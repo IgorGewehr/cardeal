@@ -73,6 +73,8 @@ impl CodigoErro {
     pub const LIMITE_EXCEDIDO: Self = Self(3004);
     /// Credenciais incorretas.
     pub const CREDENCIAL_INVALIDA: Self = Self(3005);
+    /// Conta temporariamente bloqueada por excesso de tentativas.
+    pub const CONTA_BLOQUEADA: Self = Self(3006);
 
     // ── 4xxx — concorrência ──────────────────────────────────────────────────
     /// O registro foi alterado por outra pessoa desde a leitura.
