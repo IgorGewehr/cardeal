@@ -1,0 +1,23 @@
+[package]
+name         = "xtask"
+description  = "Tarefas de build e manutenção do Cardeal."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+
+publish = false
+
+[[bin]]
+name = "xtask"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace     = true
+anyhow.workspace   = true
+walkdir.workspace  = true
+toml.workspace     = true
+serde.workspace    = true
+serde_json.workspace = true

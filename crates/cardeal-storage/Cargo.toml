@@ -1,0 +1,27 @@
+[package]
+name         = "cardeal-storage"
+description  = "Persistência SQLite: escritor único com group commit, migrações, outbox e backup."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+
+
+[dependencies]
+cardeal-kernel.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+postcard.workspace = true
+thiserror.workspace = true
+crossbeam-channel.workspace = true
+parking_lot.workspace = true
+smallvec.workspace = true
+tracing.workspace = true
+blake3.workspace = true
+zstd.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+proptest.workspace = true

@@ -1,0 +1,43 @@
+[package]
+name         = "mod-financeiro"
+description  = "Caixa, contas a pagar e a receber, bancos, conciliação e projeção de fluxo."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+
+[features]
+default = []
+# Telas do módulo (compiladas apenas no desktop).
+ui = ["dep:cardeal-ui", "dep:egui"]
+# Submódulos — ver docs/04-pilar-modularidade.md §2.1
+caixa = []
+receber = []
+pagar = []
+bancos = []
+conciliacao = []
+projecao = []
+centro_custo = []
+cobranca = []
+cheques = []
+dre = []
+completo = ["caixa", "receber", "pagar", "bancos", "conciliacao", "projecao", "centro_custo", "cobranca", "cheques", "dre"]
+
+[dependencies]
+cardeal-kernel.workspace  = true
+cardeal-ledger.workspace  = true
+cardeal-storage.workspace = true
+cardeal-modkit.workspace  = true
+cardeal-ui = { workspace = true, optional = true }
+egui       = { workspace = true, optional = true }
+serde.workspace     = true
+thiserror.workspace = true
+smallvec.workspace  = true
+rusqlite.workspace  = true
+tracing.workspace   = true
+
+[dev-dependencies]
+cardeal-testkit.workspace = true
+proptest.workspace        = true

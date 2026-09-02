@@ -1,0 +1,22 @@
+[package]
+name         = "cardeal-cliente"
+description  = "SDK do cliente: conexão, cache local, fila de saída e modo autônomo."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+
+
+[dependencies]
+cardeal-kernel.workspace = true
+cardeal-protocol.workspace = true
+cardeal-storage.workspace = true
+serde.workspace = true
+postcard.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+reqwest.workspace = true
+parking_lot.workspace = true
+tracing.workspace = true

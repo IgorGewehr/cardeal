@@ -1,0 +1,17 @@
+[package]
+name         = "cardeal-protocol"
+description  = "Contratos de comando, consulta e evento compartilhados entre servidor e cliente."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+
+
+[dependencies]
+cardeal-kernel.workspace = true
+serde.workspace = true
+postcard.workspace = true
+thiserror.workspace = true
+smallvec.workspace = true

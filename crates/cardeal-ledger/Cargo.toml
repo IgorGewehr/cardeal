@@ -1,0 +1,27 @@
+[package]
+name         = "cardeal-ledger"
+description  = "O Razão: plano de contas, lançamentos de partidas dobradas e consultas financeiras."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+
+
+[features]
+# Vazio por padrão: repositorio.rs (adaptador SQLite) ainda não existe — ver
+# docs/17-roadmap.md. O domínio (conta, lançamento, construtor) é puro e não precisa dela.
+default = []
+sqlite = ["dep:rusqlite"]
+
+[dependencies]
+cardeal-kernel.workspace = true
+serde.workspace = true
+rusqlite = { workspace = true, optional = true }
+thiserror.workspace = true
+smallvec.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

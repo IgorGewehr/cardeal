@@ -1,0 +1,163 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/cardeal-kernel",
+    "crates/cardeal-ledger",
+    "crates/cardeal-storage",
+    "crates/cardeal-modkit",
+    "crates/cardeal-auth",
+    "crates/cardeal-protocol",
+    "crates/cardeal-server",
+    "crates/cardeal-cliente",
+    "crates/cardeal-ui",
+    "crates/cardeal-desktop",
+    "crates/cardeal-analytics",
+    "crates/cardeal-fiscal",
+    "crates/cardeal-testkit",
+    "crates/modulos/mod-financeiro",
+    "crates/modulos/mod-clientes",
+    "crates/modulos/mod-estoque",
+    "crates/modulos/mod-vendas",
+    "crates/modulos/mod-pdv",
+    "crates/modulos/mod-compras",
+    "crates/modulos/mod-crm",
+    "crates/modulos/mod-agenda",
+    "crates/modulos/mod-os",
+    "crates/modulos/mod-alugueis",
+    "crates/modulos/mod-combustivel",
+    "crates/modulos/mod-hotelaria",
+    "crates/modulos/mod-industria",
+    "crates/modulos/mod-contabil",
+    "xtask",
+]
+
+[workspace.package]
+version      = "0.1.0"
+edition      = "2021"
+rust-version = "1.85"
+license      = "Apache-2.0"
+authors      = ["Equipe Cardeal"]
+repository   = "https://github.com/cardeal-erp/cardeal"
+
+[workspace.dependencies]
+# --- crates internos ---------------------------------------------------------
+cardeal-kernel    = { path = "crates/cardeal-kernel" }
+cardeal-ledger    = { path = "crates/cardeal-ledger" }
+cardeal-storage   = { path = "crates/cardeal-storage" }
+cardeal-modkit    = { path = "crates/cardeal-modkit" }
+cardeal-auth      = { path = "crates/cardeal-auth" }
+cardeal-protocol  = { path = "crates/cardeal-protocol" }
+cardeal-cliente   = { path = "crates/cardeal-cliente" }
+cardeal-ui        = { path = "crates/cardeal-ui" }
+cardeal-analytics = { path = "crates/cardeal-analytics" }
+cardeal-fiscal    = { path = "crates/cardeal-fiscal" }
+cardeal-server    = { path = "crates/cardeal-server" }
+cardeal-testkit   = { path = "crates/cardeal-testkit" }
+
+mod-financeiro   = { path = "crates/modulos/mod-financeiro" }
+mod-clientes     = { path = "crates/modulos/mod-clientes" }
+mod-estoque      = { path = "crates/modulos/mod-estoque" }
+mod-vendas       = { path = "crates/modulos/mod-vendas" }
+mod-pdv          = { path = "crates/modulos/mod-pdv" }
+mod-compras      = { path = "crates/modulos/mod-compras" }
+mod-crm          = { path = "crates/modulos/mod-crm" }
+mod-agenda       = { path = "crates/modulos/mod-agenda" }
+mod-os           = { path = "crates/modulos/mod-os" }
+mod-alugueis     = { path = "crates/modulos/mod-alugueis" }
+mod-combustivel  = { path = "crates/modulos/mod-combustivel" }
+mod-hotelaria    = { path = "crates/modulos/mod-hotelaria" }
+mod-industria    = { path = "crates/modulos/mod-industria" }
+mod-contabil     = { path = "crates/modulos/mod-contabil" }
+
+# --- fundação ----------------------------------------------------------------
+serde       = { version = "1", features = ["derive"] }
+serde_json  = "1"
+postcard    = { version = "1", features = ["use-std"] }
+thiserror   = "2"
+anyhow      = "1"
+uuid        = { version = "1", features = ["v7", "serde"] }
+smallvec    = { version = "1", features = ["serde", "union", "const_generics"] }
+arrayvec    = "0.7"
+indexmap    = { version = "2", features = ["serde"] }
+ahash       = "0.8"
+blake3      = "1"
+jiff        = "0.1"
+
+# --- persistência ------------------------------------------------------------
+rusqlite    = { version = "0.32", features = ["bundled", "blob", "backup", "functions", "limits", "trace"] }
+
+# --- assíncrono / rede -------------------------------------------------------
+tokio       = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync", "signal", "fs"] }
+axum        = { version = "0.7", features = ["ws", "http2", "macros"] }
+tower        = "0.5"
+tower-http   = { version = "0.6", features = ["compression-zstd", "limit", "timeout", "trace"] }
+reqwest      = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "gzip"] }
+rustls       = "0.23"
+rcgen        = "0.13"
+mdns-sd      = "0.11"
+
+# --- segurança ---------------------------------------------------------------
+argon2      = "0.5"
+subtle      = "2"
+zeroize     = { version = "1", features = ["derive"] }
+rand        = "0.8"
+
+# --- concorrência ------------------------------------------------------------
+crossbeam-channel = "0.5"
+parking_lot       = "0.12"
+
+# --- observabilidade ---------------------------------------------------------
+tracing            = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "time"] }
+tracing-appender   = "0.2"
+
+# --- interface ---------------------------------------------------------------
+egui        = "0.29"
+eframe      = { version = "0.29", default-features = false, features = ["wgpu", "default_fonts", "persistence"] }
+egui_extras = { version = "0.29", features = ["image"] }
+
+# --- utilitários -------------------------------------------------------------
+zstd        = "0.13"
+toml        = "0.8"
+clap        = { version = "4", features = ["derive", "env"] }
+mimalloc    = { version = "0.1", default-features = false }
+walkdir     = "2"
+
+# --- testes ------------------------------------------------------------------
+proptest    = "1"
+criterion   = { version = "0.5", features = ["html_reports"] }
+insta       = { version = "1", features = ["yaml"] }
+tempfile    = "3"
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Perfis de compilação — ver docs/02-pilar-eficiencia.md §2.7
+# ══════════════════════════════════════════════════════════════════════════════
+
+[profile.dev]
+opt-level = 1            # o domínio é aritmético; -O0 deixa os testes lentos demais
+
+[profile.dev.package."*"]
+opt-level = 3            # dependências sempre otimizadas: compila uma vez, roda sempre
+
+[profile.release]
+opt-level     = 3
+lto           = "fat"
+codegen-units = 1
+panic         = "abort"
+strip         = "symbols"
+debug         = false
+
+# Terminal de balcão: prioriza tamanho do binário e tempo de inicialização.
+[profile.balcao]
+inherits      = "release"
+opt-level     = "s"
+
+# Perfil de medição: release com símbolos, para flamegraph e orçamento de recursos.
+[profile.medicao]
+inherits = "release"
+debug    = true
+strip    = "none"
+
+[profile.bench]
+inherits = "release"
+debug    = true

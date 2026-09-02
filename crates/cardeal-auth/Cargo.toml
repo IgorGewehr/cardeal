@@ -1,0 +1,23 @@
+[package]
+name         = "cardeal-auth"
+description  = "Usuários, papéis, permissões efetivas, sessões, dispositivos e CA interna."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+
+
+[dependencies]
+cardeal-kernel.workspace = true
+cardeal-storage.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+argon2.workspace = true
+subtle.workspace = true
+zeroize.workspace = true
+rand.workspace = true
+blake3.workspace = true
+rcgen.workspace = true
+tracing.workspace = true

@@ -1,0 +1,31 @@
+/target
+**/*.rs.bk
+Cargo.lock.bak
+
+# Dados locais e bases de desenvolvimento
+/dados/*.db
+/dados/*.db-wal
+/dados/*.db-shm
+/dados/backup/
+/dados/analytics/
+/dados/logs/
+
+# Segredos e certificados
+/certificados/
+*.pfx
+*.p12
+*.pem
+*.key
+cardeal.toml
+.env
+
+# Medições e artefatos temporários
+/docs/medicoes/*.tmp
+/fuzz/artifacts/
+/fuzz/corpus/
+
+# Editores
+.vscode/
+.idea/
+*.swp
+.DS_Store

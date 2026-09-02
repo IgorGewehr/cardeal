@@ -1,0 +1,20 @@
+[package]
+name         = "cardeal-fiscal"
+description  = "Cliente da API fiscal externa: emissão, contingência, DFe e SPED."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+
+
+[dependencies]
+cardeal-kernel.workspace = true
+cardeal-storage.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+reqwest.workspace = true
+tokio.workspace = true
+tracing.workspace = true

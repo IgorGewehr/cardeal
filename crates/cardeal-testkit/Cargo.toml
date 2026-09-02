@@ -1,0 +1,19 @@
+[package]
+name         = "cardeal-testkit"
+description  = "Ferramentas de teste: motor em memória, relógio controlado e asserções de razão."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+
+
+[dependencies]
+cardeal-kernel.workspace = true
+cardeal-ledger.workspace = true
+cardeal-storage.workspace = true
+cardeal-modkit.workspace = true
+rusqlite.workspace = true
+tempfile.workspace = true
+parking_lot.workspace = true
