@@ -1,6 +1,10 @@
 # Documentação do Cardeal
 
-Ordem de leitura recomendada para quem está chegando: **16 → 00 → 01 → 05 → 04**.
+> **Retomando o projeto (humano ou IA)? Comece por [19 — Estado e processo](19-estado-e-processo.md).**
+> Ele diz exatamente o que já existe, o que é stub, e onde continuar — os outros documentos
+> descrevem o projeto *terminado*, não o estado atual do repositório.
+
+Ordem de leitura recomendada para quem está chegando: **19 → 16 → 00 → 01 → 05 → 04**.
 Depois, o resto sob demanda.
 
 ## Fundamentos
@@ -46,6 +50,7 @@ Depois, o resto sob demanda.
 | 16 | [Onboarding](16-onboarding.md) | O primeiro dia. Como criar seu primeiro módulo em 1 hora |
 | 17 | [Roadmap](17-roadmap.md) | Fases, marcos, escopo de cada release |
 | 18 | [Glossário](18-glossario.md) | Vocabulário do domínio (contábil, fiscal, varejo) |
+| 19 | [Estado e processo](19-estado-e-processo.md) | **O que existe hoje**, o que é stub, decisões estratégicas registradas, onde retomar |
 
 ## Decisões de arquitetura (ADR)
 

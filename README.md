@@ -30,7 +30,12 @@ Consequência prática: o dado de gestão é subproduto natural da operação, n
 
 ## Estado do projeto
 
-Em desenvolvimento ativo. Veja [`docs/17-roadmap.md`](docs/17-roadmap.md).
+Em desenvolvimento ativo. **O que existe de verdade agora, testado e funcionando** (não a
+visão final) está em [`docs/19-estado-e-processo.md`](docs/19-estado-e-processo.md) — leia
+esse antes do roadmap se for continuar o trabalho. Resumo: `cardeal-kernel`, `cardeal-ledger`
+(domínio), `cardeal-modkit` (manifesto) e `cardeal-auth` (domínio) implementados e testados
+(95 testes + 11 doctests, 100% verde); os demais 24 crates são stub. Visão de longo prazo em
+[`docs/17-roadmap.md`](docs/17-roadmap.md).
 
 ## Documentação
 
@@ -38,6 +43,7 @@ Comece por [`docs/README.md`](docs/README.md) — é o índice mestre.
 
 Atalhos:
 
+- **Estou retomando o projeto**: [`docs/19-estado-e-processo.md`](docs/19-estado-e-processo.md) (leia primeiro)
 - Nunca vi o projeto: [`docs/16-onboarding.md`](docs/16-onboarding.md) (o "primeiro dia")
 - Quero entender a arquitetura: [`docs/01-arquitetura-geral.md`](docs/01-arquitetura-geral.md)
 - Quero entender o financeiro: [`docs/05-nucleo-financeiro.md`](docs/05-nucleo-financeiro.md)
