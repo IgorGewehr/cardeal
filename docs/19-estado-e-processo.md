@@ -20,7 +20,7 @@ garantia deliberada deste projeto (ver §4 e §7 sobre por quê isso importa tan
 | Crate | O que tem | Testes |
 |---|---|---|
 | `cardeal-kernel` | `Dinheiro`, `Quantidade`, `Preco`, `Percentual` (aritmética exata, sem ponto flutuante), `Id`/`ChaveIdempotencia`/`Versao` (UUIDv7), `Data`/`Instante`/`Competencia`/`Periodo`/`Fuso`, `Cpf`/`Cnpj`/`Uf`/`InscricaoEstadual` (com dígito verificador real), `Erro`/`Detalhes`/`ErroDominio`, utilidades de texto (busca, similaridade, redação de PII) | **44 unit + 7 doctest** |
-| `cardeal-ledger` | Domínio puro do Razão: `Conta`/`CodigoConta`/`PapelConta`, `plano_padrao()` (o plano gerencial completo do doc 05), `Lancamento`/`Partida`/`EstadoLancamento`, `ConstrutorLancamento` → `LancamentoBalanceado` (o invariante débito=crédito provado no tipo), `Razao` (registrar/estornar/confirmar/liquidar) e `Contas` (resolução por papel/código) — **genéricos sobre a trait `PortaRazao`**, não sobre SQLite | **25 unit + 2 doctest + 1 propriedade (512 casos)** |
+| `cardeal-ledger` | O Razão: `Conta`/`CodigoConta`/`PapelConta`, `plano_padrao()`, `Lancamento`/`Partida`/`EstadoLancamento`, `ConstrutorLancamento` → `LancamentoBalanceado` (invariante débito=crédito provado no tipo), `Razao` (registrar/estornar/confirmar/liquidar) e `Contas` — genéricos sobre `PortaRazao`, com **duas** implementações: o double em memória e **`RepositorioRazao`** (adaptador SQLite real sobre a `UnidadeDeTrabalho`). `migracoes::conjunto()` traz as tabelas `razao_*` | **25 unit + 3 integração (SQLite real) + 2 doctest + 1 propriedade** |
 | `cardeal-modkit` | `Manifesto`/`Submodulo`/`Permissao`/`EntradaMenu`/`ContaPadrao`/`IdModulo`/`Icone` — os tipos declarativos do sistema de módulos, com `Manifesto::validar()` provando consistência interna | **10 unit + 1 doctest** |
 | `cardeal-storage` | **Escritor único + group commit** (`docs/07`, ADR-0012): `Armazenamento` (abre, migra o núcleo, sobe o escritor e o pool de leitura), `Escritor::executar` (enfileira uma `UnidadeDeTrabalho`, `SAVEPOINT` por tarefa, um `COMMIT`/`fsync` por lote; tarefa que falha ou entra em pânico é isolada), `UnidadeDeTrabalho` (`conexao`, `publicar` → outbox na mesma transação, `auditar` → cadeia BLAKE3, `proximo_numero`/`reservar_faixa`, `travar`), `Leitor` (pool `query_only` sobre o snapshot do WAL), executor de migrações com ordenação topológica e hash imutável, `Segredo<T>`, esquema `nucleo_*` do doc 06 | **9 unit (integração, WAL real)** |
 | `cardeal-auth` | `hash_senha`/`verificar_senha` (Argon2id real, parâmetros do doc 08), `PoliticaSenha`, `Bloqueio` (bloqueio progressivo 5→1min/10→15min), `Escopo` (a parte ABAC — "gerente da filial 2 não vê o caixa da filial 1") | **16 unit + 1 doctest** |
@@ -29,7 +29,7 @@ garantia deliberada deste projeto (ver §4 e §7 sobre por quê isso importa tan
 | `mod-estoque` (parcial) | Domínio puro: `Produto`/`Variacao`/`validar_gtin`/`Conversao`/`Lote` (NCM e GTIN por dígito verificador sem I/O, "validade exige lote"), `SaldoLocal`/`custo_medio_movel` (custo médio recalculado só na entrada, saldo negativo aceito e sinalizado, reserva que não é saída), `Inventario` (contagem cega + geração de ajustes), o `receituario` dos lançamentos que o próprio estoque posta (ajuste, perda, transferência, entrada avulsa), `MANIFESTO` validado | **20 unit + 1 propriedade** |
 | `mod-vendas` (parcial) | Domínio puro: `preco_vigente` sobre `TabelaPreco`/`RegraPreco` (faixa de quantidade + promoção com vigência; a regra mais específica vence), `Orcamento`/`Pedido`/`ItemVenda` (as duas FSMs, total dos itens, preço congelado, faturar irreversível, desconto acima do teto do papel recusado na hora), `Devolucao` (total/parcial com rateio proporcional sem perder centavo), `Comissao` (base líquida de devolução), o `receituario` (faturamento com receita + desconto + CMV, devolução, comissão), `MANIFESTO` validado (depende de financeiro + clientes + estoque) | **26 unit + 1 propriedade** |
 
-**Total: 210 testes unitários + 12 doctests + 7 propriedades. Tudo verde.**
+**Total: 213 testes (210 unit/integração + 3 de integração SQLite) + 12 doctests + 7 propriedades. Tudo verde.**
 
 ### 1.2 Crates ainda como stub
 
@@ -42,10 +42,11 @@ escrita — ver §4.
 
 `mod-financeiro`, `mod-clientes`, `mod-estoque` e `mod-vendas` já saíram do estado de stub,
 mas só na camada de **domínio puro** (§1.1): tipos e transições testadas, sem banco.
-`cardeal-storage` já existe e passa; o que falta agora para ligar os módulos ao banco é: o
-`cardeal-modkit::Registro` + despacho de `Comando`/`Consulta`, e `cardeal-ledger`
-implementar `PortaRazao` sobre a `UnidadeDeTrabalho`. Feito isso, cada módulo ganha a camada
-de comandos. Ver §4.
+`cardeal-storage` já existe e passa, e `cardeal-ledger` já grava no SQLite real via
+`RepositorioRazao`. O que falta para ligar os módulos ao banco é o `cardeal-modkit::Registro`
++ despacho de `Comando`/`Consulta`; feito isso, cada módulo ganha a camada de comandos
+(cada comando = um fecho passado a `Escritor::executar` que resolve `Contas` e chama
+`Razao::registrar` via `RepositorioRazao`). Ver §4.
 
 ### 1.3 Documentação
 
@@ -173,11 +174,6 @@ gigante por sessão. Nenhum commit é feito sem os quatro comandos de §3.3 pass
    `cardeal-auth` (a parte de `Usuario`/`Sessao`) deve implementar exatamente essas
    assinaturas.
 3. Próximo passo natural, na mesma disciplina de domínio-primeiro:
-   - **`cardeal-ledger` implementa `PortaRazao` sobre `UnidadeDeTrabalho`** — hoje o Razão só
-     roda contra o double em memória dos testes; falta o adaptador SQLite (grava
-     `razao_lancamento`/`razao_partida`, resolve `Contas` por papel lendo `razao_conta`). As
-     migrações da tabela `razao_*` (doc 06 §3) passam a ser um `ConjuntoMigracoes` do próprio
-     `cardeal-ledger`.
    - **`cardeal-modkit::Registro` + despacho** — coleta os `Manifesto` dos módulos compilados,
      resolve o grafo de dependências entre eles (o `depende_de` de `mod-vendas` já exercita
      isso), calcula o conjunto efetivo por perfil, e despacha `Comando`/`Consulta` com um

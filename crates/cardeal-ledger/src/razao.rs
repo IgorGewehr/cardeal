@@ -39,7 +39,7 @@ impl Razao {
     ) -> Result<Id, ErroRazao> {
         let mut lancamento = lancamento.dentro();
 
-        if let Some(fechado_ate) = porta.periodo_fechado_ate(lancamento.empresa) {
+        if let Some(fechado_ate) = porta.periodo_fechado_ate(lancamento.empresa)? {
             if lancamento.competencia <= fechado_ate {
                 return Err(ErroRazao::PeriodoFechado { ate: fechado_ate });
             }
@@ -47,7 +47,7 @@ impl Razao {
 
         for partida in &lancamento.partidas {
             let info = porta
-                .info_conta(partida.conta)
+                .info_conta(partida.conta)?
                 .ok_or(ErroRazao::ContaNaoEncontrada(partida.conta))?;
             if info.empresa != lancamento.empresa {
                 return Err(ErroRazao::EmpresaDivergente);
@@ -63,9 +63,9 @@ impl Razao {
             }
         }
 
-        lancamento.numero = porta.proximo_numero_lancamento(lancamento.empresa);
+        lancamento.numero = porta.proximo_numero_lancamento(lancamento.empresa)?;
         let id = lancamento.id;
-        porta.inserir_lancamento(lancamento);
+        porta.inserir_lancamento(lancamento)?;
         Ok(id)
     }
 
@@ -97,12 +97,12 @@ impl Razao {
         }
 
         let mut original_lanc = porta
-            .buscar_lancamento(original)
+            .buscar_lancamento(original)?
             .ok_or(ErroRazao::LancamentoNaoEncontrado(original))?;
         if matches!(original_lanc.estado, EstadoLancamento::Estornado) {
             return Err(ErroRazao::JaEstornado(original));
         }
-        if let Some(fechado_ate) = porta.periodo_fechado_ate(original_lanc.empresa) {
+        if let Some(fechado_ate) = porta.periodo_fechado_ate(original_lanc.empresa)? {
             if competencia <= fechado_ate {
                 return Err(ErroRazao::PeriodoFechado { ate: fechado_ate });
             }
@@ -151,13 +151,15 @@ impl Razao {
         // partidas originais somam zero, suas negativas também somam zero.
         let mut estorno = construtor.construir()?.dentro();
         estorno.estorna = Some(original);
-        estorno.numero = porta.proximo_numero_lancamento(estorno.empresa);
+        estorno.numero = porta.proximo_numero_lancamento(estorno.empresa)?;
         let estorno_id = estorno.id;
 
+        // O espelho entra primeiro: só então o original pode apontar `estornado_por` para
+        // ele sem violar a integridade referencial (`razao_lancamento.estornado_por`).
+        porta.inserir_lancamento(estorno)?;
         original_lanc.estado = EstadoLancamento::Estornado;
         original_lanc.estornado_por = Some(estorno_id);
-        porta.atualizar_lancamento(original_lanc);
-        porta.inserir_lancamento(estorno);
+        porta.atualizar_lancamento(original_lanc)?;
 
         Ok(estorno_id)
     }
@@ -170,7 +172,7 @@ impl Razao {
     /// lançamento não estiver em `Previsto`.
     pub fn confirmar<P: PortaRazao>(porta: &mut P, id: Id) -> Result<(), ErroRazao> {
         let mut lancamento = porta
-            .buscar_lancamento(id)
+            .buscar_lancamento(id)?
             .ok_or(ErroRazao::LancamentoNaoEncontrado(id))?;
         if lancamento.estado != EstadoLancamento::Previsto {
             return Err(ErroRazao::TransicaoInvalida {
@@ -179,7 +181,7 @@ impl Razao {
             });
         }
         lancamento.estado = EstadoLancamento::Confirmado;
-        porta.atualizar_lancamento(lancamento);
+        porta.atualizar_lancamento(lancamento)?;
         Ok(())
     }
 
@@ -191,7 +193,7 @@ impl Razao {
     /// lançamento já estiver `Realizado` ou `Estornado`.
     pub fn liquidar<P: PortaRazao>(porta: &mut P, id: Id, quando: Data) -> Result<(), ErroRazao> {
         let mut lancamento = porta
-            .buscar_lancamento(id)
+            .buscar_lancamento(id)?
             .ok_or(ErroRazao::LancamentoNaoEncontrado(id))?;
         if !matches!(
             lancamento.estado,
@@ -204,7 +206,7 @@ impl Razao {
         }
         lancamento.estado = EstadoLancamento::Realizado;
         lancamento.liquidacao = Some(quando);
-        porta.atualizar_lancamento(lancamento);
+        porta.atualizar_lancamento(lancamento)?;
         Ok(())
     }
 }
@@ -243,13 +245,13 @@ mod testes {
             .unwrap();
 
         let id = lancar_venda(&mut mundo, empresa, caixa, receita);
-        let gravado = mundo.buscar_lancamento(id).unwrap();
+        let gravado = mundo.obter(id);
         assert_eq!(gravado.numero, 1);
         assert_eq!(gravado.estado, EstadoLancamento::Realizado);
 
         // Um segundo lançamento recebe o próximo número da sequência da empresa.
         let id2 = lancar_venda(&mut mundo, empresa, caixa, receita);
-        assert_eq!(mundo.buscar_lancamento(id2).unwrap().numero, 2);
+        assert_eq!(mundo.obter(id2).numero, 2);
     }
 
     #[test]
@@ -334,8 +336,8 @@ mod testes {
         let estorno_id =
             Razao::estornar(&mut mundo, venda, "cliente devolveu a mercadoria", hoje()).unwrap();
 
-        let original = mundo.buscar_lancamento(venda).unwrap();
-        let estorno = mundo.buscar_lancamento(estorno_id).unwrap();
+        let original = mundo.obter(venda);
+        let estorno = mundo.obter(estorno_id);
 
         assert_eq!(original.estado, EstadoLancamento::Estornado);
         assert_eq!(original.estornado_por, Some(estorno_id));
@@ -403,10 +405,7 @@ mod testes {
         let id = Razao::registrar(&mut mundo, previsto).unwrap();
 
         Razao::confirmar(&mut mundo, id).unwrap();
-        assert_eq!(
-            mundo.buscar_lancamento(id).unwrap().estado,
-            EstadoLancamento::Confirmado
-        );
+        assert_eq!(mundo.obter(id).estado, EstadoLancamento::Confirmado);
 
         // Confirmar de novo (já Confirmado, não Previsto) falha.
         let erro = Razao::confirmar(&mut mundo, id).unwrap_err();
@@ -430,14 +429,11 @@ mod testes {
             .construir()
             .unwrap();
         let id = Razao::registrar(&mut mundo, confirmado).unwrap();
-        assert_eq!(
-            mundo.buscar_lancamento(id).unwrap().estado,
-            EstadoLancamento::Confirmado
-        );
+        assert_eq!(mundo.obter(id).estado, EstadoLancamento::Confirmado);
 
         let quando = hoje().mais_dias(30);
         Razao::liquidar(&mut mundo, id, quando).unwrap();
-        let liquidado = mundo.buscar_lancamento(id).unwrap();
+        let liquidado = mundo.obter(id);
         assert_eq!(liquidado.estado, EstadoLancamento::Realizado);
         assert_eq!(liquidado.liquidacao, Some(quando));
 

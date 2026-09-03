@@ -36,7 +36,7 @@ impl<'a, P: PortaRazao> Contas<'a, P> {
     /// plano padrão semeado.
     pub fn papel(&self, papel: PapelConta) -> Result<Id, ErroRazao> {
         self.porta
-            .conta_por_papel(self.empresa, papel)
+            .conta_por_papel(self.empresa, papel)?
             .ok_or(ErroRazao::PapelNaoMapeado(papel))
     }
 
@@ -46,7 +46,7 @@ impl<'a, P: PortaRazao> Contas<'a, P> {
     /// [`ErroRazao::CodigoNaoEncontrado`] se não existir conta com esse código.
     pub fn por_codigo(&self, codigo: &str) -> Result<Id, ErroRazao> {
         self.porta
-            .conta_por_codigo(self.empresa, codigo)
+            .conta_por_codigo(self.empresa, codigo)?
             .ok_or_else(|| ErroRazao::CodigoNaoEncontrado(codigo.to_string()))
     }
 }

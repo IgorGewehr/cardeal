@@ -9,19 +9,15 @@ authors.workspace      = true
 repository.workspace   = true
 
 
-[features]
-# Vazio por padrão: repositorio.rs (adaptador SQLite) ainda não existe — ver
-# docs/17-roadmap.md. O domínio (conta, lançamento, construtor) é puro e não precisa dela.
-default = []
-sqlite = ["dep:rusqlite"]
-
 [dependencies]
-cardeal-kernel.workspace = true
+cardeal-kernel.workspace  = true
+cardeal-storage.workspace = true
 serde.workspace = true
-rusqlite = { workspace = true, optional = true }
+rusqlite.workspace = true
 thiserror.workspace = true
 smallvec.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
+tempfile.workspace = true

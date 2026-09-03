@@ -85,6 +85,10 @@ pub enum ErroRazao {
         /// O estado que se tentou aplicar.
         para: EstadoLancamento,
     },
+
+    /// Falha da camada de persistência ao ler ou gravar (erro de SQLite, disco, etc.).
+    #[error("Falha de persistência no Razão: {0}")]
+    FalhaDePersistencia(String),
 }
 
 impl ErroDominio for ErroRazao {
@@ -105,6 +109,7 @@ impl ErroDominio for ErroRazao {
             Self::PeriodoFechado { .. } => CodigoErro::PERIODO_FECHADO,
             Self::JaEstornado(_) | Self::TransicaoInvalida { .. } => CodigoErro::ESTADO_INVALIDO,
             Self::CodigoNaoEncontrado(_) => CodigoErro::NAO_ENCONTRADO,
+            Self::FalhaDePersistencia(_) => CodigoErro::FALHA_INTERNA,
         }
     }
 

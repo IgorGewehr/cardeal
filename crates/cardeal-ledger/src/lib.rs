@@ -12,19 +12,17 @@
 //! [`ConstrutorLancamento`] — o único caminho para produzir um [`LancamentoBalanceado`],
 //! cujo campo privado torna um lançamento desbalanceado impossível de existir.
 //!
-//! [`Razao`] (registrar, estornar, confirmar, liquidar) e [`Contas`] (papel → `Id`) já
-//! existem e são genéricos sobre [`PortaRazao`] — uma trait mínima que substitui, por
-//! enquanto, a `UnidadeDeTrabalho` real de `cardeal-storage` (que ainda não existe). Nada
-//! aqui toca banco de dados; tudo é testável com `cargo test -p cardeal-ledger` sem SQLite.
-//! Ver `porta` para a justificativa completa dessa escolha.
+//! [`Razao`] (registrar, estornar, confirmar, liquidar) e [`Contas`] (papel → `Id`) são
+//! genéricos sobre [`PortaRazao`]. Há **duas** implementações: o double em memória dos
+//! testes, e [`RepositorioRazao`] — o adaptador SQLite real sobre a
+//! [`UnidadeDeTrabalho`](cardeal_storage::UnidadeDeTrabalho). As tabelas `razao_*` vêm de
+//! [`migracoes::conjunto`].
 //!
 //! ## O que falta (ver `docs/17-roadmap.md`)
 //!
-//! O adaptador de persistência real (`repositorio.rs`, atrás da feature `sqlite`, que
-//! implementará [`PortaRazao`] sobre a `UnidadeDeTrabalho` de `cardeal-storage`),
 //! `fechar_periodo`/`reabrir_periodo` (exigem somar saldos históricos) e as consultas
-//! (saldo, fluxo de caixa, DRE, prova do razão) — todas dependem de uma consulta real
-//! sobre o histórico, que só faz sentido junto do backend SQL.
+//! (saldo, fluxo de caixa, DRE, prova do razão) — todas dependem de uma consulta de
+//! agregação sobre `razao_partida`, próximo passo natural agora que o backend existe.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs, clippy::pedantic)]
@@ -37,9 +35,11 @@ mod conta;
 mod contas;
 mod erros;
 mod lancamento;
+pub mod migracoes;
 mod plano;
 mod porta;
 mod razao;
+mod repositorio;
 #[cfg(test)]
 mod testkit_interno;
 
@@ -51,3 +51,4 @@ pub use lancamento::{Contraparte, EstadoLancamento, Lancamento, Origem, Partida}
 pub use plano::{plano_padrao, ContaSemente};
 pub use porta::{InfoConta, PortaRazao};
 pub use razao::Razao;
+pub use repositorio::{semear_plano_padrao, RepositorioRazao};

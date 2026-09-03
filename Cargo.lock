@@ -619,10 +619,12 @@ name = "cardeal-ledger"
 version = "0.1.0"
 dependencies = [
  "cardeal-kernel",
+ "cardeal-storage",
  "proptest",
  "rusqlite",
  "serde",
  "smallvec",
+ "tempfile",
  "thiserror 2.0.20",
  "tracing",
 ]

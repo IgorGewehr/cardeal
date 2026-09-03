@@ -11,9 +11,12 @@ use std::collections::HashMap;
 use cardeal_kernel::{Data, Id, Instante};
 
 use crate::conta::{PapelConta, TipoConta};
+use crate::erros::ErroRazao;
 use crate::lancamento::Lancamento;
 use crate::plano::plano_padrao;
 use crate::porta::{InfoConta, PortaRazao};
+
+type Resultado<T> = Result<T, ErroRazao>;
 
 pub struct RazaoEmMemoria {
     usuario: Id,
@@ -96,6 +99,14 @@ impl RazaoEmMemoria {
     pub fn reabrir_periodo(&mut self, empresa: Id) {
         self.periodo_fechado.remove(&empresa);
     }
+
+    /// Atalho de teste: o lançamento pelo id, ou pânico se não existir.
+    pub fn obter(&self, id: Id) -> Lancamento {
+        self.lancamentos
+            .get(&id)
+            .cloned()
+            .expect("lançamento não encontrado no mundo de teste")
+    }
 }
 
 impl PortaRazao for RazaoEmMemoria {
@@ -111,37 +122,39 @@ impl PortaRazao for RazaoEmMemoria {
         self.agora
     }
 
-    fn info_conta(&self, conta: Id) -> Option<InfoConta> {
-        self.contas.get(&conta).cloned()
+    fn info_conta(&self, conta: Id) -> Resultado<Option<InfoConta>> {
+        Ok(self.contas.get(&conta).cloned())
     }
 
-    fn conta_por_papel(&self, empresa: Id, papel: PapelConta) -> Option<Id> {
-        self.por_papel.get(&(empresa, papel)).copied()
+    fn conta_por_papel(&self, empresa: Id, papel: PapelConta) -> Resultado<Option<Id>> {
+        Ok(self.por_papel.get(&(empresa, papel)).copied())
     }
 
-    fn conta_por_codigo(&self, empresa: Id, codigo: &str) -> Option<Id> {
-        self.por_codigo.get(&(empresa, codigo.to_string())).copied()
+    fn conta_por_codigo(&self, empresa: Id, codigo: &str) -> Resultado<Option<Id>> {
+        Ok(self.por_codigo.get(&(empresa, codigo.to_string())).copied())
     }
 
-    fn periodo_fechado_ate(&self, empresa: Id) -> Option<Data> {
-        self.periodo_fechado.get(&empresa).copied()
+    fn periodo_fechado_ate(&self, empresa: Id) -> Resultado<Option<Data>> {
+        Ok(self.periodo_fechado.get(&empresa).copied())
     }
 
-    fn proximo_numero_lancamento(&mut self, empresa: Id) -> u64 {
+    fn proximo_numero_lancamento(&mut self, empresa: Id) -> Resultado<u64> {
         let contador = self.proximo_numero.entry(empresa).or_insert(0);
         *contador += 1;
-        *contador
+        Ok(*contador)
     }
 
-    fn inserir_lancamento(&mut self, lancamento: Lancamento) {
+    fn inserir_lancamento(&mut self, lancamento: Lancamento) -> Resultado<()> {
         self.lancamentos.insert(lancamento.id, lancamento);
+        Ok(())
     }
 
-    fn buscar_lancamento(&self, id: Id) -> Option<Lancamento> {
-        self.lancamentos.get(&id).cloned()
+    fn buscar_lancamento(&self, id: Id) -> Resultado<Option<Lancamento>> {
+        Ok(self.lancamentos.get(&id).cloned())
     }
 
-    fn atualizar_lancamento(&mut self, lancamento: Lancamento) {
+    fn atualizar_lancamento(&mut self, lancamento: Lancamento) -> Resultado<()> {
         self.lancamentos.insert(lancamento.id, lancamento);
+        Ok(())
     }
 }
