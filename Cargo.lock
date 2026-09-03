@@ -2379,14 +2379,10 @@ name = "mod-clientes"
 version = "0.1.0"
 dependencies = [
  "cardeal-kernel",
- "cardeal-ledger",
  "cardeal-modkit",
- "cardeal-storage",
- "cardeal-testkit",
  "cardeal-ui",
  "egui",
  "proptest",
- "rusqlite",
  "serde",
  "smallvec",
  "thiserror 2.0.20",

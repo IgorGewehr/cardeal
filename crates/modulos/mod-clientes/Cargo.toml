@@ -16,21 +16,18 @@ ui = ["dep:cardeal-ui", "dep:egui"]
 credito = []
 carteira = []
 deduplicacao = []
-completo = ["credito", "carteira", "deduplicacao"]
+score = []
+completo = ["credito", "carteira", "deduplicacao", "score"]
 
 [dependencies]
 cardeal-kernel.workspace  = true
-cardeal-ledger.workspace  = true
-cardeal-storage.workspace = true
 cardeal-modkit.workspace  = true
 cardeal-ui = { workspace = true, optional = true }
 egui       = { workspace = true, optional = true }
 serde.workspace     = true
 thiserror.workspace = true
 smallvec.workspace  = true
-rusqlite.workspace  = true
 tracing.workspace   = true
 
 [dev-dependencies]
-cardeal-testkit.workspace = true
-proptest.workspace        = true
+proptest.workspace = true
