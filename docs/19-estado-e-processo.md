@@ -23,9 +23,9 @@ garantia deliberada deste projeto (ver §4 e §7 sobre por quê isso importa tan
 | `cardeal-ledger` | Domínio puro do Razão: `Conta`/`CodigoConta`/`PapelConta`, `plano_padrao()` (o plano gerencial completo do doc 05), `Lancamento`/`Partida`/`EstadoLancamento`, `ConstrutorLancamento` → `LancamentoBalanceado` (o invariante débito=crédito provado no tipo), `Razao` (registrar/estornar/confirmar/liquidar) e `Contas` (resolução por papel/código) — **genéricos sobre a trait `PortaRazao`**, não sobre SQLite | **25 unit + 2 doctest + 1 propriedade (512 casos)** |
 | `cardeal-modkit` | `Manifesto`/`Submodulo`/`Permissao`/`EntradaMenu`/`ContaPadrao`/`IdModulo`/`Icone` — os tipos declarativos do sistema de módulos, com `Manifesto::validar()` provando consistência interna | **10 unit + 1 doctest** |
 | `cardeal-auth` | `hash_senha`/`verificar_senha` (Argon2id real, parâmetros do doc 08), `PoliticaSenha`, `Bloqueio` (bloqueio progressivo 5→1min/10→15min), `Escopo` (a parte ABAC — "gerente da filial 2 não vê o caixa da filial 1") | **16 unit + 1 doctest** |
-| `mod-financeiro` (parcial) | Domínio puro: `ConstrutorTitulo` → `TituloComParcelas` (rateio de parcelas que conserva o total ao centavo), `Parcela::situacao_em`/`planejar_baixa` (juros simples diário/mensal, multa e desconto de antecipação **calculados na leitura**, nunca materializados), `SessaoCaixa` (abertura com suprimento, sangria/suprimento, **fechamento cego** com apuração de quebra), o `MANIFESTO` declarativo completo (10 submódulos, 30 permissões, menu, contas, eventos) validado, e o `receituario` que converte cada evento em `LancamentoBalanceado` do Razão | **28 unit + 1 doctest + 2 propriedades** |
+| `mod-financeiro` (parcial) | Domínio puro: `ConstrutorTitulo` → `TituloComParcelas` (rateio de parcelas que conserva o total ao centavo), `Parcela::situacao_em`/`planejar_baixa` (juros simples diário/mensal, multa e desconto de antecipação **calculados na leitura**, nunca materializados), `SessaoCaixa` (abertura com suprimento, sangria/suprimento, **fechamento cego** com apuração de quebra), `Recorrencia` (enumera ocorrências e materializa título sem gravar linha por parcela), o `MANIFESTO` declarativo completo (10 submódulos, 30 permissões, menu, contas, eventos) validado, e o `receituario` que converte cada evento em `LancamentoBalanceado` do Razão | **37 unit + 1 doctest + 3 propriedades** |
 
-**Total: 123 testes unitários + 12 doctests + 3 propriedades. Tudo verde.**
+**Total: 132 testes unitários + 12 doctests + 4 propriedades. Tudo verde.**
 
 ### 1.2 Crates ainda como stub
 
@@ -37,10 +37,10 @@ proposital: garante que `cargo check --workspace` sempre passa, mesmo com a maio
 sistema ainda não escrita — ver §4.
 
 `mod-financeiro` já saiu do estado de stub, mas só na camada de **domínio puro** (§1.1):
-títulos/parcelas/baixas e a sessão de caixa existem como tipos e transições testadas, e cada
-uma já monta seu `LancamentoBalanceado`. Falta o que depende de `cardeal-storage`: os comandos
-(`AbrirCaixa`, `LancarTitulo`, `BaixarParcela`…), as consultas paginadas, a conciliação, as
-recorrências e o Pulso (ver §4).
+títulos/parcelas/baixas, a sessão de caixa e as recorrências existem como tipos e transições
+testadas, e cada uma já monta seu `LancamentoBalanceado`. Falta o que depende de
+`cardeal-storage`: os comandos (`AbrirCaixa`, `LancarTitulo`, `BaixarParcela`…), as consultas
+paginadas, a conciliação bancária, a projeção de fluxo e o Pulso (ver §4).
 
 ### 1.3 Documentação
 
@@ -174,9 +174,9 @@ gigante por sessão. Nenhum commit é feito sem os quatro comandos de §3.3 pass
      `cardeal-storage` destrava a persistência real de tudo que já foi escrito.
    - Em paralelo (não bloqueado por storage): `mod-clientes` (pessoas, endereços, contatos) —
      domínio puro, sem dependência de storage, e o financeiro já referencia `Contraparte`/pessoa.
-   - Ainda em `mod-financeiro`, sem storage: **recorrências** (a regra que projeta títulos
-     futuros sem gravar linha — doc modulos/financeiro §11.7) e a **projeção de fluxo** em
-     memória que alimenta o Pulso.
+   - A **projeção de fluxo** (Rio do Caixa do Pulso) depende de uma consulta que agrega
+     `Recorrencia::ocorrencias` + parcelas em aberto + saldos do Razão — logo espera as
+     consultas de `cardeal-ledger`/`cardeal-storage`.
 4. Os 5 specs de módulo que faltam (`alugueis`, `combustivel`, `hotelaria`, `industria`,
    `contabil`) são de baixa prioridade — nenhum perfil que os usa está no caminho crítico
    ainda (ver doc 17, Fase 5).

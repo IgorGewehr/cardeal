@@ -204,10 +204,15 @@
 | `expressao_cron` | String | não | obrigatório se `Personalizada` |
 | `inicio` | Data | sim | |
 | `fim` | Data | não | |
+| `contraparte` | Contraparte | sim | cliente/fornecedor do título gerado — acrescentado no domínio (`mod-financeiro`): sem ele não dá para materializar um `Titulo` |
 | `conta_contrapartida` | Id | sim | conta do razão a debitar/creditar |
 | `centro_custo` | Id | não | |
 | `antecedencia_geracao_dias` | Quantidade (inteiro) | sim | quando vira `Titulo` real |
 | `ativa` | enum(`Sim`,`Nao`) | sim | |
+
+O domínio implementa `Mensal`/`Semanal`/`Anual` em `Recorrencia::ocorrencias`;
+`Personalizada` (cron) fica reservada — enumerar ocorrências dela exige um agendador que
+ainda não existe, e a chamada devolve `ErroFinanceiro::RegraDeRecorrenciaInvalida` até lá.
 
 ### CentroCusto, FormaPagamento, CondicaoPagamento
 

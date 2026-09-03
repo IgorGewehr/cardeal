@@ -48,6 +48,11 @@ pub enum ErroFinanceiro {
     #[error("O valor recebido na baixa precisa ser maior que zero")]
     BaixaZerada,
 
+    /// A regra de uma recorrência é inconsistente (valor fixo sem valor, índice sem nome,
+    /// periodicidade personalizada sem cron, `inicio` depois de `fim`…).
+    #[error("Regra de recorrência inválida: {0}")]
+    RegraDeRecorrenciaInvalida(&'static str),
+
     /// A renegociação foi pedida sobre um título sem saldo em aberto.
     #[error("Não há saldo em aberto para renegociar")]
     SemSaldoParaRenegociar,
@@ -88,6 +93,7 @@ impl ErroDominio for ErroFinanceiro {
             Self::ValorInvalido
             | Self::NumeroDeParcelasInvalido(_)
             | Self::TaxaDeJurosAusente(_)
+            | Self::RegraDeRecorrenciaInvalida(_)
             | Self::BaixaZerada => CodigoErro::ENTRADA_INVALIDA,
             Self::ParcelaDeOutroTitulo
             | Self::SemSaldoParaRenegociar

@@ -20,6 +20,8 @@
 //!   **calculados na leitura**, nunca materializados fora da baixa (§11.1).
 //! - [`SessaoCaixa`] — abertura com suprimento, suprimento/sangria e **fechamento cego**
 //!   com apuração de quebra (§11.3), cada transição produzindo seu lançamento.
+//! - [`Recorrencia`] — a regra que **projeta ocorrências sem gravar linha** (§11.7):
+//!   enumera vencimentos numa janela e materializa um só quando entra na antecedência.
 //! - [`receituario`] — funções que transformam esses eventos em
 //!   [`LancamentoBalanceado`](cardeal_ledger::LancamentoBalanceado).
 //!
@@ -28,8 +30,8 @@
 //! Os **comandos** (`AbrirCaixa`, `LancarTitulo`, `BaixarParcela`…) e **consultas** paginadas,
 //! que dependem de `cardeal-storage` (a `UnidadeDeTrabalho` e a trait `Comando` de
 //! `cardeal-modkit`, ver `docs/contratos-internos.md` §4); a **conciliação bancária**, a
-//! **projeção de fluxo**, as **recorrências** e o **Pulso**. As assinaturas dos comandos
-//! estão em `docs/modulos/financeiro.md` §5.
+//! **projeção de fluxo** (agrega recorrência + parcelas + Razão) e o **Pulso**. As
+//! assinaturas dos comandos estão em `docs/modulos/financeiro.md` §5.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs, clippy::pedantic)]
@@ -42,6 +44,7 @@ mod caixa;
 mod erros;
 mod manifesto;
 pub mod receituario;
+mod recorrencia;
 mod titulo;
 
 pub use baixa::{PlanoBaixa, SituacaoParcela};
@@ -52,6 +55,7 @@ pub use caixa::{
 pub use erros::ErroFinanceiro;
 pub use manifesto::{manifesto, MANIFESTO};
 pub use receituario::Autoria;
+pub use recorrencia::{Periodicidade, Recorrencia, TipoValor};
 pub use titulo::{
     ConstrutorTitulo, EspecieTitulo, EstadoParcela, FormaCobranca, Parcela, PoliticaJuros, Titulo,
     TituloComParcelas,
