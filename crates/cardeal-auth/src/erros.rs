@@ -36,6 +36,25 @@ pub enum ErroAuth {
     /// A ação exigia um escopo que a sessão atual não cobre.
     #[error("Fora do escopo autorizado")]
     ForaDoEscopo,
+
+    /// A sessão não concede a permissão exigida pela ação.
+    #[error("Sem permissão para \"{permissao}\"")]
+    SemPermissao {
+        /// A chave de permissão que faltou.
+        permissao: String,
+    },
+
+    /// A sessão já foi encerrada (logout ou revogação).
+    #[error("Sessão encerrada")]
+    SessaoEncerrada,
+
+    /// Tentativa de alterar um papel de fábrica, que é imutável.
+    #[error("Papéis de fábrica não podem ser alterados")]
+    PapelDoSistema,
+
+    /// A senha atual informada para a troca não confere.
+    #[error("A senha atual não confere")]
+    SenhaAtualIncorreta,
 }
 
 impl ErroDominio for ErroAuth {
@@ -43,9 +62,11 @@ impl ErroDominio for ErroAuth {
         match self {
             Self::SenhaCurta { .. } | Self::SenhaComum => CodigoErro::ENTRADA_INVALIDA,
             Self::FalhaDeHash => CodigoErro::FALHA_INTERNA,
-            Self::CredencialInvalida => CodigoErro::CREDENCIAL_INVALIDA,
+            Self::CredencialInvalida | Self::SenhaAtualIncorreta => CodigoErro::CREDENCIAL_INVALIDA,
             Self::ContaBloqueada { .. } => CodigoErro::CONTA_BLOQUEADA,
-            Self::ForaDoEscopo => CodigoErro::SEM_PERMISSAO,
+            Self::ForaDoEscopo | Self::SemPermissao { .. } => CodigoErro::SEM_PERMISSAO,
+            Self::SessaoEncerrada => CodigoErro::SESSAO_INVALIDA,
+            Self::PapelDoSistema => CodigoErro::ESTADO_INVALIDO,
         }
     }
 

@@ -511,7 +511,146 @@ pub enum Icone { Pulso, Dinheiro, Carrinho, Caixa, Pessoas, Estoque, Nota, Grafi
                  Agenda, Ferramenta, Chave, Config, Banco, Conciliar, Alerta, /* ... */ }
 ```
 
-## 5. `cardeal-ui`
+## 5. `cardeal-auth`
+
+```rust
+// ─── senha e bloqueio (implementado) ─────────────────────────────────────────
+pub fn hash_senha(senha: &str) -> Result<HashDeSenha, ErroAuth>;
+pub fn verificar_senha(senha: &str, hash: &HashDeSenha) -> bool;
+pub struct HashDeSenha;   // Debug = "[oculto]"; de_phc(String), como_phc() -> &str
+pub struct PoliticaSenha { pub minimo_caracteres: u8 }   // PADRAO; validar(&str)
+pub struct Bloqueio { pub tentativas: u32, pub bloqueado_ate: Option<Instante> }
+// NOVO, esta_bloqueado, segundos_restantes, registrar_falha, registrar_sucesso,
+// desbloquear_pelo_administrador
+
+// ─── escopo (ABAC — implementado) ────────────────────────────────────────────
+pub struct Escopo {
+    pub empresa: Id,
+    pub filial: Option<Id>,
+    pub caixa: Option<Id>,
+    pub centro_custo: Option<Id>,
+}
+impl Escopo {
+    pub const fn empresa_inteira(empresa: Id) -> Self;
+    pub const fn com_filial(self, Id) -> Self;
+    pub const fn com_caixa(self, Id) -> Self;
+    pub const fn com_centro_custo(self, Id) -> Self;
+    /// `self` (autorização) abrange `recurso`: mesma empresa e, em cada dimensão,
+    /// `None` = sem restrição, `Some` = igualdade exata.
+    pub fn abrange(&self, recurso: &Self) -> bool;
+}
+
+// ─── usuário (domínio — implementado) ────────────────────────────────────────
+pub struct Usuario {
+    pub id: Id, pub login: String, pub nome: String, pub email: Option<String>,
+    pub hash_senha: HashDeSenha, pub senha_trocada_em: Instante,
+    pub exige_troca_senha: bool, pub mfa_habilitado: bool, pub ativo: bool,
+    pub bloqueio: Bloqueio, pub versao: Versao,
+}
+impl Usuario {
+    pub fn novo(login, nome, senha_inicial: &str, PoliticaSenha, agora: Instante)
+        -> Result<Self, ErroAuth>;
+    /// Sucesso zera o bloqueio; falha registra e aplica bloqueio progressivo.
+    /// Erro genérico (CredencialInvalida) para conta inexistente/inativa/senha errada.
+    pub fn autenticar(&mut self, senha: &str, agora: Instante) -> Result<(), ErroAuth>;
+    pub fn trocar_senha(&mut self, atual, nova, PoliticaSenha, agora) -> Result<(), ErroAuth>;
+    pub fn redefinir_senha(&mut self, nova, PoliticaSenha, agora) -> Result<(), ErroAuth>;
+    pub fn desbloquear(&mut self);
+    pub fn desativar(&mut self);
+    pub fn reativar(&mut self);
+}
+
+// ─── papéis e limites (domínio — implementado) ───────────────────────────────
+pub enum ValorLimite { Dinheiro(Dinheiro), Percentual(Percentual), Contagem(u32),
+                       Dias(u32), Ilimitado }
+// comporta_dinheiro/percentual/contagem/dias(valor) -> bool; mais_permissivo(self, Self)
+
+pub struct Papel {
+    pub id: Id, pub empresa: Option<Id>, pub nome: String, pub descricao: String,
+    pub sistema: bool, pub permissoes: BTreeSet<String>,
+    pub limites: BTreeMap<String, ValorLimite>, pub versao: Versao,
+}
+impl Papel {
+    pub fn novo(empresa: Id, nome) -> Self;
+    pub fn com_permissao(self, chave) -> Self;
+    pub fn com_limite(self, chave, ValorLimite) -> Self;
+    pub fn concede(&self, permissao: &str) -> bool;
+    pub fn garantir_editavel(&self) -> Result<(), ErroAuth>;   // Err se sistema
+    pub fn duplicar_para(&self, empresa: Id, nome) -> Self;
+}
+
+pub enum PapelDeFabrica { Administrador, Gerente, Financeiro, OperadorCaixa,
+    Vendedor, Estoquista, Comprador, Contador, Auditor }   // docs/08 §3.2
+impl PapelDeFabrica {
+    pub const TODOS: [Self; 9];
+    pub const fn id(self) -> &'static str;
+    pub const fn nome(self) -> &'static str;
+    pub const fn descricao(self) -> &'static str;
+    pub const fn politica(self) -> PoliticaPapel;
+    /// Expande a política contra o catálogo real de chaves (de cardeal-modkit) →
+    /// Papel global, sistema = true.
+    pub fn materializar<'a>(self, catalogo: impl IntoIterator<Item = &'a str>) -> Papel;
+}
+pub struct PoliticaPapel {   // regra declarativa: nega vence, depois tudo/módulo/prefixo/sufixo
+    pub tudo: bool,
+    pub nega_prefixo: &'static [&'static str],
+    pub modulos: &'static [&'static str],
+    pub concede_prefixo: &'static [&'static str],
+    pub concede_sufixo: &'static [&'static str],
+}
+
+// ─── sessão e autorização (domínio — implementado) ───────────────────────────
+pub struct AutorizacoesEfetivas;   // conjunto resolvido de permissões + limites
+impl AutorizacoesEfetivas {
+    pub fn consolidar<'a>(papeis: impl IntoIterator<Item = &'a Papel>) -> Self;
+    pub fn restringir_a<'a>(self, visiveis: impl IntoIterator<Item = &'a str>) -> Self;
+    pub fn concede(&self, permissao: &str) -> bool;
+    pub fn limite(&self, chave: &str) -> Option<ValorLimite>;
+}
+
+pub const DURACAO_PADRAO_SEGUNDOS: i64 = 15 * 60;
+pub struct EmissaoSessao {
+    pub usuario: Id, pub dispositivo: Id, pub escopo: Escopo,
+    pub autorizacoes: AutorizacoesEfetivas, pub emitida_em: Instante,
+    pub duracao_segundos: i64,
+}
+impl EmissaoSessao { pub fn padrao(usuario, dispositivo, escopo, autorizacoes, emitida_em) -> Self; }
+
+pub struct Sessao {
+    pub id: Id, pub usuario: Id, pub dispositivo: Id, pub escopo: Escopo,
+    pub emitida_em: Instante, pub expira_em: Instante, pub encerrada_em: Option<Instante>,
+}
+impl Sessao {
+    pub fn abrir(EmissaoSessao) -> Self;
+    pub fn empresa(&self) -> Id;
+    pub fn esta_valida(&self, agora: Instante) -> bool;
+    pub fn renovar(&mut self, agora: Instante, duracao_segundos: i64) -> Result<(), ErroAuth>;
+    pub fn encerrar(&mut self, agora: Instante);
+    pub fn autorizacoes(&self) -> &AutorizacoesEfetivas;
+    pub fn limite(&self, chave: &str) -> Option<ValorLimite>;
+}
+
+/// O único ponto de verificação (docs/08 §3.5). Passa se a sessão concede a
+/// permissão E o escopo dela abrange o recurso. Sessão encerrada é recusada aqui
+/// também (defesa em profundidade); a expiração é da borda de transporte.
+pub fn autorizar(sessao: &Sessao, permissao: &str, recurso: &Escopo) -> Result<(), ErroAuth>;
+
+// ─── erros ───────────────────────────────────────────────────────────────────
+pub enum ErroAuth {
+    SenhaCurta { minimo: u8 }, SenhaComum, FalhaDeHash,
+    CredencialInvalida, ContaBloqueada { ate: Instante },
+    ForaDoEscopo, SemPermissao { permissao: String }, SessaoEncerrada,
+    PapelDoSistema, SenhaAtualIncorreta,
+}
+// implementa ErroDominio
+```
+
+**Nota de dependência:** `cardeal-auth` **não** depende de `cardeal-modkit` — é o contrário
+(o despacho de `cardeal-modkit` chama [`autorizar`]). Por isso a expansão "papel de fábrica
+→ permissões" recebe o catálogo de chaves por parâmetro, e a montagem de
+`AutorizacoesEfetivas` a partir do `ConjuntoEfetivo` é feita na camada que tem os dois.
+
+## 6. `cardeal-ui`
 
 ```rust
 pub mod tokens {
@@ -545,7 +684,7 @@ pub struct DialogoConflito;
 pub struct Vazio;         // estado vazio com ilustração e ação
 ```
 
-## 6. Regras de uso
+## 7. Regras de uso
 
 1. Módulo **nunca** abre conexão. Recebe `&mut UnidadeDeTrabalho` (escrita) ou
    `&rusqlite::Connection` (leitura).

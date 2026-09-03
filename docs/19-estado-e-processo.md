@@ -9,7 +9,7 @@
 > Mantenha-o atualizado a cada sessão de trabalho relevante. Se ele mentir sobre o estado
 > real do repositório, ele é pior que não existir.
 
-## 1. O que existe, com precisão, hoje (2026-09-02)
+## 1. O que existe, com precisão, hoje (2026-09-03)
 
 Todo o **workspace compila** (`cargo check --workspace`) e está formatado
 (`cargo fmt --check`) neste exato commit. Não existe estado "quebrado" no HEAD — essa é uma
@@ -23,13 +23,13 @@ garantia deliberada deste projeto (ver §4 e §7 sobre por quê isso importa tan
 | `cardeal-ledger` | O Razão: `Conta`/`CodigoConta`/`PapelConta`, `plano_padrao()`, `Lancamento`/`Partida`/`EstadoLancamento`, `ConstrutorLancamento` → `LancamentoBalanceado` (invariante débito=crédito provado no tipo), `Razao` (registrar/estornar/confirmar/liquidar) e `Contas` — genéricos sobre `PortaRazao`, com **duas** implementações: o double em memória e **`RepositorioRazao`** (adaptador SQLite real sobre a `UnidadeDeTrabalho`). `migracoes::conjunto()` traz as tabelas `razao_*` | **25 unit + 3 integração (SQLite real) + 2 doctest + 1 propriedade** |
 | `cardeal-modkit` | Os tipos declarativos (`Manifesto`/`Submodulo`/`Permissao`/`EntradaMenu`/`ContaPadrao`) com `Manifesto::validar()`, **e o `RegistroModulos`**: coleta os manifestos compilados, resolve o grafo de `depende_de` (ordem topológica, ciclo = erro, conflitos) e calcula o **conjunto efetivo** de uma empresa — módulos, submódulos (essenciais + pedidos, fechados sobre `depende_de`), permissões visíveis e menu filtrado | **18 unit + 1 doctest** |
 | `cardeal-storage` | **Escritor único + group commit** (`docs/07`, ADR-0012): `Armazenamento` (abre, migra o núcleo, sobe o escritor e o pool de leitura), `Escritor::executar` (enfileira uma `UnidadeDeTrabalho`, `SAVEPOINT` por tarefa, um `COMMIT`/`fsync` por lote; tarefa que falha ou entra em pânico é isolada), `UnidadeDeTrabalho` (`conexao`, `publicar` → outbox na mesma transação, `auditar` → cadeia BLAKE3, `proximo_numero`/`reservar_faixa`, `travar`), `Leitor` (pool `query_only` sobre o snapshot do WAL), executor de migrações com ordenação topológica e hash imutável, `Segredo<T>`, esquema `nucleo_*` do doc 06 | **9 unit (integração, WAL real)** |
-| `cardeal-auth` | `hash_senha`/`verificar_senha` (Argon2id real, parâmetros do doc 08), `PoliticaSenha`, `Bloqueio` (bloqueio progressivo 5→1min/10→15min), `Escopo` (a parte ABAC — "gerente da filial 2 não vê o caixa da filial 1") | **16 unit + 1 doctest** |
+| `cardeal-auth` | `hash_senha`/`verificar_senha` (Argon2id real, parâmetros do doc 08), `PoliticaSenha`, `Bloqueio` (progressivo 5→1min/10→15min), `Escopo` (ABAC — "gerente da filial 2 não vê o caixa da filial 1"), **`Usuario`** (autenticar/trocar/redefinir senha, ativar; erro genérico anti-enumeração), **`Papel`/`PapelDeFabrica`/`PoliticaPapel`** (os 9 papéis de §3.2 como regra declarativa expandida contra o catálogo real — sem depender de `cardeal-modkit`), **`ValorLimite`** (§3.4), **`Sessao`/`AutorizacoesEfetivas`** e a função livre **`autorizar(sessao, permissao, recurso)`** (concede a permissão **e** o escopo abrange o recurso). Domínio puro, sem banco | **50 unit + 2 doctest** |
 | `mod-financeiro` (parcial) | Domínio puro: `ConstrutorTitulo` → `TituloComParcelas` (rateio de parcelas que conserva o total ao centavo), `Parcela::situacao_em`/`planejar_baixa` (juros simples diário/mensal, multa e desconto de antecipação **calculados na leitura**, nunca materializados), `SessaoCaixa` (abertura com suprimento, sangria/suprimento, **fechamento cego** com apuração de quebra), `Recorrencia` (enumera ocorrências e materializa título sem gravar linha por parcela), o `MANIFESTO` declarativo completo (10 submódulos, 30 permissões, menu, contas, eventos) validado, e o `receituario` que converte cada evento em `LancamentoBalanceado` do Razão | **37 unit + 1 doctest + 3 propriedades** |
 | `mod-clientes` (parcial) | Domínio puro: `Pessoa`/`Papel`/`ConstrutorPessoa` (papéis que coexistem, FSM `Ativa→Inativa→Anonimizada`, anonimização LGPD que preserva o `id`), `DocumentoPessoa`/`Endereco`/`Contato` (CPF/CNPJ por dígito verificador sem I/O, UF, CEP, formato de contato), `LimiteCredito`/`Score` (bloqueio automático, liberação manual e auditada, score derivado), `dedup` (sugestão por documento e por similaridade de nome), `MANIFESTO` validado | **23 unit + 1 propriedade** |
 | `mod-estoque` (parcial) | Domínio puro: `Produto`/`Variacao`/`validar_gtin`/`Conversao`/`Lote` (NCM e GTIN por dígito verificador sem I/O, "validade exige lote"), `SaldoLocal`/`custo_medio_movel` (custo médio recalculado só na entrada, saldo negativo aceito e sinalizado, reserva que não é saída), `Inventario` (contagem cega + geração de ajustes), o `receituario` dos lançamentos que o próprio estoque posta (ajuste, perda, transferência, entrada avulsa), `MANIFESTO` validado | **20 unit + 1 propriedade** |
 | `mod-vendas` (parcial) | Domínio puro: `preco_vigente` sobre `TabelaPreco`/`RegraPreco` (faixa de quantidade + promoção com vigência; a regra mais específica vence), `Orcamento`/`Pedido`/`ItemVenda` (as duas FSMs, total dos itens, preço congelado, faturar irreversível, desconto acima do teto do papel recusado na hora), `Devolucao` (total/parcial com rateio proporcional sem perder centavo), `Comissao` (base líquida de devolução), o `receituario` (faturamento com receita + desconto + CMV, devolução, comissão), `MANIFESTO` validado (depende de financeiro + clientes + estoque) | **26 unit + 1 propriedade** |
 
-**Total: 221 testes (incl. 3 de integração SQLite) + 12 doctests + 7 propriedades. Tudo verde.**
+**Total: 255 testes (incl. 3 de integração SQLite) + 13 doctests + 7 propriedades. Tudo verde.**
 
 ### 1.2 Crates ainda como stub
 
@@ -42,12 +42,14 @@ escrita — ver §4.
 
 `mod-financeiro`, `mod-clientes`, `mod-estoque` e `mod-vendas` já saíram do estado de stub,
 mas só na camada de **domínio puro** (§1.1): tipos e transições testadas, sem banco.
-`cardeal-storage`, `cardeal-ledger` (com `RepositorioRazao`) e o `RegistroModulos` de
-`cardeal-modkit` já existem e passam. O que falta para o primeiro comando de módulo rodar é
-a trait `Modulo` + o despacho de `Comando`/`Consulta` via `Ctx`, e a integração com
-`cardeal-auth` (checar permissão) — cada comando será um fecho passado a
-`Escritor::executar` que resolve `Contas` e chama `Razao::registrar` via `RepositorioRazao`.
-Ver §4.
+`cardeal-storage`, `cardeal-ledger` (com `RepositorioRazao`), o `RegistroModulos` de
+`cardeal-modkit` e agora o domínio de autorização de `cardeal-auth` (`Usuario`, `Papel`,
+`Sessao`, `autorizar`) já existem e passam. O que falta para o primeiro comando de módulo
+rodar é: **(a)** persistir usuário/papel/sessão/dispositivo (as tabelas `nucleo_*` já
+existem) e montar `AutorizacoesEfetivas` a partir do `ConjuntoEfetivo`; **(b)** a trait
+`Modulo` + o despacho de `Comando`/`Consulta` via `Ctx`, com o despachador chamando
+`cardeal_auth::autorizar` antes de passar o fecho a `Escritor::executar` (que resolve
+`Contas` e chama `Razao::registrar` via `RepositorioRazao`). Ver §4.
 
 ### 1.3 Documentação
 
@@ -59,16 +61,15 @@ que este projeto segue, não um acidente (ver §4).
 
 ### 1.4 Git
 
-Repositório local com **3 commits** (`57e8ebd`, `720e06e`, `ac1460a` — em ordem). Remoto
-configurado: `https://github.com/IgorGewehr/cardeal.git`. **O push ainda não foi feito** — o
-Git Credential Manager exige autenticação interativa (abre navegador), que uma sessão de
-agente não consegue completar sozinha. Quem retomar deve rodar, no terminal do usuário:
+Repositório local com **13 commits**. Remoto: `https://github.com/IgorGewehr/cardeal.git`.
+O primeiro push foi feito; `origin/master` está em `11a8860` (`mod-vendas`) e o local está
+**à frente** dos commits de `cardeal-storage`, `cardeal-ledger`/`RepositorioRazao` e
+`cardeal-modkit`/`RegistroModulos` (mais o de `cardeal-auth` desta sessão, se já commitado).
+Quem retomar deve rodar, no terminal do usuário, e confirmar com `git log origin/master`:
 
 ```
-git push -u origin master
+git push origin master
 ```
-
-Depois do primeiro push autenticado, os seguintes devem funcionar sem prompt.
 
 ## 2. Decisão estratégica registrada: por que Rust, não C#/.NET
 
@@ -175,10 +176,14 @@ gigante por sessão. Nenhum commit é feito sem os quatro comandos de §3.3 pass
    `cardeal-auth` (a parte de `Usuario`/`Sessao`) deve implementar exatamente essas
    assinaturas.
 3. Próximo passo natural, na mesma disciplina de domínio-primeiro:
-   - **`cardeal-auth`: `Usuario`/`Sessao`/`autorizar`** — o `RegistroModulos` já entrega o
-     conjunto de permissões visíveis; falta persistir usuário/papel/sessão (`nucleo_*` já
-     tem as tabelas) e a função `autorizar(sessao, permissao, escopo)` que junta `Escopo` ao
-     catálogo.
+   - **`cardeal-auth`: persistência** — o domínio (`Usuario`, `Papel`/`PapelDeFabrica`,
+     `Sessao`, `AutorizacoesEfetivas`, `autorizar`) já existe e passa (§1.1). Falta o
+     adaptador SQLite sobre `nucleo_usuario`/`nucleo_papel`/`nucleo_usuario_papel`/
+     `nucleo_sessao`/`nucleo_dispositivo` e a montagem de `AutorizacoesEfetivas` cruzando os
+     papéis do usuário com o `ConjuntoEfetivo` da empresa (`RegistroModulos::resolver`).
+     Essa montagem fica na camada que tem os dois crates (`cardeal-server`), porque
+     `cardeal-modkit → cardeal-auth` (o despacho chama `autorizar`) e o inverso fecharia um
+     ciclo — por isso `PapelDeFabrica` recebe o catálogo de permissões por parâmetro.
    - **`cardeal-modkit`: a trait `Modulo` + o despacho de `Comando`/`Consulta`** — cada
      comando é `DeserializeOwned` + `PERMISSAO` + `executar(&Ctx, &mut UnidadeDeTrabalho)`;
      o despachador deserializa a carga, chama `autorizar`, e passa o fecho a
