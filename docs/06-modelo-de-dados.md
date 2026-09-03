@@ -88,6 +88,14 @@ CREATE TABLE nucleo_papel_permissao (
     PRIMARY KEY (papel, permissao)
 ) STRICT, WITHOUT ROWID;
 
+CREATE TABLE nucleo_papel_limite (                   -- os limites de doc 08 §3.4
+    papel      BLOB NOT NULL REFERENCES nucleo_papel(id),
+    chave      TEXT NOT NULL,                        -- "vendas.desconto_maximo"
+    tipo       TEXT NOT NULL CHECK (tipo IN ('Dinheiro','Percentual','Contagem','Dias','Ilimitado')),
+    valor      INTEGER NOT NULL DEFAULT 0,           -- teto na unidade interna da dimensão
+    PRIMARY KEY (papel, chave)
+) STRICT, WITHOUT ROWID;
+
 CREATE TABLE nucleo_usuario_papel (
     usuario  BLOB NOT NULL REFERENCES nucleo_usuario(id),
     papel    BLOB NOT NULL REFERENCES nucleo_papel(id),

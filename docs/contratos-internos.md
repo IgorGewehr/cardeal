@@ -635,15 +635,49 @@ impl Sessao {
 /// também (defesa em profundidade); a expiração é da borda de transporte.
 pub fn autorizar(sessao: &Sessao, permissao: &str, recurso: &Escopo) -> Result<(), ErroAuth>;
 
+// ─── persistência (adaptador SQLite — implementado) ─────────────────────────
+// Grava/lê nucleo_usuario, nucleo_papel, nucleo_papel_permissao,
+// nucleo_papel_limite, nucleo_usuario_papel. Mesma disposição de RepositorioRazao.
+pub struct RepositorioAuth<'a, 'b> { /* &mut UnidadeDeTrabalho */ }
+impl RepositorioAuth<'_, '_> {
+    pub fn novo(uow: &mut UnidadeDeTrabalho) -> Self;
+    // usuário
+    pub fn inserir_usuario(&mut self, u: &Usuario) -> Result<(), ErroAuth>;
+    pub fn atualizar_credenciais(&mut self, u: &Usuario) -> Result<(), ErroAuth>;
+    pub fn usuario_por_login(&self, login: &str) -> Result<Option<Usuario>, ErroAuth>;
+    pub fn usuario_por_id(&self, id: Id) -> Result<Option<Usuario>, ErroAuth>;
+    // papel
+    pub fn inserir_papel(&mut self, p: &Papel) -> Result<(), ErroAuth>;   // aceita sistema=1
+    pub fn atualizar_papel(&mut self, p: &Papel) -> Result<(), ErroAuth>; // Err PapelDoSistema
+    pub fn papel_por_id(&self, id: Id) -> Result<Option<Papel>, ErroAuth>;
+    pub fn papeis_do_usuario(&self, usuario: Id, empresa: Id) -> Result<Vec<Papel>, ErroAuth>;
+    pub fn atribuir_papel(&mut self, usuario: Id, papel: Id, empresa: Id) -> Result<(), ErroAuth>;
+    pub fn revogar_papel(&mut self, usuario: Id, papel: Id, empresa: Id) -> Result<(), ErroAuth>;
+}
+
+/// Leituras sobre `&rusqlite::Connection` (pool do Leitor) — mesmas assinaturas dos
+/// wrappers acima, sem `&mut`.
+pub mod consultas {
+    pub fn usuario_por_id(c: &Connection, id: Id) -> Result<Option<Usuario>, ErroAuth>;
+    pub fn usuario_por_login(c: &Connection, login: &str) -> Result<Option<Usuario>, ErroAuth>;
+    pub fn papel_por_id(c: &Connection, id: Id) -> Result<Option<Papel>, ErroAuth>;
+    pub fn papeis_do_usuario(c: &Connection, usuario: Id, empresa: Id)
+        -> Result<Vec<Papel>, ErroAuth>;
+}
+
 // ─── erros ───────────────────────────────────────────────────────────────────
 pub enum ErroAuth {
     SenhaCurta { minimo: u8 }, SenhaComum, FalhaDeHash,
     CredencialInvalida, ContaBloqueada { ate: Instante },
     ForaDoEscopo, SemPermissao { permissao: String }, SessaoEncerrada,
-    PapelDoSistema, SenhaAtualIncorreta,
+    PapelDoSistema, SenhaAtualIncorreta, FalhaDePersistencia(String),
 }
 // implementa ErroDominio
 ```
+
+`nucleo_papel_limite` foi acrescentada em `cardeal-storage` (migração `nucleo` v2,
+`docs/06 §2`): `(papel, chave, tipo, valor)` — `tipo ∈ {Dinheiro, Percentual, Contagem,
+Dias, Ilimitado}`, `valor` na unidade interna da dimensão.
 
 **Nota de dependência:** `cardeal-auth` **não** depende de `cardeal-modkit` — é o contrário
 (o despacho de `cardeal-modkit` chama [`autorizar`]). Por isso a expansão "papel de fábrica

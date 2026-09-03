@@ -55,13 +55,17 @@ pub enum ErroAuth {
     /// A senha atual informada para a troca não confere.
     #[error("A senha atual não confere")]
     SenhaAtualIncorreta,
+
+    /// Falha de infraestrutura ao ler ou gravar (SQLite, disco).
+    #[error("Falha ao acessar o armazenamento: {0}")]
+    FalhaDePersistencia(String),
 }
 
 impl ErroDominio for ErroAuth {
     fn codigo(&self) -> CodigoErro {
         match self {
             Self::SenhaCurta { .. } | Self::SenhaComum => CodigoErro::ENTRADA_INVALIDA,
-            Self::FalhaDeHash => CodigoErro::FALHA_INTERNA,
+            Self::FalhaDeHash | Self::FalhaDePersistencia(_) => CodigoErro::FALHA_INTERNA,
             Self::CredencialInvalida | Self::SenhaAtualIncorreta => CodigoErro::CREDENCIAL_INVALIDA,
             Self::ContaBloqueada { .. } => CodigoErro::CONTA_BLOQUEADA,
             Self::ForaDoEscopo | Self::SemPermissao { .. } => CodigoErro::SEM_PERMISSAO,

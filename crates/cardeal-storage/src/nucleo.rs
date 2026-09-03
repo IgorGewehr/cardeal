@@ -164,12 +164,37 @@ CREATE TABLE nucleo_sequencia (
 ) STRICT, WITHOUT ROWID;
 ";
 
-const MIGRACOES: &[Migracao] = &[Migracao {
-    versao: 1,
-    nome: "nucleo_inicial",
-    sql: SQL_INICIAL,
-    tipo: TipoMigracao::Esquema,
-}];
+/// `nucleo_papel_limite` — os limites quantitativos de papel (`docs/08 §3.4`).
+///
+/// Separado de `nucleo_papel_permissao` porque limite é "quanto", não "se": um teto
+/// tipado, não um booleano. Cada linha é uma dimensão (`Dinheiro`, `Percentual`,
+/// `Contagem`, `Dias`) ou `Ilimitado`; `valor` guarda o teto na unidade interna da
+/// dimensão (centavos, 1e-6 de ponto percentual, contagem, dias) e é ignorado para
+/// `Ilimitado`.
+const SQL_PAPEL_LIMITE: &str = r"
+CREATE TABLE nucleo_papel_limite (
+    papel BLOB NOT NULL REFERENCES nucleo_papel(id),
+    chave TEXT NOT NULL,
+    tipo  TEXT NOT NULL CHECK (tipo IN ('Dinheiro','Percentual','Contagem','Dias','Ilimitado')),
+    valor INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (papel, chave)
+) STRICT, WITHOUT ROWID;
+";
+
+const MIGRACOES: &[Migracao] = &[
+    Migracao {
+        versao: 1,
+        nome: "nucleo_inicial",
+        sql: SQL_INICIAL,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 2,
+        nome: "nucleo_papel_limite",
+        sql: SQL_PAPEL_LIMITE,
+        tipo: TipoMigracao::Esquema,
+    },
+];
 
 /// O conjunto de migrações do núcleo.
 #[must_use]
