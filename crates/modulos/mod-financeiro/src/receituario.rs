@@ -9,7 +9,7 @@
 //! ([`PapelConta`](cardeal_ledger::PapelConta)) e passa os [`Id`]s já prontos nas structs
 //! `Contas*` abaixo (`docs/contratos-internos.md` §6, regra 4).
 
-use cardeal_kernel::{Id, Instante};
+use cardeal_kernel::{Data, Fuso, Id, Instante};
 use cardeal_ledger::{ConstrutorLancamento, Contraparte, LancamentoBalanceado, Origem};
 
 use crate::baixa::PlanoBaixa;
@@ -25,6 +25,16 @@ pub struct Autoria {
     pub dispositivo: Id,
     /// O instante da unidade de trabalho.
     pub agora: Instante,
+    /// O fuso da empresa, para derivar a data corrente de [`Self::agora`].
+    pub fuso: Fuso,
+}
+
+impl Autoria {
+    /// A data corrente, no fuso da empresa.
+    #[must_use]
+    pub const fn hoje(&self) -> Data {
+        self.agora.data(self.fuso)
+    }
 }
 
 /// As contas que o lançamento de abertura de um título usa.
@@ -172,6 +182,7 @@ mod testes {
             usuario: Id::novo(),
             dispositivo: Id::novo(),
             agora: Instante::agora(),
+            fuso: Fuso::BRASILIA,
         }
     }
 
