@@ -22,29 +22,30 @@ garantia deliberada deste projeto (ver §4 e §7 sobre por quê isso importa tan
 | `cardeal-kernel` | `Dinheiro`, `Quantidade`, `Preco`, `Percentual` (aritmética exata, sem ponto flutuante), `Id`/`ChaveIdempotencia`/`Versao` (UUIDv7), `Data`/`Instante`/`Competencia`/`Periodo`/`Fuso`, `Cpf`/`Cnpj`/`Uf`/`InscricaoEstadual` (com dígito verificador real), `Erro`/`Detalhes`/`ErroDominio`, utilidades de texto (busca, similaridade, redação de PII) | **44 unit + 7 doctest** |
 | `cardeal-ledger` | Domínio puro do Razão: `Conta`/`CodigoConta`/`PapelConta`, `plano_padrao()` (o plano gerencial completo do doc 05), `Lancamento`/`Partida`/`EstadoLancamento`, `ConstrutorLancamento` → `LancamentoBalanceado` (o invariante débito=crédito provado no tipo), `Razao` (registrar/estornar/confirmar/liquidar) e `Contas` (resolução por papel/código) — **genéricos sobre a trait `PortaRazao`**, não sobre SQLite | **25 unit + 2 doctest + 1 propriedade (512 casos)** |
 | `cardeal-modkit` | `Manifesto`/`Submodulo`/`Permissao`/`EntradaMenu`/`ContaPadrao`/`IdModulo`/`Icone` — os tipos declarativos do sistema de módulos, com `Manifesto::validar()` provando consistência interna | **10 unit + 1 doctest** |
+| `cardeal-storage` | **Escritor único + group commit** (`docs/07`, ADR-0012): `Armazenamento` (abre, migra o núcleo, sobe o escritor e o pool de leitura), `Escritor::executar` (enfileira uma `UnidadeDeTrabalho`, `SAVEPOINT` por tarefa, um `COMMIT`/`fsync` por lote; tarefa que falha ou entra em pânico é isolada), `UnidadeDeTrabalho` (`conexao`, `publicar` → outbox na mesma transação, `auditar` → cadeia BLAKE3, `proximo_numero`/`reservar_faixa`, `travar`), `Leitor` (pool `query_only` sobre o snapshot do WAL), executor de migrações com ordenação topológica e hash imutável, `Segredo<T>`, esquema `nucleo_*` do doc 06 | **9 unit (integração, WAL real)** |
 | `cardeal-auth` | `hash_senha`/`verificar_senha` (Argon2id real, parâmetros do doc 08), `PoliticaSenha`, `Bloqueio` (bloqueio progressivo 5→1min/10→15min), `Escopo` (a parte ABAC — "gerente da filial 2 não vê o caixa da filial 1") | **16 unit + 1 doctest** |
 | `mod-financeiro` (parcial) | Domínio puro: `ConstrutorTitulo` → `TituloComParcelas` (rateio de parcelas que conserva o total ao centavo), `Parcela::situacao_em`/`planejar_baixa` (juros simples diário/mensal, multa e desconto de antecipação **calculados na leitura**, nunca materializados), `SessaoCaixa` (abertura com suprimento, sangria/suprimento, **fechamento cego** com apuração de quebra), `Recorrencia` (enumera ocorrências e materializa título sem gravar linha por parcela), o `MANIFESTO` declarativo completo (10 submódulos, 30 permissões, menu, contas, eventos) validado, e o `receituario` que converte cada evento em `LancamentoBalanceado` do Razão | **37 unit + 1 doctest + 3 propriedades** |
 | `mod-clientes` (parcial) | Domínio puro: `Pessoa`/`Papel`/`ConstrutorPessoa` (papéis que coexistem, FSM `Ativa→Inativa→Anonimizada`, anonimização LGPD que preserva o `id`), `DocumentoPessoa`/`Endereco`/`Contato` (CPF/CNPJ por dígito verificador sem I/O, UF, CEP, formato de contato), `LimiteCredito`/`Score` (bloqueio automático, liberação manual e auditada, score derivado), `dedup` (sugestão por documento e por similaridade de nome), `MANIFESTO` validado | **23 unit + 1 propriedade** |
 | `mod-estoque` (parcial) | Domínio puro: `Produto`/`Variacao`/`validar_gtin`/`Conversao`/`Lote` (NCM e GTIN por dígito verificador sem I/O, "validade exige lote"), `SaldoLocal`/`custo_medio_movel` (custo médio recalculado só na entrada, saldo negativo aceito e sinalizado, reserva que não é saída), `Inventario` (contagem cega + geração de ajustes), o `receituario` dos lançamentos que o próprio estoque posta (ajuste, perda, transferência, entrada avulsa), `MANIFESTO` validado | **20 unit + 1 propriedade** |
 | `mod-vendas` (parcial) | Domínio puro: `preco_vigente` sobre `TabelaPreco`/`RegraPreco` (faixa de quantidade + promoção com vigência; a regra mais específica vence), `Orcamento`/`Pedido`/`ItemVenda` (as duas FSMs, total dos itens, preço congelado, faturar irreversível, desconto acima do teto do papel recusado na hora), `Devolucao` (total/parcial com rateio proporcional sem perder centavo), `Comissao` (base líquida de devolução), o `receituario` (faturamento com receita + desconto + CMV, devolução, comissão), `MANIFESTO` validado (depende de financeiro + clientes + estoque) | **26 unit + 1 propriedade** |
 
-**Total: 201 testes unitários + 12 doctests + 7 propriedades. Tudo verde.**
+**Total: 210 testes unitários + 12 doctests + 7 propriedades. Tudo verde.**
 
 ### 1.2 Crates ainda como stub
 
-Os outros 20 crates do workspace (`cardeal-storage`, `cardeal-protocol`, `cardeal-server`,
-`cardeal-cliente`, `cardeal-ui`, `cardeal-analytics`, `cardeal-fiscal`, `cardeal-testkit`,
-`cardeal-desktop`, `xtask` e os 10 `mod-*` restantes) têm só `Cargo.toml` válido +
-`src/lib.rs`/`src/main.rs` mínimo apontando para este documento e para o roadmap. Isso é
-proposital: garante que `cargo check --workspace` sempre passa, mesmo com a maior parte do
-sistema ainda não escrita — ver §4.
+Os outros 19 crates do workspace (`cardeal-protocol`, `cardeal-server`, `cardeal-cliente`,
+`cardeal-ui`, `cardeal-analytics`, `cardeal-fiscal`, `cardeal-testkit`, `cardeal-desktop`,
+`xtask` e os 10 `mod-*` restantes) têm só `Cargo.toml` válido + `src/lib.rs`/`src/main.rs`
+mínimo apontando para este documento e para o roadmap. Isso é proposital: garante que
+`cargo check --workspace` sempre passa, mesmo com a maior parte do sistema ainda não
+escrita — ver §4.
 
 `mod-financeiro`, `mod-clientes`, `mod-estoque` e `mod-vendas` já saíram do estado de stub,
-mas só na camada de **domínio puro** (§1.1): tipos e transições testadas, sem banco. Falta,
-para os quatro, o que depende de `cardeal-storage` — os **comandos** e **consultas**
-paginadas — além da conciliação/projeção/Pulso (financeiro), da mesclagem e da `PortaFiscal`
-(clientes), da curva ABC e da `PortaCatalogo` (estoque) e das portas síncronas
-estoque/clientes e da apuração de comissão em lote (vendas). Ver §4.
+mas só na camada de **domínio puro** (§1.1): tipos e transições testadas, sem banco.
+`cardeal-storage` já existe e passa; o que falta agora para ligar os módulos ao banco é: o
+`cardeal-modkit::Registro` + despacho de `Comando`/`Consulta`, e `cardeal-ledger`
+implementar `PortaRazao` sobre a `UnidadeDeTrabalho`. Feito isso, cada módulo ganha a camada
+de comandos. Ver §4.
 
 ### 1.3 Documentação
 
@@ -172,18 +173,21 @@ gigante por sessão. Nenhum commit é feito sem os quatro comandos de §3.3 pass
    `cardeal-auth` (a parte de `Usuario`/`Sessao`) deve implementar exatamente essas
    assinaturas.
 3. Próximo passo natural, na mesma disciplina de domínio-primeiro:
-   - **`cardeal-storage`** (o escritor único + group commit do doc 07) é o gargalo dominante:
-     o domínio puro de **quatro módulos** (financeiro, clientes, estoque, vendas) já existe e
-     está provado, mas todos os comandos e consultas paginadas dependem da
-     `UnidadeDeTrabalho` e da trait `Comando` de `cardeal-modkit`. Fechar `cardeal-storage`
-     destrava a persistência real de tudo que já foi escrito de uma vez.
-   - Depois de storage, o `cardeal-modkit::Registro` + despacho (grafo de dependências entre
-     módulos, conjunto efetivo por perfil) e então a camada de **comandos** de cada módulo,
-     na ordem do roadmap (financeiro/clientes → estoque/vendas/pdv).
-   - Domínio puro ainda não escrito, sem depender de storage: `mod-pdv` (frente de caixa —
-     reusa `vendas` e o `caixa` do financeiro), e os módulos verticais da Fase 5.
-   - As portas síncronas entre módulos (`PortaCatalogo` de estoque, `LimiteDisponivel` de
-     clientes) são traits pequenas que podem ser desenhadas junto do `Registro`.
+   - **`cardeal-ledger` implementa `PortaRazao` sobre `UnidadeDeTrabalho`** — hoje o Razão só
+     roda contra o double em memória dos testes; falta o adaptador SQLite (grava
+     `razao_lancamento`/`razao_partida`, resolve `Contas` por papel lendo `razao_conta`). As
+     migrações da tabela `razao_*` (doc 06 §3) passam a ser um `ConjuntoMigracoes` do próprio
+     `cardeal-ledger`.
+   - **`cardeal-modkit::Registro` + despacho** — coleta os `Manifesto` dos módulos compilados,
+     resolve o grafo de dependências entre eles (o `depende_de` de `mod-vendas` já exercita
+     isso), calcula o conjunto efetivo por perfil, e despacha `Comando`/`Consulta` com um
+     `Ctx` construído a partir do `ContextoEscrita`.
+   - Feito isso, a camada de **comandos** de cada módulo, na ordem do roadmap
+     (financeiro/clientes → estoque/vendas → pdv), cada comando sendo um fecho passado a
+     `Escritor::executar`.
+   - Em `cardeal-storage`, o que ficou para depois: `Outbox` (leitura das pendências),
+     `Backup` online, `verificar()`, checkpoint na ociosidade, feature `cripto`, timeout por
+     tarefa.
 4. Os 5 specs de módulo que faltam (`alugueis`, `combustivel`, `hotelaria`, `industria`,
    `contabil`) são de baixa prioridade — nenhum perfil que os usa está no caminho crítico
    ainda (ver doc 17, Fase 5).

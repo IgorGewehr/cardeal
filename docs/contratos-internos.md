@@ -142,13 +142,16 @@ impl Escritor {
 
 pub struct UnidadeDeTrabalho<'a>;
 impl<'a> UnidadeDeTrabalho<'a> {
-    pub fn tx(&self) -> &rusqlite::Transaction<'a>;
+    // Cada tarefa roda no seu próprio SAVEPOINT dentro do lote do group commit, então o que
+    // se expõe é a Connection (com savepoint ativo), não uma Transaction — módulos preparam
+    // e executam suas consultas por aqui e nunca abrem conexão própria.
+    pub fn conexao(&self) -> &rusqlite::Connection;
     pub fn ctx(&self) -> &ContextoEscrita;
     pub fn empresa(&self) -> Id;
     pub fn usuario(&self) -> Id;
     pub fn dispositivo(&self) -> Id;
     pub fn agora(&self) -> Instante;
-    pub fn hoje(&self) -> Data;                    // no fuso da empresa
+    pub fn hoje(&self) -> Data;                    // fuso da empresa (hoje: fixo em Brasília)
 
     /// Publica evento de domínio. Vai para nucleo_outbox NA MESMA TRANSAÇÃO.
     pub fn publicar<E: EventoDominio>(&mut self, evento: E) -> Resultado<()>;
@@ -162,11 +165,11 @@ impl<'a> UnidadeDeTrabalho<'a> {
     /// Reserva uma faixa contígua — usado na abertura de caixa para o modo autônomo.
     pub fn reservar_faixa(&mut self, sequencia: &str, tamanho: u64) -> Resultado<FaixaNumeracao>;
 
-    /// Trava pessimista com TTL. Solta sozinha se o dono morrer.
+    /// Trava pessimista com TTL. Solta no fim do TTL ou via `Trava::soltar(&mut uow)`.
     pub fn travar(&mut self, recurso: &str, ttl_segundos: u32) -> Resultado<Trava>;
 }
 
-pub trait EventoDominio: serde::Serialize + Send + 'static {
+pub trait EventoDominio: serde::Serialize {   // serializado síncrono: sem bound Send + 'static
     /// Nome versionado: "vendas.pedido_faturado.v1"
     const TIPO: &'static str;
     fn agregado(&self) -> Option<Id> { None }
