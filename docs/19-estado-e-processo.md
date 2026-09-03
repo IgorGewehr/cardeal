@@ -26,23 +26,25 @@ garantia deliberada deste projeto (ver §4 e §7 sobre por quê isso importa tan
 | `mod-financeiro` (parcial) | Domínio puro: `ConstrutorTitulo` → `TituloComParcelas` (rateio de parcelas que conserva o total ao centavo), `Parcela::situacao_em`/`planejar_baixa` (juros simples diário/mensal, multa e desconto de antecipação **calculados na leitura**, nunca materializados), `SessaoCaixa` (abertura com suprimento, sangria/suprimento, **fechamento cego** com apuração de quebra), `Recorrencia` (enumera ocorrências e materializa título sem gravar linha por parcela), o `MANIFESTO` declarativo completo (10 submódulos, 30 permissões, menu, contas, eventos) validado, e o `receituario` que converte cada evento em `LancamentoBalanceado` do Razão | **37 unit + 1 doctest + 3 propriedades** |
 | `mod-clientes` (parcial) | Domínio puro: `Pessoa`/`Papel`/`ConstrutorPessoa` (papéis que coexistem, FSM `Ativa→Inativa→Anonimizada`, anonimização LGPD que preserva o `id`), `DocumentoPessoa`/`Endereco`/`Contato` (CPF/CNPJ por dígito verificador sem I/O, UF, CEP, formato de contato), `LimiteCredito`/`Score` (bloqueio automático, liberação manual e auditada, score derivado), `dedup` (sugestão por documento e por similaridade de nome), `MANIFESTO` validado | **23 unit + 1 propriedade** |
 | `mod-estoque` (parcial) | Domínio puro: `Produto`/`Variacao`/`validar_gtin`/`Conversao`/`Lote` (NCM e GTIN por dígito verificador sem I/O, "validade exige lote"), `SaldoLocal`/`custo_medio_movel` (custo médio recalculado só na entrada, saldo negativo aceito e sinalizado, reserva que não é saída), `Inventario` (contagem cega + geração de ajustes), o `receituario` dos lançamentos que o próprio estoque posta (ajuste, perda, transferência, entrada avulsa), `MANIFESTO` validado | **20 unit + 1 propriedade** |
+| `mod-vendas` (parcial) | Domínio puro: `preco_vigente` sobre `TabelaPreco`/`RegraPreco` (faixa de quantidade + promoção com vigência; a regra mais específica vence), `Orcamento`/`Pedido`/`ItemVenda` (as duas FSMs, total dos itens, preço congelado, faturar irreversível, desconto acima do teto do papel recusado na hora), `Devolucao` (total/parcial com rateio proporcional sem perder centavo), `Comissao` (base líquida de devolução), o `receituario` (faturamento com receita + desconto + CMV, devolução, comissão), `MANIFESTO` validado (depende de financeiro + clientes + estoque) | **26 unit + 1 propriedade** |
 
-**Total: 175 testes unitários + 12 doctests + 6 propriedades. Tudo verde.**
+**Total: 201 testes unitários + 12 doctests + 7 propriedades. Tudo verde.**
 
 ### 1.2 Crates ainda como stub
 
-Os outros 21 crates do workspace (`cardeal-storage`, `cardeal-protocol`, `cardeal-server`,
+Os outros 20 crates do workspace (`cardeal-storage`, `cardeal-protocol`, `cardeal-server`,
 `cardeal-cliente`, `cardeal-ui`, `cardeal-analytics`, `cardeal-fiscal`, `cardeal-testkit`,
-`cardeal-desktop`, `xtask` e os 11 `mod-*` restantes) têm só `Cargo.toml` válido +
+`cardeal-desktop`, `xtask` e os 10 `mod-*` restantes) têm só `Cargo.toml` válido +
 `src/lib.rs`/`src/main.rs` mínimo apontando para este documento e para o roadmap. Isso é
 proposital: garante que `cargo check --workspace` sempre passa, mesmo com a maior parte do
 sistema ainda não escrita — ver §4.
 
-`mod-financeiro`, `mod-clientes` e `mod-estoque` já saíram do estado de stub, mas só na
-camada de **domínio puro** (§1.1): tipos e transições testadas, sem banco. Falta, para os
-três, o que depende de `cardeal-storage` — os **comandos** e **consultas** paginadas — além
-da conciliação/projeção/Pulso (financeiro), da mesclagem e da `PortaFiscal` (clientes) e da
-curva ABC e da `PortaCatalogo` de reserva/consumo (estoque). Ver §4.
+`mod-financeiro`, `mod-clientes`, `mod-estoque` e `mod-vendas` já saíram do estado de stub,
+mas só na camada de **domínio puro** (§1.1): tipos e transições testadas, sem banco. Falta,
+para os quatro, o que depende de `cardeal-storage` — os **comandos** e **consultas**
+paginadas — além da conciliação/projeção/Pulso (financeiro), da mesclagem e da `PortaFiscal`
+(clientes), da curva ABC e da `PortaCatalogo` (estoque) e das portas síncronas
+estoque/clientes e da apuração de comissão em lote (vendas). Ver §4.
 
 ### 1.3 Documentação
 
@@ -170,15 +172,18 @@ gigante por sessão. Nenhum commit é feito sem os quatro comandos de §3.3 pass
    `cardeal-auth` (a parte de `Usuario`/`Sessao`) deve implementar exatamente essas
    assinaturas.
 3. Próximo passo natural, na mesma disciplina de domínio-primeiro:
-   - **`cardeal-storage`** (o escritor único + group commit do doc 07) é agora o gargalo: o
-     domínio puro de `mod-financeiro` já existe (títulos, parcelas, juros, receituário), mas
-     os comandos/consultas e a sessão de caixa dependem da `UnidadeDeTrabalho`. Fechar
-     `cardeal-storage` destrava a persistência real de tudo que já foi escrito.
-   - Em paralelo (não bloqueado por storage): `mod-clientes` (pessoas, endereços, contatos) —
-     domínio puro, sem dependência de storage, e o financeiro já referencia `Contraparte`/pessoa.
-   - A **projeção de fluxo** (Rio do Caixa do Pulso) depende de uma consulta que agrega
-     `Recorrencia::ocorrencias` + parcelas em aberto + saldos do Razão — logo espera as
-     consultas de `cardeal-ledger`/`cardeal-storage`.
+   - **`cardeal-storage`** (o escritor único + group commit do doc 07) é o gargalo dominante:
+     o domínio puro de **quatro módulos** (financeiro, clientes, estoque, vendas) já existe e
+     está provado, mas todos os comandos e consultas paginadas dependem da
+     `UnidadeDeTrabalho` e da trait `Comando` de `cardeal-modkit`. Fechar `cardeal-storage`
+     destrava a persistência real de tudo que já foi escrito de uma vez.
+   - Depois de storage, o `cardeal-modkit::Registro` + despacho (grafo de dependências entre
+     módulos, conjunto efetivo por perfil) e então a camada de **comandos** de cada módulo,
+     na ordem do roadmap (financeiro/clientes → estoque/vendas/pdv).
+   - Domínio puro ainda não escrito, sem depender de storage: `mod-pdv` (frente de caixa —
+     reusa `vendas` e o `caixa` do financeiro), e os módulos verticais da Fase 5.
+   - As portas síncronas entre módulos (`PortaCatalogo` de estoque, `LimiteDisponivel` de
+     clientes) são traits pequenas que podem ser desenhadas junto do `Registro`.
 4. Os 5 specs de módulo que faltam (`alugueis`, `combustivel`, `hotelaria`, `industria`,
    `contabil`) são de baixa prioridade — nenhum perfil que os usa está no caminho crítico
    ainda (ver doc 17, Fase 5).

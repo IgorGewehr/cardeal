@@ -246,14 +246,20 @@ stateDiagram-v2
 | `vendas.pedido.faturar` | Faturar pedido | Alto |
 | `vendas.pedido.cancelar` | Cancelar pedido não faturado | Médio |
 | `vendas.entrega.registrar` | Registrar entrega | Baixo |
+| `vendas.devolucao.ver` | Ver devoluções | Baixo |
 | `vendas.devolucao.solicitar` | Solicitar devolução | Baixo |
 | `vendas.devolucao.aprovar` | Aprovar devolução | Alto |
 | `vendas.devolucao.concluir` | Concluir devolução (estorno) | Alto |
+| `vendas.tabela_preco.ver` | Consultar tabelas de preço | Baixo |
 | `vendas.tabela_preco.criar` | Criar tabela de preço | Médio |
 | `vendas.tabela_preco.editar` | Editar regra de preço | Médio |
 | `vendas.comissao.ver` | Ver apuração de comissão | Baixo |
 | `vendas.comissao.pagar` | Pagar comissão | Médio |
 | `vendas.contrato_recorrente.criar` | Criar contrato recorrente | Médio |
+
+As permissões de leitura `vendas.devolucao.ver` e `vendas.tabela_preco.ver` foram
+acrescentadas junto do manifesto (`mod-vendas`): a §6 já pressupunha as consultas e toda
+entrada de menu precisa de uma permissão declarada.
 
 ## 10. Telas
 
