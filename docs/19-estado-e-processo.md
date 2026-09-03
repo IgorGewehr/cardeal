@@ -23,17 +23,23 @@ garantia deliberada deste projeto (ver §4 e §7 sobre por quê isso importa tan
 | `cardeal-ledger` | Domínio puro do Razão: `Conta`/`CodigoConta`/`PapelConta`, `plano_padrao()` (o plano gerencial completo do doc 05), `Lancamento`/`Partida`/`EstadoLancamento`, `ConstrutorLancamento` → `LancamentoBalanceado` (o invariante débito=crédito provado no tipo), `Razao` (registrar/estornar/confirmar/liquidar) e `Contas` (resolução por papel/código) — **genéricos sobre a trait `PortaRazao`**, não sobre SQLite | **25 unit + 2 doctest + 1 propriedade (512 casos)** |
 | `cardeal-modkit` | `Manifesto`/`Submodulo`/`Permissao`/`EntradaMenu`/`ContaPadrao`/`IdModulo`/`Icone` — os tipos declarativos do sistema de módulos, com `Manifesto::validar()` provando consistência interna | **10 unit + 1 doctest** |
 | `cardeal-auth` | `hash_senha`/`verificar_senha` (Argon2id real, parâmetros do doc 08), `PoliticaSenha`, `Bloqueio` (bloqueio progressivo 5→1min/10→15min), `Escopo` (a parte ABAC — "gerente da filial 2 não vê o caixa da filial 1") | **16 unit + 1 doctest** |
+| `mod-financeiro` (parcial) | Domínio puro de títulos: `ConstrutorTitulo` → `TituloComParcelas` (rateio de parcelas que conserva o total ao centavo), `Parcela::situacao_em`/`planejar_baixa` (juros simples diário/mensal, multa e desconto de antecipação **calculados na leitura**, nunca materializados), o `MANIFESTO` declarativo completo (10 submódulos, 30 permissões, menu, contas, eventos) validado, e o `receituario` que converte título lançado / parcela baixada em `LancamentoBalanceado` do Razão | **19 unit + 1 doctest + 2 propriedades** |
 
-**Total: 95 testes unitários + 11 doctests + 1 propriedade de 512 casos. Tudo verde.**
+**Total: 114 testes unitários + 12 doctests + 3 propriedades. Tudo verde.**
 
 ### 1.2 Crates ainda como stub
 
-Os outros 24 crates do workspace (`cardeal-storage`, `cardeal-protocol`, `cardeal-server`,
+Os outros 23 crates do workspace (`cardeal-storage`, `cardeal-protocol`, `cardeal-server`,
 `cardeal-cliente`, `cardeal-ui`, `cardeal-analytics`, `cardeal-fiscal`, `cardeal-testkit`,
-`cardeal-desktop`, `xtask` e os 14 `mod-*`) têm só `Cargo.toml` válido +
+`cardeal-desktop`, `xtask` e os 13 `mod-*` restantes) têm só `Cargo.toml` válido +
 `src/lib.rs`/`src/main.rs` mínimo apontando para este documento e para o roadmap. Isso é
 proposital: garante que `cargo check --workspace` sempre passa, mesmo com a maior parte do
 sistema ainda não escrita — ver §4.
+
+`mod-financeiro` já saiu do estado de stub, mas só na camada de **domínio puro** (§1.1): não
+tem ainda os comandos (`AbrirCaixa`, `LancarTitulo`, `BaixarParcela`…), as consultas
+paginadas, a sessão de caixa, a conciliação nem o Pulso — tudo isso espera `cardeal-storage`
+(ver §4).
 
 ### 1.3 Documentação
 
@@ -161,10 +167,16 @@ gigante por sessão. Nenhum commit é feito sem os quatro comandos de §3.3 pass
    `cardeal-auth` (a parte de `Usuario`/`Sessao`) deve implementar exatamente essas
    assinaturas.
 3. Próximo passo natural, na mesma disciplina de domínio-primeiro:
-   - **`mod-financeiro`** (domínio de contas a pagar/receber, caixa) — o módulo que o usuário
-     priorizou explicitamente, junto com estoque/clientes/vendas.
-   - Ou fechar o núcleo: `cardeal-storage` (o escritor único + group commit do doc 07) é o
-     que destrava a persistência real para tudo que já existe.
+   - **`cardeal-storage`** (o escritor único + group commit do doc 07) é agora o gargalo: o
+     domínio puro de `mod-financeiro` já existe (títulos, parcelas, juros, receituário), mas
+     os comandos/consultas e a sessão de caixa dependem da `UnidadeDeTrabalho`. Fechar
+     `cardeal-storage` destrava a persistência real de tudo que já foi escrito.
+   - Em paralelo (não bloqueado por storage): terminar o domínio puro de `mod-financeiro` —
+     a **sessão de caixa** (abertura, sangria, suprimento, fechamento cego, quebra) modelada
+     como transições puras que produzem `LancamentoBalanceado`, no mesmo estilo do
+     `receituario` já feito.
+   - `mod-clientes` (pessoas, endereços, contatos) — domínio puro, sem dependência de storage,
+     e o financeiro já referencia `Contraparte`/pessoa.
 4. Os 5 specs de módulo que faltam (`alugueis`, `combustivel`, `hotelaria`, `industria`,
    `contabil`) são de baixa prioridade — nenhum perfil que os usa está no caminho crítico
    ainda (ver doc 17, Fase 5).

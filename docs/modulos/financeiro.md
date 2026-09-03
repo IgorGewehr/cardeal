@@ -369,16 +369,25 @@ que o módulo financeiro precisa cobrir em `testes/receituario.rs`.
 | `financeiro.pagar.autorizar` | Autorizar pagamento acima do teto do papel | Alto |
 | `financeiro.banco.ver` | Consultar contas bancárias e extratos | Baixo |
 | `financeiro.banco.criar` | Cadastrar conta bancária | Médio |
+| `financeiro.conciliacao.ver` | Ver a conciliação bancária | Baixo |
 | `financeiro.conciliacao.importar` | Importar extrato bancário | Baixo |
 | `financeiro.conciliacao.confirmar` | Confirmar casamento de item do extrato | Médio |
+| `financeiro.projecao.ver` | Ver a projeção de fluxo de caixa | Baixo |
 | `financeiro.centro_custo.criar` | Cadastrar centro de custo | Baixo |
 | `financeiro.centro_custo.ver` | Ver relatórios por centro de custo | Baixo |
 | `financeiro.cobranca.gerar` | Gerar boleto/Pix de cobrança | Baixo |
+| `financeiro.cheque.ver` | Ver a carteira de cheques | Baixo |
 | `financeiro.cheque.registrar` | Registrar cheque recebido | Baixo |
 | `financeiro.cheque.compensar` | Compensar cheque | Médio |
 | `financeiro.cheque.devolver` | Registrar devolução de cheque | Alto |
 | `financeiro.dre.ver` | Ver DRE gerencial | Médio |
 | `financeiro.recorrencia.criar` | Criar/editar recorrência | Médio |
+
+As consultas de leitura (`financeiro.conciliacao.ver`, `financeiro.projecao.ver`,
+`financeiro.cheque.ver`) foram acrescentadas junto do manifesto (`mod-financeiro`): a §6
+já as pressupunha e toda entrada de menu precisa de uma permissão declarada. No manifesto,
+`financeiro.recorrencia.criar` exige o submódulo `projecao` — é onde a recorrência é
+editada e projetada.
 
 ## 10. Telas
 
