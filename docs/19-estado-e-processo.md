@@ -25,23 +25,24 @@ garantia deliberada deste projeto (ver §4 e §7 sobre por quê isso importa tan
 | `cardeal-auth` | `hash_senha`/`verificar_senha` (Argon2id real, parâmetros do doc 08), `PoliticaSenha`, `Bloqueio` (bloqueio progressivo 5→1min/10→15min), `Escopo` (a parte ABAC — "gerente da filial 2 não vê o caixa da filial 1") | **16 unit + 1 doctest** |
 | `mod-financeiro` (parcial) | Domínio puro: `ConstrutorTitulo` → `TituloComParcelas` (rateio de parcelas que conserva o total ao centavo), `Parcela::situacao_em`/`planejar_baixa` (juros simples diário/mensal, multa e desconto de antecipação **calculados na leitura**, nunca materializados), `SessaoCaixa` (abertura com suprimento, sangria/suprimento, **fechamento cego** com apuração de quebra), `Recorrencia` (enumera ocorrências e materializa título sem gravar linha por parcela), o `MANIFESTO` declarativo completo (10 submódulos, 30 permissões, menu, contas, eventos) validado, e o `receituario` que converte cada evento em `LancamentoBalanceado` do Razão | **37 unit + 1 doctest + 3 propriedades** |
 | `mod-clientes` (parcial) | Domínio puro: `Pessoa`/`Papel`/`ConstrutorPessoa` (papéis que coexistem, FSM `Ativa→Inativa→Anonimizada`, anonimização LGPD que preserva o `id`), `DocumentoPessoa`/`Endereco`/`Contato` (CPF/CNPJ por dígito verificador sem I/O, UF, CEP, formato de contato), `LimiteCredito`/`Score` (bloqueio automático, liberação manual e auditada, score derivado), `dedup` (sugestão por documento e por similaridade de nome), `MANIFESTO` validado | **23 unit + 1 propriedade** |
+| `mod-estoque` (parcial) | Domínio puro: `Produto`/`Variacao`/`validar_gtin`/`Conversao`/`Lote` (NCM e GTIN por dígito verificador sem I/O, "validade exige lote"), `SaldoLocal`/`custo_medio_movel` (custo médio recalculado só na entrada, saldo negativo aceito e sinalizado, reserva que não é saída), `Inventario` (contagem cega + geração de ajustes), o `receituario` dos lançamentos que o próprio estoque posta (ajuste, perda, transferência, entrada avulsa), `MANIFESTO` validado | **20 unit + 1 propriedade** |
 
-**Total: 155 testes unitários + 12 doctests + 5 propriedades. Tudo verde.**
+**Total: 175 testes unitários + 12 doctests + 6 propriedades. Tudo verde.**
 
 ### 1.2 Crates ainda como stub
 
-Os outros 22 crates do workspace (`cardeal-storage`, `cardeal-protocol`, `cardeal-server`,
+Os outros 21 crates do workspace (`cardeal-storage`, `cardeal-protocol`, `cardeal-server`,
 `cardeal-cliente`, `cardeal-ui`, `cardeal-analytics`, `cardeal-fiscal`, `cardeal-testkit`,
-`cardeal-desktop`, `xtask` e os 12 `mod-*` restantes) têm só `Cargo.toml` válido +
+`cardeal-desktop`, `xtask` e os 11 `mod-*` restantes) têm só `Cargo.toml` válido +
 `src/lib.rs`/`src/main.rs` mínimo apontando para este documento e para o roadmap. Isso é
 proposital: garante que `cargo check --workspace` sempre passa, mesmo com a maior parte do
 sistema ainda não escrita — ver §4.
 
-`mod-financeiro` e `mod-clientes` já saíram do estado de stub, mas só na camada de **domínio
-puro** (§1.1): tipos e transições testadas, sem banco. Falta o que depende de
-`cardeal-storage`: os **comandos** e **consultas** paginadas de cada um, a conciliação
-bancária, a projeção de fluxo e o Pulso (financeiro), a integração `PortaFiscal` e a
-mesclagem de cadastros (clientes). Ver §4.
+`mod-financeiro`, `mod-clientes` e `mod-estoque` já saíram do estado de stub, mas só na
+camada de **domínio puro** (§1.1): tipos e transições testadas, sem banco. Falta, para os
+três, o que depende de `cardeal-storage` — os **comandos** e **consultas** paginadas — além
+da conciliação/projeção/Pulso (financeiro), da mesclagem e da `PortaFiscal` (clientes) e da
+curva ABC e da `PortaCatalogo` de reserva/consumo (estoque). Ver §4.
 
 ### 1.3 Documentação
 

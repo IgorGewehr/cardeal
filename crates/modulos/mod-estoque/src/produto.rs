@@ -1,0 +1,356 @@
+//! Produto, variação de grade, código de barras, unidade e lote.
+//!
+//! `docs/modulos/estoque.md` §3, §4 e §11.7. Domínio puro — validação de NCM e de GTIN
+//! (dígito verificador mod-10) sem I/O.
+
+use cardeal_kernel::{texto, Data, Id, Quantidade, Versao};
+use serde::{Deserialize, Serialize};
+
+use crate::erros::ErroEstoque;
+
+/// Um produto do catálogo.
+// Os quatro `bool` (`controla_*`, `ativo`) espelham colunas do `docs/modulos/estoque.md`
+// §13 — são flags de domínio independentes, não um enum de estado disfarçado.
+#[allow(clippy::struct_excessive_bools)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Produto {
+    /// Identidade.
+    pub id: Id,
+    /// A empresa.
+    pub empresa: Id,
+    /// O grupo (hierárquico, com perfil tributário).
+    pub grupo_produto: Id,
+    /// O nome.
+    pub nome: String,
+    /// NCM, 8 dígitos.
+    pub ncm: String,
+    /// CEST (quando o NCM exige ST).
+    pub cest: Option<String>,
+    /// Se o saldo vive em [`Variacao`] (grade cor/tamanho).
+    pub controla_grade: bool,
+    /// Se o produto é rastreado por lote.
+    pub controla_lote: bool,
+    /// Se o produto tem validade (exige `controla_lote`).
+    pub controla_validade: bool,
+    /// A unidade padrão.
+    pub unidade_padrao: Id,
+    /// Ponto de pedido — dispara alerta quando o disponível cruza abaixo.
+    pub ponto_pedido: Option<Quantidade>,
+    /// Estoque mínimo (curva ABC, sugestão de compra).
+    pub estoque_minimo: Option<Quantidade>,
+    /// Estoque máximo.
+    pub estoque_maximo: Option<Quantidade>,
+    /// Se está ativo.
+    pub ativo: bool,
+    /// Versão para bloqueio otimista.
+    pub versao: Versao,
+}
+
+impl Produto {
+    /// Cria um produto validando NCM e a coerência lote/validade.
+    ///
+    /// # Errors
+    /// [`ErroEstoque::NomeVazio`], [`ErroEstoque::NcmInvalido`], [`ErroEstoque::ValidadeSemLote`].
+    pub fn novo(
+        empresa: Id,
+        grupo_produto: Id,
+        nome: impl Into<String>,
+        ncm: &str,
+        unidade_padrao: Id,
+    ) -> Result<Self, ErroEstoque> {
+        let nome = nome.into().trim().to_string();
+        if nome.is_empty() {
+            return Err(ErroEstoque::NomeVazio);
+        }
+        let ncm = texto::somente_digitos(ncm);
+        if ncm.len() != 8 {
+            return Err(ErroEstoque::NcmInvalido);
+        }
+        Ok(Self {
+            id: Id::novo(),
+            empresa,
+            grupo_produto,
+            nome,
+            ncm,
+            cest: None,
+            controla_grade: false,
+            controla_lote: false,
+            controla_validade: false,
+            unidade_padrao,
+            ponto_pedido: None,
+            estoque_minimo: None,
+            estoque_maximo: None,
+            ativo: true,
+            versao: Versao::INICIAL,
+        })
+    }
+
+    /// Liga os controles de rastreabilidade, recusando validade sem lote.
+    ///
+    /// # Errors
+    /// [`ErroEstoque::ValidadeSemLote`].
+    pub fn com_rastreabilidade(
+        mut self,
+        controla_lote: bool,
+        controla_validade: bool,
+    ) -> Result<Self, ErroEstoque> {
+        if controla_validade && !controla_lote {
+            return Err(ErroEstoque::ValidadeSemLote);
+        }
+        self.controla_lote = controla_lote;
+        self.controla_validade = controla_validade;
+        Ok(self)
+    }
+
+    /// Verdadeiro se o disponível informado está abaixo do ponto de pedido.
+    #[must_use]
+    pub fn abaixo_do_ponto(&self, disponivel: Quantidade) -> bool {
+        self.ponto_pedido.is_some_and(|pp| disponivel < pp)
+    }
+}
+
+/// Uma variação de grade (cor/tamanho) — só existe se `produto.controla_grade`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Variacao {
+    /// Identidade.
+    pub id: Id,
+    /// O produto dono.
+    pub produto: Id,
+    /// Cor.
+    pub cor: Option<String>,
+    /// Tamanho.
+    pub tamanho: Option<String>,
+    /// SKU, único dentro do produto.
+    pub sku: String,
+    /// Se está ativa.
+    pub ativo: bool,
+}
+
+impl Variacao {
+    /// Cria uma variação, recusando se o produto não controla grade.
+    ///
+    /// # Errors
+    /// [`ErroEstoque::ProdutoSemGrade`].
+    pub fn nova(produto: &Produto, sku: impl Into<String>) -> Result<Self, ErroEstoque> {
+        if !produto.controla_grade {
+            return Err(ErroEstoque::ProdutoSemGrade);
+        }
+        Ok(Self {
+            id: Id::novo(),
+            produto: produto.id,
+            cor: None,
+            tamanho: None,
+            sku: sku.into(),
+            ativo: true,
+        })
+    }
+}
+
+/// Valida um GTIN (EAN-8/12/13/14) pelo dígito verificador mod-10.
+///
+/// # Errors
+/// [`ErroEstoque::GtinComprimento`] se não tiver 8/12/13/14 dígitos;
+/// [`ErroEstoque::GtinInvalido`] se o dígito verificador não conferir.
+pub fn validar_gtin(gtin: &str) -> Result<String, ErroEstoque> {
+    let d = texto::somente_digitos(gtin);
+    if !matches!(d.len(), 8 | 12 | 13 | 14) {
+        return Err(ErroEstoque::GtinComprimento);
+    }
+    let bytes = d.as_bytes();
+    let n = bytes.len();
+    let mut soma = 0u32;
+    // Da direita para a esquerda, ignorando o último dígito (o verificador): pesos 3,1,3,1…
+    for (i, b) in bytes[..n - 1].iter().rev().enumerate() {
+        let valor = u32::from(b - b'0');
+        soma += if i % 2 == 0 { valor * 3 } else { valor };
+    }
+    let verificador = (10 - (soma % 10)) % 10;
+    if verificador == u32::from(bytes[n - 1] - b'0') {
+        Ok(d)
+    } else {
+        Err(ErroEstoque::GtinInvalido)
+    }
+}
+
+/// Uma unidade de medida da empresa.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Unidade {
+    /// Identidade.
+    pub id: Id,
+    /// A empresa.
+    pub empresa: Id,
+    /// Sigla: "UN", "KG", "CX".
+    pub sigla: String,
+    /// Nome por extenso.
+    pub nome: String,
+    /// Se aceita fração.
+    pub fracionavel: bool,
+}
+
+/// Conversão entre duas unidades para um produto: `1 unidade_origem = fator × unidade_destino`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Conversao {
+    /// O produto.
+    pub produto: Id,
+    /// A unidade de origem.
+    pub unidade_origem: Id,
+    /// A unidade de destino.
+    pub unidade_destino: Id,
+    /// O fator (ex.: 1 CX = 12 UN → `fator = 12`).
+    pub fator: Quantidade,
+}
+
+impl Conversao {
+    /// Converte uma quantidade da unidade de origem para a de destino.
+    #[must_use]
+    pub fn aplicar(&self, quantidade: Quantidade) -> Quantidade {
+        // qtd (1e-4) × fator (1e-4) / 1e-4 = 1e-4
+        let bruto =
+            i128::from(quantidade.unidades_internas()) * i128::from(self.fator.unidades_internas());
+        Quantidade::interna(i64::try_from(bruto / 10_000).unwrap_or(i64::MAX))
+    }
+}
+
+/// O estado de um [`Lote`] (`docs/modulos/estoque.md` §4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum EstadoLote {
+    /// Ainda tem saldo e não venceu.
+    Ativo,
+    /// A validade já passou.
+    Vencido,
+    /// O saldo chegou a zero.
+    Esgotado,
+}
+
+/// Um lote de um produto rastreado.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Lote {
+    /// Identidade.
+    pub id: Id,
+    /// A empresa.
+    pub empresa: Id,
+    /// O produto.
+    pub produto: Id,
+    /// Número do lote.
+    pub numero_lote: String,
+    /// Data de fabricação.
+    pub fabricacao: Option<Data>,
+    /// Data de validade (obrigatória se `produto.controla_validade`).
+    pub validade: Option<Data>,
+    /// Fornecedor de origem.
+    pub fornecedor: Option<Id>,
+    /// Quantidade da entrada que criou o lote.
+    pub quantidade_inicial: Quantidade,
+    /// O estado atual.
+    pub estado: EstadoLote,
+}
+
+impl Lote {
+    /// Reavalia o estado do lote conforme o saldo e a data (verificação diária).
+    pub fn reavaliar(&mut self, saldo: Quantidade, hoje: Data) {
+        self.estado = if saldo.unidades_internas() <= 0 {
+            EstadoLote::Esgotado
+        } else if self.validade.is_some_and(|v| v < hoje) {
+            EstadoLote::Vencido
+        } else {
+            EstadoLote::Ativo
+        };
+    }
+}
+
+#[cfg(test)]
+mod testes {
+    use super::*;
+
+    fn produto() -> Produto {
+        Produto::novo(
+            Id::novo(),
+            Id::novo(),
+            "Refrigerante Cola 2L",
+            "2202.10.00",
+            Id::novo(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn ncm_precisa_de_oito_digitos() {
+        assert_eq!(produto().ncm, "22021000");
+        assert_eq!(
+            Produto::novo(Id::novo(), Id::novo(), "X", "123", Id::novo()).unwrap_err(),
+            ErroEstoque::NcmInvalido
+        );
+    }
+
+    #[test]
+    fn validade_exige_lote() {
+        assert_eq!(
+            produto().com_rastreabilidade(false, true).unwrap_err(),
+            ErroEstoque::ValidadeSemLote
+        );
+        assert!(produto().com_rastreabilidade(true, true).is_ok());
+    }
+
+    #[test]
+    fn variacao_so_com_grade() {
+        let p = produto();
+        assert_eq!(
+            Variacao::nova(&p, "SKU-1").unwrap_err(),
+            ErroEstoque::ProdutoSemGrade
+        );
+        let mut p2 = produto();
+        p2.controla_grade = true;
+        assert!(Variacao::nova(&p2, "SKU-1").is_ok());
+    }
+
+    #[test]
+    fn gtin_valida_digito_verificador() {
+        // EAN-13 real (Coca-Cola), com e sem máscara.
+        assert_eq!(validar_gtin("789 4900 011517").unwrap(), "7894900011517");
+        assert_eq!(
+            validar_gtin("7894900011518").unwrap_err(),
+            ErroEstoque::GtinInvalido
+        );
+        assert_eq!(
+            validar_gtin("12345").unwrap_err(),
+            ErroEstoque::GtinComprimento
+        );
+        // EAN-8 válido.
+        assert!(validar_gtin("40170725").is_ok());
+    }
+
+    #[test]
+    fn conversao_de_caixa_para_unidade() {
+        let c = Conversao {
+            produto: Id::novo(),
+            unidade_origem: Id::novo(),
+            unidade_destino: Id::novo(),
+            fator: Quantidade::unidades(12),
+        };
+        assert_eq!(c.aplicar(Quantidade::unidades(3)), Quantidade::unidades(36));
+    }
+
+    #[test]
+    fn lote_reavalia_estado() {
+        use cardeal_kernel::Fuso;
+        let hoje = Data::hoje(Fuso::BRASILIA);
+        let mut lote = Lote {
+            id: Id::novo(),
+            empresa: Id::novo(),
+            produto: Id::novo(),
+            numero_lote: "2408A".into(),
+            fabricacao: None,
+            validade: Some(hoje.mais_dias(-1)),
+            fornecedor: None,
+            quantidade_inicial: Quantidade::unidades(100),
+            estado: EstadoLote::Ativo,
+        };
+        lote.reavaliar(Quantidade::unidades(10), hoje);
+        assert_eq!(lote.estado, EstadoLote::Vencido);
+        lote.reavaliar(Quantidade::ZERO, hoje);
+        assert_eq!(lote.estado, EstadoLote::Esgotado);
+        lote.validade = Some(hoje.mais_dias(30));
+        lote.reavaliar(Quantidade::unidades(5), hoje);
+        assert_eq!(lote.estado, EstadoLote::Ativo);
+    }
+}

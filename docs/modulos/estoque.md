@@ -275,14 +275,21 @@ e a sequência completa em [doc 01 §3](../01-arquitetura-geral.md#3-o-caminho-d
 | `estoque.movimento.saida` | Registrar saída manual | Médio |
 | `estoque.movimento.ajustar` | Ajuste de saldo fora de inventário | Alto |
 | `estoque.movimento.perda` | Registrar perda | Médio |
+| `estoque.transferencia.ver` | Ver transferências | Baixo |
 | `estoque.transferencia.criar` | Criar transferência entre locais | Médio |
 | `estoque.transferencia.confirmar` | Confirmar recebimento de transferência | Baixo |
+| `estoque.inventario.ver` | Ver inventários | Baixo |
 | `estoque.inventario.criar` | Criar inventário | Baixo |
 | `estoque.inventario.contar` | Registrar contagem | Baixo |
 | `estoque.inventario.encerrar` | Encerrar inventário e gerar ajustes | Alto |
 | `estoque.lote.ver` | Ver lotes e validade | Baixo |
 | `estoque.abc.ver` | Ver curva ABC | Baixo |
+| `estoque.compra_sugerida.ver` | Ver produtos abaixo do ponto de pedido | Baixo |
 | `estoque.tributario.editar` | Editar perfil tributário | Alto |
+
+As permissões de leitura `estoque.transferencia.ver`, `estoque.inventario.ver` e
+`estoque.compra_sugerida.ver` foram acrescentadas junto do manifesto (`mod-estoque`): a §6
+já as pressupunha e toda entrada de menu precisa de uma permissão declarada.
 
 ## 10. Telas
 
