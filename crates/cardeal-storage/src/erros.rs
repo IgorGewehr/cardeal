@@ -1,6 +1,6 @@
 //! Erros da camada de persistência.
 
-use cardeal_kernel::{AcaoSugerida, CodigoErro, Detalhes, ErroDominio};
+use cardeal_kernel::{AcaoSugerida, CodigoErro, Detalhes, Erro, ErroDominio};
 
 /// Tudo que pode dar errado ao abrir, migrar, escrever ou ler a base.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -64,6 +64,18 @@ pub enum ErroArmazenamento {
     /// Bloqueio otimista: a versão informada não é mais a atual.
     #[error("O registro foi alterado por outra pessoa — recarregue e tente de novo")]
     VersaoDesatualizada,
+
+    /// Um erro de domínio (de um módulo, do Razão, da autorização) que aconteceu **dentro**
+    /// de uma tarefa de escrita ou leitura. O `SAVEPOINT` da tarefa é desfeito e o erro sobe
+    /// intacto — quem despacha o comando reextrai o [`Erro`] original.
+    #[error(transparent)]
+    Dominio(Erro),
+}
+
+impl From<Erro> for ErroArmazenamento {
+    fn from(e: Erro) -> Self {
+        Self::Dominio(e)
+    }
 }
 
 impl ErroArmazenamento {
@@ -91,6 +103,7 @@ impl ErroDominio for ErroArmazenamento {
             }
             Self::RecursoTravado { .. } => CodigoErro::RECURSO_TRAVADO,
             Self::VersaoDesatualizada => CodigoErro::VERSAO_DESATUALIZADA,
+            Self::Dominio(e) => e.codigo,
         }
     }
 
@@ -108,6 +121,7 @@ impl ErroDominio for ErroArmazenamento {
                 )
                 .com(AcaoSugerida::nova("Tentar novamente", "repetir")),
             ),
+            Self::Dominio(e) => e.detalhes.clone(),
             _ => None,
         }
     }

@@ -128,6 +128,11 @@ pub struct ContextoEscrita {
 
 pub struct Confirmado<T> { pub valor: T, pub versao: Versao }
 
+// `Resultado<T>` aqui é `Result<T, ErroArmazenamento>`. Entre as variantes,
+// `ErroArmazenamento::Dominio(cardeal_kernel::Erro)` (com `From<Erro>`): um erro de
+// domínio ocorrido dentro do fecho — o SAVEPOINT da tarefa é desfeito e o `Erro`
+// original sobe intacto, para o despachante reextrair (ver §4, Despachante).
+
 pub struct Escritor;
 impl Escritor {
     /// Enfileira a unidade de trabalho, participa do group commit e devolve
@@ -442,27 +447,29 @@ pub struct Manifesto {
     pub eventos_assinados: &'static [&'static str],
 }
 
+// ─── despacho (implementado — ver nota de estado ao fim da seção) ────────────
 pub trait Modulo: Send + Sync + 'static {
     fn manifesto(&self) -> &'static Manifesto;
-    fn migracoes(&self) -> ConjuntoMigracoes;
+    fn migracoes(&self) -> ConjuntoMigracoes;         // de cardeal-storage
     fn registrar(&self, r: &mut Registro) -> Resultado<()>;
-    fn ao_ativar(&self, ctx: &ContextoAtivacao) -> Resultado<()> { Ok(()) }
-    fn diagnostico(&self, ctx: &Ctx) -> Vec<Checagem> { Vec::new() }
+    // ao_ativar / diagnostico: adiados (ContextoAtivacao/Checagem ainda não existem).
 }
 
-/// Contexto passado a comandos e consultas.
-pub struct Ctx<'a> {
+/// Contexto passado a comandos e consultas. Sem lifetime — os dados de módulo ativo e
+/// autorizações são `Arc` internos.
+pub struct Ctx {
     pub empresa: Id, pub usuario: Id, pub dispositivo: Id, pub sessao: Id,
     pub agora: Instante, pub fuso: Fuso, pub correlacao: Id,
 }
-impl<'a> Ctx<'a> {
+impl Ctx {
     pub fn hoje(&self) -> Data;
-    pub fn contas(&self) -> &Contas;
     pub fn ativo(&self, modulo: &str) -> bool;
     pub fn submodulo_ativo(&self, modulo: &str, submodulo: &str) -> bool;
-    pub fn config<T: DeserializeOwned>(&self, chave: &str) -> Resultado<Option<T>>;
+    pub fn concede(&self, permissao: &str) -> bool;         // poder secundário
     pub fn limite(&self, chave: &str) -> Option<ValorLimite>;
-    pub fn porta<P: ?Sized + 'static>(&self) -> Option<&P>;   // portas registradas
+    pub fn conjunto(&self) -> &ConjuntoEfetivo;
+    // contas() / config() / porta(): adiados (contas espera um resolvedor não-genérico
+    //   em cardeal-ledger; por ora o comando faz `Contas::nova(&RepositorioRazao::novo(uow), empresa)`).
 }
 
 pub trait Comando: serde::de::DeserializeOwned + Send + 'static {
@@ -476,21 +483,46 @@ pub trait Comando: serde::de::DeserializeOwned + Send + 'static {
 pub trait Consulta: serde::de::DeserializeOwned + Send + 'static {
     type Saida: serde::Serialize + Send + 'static;
     const PERMISSAO: &'static str;
-    fn executar(self, ctx: &Ctx, c: &rusqlite::Connection) -> Resultado<Self::Saida>;
+    fn executar(self, ctx: &Ctx, conexao: &rusqlite::Connection) -> Resultado<Self::Saida>;
 }
 
-pub struct Registro;
+#[derive(Default)]
+pub struct Registro { /* ... */ }
 impl Registro {
+    pub fn novo() -> Self;
     pub fn comando<C: Comando>(&mut self, nome: &'static str) -> &mut Self;
     pub fn consulta<Q: Consulta>(&mut self, nome: &'static str) -> &mut Self;
-    pub fn assinar<E: DeserializeOwned>(&mut self, evento: &'static str,
-        f: impl Fn(&Ctx, &mut UnidadeDeTrabalho, E) -> Resultado<()> + Send + Sync + 'static) -> &mut Self;
-    pub fn tarefa(&mut self, t: Tarefa) -> &mut Self;
-    pub fn fornecer_porta<P: ?Sized + 'static>(&mut self, p: Arc<P>) -> &mut Self;
-    pub fn item_pulso(&mut self, f: FonteItemPulso) -> &mut Self;   // "exige ação hoje"
+    // assinar / tarefa / fornecer_porta / item_pulso: adiados.
 }
 
-pub struct Tarefa { pub id: &'static str, pub quando: Agendamento, pub acao: ... }
+/// O que a empresa tem ativo, resolvido uma vez (`RegistroModulos::resolver`) e reusado.
+pub struct Ambiente { /* empresa, Arc<ConjuntoEfetivo>, fuso */ }
+impl Ambiente {
+    pub fn novo(empresa: Id, conjunto: ConjuntoEfetivo) -> Self;  // fuso padrão: Brasília
+    pub fn com_fuso(self, fuso: Fuso) -> Self;
+    pub fn empresa(&self) -> Id;
+}
+
+/// Roda comandos/consultas por nome. Carga e saída em `postcard` (ADR-0008).
+pub struct Despachante { /* ... */ }
+impl Despachante {
+    pub fn construir(modulos: &[&dyn Modulo]) -> Resultado<Self>;   // Err DUPLICADO em colisão de nome
+    pub fn total(&self) -> (usize, usize);
+    pub fn tem_comando(&self, nome: &str) -> bool;
+    pub fn metadados_comando(&self, nome: &str) -> Option<(Risco, bool)>;   // (risco, audita)
+    /// Confere módulo ativo → `cardeal_auth::autorizar` → `Escritor::executar`.
+    pub fn executar_comando(&self, nome: &str, carga: &[u8], sessao: &Sessao,
+        ambiente: &Ambiente, escritor: &Escritor) -> Resultado<Vec<u8>>;
+    pub fn executar_consulta(&self, nome: &str, carga: &[u8], sessao: &Sessao,
+        ambiente: &Ambiente, leitor: &Leitor) -> Resultado<Vec<u8>>;
+}
+
+// AINDA NÃO: assinaturas de evento, tarefas agendadas (Tarefa/Agendamento), portas,
+// itens do Pulso, ao_ativar/diagnostico, replay de idempotência, auditoria automática de
+// AUDITA, escopo por-comando (hoje autoriza contra `Escopo::empresa_inteira`), a macro
+// `#[comando(...)]` (virá com cardeal-protocol), e `Ctx::contas()`.
+
+pub struct Tarefa { pub id: &'static str, pub quando: Agendamento, pub acao: ... }  // adiado
 pub enum Agendamento { Intervalo(Duration), Diario { hora: Hora }, AoIniciar, AoOcioso }
 
 /// Cursor opaco de paginação keyset.

@@ -13,8 +13,14 @@ repository.workspace   = true
 cardeal-kernel.workspace = true
 cardeal-ledger.workspace = true
 cardeal-storage.workspace = true
+cardeal-auth.workspace = true
 serde.workspace = true
+postcard.workspace = true
+rusqlite.workspace = true
 thiserror.workspace = true
 indexmap.workspace = true
 ahash.workspace = true
 tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
