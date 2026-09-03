@@ -12,12 +12,19 @@
 //! [`Manifesto::validar`] prova a consistência interna de um manifesto (submódulos únicos,
 //! permissões dentro do namespace do módulo, menu sem referência solta) sem tocar em banco.
 //!
+//! ## O que este crate contém agora
+//!
+//! Além do manifesto, o [`RegistroModulos`] — coleta os [`Manifesto`]s compilados, resolve
+//! o **grafo de dependências** (ordem topológica, ciclo = erro, conflitos) e calcula o
+//! **conjunto efetivo** de uma empresa a partir da escolha do admin: módulos ativos,
+//! submódulos (essenciais + pedidos, fechados sobre `depende_de`), permissões visíveis e o
+//! menu já filtrado e ordenado (`docs/04-pilar-modularidade.md` §2.2 e §4).
+//!
 //! ## O que falta (ver `docs/17-roadmap.md`)
 //!
-//! O `Registro` (coleta os manifestos de todos os módulos compilados, resolve o grafo de
-//! dependências entre eles, calcula o conjunto efetivo por perfil/tenant) e o despacho de
-//! comandos/consultas via `Ctx`/`UnidadeDeTrabalho` — ambos dependem de `cardeal-storage`,
-//! que ainda não existe. As assinaturas exatas estão em `docs/contratos-internos.md` §4.
+//! A trait `Modulo` + o despacho de `Comando`/`Consulta` via `Ctx` sobre a
+//! `UnidadeDeTrabalho` — a integração runtime com `cardeal-auth` (permissão) e
+//! `cardeal-protocol`. As assinaturas estão em `docs/contratos-internos.md` §4.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs, clippy::pedantic)]
@@ -26,7 +33,9 @@
 mod icone;
 mod manifesto;
 mod permissao;
+mod registro;
 
 pub use icone::Icone;
 pub use manifesto::{ContaPadrao, EntradaMenu, ErroManifesto, IdModulo, Manifesto, Submodulo};
 pub use permissao::{Permissao, Risco};
+pub use registro::{ConjuntoEfetivo, ErroRegistro, PedidoAtivacao, RegistroModulos};

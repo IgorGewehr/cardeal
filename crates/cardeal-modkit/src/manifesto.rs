@@ -411,11 +411,12 @@ mod testes {
 
     #[test]
     fn pega_autoreferencia_e_conflito_com_dependencia() {
+        const ESTOQUE: IdModulo = IdModulo::novo("estoque");
+
         let mut m = manifesto_minimo();
         m.depende_de = &[FINANCEIRO];
         assert!(matches!(m.validar(), Err(ErroManifesto::AutoReferencia(_))));
 
-        const ESTOQUE: IdModulo = IdModulo::novo("estoque");
         m.depende_de = &[ESTOQUE];
         m.conflita_com = &[ESTOQUE];
         assert!(matches!(
