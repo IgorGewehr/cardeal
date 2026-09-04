@@ -25,13 +25,18 @@
 //! - [`receituario`] — funções que transformam esses eventos em
 //!   [`LancamentoBalanceado`](cardeal_ledger::LancamentoBalanceado).
 //!
+//! E a **amarração ao motor** ([`ModuloFinanceiro`]): manifesto, migrações
+//! (`financeiro_titulo`/`financeiro_parcela`/`financeiro_baixa`) e os primeiros comandos —
+//! [`LancarTituloAReceber`] e [`BaixarRecebimento`] — cada um nas cinco etapas de
+//! `docs/15-convencoes-codigo.md` §3, com o SQL isolado em [`repositorio`] e os eventos em
+//! [`eventos`].
+//!
 //! ## O que falta (ver `docs/17-roadmap.md`, Fase 1)
 //!
-//! Os **comandos** (`AbrirCaixa`, `LancarTitulo`, `BaixarParcela`…) e **consultas** paginadas,
-//! que dependem de `cardeal-storage` (a `UnidadeDeTrabalho` e a trait `Comando` de
-//! `cardeal-modkit`, ver `docs/contratos-internos.md` §4); a **conciliação bancária**, a
-//! **projeção de fluxo** (agrega recorrência + parcelas + Razão) e o **Pulso**. As
-//! assinaturas dos comandos estão em `docs/modulos/financeiro.md` §5.
+//! O espelho **a pagar** (`LancarTituloAPagar`/`BaixarPagamento`), os comandos de **caixa**
+//! (`AbrirCaixa`/`FecharCaixa`/sangria/suprimento), `EstornarBaixa`, `RenegociarTitulo`, as
+//! **consultas** paginadas, a **conciliação bancária**, a **projeção de fluxo** e o
+//! **Pulso**. As assinaturas estão em `docs/modulos/financeiro.md` §5.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs, clippy::pedantic)]
@@ -41,10 +46,15 @@
 
 mod baixa;
 mod caixa;
+mod comandos;
 mod erros;
+pub mod eventos;
 mod manifesto;
+pub mod migracoes;
+mod modulo;
 pub mod receituario;
 mod recorrencia;
+mod repositorio;
 mod titulo;
 
 pub use baixa::{PlanoBaixa, SituacaoParcela};
@@ -52,10 +62,15 @@ pub use caixa::{
     AberturaCaixa, Caixa, ContasCaixa, EstadoSessao, FechamentoCaixa, MovimentoCaixa, SessaoCaixa,
     TipoMovimento, TOLERANCIA_QUEBRA,
 };
+pub use comandos::{
+    BaixarRecebimento, LancarTituloAReceber, RecebimentoBaixado, TituloAReceberLancado,
+};
 pub use erros::ErroFinanceiro;
 pub use manifesto::{manifesto, MANIFESTO};
+pub use modulo::ModuloFinanceiro;
 pub use receituario::Autoria;
 pub use recorrencia::{Periodicidade, Recorrencia, TipoValor};
+pub use repositorio::{BaixaGravada, RepositorioFinanceiro};
 pub use titulo::{
     ConstrutorTitulo, EspecieTitulo, EstadoParcela, FormaCobranca, Parcela, PoliticaJuros, Titulo,
     TituloComParcelas,

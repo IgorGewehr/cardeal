@@ -203,8 +203,7 @@ impl Recorrencia {
             }
             Periodicidade::Anual => {
                 let (mes, dia) = (self.inicio.mes(), self.inicio.dia());
-                let mut ano = inicio.ano();
-                for _ in 0..MAX_PASSOS {
+                for ano in (inicio.ano()..).take(MAX_PASSOS) {
                     let comp = Competencia::nova(ano, mes);
                     let data = dia_do_mes(comp, u8::try_from(dia).unwrap_or(1));
                     if data > fim {
@@ -213,7 +212,6 @@ impl Recorrencia {
                     if data >= inicio && data >= self.inicio {
                         datas.push(data);
                     }
-                    ano += 1;
                 }
             }
             Periodicidade::Personalizada => {

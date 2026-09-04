@@ -271,8 +271,20 @@ stateDiagram-v2
 | `RegistrarSuprimento` | `financeiro.caixa.suprimento` | Baixo | `MovimentoCaixa Suprimento`, D Caixa / C Bancos-Cofre | `CaixaFechado` |
 | `RegistrarSangria` | `financeiro.caixa.sangria` | Médio | `MovimentoCaixa Sangria`, exige motivo | `CaixaFechado`, `ValorSuperaSaldo` |
 | `FecharCaixa` | `financeiro.caixa.fechar` | Médio | Congela a sessão, pede `valor_contado` antes de mostrar o esperado, gera lançamento de quebra se houver | `CaixaJaFechado`, `SessaoDeOutroOperador` |
-| `LancarTitulo` | `financeiro.receber.criar` / `financeiro.pagar.criar` | Baixo | Cria `Titulo` + `Parcela`(s), lançamento `Confirmado` D/C conforme espécie | `ValorInvalido`, `ContraparteInexistente` |
-| `BaixarParcela` | `financeiro.receber.baixar` / `financeiro.pagar.baixar` | Médio | Calcula juros/multa/desconto na data informada, cria `Baixa`, lançamento `Realizado` | `ParcelaJaQuitada`, `ValorSuperaSaldo`, `CaixaFechado` |
+| `LancarTituloAReceber` ✅ | `financeiro.receber.criar` | Baixo | Cria `Titulo` + `Parcela`(s), um lançamento `Confirmado` D Clientes a receber / C Receita por parcela | `ValorInvalido`, `NumeroDeParcelasInvalido` |
+| `LancarTituloAPagar` | `financeiro.pagar.criar` | Baixo | Espelho a pagar: D Despesa / C Fornecedores | idem |
+| `BaixarRecebimento` ✅ | `financeiro.receber.baixar` | Médio | Calcula juros/multa/desconto na data, cria `Baixa`, lançamento `Realizado` D Caixa/Bancos + D Descontos / C Clientes + C Receita financeira | `ParcelaNaoBaixavel`, `ValorSuperaSaldo` |
+| `BaixarPagamento` | `financeiro.pagar.baixar` | Médio | Espelho a pagar | idem |
+
+> **Nota (2026-09-03):** `LancarTitulo`/`BaixarParcela` foram divididos por espécie porque
+> `cardeal_modkit::Comando` tem uma só `PERMISSAO` const — `financeiro.receber.criar` e
+> `financeiro.pagar.criar` são autorizações distintas, e o despachante checa a permissão
+> **antes** de o comando ver a carga. O `receituario` (`lancar_titulo`/`baixar_parcela`) já
+> trata as duas espécies; os comandos a pagar são o espelho fino. As linhas ✅ estão
+> implementadas com testes de integração (`crates/modulos/mod-financeiro/tests/comandos.rs`).
+> A conta de resultado do título avulso a receber usa o papel `ReceitaVendas` (o único papel
+> de receita semeado por `plano_padrao` hoje); um seletor de conta de resultado no comando
+> vem depois.
 | `EstornarBaixa` | `financeiro.receber.estornar` | Alto | Estorna o lançamento `Realizado`, reabre a parcela | `BaixaJaEstornada`, `PeriodoFechado` |
 | `RenegociarTitulo` | `financeiro.receber.renegociar` | Alto | Cancela saldo em aberto, cria novo `Titulo` com novas condições | `TituloQuitado` |
 | `CriarRecorrencia` | `financeiro.recorrencia.criar` | Baixo | Grava a regra; não gera título imediatamente | `RegraInvalida` |

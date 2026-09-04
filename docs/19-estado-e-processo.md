@@ -24,35 +24,37 @@ garantia deliberada deste projeto (ver §4 e §7 sobre por quê isso importa tan
 | `cardeal-modkit` | Os tipos declarativos (`Manifesto`/`Submodulo`/`Permissao`/`EntradaMenu`/`ContaPadrao`) com `Manifesto::validar()`, o **`RegistroModulos`** (grafo de `depende_de`, ordem topológica, conjunto efetivo por empresa), **e o despacho**: traits `Modulo`/`Comando`/`Consulta`, `Ctx` de execução, `Registro` (declaração encadeável), `Ambiente` (conjunto efetivo por empresa) e `Despachante` — resolve módulo ativo + `cardeal_auth::autorizar` e roda o manipulador dentro da transação do `Escritor` (comando) ou sobre o `Leitor` (consulta); carga/saída em `postcard`; erro de domínio desfaz o `SAVEPOINT` e sobe intacto | **25 unit (7 de despacho end-to-end, SQLite real) + 1 doctest** |
 | `cardeal-storage` | **Escritor único + group commit** (`docs/07`, ADR-0012): `Armazenamento` (abre, migra o núcleo, sobe o escritor e o pool de leitura), `Escritor::executar` (enfileira uma `UnidadeDeTrabalho`, `SAVEPOINT` por tarefa, um `COMMIT`/`fsync` por lote; tarefa que falha ou entra em pânico é isolada), `UnidadeDeTrabalho` (`conexao`, `publicar` → outbox na mesma transação, `auditar` → cadeia BLAKE3, `proximo_numero`/`reservar_faixa`, `travar`), `Leitor` (pool `query_only` sobre o snapshot do WAL), executor de migrações com ordenação topológica e hash imutável, `Segredo<T>`, esquema `nucleo_*` do doc 06 (migração `nucleo` v2 adiciona `nucleo_papel_limite`), `ErroArmazenamento::Dominio(Erro)` (`From<Erro>`) — erro de domínio dentro de uma tarefa desfaz o `SAVEPOINT` e sobe intacto | **9 unit (integração, WAL real)** |
 | `cardeal-auth` | `hash_senha`/`verificar_senha` (Argon2id real, parâmetros do doc 08), `PoliticaSenha`, `Bloqueio` (progressivo 5→1min/10→15min), `Escopo` (ABAC — "gerente da filial 2 não vê o caixa da filial 1"), **`Usuario`** (autenticar/trocar/redefinir senha, ativar; erro genérico anti-enumeração), **`Papel`/`PapelDeFabrica`/`PoliticaPapel`** (os 9 papéis de §3.2 como regra declarativa expandida contra o catálogo real — sem depender de `cardeal-modkit`), **`ValorLimite`** (§3.4), **`Sessao`/`AutorizacoesEfetivas`** e a função livre **`autorizar(sessao, permissao, recurso)`** (concede a permissão **e** o escopo abrange o recurso). **`RepositorioAuth` + `consultas`**: adaptador SQLite de `nucleo_usuario`/`nucleo_papel`/`nucleo_papel_permissao`/`nucleo_papel_limite`/`nucleo_usuario_papel` sobre a `UnidadeDeTrabalho`, mesmo padrão do `RepositorioRazao` | **50 unit + 7 integração (SQLite real) + 2 doctest** |
-| `mod-financeiro` (parcial) | Domínio puro: `ConstrutorTitulo` → `TituloComParcelas` (rateio de parcelas que conserva o total ao centavo), `Parcela::situacao_em`/`planejar_baixa` (juros simples diário/mensal, multa e desconto de antecipação **calculados na leitura**, nunca materializados), `SessaoCaixa` (abertura com suprimento, sangria/suprimento, **fechamento cego** com apuração de quebra), `Recorrencia` (enumera ocorrências e materializa título sem gravar linha por parcela), o `MANIFESTO` declarativo completo (10 submódulos, 30 permissões, menu, contas, eventos) validado, e o `receituario` que converte cada evento em `LancamentoBalanceado` do Razão | **37 unit + 1 doctest + 3 propriedades** |
+| `mod-financeiro` (parcial) | Domínio puro: `ConstrutorTitulo` → `TituloComParcelas` (rateio que conserva o total ao centavo), `Parcela::situacao_em`/`planejar_baixa` (juros/multa/desconto **calculados na leitura**), `SessaoCaixa` (**fechamento cego** com apuração de quebra), `Recorrencia`, o `MANIFESTO` completo, o `receituario`. **E o primeiro módulo que atravessa o despacho de verdade**: `impl Modulo for ModuloFinanceiro` (manifesto + migrações `financeiro_titulo`/`financeiro_parcela`/`financeiro_baixa`), `RepositorioFinanceiro` (todo o SQL do módulo), os eventos, e os comandos **`LancarTituloAReceber`** e **`BaixarRecebimento`** — cada um nas 5 etapas do doc 15 §3, resolvendo `Contas` por papel e postando via `Razao::registrar` | **40 unit (incl. 3 propriedades) + 5 integração (Despachante + SQLite real) + 1 doctest** |
 | `mod-clientes` (parcial) | Domínio puro: `Pessoa`/`Papel`/`ConstrutorPessoa` (papéis que coexistem, FSM `Ativa→Inativa→Anonimizada`, anonimização LGPD que preserva o `id`), `DocumentoPessoa`/`Endereco`/`Contato` (CPF/CNPJ por dígito verificador sem I/O, UF, CEP, formato de contato), `LimiteCredito`/`Score` (bloqueio automático, liberação manual e auditada, score derivado), `dedup` (sugestão por documento e por similaridade de nome), `MANIFESTO` validado | **23 unit + 1 propriedade** |
 | `mod-estoque` (parcial) | Domínio puro: `Produto`/`Variacao`/`validar_gtin`/`Conversao`/`Lote` (NCM e GTIN por dígito verificador sem I/O, "validade exige lote"), `SaldoLocal`/`custo_medio_movel` (custo médio recalculado só na entrada, saldo negativo aceito e sinalizado, reserva que não é saída), `Inventario` (contagem cega + geração de ajustes), o `receituario` dos lançamentos que o próprio estoque posta (ajuste, perda, transferência, entrada avulsa), `MANIFESTO` validado | **20 unit + 1 propriedade** |
 | `mod-vendas` (parcial) | Domínio puro: `preco_vigente` sobre `TabelaPreco`/`RegraPreco` (faixa de quantidade + promoção com vigência; a regra mais específica vence), `Orcamento`/`Pedido`/`ItemVenda` (as duas FSMs, total dos itens, preço congelado, faturar irreversível, desconto acima do teto do papel recusado na hora), `Devolucao` (total/parcial com rateio proporcional sem perder centavo), `Comissao` (base líquida de devolução), o `receituario` (faturamento com receita + desconto + CMV, devolução, comissão), `MANIFESTO` validado (depende de financeiro + clientes + estoque) | **26 unit + 1 propriedade** |
 
-**Total: 269 testes (incl. 17 de integração SQLite) + 13 doctests + 7 propriedades. Tudo verde.**
+**Total: 274 testes (incl. 22 de integração SQLite) + 13 doctests + 7 propriedades. Tudo verde.**
 
 ### 1.2 Crates ainda como stub
 
-Os outros 19 crates do workspace (`cardeal-protocol`, `cardeal-server`, `cardeal-cliente`,
+Os outros 18 crates do workspace (`cardeal-protocol`, `cardeal-server`, `cardeal-cliente`,
 `cardeal-ui`, `cardeal-analytics`, `cardeal-fiscal`, `cardeal-testkit`, `cardeal-desktop`,
-`xtask` e os 10 `mod-*` restantes) têm só `Cargo.toml` válido + `src/lib.rs`/`src/main.rs`
+`xtask` e os 9 `mod-*` restantes) têm só `Cargo.toml` válido + `src/lib.rs`/`src/main.rs`
 mínimo apontando para este documento e para o roadmap. Isso é proposital: garante que
 `cargo check --workspace` sempre passa, mesmo com a maior parte do sistema ainda não
 escrita — ver §4.
 
-`mod-financeiro`, `mod-clientes`, `mod-estoque` e `mod-vendas` já saíram do estado de stub,
-mas só na camada de **domínio puro** (§1.1): tipos e transições testadas, sem banco.
-`cardeal-storage`, `cardeal-ledger` (com `RepositorioRazao`), `cardeal-auth` (domínio de
-autorização + `RepositorioAuth`) e `cardeal-modkit` (`RegistroModulos` **+ o despacho
+`mod-clientes`, `mod-estoque` e `mod-vendas` já saíram do estado de stub, mas só na camada
+de **domínio puro** (§1.1): tipos e transições testadas, sem banco. `cardeal-storage`,
+`cardeal-ledger` (com `RepositorioRazao`), `cardeal-auth` (domínio de autorização +
+`RepositorioAuth`) e `cardeal-modkit` (`RegistroModulos` **+ o despacho
 `Modulo`/`Comando`/`Consulta`/`Ctx`/`Registro`/`Despachante`**) já existem e passam.
 
-**O caminho de um comando de módulo agora roda de ponta a ponta** — provado pelos 7 testes
-de `despacho` (um módulo de brinquedo grava e lê contra SQLite real, passando por
-autorização e transação). O que falta para um comando *de verdade*: **(a)** um `impl Modulo`
-em cada `mod-*` com a camada de `comandos/` (na ordem do roadmap); **(b)** a montagem de
-`AutorizacoesEfetivas` cruzando os papéis do usuário com o `ConjuntoEfetivo` (em
-`cardeal-server`); **(c)** `Ctx::contas()` (espera um resolvedor não-genérico em
-`cardeal-ledger`) — por ora o comando faz `Contas::nova(&RepositorioRazao::novo(uow), empresa)`.
+**`mod-financeiro` foi o primeiro módulo a atravessar o despacho de verdade**:
+`impl Modulo`, migrações próprias, `RepositorioFinanceiro`, eventos, e os comandos
+`LancarTituloAReceber`/`BaixarRecebimento` (§1.1), com 5 testes de integração que vão do
+`Despachante` ao Razão e às tabelas `financeiro_*`. O que falta: **(a)** o resto dos
+comandos do financeiro (espelho a pagar, caixa, estorno) e dos outros `mod-*`, na ordem do
+roadmap; **(b)** a montagem de `AutorizacoesEfetivas` cruzando os papéis do usuário com o
+`ConjuntoEfetivo` (em `cardeal-server`); **(c)** `Ctx::contas()` (espera um resolvedor
+não-genérico em `cardeal-ledger`) — por ora o comando faz
+`Contas::nova(&RepositorioRazao::novo(uow), empresa)`.
 Ver §4.
 
 ### 1.3 Documentação
@@ -65,7 +67,7 @@ que este projeto segue, não um acidente (ver §4).
 
 ### 1.4 Git
 
-Repositório local com **16 commits**. Remoto: `https://github.com/IgorGewehr/cardeal.git`.
+Repositório local com **17 commits**. Remoto: `https://github.com/IgorGewehr/cardeal.git`.
 O primeiro push foi feito; `origin/master` está em `11a8860` (`mod-vendas`) e o local está
 **à frente** dos commits de `cardeal-storage`, `cardeal-ledger`/`RepositorioRazao` e
 `cardeal-modkit`/`RegistroModulos` (mais o de `cardeal-auth` desta sessão, se já commitado).
@@ -179,12 +181,13 @@ gigante por sessão. Nenhum commit é feito sem os quatro comandos de §3.3 pass
    `cardeal-modkit` e a §5 `cardeal-auth` já estão preenchidas, incluindo o despacho e o
    `RepositorioAuth`). Qualquer trabalho novo deve implementar exatamente essas assinaturas.
 3. Próximo passo natural, na mesma disciplina de domínio-primeiro:
-   - **`mod-financeiro`: `impl Modulo` + os primeiros comandos** — é o primeiro módulo real
-     a atravessar o despacho. Começar por `AbrirCaixa`/`BaixarParcela` (`docs/15 §3` é o
-     modelo canônico): `impl Comando`, resolver `Contas` via
-     `Contas::nova(&RepositorioRazao::novo(uow), empresa)`, postar via `Razao::registrar`,
-     `uow.publicar` o evento. O domínio puro (`ConstrutorTitulo`, `Parcela`, `SessaoCaixa`)
-     e o `receituario` já existem — falta a camada `comandos/` + `repositorio.rs` do módulo.
+   - **`mod-financeiro`: completar os comandos** — o padrão está montado
+     (`src/comandos/*.rs`, `src/repositorio.rs`, `src/eventos.rs`, `tests/comandos.rs`).
+     Faltam: o **espelho a pagar** (`LancarTituloAPagar`/`BaixarPagamento` — permissão
+     `financeiro.pagar.*`, contraparte `Fornecedor`, D/C invertidos no `receituario`, que já
+     trata as duas espécies); os comandos de **caixa** (`CadastrarCaixa` — não está no §5
+     do spec, precisa de decisão + doc; depois `AbrirCaixa`/`RegistrarSuprimento`/
+     `RegistrarSangria`/`FecharCaixa`, todo o domínio `SessaoCaixa` já pronto); `EstornarBaixa`.
    - **`cardeal-server`: a montagem de `AutorizacoesEfetivas`** — cruza os papéis do usuário
      (`RepositorioAuth::papeis_do_usuario`) com o `ConjuntoEfetivo` da empresa
      (`RegistroModulos::resolver`) e emite a `Sessao`. É a camada que tem `cardeal-auth` **e**

@@ -2495,14 +2495,19 @@ dependencies = [
 name = "mod-financeiro"
 version = "0.1.0"
 dependencies = [
+ "cardeal-auth",
  "cardeal-kernel",
  "cardeal-ledger",
  "cardeal-modkit",
+ "cardeal-storage",
  "cardeal-ui",
  "egui",
+ "postcard",
  "proptest",
+ "rusqlite",
  "serde",
  "smallvec",
+ "tempfile",
  "thiserror 2.0.20",
  "tracing",
 ]
