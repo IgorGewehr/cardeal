@@ -554,12 +554,16 @@ dependencies = [
 name = "cardeal-cliente"
 version = "0.1.0"
 dependencies = [
+ "cardeal-auth",
  "cardeal-kernel",
+ "cardeal-ledger",
+ "cardeal-modkit",
  "cardeal-protocol",
  "cardeal-storage",
  "parking_lot",
  "postcard",
  "reqwest",
+ "rusqlite",
  "serde",
  "thiserror 2.0.20",
  "tokio",
@@ -573,20 +577,16 @@ dependencies = [
  "anyhow",
  "cardeal-cliente",
  "cardeal-kernel",
- "cardeal-protocol",
- "cardeal-server",
+ "cardeal-modkit",
  "cardeal-ui",
- "clap",
  "eframe",
  "egui",
  "egui_extras",
  "mod-clientes",
  "mod-estoque",
  "mod-financeiro",
- "mod-pdv",
- "mod-vendas",
+ "mod-os",
  "serde",
- "tokio",
  "tracing",
  "tracing-subscriber",
 ]
@@ -597,6 +597,7 @@ version = "0.1.0"
 dependencies = [
  "cardeal-kernel",
  "cardeal-storage",
+ "quick-xml 0.36.2",
  "reqwest",
  "serde",
  "serde_json",
@@ -745,6 +746,8 @@ name = "cardeal-ui"
 version = "0.1.0"
 dependencies = [
  "cardeal-kernel",
+ "cardeal-modkit",
+ "eframe",
  "egui",
  "egui_extras",
  "serde",
@@ -2388,13 +2391,18 @@ dependencies = [
 name = "mod-clientes"
 version = "0.1.0"
 dependencies = [
+ "cardeal-auth",
  "cardeal-kernel",
  "cardeal-modkit",
+ "cardeal-storage",
  "cardeal-ui",
  "egui",
+ "postcard",
  "proptest",
+ "rusqlite",
  "serde",
  "smallvec",
+ "tempfile",
  "thiserror 2.0.20",
  "tracing",
 ]
@@ -2422,6 +2430,8 @@ dependencies = [
 name = "mod-compras"
 version = "0.1.0"
 dependencies = [
+ "cardeal-auth",
+ "cardeal-fiscal",
  "cardeal-kernel",
  "cardeal-ledger",
  "cardeal-modkit",
@@ -2429,10 +2439,15 @@ dependencies = [
  "cardeal-testkit",
  "cardeal-ui",
  "egui",
+ "mod-clientes",
+ "mod-estoque",
+ "mod-financeiro",
+ "postcard",
  "proptest",
  "rusqlite",
  "serde",
  "smallvec",
+ "tempfile",
  "thiserror 2.0.20",
  "tracing",
 ]
@@ -2479,14 +2494,19 @@ dependencies = [
 name = "mod-estoque"
 version = "0.1.0"
 dependencies = [
+ "cardeal-auth",
  "cardeal-kernel",
  "cardeal-ledger",
  "cardeal-modkit",
+ "cardeal-storage",
  "cardeal-ui",
  "egui",
+ "postcard",
  "proptest",
+ "rusqlite",
  "serde",
  "smallvec",
+ "tempfile",
  "thiserror 2.0.20",
  "tracing",
 ]
@@ -2554,6 +2574,7 @@ dependencies = [
 name = "mod-os"
 version = "0.1.0"
 dependencies = [
+ "cardeal-auth",
  "cardeal-kernel",
  "cardeal-ledger",
  "cardeal-modkit",
@@ -2561,10 +2582,15 @@ dependencies = [
  "cardeal-testkit",
  "cardeal-ui",
  "egui",
+ "mod-clientes",
+ "mod-estoque",
+ "mod-financeiro",
+ "postcard",
  "proptest",
  "rusqlite",
  "serde",
  "smallvec",
+ "tempfile",
  "thiserror 2.0.20",
  "tracing",
 ]
@@ -2592,14 +2618,23 @@ dependencies = [
 name = "mod-vendas"
 version = "0.1.0"
 dependencies = [
+ "cardeal-auth",
  "cardeal-kernel",
  "cardeal-ledger",
  "cardeal-modkit",
+ "cardeal-storage",
+ "cardeal-testkit",
  "cardeal-ui",
  "egui",
+ "mod-clientes",
+ "mod-estoque",
+ "mod-financeiro",
+ "postcard",
  "proptest",
+ "rusqlite",
  "serde",
  "smallvec",
+ "tempfile",
  "thiserror 2.0.20",
  "tracing",
 ]
@@ -3320,6 +3355,15 @@ name = "quick-error"
 version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a1d01941d82fa2ab50be1e79e6714289dd7cde78eba4c074bc5a4374f650dfe0"
+
+[[package]]
+name = "quick-xml"
+version = "0.36.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f7649a7b4df05aed9ea7ec6f628c67c9953a43869b8bc50929569b2999d443fe"
+dependencies = [
+ "memchr",
+]
 
 [[package]]
 name = "quick-xml"
@@ -4867,7 +4911,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "338e30461b3a2b67d70eb30a6d89f8e0c93a833e07d2ae89085cd070c4a00ac0"
 dependencies = [
  "proc-macro2",
- "quick-xml",
+ "quick-xml 0.41.0",
  "quote",
 ]
 

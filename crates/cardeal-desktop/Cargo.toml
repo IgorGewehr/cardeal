@@ -12,30 +12,21 @@ repository.workspace   = true
 name = "cardeal-desktop"
 path = "src/main.rs"
 
-[features]
-default = ["motor-embutido"]
-# Sobe o motor como thread do próprio processo (modo monoposto).
-motor-embutido = ["dep:cardeal-server"]
-
 [dependencies]
-cardeal-kernel.workspace   = true
-cardeal-ui.workspace       = true
-cardeal-cliente.workspace  = true
-cardeal-protocol.workspace = true
-cardeal-server = { workspace = true, optional = true }
+cardeal-kernel.workspace  = true
+cardeal-modkit.workspace  = true
+cardeal-ui.workspace      = true
+cardeal-cliente.workspace = true
 
-mod-financeiro = { workspace = true, features = ["ui"] }
-mod-clientes   = { workspace = true, features = ["ui"] }
-mod-estoque    = { workspace = true, features = ["ui"] }
-mod-vendas     = { workspace = true, features = ["ui"] }
-mod-pdv        = { workspace = true, features = ["ui"] }
+mod-financeiro.workspace = true
+mod-clientes.workspace   = true
+mod-estoque.workspace    = true
+mod-os.workspace         = true
 
 eframe.workspace      = true
 egui.workspace        = true
 egui_extras.workspace = true
-tokio.workspace       = true
 serde.workspace       = true
-clap.workspace        = true
 anyhow.workspace      = true
 tracing.workspace     = true
 tracing-subscriber.workspace = true

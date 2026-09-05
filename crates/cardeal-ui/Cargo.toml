@@ -10,8 +10,12 @@ repository.workspace   = true
 
 
 [dependencies]
-cardeal-kernel.workspace = true
-egui.workspace = true
-egui_extras.workspace = true
-serde.workspace = true
-tracing.workspace = true
+cardeal-kernel.workspace  = true
+cardeal-modkit.workspace  = true
+egui.workspace         = true
+egui_extras.workspace  = true
+serde.workspace        = true
+tracing.workspace      = true
+
+[dev-dependencies]
+eframe.workspace = true
