@@ -32,18 +32,34 @@
 #![warn(missing_docs, clippy::pedantic)]
 #![allow(clippy::module_name_repetitions, clippy::must_use_candidate)]
 #![allow(clippy::result_large_err)]
+// `persist(e)` (conversão de erro do SQLite) é o padrão dos módulos irmãos.
+#![allow(clippy::needless_pass_by_value)]
 
+mod comandos;
 mod comissao;
+mod consultas;
 mod devolucao;
 mod erros;
+pub mod eventos;
 mod manifesto;
+pub mod migracoes;
+mod modulo;
 mod pedido;
 mod preco;
 pub mod receituario;
+mod repositorio;
 
+pub use comandos::{
+    AdicionarItemPedido, CancelarPedido, ConfirmarPedido, CriarPedido, CriarRegraPreco,
+    CriarTabelaPreco, FaturarPedido, ItemFoiAdicionado, PedidoCriado, PedidoFoiFaturado,
+    RegraPrecoCriada, TabelaPrecoCriada,
+};
 pub use comissao::{Comissao, EstadoComissao};
+pub use consultas::{ItemPedido, PedidosRecentes};
 pub use devolucao::{Devolucao, EstadoDevolucao, ItemDevolvido, TipoDevolucao};
 pub use erros::ErroVendas;
 pub use manifesto::{manifesto, MANIFESTO};
+pub use modulo::ModuloVendas;
 pub use pedido::{EstadoOrcamento, EstadoPedido, ItemVenda, Orcamento, Pedido};
 pub use preco::{preco_vigente, AlvoRegra, RegraPreco, TabelaPreco, TipoTabela};
+pub use repositorio::RepositorioVendas;
