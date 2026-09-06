@@ -166,14 +166,18 @@ fn dialogo_ver(ctx: &egui::Context, estado: &mut EstadoTelaEstoque, i: usize) {
         estado.dlg = Dlg::Fechado;
         return;
     };
-    let fechar = Dialogo::nova(p.nome.clone()).largura(520.0).mostrar(
+    let fechar = Dialogo::nova(p.nome.clone()).largura(620.0).mostrar(
         ctx,
         estado,
         |ui, _estado| {
-            linha_kv(ui, "NCM", &p.ncm);
-            linha_kv(ui, "Disponível", &p.disponivel.to_string());
-            linha_kv(ui, "Reservado", &p.reservado.to_string());
-            linha_kv(ui, "Custo médio", &p.custo_medio.to_string());
+            ui.columns(2, |c| {
+                campo_ver(&mut c[0], "NCM", &p.ncm);
+                campo_ver(&mut c[1], "Custo médio", &p.custo_medio.to_string());
+            });
+            ui.columns(2, |c| {
+                campo_ver(&mut c[0], "Disponível", &p.disponivel.to_string());
+                campo_ver(&mut c[1], "Reservado", &p.reservado.to_string());
+            });
         },
         |ui, estado| {
             if ui.add(Botao::secundario("Fechar")).clicked() {
@@ -186,14 +190,10 @@ fn dialogo_ver(ctx: &egui::Context, estado: &mut EstadoTelaEstoque, i: usize) {
     }
 }
 
-fn linha_kv(ui: &mut egui::Ui, chave: &str, valor: &str) {
-    ui.horizontal(|ui| {
-        ui.add(Rotulo::campo(chave));
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.add(Rotulo::interface(if valor.is_empty() { "—" } else { valor }));
-        });
-    });
-    ui.add_space(Espaco::E4);
+fn campo_ver(ui: &mut egui::Ui, chave: &str, valor: &str) {
+    ui.add(Rotulo::campo(chave));
+    ui.add(Rotulo::interface(if valor.trim().is_empty() { "—" } else { valor }));
+    ui.add_space(Espaco::E12);
 }
 
 fn dialogo_novo(
@@ -202,7 +202,7 @@ fn dialogo_novo(
     sessao: &SessaoLocal,
     estado: &mut EstadoTelaEstoque,
 ) {
-    let fechar = Dialogo::nova("Novo produto").largura(560.0).mostrar(
+    let fechar = Dialogo::nova("Novo produto").largura(680.0).mostrar(
         ctx,
         estado,
         |ui, estado| corpo_novo(ui, motor, sessao, estado),
@@ -232,7 +232,45 @@ fn corpo_novo(
     sessao: &SessaoLocal,
     estado: &mut EstadoTelaEstoque,
 ) {
-    // Grupo
+    let grupo_pronto = !estado.grupos.is_empty();
+    let unidade_pronta = !estado.unidades.is_empty();
+
+    if grupo_pronto && unidade_pronta {
+        ui.columns(2, |c| {
+            bloco_grupo(&mut c[0], motor, sessao, estado);
+            bloco_unidade(&mut c[1], motor, sessao, estado);
+        });
+    } else {
+        bloco_grupo(ui, motor, sessao, estado);
+        ui.add_space(Espaco::E12);
+        bloco_unidade(ui, motor, sessao, estado);
+    }
+    ui.add_space(Espaco::E12);
+
+    ui.columns(2, |c| {
+        c[0].add(Campo::novo("Nome do produto", &mut estado.produto_nome));
+        c[1].add(Campo::novo("NCM", &mut estado.produto_ncm).marcador("8 dígitos"));
+    });
+
+    ui.add_space(Espaco::E16);
+    ui.separator();
+    ui.add_space(Espaco::E12);
+    ui.add(Rotulo::campo("Estoque inicial (opcional)"));
+    ui.add_space(Espaco::E8);
+    bloco_local(ui, motor, sessao, estado);
+    ui.add_space(Espaco::E8);
+    ui.columns(2, |c| {
+        c[0].add(Campo::novo("Quantidade", &mut estado.estoque_inicial_qtd));
+        c[1].add(Campo::novo("Custo unitário", &mut estado.estoque_inicial_custo).marcador("90,00"));
+    });
+}
+
+fn bloco_grupo(
+    ui: &mut egui::Ui,
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaEstoque,
+) {
     if estado.grupos.is_empty() {
         ui.add(Rotulo::campo("Nenhum grupo ainda — crie um:"));
         ui.add(Campo::novo("Código", &mut estado.novo_grupo_codigo).marcador("PECAS"));
@@ -267,9 +305,14 @@ fn corpo_novo(
             .opcoes(ops)
             .mostrar(ui);
     }
-    ui.add_space(Espaco::E12);
+}
 
-    // Unidade
+fn bloco_unidade(
+    ui: &mut egui::Ui,
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaEstoque,
+) {
     if estado.unidades.is_empty() {
         ui.add(Rotulo::campo("Nenhuma unidade ainda — crie uma:"));
         ui.add(Campo::novo("Sigla", &mut estado.nova_unidade_sigla).marcador("UN"));
@@ -307,17 +350,14 @@ fn corpo_novo(
             .opcoes(ops)
             .mostrar(ui);
     }
-    ui.add_space(Espaco::E12);
+}
 
-    ui.add(Campo::novo("Nome do produto", &mut estado.produto_nome));
-    ui.add_space(Espaco::E8);
-    ui.add(Campo::novo("NCM", &mut estado.produto_ncm).marcador("8 dígitos"));
-
-    ui.add_space(Espaco::E16);
-    ui.separator();
-    ui.add_space(Espaco::E12);
-    ui.add(Rotulo::campo("Estoque inicial (opcional)"));
-    ui.add_space(Espaco::E8);
+fn bloco_local(
+    ui: &mut egui::Ui,
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaEstoque,
+) {
     if estado.locais.is_empty() {
         ui.add(Campo::novo("Nome do local", &mut estado.novo_local_nome).marcador("Depósito"));
         ui.add_space(Espaco::E8);
@@ -347,10 +387,6 @@ fn corpo_novo(
             .opcoes(ops)
             .mostrar(ui);
     }
-    ui.add_space(Espaco::E8);
-    ui.add(Campo::novo("Quantidade", &mut estado.estoque_inicial_qtd));
-    ui.add_space(Espaco::E8);
-    ui.add(Campo::novo("Custo unitário", &mut estado.estoque_inicial_custo).marcador("90,00"));
 }
 
 fn cadastrar(motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoTelaEstoque) {

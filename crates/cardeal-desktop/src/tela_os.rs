@@ -183,7 +183,7 @@ fn dialogo_nova(
     sessao: &SessaoLocal,
     estado: &mut EstadoTelaOs,
 ) {
-    let fechar = Dialogo::nova("Nova ordem de serviço").largura(520.0).mostrar(
+    let fechar = Dialogo::nova("Nova ordem de serviço").largura(640.0).mostrar(
         ctx,
         estado,
         |ui, estado| {
@@ -195,9 +195,10 @@ fn dialogo_nova(
             else {
                 return;
             };
-            ui.add(Campo::novo("Nome do cliente", nome));
-            ui.add_space(Espaco::E12);
-            ui.add(Campo::novo("CPF do cliente", cpf).marcador("000.000.000-00"));
+            ui.columns(2, |c| {
+                c[0].add(Campo::novo("Nome do cliente", nome));
+                c[1].add(Campo::novo("CPF do cliente", cpf).marcador("000.000.000-00"));
+            });
             ui.add_space(Espaco::E12);
             ui.add(Campo::novo("Equipamento", equipamento).marcador("ex.: Furadeira Bosch GSB 13"));
         },
@@ -316,9 +317,10 @@ fn corpo_detalhe(
             ui.add(Rotulo::interface(format!("Diagnóstico: {dg}")).quebravel());
         }
     } else if matches!(os.estado, EstadoOs::Aberta) {
-        ui.add(Campo::novo("Problema relatado", &mut estado.laudo_problema));
-        ui.add_space(Espaco::E8);
-        ui.add(Campo::novo("Diagnóstico (opcional)", &mut estado.laudo_diagnostico));
+        ui.columns(2, |c| {
+            c[0].add(Campo::novo("Problema relatado", &mut estado.laudo_problema));
+            c[1].add(Campo::novo("Diagnóstico (opcional)", &mut estado.laudo_diagnostico));
+        });
         ui.add_space(Espaco::E8);
         if ui.add(Botao::primario("Registrar laudo")).clicked() {
             let diagnostico = (!estado.laudo_diagnostico.trim().is_empty())
@@ -371,9 +373,10 @@ fn corpo_detalhe(
 
     if os.estado.aceita_edicao_de_orcamento() {
         ui.add_space(Espaco::E12);
-        ui.add(Campo::novo("Serviço", &mut estado.mao_de_obra_descricao));
-        ui.add_space(Espaco::E8);
-        ui.add(Campo::novo("Valor", &mut estado.mao_de_obra_valor).marcador("80,00"));
+        ui.columns(2, |c| {
+            c[0].add(Campo::novo("Serviço", &mut estado.mao_de_obra_descricao));
+            c[1].add(Campo::novo("Valor", &mut estado.mao_de_obra_valor).marcador("80,00"));
+        });
         ui.add_space(Espaco::E8);
         ui.horizontal(|ui| {
             if ui.add(Botao::secundario("+ Adicionar mão de obra")).clicked() {

@@ -20,11 +20,11 @@ pub struct Dialogo {
 }
 
 impl Dialogo {
-    /// Um dialog com o título dado (largura padrão 720px, limitada à tela).
+    /// Um dialog com o título dado (largura padrão 780px, limitada à tela).
     pub fn nova(titulo: impl Into<String>) -> Self {
         Self {
             titulo: titulo.into(),
-            largura: 720.0,
+            largura: 780.0,
         }
     }
 
@@ -61,8 +61,9 @@ impl Dialogo {
                 }
             });
 
-        let largura = self.largura.min(tela.width() - Espaco::E48);
-        let altura_corpo_max = (tela.height() - 220.0).max(160.0);
+        // Aproveita a largura; ocupa bem menos que a altura total.
+        let largura = self.largura.min(tela.width() * 0.9);
+        let altura_corpo_max = (tela.height() * 0.62).clamp(200.0, 540.0);
 
         egui::Area::new(Id::new(("dialogo", &self.titulo)))
             .order(Order::Foreground)
