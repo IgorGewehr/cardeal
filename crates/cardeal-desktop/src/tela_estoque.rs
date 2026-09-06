@@ -45,6 +45,7 @@ pub struct EstadoTelaEstoque {
     unidade_selecionada: Option<Id>,
     produto_nome: String,
     produto_ncm: String,
+    produto_codigo_barras: String,
     local_selecionado: Option<Id>,
     estoque_inicial_qtd: String,
     estoque_inicial_custo: String,
@@ -71,6 +72,7 @@ impl EstadoTelaEstoque {
     fn limpar_novo(&mut self) {
         self.produto_nome.clear();
         self.produto_ncm.clear();
+        self.produto_codigo_barras.clear();
         self.estoque_inicial_qtd.clear();
         self.estoque_inicial_custo.clear();
     }
@@ -251,6 +253,11 @@ fn corpo_novo(
         c[0].add(Campo::novo("Nome do produto", &mut estado.produto_nome));
         c[1].add(Campo::novo("NCM", &mut estado.produto_ncm).marcador("8 dígitos"));
     });
+    ui.add_space(Espaco::E8);
+    ui.add(
+        Campo::novo("Código de barras (opcional)", &mut estado.produto_codigo_barras)
+            .marcador("GTIN / EAN"),
+    );
 
     ui.add_space(Espaco::E16);
     ui.separator();
@@ -398,6 +405,8 @@ fn cadastrar(motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoTelaEs
             nome: estado.produto_nome.clone(),
             ncm: estado.produto_ncm.clone(),
             unidade_padrao: estado.unidade_selecionada.unwrap_or(Id::NULO),
+            codigo_barras: (!estado.produto_codigo_barras.trim().is_empty())
+                .then(|| estado.produto_codigo_barras.clone()),
         },
     );
     let criado: ProdutoCriado = match r {
