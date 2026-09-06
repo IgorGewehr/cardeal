@@ -1,17 +1,16 @@
-//! A tela de Ordens de Serviço — lista + detalhe com a ação certa para o estado atual.
-//! `docs/modulos/os.md` §10.
+//! Tela de Ordens de Serviço — lista + dialog (criar / ver / agir). `docs/modulos/os.md`.
 //!
-//! **Escopo desta versão**: o orçamento só aceita itens de mão de obra pela tela; peça vinda
-//! do estoque (`AplicarPeca`) e busca de cliente existente ficam para quando a tela tiver um
-//! buscador de produto/pessoa. Gaps conhecidos, não esquecidos.
+//! Padrão de UI do projeto: a tela abre na lista inteira; "Nova OS" e o clique numa linha
+//! abrem o mesmo `Dialogo`. OS é workflow (máquina de estados), então o dialog de detalhe
+//! mostra as infos + a ação certa pro estado atual, em vez de um "Editar" genérico.
 
 use cardeal_cliente::{MotorLocal, SessaoLocal};
 use cardeal_kernel::{Dinheiro, Id};
+use cardeal_modkit::Icone;
 use cardeal_ui::atoms::{Botao, Rotulo, ValorDinheiro};
 use cardeal_ui::molecules::{Campo, EstadoVazio};
-use cardeal_ui::organisms::{ColunaGrade, Grade, LayoutTela};
+use cardeal_ui::organisms::{ColunaGrade, Dialogo, Grade, LayoutTela};
 use cardeal_ui::tokens::{Espaco, TemaUi};
-use cardeal_modkit::Icone;
 use eframe::egui;
 use mod_clientes::{CriarPessoa, Papel as PapelCliente, PessoaCadastrada, TipoDocumento, TipoPessoa};
 use mod_os::{
@@ -21,24 +20,31 @@ use mod_os::{
     ReprovarOrcamentoOs,
 };
 
-/// O estado local da tela — sobrevive entre quadros, não entre reinícios do app.
+/// Qual dialog está aberto.
+#[derive(Default)]
+enum Dlg {
+    #[default]
+    Fechado,
+    Nova {
+        nome: String,
+        cpf: String,
+        equipamento: String,
+    },
+    Detalhe,
+}
+
+/// Estado local da tela — sobrevive entre quadros, não entre reinícios.
 #[derive(Default)]
 pub struct EstadoTelaOs {
     ordens: Vec<OrdemServico>,
-    selecionada: Option<Id>,
     detalhe: Option<DetalheOrdem>,
     erro: Option<String>,
-
-    novo_cliente_nome: String,
-    novo_cliente_cpf: String,
-    novo_equipamento: String,
+    dlg: Dlg,
 
     laudo_problema: String,
     laudo_diagnostico: String,
-
     mao_de_obra_descricao: String,
     mao_de_obra_valor: String,
-
     aprovador: String,
 }
 
@@ -54,32 +60,50 @@ impl EstadoTelaOs {
         }
     }
 
-    fn selecionar(&mut self, motor: &MotorLocal, sessao: &SessaoLocal, id: Id) {
-        self.selecionada = Some(id);
+    fn abrir_detalhe(&mut self, motor: &MotorLocal, sessao: &SessaoLocal, id: Id) {
         match motor.consultar(
             sessao,
             "os.buscar_detalhe_ordem.v1",
             &BuscarDetalheOrdem { ordem_servico: id },
         ) {
-            Ok(detalhe) => self.detalhe = detalhe,
+            Ok(detalhe) => {
+                self.detalhe = detalhe;
+                self.dlg = Dlg::Detalhe;
+                self.limpar_campos();
+            }
             Err(e) => self.erro = Some(e.mensagem),
         }
     }
+
+    fn limpar_campos(&mut self) {
+        self.laudo_problema.clear();
+        self.laudo_diagnostico.clear();
+        self.mao_de_obra_descricao.clear();
+        self.mao_de_obra_valor.clear();
+        self.aprovador.clear();
+    }
 }
 
-/// Desenha a tela inteira (lista + detalhe responsivos).
+/// Desenha a tela inteira.
 pub fn mostrar(
     ui: &mut egui::Ui,
     motor: &MotorLocal,
     sessao: &SessaoLocal,
     estado: &mut EstadoTelaOs,
 ) {
-    LayoutTela::nova("Ordens de Serviço").mostrar_com_detalhe(
+    LayoutTela::nova("Ordens de Serviço").mostrar(
         ui,
         estado,
         |ui, estado| {
             if ui.add(Botao::secundario("Recarregar").atalho("F5")).clicked() {
                 estado.carregar(motor, sessao);
+            }
+            if ui.add(Botao::primario("+ Nova OS").atalho("Ctrl+N")).clicked() {
+                estado.dlg = Dlg::Nova {
+                    nome: String::new(),
+                    cpf: String::new(),
+                    equipamento: String::new(),
+                };
             }
         },
         |ui, estado| {
@@ -91,100 +115,44 @@ pub fn mostrar(
                 );
                 ui.add_space(Espaco::E12);
             }
-            mostrar_nova_os(ui, motor, sessao, estado);
-            ui.add_space(Espaco::E24);
-            mostrar_lista(ui, motor, sessao, estado);
+            lista(ui, motor, sessao, estado);
         },
-        |ui, estado| mostrar_detalhe(ui, motor, sessao, estado),
     );
+
+    match estado.dlg {
+        Dlg::Fechado => {}
+        Dlg::Nova { .. } => dialogo_nova(ui.ctx(), motor, sessao, estado),
+        Dlg::Detalhe => dialogo_detalhe(ui.ctx(), motor, sessao, estado),
+    }
 }
 
-fn mostrar_nova_os(
+fn lista(
     ui: &mut egui::Ui,
     motor: &MotorLocal,
     sessao: &SessaoLocal,
     estado: &mut EstadoTelaOs,
 ) {
-    ui.add(Rotulo::titulo_secao("Nova OS"));
-    ui.add_space(Espaco::E8);
-    ui.add(Campo::novo("Nome do cliente", &mut estado.novo_cliente_nome));
-    ui.add_space(Espaco::E8);
-    ui.add(Campo::novo("CPF do cliente", &mut estado.novo_cliente_cpf));
-    ui.add_space(Espaco::E8);
-    ui.add(Campo::novo("Equipamento", &mut estado.novo_equipamento));
-    ui.add_space(Espaco::E12);
-    if ui.add(Botao::primario("Abrir OS")).clicked() {
-        abrir_os(motor, sessao, estado);
-    }
-}
-
-fn abrir_os(motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoTelaOs) {
-    let cliente = motor.executar(
-        sessao,
-        "clientes.criar_pessoa.v1",
-        &CriarPessoa {
-            tipo: TipoPessoa::Fisica,
-            nome: estado.novo_cliente_nome.clone(),
-            nome_fantasia: None,
-            papel_inicial: PapelCliente::Cliente,
-            documento_tipo: TipoDocumento::Cpf,
-            documento_numero: estado.novo_cliente_cpf.clone(),
-        },
-    );
-    let cliente: PessoaCadastrada = match cliente {
-        Ok(c) => c,
-        Err(e) => {
-            estado.erro = Some(e.mensagem);
-            return;
-        }
-    };
-    let aberta = motor.executar(
-        sessao,
-        "os.abrir_ordem_servico.v1",
-        &AbrirOrdemServico {
-            cliente: cliente.pessoa,
-            equipamento: estado.novo_equipamento.clone(),
-            tecnico_responsavel: sessao.usuario(),
-            garantia_dias: 90,
-        },
-    );
-    match aberta {
-        Ok(aberta) => {
-            let aberta: OrdemServicoAberta = aberta;
-            estado.novo_cliente_nome.clear();
-            estado.novo_cliente_cpf.clear();
-            estado.novo_equipamento.clear();
-            estado.erro = None;
-            estado.carregar(motor, sessao);
-            estado.selecionar(motor, sessao, aberta.ordem_servico);
-        }
-        Err(e) => estado.erro = Some(e.mensagem),
-    }
-}
-
-fn mostrar_lista(
-    ui: &mut egui::Ui,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
-    estado: &mut EstadoTelaOs,
-) {
-    ui.add(Rotulo::titulo_secao("Em aberto"));
-    ui.add_space(Espaco::E8);
     if estado.ordens.is_empty() {
-        EstadoVazio::novo(Icone::Ferramenta, "Nenhuma ordem em aberto.").mostrar(ui);
+        if EstadoVazio::novo(Icone::Ferramenta, "Nenhuma ordem em aberto.")
+            .acao("Abrir a primeira OS")
+            .mostrar(ui)
+        {
+            estado.dlg = Dlg::Nova {
+                nome: String::new(),
+                cpf: String::new(),
+                equipamento: String::new(),
+            };
+        }
         return;
     }
 
     let colunas = vec![
         ColunaGrade::nova("Nº").largura(56.0),
         ColunaGrade::nova("Equipamento"),
-        ColunaGrade::nova("Estado").largura(140.0),
+        ColunaGrade::nova("Estado").largura(160.0),
+        ColunaGrade::nova("Total").largura(120.0),
     ];
-    let sel = estado
-        .selecionada
-        .and_then(|id| estado.ordens.iter().position(|o| o.id == id));
-
-    let clicada = Grade::nova(colunas).selecionavel(sel).mostrar(
+    let clicada = Grade::nova(colunas).selecionavel(None).mostrar(
         ui,
         estado.ordens.len(),
         |i, row| {
@@ -198,57 +166,168 @@ fn mostrar_lista(
             row.col(|ui| {
                 ui.add(Rotulo::campo(os.estado.rotulo()));
             });
+            row.col(|ui| {
+                ui.add(ValorDinheiro::novo(os.valor_total));
+            });
         },
     );
     if let Some(i) = clicada {
         let id = estado.ordens[i].id;
-        estado.selecionar(motor, sessao, id);
+        estado.abrir_detalhe(motor, sessao, id);
     }
 }
 
-fn mostrar_detalhe(
-    ui: &mut egui::Ui,
+fn dialogo_nova(
+    ctx: &egui::Context,
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaOs,
+) {
+    let fechar = Dialogo::nova("Nova ordem de serviço").largura(520.0).mostrar(
+        ctx,
+        estado,
+        |ui, estado| {
+            let Dlg::Nova {
+                nome,
+                cpf,
+                equipamento,
+            } = &mut estado.dlg
+            else {
+                return;
+            };
+            ui.add(Campo::novo("Nome do cliente", nome));
+            ui.add_space(Espaco::E12);
+            ui.add(Campo::novo("CPF do cliente", cpf).marcador("000.000.000-00"));
+            ui.add_space(Espaco::E12);
+            ui.add(Campo::novo("Equipamento", equipamento).marcador("ex.: Furadeira Bosch GSB 13"));
+        },
+        |ui, estado| {
+            if ui.add(Botao::primario("Abrir OS")).clicked() {
+                abrir_os(motor, sessao, estado);
+            }
+            if ui.add(Botao::secundario("Cancelar")).clicked() {
+                estado.dlg = Dlg::Fechado;
+            }
+        },
+    );
+    if fechar {
+        estado.dlg = Dlg::Fechado;
+    }
+}
+
+fn abrir_os(motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoTelaOs) {
+    let Dlg::Nova {
+        nome,
+        cpf,
+        equipamento,
+    } = &estado.dlg
+    else {
+        return;
+    };
+    let (nome, cpf, equipamento) = (nome.clone(), cpf.clone(), equipamento.clone());
+
+    let cliente = motor.executar(
+        sessao,
+        "clientes.criar_pessoa.v1",
+        &CriarPessoa {
+            tipo: TipoPessoa::Fisica,
+            nome,
+            nome_fantasia: None,
+            papel_inicial: PapelCliente::Cliente,
+            documento_tipo: TipoDocumento::Cpf,
+            documento_numero: cpf,
+        },
+    );
+    let cliente: PessoaCadastrada = match cliente {
+        Ok(c) => c,
+        Err(e) => {
+            estado.erro = Some(e.mensagem);
+            return;
+        }
+    };
+    match motor.executar(
+        sessao,
+        "os.abrir_ordem_servico.v1",
+        &AbrirOrdemServico {
+            cliente: cliente.pessoa,
+            equipamento,
+            tecnico_responsavel: sessao.usuario(),
+            garantia_dias: 90,
+        },
+    ) {
+        Ok(aberta) => {
+            let aberta: OrdemServicoAberta = aberta;
+            estado.erro = None;
+            estado.carregar(motor, sessao);
+            estado.abrir_detalhe(motor, sessao, aberta.ordem_servico);
+        }
+        Err(e) => estado.erro = Some(e.mensagem),
+    }
+}
+
+fn dialogo_detalhe(
+    ctx: &egui::Context,
     motor: &MotorLocal,
     sessao: &SessaoLocal,
     estado: &mut EstadoTelaOs,
 ) {
     let Some(detalhe) = estado.detalhe.clone() else {
-        EstadoVazio::novo(Icone::Ferramenta, "Selecione uma ordem à esquerda.").mostrar(ui);
+        estado.dlg = Dlg::Fechado;
         return;
     };
-    let os = &detalhe.ordem;
+    let os = detalhe.ordem.clone();
+    let titulo = format!("OS #{} · {}", os.numero, os.equipamento);
 
-    ui.add(Rotulo::titulo_secao(format!(
-        "OS #{} · {}",
-        os.numero, os.equipamento
-    )));
-    ui.add(Rotulo::campo(os.estado.rotulo()));
+    let fechar = Dialogo::nova(titulo).mostrar(
+        ctx,
+        estado,
+        |ui, estado| corpo_detalhe(ui, motor, sessao, estado, &detalhe),
+        |ui, estado| {
+            if ui.add(Botao::secundario("Fechar")).clicked() {
+                estado.dlg = Dlg::Fechado;
+            }
+        },
+    );
+    if fechar {
+        estado.dlg = Dlg::Fechado;
+    }
+}
+
+fn corpo_detalhe(
+    ui: &mut egui::Ui,
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaOs,
+    detalhe: &DetalheOrdem,
+) {
+    let os = &detalhe.ordem;
+    ui.horizontal(|ui| {
+        ui.add(Rotulo::campo("Estado"));
+        ui.add(Rotulo::interface(os.estado.rotulo()));
+    });
     ui.add_space(Espaco::E16);
 
-    // Laudo.
+    // ── Laudo ──────────────────────────────────────────────────────────────
+    ui.add(Rotulo::titulo_secao("Laudo técnico"));
+    ui.add_space(Espaco::E8);
     if let Some(laudo) = &detalhe.laudo {
-        ui.add(Rotulo::interface(format!(
-            "Problema relatado: {}",
-            laudo.descricao_problema
-        )).quebravel());
-        if let Some(diagnostico) = &laudo.diagnostico {
-            ui.add(Rotulo::interface(format!("Diagnóstico: {diagnostico}")).quebravel());
+        ui.add(Rotulo::interface(format!("Problema: {}", laudo.descricao_problema)).quebravel());
+        if let Some(dg) = &laudo.diagnostico {
+            ui.add(Rotulo::interface(format!("Diagnóstico: {dg}")).quebravel());
         }
     } else if matches!(os.estado, EstadoOs::Aberta) {
-        ui.add(Rotulo::titulo_secao("Laudo técnico"));
-        ui.add_space(Espaco::E8);
         ui.add(Campo::novo("Problema relatado", &mut estado.laudo_problema));
         ui.add_space(Espaco::E8);
-        ui.add(Campo::novo(
-            "Diagnóstico (opcional)",
-            &mut estado.laudo_diagnostico,
-        ));
+        ui.add(Campo::novo("Diagnóstico (opcional)", &mut estado.laudo_diagnostico));
         ui.add_space(Espaco::E8);
         if ui.add(Botao::primario("Registrar laudo")).clicked() {
             let diagnostico = (!estado.laudo_diagnostico.trim().is_empty())
                 .then(|| estado.laudo_diagnostico.clone());
-            let resultado = motor.executar(
+            aplicar_e_recarregar(
+                motor,
                 sessao,
+                estado,
+                os.id,
                 "os.registrar_laudo.v1",
                 &RegistrarLaudo {
                     ordem_servico: os.id,
@@ -257,21 +336,13 @@ fn mostrar_detalhe(
                     tecnico: sessao.usuario(),
                 },
             );
-            match resultado {
-                Ok(_id) => {
-                    let _: Id = _id;
-                    estado.laudo_problema.clear();
-                    estado.laudo_diagnostico.clear();
-                    estado.selecionar(motor, sessao, os.id);
-                    estado.carregar(motor, sessao);
-                }
-                Err(e) => estado.erro = Some(e.mensagem),
-            }
         }
+    } else {
+        ui.add(Rotulo::interface("—"));
     }
     ui.add_space(Espaco::E16);
 
-    // Orçamento.
+    // ── Orçamento ──────────────────────────────────────────────────────────
     ui.add(Rotulo::titulo_secao("Orçamento"));
     ui.add_space(Espaco::E8);
     for item in &detalhe.itens_mao_de_obra {
@@ -285,12 +356,11 @@ fn mostrar_detalhe(
     for item in &detalhe.itens_peca {
         ui.horizontal(|ui| {
             ui.add(Rotulo::interface("Peça do estoque"));
-            let aplicada = if item.aplicada {
+            ui.add(Rotulo::campo(if item.aplicada {
                 "(aplicada)"
             } else {
-                "(pendente de aplicação)"
-            };
-            ui.add(Rotulo::campo(aplicada));
+                "(pendente)"
+            }));
         });
     }
     ui.add_space(Espaco::E4);
@@ -301,68 +371,67 @@ fn mostrar_detalhe(
 
     if os.estado.aceita_edicao_de_orcamento() {
         ui.add_space(Espaco::E12);
-        ui.add(Campo::novo(
-            "Descrição do serviço",
-            &mut estado.mao_de_obra_descricao,
-        ));
+        ui.add(Campo::novo("Serviço", &mut estado.mao_de_obra_descricao));
         ui.add_space(Espaco::E8);
-        ui.add(
-            Campo::novo("Valor", &mut estado.mao_de_obra_valor).marcador("80,00"),
-        );
+        ui.add(Campo::novo("Valor", &mut estado.mao_de_obra_valor).marcador("80,00"));
         ui.add_space(Espaco::E8);
-        if ui
-            .add(Botao::secundario("Adicionar item de mão de obra"))
-            .clicked()
-        {
-            match estado.mao_de_obra_valor.parse::<Dinheiro>() {
-                Ok(valor) => {
-                    let resultado = motor.executar(
-                        sessao,
-                        "os.montar_orcamento.v1",
-                        &MontarOrcamentoOs {
-                            ordem_servico: os.id,
-                            item: ItemOrcamentoNovo::MaoDeObra {
-                                descricao: estado.mao_de_obra_descricao.clone(),
-                                valor,
-                                tecnico: sessao.usuario(),
-                                horas: None,
-                            },
-                        },
-                    );
-                    match resultado {
-                        Ok(_id) => {
-                            let _: Id = _id;
-                            estado.mao_de_obra_descricao.clear();
-                            estado.mao_de_obra_valor.clear();
-                            estado.selecionar(motor, sessao, os.id);
-                        }
-                        Err(e) => estado.erro = Some(e.mensagem),
-                    }
-                }
-                Err(_) => {
-                    estado.erro = Some("Valor inválido — use o formato 80,00".to_string());
-                }
+        ui.horizontal(|ui| {
+            if ui.add(Botao::secundario("+ Adicionar mão de obra")).clicked() {
+                adicionar_mao_de_obra(motor, sessao, estado, os.id);
             }
-        }
-
-        if !os.valor_total.e_zero()
-            && ui.add(Botao::primario("Enviar para aprovação")).clicked()
-        {
-            aplicar(
-                motor,
-                sessao,
-                estado,
-                os.id,
-                "os.enviar_para_aprovacao.v1",
-                &EnviarParaAprovacao {
-                    ordem_servico: os.id,
-                },
-            );
-        }
+            if !os.valor_total.e_zero()
+                && ui.add(Botao::primario("Enviar para aprovação")).clicked()
+            {
+                aplicar_e_recarregar(
+                    motor,
+                    sessao,
+                    estado,
+                    os.id,
+                    "os.enviar_para_aprovacao.v1",
+                    &EnviarParaAprovacao { ordem_servico: os.id },
+                );
+            }
+        });
     }
 
     ui.add_space(Espaco::E16);
-    acoes_por_estado(ui, motor, sessao, estado, &detalhe);
+    acoes_por_estado(ui, motor, sessao, estado, detalhe);
+}
+
+fn adicionar_mao_de_obra(
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaOs,
+    os: Id,
+) {
+    match estado.mao_de_obra_valor.parse::<Dinheiro>() {
+        Ok(valor) => {
+            let r = motor.executar(
+                sessao,
+                "os.montar_orcamento.v1",
+                &MontarOrcamentoOs {
+                    ordem_servico: os,
+                    item: ItemOrcamentoNovo::MaoDeObra {
+                        descricao: estado.mao_de_obra_descricao.clone(),
+                        valor,
+                        tecnico: sessao.usuario(),
+                        horas: None,
+                    },
+                },
+            );
+            match r {
+                Ok(id) => {
+                    let _: Id = id;
+                    estado.mao_de_obra_descricao.clear();
+                    estado.mao_de_obra_valor.clear();
+                    estado.abrir_detalhe(motor, sessao, os);
+                    estado.dlg = Dlg::Detalhe;
+                }
+                Err(e) => estado.erro = Some(e.mensagem),
+            }
+        }
+        Err(_) => estado.erro = Some("Valor inválido — use o formato 80,00".to_owned()),
+    }
 }
 
 fn acoes_por_estado(
@@ -377,14 +446,11 @@ fn acoes_por_estado(
         EstadoOs::AguardandoAprovacao => {
             ui.add(Rotulo::titulo_secao("Aprovação do cliente"));
             ui.add_space(Espaco::E8);
-            ui.add(Campo::novo(
-                "Nome (e documento) de quem aprovou",
-                &mut estado.aprovador,
-            ));
+            ui.add(Campo::novo("Quem aprovou (nome e documento)", &mut estado.aprovador));
             ui.add_space(Espaco::E8);
             ui.horizontal(|ui| {
                 if ui.add(Botao::primario("Aprovar")).clicked() {
-                    aplicar(
+                    aplicar_e_recarregar(
                         motor,
                         sessao,
                         estado,
@@ -397,64 +463,55 @@ fn acoes_por_estado(
                     );
                 }
                 if ui.add(Botao::destrutivo("Reprovar")).clicked() {
-                    aplicar(
+                    aplicar_e_recarregar(
                         motor,
                         sessao,
                         estado,
                         os.id,
                         "os.reprovar_orcamento.v1",
-                        &ReprovarOrcamentoOs {
-                            ordem_servico: os.id,
-                        },
+                        &ReprovarOrcamentoOs { ordem_servico: os.id },
                     );
                 }
             });
         }
         EstadoOs::Aprovada => {
             if ui.add(Botao::primario("Iniciar execução")).clicked() {
-                aplicar(
+                aplicar_e_recarregar(
                     motor,
                     sessao,
                     estado,
                     os.id,
                     "os.iniciar_execucao.v1",
-                    &IniciarExecucao {
-                        ordem_servico: os.id,
-                    },
+                    &IniciarExecucao { ordem_servico: os.id },
                 );
             }
         }
         EstadoOs::EmExecucao => {
-            let pendente = detalhe.itens_peca.iter().any(|i| !i.aplicada);
-            if pendente {
+            if detalhe.itens_peca.iter().any(|i| !i.aplicada) {
                 ui.add(
                     Rotulo::interface("Há peça do orçamento ainda não aplicada no estoque.")
                         .cor(ui.cores().atencao),
                 );
             } else if ui.add(Botao::primario("Concluir execução")).clicked() {
-                aplicar(
+                aplicar_e_recarregar(
                     motor,
                     sessao,
                     estado,
                     os.id,
                     "os.concluir_execucao.v1",
-                    &ConcluirExecucao {
-                        ordem_servico: os.id,
-                    },
+                    &ConcluirExecucao { ordem_servico: os.id },
                 );
             }
         }
         EstadoOs::Concluida => {
             if ui.add(Botao::primario("Faturar")).clicked() {
-                aplicar(
+                aplicar_e_recarregar(
                     motor,
                     sessao,
                     estado,
                     os.id,
                     "os.faturar_ordem_servico.v1",
-                    &FaturarOrdemServico {
-                        ordem_servico: os.id,
-                    },
+                    &FaturarOrdemServico { ordem_servico: os.id },
                 );
             }
         }
@@ -466,20 +523,21 @@ fn acoes_por_estado(
     }
 }
 
-fn aplicar<C: cardeal_modkit::Comando + serde::Serialize>(
+fn aplicar_e_recarregar<C: cardeal_modkit::Comando + serde::Serialize>(
     motor: &MotorLocal,
     sessao: &SessaoLocal,
     estado: &mut EstadoTelaOs,
-    ordem_servico: Id,
+    ordem: Id,
     nome: &str,
     comando: &C,
 ) where
     C::Saida: serde::de::DeserializeOwned,
 {
     match motor.executar(sessao, nome, comando) {
-        Ok(_saida) => {
-            estado.selecionar(motor, sessao, ordem_servico);
+        Ok(_) => {
             estado.carregar(motor, sessao);
+            estado.abrir_detalhe(motor, sessao, ordem);
+            estado.dlg = Dlg::Detalhe;
         }
         Err(e) => estado.erro = Some(e.mensagem),
     }

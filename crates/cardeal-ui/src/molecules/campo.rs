@@ -11,6 +11,9 @@ use crate::atoms::Rotulo;
 use crate::tokens::{Espaco, Papel, TemaUi};
 
 /// Um campo de formulário completo.
+///
+/// Serve os três modos do [`Dialogo`](crate::organisms::Dialogo): em `.somente_leitura(true)`
+/// (modo "Ver") o valor aparece como texto formatado, não como `TextEdit`.
 #[must_use]
 pub struct Campo<'a> {
     valor: &'a mut String,
@@ -18,6 +21,7 @@ pub struct Campo<'a> {
     marcador: Option<String>,
     erro: Option<String>,
     senha: bool,
+    somente_leitura: bool,
 }
 
 impl<'a> Campo<'a> {
@@ -29,7 +33,14 @@ impl<'a> Campo<'a> {
             marcador: None,
             erro: None,
             senha: false,
+            somente_leitura: false,
         }
+    }
+
+    /// Modo leitura: mostra o valor como texto, sem caixa de edição.
+    pub const fn somente_leitura(mut self, v: bool) -> Self {
+        self.somente_leitura = v;
+        self
     }
 
     /// Texto de exemplo quando vazio.
@@ -59,6 +70,17 @@ impl Widget for Campo<'_> {
         ui.vertical(|ui| {
             ui.add(Rotulo::campo(self.rotulo));
             ui.add_space(Espaco::E4);
+
+            if self.somente_leitura {
+                let texto = if self.valor.trim().is_empty() {
+                    "—".to_owned()
+                } else if self.senha {
+                    "••••••••".to_owned()
+                } else {
+                    self.valor.clone()
+                };
+                return ui.add(Rotulo::interface(texto).quebravel());
+            }
 
             let resp = ui
                 .scope(|ui| {

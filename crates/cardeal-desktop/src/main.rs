@@ -1,9 +1,10 @@
 //! O aplicativo desktop do Cardeal. Ver `docs/12-ui-ux.md`.
 //!
-//! Fase atual: shell com sidebar retrátil sobre o design system Rubro — login real
-//! (`cardeal_cliente::MotorLocal`, monoposto), o Pulso na versão KPI, Ordens de Serviço e
-//! Estoque. Só os módulos já com backend real no despacho
-//! (financeiro/clientes/estoque/os) — vendas/PDV ficam de fora até terem comandos.
+//! Shell com sidebar agrupada sobre o design system Rubro — login real
+//! (`cardeal_cliente::MotorLocal`, monoposto). Navegação: Comercial (Vendas, Clientes),
+//! Suprimentos (Estoque, Compras), Serviços (OS), Financeiro. Cada tela abre na lista
+//! inteira; criar/ver um item acontece num `Dialogo` (regra de UI do projeto). Telas com UI:
+//! Ordens de Serviço e Estoque; as demais mostram `tela_em_construcao` (backend já responde).
 
 mod tela_estoque;
 mod tela_os;

@@ -5,6 +5,9 @@
 //! um traço próprio, 1.5px, desenhado no `painter` — mesma linguagem visual em qualquer
 //! tamanho, sem depender da fonte de emoji do sistema.
 
+// Módulo de desenho: índices de laço pequenos viram `f32` o tempo todo.
+#![allow(clippy::cast_precision_loss)]
+
 use cardeal_modkit::Icone;
 use egui::{Color32, Pos2, Sense, Shape, Stroke, Ui, Vec2};
 

@@ -2,11 +2,13 @@
 //! `docs/12-ui-ux.md` §7.
 
 mod cartao;
+mod dialogo;
 mod grade;
 mod layout_tela;
 mod sidebar;
 
 pub use cartao::Cartao;
+pub use dialogo::Dialogo;
 pub use grade::{ColunaGrade, Grade};
 pub use layout_tela::LayoutTela;
 pub use sidebar::{GrupoSidebar, ItemSidebar, Sidebar};
