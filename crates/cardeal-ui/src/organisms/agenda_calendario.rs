@@ -5,7 +5,7 @@
 //! devolve o que foi tocado — um bloco existente ou um espaço vazio (para criar). O cálculo
 //! de sobreposição divide a largura da coluna entre blocos concorrentes.
 
-#![allow(clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_lossless)]
+#![allow(clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_lossless, clippy::many_single_char_names)]
 
 use cardeal_kernel::{Data, Fuso, Hora, Instante};
 use egui::{Color32, CursorIcon, Rect, Sense, Ui};
@@ -53,6 +53,8 @@ pub enum ModoCalendario {
     Dia,
     /// Sete dias a partir da segunda-feira da semana de `base`.
     Semana,
+    /// Grade mensal — renderizada por [`AgendaMes`](super::AgendaMes).
+    Mes,
 }
 
 /// O que o usuário tocou na grade.
@@ -68,6 +70,14 @@ pub enum AcaoAgenda {
         /// A hora (arredondada para 30 min).
         hora: Hora,
     },
+    /// Clicou no número de um dia na visão mensal — abrir a visão diária dele.
+    AbrirDia(Data),
+}
+
+/// A cor `(preenchimento, barra)` de um bloco — compartilhada com [`AgendaMes`](super::AgendaMes).
+#[must_use]
+pub(crate) fn cor_tag_pub(tag: TagAgenda, c: &crate::tokens::Cores) -> (Color32, Color32) {
+    cor_tag(tag, c)
 }
 
 /// A grade de calendário.
@@ -103,7 +113,7 @@ impl<'a> AgendaCalendario<'a> {
     fn dias(&self) -> Vec<Data> {
         match self.modo {
             ModoCalendario::Dia => vec![self.base],
-            ModoCalendario::Semana => {
+            ModoCalendario::Semana | ModoCalendario::Mes => {
                 // Segunda = 0 … Domingo = 6 (dia_da_semana varia; normalizamos).
                 let dow = self.base.dia_da_semana() as i32; // Domingo = 0
                 let atras = (dow + 6) % 7;
