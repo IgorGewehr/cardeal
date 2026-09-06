@@ -482,16 +482,19 @@ impl eframe::App for App {
 
 /// Tela de um módulo cujo backend já existe mas a interface ainda não foi construída.
 fn tela_em_construcao(ui: &mut egui::Ui, area: Area) {
+    let msg = match area {
+        Area::Vendas => "Vendas: falta a consulta de listagem de pedidos no mod-vendas \
+                         (só há comandos hoje). A tela vem assim que o backend listar.",
+        Area::Compras => "Compras: falta a consulta de listagem no mod-compras. A tela vem \
+                          assim que o backend listar.",
+        _ => "Este módulo ainda não tem tela.",
+    };
     LayoutTela::nova(area.rotulo()).mostrar(
         ui,
         &mut (),
         |_ui, ()| {},
         |ui, ()| {
-            cardeal_ui::molecules::EstadoVazio::novo(
-                Icone::Config,
-                "Este módulo ainda não tem tela — o backend já responde por API.",
-            )
-            .mostrar(ui);
+            cardeal_ui::molecules::EstadoVazio::novo(Icone::Config, msg).mostrar(ui);
         },
     );
 }
