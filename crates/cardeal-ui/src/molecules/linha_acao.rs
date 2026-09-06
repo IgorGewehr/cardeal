@@ -89,7 +89,7 @@ impl LinhaDeAcao {
             .rounding(Raio::CARTAO)
             .inner_margin(Espaco::E12)
             .show(ui, |ui| {
-                ui.set_min_width(ui.available_width());
+                ui.set_min_width(ui.available_width().max(0.0));
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new(self.severidade.glifo()).size(13.0_f32));
                     ui.add_space(Espaco::E8);

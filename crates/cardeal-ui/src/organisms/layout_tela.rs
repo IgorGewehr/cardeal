@@ -54,7 +54,7 @@ impl LayoutTela {
         ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                ui.set_width(ui.available_width());
+                ui.set_width(ui.available_width().max(0.0));
                 corpo(ui, &mut *estado);
             });
     }
@@ -94,7 +94,7 @@ impl LayoutTela {
                 );
                 ui.add_space(Espaco::E16);
                 ui.vertical(|ui| {
-                    ui.set_width(ui.available_width());
+                    ui.set_width(ui.available_width().max(0.0));
                     ScrollArea::vertical()
                         .id_salt("detalhe")
                         .auto_shrink([false, false])
@@ -105,7 +105,7 @@ impl LayoutTela {
             ScrollArea::vertical()
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
-                    ui.set_width(ui.available_width());
+                    ui.set_width(ui.available_width().max(0.0));
                     lista(ui, &mut *estado);
                     ui.add_space(Espaco::E24);
                     ui.separator();

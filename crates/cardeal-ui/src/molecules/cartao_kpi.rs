@@ -43,7 +43,7 @@ impl Widget for CartaoKpi {
             .shadow(crate::tokens::sombra_cartao(ui.ctx()))
             .inner_margin(Espaco::E16)
             .show(ui, |ui| {
-                ui.set_min_width(ui.available_width());
+                ui.set_min_width(ui.available_width().max(0.0));
                 ui.vertical(|ui| {
                     ui.add(Rotulo::campo(self.rotulo.to_uppercase()));
                     ui.add_space(Espaco::E4);

@@ -62,7 +62,7 @@ impl Dialogo {
             });
 
         // Aproveita a largura; ocupa bem menos que a altura total.
-        let largura = self.largura.min(tela.width() * 0.9);
+        let largura = self.largura.min(tela.width() * 0.9).max(120.0);
         let altura_corpo_max = (tela.height() * 0.62).clamp(200.0, 540.0);
 
         egui::Area::new(Id::new(("dialogo", &self.titulo)))
@@ -82,7 +82,7 @@ impl Dialogo {
                     })
                     .inner_margin(Espaco::E24)
                     .show(ui, |ui| {
-                        ui.set_width(largura - Espaco::E24 * 2.0);
+                        ui.set_width((largura - Espaco::E24 * 2.0).max(1.0));
 
                         ui.horizontal(|ui| {
                             ui.add(Rotulo::titulo_secao(self.titulo.clone()));
@@ -103,7 +103,7 @@ impl Dialogo {
                             .max_height(altura_corpo_max)
                             .auto_shrink([false, true])
                             .show(ui, |ui| {
-                                ui.set_width(ui.available_width());
+                                ui.set_width(ui.available_width().max(0.0));
                                 corpo(ui, estado);
                             });
 

@@ -40,9 +40,9 @@ impl<'a> AgendaMes<'a> {
         let inicio = primeiro.mais_dias(-((dow + 6) % 7));
 
         let cab = 30.0_f32;
-        let largura = ui.available_width();
+        let largura = ui.available_width().max(1.0);
         let col_w = largura / 7.0;
-        let alt_total = ui.available_height().max(420.0);
+        let alt_total = ui.available_height().max(420.0_f32);
         let row_h = ((alt_total - cab) / 6.0).max(72.0);
 
         let (rect, _) = ui.allocate_exact_size(
@@ -135,7 +135,7 @@ impl<'a> AgendaMes<'a> {
                         format!("{} {}", hora.formatar(), b.titulo),
                         Papel::RotuloCampo.font_id(),
                         cores.texto_forte,
-                        pill.width() - 8.0,
+                        (pill.width() - 8.0).max(1.0),
                     );
                     p.galley(pill.min + egui::vec2(6.0, 2.0), g, cores.texto_forte);
 

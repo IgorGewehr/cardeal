@@ -135,7 +135,7 @@ impl<'a> AgendaCalendario<'a> {
         let altura_hora = 52.0_f32;
         let cab = 44.0_f32;
         let n_horas = (self.hora_ate - self.hora_de).max(1);
-        let largura_total = ui.available_width();
+        let largura_total = ui.available_width().max(1.0);
         let largura_col = ((largura_total - gutter) / dias.len() as f32).max(60.0);
         let altura_total = cab + altura_hora * n_horas as f32;
 
@@ -265,7 +265,7 @@ impl<'a> AgendaCalendario<'a> {
                     b.titulo.to_owned(),
                     Papel::Interface.font_id(),
                     cores.texto_forte,
-                    bw - 12.0,
+                    (bw - 12.0).max(1.0),
                 );
                 p.galley(bloco.min + egui::vec2(8.0, 4.0), texto, cores.texto_forte);
                 if bh > 34.0 {

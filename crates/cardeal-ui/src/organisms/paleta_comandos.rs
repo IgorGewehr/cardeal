@@ -84,7 +84,7 @@ impl<'a> PaletaComandos<'a> {
                 }
             });
 
-        let largura = 560.0_f32.min(tela.width() - Espaco::E32);
+        let largura = 560.0_f32.min(tela.width() - Espaco::E32).max(120.0);
         egui::Area::new(Id::new("paleta-comandos"))
             .order(Order::Foreground)
             .anchor(Align2::CENTER_TOP, [0.0, tela.height() * 0.14])
@@ -102,7 +102,7 @@ impl<'a> PaletaComandos<'a> {
                     })
                     .inner_margin(Espaco::E12)
                     .show(ui, |ui| {
-                        ui.set_width(largura - Espaco::E12 * 2.0);
+                        ui.set_width((largura - Espaco::E12 * 2.0).max(1.0));
 
                         let campo = ui.add(
                             egui::TextEdit::singleline(busca)
@@ -120,7 +120,7 @@ impl<'a> PaletaComandos<'a> {
                             .max_height(tela.height() * 0.42)
                             .auto_shrink([false, true])
                             .show(ui, |ui| {
-                                ui.set_width(ui.available_width());
+                                ui.set_width(ui.available_width().max(0.0));
                                 for (i, c) in filtrados.iter().enumerate() {
                                     let clic = crate::atoms::superficie_clicavel(
                                         ui,

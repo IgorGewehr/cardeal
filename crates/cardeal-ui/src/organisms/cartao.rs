@@ -27,8 +27,10 @@ impl Cartao {
     /// Desenha o cartão centralizado, com o conteúdo montado por `conteudo`.
     pub fn mostrar(self, ui: &mut Ui, conteudo: impl FnOnce(&mut Ui)) {
         let cores = ui.cores();
-        let disponivel = ui.available_width();
-        let largura = self.largura_max.min(disponivel);
+        let disponivel = ui.available_width().max(0.0);
+        // Na primeira renderização o `available_width` pode vir ~0; o `.max` evita largura
+        // negativa em `set_width` (que faz o egui dar `assert 0.0 <= width`).
+        let largura = self.largura_max.min(disponivel).max(80.0);
         let margem = ((disponivel - largura) / 2.0).max(0.0);
         ui.horizontal(|ui| {
             ui.add_space(margem);
@@ -41,7 +43,7 @@ impl Cartao {
                     .shadow(crate::tokens::sombra_cartao(ui.ctx()))
                     .inner_margin(Espaco::E32)
                     .show(ui, |ui| {
-                        ui.set_width(largura - Espaco::E32 * 2.0);
+                        ui.set_width((largura - Espaco::E32 * 2.0).max(1.0));
                         conteudo(ui);
                     });
             });

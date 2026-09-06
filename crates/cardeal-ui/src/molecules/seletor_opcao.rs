@@ -78,7 +78,7 @@ impl<'a, T: PartialEq + Copy> SeletorOpcao<'a, T> {
                         .font(Papel::Interface.font_id())
                         .color(if vazio { cores.texto_fraco } else { cores.texto }),
                 )
-                .width(ui.available_width() - Espaco::E8)
+                .width((ui.available_width() - Espaco::E8).max(60.0))
                 .show_ui(ui, |ui| {
                     for (valor, texto) in &opcoes {
                         ui.selectable_value(selecionado, Some(*valor), texto.clone());
