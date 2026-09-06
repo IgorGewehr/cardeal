@@ -9,4 +9,4 @@ mod sidebar;
 pub use cartao::Cartao;
 pub use grade::{ColunaGrade, Grade};
 pub use layout_tela::LayoutTela;
-pub use sidebar::{ItemSidebar, Sidebar};
+pub use sidebar::{GrupoSidebar, ItemSidebar, Sidebar};

@@ -59,8 +59,15 @@ pub struct Cores {
     pub fundo: Color32,
     /// Cartões, painéis.
     pub superficie: Color32,
-    /// Cabeçalho de tabela, sidebar, hover de linha.
+    /// Cabeçalho de tabela, sidebar.
     pub superficie_2: Color32,
+    /// Fundo de hover de item/linha — bem sutil (`rgba(0,0,0,.04)` claro).
+    pub superficie_hover: Color32,
+    /// Fundo do item de navegação ativo — tint da marca a ~10% (`bg-primary/10`), não o
+    /// rosa saturado do `rubro-50`.
+    pub rubro_ativo: Color32,
+    /// A cor da marca (`Rubro::R500`), como campo — pro componente não importar `Rubro`.
+    pub rubro: Color32,
     /// Divisórias.
     pub borda: Color32,
     /// Contorno de campo.
@@ -100,10 +107,13 @@ impl Cores {
     #[must_use]
     pub const fn claro() -> Self {
         Self {
-            fundo: hex(0xFFFFFF),
-            superficie: hex(0xFAFAFA),
-            superficie_2: hex(0xF4F4F5),
-            borda: hex(0xE4E4E7),
+            fundo: hex(0xF8F9FA),
+            superficie: hex(0xFFFFFF),
+            superficie_2: hex(0xF3F4F6),
+            superficie_hover: hex(0xEEEFF1),
+            rubro_ativo: hex(0xFDECEB),
+            rubro: Rubro::R500,
+            borda: hex(0xE7E7EA),
             borda_forte: hex(0xD4D4D8),
             texto_fraco: hex(0x8A8A93),
             texto_medio: hex(0x52525B),
@@ -131,6 +141,9 @@ impl Cores {
             fundo: hex(0x0F1012),
             superficie: hex(0x17181B),
             superficie_2: hex(0x1E1F23),
+            superficie_hover: hex(0x22242A),
+            rubro_ativo: hex(0x33191A),
+            rubro: Rubro::R500,
             borda: hex(0x2A2B30),
             borda_forte: hex(0x3A3B41),
             texto_fraco: hex(0x7A7B84),

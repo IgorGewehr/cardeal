@@ -24,16 +24,19 @@ impl Espaco {
     pub const E64: f32 = 64.0;
 }
 
-/// Raio de canto por papel do elemento.
+/// Raio de canto por papel do elemento. Escala generosa (referência: `gestao-raiz`,
+/// `--radius-*`) — cantos macios, nada de 2px de ERP dos anos 2000.
 pub struct Raio;
 
 impl Raio {
-    /// Campo, botão.
-    pub const CAMPO: f32 = 4.0;
-    /// Cartão.
-    pub const CARTAO: f32 = 8.0;
-    /// Modal.
-    pub const MODAL: f32 = 14.0;
+    /// Campo, botão pequeno.
+    pub const CAMPO: f32 = 8.0;
+    /// Botão padrão, item de navegação, linha clicável.
+    pub const ITEM: f32 = 12.0;
+    /// Cartão, painel.
+    pub const CARTAO: f32 = 14.0;
+    /// Modal, popover.
+    pub const MODAL: f32 = 18.0;
     /// Pílula / badge.
     pub const PILULA: f32 = 999.0;
 }

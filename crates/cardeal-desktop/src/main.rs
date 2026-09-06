@@ -11,16 +11,12 @@ mod tela_os;
 use std::path::PathBuf;
 
 use cardeal_cliente::{MotorLocal, SessaoLocal};
-use cardeal_kernel::Dinheiro;
 use cardeal_modkit::{Icone, Modulo, PedidoAtivacao};
 use cardeal_ui::atoms::{Botao, Rotulo};
-use cardeal_ui::molecules::{Campo, CartaoKpi, LinhaDeAcao, Severidade};
+use cardeal_ui::molecules::Campo;
 use cardeal_ui::organisms::{Cartao, ItemSidebar, LayoutTela, Sidebar};
 use cardeal_ui::tokens::{instalar_estilo, instalar_fontes, Espaco, Rubro, Tema, TemaUi};
 use eframe::egui;
-use mod_financeiro::{
-    ItemTituloEmAberto, TitulosAPagarEmAberto, TitulosAReceberEmAberto,
-};
 
 fn caminho_da_base() -> PathBuf {
     let base = std::env::var_os("APPDATA").map_or_else(std::env::temp_dir, PathBuf::from);
@@ -34,6 +30,8 @@ fn modulos() -> Vec<&'static dyn Modulo> {
         &mod_financeiro::ModuloFinanceiro,
         &mod_clientes::ModuloClientes,
         &mod_estoque::ModuloEstoque,
+        &mod_compras::ModuloCompras,
+        &mod_vendas::ModuloVendas,
         &mod_os::ModuloOs,
     ]
 }
@@ -43,6 +41,8 @@ fn pedido_ativacao() -> PedidoAtivacao {
         .com_modulo("financeiro")
         .com_modulo("clientes")
         .com_modulo("estoque")
+        .com_modulo("compras")
+        .com_modulo("vendas")
         .com_modulo("os")
 }
 
@@ -62,47 +62,76 @@ fn main() -> eframe::Result<()> {
 /// A área selecionada na sidebar, quando autenticado.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Area {
-    Pulso,
-    Os,
+    Vendas,
+    Clientes,
     Estoque,
+    Compras,
+    Os,
+    Financeiro,
 }
 
 impl Area {
     const fn id(self) -> &'static str {
         match self {
-            Self::Pulso => "pulso",
-            Self::Os => "os",
+            Self::Vendas => "vendas",
+            Self::Clientes => "clientes",
             Self::Estoque => "estoque",
+            Self::Compras => "compras",
+            Self::Os => "os",
+            Self::Financeiro => "financeiro",
         }
     }
 
     fn de_id(id: &str) -> Self {
         match id {
+            "vendas" => Self::Vendas,
+            "clientes" => Self::Clientes,
+            "compras" => Self::Compras,
             "os" => Self::Os,
-            "estoque" => Self::Estoque,
-            _ => Self::Pulso,
+            "financeiro" => Self::Financeiro,
+            _ => Self::Estoque,
+        }
+    }
+
+    /// Título e ícone para a tela ainda sem implementação.
+    const fn rotulo(self) -> &'static str {
+        match self {
+            Self::Vendas => "Vendas",
+            Self::Clientes => "Clientes",
+            Self::Estoque => "Estoque",
+            Self::Compras => "Compras",
+            Self::Os => "Ordens de Serviço",
+            Self::Financeiro => "Financeiro",
         }
     }
 }
 
-const ITENS_SIDEBAR: &[ItemSidebar] = &[
-    ItemSidebar {
-        id: "pulso",
-        icone: Icone::Pulso,
-        rotulo: "Pulso",
-        badge: None,
+const GRUPOS_SIDEBAR: &[cardeal_ui::organisms::GrupoSidebar<'static>] = &[
+    cardeal_ui::organisms::GrupoSidebar {
+        titulo: Some("Comercial"),
+        itens: &[
+            ItemSidebar { id: "vendas", icone: Icone::Carrinho, rotulo: "Vendas", badge: None },
+            ItemSidebar { id: "clientes", icone: Icone::Pessoas, rotulo: "Clientes", badge: None },
+        ],
     },
-    ItemSidebar {
-        id: "os",
-        icone: Icone::Ferramenta,
-        rotulo: "Ordens de Serviço",
-        badge: None,
+    cardeal_ui::organisms::GrupoSidebar {
+        titulo: Some("Suprimentos"),
+        itens: &[
+            ItemSidebar { id: "estoque", icone: Icone::Estoque, rotulo: "Estoque", badge: None },
+            ItemSidebar { id: "compras", icone: Icone::Nota, rotulo: "Compras", badge: None },
+        ],
     },
-    ItemSidebar {
-        id: "estoque",
-        icone: Icone::Estoque,
-        rotulo: "Estoque",
-        badge: None,
+    cardeal_ui::organisms::GrupoSidebar {
+        titulo: Some("Serviços"),
+        itens: &[
+            ItemSidebar { id: "os", icone: Icone::Ferramenta, rotulo: "Ordens de Serviço", badge: None },
+        ],
+    },
+    cardeal_ui::organisms::GrupoSidebar {
+        titulo: Some("Financeiro"),
+        itens: &[
+            ItemSidebar { id: "financeiro", icone: Icone::Dinheiro, rotulo: "Financeiro", badge: None },
+        ],
     },
 ];
 
@@ -110,9 +139,6 @@ const ITENS_SIDEBAR: &[ItemSidebar] = &[
 struct EstadoAutenticado {
     sessao: SessaoLocal,
     area: Area,
-    pulso_a_receber: Vec<ItemTituloEmAberto>,
-    pulso_a_pagar: Vec<ItemTituloEmAberto>,
-    pulso_erro: Option<String>,
     os: tela_os::EstadoTelaOs,
     estoque: tela_estoque::EstadoTelaEstoque,
 }
@@ -144,7 +170,6 @@ enum Acao {
     AlternarTema,
     AdminCriado(String),
     LoginOk(SessaoLocal),
-    RecarregarPulso,
     MudarArea(Area),
     AlternarSidebar,
     TentarNovamente,
@@ -205,56 +230,12 @@ impl App {
         os.carregar(motor, &sessao);
         estoque.carregar(motor, &sessao);
 
-        let a_receber = motor.consultar(
-            &sessao,
-            "financeiro.titulos_a_receber_em_aberto.v1",
-            &TitulosAReceberEmAberto,
-        );
-        let a_pagar = motor.consultar(
-            &sessao,
-            "financeiro.titulos_a_pagar_em_aberto.v1",
-            &TitulosAPagarEmAberto,
-        );
-        let (pulso_a_receber, pulso_a_pagar, pulso_erro) = match (a_receber, a_pagar) {
-            (Ok(r), Ok(p)) => (r, p, None),
-            (Err(e), _) | (_, Err(e)) => (vec![], vec![], Some(e.mensagem)),
-        };
-
         self.tela = Tela::Autenticado(Box::new(EstadoAutenticado {
             sessao,
             area: Area::Os,
-            pulso_a_receber,
-            pulso_a_pagar,
-            pulso_erro,
             os,
             estoque,
         }));
-    }
-
-    fn recarregar_pulso(&mut self) {
-        let Some(motor) = &self.motor else { return };
-        let Tela::Autenticado(estado) = &mut self.tela else {
-            return;
-        };
-        match (
-            motor.consultar(
-                &estado.sessao,
-                "financeiro.titulos_a_receber_em_aberto.v1",
-                &TitulosAReceberEmAberto,
-            ),
-            motor.consultar(
-                &estado.sessao,
-                "financeiro.titulos_a_pagar_em_aberto.v1",
-                &TitulosAPagarEmAberto,
-            ),
-        ) {
-            (Ok(r), Ok(p)) => {
-                estado.pulso_a_receber = r;
-                estado.pulso_a_pagar = p;
-                estado.pulso_erro = None;
-            }
-            (Err(e), _) | (_, Err(e)) => estado.pulso_erro = Some(e.mensagem),
-        }
     }
 }
 
@@ -277,13 +258,24 @@ impl eframe::App for App {
 
         let mut acao = Acao::Nenhuma;
 
-        // Ctrl+1..9 salta para a n-ésima entrada da sidebar (`docs/12-ui-ux.md` §8).
+        // Ctrl+1..6 salta para a n-ésima entrada da sidebar (`docs/12-ui-ux.md` §8).
         if matches!(self.tela, Tela::Autenticado(_)) {
-            const TECLAS: [egui::Key; 3] = [egui::Key::Num1, egui::Key::Num2, egui::Key::Num3];
+            const TECLAS: [egui::Key; 6] = [
+                egui::Key::Num1,
+                egui::Key::Num2,
+                egui::Key::Num3,
+                egui::Key::Num4,
+                egui::Key::Num5,
+                egui::Key::Num6,
+            ];
+            let ordem: Vec<&str> = GRUPOS_SIDEBAR
+                .iter()
+                .flat_map(|g| g.itens.iter().map(|i| i.id))
+                .collect();
             for (i, tecla) in TECLAS.iter().enumerate() {
                 if ctx.input(|inp| inp.modifiers.command && inp.key_pressed(*tecla)) {
-                    if let Some(item) = ITENS_SIDEBAR.get(i) {
-                        acao = Acao::MudarArea(Area::de_id(item.id));
+                    if let Some(id) = ordem.get(i) {
+                        acao = Acao::MudarArea(Area::de_id(id));
                     }
                 }
             }
@@ -312,7 +304,7 @@ impl eframe::App for App {
                     ui.add_space(Espaco::E16);
 
                     if let Some(id) =
-                        Sidebar::nova(ITENS_SIDEBAR, estado.area.id(), mostra_rotulos).mostrar(ui)
+                        Sidebar::nova(GRUPOS_SIDEBAR, estado.area.id(), mostra_rotulos).mostrar(ui)
                     {
                         acao = Acao::MudarArea(Area::de_id(id));
                     }
@@ -438,13 +430,13 @@ impl eframe::App for App {
                 Tela::Autenticado(estado) => {
                     let Some(motor) = &self.motor else { return };
                     match estado.area {
-                        Area::Pulso => mostrar_pulso(ui, estado, &mut acao),
                         Area::Os => {
                             tela_os::mostrar(ui, motor, &estado.sessao, &mut estado.os);
                         }
                         Area::Estoque => {
                             tela_estoque::mostrar(ui, motor, &estado.sessao, &mut estado.estoque);
                         }
+                        outra => tela_em_construcao(ui, outra),
                     }
                 }
             });
@@ -462,7 +454,6 @@ impl eframe::App for App {
                 }
             }
             Acao::LoginOk(sessao) => self.entrar(sessao),
-            Acao::RecarregarPulso => self.recarregar_pulso(),
             Acao::MudarArea(area) => {
                 if let Tela::Autenticado(estado) = &mut self.tela {
                     estado.area = area;
@@ -472,67 +463,18 @@ impl eframe::App for App {
     }
 }
 
-fn mostrar_pulso(ui: &mut egui::Ui, estado: &EstadoAutenticado, acao: &mut Acao) {
-    let a_receber = &estado.pulso_a_receber;
-    let a_pagar = &estado.pulso_a_pagar;
-    let total_receber: Dinheiro = a_receber
-        .iter()
-        .map(ItemTituloEmAberto::saldo)
-        .fold(Dinheiro::ZERO, |a, b| a + b);
-    let total_pagar: Dinheiro = a_pagar
-        .iter()
-        .map(ItemTituloEmAberto::saldo)
-        .fold(Dinheiro::ZERO, |a, b| a + b);
-    let hoje = cardeal_kernel::Data::hoje(cardeal_kernel::Fuso::BRASILIA);
-
-    let erro = estado.pulso_erro.clone();
-    LayoutTela::nova("Pulso").mostrar(
+/// Tela de um módulo cujo backend já existe mas a interface ainda não foi construída.
+fn tela_em_construcao(ui: &mut egui::Ui, area: Area) {
+    LayoutTela::nova(area.rotulo()).mostrar(
         ui,
-        acao,
-        |ui, acao| {
-            if ui.add(Botao::secundario("Recarregar").atalho("F5")).clicked() {
-                *acao = Acao::RecarregarPulso;
-            }
-        },
-        |ui, _acao| {
-            if let Some(erro) = &erro {
-                ui.add(Rotulo::interface(erro.clone()).cor(ui.cores().negativo));
-                ui.add_space(Espaco::E16);
-            }
-
-            ui.columns(2, |cols| {
-                cols[0].add(
-                    CartaoKpi::novo("A receber (em aberto)", total_receber)
-                        .variacao(format!("{} título(s)", a_receber.len())),
-                );
-                cols[1].add(
-                    CartaoKpi::novo("A pagar (em aberto)", total_pagar)
-                        .variacao(format!("{} título(s)", a_pagar.len())),
-                );
-            });
-
-            ui.add_space(Espaco::E24);
-            ui.add(Rotulo::titulo_secao("Exige ação hoje"));
-            ui.add_space(Espaco::E8);
-
-            let mut algum = false;
-            for item in a_receber.iter().filter(|i| i.vencimento <= hoje) {
-                algum = true;
-                LinhaDeAcao::novo(Severidade::Critica, "Parcela vencida", "Cobrar")
-                    .valor(item.saldo())
-                    .mostrar(ui);
-                ui.add_space(Espaco::E8);
-            }
-            for item in a_pagar.iter().filter(|i| i.vencimento <= hoje) {
-                algum = true;
-                LinhaDeAcao::novo(Severidade::Atencao, "Conta a pagar vencida", "Pagar")
-                    .valor(item.saldo())
-                    .mostrar(ui);
-                ui.add_space(Espaco::E8);
-            }
-            if !algum {
-                ui.add(Rotulo::interface("Nada exige sua atenção agora."));
-            }
+        &mut (),
+        |_ui, ()| {},
+        |ui, ()| {
+            cardeal_ui::molecules::EstadoVazio::novo(
+                Icone::Config,
+                "Este módulo ainda não tem tela — o backend já responde por API.",
+            )
+            .mostrar(ui);
         },
     );
 }

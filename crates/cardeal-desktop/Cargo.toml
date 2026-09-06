@@ -21,6 +21,8 @@ cardeal-cliente.workspace = true
 mod-financeiro.workspace = true
 mod-clientes.workspace   = true
 mod-estoque.workspace    = true
+mod-compras.workspace    = true
+mod-vendas.workspace     = true
 mod-os.workspace         = true
 
 eframe.workspace      = true
