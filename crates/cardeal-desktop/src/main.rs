@@ -8,6 +8,7 @@
 
 mod tela_clientes;
 mod tela_estoque;
+mod tela_financeiro;
 mod tela_os;
 
 use std::path::PathBuf;
@@ -144,6 +145,7 @@ struct EstadoAutenticado {
     os: tela_os::EstadoTelaOs,
     estoque: tela_estoque::EstadoTelaEstoque,
     clientes: tela_clientes::EstadoTelaClientes,
+    financeiro: tela_financeiro::EstadoTelaFinanceiro,
 }
 
 /// O que a tela mostra agora.
@@ -231,9 +233,11 @@ impl App {
         let mut os = tela_os::EstadoTelaOs::default();
         let mut estoque = tela_estoque::EstadoTelaEstoque::default();
         let mut clientes = tela_clientes::EstadoTelaClientes::default();
+        let mut financeiro = tela_financeiro::EstadoTelaFinanceiro::default();
         os.carregar(motor, &sessao);
         estoque.carregar(motor, &sessao);
         clientes.carregar(motor, &sessao);
+        financeiro.carregar(motor, &sessao);
 
         self.tela = Tela::Autenticado(Box::new(EstadoAutenticado {
             sessao,
@@ -241,6 +245,7 @@ impl App {
             os,
             estoque,
             clientes,
+            financeiro,
         }));
     }
 }
@@ -444,6 +449,9 @@ impl eframe::App for App {
                         }
                         Area::Clientes => {
                             tela_clientes::mostrar(ui, motor, &estado.sessao, &mut estado.clientes);
+                        }
+                        Area::Financeiro => {
+                            tela_financeiro::mostrar(ui, motor, &estado.sessao, &mut estado.financeiro);
                         }
                         outra => tela_em_construcao(ui, outra),
                     }
