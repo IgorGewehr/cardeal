@@ -11,7 +11,7 @@ use cardeal_cliente::{MotorLocal, SessaoLocal};
 use cardeal_kernel::{Dinheiro, Id};
 use cardeal_modkit::Icone;
 use cardeal_ui::atoms::{Botao, Rotulo, ValorDinheiro};
-use cardeal_ui::molecules::{Campo, EstadoVazio, SeletorOpcao};
+use cardeal_ui::molecules::{Campo, EstadoVazio, Mascara, SeletorOpcao};
 use cardeal_ui::organisms::{ColunaGrade, Dialogo, Grade, LayoutTela};
 use cardeal_ui::tokens::{Espaco, TemaUi};
 use eframe::egui;
@@ -232,14 +232,14 @@ fn dialogo_nova(
         |ui, estado| {
             let f = &mut estado.nova;
             ui.columns(2, |c| {
-                c[0].add(Campo::novo("CNPJ do fornecedor", &mut f.cnpj).marcador("00.000.000/0000-00"));
+                c[0].add(Campo::novo("CNPJ do fornecedor", &mut f.cnpj).mascara(Mascara::Documento).marcador("00.000.000/0000-00"));
                 c[1].add(Campo::novo("Razão social", &mut f.nome));
             });
             ui.add_space(Espaco::E8);
             ui.columns(3, |c| {
                 c[0].add(Campo::novo("Número", &mut f.numero));
                 c[1].add(Campo::novo("Série", &mut f.serie));
-                c[2].add(Campo::novo("Emissão", &mut f.data));
+                c[2].add(Campo::novo("Emissão", &mut f.data).mascara(Mascara::Data));
             });
             ui.add_space(Espaco::E8);
             ui.add(Campo::novo("Frete", &mut f.frete).marcador("0,00"));

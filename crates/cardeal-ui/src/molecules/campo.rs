@@ -5,10 +5,55 @@
 //! `CampoTexto` + tratamento de erro na mão). Com `erro`, o contorno fica `negativo` e a
 //! mensagem aparece abaixo.
 
+use std::str::FromStr;
+
 use egui::{Response, Ui, Widget};
 
 use crate::atoms::Rotulo;
 use crate::tokens::{Espaco, Papel, TemaUi};
+
+/// Máscara aplicada ao valor quando o campo perde o foco.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Mascara {
+    /// Sem formatação.
+    #[default]
+    Nenhuma,
+    /// CPF ou CNPJ, escolhido pela contagem de dígitos (11 → CPF, 14 → CNPJ).
+    Documento,
+    /// Data — normaliza `10/3`, `1003`, `2026-03-10` para `dd/mm/aaaa`.
+    Data,
+}
+
+impl Mascara {
+    fn aplicar(self, bruto: &str) -> String {
+        match self {
+            Self::Nenhuma => bruto.to_owned(),
+            Self::Documento => formatar_documento(bruto),
+            Self::Data => formatar_data(bruto),
+        }
+    }
+}
+
+fn formatar_documento(bruto: &str) -> String {
+    let d: String = bruto.chars().filter(char::is_ascii_digit).collect();
+    match d.len() {
+        11 => format!("{}.{}.{}-{}", &d[0..3], &d[3..6], &d[6..9], &d[9..11]),
+        14 => format!(
+            "{}.{}.{}/{}-{}",
+            &d[0..2],
+            &d[2..5],
+            &d[5..8],
+            &d[8..12],
+            &d[12..14]
+        ),
+        _ => bruto.trim().to_owned(),
+    }
+}
+
+fn formatar_data(bruto: &str) -> String {
+    cardeal_kernel::Data::from_str(bruto.trim())
+        .map_or_else(|_| bruto.trim().to_owned(), |d| d.to_string())
+}
 
 /// Um campo de formulário completo.
 ///
@@ -22,6 +67,7 @@ pub struct Campo<'a> {
     erro: Option<String>,
     senha: bool,
     somente_leitura: bool,
+    mascara: Mascara,
 }
 
 impl<'a> Campo<'a> {
@@ -34,12 +80,19 @@ impl<'a> Campo<'a> {
             erro: None,
             senha: false,
             somente_leitura: false,
+            mascara: Mascara::Nenhuma,
         }
     }
 
     /// Modo leitura: mostra o valor como texto, sem caixa de edição.
     pub const fn somente_leitura(mut self, v: bool) -> Self {
         self.somente_leitura = v;
+        self
+    }
+
+    /// Formata o valor ao perder o foco (CPF/CNPJ, data).
+    pub const fn mascara(mut self, m: Mascara) -> Self {
+        self.mascara = m;
         self
     }
 
@@ -102,6 +155,13 @@ impl Widget for Campo<'_> {
                     ui.add(edicao)
                 })
                 .inner;
+
+            if self.mascara != Mascara::Nenhuma && resp.lost_focus() {
+                let f = self.mascara.aplicar(self.valor);
+                if f != *self.valor {
+                    *self.valor = f;
+                }
+            }
 
             if let Some(erro) = self.erro {
                 ui.add_space(Espaco::E4);

@@ -8,7 +8,7 @@ use cardeal_cliente::{MotorLocal, SessaoLocal};
 use cardeal_kernel::{Dinheiro, Id, Preco, Quantidade};
 use cardeal_modkit::Icone;
 use cardeal_ui::atoms::{Botao, Rotulo, ValorDinheiro};
-use cardeal_ui::molecules::{Campo, EstadoVazio, SeletorOpcao};
+use cardeal_ui::molecules::{Campo, EstadoVazio, Mascara, SeletorOpcao};
 use cardeal_ui::organisms::{ColunaGrade, Dialogo, Grade, LayoutTela};
 use cardeal_ui::tokens::{Espaco, TemaUi};
 use eframe::egui;
@@ -256,7 +256,7 @@ fn dialogo_nova(
             if *cliente_novo {
                 ui.columns(2, |c| {
                     c[0].add(Campo::novo("Nome do cliente", nome));
-                    c[1].add(Campo::novo("CPF do cliente", cpf).marcador("000.000.000-00"));
+                    c[1].add(Campo::novo("CPF do cliente", cpf).mascara(Mascara::Documento).marcador("000.000.000-00"));
                 });
             } else {
                 SeletorOpcao::novo("Cliente", cliente_sel)

@@ -19,7 +19,7 @@ use cardeal_cliente::{MotorLocal, SessaoLocal};
 use cardeal_modkit::{Icone, Modulo, PedidoAtivacao};
 use cardeal_ui::atoms::{Botao, Rotulo};
 use cardeal_ui::molecules::Campo;
-use cardeal_ui::organisms::{Cartao, ItemSidebar, Sidebar};
+use cardeal_ui::organisms::{Cartao, ItemComando, ItemSidebar, PaletaComandos, Sidebar};
 use cardeal_ui::tokens::{instalar_estilo, instalar_fontes, Espaco, Rubro, Tema, TemaUi};
 use eframe::egui;
 
@@ -100,6 +100,16 @@ impl Area {
 
 }
 
+const ITENS_PALETA: &[ItemComando] = &[
+    ItemComando { id: "vendas", rotulo: "Vendas", grupo: "Ir para" },
+    ItemComando { id: "clientes", rotulo: "Clientes", grupo: "Ir para" },
+    ItemComando { id: "estoque", rotulo: "Estoque", grupo: "Ir para" },
+    ItemComando { id: "compras", rotulo: "Compras", grupo: "Ir para" },
+    ItemComando { id: "os", rotulo: "Ordens de Serviço", grupo: "Ir para" },
+    ItemComando { id: "financeiro", rotulo: "Financeiro", grupo: "Ir para" },
+    ItemComando { id: "tema", rotulo: "Alternar tema (claro/escuro)", grupo: "Ação" },
+];
+
 const GRUPOS_SIDEBAR: &[cardeal_ui::organisms::GrupoSidebar<'static>] = &[
     cardeal_ui::organisms::GrupoSidebar {
         titulo: Some("Comercial"),
@@ -178,6 +188,8 @@ struct App {
     tema: Tema,
     tema_aplicado: Option<Tema>,
     sidebar_expandida: bool,
+    paleta_aberta: bool,
+    paleta_busca: String,
     tela: Tela,
 }
 
@@ -188,6 +200,8 @@ impl App {
             tema: Tema::Claro,
             tema_aplicado: Some(Tema::Claro),
             sidebar_expandida: true,
+            paleta_aberta: false,
+            paleta_busca: String::new(),
             tela: Tela::Carregando,
         }
     }
@@ -265,8 +279,23 @@ impl eframe::App for App {
         if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::B)) {
             self.sidebar_expandida = !self.sidebar_expandida;
         }
+        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::K)) {
+            self.paleta_aberta = !self.paleta_aberta;
+        }
 
         let mut acao = Acao::Nenhuma;
+
+        if matches!(self.tela, Tela::Autenticado(_)) {
+            if let Some(id) = PaletaComandos::nova(ITENS_PALETA)
+                .mostrar(ctx, &mut self.paleta_aberta, &mut self.paleta_busca)
+            {
+                acao = if id == "tema" {
+                    Acao::AlternarTema
+                } else {
+                    Acao::MudarArea(Area::de_id(id))
+                };
+            }
+        }
 
         // Ctrl+1..6 salta para a n-ésima entrada da sidebar (`docs/12-ui-ux.md` §8).
         if matches!(self.tela, Tela::Autenticado(_)) {

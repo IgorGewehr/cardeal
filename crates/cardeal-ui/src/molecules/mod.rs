@@ -10,7 +10,7 @@ mod linha_acao;
 mod seletor_opcao;
 
 pub use cabecalho_tela::CabecalhoTela;
-pub use campo::Campo;
+pub use campo::{Campo, Mascara};
 pub use cartao_kpi::CartaoKpi;
 pub use estado_vazio::EstadoVazio;
 pub use item_lista::ItemDeLista;

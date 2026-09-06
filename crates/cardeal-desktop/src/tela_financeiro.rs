@@ -10,7 +10,7 @@ use cardeal_kernel::{Data, Dinheiro, Fuso, Id};
 use cardeal_ledger::Contraparte;
 use cardeal_modkit::Icone;
 use cardeal_ui::atoms::{Botao, Rotulo, ValorDinheiro};
-use cardeal_ui::molecules::{Campo, EstadoVazio, SeletorOpcao};
+use cardeal_ui::molecules::{Campo, EstadoVazio, Mascara, SeletorOpcao};
 use cardeal_ui::organisms::{ColunaGrade, Dialogo, Grade, LayoutTela};
 use cardeal_ui::tokens::{Espaco, TemaUi};
 use eframe::egui;
@@ -280,12 +280,12 @@ fn dialogo_lancar(
             ui.add_space(Espaco::E12);
             ui.columns(2, |c| {
                 c[0].add(Campo::novo("Valor total", &mut f.valor).marcador("0,00"));
-                c[1].add(Campo::novo("Emissão", &mut f.emissao));
+                c[1].add(Campo::novo("Emissão", &mut f.emissao).mascara(Mascara::Data));
             });
             ui.add_space(Espaco::E12);
             ui.columns(3, |c| {
                 c[0].add(Campo::novo("Parcelas", &mut f.parcelas));
-                c[1].add(Campo::novo("1º vencimento", &mut f.primeiro_vencimento));
+                c[1].add(Campo::novo("1º vencimento", &mut f.primeiro_vencimento).mascara(Mascara::Data));
                 c[2].add(Campo::novo("Intervalo (dias)", &mut f.intervalo));
             });
             ui.add_space(Espaco::E12);
@@ -401,7 +401,7 @@ fn dialogo_baixar(
                 let Dlg::Baixar { valor, data, .. } = &mut estado.dlg else { return };
                 ui.columns(2, |c| {
                     c[0].add(Campo::novo("Valor recebido", valor));
-                    c[1].add(Campo::novo("Data", data));
+                    c[1].add(Campo::novo("Data", data).mascara(Mascara::Data));
                 });
             },
             |ui, estado| {

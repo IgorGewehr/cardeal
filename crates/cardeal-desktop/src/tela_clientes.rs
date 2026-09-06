@@ -8,7 +8,7 @@ use cardeal_cliente::{MotorLocal, SessaoLocal};
 use cardeal_kernel::Id;
 use cardeal_modkit::Icone;
 use cardeal_ui::atoms::{Botao, Rotulo};
-use cardeal_ui::molecules::{Campo, EstadoVazio, SeletorOpcao};
+use cardeal_ui::molecules::{Campo, EstadoVazio, Mascara, SeletorOpcao};
 use cardeal_ui::organisms::{ColunaGrade, Dialogo, Grade, LayoutTela};
 use cardeal_ui::tokens::{Espaco, TemaUi};
 use eframe::egui;
@@ -254,6 +254,7 @@ fn dialogo(
                 );
                 c[1].add(
                     Campo::novo(if pj { "CNPJ" } else { "CPF" }, &mut f.documento)
+                        .mascara(Mascara::Documento)
                         .somente_leitura(leitura || f.modo == Modo::Editar),
                 );
             });
