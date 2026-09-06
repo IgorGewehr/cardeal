@@ -80,7 +80,10 @@ pub struct ItemVenda {
     pub desconto_valor: Dinheiro,
     /// `quantidade × preco_unitario − desconto_valor`.
     pub total_item: Dinheiro,
-    /// A reserva de estoque, preenchida ao confirmar o pedido.
+    /// A reserva de estoque — no desenho do domínio, preenchida ao confirmar o pedido
+    /// (§11.2). **Hoje sempre `None`**: `ConfirmarPedido` só faz a transição de estado; a
+    /// reserva de verdade depende de `ReservarEstoque`/`LimiteDisponivel`, que ainda não
+    /// existem em `mod-estoque`/`mod-clientes` (ver `docs/modulos/vendas.md` §5).
     pub reserva: Option<Id>,
 }
 

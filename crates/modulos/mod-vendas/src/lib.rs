@@ -55,7 +55,7 @@ pub use comandos::{
     RegraPrecoCriada, TabelaPrecoCriada,
 };
 pub use comissao::{Comissao, EstadoComissao};
-pub use consultas::{ItemPedido, PedidosRecentes};
+pub use consultas::{ItemPedido, ItensDoPedido, PedidosRecentes, RegrasDaTabela, TabelasDePreco};
 pub use devolucao::{Devolucao, EstadoDevolucao, ItemDevolvido, TipoDevolucao};
 pub use erros::ErroVendas;
 pub use manifesto::{manifesto, MANIFESTO};

@@ -94,8 +94,11 @@ impl RegraPreco {
 
     /// A especificidade da regra, para desempate: uma promoção com janela de vigência vence
     /// a regra permanente; regra por produto vence por grupo; faixa de quantidade maior
-    /// vence a de menor.
-    fn especificidade(&self) -> (u8, u8, i64) {
+    /// vence a de menor. O `id` entra por último só para desempatar duas regras
+    /// **igualmente específicas** (cadastro duplicado) de forma determinística — como `Id` é
+    /// `UUIDv7` (ordenado no tempo), a mais recente vence, em vez de depender da ordem de
+    /// leitura do SQLite (`regras_da_tabela` não tem `ORDER BY`).
+    fn especificidade(&self) -> (u8, u8, i64, Id) {
         let promo = u8::from(self.periodo_de.is_some() || self.periodo_ate.is_some());
         let alvo = match self.alvo {
             AlvoRegra::Produto(_) => 1,
@@ -104,7 +107,7 @@ impl RegraPreco {
         let faixa = self
             .quantidade_minima
             .map_or(0, Quantidade::unidades_internas);
-        (promo, alvo, faixa)
+        (promo, alvo, faixa, self.id)
     }
 }
 
@@ -230,6 +233,29 @@ mod testes {
             preco_vigente(&t, &regras, prod, grupo, Quantidade::unidades(1), hoje()).unwrap(),
             Preco::reais(9)
         );
+    }
+
+    #[test]
+    fn regras_igualmente_especificas_desempatam_pela_mais_recente_e_de_forma_estavel() {
+        let t = tabela();
+        let prod = Id::novo();
+        let mais_velha = regra(t.id, AlvoRegra::Produto(prod), None, 10);
+        let mut mais_nova = regra(t.id, AlvoRegra::Produto(prod), None, 8);
+        // `Id::novo()` é UUIDv7 — gerar em sequência já garante `mais_nova > mais_velha`, mas
+        // fixamos explicitamente para não depender de timing de teste.
+        while mais_nova.id <= mais_velha.id {
+            mais_nova.id = Id::novo();
+        }
+
+        let em_ordem = vec![mais_velha.clone(), mais_nova.clone()];
+        let invertida = vec![mais_nova.clone(), mais_velha.clone()];
+        let preco_em_ordem =
+            preco_vigente(&t, &em_ordem, prod, Id::novo(), Quantidade::UM, hoje()).unwrap();
+        let preco_invertido =
+            preco_vigente(&t, &invertida, prod, Id::novo(), Quantidade::UM, hoje()).unwrap();
+
+        assert_eq!(preco_em_ordem, preco_invertido);
+        assert_eq!(preco_em_ordem, mais_nova.preco);
     }
 
     #[test]

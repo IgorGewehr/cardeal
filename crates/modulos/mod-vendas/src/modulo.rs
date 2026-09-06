@@ -9,7 +9,7 @@ use crate::comandos::{
     AdicionarItemPedido, CancelarPedido, ConfirmarPedido, CriarPedido, CriarRegraPreco,
     CriarTabelaPreco, FaturarPedido,
 };
-use crate::consultas::PedidosRecentes;
+use crate::consultas::{ItensDoPedido, PedidosRecentes, RegrasDaTabela, TabelasDePreco};
 use crate::manifesto::MANIFESTO;
 use crate::migracoes;
 
@@ -34,7 +34,10 @@ impl Modulo for ModuloVendas {
             .comando::<ConfirmarPedido>("vendas.confirmar_pedido.v1")
             .comando::<CancelarPedido>("vendas.cancelar_pedido.v1")
             .comando::<FaturarPedido>("vendas.faturar_pedido.v1")
-            .consulta::<PedidosRecentes>("vendas.pedidos_recentes.v1");
+            .consulta::<PedidosRecentes>("vendas.pedidos_recentes.v1")
+            .consulta::<TabelasDePreco>("vendas.tabelas_de_preco.v1")
+            .consulta::<RegrasDaTabela>("vendas.regras_da_tabela.v1")
+            .consulta::<ItensDoPedido>("vendas.itens_do_pedido.v1");
         Ok(())
     }
 }

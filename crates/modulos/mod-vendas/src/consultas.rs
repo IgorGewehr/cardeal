@@ -6,8 +6,12 @@ use cardeal_modkit::{Consulta, Ctx};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
-use crate::pedido::EstadoPedido;
-use crate::repositorio::{blob, data_de, estado_pedido_de, id_de, persist};
+use crate::pedido::{EstadoPedido, ItemVenda};
+use crate::preco::{RegraPreco, TabelaPreco};
+use crate::repositorio::{
+    blob, data_de, estado_pedido_de, id_de, item_de_linha, persist, regra_de_linha,
+    tabela_de_linha,
+};
 
 /// Um pedido na lista de Vendas — cabeçalho suficiente para a grade, sem carregar itens.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,6 +61,85 @@ impl Consulta for PedidosRecentes {
                     itens: r.get::<_, i64>(5)?.try_into().unwrap_or(0),
                 })
             })
+            .map_err(persist)?;
+        linhas.collect::<rusqlite::Result<Vec<_>>>().map_err(persist)
+    }
+}
+
+/// Lista as tabelas de preço ativas da empresa, por nome. Alimenta o seletor de tabela ao
+/// abrir um pedido.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TabelasDePreco;
+
+impl Consulta for TabelasDePreco {
+    type Saida = Vec<TabelaPreco>;
+    const PERMISSAO: &'static str = "vendas.tabela_preco.ver";
+
+    fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        let mut stmt = conexao
+            .prepare(
+                "SELECT id, empresa, nome, tipo, vigente_de, vigente_ate, ativa, versao
+                 FROM vendas_tabela_preco
+                 WHERE empresa = ?1 AND ativa = 1
+                 ORDER BY nome ASC",
+            )
+            .map_err(persist)?;
+        let linhas = stmt
+            .query_map([blob(ctx.empresa)], tabela_de_linha)
+            .map_err(persist)?;
+        linhas.collect::<rusqlite::Result<Vec<_>>>().map_err(persist)
+    }
+}
+
+/// As regras de preço de uma tabela — para a tela mostrar/gerenciar preços.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegrasDaTabela {
+    /// A tabela.
+    pub tabela: Id,
+}
+
+impl Consulta for RegrasDaTabela {
+    type Saida = Vec<RegraPreco>;
+    const PERMISSAO: &'static str = "vendas.tabela_preco.ver";
+
+    fn executar(self, _ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        let mut stmt = conexao
+            .prepare(
+                "SELECT id, empresa, tabela_preco, produto, grupo_produto, quantidade_minima,
+                        preco, periodo_de, periodo_ate
+                 FROM vendas_regra_preco
+                 WHERE tabela_preco = ?1
+                 ORDER BY rowid ASC",
+            )
+            .map_err(persist)?;
+        let linhas = stmt
+            .query_map([blob(self.tabela)], regra_de_linha)
+            .map_err(persist)?;
+        linhas.collect::<rusqlite::Result<Vec<_>>>().map_err(persist)
+    }
+}
+
+/// Os itens de um pedido — para o dialog de detalhe montar a lista e o total.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ItensDoPedido {
+    /// O pedido.
+    pub pedido: Id,
+}
+
+impl Consulta for ItensDoPedido {
+    type Saida = Vec<ItemVenda>;
+    const PERMISSAO: &'static str = "vendas.pedido.ver";
+
+    fn executar(self, _ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        let mut stmt = conexao
+            .prepare(
+                "SELECT id, produto, variacao, quantidade, preco_unitario, desconto_percentual,
+                        desconto_valor, total_item, reserva
+                 FROM vendas_item_pedido WHERE pedido = ?1 ORDER BY rowid",
+            )
+            .map_err(persist)?;
+        let linhas = stmt
+            .query_map([blob(self.pedido)], item_de_linha)
             .map_err(persist)?;
         linhas.collect::<rusqlite::Result<Vec<_>>>().map_err(persist)
     }
