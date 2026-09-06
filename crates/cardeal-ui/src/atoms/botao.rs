@@ -9,7 +9,7 @@
 
 use egui::{Color32, CursorIcon, Response, Sense, Stroke, Ui, Vec2, Widget};
 
-use crate::tokens::{Espaco, Papel, Raio, Rubro, TemaUi};
+use crate::tokens::{Papel, Raio, Rubro, TemaUi};
 
 /// A variante visual do botão — `docs/12-ui-ux.md` §7 e §2.3.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -136,8 +136,8 @@ impl Widget for Botao {
             .painter()
             .layout_no_wrap(texto, fonte, Color32::PLACEHOLDER);
 
-        let padding = Vec2::new(Espaco::E16, Espaco::E8);
-        let altura_min = 32.0_f32;
+        let padding = Vec2::new(20.0_f32, 11.0_f32);
+        let altura_min = 44.0_f32;
         let largura = if self.preenche_largura {
             ui.available_width()
         } else {
@@ -150,21 +150,27 @@ impl Widget for Botao {
         } else {
             Sense::hover()
         };
-        let (rect, resp) = ui.allocate_exact_size(tamanho, sense);
+        let (rect_total, resp) = ui.allocate_exact_size(tamanho, sense);
 
-        if ui.is_rect_visible(rect) {
+        if ui.is_rect_visible(rect_total) {
+            // "press-scale": encolhe 1px enquanto pressionado (referência gestao-raiz).
+            let rect = if resp.is_pointer_button_down_on() {
+                rect_total.shrink(1.0_f32)
+            } else {
+                rect_total
+            };
             let (fill, stroke, fg) = self.paleta(&resp, &cores);
             let painter = ui.painter();
             if let Some(f) = fill {
-                painter.rect_filled(rect, Raio::CAMPO, f);
+                painter.rect_filled(rect, Raio::ITEM, f);
             }
             if let Some(s) = stroke {
-                painter.rect_stroke(rect, Raio::CAMPO, Stroke::new(1.0_f32, s));
+                painter.rect_stroke(rect, Raio::ITEM, Stroke::new(1.0_f32, s));
             }
             if resp.has_focus() {
                 painter.rect_stroke(
                     rect.expand(2.0_f32),
-                    Raio::CAMPO + 2.0_f32,
+                    Raio::ITEM + 2.0_f32,
                     Stroke::new(2.0_f32, Rubro::R500),
                 );
             }

@@ -40,6 +40,7 @@ impl Widget for CartaoKpi {
             .fill(cores.superficie)
             .stroke(egui::Stroke::new(1.0_f32, cores.borda))
             .rounding(Raio::CARTAO)
+            .shadow(crate::tokens::sombra_cartao(ui.ctx()))
             .inner_margin(Espaco::E16)
             .show(ui, |ui| {
                 ui.set_min_width(ui.available_width());

@@ -38,6 +38,7 @@ impl Cartao {
                     .fill(cores.superficie)
                     .stroke(egui::Stroke::new(1.0_f32, cores.borda))
                     .rounding(Raio::MODAL)
+                    .shadow(crate::tokens::sombra_cartao(ui.ctx()))
                     .inner_margin(Espaco::E32)
                     .show(ui, |ui| {
                         ui.set_width(largura - Espaco::E32 * 2.0);

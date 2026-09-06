@@ -123,6 +123,12 @@ fn sombra(tema: Tema, offset_y: f32, blur: f32, alfa_escuro: u8, alfa_claro: u8)
     }
 }
 
+/// A sombra sutil de um cartão em repouso (`--shadow-card` do gestao-raiz).
+#[must_use]
+pub fn sombra_cartao(ctx: &Context) -> egui::epaint::Shadow {
+    sombra(ctx.tema(), 1.0_f32, 6.0_f32, 70, 22)
+}
+
 /// Acesso ao tema ativo a partir de qualquer `Ui` — o caminho normal para um componente
 /// descobrir a paleta, sem `&Cores` na assinatura.
 pub trait TemaUi {
