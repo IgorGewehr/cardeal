@@ -54,11 +54,48 @@ fn pedido_ativacao() -> PedidoAtivacao {
         .com_modulo("agenda")
 }
 
+/// Ícone da janela — quadrado `rubro-500` com cantos arredondados, gerado em código
+/// (não há asset ainda). 48×48 RGBA.
+fn icone_janela() -> egui::IconData {
+    const L: usize = 48;
+    const R: f32 = 10.0;
+    let (cr, cg, cb) = (0xEF, 0x44, 0x3B); // Rubro::R500
+    let mut rgba = vec![0u8; L * L * 4];
+    for y in 0..L {
+        for x in 0..L {
+            let fx = (x as f32).min((L - 1 - x) as f32);
+            let fy = (y as f32).min((L - 1 - y) as f32);
+            let dentro = if fx >= R || fy >= R {
+                true
+            } else {
+                let (dx, dy) = (R - fx, R - fy);
+                dx * dx + dy * dy <= R * R
+            };
+            let i = (y * L + x) * 4;
+            if dentro {
+                rgba[i] = cr;
+                rgba[i + 1] = cg;
+                rgba[i + 2] = cb;
+                rgba[i + 3] = 255;
+            }
+        }
+    }
+    egui::IconData { rgba, width: L as u32, height: L as u32 }
+}
+
 fn main() -> eframe::Result<()> {
     tracing_subscriber::fmt::init();
+    let opcoes = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_title("Cardeal")
+            .with_inner_size([1200.0, 800.0])
+            .with_min_inner_size([920.0, 600.0])
+            .with_icon(icone_janela()),
+        ..eframe::NativeOptions::default()
+    };
     eframe::run_native(
         "Cardeal",
-        eframe::NativeOptions::default(),
+        opcoes,
         Box::new(|cc| {
             instalar_fontes(&cc.egui_ctx);
             instalar_estilo(&cc.egui_ctx, Tema::Claro);
