@@ -61,9 +61,18 @@ impl<'a> Sidebar<'a> {
             for (gi, grupo) in self.grupos.iter().enumerate() {
                 if let Some(titulo) = grupo.titulo {
                     if self.expandida {
-                        ui.add_space(if gi == 0 { Espaco::E4 } else { Espaco::E16 });
+                        ui.add_space(if gi == 0 { Espaco::E8 } else { Espaco::E16 });
                         ui.horizontal(|ui| {
-                            ui.add_space(Espaco::E12);
+                            let (tick, _) = ui.allocate_exact_size(
+                                egui::vec2(Espaco::E12, 14.0),
+                                egui::Sense::hover(),
+                            );
+                            let barra = egui::Rect::from_center_size(
+                                egui::pos2(tick.left() + 4.5, tick.center().y),
+                                egui::vec2(3.0, 11.0),
+                            );
+                            ui.painter()
+                                .rect_filled(barra, 999.0, cores.rubro.gamma_multiply(0.55));
                             let espacado: String = titulo
                                 .to_uppercase()
                                 .chars()
@@ -72,8 +81,9 @@ impl<'a> Sidebar<'a> {
                             ui.label(
                                 egui::RichText::new(espacado)
                                     .font(Papel::RotuloCampo.font_id())
-                                    .color(cores.texto_fraco)
-                                    .size(10.5),
+                                    .color(cores.texto_medio)
+                                    .size(10.5)
+                                    .strong(),
                             );
                         });
                         ui.add_space(Espaco::E4);

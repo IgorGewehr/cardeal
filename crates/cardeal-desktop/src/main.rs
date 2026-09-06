@@ -6,6 +6,7 @@
 //! inteira; criar/ver um item acontece num `Dialogo` (regra de UI do projeto). Telas com UI:
 //! Ordens de Serviço e Estoque; as demais mostram `tela_em_construcao` (backend já responde).
 
+mod tela_clientes;
 mod tela_estoque;
 mod tela_os;
 
@@ -142,6 +143,7 @@ struct EstadoAutenticado {
     area: Area,
     os: tela_os::EstadoTelaOs,
     estoque: tela_estoque::EstadoTelaEstoque,
+    clientes: tela_clientes::EstadoTelaClientes,
 }
 
 /// O que a tela mostra agora.
@@ -228,14 +230,17 @@ impl App {
         let Some(motor) = &self.motor else { return };
         let mut os = tela_os::EstadoTelaOs::default();
         let mut estoque = tela_estoque::EstadoTelaEstoque::default();
+        let mut clientes = tela_clientes::EstadoTelaClientes::default();
         os.carregar(motor, &sessao);
         estoque.carregar(motor, &sessao);
+        clientes.carregar(motor, &sessao);
 
         self.tela = Tela::Autenticado(Box::new(EstadoAutenticado {
             sessao,
             area: Area::Os,
             os,
             estoque,
+            clientes,
         }));
     }
 }
@@ -436,6 +441,9 @@ impl eframe::App for App {
                         }
                         Area::Estoque => {
                             tela_estoque::mostrar(ui, motor, &estado.sessao, &mut estado.estoque);
+                        }
+                        Area::Clientes => {
+                            tela_clientes::mostrar(ui, motor, &estado.sessao, &mut estado.clientes);
                         }
                         outra => tela_em_construcao(ui, outra),
                     }
