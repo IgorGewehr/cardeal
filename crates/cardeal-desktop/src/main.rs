@@ -7,6 +7,7 @@
 //! Ordens de Serviço e Estoque; as demais mostram `tela_em_construcao` (backend já responde).
 
 mod tela_clientes;
+mod tela_compras;
 mod tela_estoque;
 mod tela_financeiro;
 mod tela_os;
@@ -18,7 +19,7 @@ use cardeal_cliente::{MotorLocal, SessaoLocal};
 use cardeal_modkit::{Icone, Modulo, PedidoAtivacao};
 use cardeal_ui::atoms::{Botao, Rotulo};
 use cardeal_ui::molecules::Campo;
-use cardeal_ui::organisms::{Cartao, ItemSidebar, LayoutTela, Sidebar};
+use cardeal_ui::organisms::{Cartao, ItemSidebar, Sidebar};
 use cardeal_ui::tokens::{instalar_estilo, instalar_fontes, Espaco, Rubro, Tema, TemaUi};
 use eframe::egui;
 
@@ -97,17 +98,6 @@ impl Area {
         }
     }
 
-    /// Título e ícone para a tela ainda sem implementação.
-    const fn rotulo(self) -> &'static str {
-        match self {
-            Self::Vendas => "Vendas",
-            Self::Clientes => "Clientes",
-            Self::Estoque => "Estoque",
-            Self::Compras => "Compras",
-            Self::Os => "Ordens de Serviço",
-            Self::Financeiro => "Financeiro",
-        }
-    }
 }
 
 const GRUPOS_SIDEBAR: &[cardeal_ui::organisms::GrupoSidebar<'static>] = &[
@@ -148,6 +138,7 @@ struct EstadoAutenticado {
     clientes: tela_clientes::EstadoTelaClientes,
     financeiro: tela_financeiro::EstadoTelaFinanceiro,
     vendas: tela_vendas::EstadoTelaVendas,
+    compras: tela_compras::EstadoTelaCompras,
 }
 
 /// O que a tela mostra agora.
@@ -242,6 +233,8 @@ impl App {
         financeiro.carregar(motor, &sessao);
         let mut vendas = tela_vendas::EstadoTelaVendas::default();
         vendas.carregar(motor, &sessao);
+        let mut compras = tela_compras::EstadoTelaCompras::default();
+        compras.carregar(motor, &sessao);
 
         self.tela = Tela::Autenticado(Box::new(EstadoAutenticado {
             sessao,
@@ -251,6 +244,7 @@ impl App {
             clientes,
             financeiro,
             vendas,
+            compras,
         }));
     }
 }
@@ -461,7 +455,9 @@ impl eframe::App for App {
                         Area::Vendas => {
                             tela_vendas::mostrar(ui, motor, &estado.sessao, &mut estado.vendas);
                         }
-                        outra => tela_em_construcao(ui, outra),
+                        Area::Compras => {
+                            tela_compras::mostrar(ui, motor, &estado.sessao, &mut estado.compras);
+                        }
                     }
                 }
             });
@@ -488,21 +484,3 @@ impl eframe::App for App {
     }
 }
 
-/// Tela de um módulo cujo backend já existe mas a interface ainda não foi construída.
-fn tela_em_construcao(ui: &mut egui::Ui, area: Area) {
-    let msg = match area {
-        Area::Vendas => "Vendas: falta a consulta de listagem de pedidos no mod-vendas \
-                         (só há comandos hoje). A tela vem assim que o backend listar.",
-        Area::Compras => "Compras: falta a consulta de listagem no mod-compras. A tela vem \
-                          assim que o backend listar.",
-        _ => "Este módulo ainda não tem tela.",
-    };
-    LayoutTela::nova(area.rotulo()).mostrar(
-        ui,
-        &mut (),
-        |_ui, ()| {},
-        |ui, ()| {
-            cardeal_ui::molecules::EstadoVazio::novo(Icone::Config, msg).mostrar(ui);
-        },
-    );
-}
