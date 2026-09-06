@@ -16,8 +16,9 @@ use cardeal_ui::tokens::{Espaco, TemaUi};
 use eframe::egui;
 use mod_clientes::{ItemPessoa, Papel, PessoasPorPapel};
 use mod_financeiro::{
-    BaixarPagamento, BaixarRecebimento, ItemTituloEmAberto, LancarTituloAPagar,
-    LancarTituloAReceber, TitulosAPagarEmAberto, TitulosAReceberEmAberto,
+    BaixarPagamento, BaixarRecebimento, CategoriaFinanceira, Categorias,
+    ItemTituloEmAberto, LancarTituloAPagar, LancarTituloAReceber, TitulosAPagarEmAberto,
+    TitulosAReceberEmAberto,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
@@ -53,6 +54,7 @@ struct FormLancar {
     primeiro_vencimento: String,
     intervalo: String,
     observacao: String,
+    categoria: Option<Id>,
 }
 
 impl Default for FormLancar {
@@ -66,6 +68,7 @@ impl Default for FormLancar {
             primeiro_vencimento: hoje,
             intervalo: "30".to_owned(),
             observacao: String::new(),
+            categoria: None,
         }
     }
 }
@@ -78,6 +81,7 @@ pub struct EstadoTelaFinanceiro {
     nomes: HashMap<Id, String>,
     clientes: Vec<ItemPessoa>,
     fornecedores: Vec<ItemPessoa>,
+    categorias: Vec<CategoriaFinanceira>,
     erro: Option<String>,
     dlg: Dlg,
 }
@@ -125,6 +129,9 @@ impl EstadoTelaFinanceiro {
             },
         ) {
             self.fornecedores = f;
+        }
+        if let Ok(cat) = motor.consultar(sessao, "financeiro.categorias.v1", &Categorias) {
+            self.categorias = cat;
         }
         self.nomes = self
             .clientes
@@ -299,6 +306,11 @@ fn dialogo_lancar(
             .map(|p| (p.pessoa, p.nome.clone()))
             .collect()
     };
+    let cats: Vec<(Id, String)> = estado
+        .categorias
+        .iter()
+        .map(|c| (c.id, c.nome.clone()))
+        .collect();
 
     let fechar = Dialogo::nova(titulo).largura(680.0).mostrar(
         ctx,
@@ -326,6 +338,11 @@ fn dialogo_lancar(
                 );
                 c[2].add(Campo::novo("Intervalo (dias)", &mut f.intervalo));
             });
+            ui.add_space(Espaco::E12);
+            cardeal_ui::molecules::SeletorOpcao::novo("Categoria (opcional)", &mut f.categoria)
+                .opcoes(cats.clone())
+                .placeholder("Sem categoria")
+                .mostrar(ui);
             ui.add_space(Espaco::E12);
             ui.add(Campo::novo("Observação", &mut f.observacao));
         },
@@ -361,6 +378,7 @@ fn lancar(motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoTelaFinan
         return;
     };
     let obs = (!f.observacao.trim().is_empty()).then(|| f.observacao.clone());
+    let cat = f.categoria;
 
     let r = if a_receber {
         motor
@@ -375,7 +393,7 @@ fn lancar(motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoTelaFinan
                     primeiro_vencimento: prim,
                     intervalo_dias: intervalo,
                     observacao: obs,
-                    categoria: None,
+                    categoria: cat,
                 },
             )
             .map(|_: mod_financeiro::TituloAReceberLancado| ())
@@ -392,7 +410,7 @@ fn lancar(motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoTelaFinan
                     primeiro_vencimento: prim,
                     intervalo_dias: intervalo,
                     observacao: obs,
-                    categoria: None,
+                    categoria: cat,
                 },
             )
             .map(|_: mod_financeiro::TituloAPagarLancado| ())

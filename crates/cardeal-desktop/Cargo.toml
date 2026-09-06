@@ -25,6 +25,7 @@ mod-estoque.workspace    = true
 mod-compras.workspace    = true
 mod-vendas.workspace     = true
 mod-os.workspace         = true
+mod-agenda.workspace     = true
 
 eframe.workspace      = true
 egui.workspace        = true

@@ -39,6 +39,7 @@ fn modulos() -> Vec<&'static dyn Modulo> {
         &mod_compras::ModuloCompras,
         &mod_vendas::ModuloVendas,
         &mod_os::ModuloOs,
+        &mod_agenda::ModuloAgenda,
     ]
 }
 
@@ -50,6 +51,7 @@ fn pedido_ativacao() -> PedidoAtivacao {
         .com_modulo("compras")
         .com_modulo("vendas")
         .com_modulo("os")
+        .com_modulo("agenda")
 }
 
 fn main() -> eframe::Result<()> {
