@@ -72,7 +72,10 @@ impl EstadoTelaVendas {
         if let Ok(c) = motor.consultar(
             sessao,
             "clientes.pessoas_por_papel.v1",
-            &PessoasPorPapel { papel: Papel::Cliente, busca: None },
+            &PessoasPorPapel {
+                papel: Papel::Cliente,
+                busca: None,
+            },
         ) {
             self.nomes = c.iter().map(|p| (p.pessoa, p.nome.clone())).collect();
             self.clientes = c;
@@ -92,25 +95,40 @@ impl EstadoTelaVendas {
         let Some(p) = self.pedidos.get(i) else { return };
         let id = p.pedido;
         self.itens_ped = motor
-            .consultar(sessao, "vendas.itens_do_pedido.v1", &ItensDoPedido { pedido: id })
+            .consultar(
+                sessao,
+                "vendas.itens_do_pedido.v1",
+                &ItensDoPedido { pedido: id },
+            )
             .unwrap_or_default();
         self.dlg = Dlg::Ver(i);
     }
 
     fn recarregar_itens(&mut self, motor: &MotorLocal, sessao: &SessaoLocal, pedido: Id) {
         self.itens_ped = motor
-            .consultar(sessao, "vendas.itens_do_pedido.v1", &ItensDoPedido { pedido })
+            .consultar(
+                sessao,
+                "vendas.itens_do_pedido.v1",
+                &ItensDoPedido { pedido },
+            )
             .unwrap_or_default();
     }
 
     fn carregar_regras(&mut self, motor: &MotorLocal, sessao: &SessaoLocal, tabela: Id) {
         self.regras = motor
-            .consultar(sessao, "vendas.regras_da_tabela.v1", &RegrasDaTabela { tabela })
+            .consultar(
+                sessao,
+                "vendas.regras_da_tabela.v1",
+                &RegrasDaTabela { tabela },
+            )
             .unwrap_or_default();
     }
 
     fn nome(&self, cliente: Id) -> String {
-        self.nomes.get(&cliente).cloned().unwrap_or_else(|| "—".to_owned())
+        self.nomes
+            .get(&cliente)
+            .cloned()
+            .unwrap_or_else(|| "—".to_owned())
     }
 
     fn nome_produto(&self, produto: Id) -> String {
@@ -132,13 +150,19 @@ pub fn mostrar(
         ui,
         estado,
         |ui, estado| {
-            if ui.add(Botao::secundario("Recarregar").atalho("F5")).clicked() {
+            if ui
+                .add(Botao::secundario("Recarregar").atalho("F5"))
+                .clicked()
+            {
                 estado.carregar(motor, sessao);
             }
             if ui.add(Botao::secundario("Tabelas de preço")).clicked() {
                 estado.dlg = Dlg::Tabelas;
             }
-            if ui.add(Botao::primario("+ Novo pedido").atalho("Ctrl+N")).clicked() {
+            if ui
+                .add(Botao::primario("+ Novo pedido").atalho("Ctrl+N"))
+                .clicked()
+            {
                 estado.novo_cliente = None;
                 estado.novo_tabela = estado.tabelas.first().map(|t| t.id);
                 estado.novo_local = estado.locais.first().map(|l| l.id);
@@ -147,7 +171,11 @@ pub fn mostrar(
         },
         |ui, estado| {
             if let Some(erro) = &estado.erro {
-                ui.add(Rotulo::interface(erro.clone()).quebravel().cor(ui.cores().negativo));
+                ui.add(
+                    Rotulo::interface(erro.clone())
+                        .quebravel()
+                        .cor(ui.cores().negativo),
+                );
                 ui.add_space(Espaco::E12);
             }
             lista(ui, motor, sessao, estado);
@@ -179,28 +207,27 @@ fn lista(
         ColunaGrade::nova("Total").largura(130.0),
         ColunaGrade::nova("Estado").largura(120.0),
     ];
-    let clicada = Grade::nova(colunas).selecionavel(None).mostrar(
-        ui,
-        estado.pedidos.len(),
-        |i, row| {
-            let p = &estado.pedidos[i];
-            row.col(|ui| {
-                ui.add(Rotulo::interface(estado.nome(p.cliente)));
+    let clicada =
+        Grade::nova(colunas)
+            .selecionavel(None)
+            .mostrar(ui, estado.pedidos.len(), |i, row| {
+                let p = &estado.pedidos[i];
+                row.col(|ui| {
+                    ui.add(Rotulo::interface(estado.nome(p.cliente)));
+                });
+                row.col(|ui| {
+                    ui.add(Rotulo::interface(p.data.to_string()));
+                });
+                row.col(|ui| {
+                    ui.add(Rotulo::interface(p.itens.to_string()));
+                });
+                row.col(|ui| {
+                    ui.add(ValorDinheiro::novo(p.total));
+                });
+                row.col(|ui| {
+                    ui.add(Rotulo::campo(p.estado.rotulo()));
+                });
             });
-            row.col(|ui| {
-                ui.add(Rotulo::interface(p.data.to_string()));
-            });
-            row.col(|ui| {
-                ui.add(Rotulo::interface(p.itens.to_string()));
-            });
-            row.col(|ui| {
-                ui.add(ValorDinheiro::novo(p.total));
-            });
-            row.col(|ui| {
-                ui.add(Rotulo::campo(p.estado.rotulo()));
-            });
-        },
-    );
     if let Some(i) = clicada {
         estado.abrir_pedido(motor, sessao, i);
     }
@@ -212,12 +239,21 @@ fn dialogo_novo(
     sessao: &SessaoLocal,
     estado: &mut EstadoTelaVendas,
 ) {
-    let ops_cli: Vec<(Id, String)> =
-        estado.clientes.iter().map(|c| (c.pessoa, c.nome.clone())).collect();
-    let ops_tab: Vec<(Id, String)> =
-        estado.tabelas.iter().map(|t| (t.id, t.nome.clone())).collect();
-    let ops_loc: Vec<(Id, String)> =
-        estado.locais.iter().map(|l| (l.id, l.nome.clone())).collect();
+    let ops_cli: Vec<(Id, String)> = estado
+        .clientes
+        .iter()
+        .map(|c| (c.pessoa, c.nome.clone()))
+        .collect();
+    let ops_tab: Vec<(Id, String)> = estado
+        .tabelas
+        .iter()
+        .map(|t| (t.id, t.nome.clone()))
+        .collect();
+    let ops_loc: Vec<(Id, String)> = estado
+        .locais
+        .iter()
+        .map(|l| (l.id, l.nome.clone()))
+        .collect();
     let sem_tabela = estado.tabelas.is_empty();
 
     let fechar = Dialogo::nova("Novo pedido").largura(620.0).mostrar(
@@ -252,7 +288,11 @@ fn dialogo_novo(
             let pronto = estado.novo_cliente.is_some()
                 && estado.novo_tabela.is_some()
                 && estado.novo_local.is_some();
-            if ui.add(Botao::primario("Criar rascunho").habilitado(pronto)).clicked() && pronto {
+            if ui
+                .add(Botao::primario("Criar rascunho").habilitado(pronto))
+                .clicked()
+                && pronto
+            {
                 criar_pedido(motor, sessao, estado);
             }
             if ui.add(Botao::secundario("Cancelar")).clicked() {
@@ -310,65 +350,67 @@ fn dialogo_ver(
     };
     let nome = estado.nome(p.cliente);
 
-    let fechar = Dialogo::nova(format!("Pedido · {nome}")).largura(680.0).mostrar(
-        ctx,
-        estado,
-        |ui, estado| {
-            ui.columns(2, |c| {
-                kv(&mut c[0], "Data", &p.data.to_string());
-                kv(&mut c[1], "Estado", p.estado.rotulo());
-            });
-            ui.add_space(Espaco::E8);
-
-            ui.add(Rotulo::titulo_secao("Itens"));
-            ui.add_space(Espaco::E4);
-            if estado.itens_ped.is_empty() {
-                ui.add(Rotulo::campo("Nenhum item ainda."));
-            }
-            for it in &estado.itens_ped {
-                ui.horizontal(|ui| {
-                    ui.add(Rotulo::interface(format!(
-                        "{} × {}",
-                        it.quantidade,
-                        estado.nome_produto(it.produto)
-                    )));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.add(ValorDinheiro::novo(it.total_item));
-                    });
-                });
-            }
-
-            if matches!(p.estado, EstadoPedido::Rascunho) {
-                ui.add_space(Espaco::E12);
-                let ops: Vec<(Id, String)> = estado
-                    .produtos
-                    .iter()
-                    .map(|pr| (pr.produto, pr.nome.clone()))
-                    .collect();
+    let fechar = Dialogo::nova(format!("Pedido · {nome}"))
+        .largura(680.0)
+        .mostrar(
+            ctx,
+            estado,
+            |ui, estado| {
                 ui.columns(2, |c| {
-                    SeletorOpcao::novo("Produto", &mut estado.item_produto)
-                        .opcoes(ops.clone())
-                        .placeholder("Buscar produto…")
-                        .mostrar(&mut c[0]);
-                    c[1].add(Campo::novo("Quantidade", &mut estado.item_qtd).marcador("1"));
+                    kv(&mut c[0], "Data", &p.data.to_string());
+                    kv(&mut c[1], "Estado", p.estado.rotulo());
                 });
-                ui.add_space(Espaco::E4);
-                if ui.add(Botao::secundario("+ Adicionar item")).clicked() {
-                    adicionar_item(motor, sessao, estado, p.pedido);
-                }
-            }
+                ui.add_space(Espaco::E8);
 
-            ui.add_space(Espaco::E12);
-            ui.separator();
-            ui.add_space(Espaco::E12);
-            acoes(ui, motor, sessao, estado, &p);
-        },
-        |ui, estado| {
-            if ui.add(Botao::secundario("Fechar")).clicked() {
-                estado.dlg = Dlg::Fechado;
-            }
-        },
-    );
+                ui.add(Rotulo::titulo_secao("Itens"));
+                ui.add_space(Espaco::E4);
+                if estado.itens_ped.is_empty() {
+                    ui.add(Rotulo::campo("Nenhum item ainda."));
+                }
+                for it in &estado.itens_ped {
+                    ui.horizontal(|ui| {
+                        ui.add(Rotulo::interface(format!(
+                            "{} × {}",
+                            it.quantidade,
+                            estado.nome_produto(it.produto)
+                        )));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.add(ValorDinheiro::novo(it.total_item));
+                        });
+                    });
+                }
+
+                if matches!(p.estado, EstadoPedido::Rascunho) {
+                    ui.add_space(Espaco::E12);
+                    let ops: Vec<(Id, String)> = estado
+                        .produtos
+                        .iter()
+                        .map(|pr| (pr.produto, pr.nome.clone()))
+                        .collect();
+                    ui.columns(2, |c| {
+                        SeletorOpcao::novo("Produto", &mut estado.item_produto)
+                            .opcoes(ops.clone())
+                            .placeholder("Buscar produto…")
+                            .mostrar(&mut c[0]);
+                        c[1].add(Campo::novo("Quantidade", &mut estado.item_qtd).marcador("1"));
+                    });
+                    ui.add_space(Espaco::E4);
+                    if ui.add(Botao::secundario("+ Adicionar item")).clicked() {
+                        adicionar_item(motor, sessao, estado, p.pedido);
+                    }
+                }
+
+                ui.add_space(Espaco::E12);
+                ui.separator();
+                ui.add_space(Espaco::E12);
+                acoes(ui, motor, sessao, estado, &p);
+            },
+            |ui, estado| {
+                if ui.add(Botao::secundario("Fechar")).clicked() {
+                    estado.dlg = Dlg::Fechado;
+                }
+            },
+        );
     if fechar {
         estado.dlg = Dlg::Fechado;
     }
@@ -420,38 +462,64 @@ fn acoes(
         EstadoPedido::Rascunho => {
             ui.horizontal(|ui| {
                 let tem_item = !estado.itens_ped.is_empty();
-                if ui.add(Botao::primario("Confirmar pedido").habilitado(tem_item)).clicked()
+                if ui
+                    .add(Botao::primario("Confirmar pedido").habilitado(tem_item))
+                    .clicked()
                     && tem_item
                 {
-                    aplicar(motor, sessao, estado, "vendas.confirmar_pedido.v1", &ConfirmarPedido {
-                        pedido: p.pedido,
-                    });
+                    aplicar(
+                        motor,
+                        sessao,
+                        estado,
+                        "vendas.confirmar_pedido.v1",
+                        &ConfirmarPedido { pedido: p.pedido },
+                    );
                 }
                 if ui.add(Botao::destrutivo("Cancelar pedido")).clicked() {
-                    aplicar(motor, sessao, estado, "vendas.cancelar_pedido.v1", &CancelarPedido {
-                        pedido: p.pedido,
-                    });
+                    aplicar(
+                        motor,
+                        sessao,
+                        estado,
+                        "vendas.cancelar_pedido.v1",
+                        &CancelarPedido { pedido: p.pedido },
+                    );
                 }
             });
         }
         EstadoPedido::Confirmado => {
             ui.horizontal(|ui| {
                 if ui.add(Botao::primario("Faturar à vista")).clicked() {
-                    aplicar(motor, sessao, estado, "vendas.faturar_pedido.v1", &FaturarPedido {
-                        pedido: p.pedido,
-                        a_vista: true,
-                    });
+                    aplicar(
+                        motor,
+                        sessao,
+                        estado,
+                        "vendas.faturar_pedido.v1",
+                        &FaturarPedido {
+                            pedido: p.pedido,
+                            a_vista: true,
+                        },
+                    );
                 }
                 if ui.add(Botao::secundario("Faturar a prazo")).clicked() {
-                    aplicar(motor, sessao, estado, "vendas.faturar_pedido.v1", &FaturarPedido {
-                        pedido: p.pedido,
-                        a_vista: false,
-                    });
+                    aplicar(
+                        motor,
+                        sessao,
+                        estado,
+                        "vendas.faturar_pedido.v1",
+                        &FaturarPedido {
+                            pedido: p.pedido,
+                            a_vista: false,
+                        },
+                    );
                 }
                 if ui.add(Botao::destrutivo("Cancelar")).clicked() {
-                    aplicar(motor, sessao, estado, "vendas.cancelar_pedido.v1", &CancelarPedido {
-                        pedido: p.pedido,
-                    });
+                    aplicar(
+                        motor,
+                        sessao,
+                        estado,
+                        "vendas.cancelar_pedido.v1",
+                        &CancelarPedido { pedido: p.pedido },
+                    );
                 }
             });
         }
@@ -470,8 +538,11 @@ fn dialogo_tabelas(
     sessao: &SessaoLocal,
     estado: &mut EstadoTelaVendas,
 ) {
-    let ops_prod: Vec<(Id, String)> =
-        estado.produtos.iter().map(|p| (p.produto, p.nome.clone())).collect();
+    let ops_prod: Vec<(Id, String)> = estado
+        .produtos
+        .iter()
+        .map(|p| (p.produto, p.nome.clone()))
+        .collect();
 
     let fechar = Dialogo::nova("Tabelas de preço").largura(700.0).mostrar(
         ctx,
@@ -514,7 +585,9 @@ fn dialogo_tabelas(
                 ui.add(Rotulo::titulo_secao("Regras de preço"));
                 ui.add_space(Espaco::E4);
                 if estado.regras.is_empty() {
-                    ui.add(Rotulo::campo("Nenhuma regra — os itens não terão preço sem isto."));
+                    ui.add(Rotulo::campo(
+                        "Nenhuma regra — os itens não terão preço sem isto.",
+                    ));
                 }
                 for r in estado.regras.clone() {
                     let alvo = match r.alvo {
@@ -634,6 +707,10 @@ fn aplicar<C: cardeal_modkit::Comando + serde::Serialize>(
 
 fn kv(ui: &mut egui::Ui, chave: &str, valor: &str) {
     ui.add(Rotulo::campo(chave));
-    ui.add(Rotulo::interface(if valor.trim().is_empty() { "—" } else { valor }));
+    ui.add(Rotulo::interface(if valor.trim().is_empty() {
+        "—"
+    } else {
+        valor
+    }));
     ui.add_space(Espaco::E8);
 }

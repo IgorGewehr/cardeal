@@ -124,7 +124,11 @@ impl EstadoTelaClientes {
     }
 
     fn abrir_detalhe(&mut self, motor: &MotorLocal, sessao: &SessaoLocal, id: Id) {
-        match motor.consultar(sessao, "clientes.detalhe_pessoa.v1", &DetalhePessoa { pessoa: id }) {
+        match motor.consultar(
+            sessao,
+            "clientes.detalhe_pessoa.v1",
+            &DetalhePessoa { pessoa: id },
+        ) {
             Ok(Some(d)) => self.form = Some(Form::de_detalhe(&d)),
             Ok(None) => self.erro = Some("Pessoa não encontrada.".to_owned()),
             Err(e) => self.erro = Some(e.mensagem),
@@ -143,7 +147,10 @@ pub fn mostrar(
         ui,
         estado,
         |ui, estado| {
-            if ui.add(Botao::primario("+ Novo cliente").atalho("Ctrl+N")).clicked() {
+            if ui
+                .add(Botao::primario("+ Novo cliente").atalho("Ctrl+N"))
+                .clicked()
+            {
                 estado.form = Some(Form::novo());
             }
         },
@@ -151,7 +158,10 @@ pub fn mostrar(
             ui.horizontal(|ui| {
                 ui.set_max_width(360.0);
                 if ui
-                    .add(cardeal_ui::molecules::Campo::novo("", &mut estado.busca).marcador("Buscar por nome ou documento"))
+                    .add(
+                        cardeal_ui::molecules::Campo::novo("", &mut estado.busca)
+                            .marcador("Buscar por nome ou documento"),
+                    )
                     .changed()
                 {
                     estado.carregar(motor, sessao);
@@ -160,7 +170,11 @@ pub fn mostrar(
             ui.add_space(Espaco::E12);
 
             if let Some(erro) = &estado.erro {
-                ui.add(Rotulo::interface(erro.clone()).quebravel().cor(ui.cores().negativo));
+                ui.add(
+                    Rotulo::interface(erro.clone())
+                        .quebravel()
+                        .cor(ui.cores().negativo),
+                );
                 ui.add_space(Espaco::E12);
             }
             lista(ui, motor, sessao, estado);
@@ -197,19 +211,20 @@ fn lista(
         ColunaGrade::nova("Nome"),
         ColunaGrade::nova("Documento").largura(200.0),
     ];
-    let clicada = Grade::nova(colunas).selecionavel(None).mostrar(
-        ui,
-        estado.pessoas.len(),
-        |i, row| {
-            let p = &estado.pessoas[i];
-            row.col(|ui| {
-                ui.add(Rotulo::interface(p.nome.clone()));
+    let clicada =
+        Grade::nova(colunas)
+            .selecionavel(None)
+            .mostrar(ui, estado.pessoas.len(), |i, row| {
+                let p = &estado.pessoas[i];
+                row.col(|ui| {
+                    ui.add(Rotulo::interface(p.nome.clone()));
+                });
+                row.col(|ui| {
+                    ui.add(Rotulo::campo(
+                        p.documento.clone().unwrap_or_else(|| "—".to_owned()),
+                    ));
+                });
             });
-            row.col(|ui| {
-                ui.add(Rotulo::campo(p.documento.clone().unwrap_or_else(|| "—".to_owned())));
-            });
-        },
-    );
     if let Some(i) = clicada {
         let id = estado.pessoas[i].pessoa;
         estado.abrir_detalhe(motor, sessao, id);
@@ -235,7 +250,9 @@ fn dialogo(
         ctx,
         estado,
         |ui, estado| {
-            let Some(f) = estado.form.as_mut() else { return };
+            let Some(f) = estado.form.as_mut() else {
+                return;
+            };
             let leitura = f.modo == Modo::Ver;
             let pj = matches!(f.tipo, Some(TipoPessoa::Juridica));
 
@@ -261,9 +278,7 @@ fn dialogo(
             ui.add_space(Espaco::E12);
 
             if pj {
-                ui.add(
-                    Campo::novo("Nome fantasia", &mut f.nome_fantasia).somente_leitura(leitura),
-                );
+                ui.add(Campo::novo("Nome fantasia", &mut f.nome_fantasia).somente_leitura(leitura));
                 ui.add_space(Espaco::E12);
             }
 
@@ -320,19 +335,28 @@ fn dialogo(
 
 fn kv(ui: &mut egui::Ui, chave: &str, valor: &str) {
     ui.add(Rotulo::campo(chave));
-    ui.add(Rotulo::interface(if valor.trim().is_empty() { "—" } else { valor }));
+    ui.add(Rotulo::interface(if valor.trim().is_empty() {
+        "—"
+    } else {
+        valor
+    }));
 }
 
 fn criar(motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoTelaClientes) {
-    let Some(f) = estado.form.as_ref() else { return };
+    let Some(f) = estado.form.as_ref() else {
+        return;
+    };
     let pj = matches!(f.tipo, Some(TipoPessoa::Juridica));
     let cmd = CriarPessoa {
         tipo: f.tipo.unwrap_or(TipoPessoa::Fisica),
         nome: f.nome.clone(),
-        nome_fantasia: (pj && !f.nome_fantasia.trim().is_empty())
-            .then(|| f.nome_fantasia.clone()),
+        nome_fantasia: (pj && !f.nome_fantasia.trim().is_empty()).then(|| f.nome_fantasia.clone()),
         papel_inicial: Papel::Cliente,
-        documento_tipo: if pj { TipoDocumento::Cnpj } else { TipoDocumento::Cpf },
+        documento_tipo: if pj {
+            TipoDocumento::Cnpj
+        } else {
+            TipoDocumento::Cpf
+        },
         documento_numero: f.documento.clone(),
     };
     match motor.executar(sessao, "clientes.criar_pessoa.v1", &cmd) {
@@ -346,7 +370,9 @@ fn criar(motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoTelaClient
 }
 
 fn salvar(motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoTelaClientes) {
-    let Some(f) = estado.form.as_ref() else { return };
+    let Some(f) = estado.form.as_ref() else {
+        return;
+    };
     let Some(id) = f.pessoa else { return };
     let cmd = EditarPessoa {
         pessoa: id,

@@ -17,8 +17,8 @@ use cardeal_ui::tokens::{Espaco, TemaUi};
 use eframe::egui;
 use mod_clientes::{Papel, PessoasPorPapel};
 use mod_compras::{
-    ConfirmarEntrada, EstadoCasamento, EstadoNotaEntrada, ItemNota, ItemNotaEntrada, ItemNotaManual,
-    ItensDaNota, LancarNotaManual, NotasRecentes, VincularProdutoManual,
+    ConfirmarEntrada, EstadoCasamento, EstadoNotaEntrada, ItemNota, ItemNotaEntrada,
+    ItemNotaManual, ItensDaNota, LancarNotaManual, NotasRecentes, VincularProdutoManual,
 };
 use mod_estoque::{ItemLocal, ItemProdutoComSaldo, Locais, ProdutosComSaldo};
 
@@ -78,7 +78,10 @@ impl EstadoTelaCompras {
         if let Ok(f) = motor.consultar(
             sessao,
             "clientes.pessoas_por_papel.v1",
-            &PessoasPorPapel { papel: Papel::Fornecedor, busca: None },
+            &PessoasPorPapel {
+                papel: Papel::Fornecedor,
+                busca: None,
+            },
         ) {
             self.fornecedores = f.into_iter().map(|p| (p.pessoa, p.nome)).collect();
         }
@@ -94,7 +97,11 @@ impl EstadoTelaCompras {
         let Some(n) = self.notas.get(i) else { return };
         let id = n.nota;
         self.itens_nota = motor
-            .consultar(sessao, "compras.itens_da_nota.v1", &ItensDaNota { nota: id })
+            .consultar(
+                sessao,
+                "compras.itens_da_nota.v1",
+                &ItensDaNota { nota: id },
+            )
             .unwrap_or_default();
         self.vinc_produto.clear();
         self.dlg = Dlg::Ver(i);
@@ -112,13 +119,6 @@ impl EstadoTelaCompras {
             .cloned()
             .unwrap_or_else(|| "—".to_owned())
     }
-
-    fn nome_produto(&self, produto: Id) -> String {
-        self.produtos
-            .iter()
-            .find(|p| p.produto == produto)
-            .map_or_else(|| "produto".to_owned(), |p| p.nome.clone())
-    }
 }
 
 /// Desenha a tela inteira.
@@ -132,10 +132,16 @@ pub fn mostrar(
         ui,
         estado,
         |ui, estado| {
-            if ui.add(Botao::secundario("Recarregar").atalho("F5")).clicked() {
+            if ui
+                .add(Botao::secundario("Recarregar").atalho("F5"))
+                .clicked()
+            {
                 estado.carregar(motor, sessao);
             }
-            if ui.add(Botao::primario("+ Nova nota").atalho("Ctrl+N")).clicked() {
+            if ui
+                .add(Botao::primario("+ Nova nota").atalho("Ctrl+N"))
+                .clicked()
+            {
                 estado.nova = FormNova {
                     data: cardeal_kernel::Data::hoje(cardeal_kernel::Fuso::BRASILIA).to_string(),
                     frete: "0,00".to_owned(),
@@ -147,7 +153,11 @@ pub fn mostrar(
         },
         |ui, estado| {
             if let Some(erro) = &estado.erro {
-                ui.add(Rotulo::interface(erro.clone()).quebravel().cor(ui.cores().negativo));
+                ui.add(
+                    Rotulo::interface(erro.clone())
+                        .quebravel()
+                        .cor(ui.cores().negativo),
+                );
                 ui.add_space(Espaco::E12);
             }
             lista(ui, motor, sessao, estado);
@@ -190,31 +200,30 @@ fn lista(
         ColunaGrade::nova("Total").largura(130.0),
         ColunaGrade::nova("Estado").largura(110.0),
     ];
-    let clicada = Grade::nova(colunas).selecionavel(None).mostrar(
-        ui,
-        estado.notas.len(),
-        |i, row| {
-            let n = &estado.notas[i];
-            row.col(|ui| {
-                ui.add(Rotulo::interface(estado.nome(n.fornecedor)));
+    let clicada =
+        Grade::nova(colunas)
+            .selecionavel(None)
+            .mostrar(ui, estado.notas.len(), |i, row| {
+                let n = &estado.notas[i];
+                row.col(|ui| {
+                    ui.add(Rotulo::interface(estado.nome(n.fornecedor)));
+                });
+                row.col(|ui| {
+                    ui.add(Rotulo::interface(format!("{} / {}", n.numero, n.serie)));
+                });
+                row.col(|ui| {
+                    ui.add(Rotulo::interface(n.data_emissao.to_string()));
+                });
+                row.col(|ui| {
+                    ui.add(Rotulo::interface(n.itens.to_string()));
+                });
+                row.col(|ui| {
+                    ui.add(ValorDinheiro::novo(n.valor_total));
+                });
+                row.col(|ui| {
+                    ui.add(Rotulo::campo(n.estado.rotulo()));
+                });
             });
-            row.col(|ui| {
-                ui.add(Rotulo::interface(format!("{} / {}", n.numero, n.serie)));
-            });
-            row.col(|ui| {
-                ui.add(Rotulo::interface(n.data_emissao.to_string()));
-            });
-            row.col(|ui| {
-                ui.add(Rotulo::interface(n.itens.to_string()));
-            });
-            row.col(|ui| {
-                ui.add(ValorDinheiro::novo(n.valor_total));
-            });
-            row.col(|ui| {
-                ui.add(Rotulo::campo(n.estado.rotulo()));
-            });
-        },
-    );
     if let Some(i) = clicada {
         estado.abrir_nota(motor, sessao, i);
     }
@@ -226,58 +235,64 @@ fn dialogo_nova(
     sessao: &SessaoLocal,
     estado: &mut EstadoTelaCompras,
 ) {
-    let fechar = Dialogo::nova("Nova nota de entrada").largura(760.0).mostrar(
-        ctx,
-        estado,
-        |ui, estado| {
-            let f = &mut estado.nova;
-            ui.columns(2, |c| {
-                c[0].add(Campo::novo("CNPJ do fornecedor", &mut f.cnpj).mascara(Mascara::Documento).marcador("00.000.000/0000-00"));
-                c[1].add(Campo::novo("Razão social", &mut f.nome));
-            });
-            ui.add_space(Espaco::E8);
-            ui.columns(3, |c| {
-                c[0].add(Campo::novo("Número", &mut f.numero));
-                c[1].add(Campo::novo("Série", &mut f.serie));
-                c[2].add(Campo::novo("Emissão", &mut f.data).mascara(Mascara::Data));
-            });
-            ui.add_space(Espaco::E8);
-            ui.add(Campo::novo("Frete", &mut f.frete).marcador("0,00"));
-
-            ui.add_space(Espaco::E12);
-            ui.add(Rotulo::titulo_secao("Itens"));
-            ui.add_space(Espaco::E4);
-            let mut remover = None;
-            let n_itens = f.itens.len();
-            for (idx, it) in f.itens.iter_mut().enumerate() {
-                ui.columns(5, |c| {
-                    c[0].add(Campo::novo("Código", &mut it.codigo));
-                    c[1].add(Campo::novo("Descrição", &mut it.descricao));
-                    c[2].add(Campo::novo("NCM", &mut it.ncm));
-                    c[3].add(Campo::novo("Qtd", &mut it.quantidade));
-                    c[4].add(Campo::novo("Vlr unit.", &mut it.valor_unitario));
+    let fechar = Dialogo::nova("Nova nota de entrada")
+        .largura(760.0)
+        .mostrar(
+            ctx,
+            estado,
+            |ui, estado| {
+                let f = &mut estado.nova;
+                ui.columns(2, |c| {
+                    c[0].add(
+                        Campo::novo("CNPJ do fornecedor", &mut f.cnpj)
+                            .mascara(Mascara::Documento)
+                            .marcador("00.000.000/0000-00"),
+                    );
+                    c[1].add(Campo::novo("Razão social", &mut f.nome));
                 });
-                if n_itens > 1 && ui.add(Botao::fantasma("remover linha")).clicked() {
-                    remover = Some(idx);
-                }
                 ui.add_space(Espaco::E8);
-            }
-            if let Some(idx) = remover {
-                f.itens.remove(idx);
-            }
-            if ui.add(Botao::secundario("+ Linha")).clicked() {
-                f.itens.push(LinhaItem::default());
-            }
-        },
-        |ui, estado| {
-            if ui.add(Botao::primario("Lançar nota")).clicked() {
-                lancar(motor, sessao, estado);
-            }
-            if ui.add(Botao::secundario("Cancelar")).clicked() {
-                estado.dlg = Dlg::Fechado;
-            }
-        },
-    );
+                ui.columns(3, |c| {
+                    c[0].add(Campo::novo("Número", &mut f.numero));
+                    c[1].add(Campo::novo("Série", &mut f.serie));
+                    c[2].add(Campo::novo("Emissão", &mut f.data).mascara(Mascara::Data));
+                });
+                ui.add_space(Espaco::E8);
+                ui.add(Campo::novo("Frete", &mut f.frete).marcador("0,00"));
+
+                ui.add_space(Espaco::E12);
+                ui.add(Rotulo::titulo_secao("Itens"));
+                ui.add_space(Espaco::E4);
+                let mut remover = None;
+                let n_itens = f.itens.len();
+                for (idx, it) in f.itens.iter_mut().enumerate() {
+                    ui.columns(5, |c| {
+                        c[0].add(Campo::novo("Código", &mut it.codigo));
+                        c[1].add(Campo::novo("Descrição", &mut it.descricao));
+                        c[2].add(Campo::novo("NCM", &mut it.ncm));
+                        c[3].add(Campo::novo("Qtd", &mut it.quantidade));
+                        c[4].add(Campo::novo("Vlr unit.", &mut it.valor_unitario));
+                    });
+                    if n_itens > 1 && ui.add(Botao::fantasma("remover linha")).clicked() {
+                        remover = Some(idx);
+                    }
+                    ui.add_space(Espaco::E8);
+                }
+                if let Some(idx) = remover {
+                    f.itens.remove(idx);
+                }
+                if ui.add(Botao::secundario("+ Linha")).clicked() {
+                    f.itens.push(LinhaItem::default());
+                }
+            },
+            |ui, estado| {
+                if ui.add(Botao::primario("Lançar nota")).clicked() {
+                    lancar(motor, sessao, estado);
+                }
+                if ui.add(Botao::secundario("Cancelar")).clicked() {
+                    estado.dlg = Dlg::Fechado;
+                }
+            },
+        );
     if fechar {
         estado.dlg = Dlg::Fechado;
     }
@@ -349,81 +364,89 @@ fn dialogo_ver(
         return;
     };
     let nome = estado.nome(n.fornecedor);
-    let ops_prod: Vec<(Id, String)> =
-        estado.produtos.iter().map(|p| (p.produto, p.nome.clone())).collect();
-    let ops_local: Vec<(Id, String)> =
-        estado.locais.iter().map(|l| (l.id, l.nome.clone())).collect();
+    let ops_prod: Vec<(Id, String)> = estado
+        .produtos
+        .iter()
+        .map(|p| (p.produto, p.nome.clone()))
+        .collect();
+    let ops_local: Vec<(Id, String)> = estado
+        .locais
+        .iter()
+        .map(|l| (l.id, l.nome.clone()))
+        .collect();
 
-    let fechar = Dialogo::nova(format!("Nota {} · {nome}", n.numero)).largura(720.0).mostrar(
-        ctx,
-        estado,
-        |ui, estado| {
-            ui.columns(2, |c| {
-                kv(&mut c[0], "Série", &n.serie);
-                kv(&mut c[1], "Emissão", &n.data_emissao.to_string());
-            });
-            ui.columns(2, |c| {
-                kv(&mut c[0], "Total", &n.valor_total.formatar_com_simbolo());
-                kv(&mut c[1], "Estado", n.estado.rotulo());
-            });
-
-            ui.add_space(Espaco::E12);
-            ui.add(Rotulo::titulo_secao("Itens e casamento"));
-            ui.add_space(Espaco::E4);
-            let mut vincular: Option<Id> = None;
-            for it in estado.itens_nota.clone() {
-                ui.horizontal(|ui| {
-                    ui.add(Rotulo::interface(format!(
-                        "{} × {}",
-                        it.quantidade, it.descricao_fornecedor
-                    )));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.add(Rotulo::campo(match it.estado_casamento {
-                            EstadoCasamento::Casado => "casado",
-                            EstadoCasamento::SugestaoForte => "sugestão",
-                            EstadoCasamento::NaoCasado => "não casado",
-                        }));
-                    });
+    let fechar = Dialogo::nova(format!("Nota {} · {nome}", n.numero))
+        .largura(720.0)
+        .mostrar(
+            ctx,
+            estado,
+            |ui, estado| {
+                ui.columns(2, |c| {
+                    kv(&mut c[0], "Série", &n.serie);
+                    kv(&mut c[1], "Emissão", &n.data_emissao.to_string());
                 });
-                if !matches!(it.estado_casamento, EstadoCasamento::Casado) {
-                    ui.horizontal(|ui| {
-                        let sel = estado.vinc_produto.entry(it.id).or_default();
-                        SeletorOpcao::novo("", sel)
-                            .opcoes(ops_prod.clone())
-                            .placeholder("casar com produto…")
-                            .mostrar(ui);
-                        if ui.add(Botao::fantasma("vincular")).clicked() {
-                            vincular = Some(it.id);
-                        }
-                    });
-                }
-                ui.add_space(Espaco::E4);
-            }
-            if let Some(item_nota) = vincular {
-                vincular_item(motor, sessao, estado, n.nota, item_nota);
-            }
+                ui.columns(2, |c| {
+                    kv(&mut c[0], "Total", &n.valor_total.formatar_com_simbolo());
+                    kv(&mut c[1], "Estado", n.estado.rotulo());
+                });
 
-            if matches!(n.estado, EstadoNotaEntrada::Conferida) {
                 ui.add_space(Espaco::E12);
-                ui.separator();
-                ui.add_space(Espaco::E12);
-                ui.add(Rotulo::titulo_secao("Confirmar entrada"));
-                ui.add_space(Espaco::E8);
-                SeletorOpcao::novo("Local que recebe", &mut estado.local_sel)
-                    .opcoes(ops_local.clone())
-                    .mostrar(ui);
-                ui.add_space(Espaco::E8);
-                if ui.add(Botao::primario("Confirmar entrada")).clicked() {
-                    confirmar(motor, sessao, estado, n.nota);
+                ui.add(Rotulo::titulo_secao("Itens e casamento"));
+                ui.add_space(Espaco::E4);
+                let mut vincular: Option<Id> = None;
+                for it in estado.itens_nota.clone() {
+                    ui.horizontal(|ui| {
+                        ui.add(Rotulo::interface(format!(
+                            "{} × {}",
+                            it.quantidade, it.descricao_fornecedor
+                        )));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.add(Rotulo::campo(match it.estado_casamento {
+                                EstadoCasamento::Casado => "casado",
+                                EstadoCasamento::SugestaoForte => "sugestão",
+                                EstadoCasamento::NaoCasado => "não casado",
+                            }));
+                        });
+                    });
+                    if !matches!(it.estado_casamento, EstadoCasamento::Casado) {
+                        ui.horizontal(|ui| {
+                            let sel = estado.vinc_produto.entry(it.id).or_default();
+                            SeletorOpcao::novo("", sel)
+                                .opcoes(ops_prod.clone())
+                                .placeholder("casar com produto…")
+                                .mostrar(ui);
+                            if ui.add(Botao::fantasma("vincular")).clicked() {
+                                vincular = Some(it.id);
+                            }
+                        });
+                    }
+                    ui.add_space(Espaco::E4);
                 }
-            }
-        },
-        |ui, estado| {
-            if ui.add(Botao::secundario("Fechar")).clicked() {
-                estado.dlg = Dlg::Fechado;
-            }
-        },
-    );
+                if let Some(item_nota) = vincular {
+                    vincular_item(motor, sessao, estado, n.nota, item_nota);
+                }
+
+                if matches!(n.estado, EstadoNotaEntrada::Conferida) {
+                    ui.add_space(Espaco::E12);
+                    ui.separator();
+                    ui.add_space(Espaco::E12);
+                    ui.add(Rotulo::titulo_secao("Confirmar entrada"));
+                    ui.add_space(Espaco::E8);
+                    SeletorOpcao::novo("Local que recebe", &mut estado.local_sel)
+                        .opcoes(ops_local.clone())
+                        .mostrar(ui);
+                    ui.add_space(Espaco::E8);
+                    if ui.add(Botao::primario("Confirmar entrada")).clicked() {
+                        confirmar(motor, sessao, estado, n.nota);
+                    }
+                }
+            },
+            |ui, estado| {
+                if ui.add(Botao::secundario("Fechar")).clicked() {
+                    estado.dlg = Dlg::Fechado;
+                }
+            },
+        );
     if fechar {
         estado.dlg = Dlg::Fechado;
     }
@@ -477,6 +500,10 @@ fn confirmar(motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoTelaCo
 
 fn kv(ui: &mut egui::Ui, chave: &str, valor: &str) {
     ui.add(Rotulo::campo(chave));
-    ui.add(Rotulo::interface(if valor.trim().is_empty() { "—" } else { valor }));
+    ui.add(Rotulo::interface(if valor.trim().is_empty() {
+        "—"
+    } else {
+        valor
+    }));
     ui.add_space(Espaco::E8);
 }

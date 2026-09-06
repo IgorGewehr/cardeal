@@ -6,6 +6,7 @@
 //! inteira; criar/ver um item acontece num `Dialogo` (regra de UI do projeto). Telas com UI:
 //! Ordens de Serviço e Estoque; as demais mostram `tela_em_construcao` (backend já responde).
 
+mod tela_agenda;
 mod tela_clientes;
 mod tela_compras;
 mod tela_estoque;
@@ -72,6 +73,7 @@ enum Area {
     Estoque,
     Compras,
     Os,
+    Agenda,
     Financeiro,
 }
 
@@ -83,6 +85,7 @@ impl Area {
             Self::Estoque => "estoque",
             Self::Compras => "compras",
             Self::Os => "os",
+            Self::Agenda => "agenda",
             Self::Financeiro => "financeiro",
         }
     }
@@ -93,49 +96,116 @@ impl Area {
             "clientes" => Self::Clientes,
             "compras" => Self::Compras,
             "os" => Self::Os,
+            "agenda" => Self::Agenda,
             "financeiro" => Self::Financeiro,
             _ => Self::Estoque,
         }
     }
-
 }
 
 const ITENS_PALETA: &[ItemComando] = &[
-    ItemComando { id: "vendas", rotulo: "Vendas", grupo: "Ir para" },
-    ItemComando { id: "clientes", rotulo: "Clientes", grupo: "Ir para" },
-    ItemComando { id: "estoque", rotulo: "Estoque", grupo: "Ir para" },
-    ItemComando { id: "compras", rotulo: "Compras", grupo: "Ir para" },
-    ItemComando { id: "os", rotulo: "Ordens de Serviço", grupo: "Ir para" },
-    ItemComando { id: "financeiro", rotulo: "Financeiro", grupo: "Ir para" },
-    ItemComando { id: "tema", rotulo: "Alternar tema (claro/escuro)", grupo: "Ação" },
+    ItemComando {
+        id: "vendas",
+        rotulo: "Vendas",
+        grupo: "Ir para",
+    },
+    ItemComando {
+        id: "clientes",
+        rotulo: "Clientes",
+        grupo: "Ir para",
+    },
+    ItemComando {
+        id: "estoque",
+        rotulo: "Estoque",
+        grupo: "Ir para",
+    },
+    ItemComando {
+        id: "compras",
+        rotulo: "Compras",
+        grupo: "Ir para",
+    },
+    ItemComando {
+        id: "os",
+        rotulo: "Ordens de Serviço",
+        grupo: "Ir para",
+    },
+    ItemComando {
+        id: "agenda",
+        rotulo: "Agenda",
+        grupo: "Ir para",
+    },
+    ItemComando {
+        id: "financeiro",
+        rotulo: "Financeiro",
+        grupo: "Ir para",
+    },
+    ItemComando {
+        id: "tema",
+        rotulo: "Alternar tema (claro/escuro)",
+        grupo: "Ação",
+    },
 ];
 
 const GRUPOS_SIDEBAR: &[cardeal_ui::organisms::GrupoSidebar<'static>] = &[
     cardeal_ui::organisms::GrupoSidebar {
         titulo: Some("Comercial"),
         itens: &[
-            ItemSidebar { id: "vendas", icone: Icone::Carrinho, rotulo: "Vendas", badge: None },
-            ItemSidebar { id: "clientes", icone: Icone::Pessoas, rotulo: "Clientes", badge: None },
+            ItemSidebar {
+                id: "vendas",
+                icone: Icone::Carrinho,
+                rotulo: "Vendas",
+                badge: None,
+            },
+            ItemSidebar {
+                id: "clientes",
+                icone: Icone::Pessoas,
+                rotulo: "Clientes",
+                badge: None,
+            },
         ],
     },
     cardeal_ui::organisms::GrupoSidebar {
         titulo: Some("Suprimentos"),
         itens: &[
-            ItemSidebar { id: "estoque", icone: Icone::Estoque, rotulo: "Estoque", badge: None },
-            ItemSidebar { id: "compras", icone: Icone::Nota, rotulo: "Compras", badge: None },
+            ItemSidebar {
+                id: "estoque",
+                icone: Icone::Estoque,
+                rotulo: "Estoque",
+                badge: None,
+            },
+            ItemSidebar {
+                id: "compras",
+                icone: Icone::Nota,
+                rotulo: "Compras",
+                badge: None,
+            },
         ],
     },
     cardeal_ui::organisms::GrupoSidebar {
         titulo: Some("Serviços"),
         itens: &[
-            ItemSidebar { id: "os", icone: Icone::Ferramenta, rotulo: "Ordens de Serviço", badge: None },
+            ItemSidebar {
+                id: "os",
+                icone: Icone::Ferramenta,
+                rotulo: "Ordens de Serviço",
+                badge: None,
+            },
+            ItemSidebar {
+                id: "agenda",
+                icone: Icone::Agenda,
+                rotulo: "Agenda",
+                badge: None,
+            },
         ],
     },
     cardeal_ui::organisms::GrupoSidebar {
         titulo: Some("Financeiro"),
-        itens: &[
-            ItemSidebar { id: "financeiro", icone: Icone::Dinheiro, rotulo: "Financeiro", badge: None },
-        ],
+        itens: &[ItemSidebar {
+            id: "financeiro",
+            icone: Icone::Dinheiro,
+            rotulo: "Financeiro",
+            badge: None,
+        }],
     },
 ];
 
@@ -149,6 +219,7 @@ struct EstadoAutenticado {
     financeiro: tela_financeiro::EstadoTelaFinanceiro,
     vendas: tela_vendas::EstadoTelaVendas,
     compras: tela_compras::EstadoTelaCompras,
+    agenda: tela_agenda::EstadoTelaAgenda,
 }
 
 /// O que a tela mostra agora.
@@ -249,6 +320,8 @@ impl App {
         vendas.carregar(motor, &sessao);
         let mut compras = tela_compras::EstadoTelaCompras::default();
         compras.carregar(motor, &sessao);
+        let mut agenda = tela_agenda::EstadoTelaAgenda::default();
+        agenda.carregar(motor, &sessao);
 
         self.tela = Tela::Autenticado(Box::new(EstadoAutenticado {
             sessao,
@@ -259,6 +332,7 @@ impl App {
             financeiro,
             vendas,
             compras,
+            agenda,
         }));
     }
 }
@@ -286,9 +360,11 @@ impl eframe::App for App {
         let mut acao = Acao::Nenhuma;
 
         if matches!(self.tela, Tela::Autenticado(_)) {
-            if let Some(id) = PaletaComandos::nova(ITENS_PALETA)
-                .mostrar(ctx, &mut self.paleta_aberta, &mut self.paleta_busca)
-            {
+            if let Some(id) = PaletaComandos::nova(ITENS_PALETA).mostrar(
+                ctx,
+                &mut self.paleta_aberta,
+                &mut self.paleta_busca,
+            ) {
                 acao = if id == "tema" {
                     Acao::AlternarTema
                 } else {
@@ -328,12 +404,17 @@ impl eframe::App for App {
             egui::SidePanel::left("sidebar")
                 .resizable(false)
                 .exact_width(largura)
-                .frame(egui::Frame::none().fill(self.tema.cores().superficie_2).inner_margin(Espaco::E8))
+                .frame(
+                    egui::Frame::none()
+                        .fill(self.tema.cores().superficie_2)
+                        .inner_margin(Espaco::E8),
+                )
                 .show(ctx, |ui| {
                     ui.add_space(Espaco::E8);
                     ui.horizontal(|ui| {
                         ui.add_space(Espaco::E8);
-                        let (rect, _) = ui.allocate_exact_size(egui::vec2(16.0, 16.0), egui::Sense::hover());
+                        let (rect, _) =
+                            ui.allocate_exact_size(egui::vec2(16.0, 16.0), egui::Sense::hover());
                         ui.painter().rect_filled(rect, 3.0, Rubro::R500);
                         if mostra_rotulos {
                             ui.add_space(Espaco::E8);
@@ -370,7 +451,11 @@ impl eframe::App for App {
         }
 
         egui::CentralPanel::default()
-            .frame(egui::Frame::none().fill(self.tema.cores().fundo).inner_margin(Espaco::E24))
+            .frame(
+                egui::Frame::none()
+                    .fill(self.tema.cores().fundo)
+                    .inner_margin(Espaco::E24),
+            )
             .show(ctx, |ui| match &mut self.tela {
                 Tela::Carregando => {
                     ui.centered_and_justified(|ui| {
@@ -382,7 +467,11 @@ impl eframe::App for App {
                     Cartao::novo().mostrar(ui, |ui| {
                         ui.add(Rotulo::titulo_secao("Não foi possível abrir a base"));
                         ui.add_space(Espaco::E8);
-                        ui.add(Rotulo::interface(erro.clone()).quebravel().cor(ui.cores().negativo));
+                        ui.add(
+                            Rotulo::interface(erro.clone())
+                                .quebravel()
+                                .cor(ui.cores().negativo),
+                        );
                         ui.add_space(Espaco::E16);
                         if ui.add(Botao::primario("Tentar de novo")).clicked() {
                             acao = Acao::TentarNovamente;
@@ -479,13 +568,21 @@ impl eframe::App for App {
                             tela_clientes::mostrar(ui, motor, &estado.sessao, &mut estado.clientes);
                         }
                         Area::Financeiro => {
-                            tela_financeiro::mostrar(ui, motor, &estado.sessao, &mut estado.financeiro);
+                            tela_financeiro::mostrar(
+                                ui,
+                                motor,
+                                &estado.sessao,
+                                &mut estado.financeiro,
+                            );
                         }
                         Area::Vendas => {
                             tela_vendas::mostrar(ui, motor, &estado.sessao, &mut estado.vendas);
                         }
                         Area::Compras => {
                             tela_compras::mostrar(ui, motor, &estado.sessao, &mut estado.compras);
+                        }
+                        Area::Agenda => {
+                            tela_agenda::mostrar(ui, motor, &estado.sessao, &mut estado.agenda);
                         }
                     }
                 }
@@ -512,4 +609,3 @@ impl eframe::App for App {
         }
     }
 }
-

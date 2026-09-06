@@ -85,7 +85,10 @@ impl EstadoTelaOs {
         if let Ok(c) = motor.consultar(
             sessao,
             "clientes.pessoas_por_papel.v1",
-            &PessoasPorPapel { papel: PapelCliente::Cliente, busca: None },
+            &PessoasPorPapel {
+                papel: PapelCliente::Cliente,
+                busca: None,
+            },
         ) {
             self.clientes = c;
         }
@@ -132,10 +135,16 @@ pub fn mostrar(
         ui,
         estado,
         |ui, estado| {
-            if ui.add(Botao::secundario("Recarregar").atalho("F5")).clicked() {
+            if ui
+                .add(Botao::secundario("Recarregar").atalho("F5"))
+                .clicked()
+            {
                 estado.carregar(motor, sessao);
             }
-            if ui.add(Botao::primario("+ Nova OS").atalho("Ctrl+N")).clicked() {
+            if ui
+                .add(Botao::primario("+ Nova OS").atalho("Ctrl+N"))
+                .clicked()
+            {
                 estado.dlg = Dlg::nova();
             }
         },
@@ -159,12 +168,7 @@ pub fn mostrar(
     }
 }
 
-fn lista(
-    ui: &mut egui::Ui,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
-    estado: &mut EstadoTelaOs,
-) {
+fn lista(ui: &mut egui::Ui, motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoTelaOs) {
     if estado.ordens.is_empty() {
         if EstadoVazio::novo(Icone::Ferramenta, "Nenhuma ordem em aberto.")
             .acao("Abrir a primeira OS")
@@ -181,25 +185,24 @@ fn lista(
         ColunaGrade::nova("Estado").largura(160.0),
         ColunaGrade::nova("Total").largura(120.0),
     ];
-    let clicada = Grade::nova(colunas).selecionavel(None).mostrar(
-        ui,
-        estado.ordens.len(),
-        |i, row| {
-            let os = &estado.ordens[i];
-            row.col(|ui| {
-                ui.add(Rotulo::interface(os.numero.to_string()));
+    let clicada =
+        Grade::nova(colunas)
+            .selecionavel(None)
+            .mostrar(ui, estado.ordens.len(), |i, row| {
+                let os = &estado.ordens[i];
+                row.col(|ui| {
+                    ui.add(Rotulo::interface(os.numero.to_string()));
+                });
+                row.col(|ui| {
+                    ui.add(Rotulo::interface(os.equipamento.clone()));
+                });
+                row.col(|ui| {
+                    ui.add(Rotulo::campo(os.estado.rotulo()));
+                });
+                row.col(|ui| {
+                    ui.add(ValorDinheiro::novo(os.valor_total));
+                });
             });
-            row.col(|ui| {
-                ui.add(Rotulo::interface(os.equipamento.clone()));
-            });
-            row.col(|ui| {
-                ui.add(Rotulo::campo(os.estado.rotulo()));
-            });
-            row.col(|ui| {
-                ui.add(ValorDinheiro::novo(os.valor_total));
-            });
-        },
-    );
     if let Some(i) = clicada {
         let id = estado.ordens[i].id;
         estado.abrir_detalhe(motor, sessao, id);
@@ -218,64 +221,72 @@ fn dialogo_nova(
         .map(|c| (c.pessoa, c.nome.clone()))
         .collect();
 
-    let fechar = Dialogo::nova("Nova ordem de serviço").largura(640.0).mostrar(
-        ctx,
-        estado,
-        |ui, estado| {
-            let Dlg::Nova {
-                cliente_novo,
-                cliente_sel,
-                nome,
-                cpf,
-                equipamento,
-            } = &mut estado.dlg
-            else {
-                return;
-            };
-
-            ui.horizontal(|ui| {
-                let sel_existente = if *cliente_novo {
-                    Botao::fantasma("Cliente existente")
-                } else {
-                    Botao::primario("Cliente existente")
+    let fechar = Dialogo::nova("Nova ordem de serviço")
+        .largura(640.0)
+        .mostrar(
+            ctx,
+            estado,
+            |ui, estado| {
+                let Dlg::Nova {
+                    cliente_novo,
+                    cliente_sel,
+                    nome,
+                    cpf,
+                    equipamento,
+                } = &mut estado.dlg
+                else {
+                    return;
                 };
-                if ui.add(sel_existente).clicked() {
-                    *cliente_novo = false;
-                }
-                let sel_novo = if *cliente_novo {
-                    Botao::primario("Novo cliente")
-                } else {
-                    Botao::fantasma("Novo cliente")
-                };
-                if ui.add(sel_novo).clicked() {
-                    *cliente_novo = true;
-                }
-            });
-            ui.add_space(Espaco::E12);
 
-            if *cliente_novo {
-                ui.columns(2, |c| {
-                    c[0].add(Campo::novo("Nome do cliente", nome));
-                    c[1].add(Campo::novo("CPF do cliente", cpf).mascara(Mascara::Documento).marcador("000.000.000-00"));
+                ui.horizontal(|ui| {
+                    let sel_existente = if *cliente_novo {
+                        Botao::fantasma("Cliente existente")
+                    } else {
+                        Botao::primario("Cliente existente")
+                    };
+                    if ui.add(sel_existente).clicked() {
+                        *cliente_novo = false;
+                    }
+                    let sel_novo = if *cliente_novo {
+                        Botao::primario("Novo cliente")
+                    } else {
+                        Botao::fantasma("Novo cliente")
+                    };
+                    if ui.add(sel_novo).clicked() {
+                        *cliente_novo = true;
+                    }
                 });
-            } else {
-                SeletorOpcao::novo("Cliente", cliente_sel)
-                    .opcoes(ops_cli.clone())
-                    .placeholder("Buscar cliente cadastrado…")
-                    .mostrar(ui);
-            }
-            ui.add_space(Espaco::E12);
-            ui.add(Campo::novo("Equipamento", equipamento).marcador("ex.: Furadeira Bosch GSB 13"));
-        },
-        |ui, estado| {
-            if ui.add(Botao::primario("Abrir OS")).clicked() {
-                abrir_os(motor, sessao, estado);
-            }
-            if ui.add(Botao::secundario("Cancelar")).clicked() {
-                estado.dlg = Dlg::Fechado;
-            }
-        },
-    );
+                ui.add_space(Espaco::E12);
+
+                if *cliente_novo {
+                    ui.columns(2, |c| {
+                        c[0].add(Campo::novo("Nome do cliente", nome));
+                        c[1].add(
+                            Campo::novo("CPF do cliente", cpf)
+                                .mascara(Mascara::Documento)
+                                .marcador("000.000.000-00"),
+                        );
+                    });
+                } else {
+                    SeletorOpcao::novo("Cliente", cliente_sel)
+                        .opcoes(ops_cli.clone())
+                        .placeholder("Buscar cliente cadastrado…")
+                        .mostrar(ui);
+                }
+                ui.add_space(Espaco::E12);
+                ui.add(
+                    Campo::novo("Equipamento", equipamento).marcador("ex.: Furadeira Bosch GSB 13"),
+                );
+            },
+            |ui, estado| {
+                if ui.add(Botao::primario("Abrir OS")).clicked() {
+                    abrir_os(motor, sessao, estado);
+                }
+                if ui.add(Botao::secundario("Cancelar")).clicked() {
+                    estado.dlg = Dlg::Fechado;
+                }
+            },
+        );
     if fechar {
         estado.dlg = Dlg::Fechado;
     }
@@ -398,7 +409,10 @@ fn corpo_detalhe(
     } else if matches!(os.estado, EstadoOs::Aberta) {
         ui.columns(2, |c| {
             c[0].add(Campo::novo("Problema relatado", &mut estado.laudo_problema));
-            c[1].add(Campo::novo("Diagnóstico (opcional)", &mut estado.laudo_diagnostico));
+            c[1].add(Campo::novo(
+                "Diagnóstico (opcional)",
+                &mut estado.laudo_diagnostico,
+            ));
         });
         ui.add_space(Espaco::E8);
         if ui.add(Botao::primario("Registrar laudo")).clicked() {
@@ -470,7 +484,10 @@ fn corpo_detalhe(
             c[1].add(Campo::novo("Valor", &mut estado.mao_de_obra_valor).marcador("80,00"));
         });
         ui.add_space(Espaco::E4);
-        if ui.add(Botao::secundario("+ Adicionar mão de obra")).clicked() {
+        if ui
+            .add(Botao::secundario("+ Adicionar mão de obra"))
+            .clicked()
+        {
             adicionar_mao_de_obra(motor, sessao, estado, os.id);
         }
 
@@ -509,7 +526,9 @@ fn corpo_detalhe(
                     estado,
                     os.id,
                     "os.enviar_para_aprovacao.v1",
-                    &EnviarParaAprovacao { ordem_servico: os.id },
+                    &EnviarParaAprovacao {
+                        ordem_servico: os.id,
+                    },
                 );
             }
         });
@@ -604,7 +623,10 @@ fn acoes_por_estado(
         EstadoOs::AguardandoAprovacao => {
             ui.add(Rotulo::titulo_secao("Aprovação do cliente"));
             ui.add_space(Espaco::E8);
-            ui.add(Campo::novo("Quem aprovou (nome e documento)", &mut estado.aprovador));
+            ui.add(Campo::novo(
+                "Quem aprovou (nome e documento)",
+                &mut estado.aprovador,
+            ));
             ui.add_space(Espaco::E8);
             ui.horizontal(|ui| {
                 if ui.add(Botao::primario("Aprovar")).clicked() {
@@ -627,7 +649,9 @@ fn acoes_por_estado(
                         estado,
                         os.id,
                         "os.reprovar_orcamento.v1",
-                        &ReprovarOrcamentoOs { ordem_servico: os.id },
+                        &ReprovarOrcamentoOs {
+                            ordem_servico: os.id,
+                        },
                     );
                 }
             });
@@ -640,7 +664,9 @@ fn acoes_por_estado(
                     estado,
                     os.id,
                     "os.iniciar_execucao.v1",
-                    &IniciarExecucao { ordem_servico: os.id },
+                    &IniciarExecucao {
+                        ordem_servico: os.id,
+                    },
                 );
             }
         }
@@ -657,7 +683,9 @@ fn acoes_por_estado(
                     estado,
                     os.id,
                     "os.concluir_execucao.v1",
-                    &ConcluirExecucao { ordem_servico: os.id },
+                    &ConcluirExecucao {
+                        ordem_servico: os.id,
+                    },
                 );
             }
         }
@@ -669,7 +697,9 @@ fn acoes_por_estado(
                     estado,
                     os.id,
                     "os.faturar_ordem_servico.v1",
-                    &FaturarOrdemServico { ordem_servico: os.id },
+                    &FaturarOrdemServico {
+                        ordem_servico: os.id,
+                    },
                 );
             }
         }

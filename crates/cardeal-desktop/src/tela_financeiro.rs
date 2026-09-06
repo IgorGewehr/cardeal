@@ -38,7 +38,11 @@ enum Dlg {
     #[default]
     Fechado,
     Lancar(FormLancar),
-    Baixar { indice: usize, valor: String, data: String },
+    Baixar {
+        indice: usize,
+        valor: String,
+        data: String,
+    },
 }
 
 struct FormLancar {
@@ -105,14 +109,20 @@ impl EstadoTelaFinanceiro {
         if let Ok(c) = motor.consultar(
             sessao,
             "clientes.pessoas_por_papel.v1",
-            &PessoasPorPapel { papel: Papel::Cliente, busca: None },
+            &PessoasPorPapel {
+                papel: Papel::Cliente,
+                busca: None,
+            },
         ) {
             self.clientes = c;
         }
         if let Ok(f) = motor.consultar(
             sessao,
             "clientes.pessoas_por_papel.v1",
-            &PessoasPorPapel { papel: Papel::Fornecedor, busca: None },
+            &PessoasPorPapel {
+                papel: Papel::Fornecedor,
+                busca: None,
+            },
         ) {
             self.fornecedores = f;
         }
@@ -132,7 +142,10 @@ impl EstadoTelaFinanceiro {
             | Contraparte::Socio(i)
             | Contraparte::Outro(i) => *i,
         };
-        self.nomes.get(&id).cloned().unwrap_or_else(|| "—".to_owned())
+        self.nomes
+            .get(&id)
+            .cloned()
+            .unwrap_or_else(|| "—".to_owned())
     }
 }
 
@@ -147,7 +160,10 @@ pub fn mostrar(
         ui,
         estado,
         |ui, estado| {
-            if ui.add(Botao::secundario("Recarregar").atalho("F5")).clicked() {
+            if ui
+                .add(Botao::secundario("Recarregar").atalho("F5"))
+                .clicked()
+            {
                 estado.carregar(motor, sessao);
             }
             let rot = if estado.aba.a_receber() {
@@ -164,7 +180,11 @@ pub fn mostrar(
             ui.add_space(Espaco::E16);
 
             if let Some(erro) = &estado.erro {
-                ui.add(Rotulo::interface(erro.clone()).quebravel().cor(ui.cores().negativo));
+                ui.add(
+                    Rotulo::interface(erro.clone())
+                        .quebravel()
+                        .cor(ui.cores().negativo),
+                );
                 ui.add_space(Espaco::E12);
             }
             lista(ui, estado);
@@ -218,30 +238,33 @@ fn lista(ui: &mut egui::Ui, estado: &mut EstadoTelaFinanceiro) {
         ColunaGrade::nova("Saldo").largura(130.0),
         ColunaGrade::nova("Estado").largura(110.0),
     ];
-    let clicada = Grade::nova(colunas).selecionavel(None).mostrar(
-        ui,
-        estado.parcelas.len(),
-        |i, row| {
-            let p = &estado.parcelas[i];
-            row.col(|ui| {
-                ui.add(Rotulo::interface(estado.nome_contraparte(&p.contraparte)));
+    let clicada =
+        Grade::nova(colunas)
+            .selecionavel(None)
+            .mostrar(ui, estado.parcelas.len(), |i, row| {
+                let p = &estado.parcelas[i];
+                row.col(|ui| {
+                    ui.add(Rotulo::interface(estado.nome_contraparte(&p.contraparte)));
+                });
+                row.col(|ui| {
+                    ui.add(Rotulo::interface(p.numero.to_string()));
+                });
+                row.col(|ui| {
+                    let venceu = p.vencimento < hoje;
+                    let r = Rotulo::interface(p.vencimento.to_string());
+                    ui.add(if venceu {
+                        r.cor(ui.cores().negativo)
+                    } else {
+                        r
+                    });
+                });
+                row.col(|ui| {
+                    ui.add(ValorDinheiro::novo(p.saldo()));
+                });
+                row.col(|ui| {
+                    ui.add(Rotulo::campo(format!("{:?}", p.estado)));
+                });
             });
-            row.col(|ui| {
-                ui.add(Rotulo::interface(p.numero.to_string()));
-            });
-            row.col(|ui| {
-                let venceu = p.vencimento < hoje;
-                let r = Rotulo::interface(p.vencimento.to_string());
-                ui.add(if venceu { r.cor(ui.cores().negativo) } else { r });
-            });
-            row.col(|ui| {
-                ui.add(ValorDinheiro::novo(p.saldo()));
-            });
-            row.col(|ui| {
-                ui.add(Rotulo::campo(format!("{:?}", p.estado)));
-            });
-        },
-    );
     if let Some(i) = clicada {
         estado.dlg = Dlg::Baixar {
             indice: i,
@@ -264,19 +287,32 @@ fn dialogo_lancar(
         "Lançar título a pagar"
     };
     let ops: Vec<(Id, String)> = if a_receber {
-        estado.clientes.iter().map(|p| (p.pessoa, p.nome.clone())).collect()
+        estado
+            .clientes
+            .iter()
+            .map(|p| (p.pessoa, p.nome.clone()))
+            .collect()
     } else {
-        estado.fornecedores.iter().map(|p| (p.pessoa, p.nome.clone())).collect()
+        estado
+            .fornecedores
+            .iter()
+            .map(|p| (p.pessoa, p.nome.clone()))
+            .collect()
     };
 
     let fechar = Dialogo::nova(titulo).largura(680.0).mostrar(
         ctx,
         estado,
         |ui, estado| {
-            let Dlg::Lancar(f) = &mut estado.dlg else { return };
-            SeletorOpcao::novo(if a_receber { "Cliente" } else { "Fornecedor" }, &mut f.contraparte)
-                .opcoes(ops.clone())
-                .mostrar(ui);
+            let Dlg::Lancar(f) = &mut estado.dlg else {
+                return;
+            };
+            SeletorOpcao::novo(
+                if a_receber { "Cliente" } else { "Fornecedor" },
+                &mut f.contraparte,
+            )
+            .opcoes(ops.clone())
+            .mostrar(ui);
             ui.add_space(Espaco::E12);
             ui.columns(2, |c| {
                 c[0].add(Campo::novo("Valor total", &mut f.valor).marcador("0,00"));
@@ -285,7 +321,9 @@ fn dialogo_lancar(
             ui.add_space(Espaco::E12);
             ui.columns(3, |c| {
                 c[0].add(Campo::novo("Parcelas", &mut f.parcelas));
-                c[1].add(Campo::novo("1º vencimento", &mut f.primeiro_vencimento).mascara(Mascara::Data));
+                c[1].add(
+                    Campo::novo("1º vencimento", &mut f.primeiro_vencimento).mascara(Mascara::Data),
+                );
                 c[2].add(Campo::novo("Intervalo (dias)", &mut f.intervalo));
             });
             ui.add_space(Espaco::E12);
@@ -337,6 +375,7 @@ fn lancar(motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoTelaFinan
                     primeiro_vencimento: prim,
                     intervalo_dias: intervalo,
                     observacao: obs,
+                    categoria: None,
                 },
             )
             .map(|_: mod_financeiro::TituloAReceberLancado| ())
@@ -353,6 +392,7 @@ fn lancar(motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoTelaFinan
                     primeiro_vencimento: prim,
                     intervalo_dias: intervalo,
                     observacao: obs,
+                    categoria: None,
                 },
             )
             .map(|_: mod_financeiro::TituloAPagarLancado| ())
@@ -372,7 +412,9 @@ fn dialogo_baixar(
     sessao: &SessaoLocal,
     estado: &mut EstadoTelaFinanceiro,
 ) {
-    let Dlg::Baixar { indice, .. } = estado.dlg else { return };
+    let Dlg::Baixar { indice, .. } = estado.dlg else {
+        return;
+    };
     let Some(p) = estado.parcelas.get(indice).cloned() else {
         estado.dlg = Dlg::Fechado;
         return;
@@ -387,10 +429,18 @@ fn dialogo_baixar(
             |ui, estado| {
                 ui.columns(2, |c| {
                     kv(&mut c[0], "Vencimento", &p.vencimento.to_string());
-                    kv(&mut c[1], "Valor original", &p.valor_original.formatar_com_simbolo());
+                    kv(
+                        &mut c[1],
+                        "Valor original",
+                        &p.valor_original.formatar_com_simbolo(),
+                    );
                 });
                 ui.columns(2, |c| {
-                    kv(&mut c[0], "Já baixado", &p.valor_baixado.formatar_com_simbolo());
+                    kv(
+                        &mut c[0],
+                        "Já baixado",
+                        &p.valor_baixado.formatar_com_simbolo(),
+                    );
                     kv(&mut c[1], "Saldo", &p.saldo().formatar_com_simbolo());
                 });
                 ui.add_space(Espaco::E16);
@@ -398,7 +448,9 @@ fn dialogo_baixar(
                 ui.add_space(Espaco::E12);
                 ui.add(Rotulo::titulo_secao("Dar baixa"));
                 ui.add_space(Espaco::E8);
-                let Dlg::Baixar { valor, data, .. } = &mut estado.dlg else { return };
+                let Dlg::Baixar { valor, data, .. } = &mut estado.dlg else {
+                    return;
+                };
                 ui.columns(2, |c| {
                     c[0].add(Campo::novo("Valor recebido", valor));
                     c[1].add(Campo::novo("Data", data).mascara(Mascara::Data));
@@ -424,7 +476,9 @@ fn baixar(
     estado: &mut EstadoTelaFinanceiro,
     p: &ItemTituloEmAberto,
 ) {
-    let Dlg::Baixar { valor, data, .. } = &estado.dlg else { return };
+    let Dlg::Baixar { valor, data, .. } = &estado.dlg else {
+        return;
+    };
     let (Ok(valor), Ok(data)) = (valor.parse::<Dinheiro>(), data.parse::<Data>()) else {
         estado.erro = Some("Valor (0,00) ou data (dd/mm/aaaa) inválidos.".to_owned());
         return;
@@ -434,7 +488,12 @@ fn baixar(
             .executar(
                 sessao,
                 "financeiro.baixar_recebimento.v1",
-                &BaixarRecebimento { parcela: p.parcela, valor, data, conta_destino: None },
+                &BaixarRecebimento {
+                    parcela: p.parcela,
+                    valor,
+                    data,
+                    conta_destino: None,
+                },
             )
             .map(|_: mod_financeiro::RecebimentoBaixado| ())
     } else {
@@ -442,7 +501,12 @@ fn baixar(
             .executar(
                 sessao,
                 "financeiro.baixar_pagamento.v1",
-                &BaixarPagamento { parcela: p.parcela, valor, data, conta_destino: None },
+                &BaixarPagamento {
+                    parcela: p.parcela,
+                    valor,
+                    data,
+                    conta_destino: None,
+                },
             )
             .map(|_: mod_financeiro::PagamentoBaixado| ())
     };
@@ -457,6 +521,10 @@ fn baixar(
 
 fn kv(ui: &mut egui::Ui, chave: &str, valor: &str) {
     ui.add(Rotulo::campo(chave));
-    ui.add(Rotulo::interface(if valor.trim().is_empty() { "—" } else { valor }));
+    ui.add(Rotulo::interface(if valor.trim().is_empty() {
+        "—"
+    } else {
+        valor
+    }));
     ui.add_space(Espaco::E8);
 }

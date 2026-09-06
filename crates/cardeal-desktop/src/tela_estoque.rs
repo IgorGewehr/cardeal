@@ -89,10 +89,16 @@ pub fn mostrar(
         ui,
         estado,
         |ui, estado| {
-            if ui.add(Botao::secundario("Recarregar").atalho("F5")).clicked() {
+            if ui
+                .add(Botao::secundario("Recarregar").atalho("F5"))
+                .clicked()
+            {
                 estado.carregar(motor, sessao);
             }
-            if ui.add(Botao::primario("+ Novo produto").atalho("Ctrl+N")).clicked() {
+            if ui
+                .add(Botao::primario("+ Novo produto").atalho("Ctrl+N"))
+                .clicked()
+            {
                 estado.limpar_novo();
                 estado.dlg = Dlg::Novo;
             }
@@ -136,28 +142,27 @@ fn lista(ui: &mut egui::Ui, estado: &mut EstadoTelaEstoque) {
         ColunaGrade::nova("Reservado").largura(110.0),
         ColunaGrade::nova("Custo médio").largura(120.0),
     ];
-    let clicada = Grade::nova(colunas).selecionavel(None).mostrar(
-        ui,
-        estado.produtos.len(),
-        |i, row| {
-            let p = &estado.produtos[i];
-            row.col(|ui| {
-                ui.add(Rotulo::interface(p.nome.clone()));
+    let clicada =
+        Grade::nova(colunas)
+            .selecionavel(None)
+            .mostrar(ui, estado.produtos.len(), |i, row| {
+                let p = &estado.produtos[i];
+                row.col(|ui| {
+                    ui.add(Rotulo::interface(p.nome.clone()));
+                });
+                row.col(|ui| {
+                    ui.add(Rotulo::campo(p.ncm.clone()));
+                });
+                row.col(|ui| {
+                    ui.add(Rotulo::interface(p.disponivel.to_string()));
+                });
+                row.col(|ui| {
+                    ui.add(Rotulo::interface(p.reservado.to_string()));
+                });
+                row.col(|ui| {
+                    ui.add(Rotulo::interface(p.custo_medio.to_string()));
+                });
             });
-            row.col(|ui| {
-                ui.add(Rotulo::campo(p.ncm.clone()));
-            });
-            row.col(|ui| {
-                ui.add(Rotulo::interface(p.disponivel.to_string()));
-            });
-            row.col(|ui| {
-                ui.add(Rotulo::interface(p.reservado.to_string()));
-            });
-            row.col(|ui| {
-                ui.add(Rotulo::interface(p.custo_medio.to_string()));
-            });
-        },
-    );
     if let Some(i) = clicada {
         estado.dlg = Dlg::Ver(i);
     }
@@ -194,7 +199,11 @@ fn dialogo_ver(ctx: &egui::Context, estado: &mut EstadoTelaEstoque, i: usize) {
 
 fn campo_ver(ui: &mut egui::Ui, chave: &str, valor: &str) {
     ui.add(Rotulo::campo(chave));
-    ui.add(Rotulo::interface(if valor.trim().is_empty() { "—" } else { valor }));
+    ui.add(Rotulo::interface(if valor.trim().is_empty() {
+        "—"
+    } else {
+        valor
+    }));
     ui.add_space(Espaco::E12);
 }
 
@@ -209,8 +218,7 @@ fn dialogo_novo(
         estado,
         |ui, estado| corpo_novo(ui, motor, sessao, estado),
         |ui, estado| {
-            let pronto =
-                estado.grupo_selecionado.is_some() && estado.unidade_selecionada.is_some();
+            let pronto = estado.grupo_selecionado.is_some() && estado.unidade_selecionada.is_some();
             if ui
                 .add(Botao::primario("Cadastrar produto").habilitado(pronto))
                 .clicked()
@@ -255,8 +263,11 @@ fn corpo_novo(
     });
     ui.add_space(Espaco::E8);
     ui.add(
-        Campo::novo("Código de barras (opcional)", &mut estado.produto_codigo_barras)
-            .marcador("GTIN / EAN"),
+        Campo::novo(
+            "Código de barras (opcional)",
+            &mut estado.produto_codigo_barras,
+        )
+        .marcador("GTIN / EAN"),
     );
 
     ui.add_space(Espaco::E16);
@@ -268,7 +279,9 @@ fn corpo_novo(
     ui.add_space(Espaco::E8);
     ui.columns(2, |c| {
         c[0].add(Campo::novo("Quantidade", &mut estado.estoque_inicial_qtd));
-        c[1].add(Campo::novo("Custo unitário", &mut estado.estoque_inicial_custo).marcador("90,00"));
+        c[1].add(
+            Campo::novo("Custo unitário", &mut estado.estoque_inicial_custo).marcador("90,00"),
+        );
     });
 }
 
@@ -306,8 +319,11 @@ fn bloco_grupo(
             }
         }
     } else {
-        let ops: Vec<(Id, String)> =
-            estado.grupos.iter().map(|g| (g.id, g.nome.clone())).collect();
+        let ops: Vec<(Id, String)> = estado
+            .grupos
+            .iter()
+            .map(|g| (g.id, g.nome.clone()))
+            .collect();
         SeletorOpcao::novo("Grupo", &mut estado.grupo_selecionado)
             .opcoes(ops)
             .mostrar(ui);
@@ -324,7 +340,10 @@ fn bloco_unidade(
         ui.add(Rotulo::campo("Nenhuma unidade ainda — crie uma:"));
         ui.add(Campo::novo("Sigla", &mut estado.nova_unidade_sigla).marcador("UN"));
         ui.add_space(Espaco::E8);
-        ui.add(Campo::novo("Nome da unidade", &mut estado.nova_unidade_nome));
+        ui.add(Campo::novo(
+            "Nome da unidade",
+            &mut estado.nova_unidade_nome,
+        ));
         ui.add_space(Espaco::E8);
         if ui.add(Botao::secundario("Criar unidade")).clicked() {
             match motor.executar(
@@ -388,8 +407,11 @@ fn bloco_local(
             }
         }
     } else {
-        let ops: Vec<(Id, String)> =
-            estado.locais.iter().map(|l| (l.id, l.nome.clone())).collect();
+        let ops: Vec<(Id, String)> = estado
+            .locais
+            .iter()
+            .map(|l| (l.id, l.nome.clone()))
+            .collect();
         SeletorOpcao::novo("Local", &mut estado.local_selecionado)
             .opcoes(ops)
             .mostrar(ui);
