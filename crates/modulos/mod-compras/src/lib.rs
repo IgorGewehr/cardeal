@@ -64,7 +64,7 @@ mod preferencias;
 mod repositorio;
 
 pub use casamento::{casar, RegraCasamentoAprendida, ResultadoCasamento, LIMIAR_SUGESTAO_FORTE};
-pub use consultas::{ItemNota, NotasRecentes};
+pub use consultas::{ItemNota, ItensDaNota, NotasRecentes};
 pub use comandos::{
     confirmar_entrada_comum, importar_nota_da_sefaz, verificar_notas_na_sefaz, ConfirmarEntrada,
     DefinirPreferenciasCompras, EntradaConfirmada, ItemNotaManual, LancarNotaManual,

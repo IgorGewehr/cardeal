@@ -9,7 +9,9 @@ use cardeal_modkit::{Consulta, Ctx};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
-use crate::nota::EstadoNotaEntrada;
+use cardeal_kernel::{Preco, Quantidade};
+
+use crate::nota::{EstadoCasamento, EstadoNotaEntrada, ItemNotaEntrada};
 
 fn blob(id: Id) -> Vec<u8> {
     id.em_bytes().to_vec()
@@ -30,6 +32,14 @@ fn estado_de(s: &str) -> EstadoNotaEntrada {
         "Confirmada" => EstadoNotaEntrada::Confirmada,
         "Devolvida" => EstadoNotaEntrada::Devolvida,
         _ => EstadoNotaEntrada::AConferir,
+    }
+}
+
+fn casamento_de(s: &str) -> EstadoCasamento {
+    match s {
+        "Casado" => EstadoCasamento::Casado,
+        "SugestaoForte" => EstadoCasamento::SugestaoForte,
+        _ => EstadoCasamento::NaoCasado,
     }
 }
 
@@ -87,6 +97,46 @@ impl Consulta for NotasRecentes {
                     valor_total: Dinheiro::centavos(r.get::<_, i64>(5)?),
                     estado: estado_de(&r.get::<_, String>(6)?),
                     itens: r.get::<_, i64>(7)?.try_into().unwrap_or(0),
+                })
+            })
+            .map_err(persist)?;
+        linhas.collect::<rusqlite::Result<Vec<_>>>().map_err(persist)
+    }
+}
+
+/// Os itens de uma nota de entrada — para a tela mostrar o casamento e permitir vincular.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ItensDaNota {
+    /// A nota.
+    pub nota: Id,
+}
+
+impl Consulta for ItensDaNota {
+    type Saida = Vec<ItemNotaEntrada>;
+    const PERMISSAO: &'static str = "compras.entrada.ver";
+
+    fn executar(self, _ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        let mut stmt = conexao
+            .prepare(
+                "SELECT id, nota_entrada, produto_casado, codigo_fornecedor,
+                        descricao_fornecedor, ncm, quantidade, valor_unitario, valor_rateio,
+                        estado_casamento
+                 FROM compras_item_nota_entrada WHERE nota_entrada = ?1 ORDER BY rowid",
+            )
+            .map_err(persist)?;
+        let linhas = stmt
+            .query_map([blob(self.nota)], |r| {
+                Ok(ItemNotaEntrada {
+                    id: id_de(r.get::<_, Vec<u8>>(0)?),
+                    nota_entrada: id_de(r.get::<_, Vec<u8>>(1)?),
+                    produto_casado: r.get::<_, Option<Vec<u8>>>(2)?.map(id_de),
+                    codigo_fornecedor: r.get(3)?,
+                    descricao_fornecedor: r.get(4)?,
+                    ncm: r.get(5)?,
+                    quantidade: Quantidade::interna(r.get::<_, i64>(6)?),
+                    valor_unitario: Preco::interna(r.get::<_, i64>(7)?),
+                    valor_rateio: cardeal_kernel::Dinheiro::centavos(r.get::<_, i64>(8)?),
+                    estado_casamento: casamento_de(&r.get::<_, String>(9)?),
                 })
             })
             .map_err(persist)?;
