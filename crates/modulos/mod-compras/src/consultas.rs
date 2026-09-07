@@ -91,16 +91,16 @@ impl Consulta for NotasRecentes {
                     fornecedor: id_de(r.get::<_, Vec<u8>>(1)?),
                     numero: r.get(2)?,
                     serie: r.get(3)?,
-                    data_emissao: Data::de_dias(
-                        i32::try_from(r.get::<_, i64>(4)?).unwrap_or(0),
-                    ),
+                    data_emissao: Data::de_dias(i32::try_from(r.get::<_, i64>(4)?).unwrap_or(0)),
                     valor_total: Dinheiro::centavos(r.get::<_, i64>(5)?),
                     estado: estado_de(&r.get::<_, String>(6)?),
                     itens: r.get::<_, i64>(7)?.try_into().unwrap_or(0),
                 })
             })
             .map_err(persist)?;
-        linhas.collect::<rusqlite::Result<Vec<_>>>().map_err(persist)
+        linhas
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(persist)
     }
 }
 
@@ -140,6 +140,8 @@ impl Consulta for ItensDaNota {
                 })
             })
             .map_err(persist)?;
-        linhas.collect::<rusqlite::Result<Vec<_>>>().map_err(persist)
+        linhas
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(persist)
     }
 }

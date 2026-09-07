@@ -9,5 +9,5 @@ mod tipografia;
 
 pub use cores::{Cores, Rubro, Tema};
 pub use espacamento::{AlturaLinha, Elevacao, Espaco, Raio};
-pub use estilo::{instalar_estilo, sombra_cartao, TemaUi};
+pub use estilo::{instalar_estilo, sombra_cartao, sombra_dropdown, TemaUi};
 pub use tipografia::{instalar_fontes, Papel};

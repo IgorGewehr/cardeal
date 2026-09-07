@@ -27,6 +27,10 @@ cardeal-kernel.workspace  = true
 cardeal-ledger.workspace  = true
 cardeal-storage.workspace = true
 cardeal-modkit.workspace  = true
+cardeal-auth.workspace    = true
+mod-financeiro.workspace  = true
+mod-estoque.workspace     = true
+mod-vendas.workspace      = true
 cardeal-ui = { workspace = true, optional = true }
 egui       = { workspace = true, optional = true }
 serde.workspace     = true
@@ -38,3 +42,6 @@ tracing.workspace   = true
 [dev-dependencies]
 cardeal-testkit.workspace = true
 proptest.workspace        = true
+mod-clientes.workspace    = true
+postcard.workspace        = true
+tempfile.workspace        = true

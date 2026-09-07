@@ -208,11 +208,29 @@
 | `conta_contrapartida` | Id | sim | conta do razão a debitar/creditar |
 | `centro_custo` | Id | não | |
 | `antecedencia_geracao_dias` | Quantidade (inteiro) | sim | quando vira `Titulo` real |
+| `categoria` | Id | não | propagada para cada `Titulo` materializado — ver `CategoriaFinanceira` abaixo |
 | `ativa` | enum(`Sim`,`Nao`) | sim | |
 
 O domínio implementa `Mensal`/`Semanal`/`Anual` em `Recorrencia::ocorrencias`;
 `Personalizada` (cron) fica reservada — enumerar ocorrências dela exige um agendador que
 ainda não existe, e a chamada devolve `ErroFinanceiro::RegraDeRecorrenciaInvalida` até lá.
+
+### CategoriaFinanceira
+
+| Campo | Tipo | Obrigatório | Regra |
+|---|---|---|---|
+| `id` | Id | sim | |
+| `empresa` | Id | sim | |
+| `nome` | String | sim | "Aluguel", "Internet", "Assinatura SaaS — Cliente X" |
+| `especie` | enum(`Receber`,`Pagar`) | não | `null` serve para custo e receita |
+| `ativa` | enum(`Sim`,`Nao`) | sim | inativa some do seletor; títulos antigos mantêm o vínculo |
+
+Rótulo livre para relatório/gráfico, **fora** do plano de contas — nunca participa da
+contabilização (a conta de resultado continua resolvida por `PapelConta`, sempre). Existe só
+para alimentar agregações por categoria e mês (`TotalPorCategoriaNoPeriodo`, §6): quanto cada
+categoria de custo recorrente pesou, quanto cada categoria de receita (projeto/cliente de
+SaaS) rendeu, mês a mês — a base para acompanhar churn e receita recorrente. `Titulo.categoria`
+é opcional em qualquer lançamento, não só nos recorrentes.
 
 ### CentroCusto, FormaPagamento, CondicaoPagamento
 
@@ -267,15 +285,30 @@ stateDiagram-v2
 
 | Comando | Permissão | Risco | O que faz | Erros possíveis |
 |---|---|---|---|---|
-| `AbrirCaixa` | `financeiro.caixa.abrir` | Baixo | Cria `SessaoCaixa`, lança suprimento inicial se houver | `CaixaJaAberto`, `CaixaInativo` |
-| `RegistrarSuprimento` | `financeiro.caixa.suprimento` | Baixo | `MovimentoCaixa Suprimento`, D Caixa / C Bancos-Cofre | `CaixaFechado` |
-| `RegistrarSangria` | `financeiro.caixa.sangria` | Médio | `MovimentoCaixa Sangria`, exige motivo | `CaixaFechado`, `ValorSuperaSaldo` |
-| `FecharCaixa` | `financeiro.caixa.fechar` | Médio | Congela a sessão, pede `valor_contado` antes de mostrar o esperado, gera lançamento de quebra se houver | `CaixaJaFechado`, `SessaoDeOutroOperador` |
-| `LancarTituloAReceber` ✅ | `financeiro.receber.criar` | Baixo | Cria `Titulo` + `Parcela`(s), um lançamento `Confirmado` D Clientes a receber / C Receita por parcela | `ValorInvalido`, `NumeroDeParcelasInvalido` |
-| `LancarTituloAPagar` | `financeiro.pagar.criar` | Baixo | Espelho a pagar: D Despesa / C Fornecedores | idem |
+| `CadastrarCaixa` ✅ | `financeiro.caixa.cadastrar` | Baixo | Cadastra um caixa físico apontando para uma conta analítica **já existente** do plano | `NomeDeCaixaVazio`, `ContaDeCaixaInvalida` |
+| `AbrirCaixa` ✅ | `financeiro.caixa.abrir` | Baixo | Cria `SessaoCaixa`, lança suprimento inicial se houver | `CaixaJaAberto`, `CaixaInativo` |
+| `RegistrarSuprimento` ✅ | `financeiro.caixa.suprimento` | Baixo | `MovimentoCaixa Suprimento`, D Caixa / C Bancos-Cofre | `CaixaFechado` |
+| `RegistrarSangria` ✅ | `financeiro.caixa.sangria` | Médio | `MovimentoCaixa Sangria`, exige motivo | `CaixaFechado`, `ValorSuperaSaldoDoCaixa` |
+| `FecharCaixa` ✅ | `financeiro.caixa.fechar` | Médio | Congela a sessão, pede `valor_contado` antes de mostrar o esperado, gera lançamento de quebra se houver | `QuebraExigeMotivo` |
+| `LancarTituloAReceber` ✅ | `financeiro.receber.criar` | Baixo | Cria `Titulo` + `Parcela`(s), um lançamento `Confirmado` D Clientes a receber / C Receita por parcela; `categoria` opcional | `ValorInvalido`, `NumeroDeParcelasInvalido` |
+| `LancarTituloAPagar` ✅ | `financeiro.pagar.criar` | Baixo | Espelho a pagar: D Despesa / C Fornecedores; `categoria` opcional | idem |
 | `BaixarRecebimento` ✅ | `financeiro.receber.baixar` | Médio | Calcula juros/multa/desconto na data, cria `Baixa`, lançamento `Realizado` D Caixa/Bancos + D Descontos / C Clientes + C Receita financeira | `ParcelaNaoBaixavel`, `ValorSuperaSaldo` |
-| `BaixarPagamento` | `financeiro.pagar.baixar` | Médio | Espelho a pagar | idem |
+| `BaixarPagamento` ✅ | `financeiro.pagar.baixar` | Médio | Espelho a pagar | idem |
 
+> **Nota (2026-09-04) — decisão sobre `CadastrarCaixa`:** não estava no §5 original (a
+> primeira versão deste doc já sinalizava a lacuna). Decisão tomada: o comando **não cria**
+> a conta analítica do caixa — recebe o `Id` de uma conta já existente no plano (Ativo,
+> analítica, ativa) e só vincula. Editar o plano de contas em runtime (criar uma sub-conta
+> nova em `1.1.01` por caixa) é uma feature própria, ainda não construída; até lá, a conta é
+> escolhida entre as que já existem — a `1.1.01` do plano padrão serve para o primeiro caixa.
+> Permissão nova: `financeiro.caixa.cadastrar` (Baixo, submódulo `caixa`).
+>
+> **Nota (2026-09-04) — saldo do caixa:** `RegistrarSangria` e `FecharCaixa` não mantêm um
+> contador de saldo à parte. Ambos leem `RepositorioRazao::saldo_realizado` (soma das
+> partidas `Realizado` da conta do caixa) — a mesma fonte que qualquer relatório vai usar
+> depois. `FecharCaixa` calcula `valor_esperado` assim, sem o operador ver antes de digitar
+> `valor_contado` (fechamento cego, §11.3).
+>
 > **Nota (2026-09-03):** `LancarTitulo`/`BaixarParcela` foram divididos por espécie porque
 > `cardeal_modkit::Comando` tem uma só `PERMISSAO` const — `financeiro.receber.criar` e
 > `financeiro.pagar.criar` são autorizações distintas, e o despachante checa a permissão
@@ -285,11 +318,12 @@ stateDiagram-v2
 > A conta de resultado do título avulso a receber usa o papel `ReceitaVendas` (o único papel
 > de receita semeado por `plano_padrao` hoje); um seletor de conta de resultado no comando
 > vem depois.
-| `EstornarBaixa` | `financeiro.receber.estornar` | Alto | Estorna o lançamento `Realizado`, reabre a parcela | `BaixaJaEstornada`, `PeriodoFechado` |
-| `RenegociarTitulo` | `financeiro.receber.renegociar` | Alto | Cancela saldo em aberto, cria novo `Titulo` com novas condições | `TituloQuitado` |
-| `CriarRecorrencia` | `financeiro.recorrencia.criar` | Baixo | Grava a regra; não gera título imediatamente | `RegraInvalida` |
-| `MaterializarRecorrencia` | (tarefa agendada, sem permissão de usuário) | Baixo | Gera `Titulo` real quando falta `antecedencia_geracao_dias` | — |
-| `CriarContaBancaria` | `financeiro.banco.criar` | Baixo | Cria a conta e sua conta analítica em 1.1.02 | `ContaDuplicada` |
+| `EstornarBaixa` ✅ | `financeiro.receber.estornar` | Alto | Estorna o lançamento `Realizado` (`Razao::estornar`), reabre a parcela (`Parcial` ou `Aberta` conforme sobra saldo baixado) | `BaixaJaEstornada` |
+| `RenegociarTitulo` ✅ | `financeiro.receber.renegociar` | Alto | Marca as parcelas em aberto como `Renegociada`, cria um `Titulo` novo com o saldo consolidado e as condições novas — **sem** lançamento novo (ver nota abaixo) | `SemSaldoParaRenegociar` |
+| `CriarRecorrencia` ✅ | `financeiro.recorrencia.criar` | Médio | Grava a regra (`categoria` opcional); não gera título imediatamente | `RegraDeRecorrenciaInvalida` |
+| `MaterializarRecorrencia` ✅ | (tarefa agendada, sem permissão de usuário) | Baixo | `materializar_recorrencias_pendentes` — gera `Titulo` real quando falta `antecedencia_geracao_dias`, idempotente por `(origem_id, emissao)` | — |
+| `CriarCategoria` ✅ | `financeiro.categoria.criar` | Baixo | Cria `CategoriaFinanceira` | `NomeDeCategoriaVazio` |
+| `CriarContaBancaria` ✅ | `financeiro.banco.criar` | Baixo | Abre uma conta analítica nova, filha de `1.1` (Disponível) — `1.1.05`, `1.1.06`… (`CodigoConta::proximo_filho`, novo em `cardeal-ledger`). **Decisão**: não mexe em `1.1.02 "Bancos"`, que continua sendo o destino padrão de `BaixarPagamento`/`BaixarRecebimento` sem `conta_destino` explícito; cada conta nova nasce com `papel: None` — só endereçável pelo `Id`, escolhido na tela | — |
 | `ImportarExtrato` | `financeiro.conciliacao.importar` | Baixo | Parseia OFX/CNAB240/Pix, cria `ItemExtrato` em `Pendente`, dispara casamento automático | `FormatoInvalido`, `PeriodoJaImportado` |
 | `ConciliarItem` | `financeiro.conciliacao.confirmar` | Médio | Vincula `ItemExtrato` a um `Lancamento`/`Baixa` existente ou cria um novo | `ItemJaConciliado`, `ValorDivergente` |
 | `CriarCentroCusto` | `financeiro.centro_custo.criar` | Baixo | | `CodigoDuplicado` |
@@ -297,6 +331,44 @@ stateDiagram-v2
 | `RegistrarCheque` | `financeiro.cheque.registrar` | Médio | Cria `Titulo`/`Baixa` com forma `Cheque`, estado `EmCarteira` | `ChequeDuplicado` |
 | `CompensarCheque` | `financeiro.cheque.compensar` | Médio | Lançamento D Bancos / C Cheques a receber | `ChequeJaCompensado` |
 | `DevolverCheque` | `financeiro.cheque.devolver` | Alto | Estorna a compensação, reabre o título como inadimplente | `ChequeNaoCompensado` |
+
+> **Nota (2026-09-05) — `EstornarBaixa`/`RenegociarTitulo`:** implementados com teste de
+> integração de ponta a ponta (`crates/modulos/mod-financeiro/tests/comandos.rs`). Duas
+> simplificações deliberadas em relação ao spec original: (1) não existe ainda o conceito de
+> "período fechado" no sistema, então `PeriodoFechado` não é um erro possível — fica para
+> quando houver fechamento de competência; (2) `RenegociarTitulo` **não gera lançamento
+> algum** no Razão. A receita/despesa já foi reconhecida quando o título original foi lançado
+> (um `Confirmado` por parcela em `LancarTitulo`) — renegociar só reagenda o
+> recebimento/pagamento, não é um fato gerador novo, então as parcelas do título novo nascem
+> com `lancamento: None` (o mesmo estado transitório que qualquer `ConstrutorTitulo` produz
+> antes de ser postado) e as parcelas antigas mantêm intacto o lançamento que já as
+> representava. `SemSaldoParaRenegociar` cobre tanto "sem saldo em aberto" quanto o
+> `TituloQuitado` que este spec citava — é o mesmo caso, não valeu a pena um segundo erro.
+> Ambas as permissões (`financeiro.receber.estornar`/`.renegociar`) valem para qualquer
+> espécie de título — não há um par `financeiro.pagar.estornar`/`.renegociar` ainda, e por
+> isso um papel com a permissão de receber também consegue estornar/renegociar um título a
+> pagar; corrigir isso (permissão por espécie) fica para quando tiver um caso de uso real
+> pedindo o contrário.
+
+> **Nota (2026-09-06) — `CriarRecorrencia`/`MaterializarRecorrencia`/`CategoriaFinanceira`:**
+> pedido do usuário para dar suporte a custos e receitas recorrentes (aluguel, internet,
+> assinaturas de SaaS vendidas) e a uma categoria livre para gráficos de churn/receita por
+> projeto. Duas simplificações deliberadas em relação ao §7 original: (1) não existe a
+> materialização em duas fases (`Previsto` na criação da regra, depois estornado e recriado
+> `Confirmado` no vencimento) que a tabela do §7 descrevia — `materializar_recorrencias_pendentes`
+> gera o `Titulo` já `Confirmado` direto quando entra na janela de antecedência, sem um
+> `Previsto` intermediário (mais simples, e o "Rio do Caixa" já projeta o que ainda não foi
+> materializado via `Recorrencia::ocorrencias`, então o `Previsto` não tinha um consumidor
+> real); (2) `CriarCompromisso`-style exceção explícita para forçar uma recorrência
+> conflitante não existe — não há conflito possível aqui (`Recorrencia` não reserva recurso
+> nenhum). A idempotência da materialização é garantida checando `financeiro_titulo` por
+> `(origem_modulo='financeiro_recorrencia', origem_id, emissao)` antes de cada geração — a
+> regra em si não guarda um cursor de "última ocorrência gerada". `categoria` foi adicionada a
+> **todo** lançamento de título (`LancarTituloAReceber`/`LancarTituloAPagar`/`CriarRecorrencia`),
+> não só ao recorrente — o pedido original restringia a categoria ao fluxo recorrente, mas o
+> campo é opcional e sem custo extra torná-lo disponível em qualquer lançamento, o que serve
+> melhor o objetivo final (acompanhar receita por projeto/cliente mês a mês, mesmo quando o
+> lançamento em si é avulso).
 
 ## 6. Consultas
 
@@ -312,6 +384,8 @@ stateDiagram-v2
 | `PosicaoPorCentroCusto` | `financeiro.centro_custo.ver` | Relatório de centro de custo | `razao_partida_cc(centro_custo, lancamento)` |
 | `HistoricoDoCliente` | `financeiro.receber.ver` | Ficha do cliente (aba financeira) | `financeiro_titulo(contraparte_tipo, contraparte_id)` |
 | `SessoesEmAberto` | `financeiro.caixa.ver` | "Caixa 2 aberto há 14h" no Pulso | `financeiro_sessao_caixa(estado) WHERE estado = 'Aberta'` |
+| `Categorias` ✅ | `financeiro.categoria.ver` | Seletor de categoria ao lançar título/recorrência | `financeiro_categoria(empresa, nome) WHERE ativa = 1` |
+| `TotalPorCategoriaNoPeriodo` ✅ | `financeiro.categoria.ver` | Gráfico de custo/receita por categoria e mês (churn, MRR por projeto) | agregação em memória sobre `financeiro_baixa` join `financeiro_titulo`, filtrando por `data` |
 
 ## 7. Receituário contábil
 
@@ -331,8 +405,7 @@ stateDiagram-v2
 | Pagamento de parcela, com juros/multa | Fornecedores + Despesas financeiras (5.9) | Bancos | Realizado |
 | Estorno de baixa | Clientes a receber/Fornecedores | Caixa/Bancos (invertido) | Realizado (estorno) |
 | Renegociação de título | Estorna Confirmado original | Novo `Titulo` Confirmado | Confirmado |
-| Recorrência materializada (ainda não vencida) | Ocupação/Despesa correspondente | Fornecedores | Previsto |
-| Recorrência vira título real | Estorna `Previsto` | Recria `Confirmado` | Confirmado |
+| Recorrência vira título real (janela de antecedência atingida) | Clientes a receber/Fornecedores (papel) | Conta de resultado da própria `Recorrencia.conta_contrapartida` | Confirmado |
 | Compensação de cheque recebido | Bancos | Cheques a receber (1.2.03) | Realizado |
 | Depósito de cheque (aguardando compensação) | Cheques a receber | Clientes a receber | Realizado |
 | Devolução de cheque | Clientes a receber | Cheques a receber (estorno) | Realizado (estorno) |
@@ -370,6 +443,7 @@ que o módulo financeiro precisa cobrir em `testes/receituario.rs`.
 | Chave | Descrição | Risco |
 |---|---|---|
 | `financeiro.pulso.ver` | Ver o Pulso | Baixo |
+| `financeiro.caixa.cadastrar` | Cadastrar caixa físico | Baixo |
 | `financeiro.caixa.abrir` | Abrir sessão de caixa | Baixo |
 | `financeiro.caixa.fechar` | Fechar sessão de caixa | Médio |
 | `financeiro.caixa.sangria` | Registrar sangria | Médio |
@@ -399,12 +473,15 @@ que o módulo financeiro precisa cobrir em `testes/receituario.rs`.
 | `financeiro.cheque.devolver` | Registrar devolução de cheque | Alto |
 | `financeiro.dre.ver` | Ver DRE gerencial | Médio |
 | `financeiro.recorrencia.criar` | Criar/editar recorrência | Médio |
+| `financeiro.categoria.ver` | Ver categorias e totais por categoria | Baixo |
+| `financeiro.categoria.criar` | Criar categoria | Baixo |
 
 As consultas de leitura (`financeiro.conciliacao.ver`, `financeiro.projecao.ver`,
 `financeiro.cheque.ver`) foram acrescentadas junto do manifesto (`mod-financeiro`): a §6
 já as pressupunha e toda entrada de menu precisa de uma permissão declarada. No manifesto,
 `financeiro.recorrencia.criar` exige o submódulo `projecao` — é onde a recorrência é
-editada e projetada.
+editada e projetada. `financeiro.categoria.*` não exige submódulo — categoria é um cadastro
+leve e transversal, usado tanto por títulos avulsos quanto por recorrências.
 
 ## 10. Telas
 
@@ -705,6 +782,7 @@ CREATE TABLE financeiro_titulo (
     valor_original    INTEGER NOT NULL,
     forma_cobranca    TEXT    NOT NULL CHECK (forma_cobranca IN ('Boleto','Pix','Carteira','DebitoAutomatico','Cartao')),
     centro_custo      BLOB,
+    categoria         BLOB    REFERENCES financeiro_categoria(id), -- v3, ver Nota da §5
     observacao        TEXT,
     cancelado_em      INTEGER,
     versao            INTEGER NOT NULL DEFAULT 1,
@@ -752,11 +830,22 @@ CREATE TABLE financeiro_baixa (
 ) STRICT;
 CREATE INDEX financeiro_baixa_parcela ON financeiro_baixa(parcela, data);
 
+CREATE TABLE financeiro_categoria (
+    id      BLOB PRIMARY KEY,
+    empresa BLOB    NOT NULL,
+    nome    TEXT    NOT NULL,
+    especie TEXT    CHECK (especie IN ('Receber','Pagar')), -- null serve para as duas
+    ativa   INTEGER NOT NULL DEFAULT 1 CHECK (ativa IN (0,1))
+) STRICT;
+CREATE UNIQUE INDEX financeiro_categoria_nome_ativa ON financeiro_categoria(empresa, nome) WHERE ativa = 1;
+
 CREATE TABLE financeiro_recorrencia (
     id                        BLOB PRIMARY KEY,
     empresa                   BLOB    NOT NULL,
     descricao                 TEXT    NOT NULL,
     especie                   TEXT    NOT NULL CHECK (especie IN ('Receber','Pagar')),
+    contraparte_tipo          TEXT    NOT NULL CHECK (contraparte_tipo IN ('Cliente','Fornecedor','Funcionario','Socio','Outro')), -- acrescentado no domínio, ver §3
+    contraparte_id            BLOB    NOT NULL,
     tipo_valor                TEXT    NOT NULL CHECK (tipo_valor IN ('Fixo','Indexado','Variavel')),
     valor_fixo                INTEGER,
     indice                    TEXT,
@@ -768,6 +857,7 @@ CREATE TABLE financeiro_recorrencia (
     fim                       INTEGER,
     conta_contrapartida       BLOB    NOT NULL,
     centro_custo              BLOB,
+    categoria                 BLOB    REFERENCES financeiro_categoria(id),
     antecedencia_geracao_dias INTEGER NOT NULL DEFAULT 5,
     ativa                     INTEGER NOT NULL DEFAULT 1 CHECK (ativa IN (0,1)),
     versao                    INTEGER NOT NULL DEFAULT 1

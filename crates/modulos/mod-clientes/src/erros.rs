@@ -19,6 +19,10 @@ pub enum ErroClientes {
     #[error("Documento inválido: {0}")]
     DocumentoInvalido(&'static str),
 
+    /// Já existe uma pessoa com este documento na empresa.
+    #[error("Já existe um cadastro com este documento")]
+    DocumentoDuplicado,
+
     /// Um contato (e-mail, telefone) não bate com o formato do seu tipo.
     #[error("{0}")]
     ContatoInvalido(&'static str),
@@ -67,7 +71,7 @@ impl ErroDominio for ErroClientes {
             | Self::LimiteNegativo
             | Self::LiberacaoSemMotivo => CodigoErro::ENTRADA_INVALIDA,
             Self::DocumentoInvalido(_) => CodigoErro::DOCUMENTO_INVALIDO,
-            Self::PapelJaExiste(_) => CodigoErro::DUPLICADO,
+            Self::PapelJaExiste(_) | Self::DocumentoDuplicado => CodigoErro::DUPLICADO,
             Self::PapelComPendencia(_) | Self::CreditoNaoBloqueado => CodigoErro::REGRA_VIOLADA,
             Self::PessoaAnonimizada => CodigoErro::ESTADO_INVALIDO,
         }

@@ -186,33 +186,47 @@ stateDiagram-v2
 
 | Comando | Permissão | Risco | O que faz | Erros possíveis |
 |---|---|---|---|---|
-| `CriarPessoa` | `clientes.pessoa.criar` | Baixo | Cria `Pessoa` + documento principal; dispara verificação de duplicidade | `DocumentoInvalido`, `DocumentoDuplicado` |
-| `EditarPessoa` | `clientes.pessoa.editar` | Baixo | Atualiza dados cadastrais | `VersaoDesatualizada` |
-| `AdicionarPapel` | `clientes.papel.gerenciar` | Baixo | Acrescenta papel a uma pessoa existente | `PapelJaExiste` |
-| `RemoverPapel` | `clientes.papel.gerenciar` | Médio | Desativa papel; recusa se houver título em aberto naquele papel | `PapelComPendencia` |
-| `ConsultarCadastroSefaz` | `clientes.pessoa.consultar_sefaz` | Baixo | Chama `PortaFiscal::consultar_cadastro`, sugere preenchimento | `DocumentoInvalido`, `ServicoIndisponivel` |
-| `SugerirMesclagem` | (automático, sem permissão de usuário) | Baixo | Roda no `CriarPessoa`, gera sugestão por similaridade de nome (trigrama ≥ 0,85) | — |
-| `MesclarPessoas` | `clientes.duplicidade.mesclar` | Alto | Une duas pessoas em uma, preservando o histórico das duas | `PessoaJaMesclada` |
-| `DefinirLimiteCredito` | `clientes.credito.definir_limite` | Médio | Cria/edita `LimiteCredito` | `LimiteNegativo` |
-| `BloquearCredito` | (automático, disparado por `vendas`/`financeiro` via evento) | Médio | Marca `Bloqueado`, motivo do sistema | — |
-| `LiberarCredito` | `clientes.credito.liberar` | Alto | Exige senha/PIN de supervisor; registra quem liberou e motivo | `SemPermissaoSupervisor` |
-| `VincularVendedor` | `clientes.carteira.gerenciar` | Baixo | Define a carteira do cliente | `VendedorInexistente` |
-| `VincularTabelaPreco` | `clientes.tabela_preco.vincular` | Baixo | Grava a referência opaca | — |
-| `AnonimizarPessoa` | `clientes.lgpd.anonimizar` | Crítico | Substitui nome/documento por identificadores anônimos; preserva `financeiro_titulo` | `PessoaComProcessoAtivo` |
-| `ExportarDadosDoTitular` | `clientes.lgpd.exportar` | Alto | Gera JSON com tudo que o sistema tem daquele documento | `DocumentoNaoEncontrado` |
+| `CriarPessoa` ✅ | `clientes.pessoa.criar` | Baixo | Cria `Pessoa` + documento principal; dispara verificação de duplicidade | `DocumentoInvalido`, `DocumentoDuplicado` |
+| `EditarPessoa` ✅ | `clientes.pessoa.editar` | Baixo | Atualiza dados cadastrais | `VersaoDesatualizada` |
+| `AdicionarPapel` ✅ | `clientes.papel.gerenciar` | Baixo | Acrescenta papel a uma pessoa existente | `PapelJaExiste` |
+| `RemoverPapel` | `clientes.papel.gerenciar` | Médio | Ainda não implementado | `PapelComPendencia` |
+| `ConsultarCadastroSefaz` | `clientes.pessoa.consultar_sefaz` | Baixo | Ainda não implementado (precisa de `PortaFiscal`, que o despacho ainda não injeta) | `DocumentoInvalido`, `ServicoIndisponivel` |
+| `SugerirMesclagem` | (automático, sem permissão de usuário) | Baixo | Ainda não implementado (domínio pronto: `dedup`) | — |
+| `MesclarPessoas` | `clientes.duplicidade.mesclar` | Alto | Ainda não implementado | `PessoaJaMesclada` |
+| `DefinirLimiteCredito` ✅ | `clientes.credito.definir_limite` | Médio | Cria/edita `LimiteCredito` | `LimiteNegativo` |
+| `AdicionarContato` ✅ (não estava no §5 original) | `clientes.pessoa.editar` | Baixo | Adiciona telefone/celular/e-mail/WhatsApp — sem isto não havia como ligar para o cliente | `ContatoInvalido` |
+| `AdicionarEndereco` ✅ (não estava no §5 original) | `clientes.pessoa.editar` | Baixo | Adiciona um endereço | `UfInvalida`, `CepInvalido` |
+| `BloquearCredito` | (automático, disparado por `vendas`/`financeiro` via evento) | Médio | Ainda não implementado | — |
+| `LiberarCredito` | `clientes.credito.liberar` | Alto | Ainda não implementado | `SemPermissaoSupervisor` |
+| `VincularVendedor` | `clientes.carteira.gerenciar` | Baixo | Ainda não implementado | `VendedorInexistente` |
+| `VincularTabelaPreco` | `clientes.tabela_preco.vincular` | Baixo | Ainda não implementado | — |
+| `AnonimizarPessoa` | `clientes.lgpd.anonimizar` | Crítico | Ainda não implementado (domínio pronto: `Pessoa::anonimizar`) | `PessoaComProcessoAtivo` |
+| `ExportarDadosDoTitular` | `clientes.lgpd.exportar` | Alto | Ainda não implementado | `DocumentoNaoEncontrado` |
+
+> **Nota (2026-09-05):** as linhas ✅ estão implementadas com teste de integração de ponta a
+> ponta (`crates/modulos/mod-clientes/tests/comandos.rs`, `Despachante` real contra SQLite).
+> O restante fica para quando tiver consumidor — `os`/`vendas`/`compras` só precisavam da
+> fatia mínima (criar pessoa, papel, editar, limite de crédito).
+>
+> **Nota (2026-09-06) — auditoria de produção:** `AdicionarContato`/`AdicionarEndereco`
+> nasceram de uma auditoria de prontidão para produção que encontrou uma lacuna real: os
+> tipos `Contato`/`Endereco` existiam no domínio desde o início, mas nenhum comando os
+> gravava — um cadastro de cliente era só nome + documento, sem telefone nem endereço.
+> Migração v2 (`clientes_contato`/`clientes_endereco`); `DetalhePessoa` (§6) agora traz
+> `contatos`/`enderecos` junto com documentos e limite de crédito.
 
 ## 6. Consultas
 
 | Consulta | Permissão | Uso na UI | Índice que a sustenta |
 |---|---|---|---|
 | `BuscarPessoa` | `clientes.pessoa.ver` | `Ctrl+K`, F6 do PDV, campo de busca de qualquer módulo | `clientes_pessoa_busca` (FTS por nome) + `clientes_documento(numero)` |
-| `FichaDaPessoa` | `clientes.pessoa.ver` | Tela de cadastro completa | `clientes_pessoa(id)` |
+| `DetalhePessoa` ✅ (implementa o papel de `FichaDaPessoa`) | `clientes.pessoa.ver` | Tela de cadastro completa | `clientes_pessoa(id)` — traz pessoa + documentos + contatos + endereços + limite de crédito num só retorno |
 | `PapeisDaPessoa` | `clientes.pessoa.ver` | Abas da ficha | `clientes_papel(pessoa)` |
 | `DuplicidadesSugeridas` | `clientes.duplicidade.mesclar` | Fila de conferência de cadastro | `clientes_pessoa_busca` por trigrama |
 | `LimiteDisponivel` | `clientes.credito.ver` | Selo na tela de venda/PDV | `clientes_limite_credito(pessoa)` + agregação em `financeiro_parcela` |
 | `ScoreDePagamento` | `clientes.credito.ver` | Selo "bom pagador" na ficha | `clientes_historico_credito(pessoa, data DESC)` |
 | `CarteiraDoVendedor` | `clientes.carteira.ver` | Painel do vendedor | `clientes_carteira(vendedor)` |
-| `PessoasPorPapel` | `clientes.pessoa.ver` | Listas de clientes/fornecedores | `clientes_papel(papel, ativo)` |
+| `PessoasPorPapel` ✅ | `clientes.pessoa.ver` | Listas de clientes/fornecedores, também serve busca (parâmetro `busca` opcional faz `LIKE` em nome/documento) | `clientes_papel(papel, ativo)` — `LIMIT 200`, sem `Pagina`/`Cursor` ainda |
 
 ## 7. Receituário contábil
 

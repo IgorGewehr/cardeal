@@ -220,6 +220,21 @@ impl CodigoConta {
             && self.0.len() > outro.0.len()
             && self.0.as_bytes()[outro.0.len()] == b'.'
     }
+
+    /// O próximo código filho de `self` — usado para abrir uma conta nova em runtime sob uma
+    /// sintética existente (`Conta::abrir_filha`). `ultimo_filho` é o maior código filho já
+    /// existente (`None` se `self` ainda não tem filhos): o próximo segmento é o número dele
+    /// mais um, preservando a largura (`"01"`, `"02"`… até `"99"`, depois `"100"`).
+    #[must_use]
+    pub fn proximo_filho(&self, ultimo_filho: Option<&Self>) -> Self {
+        let Some(ultimo) = ultimo_filho else {
+            return Self(format!("{}.01", self.0));
+        };
+        let ultimo_segmento = ultimo.0.rsplit('.').next().unwrap_or("00");
+        let largura = ultimo_segmento.len();
+        let numero: u64 = ultimo_segmento.parse().unwrap_or(0) + 1;
+        Self(format!("{}.{numero:0largura$}", self.0))
+    }
 }
 
 impl fmt::Display for CodigoConta {
@@ -271,6 +286,62 @@ impl Conta {
     pub const fn aceita_lancamento(&self) -> bool {
         matches!(self.tipo, TipoConta::Analitica) && self.ativa
     }
+
+    /// Abre uma conta analítica nova, filha de `pai` — o que um módulo usa para criar contas
+    /// em runtime (ex.: uma conta bancária por banco, `docs/modulos/financeiro.md` §5).
+    /// `pai` é a informação mínima já disponível via
+    /// [`PortaRazao::info_conta`](crate::porta::PortaRazao::info_conta) — pedir o registro
+    /// inteiro só para abrir uma filha seria desperdício. `natureza`, `grupo_fluxo` e `papel`
+    /// ficam a critério de quem chama (uma conta bancária nova é `Natureza::Ativo`/
+    /// `Some(GrupoFluxo::Operacional)`/`papel: None`, por exemplo — o papel `Bancos` já está
+    /// mapeado na conta padrão `1.1.02`).
+    ///
+    /// # Errors
+    /// [`ErroRazao::ContaPaiNaoESintetica`] se `pai` não agrupa contas;
+    /// [`ErroRazao::ContaPaiInativa`] se `pai` está inativa;
+    /// [`ErroRazao::CodigoNaoEhFilhoDoPai`] se `codigo` não é filho direto do código de `pai`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn abrir_filha(
+        pai_id: Id,
+        pai: &crate::porta::InfoConta,
+        codigo: CodigoConta,
+        nome: String,
+        natureza: Natureza,
+        grupo_fluxo: Option<GrupoFluxo>,
+        papel: Option<PapelConta>,
+        modulo_origem: impl Into<String>,
+    ) -> Result<Self, crate::erros::ErroRazao> {
+        if pai.tipo != TipoConta::Sintetica {
+            return Err(crate::erros::ErroRazao::ContaPaiNaoESintetica(
+                pai.codigo.clone(),
+            ));
+        }
+        if !pai.ativa {
+            return Err(crate::erros::ErroRazao::ContaPaiInativa(pai.codigo.clone()));
+        }
+        let pai_codigo = CodigoConta::novo(pai.codigo.clone());
+        if codigo.pai().as_ref() != Some(&pai_codigo) {
+            return Err(crate::erros::ErroRazao::CodigoNaoEhFilhoDoPai {
+                codigo: codigo.to_string(),
+                pai: pai.codigo.clone(),
+            });
+        }
+        Ok(Self {
+            id: Id::novo(),
+            empresa: pai.empresa,
+            nivel: codigo.nivel(),
+            codigo,
+            nome,
+            natureza,
+            tipo: TipoConta::Analitica,
+            pai: Some(pai_id),
+            grupo_fluxo,
+            papel,
+            modulo_origem: Some(modulo_origem.into()),
+            ativa: true,
+            versao: cardeal_kernel::Versao::INICIAL,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -302,5 +373,98 @@ mod testes {
                                                                        // "1.1.010" não deve ser confundida como descendente de "1.1.01" (prefixo de string
                                                                        // sem separador de segmento não conta).
         assert!(!CodigoConta::novo("1.1.010").descende_de(&CodigoConta::novo("1.1.01")));
+    }
+
+    #[test]
+    fn proximo_filho_incrementa_preservando_a_largura() {
+        let pai = CodigoConta::novo("1.1");
+        assert_eq!(pai.proximo_filho(None), CodigoConta::novo("1.1.01"));
+        assert_eq!(
+            pai.proximo_filho(Some(&CodigoConta::novo("1.1.04"))),
+            CodigoConta::novo("1.1.05")
+        );
+        assert_eq!(
+            pai.proximo_filho(Some(&CodigoConta::novo("1.1.99"))),
+            CodigoConta::novo("1.1.100")
+        );
+    }
+
+    fn info_de(codigo: &str, tipo: TipoConta, ativa: bool) -> crate::porta::InfoConta {
+        crate::porta::InfoConta {
+            empresa: Id::novo(),
+            codigo: codigo.to_string(),
+            tipo,
+            ativa,
+        }
+    }
+
+    #[test]
+    fn abrir_filha_usa_a_natureza_pedida_e_marca_o_modulo_origem() {
+        let pai_id = Id::novo();
+        let pai = info_de("1.1", TipoConta::Sintetica, true);
+        let filha = Conta::abrir_filha(
+            pai_id,
+            &pai,
+            CodigoConta::novo("1.1.05"),
+            "Nubank".to_string(),
+            Natureza::Ativo,
+            Some(GrupoFluxo::Operacional),
+            None,
+            "financeiro",
+        )
+        .unwrap();
+        assert_eq!(filha.natureza, Natureza::Ativo);
+        assert_eq!(filha.tipo, TipoConta::Analitica);
+        assert_eq!(filha.pai, Some(pai_id));
+        assert_eq!(filha.empresa, pai.empresa);
+        assert_eq!(filha.modulo_origem.as_deref(), Some("financeiro"));
+        assert!(filha.aceita_lancamento());
+    }
+
+    #[test]
+    fn abrir_filha_recusa_pai_analitica_inativa_ou_codigo_errado() {
+        let sintetica = info_de("1.1", TipoConta::Sintetica, true);
+        let analitica = info_de("1.1.01", TipoConta::Analitica, true);
+        let inativa = info_de("1.1", TipoConta::Sintetica, false);
+
+        assert!(matches!(
+            Conta::abrir_filha(
+                Id::novo(),
+                &analitica,
+                CodigoConta::novo("1.1.01.001"),
+                "x".into(),
+                Natureza::Ativo,
+                None,
+                None,
+                "financeiro"
+            ),
+            Err(crate::erros::ErroRazao::ContaPaiNaoESintetica(_))
+        ));
+        assert!(matches!(
+            Conta::abrir_filha(
+                Id::novo(),
+                &inativa,
+                CodigoConta::novo("1.1.05"),
+                "x".into(),
+                Natureza::Ativo,
+                None,
+                None,
+                "financeiro"
+            ),
+            Err(crate::erros::ErroRazao::ContaPaiInativa(_))
+        ));
+        assert!(matches!(
+            Conta::abrir_filha(
+                Id::novo(),
+                &sintetica,
+                CodigoConta::novo("1.2.05"),
+                "x".into(),
+                Natureza::Ativo,
+                None,
+                None,
+                "financeiro"
+            ),
+            Err(crate::erros::ErroRazao::CodigoNaoEhFilhoDoPai { .. })
+        ));
     }
 }

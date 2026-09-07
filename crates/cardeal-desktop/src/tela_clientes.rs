@@ -9,7 +9,7 @@ use cardeal_kernel::Id;
 use cardeal_modkit::Icone;
 use cardeal_ui::atoms::{Botao, Rotulo};
 use cardeal_ui::molecules::{Campo, EstadoVazio, Mascara, SeletorOpcao};
-use cardeal_ui::organisms::{ColunaGrade, Dialogo, Grade, LayoutTela};
+use cardeal_ui::organisms::{notificar, ColunaGrade, Dialogo, Grade, LayoutTela, Notificacao};
 use cardeal_ui::tokens::{Espaco, TemaUi};
 use eframe::egui;
 use mod_clientes::{
@@ -198,9 +198,10 @@ fn lista(
         } else {
             "Nenhum cliente para essa busca."
         };
-        if EstadoVazio::novo(Icone::Pessoas, msg)
-            .acao("Cadastrar cliente")
-            .mostrar(ui)
+        if estado.erro.is_none()
+            && EstadoVazio::novo(Icone::Pessoas, msg)
+                .acao("Cadastrar cliente")
+                .mostrar(ui)
         {
             estado.form = Some(Form::novo());
         }
@@ -299,7 +300,7 @@ fn dialogo(
             match modo {
                 Modo::Criar => {
                     if ui.add(Botao::primario("Cadastrar")).clicked() {
-                        criar(motor, sessao, estado);
+                        criar(ui.ctx(), motor, sessao, estado);
                     }
                     if ui.add(Botao::secundario("Cancelar")).clicked() {
                         estado.form = None;
@@ -317,7 +318,7 @@ fn dialogo(
                 }
                 Modo::Editar => {
                     if ui.add(Botao::primario("Salvar")).clicked() {
-                        salvar(motor, sessao, estado);
+                        salvar(ui.ctx(), motor, sessao, estado);
                     }
                     if ui.add(Botao::secundario("Cancelar")).clicked() {
                         if let Some(f) = estado.form.as_mut() {
@@ -342,7 +343,12 @@ fn kv(ui: &mut egui::Ui, chave: &str, valor: &str) {
     }));
 }
 
-fn criar(motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoTelaClientes) {
+fn criar(
+    ctx: &egui::Context,
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaClientes,
+) {
     let Some(f) = estado.form.as_ref() else {
         return;
     };
@@ -364,12 +370,18 @@ fn criar(motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoTelaClient
             let _: PessoaCadastrada = r;
             estado.form = None;
             estado.carregar(motor, sessao);
+            notificar(ctx, Notificacao::sucesso("Cliente cadastrado"));
         }
-        Err(e) => estado.erro = Some(e.mensagem),
+        Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
     }
 }
 
-fn salvar(motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoTelaClientes) {
+fn salvar(
+    ctx: &egui::Context,
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaClientes,
+) {
     let Some(f) = estado.form.as_ref() else {
         return;
     };
@@ -385,7 +397,8 @@ fn salvar(motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoTelaClien
             let _: PessoaEditada = r;
             estado.abrir_detalhe(motor, sessao, id);
             estado.carregar(motor, sessao);
+            notificar(ctx, Notificacao::sucesso("Cliente atualizado"));
         }
-        Err(e) => estado.erro = Some(e.mensagem),
+        Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
     }
 }

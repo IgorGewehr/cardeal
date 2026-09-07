@@ -191,24 +191,36 @@ stateDiagram-v2
 
 | Comando | Permissão | Risco | O que faz | Erros possíveis |
 |---|---|---|---|---|
-| `CriarProduto` | `estoque.produto.criar` | Baixo | Cria `Produto` + unidade padrão | `NcmInvalido` |
-| `CriarVariacao` | `estoque.produto.criar` | Baixo | Cria SKU de grade | `ProdutoSemGrade` |
-| `DefinirCodigoBarras` | `estoque.produto.editar` | Baixo | Vincula GTIN | `GtinDuplicado`, `DigitoInvalido` |
-| `CriarLocal` | `estoque.local.criar` | Baixo | | `NomeDuplicado` |
-| `RegistrarEntrada` | `estoque.movimento.entrada` | Baixo | Cria `Movimento Entrada`, recalcula custo médio | `QuantidadeInvalida` |
-| `RegistrarSaida` | `estoque.movimento.saida` | Médio | Cria `Movimento Saida`, decrementa disponível | `SaldoInsuficiente` (aviso, não bloqueia por padrão — ver regra 2) |
-| `ReservarEstoque` | (consulta síncrona de `vendas`, sem permissão de usuário direta) | Baixo | Move quantidade de disponível para reservada | `SaldoInsuficiente` |
-| `LiberarReserva` | idem | Baixo | Devolve reservada → disponível (pedido cancelado) | `ReservaInexistente` |
-| `TransferirEntreLocais` | `estoque.transferencia.criar` | Médio | Duas escritas atômicas: saída na origem, entrada (via `EmTransito`) no destino | `LocalIgual`, `SaldoInsuficiente` |
-| `ConfirmarRecebimentoTransferencia` | `estoque.transferencia.confirmar` | Baixo | Move de `EmTransito` para o local de destino final | `TransferenciaJaConfirmada` |
-| `AjustarSaldo` | `estoque.movimento.ajustar` | Alto | Ajuste manual fora de inventário, exige motivo | `MotivoObrigatorio` |
-| `RegistrarPerda` | `estoque.movimento.perda` | Médio | `Movimento Perda`, baixa lote vencido/quebrado | `LoteInexistente` |
-| `CriarInventario` | `estoque.inventario.criar` | Baixo | | — |
-| `IniciarContagem` | `estoque.inventario.contar` | Baixo | Adquire `nucleo_trava` do local | `LocalJaEmInventario` |
-| `RegistrarContagem` | `estoque.inventario.contar` | Baixo | Grava `quantidade_contada` sem revelar a esperada | — |
-| `EncerrarInventario` | `estoque.inventario.encerrar` | Alto | Gera `AjustePositivo`/`AjusteNegativo` por item divergente, libera a trava | `ContagensPendentes` |
-| `DefinirPontoPedido` | `estoque.produto.editar` | Baixo | | — |
-| `VincularPerfilTributario` | `estoque.tributario.editar` | Médio | Associa perfil a grupo de produto | — |
+| `CriarProduto` ✅ | `estoque.produto.criar` | Baixo | Cria `Produto` + unidade padrão; aceita `codigo_barras` opcional já na criação (valida dígito verificador via `Produto::com_codigo_barras`) | `NcmInvalido`, `GtinInvalido` |
+| `CriarVariacao` | `estoque.produto.criar` | Baixo | Ainda não implementado | `ProdutoSemGrade` |
+| `DefinirCodigoBarras` | `estoque.produto.editar` | Baixo | Ainda não implementado como comando de edição separado — hoje só se define na criação (`CriarProduto`); não há `EditarProduto` nesta fatia | `GtinDuplicado`, `DigitoInvalido` |
+| `CriarLocal` ✅ | `estoque.local.criar` | Baixo | | `NomeDuplicado` |
+| `RegistrarEntrada` ✅ | `estoque.movimento.entrada` | Baixo | Cria `Movimento Entrada`, recalcula custo médio | `QuantidadeInvalida` |
+| `RegistrarSaida` ✅ | `estoque.movimento.saida` | Médio | Cria `Movimento Saida`, decrementa disponível | `SaldoInsuficiente` (aviso, não bloqueia por padrão — ver regra 2) |
+| `ReservarEstoque` | (consulta síncrona de `vendas`, sem permissão de usuário direta) | Baixo | Ainda não implementado | `SaldoInsuficiente` |
+| `LiberarReserva` | idem | Baixo | Ainda não implementado | `ReservaInexistente` |
+| `TransferirEntreLocais` | `estoque.transferencia.criar` | Médio | Ainda não implementado | `LocalIgual`, `SaldoInsuficiente` |
+| `ConfirmarRecebimentoTransferencia` | `estoque.transferencia.confirmar` | Baixo | Ainda não implementado | `TransferenciaJaConfirmada` |
+| `AjustarSaldo` ✅ | `estoque.movimento.ajustar` | Alto | Corrige o disponível de um produto/local para `nova_quantidade` (erro de digitação de contagem/entrada), fora do fluxo formal de inventário; **é o único comando de movimento desta fatia que posta no razão** (`receituario::ajuste_manual`, mesma contabilização de `ajuste_de_inventario` — D Estoque/C Outras receitas na sobra, D Perdas/C Estoque na falta), porque não há nenhum outro módulo gerando a contrapartida de uma correção manual. Corrige quantidade, não custo — reabrir/corrigir só o `custo_medio` sem mexer na quantidade fica para quando existir `EditarProduto` | `MotivoObrigatorio` (motivo com menos de 10 caracteres), `QuantidadeInvalida` (`nova_quantidade` igual à atual — nada a corrigir) |
+| `RegistrarPerda` | `estoque.movimento.perda` | Médio | Ainda não implementado | `LoteInexistente` |
+| `CriarInventario` | `estoque.inventario.criar` | Baixo | Ainda não implementado como comando — o domínio (`Inventario`, contagem cega) já existe e é testado, só falta a amarração ao despacho | — |
+| `IniciarContagem` | `estoque.inventario.contar` | Baixo | Ainda não implementado (idem) | `LocalJaEmInventario` |
+| `RegistrarContagem` | `estoque.inventario.contar` | Baixo | Ainda não implementado (idem) | — |
+| `EncerrarInventario` | `estoque.inventario.encerrar` | Alto | Ainda não implementado (idem) | `ContagensPendentes` |
+| `DefinirPontoPedido` | `estoque.produto.editar` | Baixo | Ainda não implementado | — |
+| `VincularPerfilTributario` | `estoque.tributario.editar` | Médio | Ainda não implementado | — |
+
+> **Nota (2026-09-06) — auditoria de produção:** `CriarProduto` ganhou `codigo_barras`
+> opcional (`GTIN`, validado por dígito verificador) e a consulta `ProdutoPorCodigoBarras`
+> (§6) — sem isso não havia como bipar um produto no balcão. **`AjustarSaldo`** também saiu
+> do papel — reaproveita `SaldoLocal::ajustar` (já existia) e um novo
+> `receituario::ajuste_manual` (mesma contabilização de `ajuste_de_inventario`, só muda a
+> origem do lançamento) para corrigir um erro de digitação de contagem sem precisar do
+> ciclo formal de inventário inteiro. `CriarInventario` e o resto do ciclo de **contagem
+> cega** continuam sem comando (o domínio `Inventario` já existe e é testado desde antes) —
+> ficou de fora desta rodada por ser uma peça maior (múltiplos itens, trava de local via
+> `nucleo_trava`, fluxo de várias etapas); o `AjustarSaldo` cobre o caso do dia a dia (um
+> item, um erro, corrige na hora).
 
 ## 6. Consultas
 

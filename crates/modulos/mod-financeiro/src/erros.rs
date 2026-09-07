@@ -85,6 +85,31 @@ pub enum ErroFinanceiro {
         /// O estado que a operação exigia.
         esperado: &'static str,
     },
+
+    /// `AbrirCaixa` pedido para um caixa que já tem uma sessão aberta.
+    #[error("Este caixa já tem uma sessão aberta")]
+    CaixaJaAberto,
+
+    /// `AbrirCaixa` pedido para um caixa marcado como inativo.
+    #[error("Este caixa está inativo")]
+    CaixaInativo,
+
+    /// Um `CadastrarCaixa` apontou para uma conta que não serve de conta de caixa: de outra
+    /// empresa, sintética (agrupadora) ou inativa.
+    #[error("A conta informada não pode representar um caixa")]
+    ContaDeCaixaInvalida,
+
+    /// `CadastrarCaixa` com nome vazio.
+    #[error("O caixa precisa de um nome")]
+    NomeDeCaixaVazio,
+
+    /// `EstornarBaixa` pedido sobre uma baixa que já foi estornada antes.
+    #[error("Esta baixa já foi estornada")]
+    BaixaJaEstornada,
+
+    /// `CriarCategoria` com nome vazio.
+    #[error("A categoria precisa de um nome")]
+    NomeDeCategoriaVazio,
 }
 
 impl ErroDominio for ErroFinanceiro {
@@ -94,15 +119,20 @@ impl ErroDominio for ErroFinanceiro {
             | Self::NumeroDeParcelasInvalido(_)
             | Self::TaxaDeJurosAusente(_)
             | Self::RegraDeRecorrenciaInvalida(_)
+            | Self::ContaDeCaixaInvalida
+            | Self::NomeDeCaixaVazio
+            | Self::NomeDeCategoriaVazio
             | Self::BaixaZerada => CodigoErro::ENTRADA_INVALIDA,
             Self::ParcelaDeOutroTitulo
             | Self::SemSaldoParaRenegociar
             | Self::ValorSuperaSaldo { .. }
             | Self::QuebraExigeMotivo { .. }
+            | Self::CaixaInativo
             | Self::ValorSuperaSaldoDoCaixa { .. } => CodigoErro::REGRA_VIOLADA,
-            Self::ParcelaNaoBaixavel(_) | Self::EstadoDeSessaoInvalido { .. } => {
-                CodigoErro::ESTADO_INVALIDO
-            }
+            Self::ParcelaNaoBaixavel(_)
+            | Self::EstadoDeSessaoInvalido { .. }
+            | Self::CaixaJaAberto
+            | Self::BaixaJaEstornada => CodigoErro::ESTADO_INVALIDO,
             Self::CaixaFechado => CodigoErro::CAIXA_FECHADO,
         }
     }

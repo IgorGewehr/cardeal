@@ -26,6 +26,9 @@ pub struct Produto {
     pub ncm: String,
     /// CEST (quando o NCM exige ST).
     pub cest: Option<String>,
+    /// Código de barras (GTIN — EAN-8/12/13/14), validado por dígito verificador. `None`
+    /// para produtos sem código impresso (peça avulsa, serviço).
+    pub codigo_barras: Option<String>,
     /// Se o saldo vive em [`Variacao`] (grade cor/tamanho).
     pub controla_grade: bool,
     /// Se o produto é rastreado por lote.
@@ -73,6 +76,7 @@ impl Produto {
             nome,
             ncm,
             cest: None,
+            codigo_barras: None,
             controla_grade: false,
             controla_lote: false,
             controla_validade: false,
@@ -106,6 +110,15 @@ impl Produto {
     #[must_use]
     pub fn abaixo_do_ponto(&self, disponivel: Quantidade) -> bool {
         self.ponto_pedido.is_some_and(|pp| disponivel < pp)
+    }
+
+    /// Define o código de barras, validando o dígito verificador.
+    ///
+    /// # Errors
+    /// [`ErroEstoque::GtinComprimento`], [`ErroEstoque::GtinInvalido`].
+    pub fn com_codigo_barras(mut self, gtin: &str) -> Result<Self, ErroEstoque> {
+        self.codigo_barras = Some(validar_gtin(gtin)?);
+        Ok(self)
     }
 }
 
@@ -289,6 +302,16 @@ mod testes {
             ErroEstoque::ValidadeSemLote
         );
         assert!(produto().com_rastreabilidade(true, true).is_ok());
+    }
+
+    #[test]
+    fn codigo_de_barras_valida_e_normaliza() {
+        let p = produto().com_codigo_barras("789 4900 011517").unwrap();
+        assert_eq!(p.codigo_barras.as_deref(), Some("7894900011517"));
+        assert_eq!(
+            produto().com_codigo_barras("7894900011518").unwrap_err(),
+            ErroEstoque::GtinInvalido
+        );
     }
 
     #[test]

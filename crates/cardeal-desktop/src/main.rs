@@ -12,6 +12,8 @@ mod tela_compras;
 mod tela_estoque;
 mod tela_financeiro;
 mod tela_os;
+mod tela_pdv;
+mod tela_settings;
 mod tela_vendas;
 
 use std::path::PathBuf;
@@ -20,7 +22,9 @@ use cardeal_cliente::{MotorLocal, SessaoLocal};
 use cardeal_modkit::{Icone, Modulo, PedidoAtivacao};
 use cardeal_ui::atoms::{Botao, Rotulo};
 use cardeal_ui::molecules::Campo;
-use cardeal_ui::organisms::{Cartao, ItemComando, ItemSidebar, PaletaComandos, Sidebar};
+use cardeal_ui::organisms::{
+    Cartao, ItemComando, ItemSidebar, Notificacoes, PaletaComandos, Sidebar,
+};
 use cardeal_ui::tokens::{instalar_estilo, instalar_fontes, Espaco, Rubro, Tema, TemaUi};
 use eframe::egui;
 
@@ -40,18 +44,25 @@ fn modulos() -> Vec<&'static dyn Modulo> {
         &mod_vendas::ModuloVendas,
         &mod_os::ModuloOs,
         &mod_agenda::ModuloAgenda,
+        &mod_pdv::ModuloPdv,
     ]
 }
 
+/// Liga todos os módulos do desktop **e todos os seus submódulos** — as telas usam
+/// funcionalidade de submódulos não-essenciais (contas a pagar, contas bancárias, fluxo,
+/// recurso de agenda, laudo de OS, limite de crédito...) e sem isso as permissões
+/// correspondentes nem entram no catálogo, travando o admin com "Sem permissão para ...".
 fn pedido_ativacao() -> PedidoAtivacao {
-    PedidoAtivacao::nova()
-        .com_modulo("financeiro")
-        .com_modulo("clientes")
-        .com_modulo("estoque")
-        .com_modulo("compras")
-        .com_modulo("vendas")
-        .com_modulo("os")
-        .com_modulo("agenda")
+    let mut pedido = PedidoAtivacao::nova();
+    for m in modulos() {
+        let manifesto = m.manifesto();
+        let id = manifesto.id.como_str();
+        pedido = pedido.com_modulo(id);
+        for sub in manifesto.submodulos {
+            pedido = pedido.com_submodulo(id, sub.id);
+        }
+    }
+    pedido
 }
 
 /// Ícone da janela — quadrado `rubro-500` com cantos arredondados, gerado em código
@@ -83,6 +94,38 @@ fn icone_janela() -> egui::IconData {
     egui::IconData { rgba, width: L as u32, height: L as u32 }
 }
 
+/// Um botão-chevron (‹ / ›) desenhado à mão — recolher/expandir a sidebar. `aponta_esquerda`
+/// = a sidebar está expandida (a seta convida a recolher).
+fn chevron(ui: &mut egui::Ui, aponta_esquerda: bool, cor: egui::Color32) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(28.0, 28.0), egui::Sense::click());
+    if ui.is_rect_visible(rect) {
+        if resp.hovered() {
+            ui.painter()
+                .rect_filled(rect, 6.0, ui.style().visuals.widgets.hovered.bg_fill);
+        }
+        let c = rect.center();
+        let (dx, dy) = (3.5_f32, 5.0_f32);
+        let (perto, longe) = if aponta_esquerda {
+            (c.x + dx / 2.0, c.x - dx / 2.0)
+        } else {
+            (c.x - dx / 2.0, c.x + dx / 2.0)
+        };
+        let traco = egui::Stroke::new(2.0_f32, cor);
+        ui.painter().line_segment(
+            [egui::pos2(perto, c.y - dy), egui::pos2(longe, c.y)],
+            traco,
+        );
+        ui.painter().line_segment(
+            [egui::pos2(longe, c.y), egui::pos2(perto, c.y + dy)],
+            traco,
+        );
+    }
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    resp
+}
+
 fn main() -> eframe::Result<()> {
     tracing_subscriber::fmt::init();
     let opcoes = eframe::NativeOptions {
@@ -107,6 +150,7 @@ fn main() -> eframe::Result<()> {
 /// A área selecionada na sidebar, quando autenticado.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Area {
+    Pdv,
     Vendas,
     Clientes,
     Estoque,
@@ -114,11 +158,13 @@ enum Area {
     Os,
     Agenda,
     Financeiro,
+    Configuracoes,
 }
 
 impl Area {
     const fn id(self) -> &'static str {
         match self {
+            Self::Pdv => "pdv",
             Self::Vendas => "vendas",
             Self::Clientes => "clientes",
             Self::Estoque => "estoque",
@@ -126,23 +172,31 @@ impl Area {
             Self::Os => "os",
             Self::Agenda => "agenda",
             Self::Financeiro => "financeiro",
+            Self::Configuracoes => "configuracoes",
         }
     }
 
     fn de_id(id: &str) -> Self {
         match id {
+            "pdv" => Self::Pdv,
             "vendas" => Self::Vendas,
             "clientes" => Self::Clientes,
             "compras" => Self::Compras,
             "os" => Self::Os,
             "agenda" => Self::Agenda,
             "financeiro" => Self::Financeiro,
+            "configuracoes" => Self::Configuracoes,
             _ => Self::Estoque,
         }
     }
 }
 
 const ITENS_PALETA: &[ItemComando] = &[
+    ItemComando {
+        id: "pdv",
+        rotulo: "PDV — Frente de caixa",
+        grupo: "Ir para",
+    },
     ItemComando {
         id: "vendas",
         rotulo: "Vendas",
@@ -189,6 +243,12 @@ const GRUPOS_SIDEBAR: &[cardeal_ui::organisms::GrupoSidebar<'static>] = &[
     cardeal_ui::organisms::GrupoSidebar {
         titulo: Some("Comercial"),
         itens: &[
+            ItemSidebar {
+                id: "pdv",
+                icone: Icone::Caixa,
+                rotulo: "PDV",
+                badge: None,
+            },
             ItemSidebar {
                 id: "vendas",
                 icone: Icone::Carrinho,
@@ -252,6 +312,8 @@ const GRUPOS_SIDEBAR: &[cardeal_ui::organisms::GrupoSidebar<'static>] = &[
 struct EstadoAutenticado {
     sessao: SessaoLocal,
     area: Area,
+    pdv: tela_pdv::EstadoTelaPdv,
+    settings: tela_settings::EstadoTelaSettings,
     os: tela_os::EstadoTelaOs,
     estoque: tela_estoque::EstadoTelaEstoque,
     clientes: tela_clientes::EstadoTelaClientes,
@@ -259,6 +321,24 @@ struct EstadoAutenticado {
     vendas: tela_vendas::EstadoTelaVendas,
     compras: tela_compras::EstadoTelaCompras,
     agenda: tela_agenda::EstadoTelaAgenda,
+}
+
+impl EstadoAutenticado {
+    /// Recarrega a área ativa — F5, e o ponto único caso outra coisa precise forçar refresh.
+    fn recarregar_area(&mut self, motor: &MotorLocal) {
+        let s = &self.sessao;
+        match self.area {
+            Area::Pdv => self.pdv.carregar(motor, s),
+            Area::Configuracoes => self.settings.carregar(motor, s),
+            Area::Os => self.os.carregar(motor, s),
+            Area::Estoque => self.estoque.carregar(motor, s),
+            Area::Clientes => self.clientes.carregar(motor, s),
+            Area::Financeiro => self.financeiro.carregar(motor, s),
+            Area::Vendas => self.vendas.carregar(motor, s),
+            Area::Compras => self.compras.carregar(motor, s),
+            Area::Agenda => self.agenda.carregar(motor, s),
+        }
+    }
 }
 
 /// O que a tela mostra agora.
@@ -303,12 +383,34 @@ struct App {
     tela: Tela,
 }
 
+/// Onde a preferência de tema fica gravada (ao lado da base).
+fn caminho_preferencias() -> PathBuf {
+    caminho_da_base().with_file_name("preferencias.txt")
+}
+
+/// Lê o tema salvo; `Claro` se não houver arquivo.
+fn tema_salvo() -> Tema {
+    match std::fs::read_to_string(caminho_preferencias()) {
+        Ok(s) if s.trim() == "escuro" => Tema::Escuro,
+        _ => Tema::Claro,
+    }
+}
+
+/// Grava a preferência de tema (best-effort).
+fn salvar_tema(tema: Tema) {
+    let _ = std::fs::write(
+        caminho_preferencias(),
+        if tema.e_escuro() { "escuro" } else { "claro" },
+    );
+}
+
 impl App {
     fn novo() -> Self {
+        let tema = tema_salvo();
         Self {
             motor: None,
-            tema: Tema::Claro,
-            tema_aplicado: Some(Tema::Claro),
+            tema,
+            tema_aplicado: None,
             sidebar_expandida: true,
             paleta_aberta: false,
             paleta_busca: String::new(),
@@ -361,10 +463,16 @@ impl App {
         compras.carregar(motor, &sessao);
         let mut agenda = tela_agenda::EstadoTelaAgenda::default();
         agenda.carregar(motor, &sessao);
+        let mut pdv = tela_pdv::EstadoTelaPdv::default();
+        pdv.carregar(motor, &sessao);
+        let mut settings = tela_settings::EstadoTelaSettings::default();
+        settings.carregar(motor, &sessao);
 
         self.tela = Tela::Autenticado(Box::new(EstadoAutenticado {
             sessao,
             area: Area::Os,
+            pdv,
+            settings,
             os,
             estoque,
             clientes,
@@ -383,6 +491,9 @@ impl eframe::App for App {
         }
         if self.tema_aplicado != Some(self.tema) {
             instalar_estilo(ctx, self.tema);
+            if self.tema_aplicado.is_some() {
+                salvar_tema(self.tema);
+            }
             self.tema_aplicado = Some(self.tema);
         }
 
@@ -394,6 +505,11 @@ impl eframe::App for App {
         }
         if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::K)) {
             self.paleta_aberta = !self.paleta_aberta;
+        }
+        if ctx.input(|i| i.key_pressed(egui::Key::F5)) {
+            if let (Tela::Autenticado(estado), Some(motor)) = (&mut self.tela, &self.motor) {
+                estado.recarregar_area(motor);
+            }
         }
 
         let mut acao = Acao::Nenhuma;
@@ -450,15 +566,23 @@ impl eframe::App for App {
                 )
                 .show(ctx, |ui| {
                     ui.add_space(Espaco::E8);
+                    // Topo: logo + título + chevron de recolher, tudo na mesma linha.
                     ui.horizontal(|ui| {
-                        ui.add_space(Espaco::E8);
+                        ui.add_space(Espaco::E4);
                         let (rect, _) =
-                            ui.allocate_exact_size(egui::vec2(16.0, 16.0), egui::Sense::hover());
-                        ui.painter().rect_filled(rect, 3.0, Rubro::R500);
+                            ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
+                        ui.painter().rect_filled(rect, 4.0, Rubro::R500);
                         if mostra_rotulos {
                             ui.add_space(Espaco::E8);
                             ui.add(Rotulo::titulo_secao("Cardeal"));
                         }
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if chevron(ui, self.sidebar_expandida, self.tema.cores().texto_medio)
+                                .clicked()
+                            {
+                                acao = Acao::AlternarSidebar;
+                            }
+                        });
                     });
                     ui.add_space(Espaco::E16);
 
@@ -468,22 +592,29 @@ impl eframe::App for App {
                         acao = Acao::MudarArea(Area::de_id(id));
                     }
 
+                    // Rodapé fixo: Configurações.
                     ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
                         ui.add_space(Espaco::E8);
-                        if ui
-                            .add(Botao::fantasma(if self.sidebar_expandida {
-                                "« Recolher"
-                            } else {
-                                "»"
-                            }))
-                            .clicked()
-                        {
-                            acao = Acao::AlternarSidebar;
-                        }
-                        if self.sidebar_expandida
-                            && ui.add(Botao::fantasma("Alternar tema")).clicked()
-                        {
-                            acao = Acao::AlternarTema;
+                        let sel = matches!(estado.area, Area::Configuracoes);
+                        let cor = if sel {
+                            self.tema.cores().rubro
+                        } else {
+                            self.tema.cores().texto_medio
+                        };
+                        let clic = cardeal_ui::atoms::superficie_clicavel(
+                            ui,
+                            sel,
+                            cardeal_ui::atoms::altura_navegacao(),
+                            |ui| {
+                                cardeal_ui::atoms::desenhar_icone(ui, Icone::Config, 18.0, cor);
+                                if mostra_rotulos {
+                                    ui.add_space(Espaco::E12);
+                                    ui.add(Rotulo::interface("Configurações").cor(cor));
+                                }
+                            },
+                        );
+                        if clic.clicked() {
+                            acao = Acao::MudarArea(Area::Configuracoes);
                         }
                     });
                 });
@@ -597,6 +728,18 @@ impl eframe::App for App {
                 Tela::Autenticado(estado) => {
                     let Some(motor) = &self.motor else { return };
                     match estado.area {
+                        Area::Pdv => {
+                            tela_pdv::mostrar(ui, motor, &estado.sessao, &mut estado.pdv);
+                        }
+                        Area::Configuracoes => {
+                            tela_settings::mostrar(
+                                ui,
+                                motor,
+                                &estado.sessao,
+                                &mut estado.settings,
+                                &mut self.tema,
+                            );
+                        }
                         Area::Os => {
                             tela_os::mostrar(ui, motor, &estado.sessao, &mut estado.os);
                         }
@@ -641,10 +784,17 @@ impl eframe::App for App {
             }
             Acao::LoginOk(sessao) => self.entrar(sessao),
             Acao::MudarArea(area) => {
-                if let Tela::Autenticado(estado) = &mut self.tela {
-                    estado.area = area;
+                if let (Tela::Autenticado(estado), Some(motor)) = (&mut self.tela, &self.motor) {
+                    if estado.area != area {
+                        estado.area = area;
+                        // Entrar numa área sempre traz dados frescos — sem depender de um botão.
+                        estado.recarregar_area(motor);
+                    }
                 }
             }
         }
+
+        // Toasts — por último, para ficar acima de tudo (inclusive de qualquer dialog).
+        Notificacoes::mostrar(ctx);
     }
 }

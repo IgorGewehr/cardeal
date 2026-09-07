@@ -10,7 +10,7 @@
 use cardeal_kernel::{Data, Fuso, Hora};
 use egui::{CursorIcon, Rect, Sense, Ui};
 
-use super::agenda_calendario::{AcaoAgenda, BlocoAgenda};
+use super::agenda_calendario::{mistura, AcaoAgenda, BlocoAgenda};
 use crate::tokens::{Papel, Raio, Rubro, TemaUi};
 
 /// A grade mensal.
@@ -39,29 +39,45 @@ impl<'a> AgendaMes<'a> {
         let dow = primeiro.dia_da_semana() as i32; // Domingo = 0
         let inicio = primeiro.mais_dias(-((dow + 6) % 7));
 
-        let cab = 30.0_f32;
+        let cab = 34.0_f32;
         let largura = ui.available_width().max(1.0);
         let col_w = largura / 7.0;
-        let alt_total = ui.available_height().max(420.0_f32);
-        let row_h = ((alt_total - cab) / 6.0).max(72.0);
+        let alt_total = ui.available_height().max(460.0_f32);
+        let row_h = ((alt_total - cab) / 6.0).max(88.0);
 
-        let (rect, _) = ui.allocate_exact_size(
-            egui::vec2(largura, cab + row_h * 6.0),
-            Sense::hover(),
-        );
+        let (rect, _) =
+            ui.allocate_exact_size(egui::vec2(largura, cab + row_h * 6.0), Sense::hover());
         let p = ui.painter_at(rect);
         let mut acao = AcaoAgenda::Nenhuma;
 
-        // Cabeçalho dos dias da semana.
-        for (i, nome) in ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"].iter().enumerate() {
+        let linha = mistura(cores.borda, cores.superficie, 0.35);
+
+        // ── Moldura do cartão ─────────────────────────────────────────────
+        p.rect(
+            rect,
+            Raio::CARTAO,
+            cores.superficie,
+            egui::Stroke::new(1.0_f32, cores.borda),
+        );
+
+        // ── Cabeçalho dos dias da semana ──────────────────────────────────
+        for (i, nome) in ["SEG", "TER", "QUA", "QUI", "SEX", "SÁB", "DOM"]
+            .iter()
+            .enumerate()
+        {
             p.text(
-                egui::pos2(rect.left() + col_w * i as f32 + 8.0, rect.top() + 8.0),
-                egui::Align2::LEFT_TOP,
+                egui::pos2(rect.left() + col_w * (i as f32 + 0.5), rect.top() + 12.0),
+                egui::Align2::CENTER_TOP,
                 *nome,
                 Papel::RotuloCampo.font_id(),
                 cores.texto_fraco,
             );
         }
+        p.hline(
+            rect.left()..=rect.right(),
+            rect.top() + cab,
+            egui::Stroke::new(1.0_f32, cores.borda),
+        );
 
         for semana in 0..6 {
             for dow_i in 0..7 {
@@ -73,19 +89,20 @@ impl<'a> AgendaMes<'a> {
                 let do_mes = dia.mes() == mes_atual;
                 let e_hoje = dia == hoje;
 
-                // Fundo e borda da célula.
-                p.rect_stroke(cel, 0.0, egui::Stroke::new(1.0_f32, cores.borda));
-                if !do_mes {
-                    p.rect_filled(cel, 0.0, cores.superficie_2.gamma_multiply(0.5));
+                // Fundo da célula: leve realce em hoje, esmaecimento fora do mês.
+                if e_hoje {
+                    p.rect_filled(cel, 0.0, cores.rubro_ativo.gamma_multiply(0.55));
+                } else if !do_mes {
+                    p.rect_filled(cel, 0.0, cores.superficie_2.gamma_multiply(0.35));
                 }
 
                 // Número do dia (clicável → abre a visão diária).
-                let num_rect = Rect::from_min_size(cel.min + egui::vec2(4.0, 4.0), egui::vec2(26.0, 20.0));
+                let centro_num = egui::pos2(cel.left() + 16.0, cel.top() + 16.0);
                 if e_hoje {
-                    p.circle_filled(num_rect.center() + egui::vec2(2.0, 1.0), 11.0, Rubro::R500);
+                    p.circle_filled(centro_num, 11.0, cores.rubro);
                 }
                 p.text(
-                    num_rect.center() + egui::vec2(2.0, 1.0),
+                    centro_num,
                     egui::Align2::CENTER_CENTER,
                     dia.dia().to_string(),
                     Papel::RotuloCampo.font_id(),
@@ -97,7 +114,12 @@ impl<'a> AgendaMes<'a> {
                         cores.texto_fraco
                     },
                 );
-                let num_resp = ui.interact(num_rect, ui.id().with(("mes-num", semana, dow_i)), Sense::click());
+                let num_rect = Rect::from_center_size(centro_num, egui::vec2(24.0, 22.0));
+                let num_resp = ui.interact(
+                    num_rect,
+                    ui.id().with(("mes-num", semana, dow_i)),
+                    Sense::click(),
+                );
                 if num_resp.hovered() {
                     ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
                 }
@@ -113,34 +135,40 @@ impl<'a> AgendaMes<'a> {
                     .collect();
                 do_dia.sort_by_key(|b| b.inicio.em_micros());
 
-                let pill_h = 17.0_f32;
-                let cabem = (((row_h - 28.0) / (pill_h + 2.0)).floor() as usize).max(1);
-                let mostrar_n = do_dia.len().min(if do_dia.len() > cabem { cabem - 1 } else { cabem });
+                let pill_h = 19.0_f32;
+                let topo = cel.top() + 32.0;
+                let cabem = (((row_h - 36.0) / (pill_h + 3.0)).floor() as usize).max(1);
+                let mostrar_n = if do_dia.len() > cabem {
+                    cabem - 1
+                } else {
+                    do_dia.len()
+                };
 
                 for (k, b) in do_dia.iter().take(mostrar_n).enumerate() {
-                    let py = cel.top() + 26.0 + k as f32 * (pill_h + 2.0);
+                    let py = topo + k as f32 * (pill_h + 3.0);
                     let pill = Rect::from_min_size(
-                        egui::pos2(cel.left() + 4.0, py),
-                        egui::vec2(col_w - 8.0, pill_h),
+                        egui::pos2(cel.left() + 6.0, py),
+                        egui::vec2(col_w - 12.0, pill_h),
                     );
-                    let (fill, barra) = super::agenda_calendario::cor_tag_pub(b.tag, &cores);
+                    let (fill, acc) = super::agenda_calendario::cor_tag_pub(b.tag, &cores);
                     p.rect_filled(pill, Raio::CAMPO, fill);
-                    p.rect_filled(
-                        Rect::from_min_size(pill.min, egui::vec2(2.5, pill.height())),
-                        0.0,
-                        barra,
-                    );
+                    p.circle_filled(egui::pos2(pill.left() + 9.0, pill.center().y), 3.0, acc);
                     let hora = b.inicio.hora(Fuso::BRASILIA);
                     let g = ui.painter().layout(
-                        format!("{} {}", hora.formatar(), b.titulo),
+                        format!("{}  {}", hora.formatar(), b.titulo),
                         Papel::RotuloCampo.font_id(),
-                        cores.texto_forte,
-                        (pill.width() - 8.0).max(1.0),
+                        cores.texto,
+                        (pill.width() - 24.0).max(1.0),
                     );
-                    p.galley(pill.min + egui::vec2(6.0, 2.0), g, cores.texto_forte);
+                    p.galley(
+                        egui::pos2(pill.left() + 17.0, pill.center().y - g.size().y / 2.0),
+                        g,
+                        cores.texto,
+                    );
 
                     let r = ui.interact(pill, ui.id().with(("mes-pill", b.id)), Sense::click());
                     if r.hovered() {
+                        p.rect_stroke(pill, Raio::CAMPO, egui::Stroke::new(1.0_f32, acc));
                         ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
                     }
                     if r.clicked() {
@@ -149,28 +177,67 @@ impl<'a> AgendaMes<'a> {
                 }
 
                 if do_dia.len() > mostrar_n {
-                    let py = cel.top() + 26.0 + mostrar_n as f32 * (pill_h + 2.0);
-                    p.text(
-                        egui::pos2(cel.left() + 8.0, py),
-                        egui::Align2::LEFT_TOP,
-                        format!("+ mais {}", do_dia.len() - mostrar_n),
-                        Papel::RotuloCampo.font_id(),
-                        cores.texto_medio,
+                    let py = topo + mostrar_n as f32 * (pill_h + 3.0);
+                    let etq = Rect::from_min_size(
+                        egui::pos2(cel.left() + 6.0, py),
+                        egui::vec2(col_w - 12.0, pill_h),
                     );
+                    let r = ui.interact(
+                        etq,
+                        ui.id().with(("mes-mais", semana, dow_i)),
+                        Sense::click(),
+                    );
+                    let cor = if r.hovered() {
+                        cores.texto
+                    } else {
+                        cores.texto_medio
+                    };
+                    p.text(
+                        egui::pos2(etq.left() + 11.0, etq.center().y),
+                        egui::Align2::LEFT_CENTER,
+                        format!("+{} mais", do_dia.len() - mostrar_n),
+                        Papel::RotuloCampo.font_id(),
+                        cor,
+                    );
+                    if r.hovered() {
+                        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+                    }
+                    if r.clicked() {
+                        acao = AcaoAgenda::AbrirDia(dia);
+                    }
                 }
 
                 // Clique no vazio da célula → novo compromisso às 9h.
-                let resto = Rect::from_min_max(
-                    egui::pos2(cel.left(), cel.top() + 26.0),
-                    cel.max,
+                let resto = Rect::from_min_max(egui::pos2(cel.left(), topo), cel.max);
+                let vazio = ui.interact(
+                    resto,
+                    ui.id().with(("mes-cel", semana, dow_i)),
+                    Sense::click(),
                 );
-                let vazio = ui.interact(resto, ui.id().with(("mes-cel", semana, dow_i)), Sense::click());
                 if vazio.clicked() && do_dia.len() <= mostrar_n {
                     if let Ok(hora) = Hora::de_hms(9, 0, 0) {
                         acao = AcaoAgenda::Vazio { data: dia, hora };
                     }
                 }
             }
+        }
+
+        // ── Grade: apenas as linhas internas, finas ───────────────────────
+        for c in 1..7 {
+            let x = rect.left() + col_w * c as f32;
+            p.vline(
+                x,
+                (rect.top() + cab)..=(rect.bottom() - 1.0),
+                egui::Stroke::new(1.0_f32, linha),
+            );
+        }
+        for r in 1..6 {
+            let y = rect.top() + cab + row_h * r as f32;
+            p.hline(
+                rect.left()..=rect.right(),
+                y,
+                egui::Stroke::new(1.0_f32, linha),
+            );
         }
 
         acao

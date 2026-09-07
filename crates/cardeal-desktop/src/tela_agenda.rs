@@ -12,10 +12,10 @@ use cardeal_kernel::{Data, Fuso, Hora, Id, Instante};
 use cardeal_ui::atoms::{Botao, Rotulo};
 use cardeal_ui::molecules::{Campo, Mascara, SeletorOpcao};
 use cardeal_ui::organisms::{
-    AcaoAgenda, AgendaCalendario, AgendaMes, BlocoAgenda, Dialogo, LayoutTela, ModoCalendario,
-    TagAgenda,
+    notificar, AcaoAgenda, AgendaCalendario, AgendaMes, BlocoAgenda, Dialogo, LayoutTela,
+    ModoCalendario, Notificacao, TagAgenda,
 };
-use cardeal_ui::tokens::{Espaco, TemaUi};
+use cardeal_ui::tokens::{Espaco, Raio, TemaUi};
 use eframe::egui;
 use mod_agenda::{
     CancelarCompromisso, Compromisso, CompromissosNoPeriodo, ConcluirCompromisso,
@@ -79,6 +79,7 @@ pub struct EstadoTelaAgenda {
     nomes: HashMap<Id, String>,
     base: Option<Data>,
     modo: Modo,
+    filtro_recurso: Option<Id>,
     dlg: Dlg,
     erro: Option<String>,
 }
@@ -110,7 +111,11 @@ impl EstadoTelaAgenda {
         match motor.consultar(
             sessao,
             "agenda.compromissos_no_periodo.v1",
-            &CompromissosNoPeriodo { inicio, fim },
+            &CompromissosNoPeriodo {
+                inicio,
+                fim,
+                recurso: self.filtro_recurso,
+            },
         ) {
             Ok(c) => {
                 self.ids = c.iter().map(|x| x.id.to_string()).collect();
@@ -172,9 +177,6 @@ pub fn mostrar(
         ui,
         estado,
         |ui, estado| {
-            if ui.add(Botao::secundario("Recarregar").atalho("F5")).clicked() {
-                estado.carregar(motor, sessao);
-            }
             if ui
                 .add(Botao::primario("+ Novo compromisso").atalho("Ctrl+N"))
                 .clicked()
@@ -189,8 +191,6 @@ pub fn mostrar(
                 ui.add(Rotulo::interface(e.clone()).quebravel().cor(ui.cores().negativo));
                 ui.add_space(Espaco::E8);
             }
-            resumo_hoje(ui, estado);
-            ui.add_space(Espaco::E12);
 
             let base = estado.base.unwrap_or_else(|| Data::hoje(FUSO));
             let subtitulos: Vec<String> = estado
@@ -214,15 +214,12 @@ pub fn mostrar(
                 })
                 .collect();
 
-            let acao = egui::ScrollArea::vertical()
-                .auto_shrink([false, false])
-                .show(ui, |ui| match estado.modo {
-                    Modo::Mes => AgendaMes::nova(base, &blocos).mostrar(ui),
-                    m => AgendaCalendario::nova(base, m.organism(), &blocos)
-                        .horas(7, 21)
-                        .mostrar(ui),
-                })
-                .inner;
+            let acao = match estado.modo {
+                Modo::Mes => AgendaMes::nova(base, &blocos).mostrar(ui),
+                m => AgendaCalendario::nova(base, m.organism(), &blocos)
+                    .horas(7, 21)
+                    .mostrar(ui),
+            };
 
             match acao {
                 AcaoAgenda::Nenhuma => {}
@@ -275,33 +272,70 @@ fn barra_controles(
     estado: &mut EstadoTelaAgenda,
 ) {
     let base = estado.base.unwrap_or_else(|| Data::hoje(FUSO));
+    let cores = ui.cores();
     ui.horizontal(|ui| {
-        for (m, r) in [(Modo::Dia, "Dia"), (Modo::Semana, "Semana"), (Modo::Mes, "Mês")] {
-            let b = if estado.modo == m {
-                Botao::primario(r)
-            } else {
-                Botao::fantasma(r)
-            };
-            if ui.add(b).clicked() {
-                estado.modo = m;
-                estado.carregar(motor, sessao);
-            }
-        }
-        ui.add_space(Espaco::E16);
-        if ui.add(Botao::secundario("‹")).clicked() {
+        // Controle segmentado Dia / Semana / Mês.
+        egui::Frame::none()
+            .fill(cores.superficie_2)
+            .rounding(Raio::ITEM)
+            .inner_margin(3.0)
+            .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.x = 2.0;
+                for (m, r) in [(Modo::Dia, "Dia"), (Modo::Semana, "Semana"), (Modo::Mes, "Mês")] {
+                    let b = if estado.modo == m {
+                        Botao::primario(r).pequeno()
+                    } else {
+                        Botao::fantasma(r).pequeno()
+                    };
+                    if ui.add(b).clicked() {
+                        estado.modo = m;
+                        estado.carregar(motor, sessao);
+                    }
+                }
+            });
+
+        ui.add_space(Espaco::E8);
+        if ui.add(Botao::fantasma("\u{2039}").pequeno()).clicked() {
             estado.base = Some(recuar(base, estado.modo, -1));
             estado.carregar(motor, sessao);
         }
-        if ui.add(Botao::secundario("Hoje")).clicked() {
+        if ui.add(Botao::secundario("Hoje").pequeno()).clicked() {
             estado.base = Some(Data::hoje(FUSO));
             estado.carregar(motor, sessao);
         }
-        if ui.add(Botao::secundario("›")).clicked() {
+        if ui.add(Botao::fantasma("\u{203A}").pequeno()).clicked() {
             estado.base = Some(recuar(base, estado.modo, 1));
             estado.carregar(motor, sessao);
         }
         ui.add_space(Espaco::E12);
         ui.add(Rotulo::titulo_secao(titulo_periodo(base, estado.modo)));
+
+        // Direita, na mesma linha: filtro de recurso + resumo do dia.
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let atual = estado
+                .filtro_recurso
+                .and_then(|id| estado.recursos.iter().find(|r| r.id == id))
+                .map_or_else(|| "Todos os recursos".to_owned(), |r| r.nome.clone());
+            let mut novo = estado.filtro_recurso;
+            egui::ComboBox::from_id_salt("agenda-filtro-recurso")
+                .selected_text(atual)
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut novo, None, "Todos os recursos");
+                    for r in &estado.recursos {
+                        ui.selectable_value(&mut novo, Some(r.id), r.nome.clone());
+                    }
+                });
+            if novo != estado.filtro_recurso {
+                estado.filtro_recurso = novo;
+                estado.carregar(motor, sessao);
+            }
+
+            ui.add_space(Espaco::E16);
+            let (texto, ponto) = resumo_dia_texto(estado, &cores);
+            ui.add(Rotulo::interface(texto).cor(cores.texto_medio));
+            let (rct, _) = ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
+            ui.painter().circle_filled(rct.center(), 4.0, ponto);
+        });
     });
 }
 
@@ -324,30 +358,35 @@ fn titulo_periodo(base: Data, modo: Modo) -> String {
     }
 }
 
-fn resumo_hoje(ui: &mut egui::Ui, estado: &EstadoTelaAgenda) {
+/// O texto curto de resumo do dia + a cor do ponto (rubro quando há compromisso em aberto
+/// ainda hoje). Fica na barra de controles, não numa faixa separada.
+fn resumo_dia_texto(
+    estado: &EstadoTelaAgenda,
+    cores: &cardeal_ui::tokens::Cores,
+) -> (String, egui::Color32) {
     let hoje = Data::hoje(FUSO);
     let agora = Instante::agora();
     let mut hoje_c: Vec<&Compromisso> = estado
         .compromissos
         .iter()
         .filter(|c| {
-            c.inicio.data(FUSO) == hoje
-                && !matches!(c.estado, EstadoCompromisso::Cancelado)
+            c.inicio.data(FUSO) == hoje && !matches!(c.estado, EstadoCompromisso::Cancelado)
         })
         .collect();
     hoje_c.sort_by_key(|c| c.inicio.em_micros());
     let prox = hoje_c.iter().find(|c| c.fim.em_micros() > agora.em_micros());
 
-    let t = match (hoje_c.len(), prox) {
-        (0, _) => "Nada agendado para hoje.".to_owned(),
-        (n, Some(p)) => format!(
-            "{n} compromisso(s) hoje · próximo {} — {}",
-            p.inicio.hora(FUSO).formatar(),
-            p.titulo
-        ),
-        (n, None) => format!("{n} compromisso(s) hoje · todos já passaram"),
-    };
-    ui.add(Rotulo::interface(t).cor(ui.cores().texto_medio));
+    match (hoje_c.len(), prox) {
+        (0, _) => ("Nada hoje".to_owned(), cores.texto_fraco),
+        (n, Some(p)) => {
+            let t: String = p.titulo.chars().take(22).collect();
+            (
+                format!("Hoje {n} · {} {}", p.inicio.hora(FUSO).formatar(), t),
+                cores.rubro,
+            )
+        }
+        (n, None) => (format!("Hoje {n} · encerrados"), cores.texto_fraco),
+    }
 }
 
 fn dialogo_novo(
@@ -396,7 +435,7 @@ fn dialogo_novo(
                 return;
             }
             if ui.add(Botao::primario("Agendar")).clicked() {
-                agendar(motor, sessao, estado);
+                agendar(ui.ctx(), motor, sessao, estado);
             }
             if ui.add(Botao::secundario("Cancelar")).clicked() {
                 estado.dlg = Dlg::Fechado;
@@ -408,11 +447,16 @@ fn dialogo_novo(
     }
 }
 
-fn agendar(motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoTelaAgenda) {
+fn agendar(
+    ctx: &egui::Context,
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaAgenda,
+) {
     let Dlg::Novo(f) = &estado.dlg else { return };
     let f = f.clone();
     if f.titulo.trim().is_empty() {
-        estado.erro = Some("Dê um título ao compromisso.".to_owned());
+        notificar(ctx, Notificacao::aviso("Dê um título ao compromisso."));
         return;
     }
     let (Ok(data), Some(hi), Some(hf)) = (
@@ -420,13 +464,16 @@ fn agendar(motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoTelaAgen
         parse_hora(&f.hora_ini),
         parse_hora(&f.hora_fim),
     ) else {
-        estado.erro = Some("Data (dd/mm/aaaa) ou horas (HH:MM) inválidas.".to_owned());
+        notificar(
+            ctx,
+            Notificacao::aviso("Data (dd/mm/aaaa) ou horas (HH:MM) inválidas."),
+        );
         return;
     };
     let inicio = Instante::de_data_hora(data, hi, FUSO);
     let fim = Instante::de_data_hora(data, hf, FUSO);
     if fim.em_micros() <= inicio.em_micros() {
-        estado.erro = Some("O fim tem de ser depois do início.".to_owned());
+        notificar(ctx, Notificacao::aviso("O fim tem de ser depois do início."));
         return;
     }
 
@@ -451,8 +498,9 @@ fn agendar(motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoTelaAgen
             estado.erro = None;
             estado.dlg = Dlg::Fechado;
             estado.carregar(motor, sessao);
+            notificar(ctx, Notificacao::sucesso("Compromisso criado"));
         }
-        Err(e) => estado.erro = Some(e.mensagem),
+        Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
     }
 }
 
@@ -500,8 +548,9 @@ fn dialogo_recurso(
                         Ok(_) => {
                             estado.carregar(motor, sessao);
                             estado.dlg = Dlg::Novo(form_em(estado, Data::hoje(FUSO), 9));
+                            notificar(ui.ctx(), Notificacao::sucesso("Recurso criado"));
                         }
-                        Err(e) => estado.erro = Some(e.mensagem),
+                        Err(e) => notificar(ui.ctx(), Notificacao::erro(e.mensagem)),
                     }
                 }
             }
@@ -588,23 +637,23 @@ fn acoes_estado(
     ui.horizontal(|ui| match c.estado {
         EstadoCompromisso::Agendado => {
             if ui.add(Botao::primario("Confirmar")).clicked() {
-                aplicar(motor, sessao, estado, "agenda.confirmar_compromisso.v1", &ConfirmarCompromisso { compromisso: id });
+                aplicar(ui.ctx(), motor, sessao, estado, "agenda.confirmar_compromisso.v1", &ConfirmarCompromisso { compromisso: id }, "Compromisso confirmado");
             }
             if ui.add(Botao::destrutivo("Cancelar")).clicked() {
-                aplicar(motor, sessao, estado, "agenda.cancelar_compromisso.v1", &CancelarCompromisso { compromisso: id });
+                aplicar(ui.ctx(), motor, sessao, estado, "agenda.cancelar_compromisso.v1", &CancelarCompromisso { compromisso: id }, "Compromisso cancelado");
             }
         }
         EstadoCompromisso::Confirmado => {
             if ui.add(Botao::primario("Iniciar")).clicked() {
-                aplicar(motor, sessao, estado, "agenda.iniciar_compromisso.v1", &IniciarCompromisso { compromisso: id });
+                aplicar(ui.ctx(), motor, sessao, estado, "agenda.iniciar_compromisso.v1", &IniciarCompromisso { compromisso: id }, "Compromisso iniciado");
             }
             if ui.add(Botao::destrutivo("Cancelar")).clicked() {
-                aplicar(motor, sessao, estado, "agenda.cancelar_compromisso.v1", &CancelarCompromisso { compromisso: id });
+                aplicar(ui.ctx(), motor, sessao, estado, "agenda.cancelar_compromisso.v1", &CancelarCompromisso { compromisso: id }, "Compromisso cancelado");
             }
         }
         EstadoCompromisso::EmAndamento => {
             if ui.add(Botao::primario("Concluir")).clicked() {
-                aplicar(motor, sessao, estado, "agenda.concluir_compromisso.v1", &ConcluirCompromisso { compromisso: id });
+                aplicar(ui.ctx(), motor, sessao, estado, "agenda.concluir_compromisso.v1", &ConcluirCompromisso { compromisso: id }, "Compromisso concluído");
             }
         }
         EstadoCompromisso::Concluido
@@ -616,11 +665,13 @@ fn acoes_estado(
 }
 
 fn aplicar<C: cardeal_modkit::Comando + serde::Serialize>(
+    ctx: &egui::Context,
     motor: &MotorLocal,
     sessao: &SessaoLocal,
     estado: &mut EstadoTelaAgenda,
     nome: &str,
     comando: &C,
+    sucesso: &str,
 ) where
     C::Saida: serde::de::DeserializeOwned,
 {
@@ -628,8 +679,9 @@ fn aplicar<C: cardeal_modkit::Comando + serde::Serialize>(
         Ok(_) => {
             estado.dlg = Dlg::Fechado;
             estado.carregar(motor, sessao);
+            notificar(ctx, Notificacao::sucesso(sucesso.to_owned()));
         }
-        Err(e) => estado.erro = Some(e.mensagem),
+        Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
     }
 }
 

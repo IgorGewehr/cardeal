@@ -209,6 +209,20 @@ impl Parcela {
         self.estado = plano.estado_resultante();
         self.versao = self.versao.proxima();
     }
+
+    /// Reverte uma baixa já aplicada: subtrai o `principal` daquela baixa do `valor_baixado`
+    /// e recua o estado — `Aberta` se não sobrar nada baixado, `Parcial` caso contrário.
+    /// É o inverso exato de [`Self::aplicar_baixa`]; quem chama garante que `principal` veio
+    /// de uma baixa real desta parcela (o comando `EstornarBaixa` busca isso do registro).
+    pub fn reverter_baixa(&mut self, principal: Dinheiro) {
+        self.valor_baixado = (self.valor_baixado - principal).nao_negativo();
+        self.estado = if self.valor_baixado.e_positivo() {
+            EstadoParcela::Parcial
+        } else {
+            EstadoParcela::Aberta
+        };
+        self.versao = self.versao.proxima();
+    }
 }
 
 #[cfg(test)]
@@ -315,6 +329,27 @@ mod testes {
         p.aplicar_baixa(&plano);
         assert_eq!(p.estado, EstadoParcela::Parcial);
         assert_eq!(p.valor_baixado, Dinheiro::reais(5));
+    }
+
+    #[test]
+    fn reverter_baixa_e_o_inverso_exato_de_aplicar() {
+        let mut p = parcela_de(Dinheiro::reais(100), hoje().mais_dias(20));
+        let plano = p.planejar_baixa(hoje(), Dinheiro::reais(40)).unwrap();
+        p.aplicar_baixa(&plano);
+        assert_eq!(p.estado, EstadoParcela::Parcial);
+        assert_eq!(p.valor_baixado, Dinheiro::reais(40));
+
+        p.reverter_baixa(plano.principal);
+        assert_eq!(p.estado, EstadoParcela::Aberta);
+        assert_eq!(p.valor_baixado, Dinheiro::ZERO);
+
+        // Uma baixa total revertida também volta a Aberta.
+        let plano_total = p.planejar_baixa(hoje(), Dinheiro::reais(100)).unwrap();
+        p.aplicar_baixa(&plano_total);
+        assert_eq!(p.estado, EstadoParcela::Quitada);
+        p.reverter_baixa(plano_total.principal);
+        assert_eq!(p.estado, EstadoParcela::Aberta);
+        assert_eq!(p.valor_baixado, Dinheiro::ZERO);
     }
 
     #[test]

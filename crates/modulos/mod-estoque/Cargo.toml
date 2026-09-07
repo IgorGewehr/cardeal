@@ -27,13 +27,18 @@ completo = ["saldo", "custo_medio", "lote", "validade", "inventario", "transfere
 [dependencies]
 cardeal-kernel.workspace  = true
 cardeal-ledger.workspace  = true
+cardeal-storage.workspace = true
 cardeal-modkit.workspace  = true
 cardeal-ui = { workspace = true, optional = true }
 egui       = { workspace = true, optional = true }
 serde.workspace     = true
+rusqlite.workspace  = true
 thiserror.workspace = true
 smallvec.workspace  = true
 tracing.workspace   = true
 
 [dev-dependencies]
 proptest.workspace = true
+cardeal-auth.workspace = true
+postcard.workspace = true
+tempfile.workspace = true

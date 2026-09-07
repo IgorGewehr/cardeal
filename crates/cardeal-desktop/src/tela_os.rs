@@ -9,7 +9,7 @@ use cardeal_kernel::{Dinheiro, Id, Preco, Quantidade};
 use cardeal_modkit::Icone;
 use cardeal_ui::atoms::{Botao, Rotulo, ValorDinheiro};
 use cardeal_ui::molecules::{Campo, EstadoVazio, Mascara, SeletorOpcao};
-use cardeal_ui::organisms::{ColunaGrade, Dialogo, Grade, LayoutTela};
+use cardeal_ui::organisms::{notificar, ColunaGrade, Dialogo, Grade, LayoutTela, Notificacao};
 use cardeal_ui::tokens::{Espaco, TemaUi};
 use eframe::egui;
 use mod_clientes::{
@@ -136,12 +136,6 @@ pub fn mostrar(
         estado,
         |ui, estado| {
             if ui
-                .add(Botao::secundario("Recarregar").atalho("F5"))
-                .clicked()
-            {
-                estado.carregar(motor, sessao);
-            }
-            if ui
                 .add(Botao::primario("+ Nova OS").atalho("Ctrl+N"))
                 .clicked()
             {
@@ -170,9 +164,10 @@ pub fn mostrar(
 
 fn lista(ui: &mut egui::Ui, motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoTelaOs) {
     if estado.ordens.is_empty() {
-        if EstadoVazio::novo(Icone::Ferramenta, "Nenhuma ordem em aberto.")
-            .acao("Abrir a primeira OS")
-            .mostrar(ui)
+        if estado.erro.is_none()
+            && EstadoVazio::novo(Icone::Ferramenta, "Nenhuma ordem em aberto.")
+                .acao("Abrir a primeira OS")
+                .mostrar(ui)
         {
             estado.dlg = Dlg::nova();
         }
@@ -280,7 +275,7 @@ fn dialogo_nova(
             },
             |ui, estado| {
                 if ui.add(Botao::primario("Abrir OS")).clicked() {
-                    abrir_os(motor, sessao, estado);
+                    abrir_os(ui.ctx(), motor, sessao, estado);
                 }
                 if ui.add(Botao::secundario("Cancelar")).clicked() {
                     estado.dlg = Dlg::Fechado;
@@ -292,7 +287,12 @@ fn dialogo_nova(
     }
 }
 
-fn abrir_os(motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoTelaOs) {
+fn abrir_os(
+    ctx: &egui::Context,
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaOs,
+) {
     let Dlg::Nova {
         cliente_novo,
         cliente_sel,
@@ -325,14 +325,17 @@ fn abrir_os(motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoTelaOs)
                 c.pessoa
             }
             Err(e) => {
-                estado.erro = Some(e.mensagem);
+                notificar(ctx, Notificacao::erro(e.mensagem));
                 return;
             }
         }
     } else if let Some(id) = cliente_sel {
         id
     } else {
-        estado.erro = Some("Escolha um cliente da lista ou cadastre um novo.".to_owned());
+        notificar(
+            ctx,
+            Notificacao::aviso("Escolha um cliente da lista ou cadastre um novo."),
+        );
         return;
     };
 
@@ -351,8 +354,9 @@ fn abrir_os(motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoTelaOs)
             estado.erro = None;
             estado.carregar(motor, sessao);
             estado.abrir_detalhe(motor, sessao, aberta.ordem_servico);
+            notificar(ctx, Notificacao::sucesso(format!("OS #{} aberta", aberta.numero)));
         }
-        Err(e) => estado.erro = Some(e.mensagem),
+        Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
     }
 }
 
@@ -419,6 +423,7 @@ fn corpo_detalhe(
             let diagnostico = (!estado.laudo_diagnostico.trim().is_empty())
                 .then(|| estado.laudo_diagnostico.clone());
             aplicar_e_recarregar(
+                ui.ctx(),
                 motor,
                 sessao,
                 estado,
@@ -430,6 +435,7 @@ fn corpo_detalhe(
                     diagnostico,
                     tecnico: sessao.usuario(),
                 },
+                "Laudo registrado",
             );
         }
     } else {
@@ -488,7 +494,7 @@ fn corpo_detalhe(
             .add(Botao::secundario("+ Adicionar mão de obra"))
             .clicked()
         {
-            adicionar_mao_de_obra(motor, sessao, estado, os.id);
+            adicionar_mao_de_obra(ui.ctx(), motor, sessao, estado, os.id);
         }
 
         ui.add_space(Espaco::E12);
@@ -512,7 +518,7 @@ fn corpo_detalhe(
         });
         ui.add_space(Espaco::E4);
         if ui.add(Botao::secundario("+ Adicionar peça")).clicked() {
-            adicionar_peca(motor, sessao, estado, os.id);
+            adicionar_peca(ui.ctx(), motor, sessao, estado, os.id);
         }
 
         ui.add_space(Espaco::E12);
@@ -521,6 +527,7 @@ fn corpo_detalhe(
                 && ui.add(Botao::primario("Enviar para aprovação")).clicked()
             {
                 aplicar_e_recarregar(
+                    ui.ctx(),
                     motor,
                     sessao,
                     estado,
@@ -529,6 +536,7 @@ fn corpo_detalhe(
                     &EnviarParaAprovacao {
                         ordem_servico: os.id,
                     },
+                    "Orçamento enviado para aprovação",
                 );
             }
         });
@@ -539,6 +547,7 @@ fn corpo_detalhe(
 }
 
 fn adicionar_mao_de_obra(
+    ctx: &egui::Context,
     motor: &MotorLocal,
     sessao: &SessaoLocal,
     estado: &mut EstadoTelaOs,
@@ -566,24 +575,34 @@ fn adicionar_mao_de_obra(
                     estado.mao_de_obra_valor.clear();
                     estado.abrir_detalhe(motor, sessao, os);
                     estado.dlg = Dlg::Detalhe;
+                    notificar(ctx, Notificacao::sucesso("Mão de obra adicionada"));
                 }
-                Err(e) => estado.erro = Some(e.mensagem),
+                Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
             }
         }
-        Err(_) => estado.erro = Some("Valor inválido — use o formato 80,00".to_owned()),
+        Err(_) => notificar(
+            ctx,
+            Notificacao::aviso("Valor inválido — use o formato 80,00"),
+        ),
     }
 }
 
-fn adicionar_peca(motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoTelaOs, os: Id) {
+fn adicionar_peca(
+    ctx: &egui::Context,
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaOs,
+    os: Id,
+) {
     let Some(produto) = estado.peca_produto else {
-        estado.erro = Some("Escolha o produto da lista de estoque.".to_owned());
+        notificar(ctx, Notificacao::aviso("Escolha o produto da lista de estoque."));
         return;
     };
     let (Ok(quantidade), Ok(preco_unitario)) = (
         estado.peca_qtd.parse::<Quantidade>(),
         estado.peca_preco.parse::<Preco>(),
     ) else {
-        estado.erro = Some("Quantidade ou preço inválidos.".to_owned());
+        notificar(ctx, Notificacao::aviso("Quantidade ou preço inválidos."));
         return;
     };
     let r = motor.executar(
@@ -606,8 +625,9 @@ fn adicionar_peca(motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoT
             estado.peca_preco.clear();
             estado.abrir_detalhe(motor, sessao, os);
             estado.dlg = Dlg::Detalhe;
+            notificar(ctx, Notificacao::sucesso("Peça adicionada ao orçamento"));
         }
-        Err(e) => estado.erro = Some(e.mensagem),
+        Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
     }
 }
 
@@ -631,6 +651,7 @@ fn acoes_por_estado(
             ui.horizontal(|ui| {
                 if ui.add(Botao::primario("Aprovar")).clicked() {
                     aplicar_e_recarregar(
+                        ui.ctx(),
                         motor,
                         sessao,
                         estado,
@@ -640,10 +661,12 @@ fn acoes_por_estado(
                             ordem_servico: os.id,
                             identificacao_aprovador: estado.aprovador.clone(),
                         },
+                        "Orçamento aprovado",
                     );
                 }
                 if ui.add(Botao::destrutivo("Reprovar")).clicked() {
                     aplicar_e_recarregar(
+                        ui.ctx(),
                         motor,
                         sessao,
                         estado,
@@ -652,6 +675,7 @@ fn acoes_por_estado(
                         &ReprovarOrcamentoOs {
                             ordem_servico: os.id,
                         },
+                        "Orçamento reprovado",
                     );
                 }
             });
@@ -659,6 +683,7 @@ fn acoes_por_estado(
         EstadoOs::Aprovada => {
             if ui.add(Botao::primario("Iniciar execução")).clicked() {
                 aplicar_e_recarregar(
+                    ui.ctx(),
                     motor,
                     sessao,
                     estado,
@@ -667,6 +692,7 @@ fn acoes_por_estado(
                     &IniciarExecucao {
                         ordem_servico: os.id,
                     },
+                    "Execução iniciada",
                 );
             }
         }
@@ -678,6 +704,7 @@ fn acoes_por_estado(
                 );
             } else if ui.add(Botao::primario("Concluir execução")).clicked() {
                 aplicar_e_recarregar(
+                    ui.ctx(),
                     motor,
                     sessao,
                     estado,
@@ -686,12 +713,14 @@ fn acoes_por_estado(
                     &ConcluirExecucao {
                         ordem_servico: os.id,
                     },
+                    "Execução concluída",
                 );
             }
         }
         EstadoOs::Concluida => {
             if ui.add(Botao::primario("Faturar")).clicked() {
                 aplicar_e_recarregar(
+                    ui.ctx(),
                     motor,
                     sessao,
                     estado,
@@ -700,6 +729,7 @@ fn acoes_por_estado(
                     &FaturarOrdemServico {
                         ordem_servico: os.id,
                     },
+                    "OS faturada",
                 );
             }
         }
@@ -711,13 +741,16 @@ fn acoes_por_estado(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn aplicar_e_recarregar<C: cardeal_modkit::Comando + serde::Serialize>(
+    ctx: &egui::Context,
     motor: &MotorLocal,
     sessao: &SessaoLocal,
     estado: &mut EstadoTelaOs,
     ordem: Id,
     nome: &str,
     comando: &C,
+    sucesso: &str,
 ) where
     C::Saida: serde::de::DeserializeOwned,
 {
@@ -726,7 +759,8 @@ fn aplicar_e_recarregar<C: cardeal_modkit::Comando + serde::Serialize>(
             estado.carregar(motor, sessao);
             estado.abrir_detalhe(motor, sessao, ordem);
             estado.dlg = Dlg::Detalhe;
+            notificar(ctx, Notificacao::sucesso(sucesso.to_owned()));
         }
-        Err(e) => estado.erro = Some(e.mensagem),
+        Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
     }
 }

@@ -12,7 +12,7 @@ use cardeal_kernel::{Dinheiro, Id};
 use cardeal_modkit::Icone;
 use cardeal_ui::atoms::{Botao, Rotulo, ValorDinheiro};
 use cardeal_ui::molecules::{Campo, EstadoVazio, Mascara, SeletorOpcao};
-use cardeal_ui::organisms::{ColunaGrade, Dialogo, Grade, LayoutTela};
+use cardeal_ui::organisms::{notificar, ColunaGrade, Dialogo, Grade, LayoutTela, Notificacao};
 use cardeal_ui::tokens::{Espaco, TemaUi};
 use eframe::egui;
 use mod_clientes::{Papel, PessoasPorPapel};
@@ -133,12 +133,6 @@ pub fn mostrar(
         estado,
         |ui, estado| {
             if ui
-                .add(Botao::secundario("Recarregar").atalho("F5"))
-                .clicked()
-            {
-                estado.carregar(motor, sessao);
-            }
-            if ui
                 .add(Botao::primario("+ Nova nota").atalho("Ctrl+N"))
                 .clicked()
             {
@@ -178,9 +172,10 @@ fn lista(
     estado: &mut EstadoTelaCompras,
 ) {
     if estado.notas.is_empty() {
-        if EstadoVazio::novo(Icone::Nota, "Nenhuma nota de entrada.")
-            .acao("Lançar a primeira")
-            .mostrar(ui)
+        if estado.erro.is_none()
+            && EstadoVazio::novo(Icone::Nota, "Nenhuma nota de entrada.")
+                .acao("Lançar a primeira")
+                .mostrar(ui)
         {
             estado.nova = FormNova {
                 data: cardeal_kernel::Data::hoje(cardeal_kernel::Fuso::BRASILIA).to_string(),
@@ -286,7 +281,7 @@ fn dialogo_nova(
             },
             |ui, estado| {
                 if ui.add(Botao::primario("Lançar nota")).clicked() {
-                    lancar(motor, sessao, estado);
+                    lancar(ui.ctx(), motor, sessao, estado);
                 }
                 if ui.add(Botao::secundario("Cancelar")).clicked() {
                     estado.dlg = Dlg::Fechado;
@@ -298,10 +293,15 @@ fn dialogo_nova(
     }
 }
 
-fn lancar(motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoTelaCompras) {
+fn lancar(
+    ctx: &egui::Context,
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaCompras,
+) {
     let f = &estado.nova;
     let Ok(data_emissao) = f.data.parse() else {
-        estado.erro = Some("Data de emissão inválida (dd/mm/aaaa).".to_owned());
+        notificar(ctx, Notificacao::aviso("Data de emissão inválida (dd/mm/aaaa)."));
         return;
     };
     let frete = f.frete.parse().unwrap_or(Dinheiro::ZERO);
@@ -313,7 +313,10 @@ fn lancar(motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoTelaCompr
         let (Ok(quantidade), Ok(valor_unitario)) =
             (it.quantidade.parse(), it.valor_unitario.parse())
         else {
-            estado.erro = Some(format!("Item \"{}\": qtd/valor inválidos.", it.descricao));
+            notificar(
+                ctx,
+                Notificacao::aviso(format!("Item \"{}\": qtd/valor inválidos.", it.descricao)),
+            );
             return;
         };
         itens.push(ItemNotaManual {
@@ -325,7 +328,7 @@ fn lancar(motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoTelaCompr
         });
     }
     if itens.is_empty() {
-        estado.erro = Some("Adicione ao menos um item.".to_owned());
+        notificar(ctx, Notificacao::aviso("Adicione ao menos um item."));
         return;
     }
 
@@ -347,8 +350,9 @@ fn lancar(motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoTelaCompr
         Ok(_) => {
             estado.dlg = Dlg::Fechado;
             estado.carregar(motor, sessao);
+            notificar(ctx, Notificacao::sucesso("Nota lançada"));
         }
-        Err(e) => estado.erro = Some(e.mensagem),
+        Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
     }
 }
 
@@ -423,7 +427,7 @@ fn dialogo_ver(
                     ui.add_space(Espaco::E4);
                 }
                 if let Some(item_nota) = vincular {
-                    vincular_item(motor, sessao, estado, n.nota, item_nota);
+                    vincular_item(ui.ctx(), motor, sessao, estado, n.nota, item_nota);
                 }
 
                 if matches!(n.estado, EstadoNotaEntrada::Conferida) {
@@ -437,7 +441,7 @@ fn dialogo_ver(
                         .mostrar(ui);
                     ui.add_space(Espaco::E8);
                     if ui.add(Botao::primario("Confirmar entrada")).clicked() {
-                        confirmar(motor, sessao, estado, n.nota);
+                        confirmar(ui.ctx(), motor, sessao, estado, n.nota);
                     }
                 }
             },
@@ -453,6 +457,7 @@ fn dialogo_ver(
 }
 
 fn vincular_item(
+    ctx: &egui::Context,
     motor: &MotorLocal,
     sessao: &SessaoLocal,
     estado: &mut EstadoTelaCompras,
@@ -460,7 +465,7 @@ fn vincular_item(
     item_nota: Id,
 ) {
     let Some(Some(produto)) = estado.vinc_produto.get(&item_nota).copied() else {
-        estado.erro = Some("Escolha o produto para vincular.".to_owned());
+        notificar(ctx, Notificacao::aviso("Escolha o produto para vincular."));
         return;
     };
     match motor.executar(
@@ -471,14 +476,21 @@ fn vincular_item(
         Ok(_) => {
             estado.recarregar_itens(motor, sessao, nota);
             estado.carregar(motor, sessao);
+            notificar(ctx, Notificacao::sucesso("Produto vinculado"));
         }
-        Err(e) => estado.erro = Some(e.mensagem),
+        Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
     }
 }
 
-fn confirmar(motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoTelaCompras, nota: Id) {
+fn confirmar(
+    ctx: &egui::Context,
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaCompras,
+    nota: Id,
+) {
     let Some(local) = estado.local_sel else {
-        estado.erro = Some("Escolha o local de estoque que recebe.".to_owned());
+        notificar(ctx, Notificacao::aviso("Escolha o local de estoque que recebe."));
         return;
     };
     match motor.executar(
@@ -493,8 +505,9 @@ fn confirmar(motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoTelaCo
         Ok(_) => {
             estado.dlg = Dlg::Fechado;
             estado.carregar(motor, sessao);
+            notificar(ctx, Notificacao::sucesso("Entrada confirmada"));
         }
-        Err(e) => estado.erro = Some(e.mensagem),
+        Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
     }
 }
 

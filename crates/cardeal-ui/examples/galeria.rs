@@ -4,8 +4,11 @@
 //! conferência visual — o mais próximo de um "teste" de pixels antes de screenshot-diff.
 
 use cardeal_modkit::Icone;
-use cardeal_ui::atoms::{desenhar_icone, superficie_clicavel, Botao, CampoTexto, Rotulo, ValorDinheiro};
+use cardeal_ui::atoms::{
+    desenhar_icone, superficie_clicavel, Botao, CampoTexto, Rotulo, Spinner, ValorDinheiro,
+};
 use cardeal_ui::molecules::{CabecalhoTela, Campo, CartaoKpi, EstadoVazio, LinhaDeAcao, Severidade};
+use cardeal_ui::organisms::{notificar, Notificacao, Notificacoes};
 use cardeal_ui::tokens::{instalar_estilo, instalar_fontes, Espaco, Rubro, Tema, TemaUi};
 use cardeal_kernel::Dinheiro;
 use eframe::egui;
@@ -51,6 +54,51 @@ impl eframe::App for Galeria {
                 });
                 ui.add_space(Espaco::E8);
                 ui.add(Botao::primario("Botão de largura cheia").preenche_largura());
+
+                ui.add_space(Espaco::E24);
+                ui.add(Rotulo::titulo_secao("Carregamento"));
+                ui.horizontal(|ui| {
+                    ui.add(Spinner::novo());
+                    ui.add_space(Espaco::E16);
+                    ui.add(Spinner::novo().pequeno());
+                    ui.add_space(Espaco::E16);
+                    ui.add(Botao::primario("Emitindo…").carregando(true));
+                    ui.add(Botao::secundario("Salvando…").carregando(true));
+                });
+
+                ui.add_space(Espaco::E24);
+                ui.add(Rotulo::titulo_secao("Notificações (toast)"));
+                ui.horizontal_wrapped(|ui| {
+                    if ui.add(Botao::primario("Sucesso")).clicked() {
+                        notificar(ui.ctx(), Notificacao::sucesso("Cliente cadastrado"));
+                    }
+                    if ui.add(Botao::destrutivo("Erro")).clicked() {
+                        notificar(
+                            ui.ctx(),
+                            Notificacao::erro("Documento inválido: dígito verificador não confere")
+                                .detalhe("Confira o CPF informado e tente de novo."),
+                        );
+                    }
+                    if ui.add(Botao::secundario("Aviso")).clicked() {
+                        notificar(ui.ctx(), Notificacao::aviso("3 títulos vencem hoje"));
+                    }
+                    if ui.add(Botao::secundario("Info")).clicked() {
+                        notificar(ui.ctx(), Notificacao::info("Backup concluído às 03:00"));
+                    }
+                    if ui.add(Botao::fantasma("NFC-e (loading → ok)")).clicked() {
+                        let id = egui::Id::new("galeria-fiscal");
+                        notificar(ui.ctx(), Notificacao::carregando("Emitindo NFC-e…").id(id));
+                        let ctx = ui.ctx().clone();
+                        // Simula a resposta chegando ~1,5s depois.
+                        std::thread::spawn(move || {
+                            std::thread::sleep(std::time::Duration::from_millis(1500));
+                            notificar(
+                                &ctx,
+                                Notificacao::sucesso("NFC-e autorizada — venda #4821").id(id),
+                            );
+                        });
+                    }
+                });
 
                 ui.add_space(Espaco::E24);
                 ui.add(Rotulo::titulo_secao("Tipografia"));
@@ -119,5 +167,7 @@ impl eframe::App for Galeria {
                 });
             });
         });
+
+        Notificacoes::mostrar(ctx);
     }
 }

@@ -75,6 +75,9 @@ pub struct Recorrencia {
     pub conta_contrapartida: Id,
     /// Centro de custo, quando aplicável.
     pub centro_custo: Option<Id>,
+    /// Categoria de relatório propagada para cada `Titulo` materializado
+    /// (`docs/modulos/financeiro.md` §11.9) — "Aluguel", "Assinatura `SaaS` — Cliente X".
+    pub categoria: Option<Id>,
     /// Com quantos dias de antecedência a ocorrência vira `Titulo` real.
     pub antecedencia_geracao_dias: u16,
     /// Se a regra está ativa.
@@ -259,6 +262,9 @@ impl Recorrencia {
         if let Some(cc) = self.centro_custo {
             c = c.centro_custo(cc);
         }
+        if let Some(cat) = self.categoria {
+            c = c.categoria(cat);
+        }
         c.construir()
     }
 
@@ -317,6 +323,7 @@ mod testes {
             fim: None,
             conta_contrapartida: Id::novo(),
             centro_custo: None,
+            categoria: None,
             antecedencia_geracao_dias: 5,
             ativa: true,
             versao: Versao::INICIAL,
@@ -461,6 +468,16 @@ mod testes {
         assert_eq!(tcp.titulo.valor_original, Dinheiro::reais(2200));
         assert_eq!(tcp.titulo.origem_modulo, "financeiro_recorrencia");
         assert_eq!(tcp.titulo.origem_id, Some(r.id));
+    }
+
+    #[test]
+    fn categoria_e_propagada_para_o_titulo_materializado() {
+        let mut r = base();
+        let cat = Id::novo();
+        r.categoria = Some(cat);
+        let venc = Data::de_ymd(2026, 3, 10).unwrap();
+        let tcp = r.materializar(venc, r.valor_de().unwrap()).unwrap();
+        assert_eq!(tcp.titulo.categoria, Some(cat));
     }
 
     proptest! {

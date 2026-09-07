@@ -12,7 +12,7 @@ use cardeal_kernel::{Id, Percentual};
 use cardeal_modkit::Icone;
 use cardeal_ui::atoms::{Botao, Rotulo, ValorDinheiro};
 use cardeal_ui::molecules::{Campo, EstadoVazio, SeletorOpcao};
-use cardeal_ui::organisms::{ColunaGrade, Dialogo, Grade, LayoutTela};
+use cardeal_ui::organisms::{notificar, ColunaGrade, Dialogo, Grade, LayoutTela, Notificacao};
 use cardeal_ui::tokens::{Espaco, TemaUi};
 use eframe::egui;
 use mod_clientes::{ItemPessoa, Papel, PessoasPorPapel};
@@ -150,12 +150,6 @@ pub fn mostrar(
         ui,
         estado,
         |ui, estado| {
-            if ui
-                .add(Botao::secundario("Recarregar").atalho("F5"))
-                .clicked()
-            {
-                estado.carregar(motor, sessao);
-            }
             if ui.add(Botao::secundario("Tabelas de preço")).clicked() {
                 estado.dlg = Dlg::Tabelas;
             }
@@ -197,7 +191,9 @@ fn lista(
     estado: &mut EstadoTelaVendas,
 ) {
     if estado.pedidos.is_empty() {
-        EstadoVazio::novo(Icone::Carrinho, "Nenhum pedido ainda.").mostrar(ui);
+        if estado.erro.is_none() {
+            EstadoVazio::novo(Icone::Carrinho, "Nenhum pedido ainda.").mostrar(ui);
+        }
         return;
     }
     let colunas = vec![
@@ -293,7 +289,7 @@ fn dialogo_novo(
                 .clicked()
                 && pronto
             {
-                criar_pedido(motor, sessao, estado);
+                criar_pedido(ui.ctx(), motor, sessao, estado);
             }
             if ui.add(Botao::secundario("Cancelar")).clicked() {
                 estado.dlg = Dlg::Fechado;
@@ -305,7 +301,12 @@ fn dialogo_novo(
     }
 }
 
-fn criar_pedido(motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoTelaVendas) {
+fn criar_pedido(
+    ctx: &egui::Context,
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaVendas,
+) {
     let (Some(cliente), Some(tabela), Some(local)) =
         (estado.novo_cliente, estado.novo_tabela, estado.novo_local)
     else {
@@ -332,8 +333,9 @@ fn criar_pedido(motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoTel
             } else {
                 estado.dlg = Dlg::Fechado;
             }
+            notificar(ctx, Notificacao::sucesso("Pedido criado"));
         }
-        Err(e) => estado.erro = Some(e.mensagem),
+        Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
     }
 }
 
@@ -396,7 +398,7 @@ fn dialogo_ver(
                     });
                     ui.add_space(Espaco::E4);
                     if ui.add(Botao::secundario("+ Adicionar item")).clicked() {
-                        adicionar_item(motor, sessao, estado, p.pedido);
+                        adicionar_item(ui.ctx(), motor, sessao, estado, p.pedido);
                     }
                 }
 
@@ -417,17 +419,18 @@ fn dialogo_ver(
 }
 
 fn adicionar_item(
+    ctx: &egui::Context,
     motor: &MotorLocal,
     sessao: &SessaoLocal,
     estado: &mut EstadoTelaVendas,
     pedido: Id,
 ) {
     let Some(produto) = estado.item_produto else {
-        estado.erro = Some("Escolha o produto.".to_owned());
+        notificar(ctx, Notificacao::aviso("Escolha o produto."));
         return;
     };
     let Ok(quantidade) = estado.item_qtd.parse() else {
-        estado.erro = Some("Quantidade inválida.".to_owned());
+        notificar(ctx, Notificacao::aviso("Quantidade inválida."));
         return;
     };
     match motor.executar(
@@ -446,8 +449,9 @@ fn adicionar_item(
             estado.item_qtd.clear();
             estado.recarregar_itens(motor, sessao, pedido);
             estado.carregar(motor, sessao);
+            notificar(ctx, Notificacao::sucesso("Item adicionado"));
         }
-        Err(e) => estado.erro = Some(e.mensagem),
+        Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
     }
 }
 
@@ -468,20 +472,24 @@ fn acoes(
                     && tem_item
                 {
                     aplicar(
+                        ui.ctx(),
                         motor,
                         sessao,
                         estado,
                         "vendas.confirmar_pedido.v1",
                         &ConfirmarPedido { pedido: p.pedido },
+                        "Pedido confirmado",
                     );
                 }
                 if ui.add(Botao::destrutivo("Cancelar pedido")).clicked() {
                     aplicar(
+                        ui.ctx(),
                         motor,
                         sessao,
                         estado,
                         "vendas.cancelar_pedido.v1",
                         &CancelarPedido { pedido: p.pedido },
+                        "Pedido cancelado",
                     );
                 }
             });
@@ -490,6 +498,7 @@ fn acoes(
             ui.horizontal(|ui| {
                 if ui.add(Botao::primario("Faturar à vista")).clicked() {
                     aplicar(
+                        ui.ctx(),
                         motor,
                         sessao,
                         estado,
@@ -498,10 +507,12 @@ fn acoes(
                             pedido: p.pedido,
                             a_vista: true,
                         },
+                        "Pedido faturado — NFC-e emitida",
                     );
                 }
                 if ui.add(Botao::secundario("Faturar a prazo")).clicked() {
                     aplicar(
+                        ui.ctx(),
                         motor,
                         sessao,
                         estado,
@@ -510,15 +521,18 @@ fn acoes(
                             pedido: p.pedido,
                             a_vista: false,
                         },
+                        "Pedido faturado a prazo",
                     );
                 }
                 if ui.add(Botao::destrutivo("Cancelar")).clicked() {
                     aplicar(
+                        ui.ctx(),
                         motor,
                         sessao,
                         estado,
                         "vendas.cancelar_pedido.v1",
                         &CancelarPedido { pedido: p.pedido },
+                        "Pedido cancelado",
                     );
                 }
             });
@@ -574,7 +588,7 @@ fn dialogo_tabelas(
             ui.horizontal(|ui| {
                 ui.add(Campo::novo("Nova tabela", &mut estado.tab_nome).marcador("ex.: Balcão"));
                 if ui.add(Botao::secundario("Criar")).clicked() {
-                    criar_tabela(motor, sessao, estado);
+                    criar_tabela(ui.ctx(), motor, sessao, estado);
                 }
             });
 
@@ -610,7 +624,7 @@ fn dialogo_tabelas(
                 });
                 ui.add_space(Espaco::E4);
                 if ui.add(Botao::secundario("+ Adicionar regra")).clicked() {
-                    criar_regra(motor, sessao, estado, tab);
+                    criar_regra(ui.ctx(), motor, sessao, estado, tab);
                 }
             }
         },
@@ -625,9 +639,14 @@ fn dialogo_tabelas(
     }
 }
 
-fn criar_tabela(motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoTelaVendas) {
+fn criar_tabela(
+    ctx: &egui::Context,
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaVendas,
+) {
     if estado.tab_nome.trim().is_empty() {
-        estado.erro = Some("Dê um nome à tabela.".to_owned());
+        notificar(ctx, Notificacao::aviso("Dê um nome à tabela."));
         return;
     }
     let hoje = cardeal_kernel::Data::hoje(cardeal_kernel::Fuso::BRASILIA);
@@ -645,23 +664,25 @@ fn criar_tabela(motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoTel
             estado.tab_nome.clear();
             estado.carregar(motor, sessao);
             estado.dlg = Dlg::Tabelas;
+            notificar(ctx, Notificacao::sucesso("Tabela de preço criada"));
         }
-        Err(e) => estado.erro = Some(e.mensagem),
+        Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
     }
 }
 
 fn criar_regra(
+    ctx: &egui::Context,
     motor: &MotorLocal,
     sessao: &SessaoLocal,
     estado: &mut EstadoTelaVendas,
     tabela: Id,
 ) {
     let Some(alvo_produto) = estado.regra_produto else {
-        estado.erro = Some("Escolha o produto da regra.".to_owned());
+        notificar(ctx, Notificacao::aviso("Escolha o produto da regra."));
         return;
     };
     let Ok(preco) = estado.regra_preco.parse() else {
-        estado.erro = Some("Preço inválido — use 0,00.".to_owned());
+        notificar(ctx, Notificacao::aviso("Preço inválido — use 0,00."));
         return;
     };
     match motor.executar(
@@ -682,17 +703,20 @@ fn criar_regra(
             estado.regra_preco.clear();
             estado.carregar_regras(motor, sessao, tabela);
             estado.dlg = Dlg::Tabelas;
+            notificar(ctx, Notificacao::sucesso("Regra de preço adicionada"));
         }
-        Err(e) => estado.erro = Some(e.mensagem),
+        Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
     }
 }
 
 fn aplicar<C: cardeal_modkit::Comando + serde::Serialize>(
+    ctx: &egui::Context,
     motor: &MotorLocal,
     sessao: &SessaoLocal,
     estado: &mut EstadoTelaVendas,
     nome: &str,
     comando: &C,
+    sucesso: &str,
 ) where
     C::Saida: serde::de::DeserializeOwned,
 {
@@ -700,8 +724,9 @@ fn aplicar<C: cardeal_modkit::Comando + serde::Serialize>(
         Ok(_) => {
             estado.dlg = Dlg::Fechado;
             estado.carregar(motor, sessao);
+            notificar(ctx, Notificacao::sucesso(sucesso.to_owned()));
         }
-        Err(e) => estado.erro = Some(e.mensagem),
+        Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
     }
 }
 

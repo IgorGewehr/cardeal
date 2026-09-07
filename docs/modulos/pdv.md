@@ -130,19 +130,32 @@ stateDiagram-v2
 
 | Comando | Permissão | Risco | O que faz | Erros possíveis |
 |---|---|---|---|---|
-| `AdicionarItem` | `pdv.venda.editar` | Baixo | Bipe/código → resolve produto e preço, cria `Cupom` se não existir | `ProdutoNaoEncontrado`, `SaldoInsuficiente` (aviso) |
-| `AlterarQuantidade` | `pdv.venda.editar` | Baixo | `F4` — abre o campo, aceita leitura de `PortaBalanca` | `PesoInstavel` |
-| `AplicarDesconto` | `pdv.desconto.aplicar` | Médio | `F5` — valida contra `vendas.desconto_maximo`; acima disso pede supervisor | `DescontoAcimaDoLimite` |
-| `IdentificarCliente` | `pdv.venda.editar` | Baixo | `F6` — busca ou cadastro rápido (delega a `clientes.CriarPessoa`) | — |
-| `CancelarItem` | `pdv.item.cancelar` | Baixo | `F7` — remove item do total, mantém linha auditável | `ItemInexistente` |
-| `CancelarCupom` | `pdv.cupom.cancelar` | Alto | `F8` — exige senha/crachá de supervisor, motivo obrigatório | `SemAutorizacaoSupervisor`, `CupomJaFinalizado` |
-| `ConsultarPreco` | `pdv.preco.consultar` | Baixo | `F10` — não abre `Cupom`, só mostra preço e saldo | — |
-| `IniciarPagamentoTef` | `pdv.tef.operar` | Médio | Envia valor à `PortaTef`, aguarda resposta | `TefIndisponivel`, `TefRecusado` |
-| `FinalizarVenda` | `pdv.venda.finalizar` | Alto | `F2` — valida soma dos pagamentos = total, consome estoque, monta `LancamentoBalanceado`, imprime, publica evento | `SomaDePagamentosDivergente`, `CaixaFechado`, `FaixaEsgotada` |
-| `AbrirCaixaPdv` | `financeiro.caixa.abrir` | Baixo | `F12` (caixa fechado) — delega a `financeiro.AbrirCaixa`, reserva `FaixaNumeracao` | `CaixaJaAberto` |
-| `FecharCaixaPdv` | `financeiro.caixa.fechar` | Médio | `F12` (caixa aberto) — delega a `financeiro.FecharCaixa` (fechamento cego) | `VendaEmAndamento` |
-| `RegistrarSangriaPdv` | `financeiro.caixa.sangria` | Médio | `F9` — delega a `financeiro.RegistrarSangria` | `CaixaFechado` |
-| `RecuperarCupomEmAndamento` | (automático no boot do terminal) | Baixo | Lê o diário durável, reapresenta o carrinho | `DiarioCorrompido` (descarta só o registro truncado) |
+| `AbrirCupom` ✅ (não estava no spec original) | `pdv.venda.editar` | Baixo | Abre o `Cupom EmAndamento` explicitamente, em vez de nascer implícito no primeiro `AdicionarItem` — mesmo padrão de `CriarPedido`/`AbrirOrdemServico` no resto do código (ver nota no arquivo do comando) | `CaixaFechado` |
+| `AdicionarItem` ✅ | `pdv.venda.editar` | Baixo | Resolve produto e preço vigente na `TabelaPreco` do cupom (via `mod-vendas`), congela no item | `ProdutoNaoEncontrado`, `PrecoNaoEncontrado` |
+| `AlterarQuantidade` | `pdv.venda.editar` | Baixo | Ainda não implementado — `PortaBalanca` não existe; quantidade só entra via `AdicionarItem` | `PesoInstavel` |
+| `AplicarDesconto` ✅ (nomeado `AplicarDescontoItem`) | `pdv.desconto.aplicar` | Médio | `F5` — valida contra `vendas.desconto_maximo`; ainda **não** escala para autorização de supervisor acima do teto | `DescontoAcimaDoLimite` |
+| `IdentificarCliente` | `pdv.venda.editar` | Baixo | Ainda não implementado como comando separado — `AbrirCupom` já aceita `cliente: Option<Id>` desde a abertura | — |
+| `CancelarItem` ✅ | `pdv.item.cancelar` | Baixo | `F7` — remove item do total, mantém linha auditável | `ItemInexistente` |
+| `CancelarCupom` ✅ | `pdv.cupom.cancelar` | Alto | `F8` — registra `autorizado_por` e `motivo`; a re-autenticação do supervisor em si é da UI/sessão (mesmo padrão de `AprovarOrcamentoOs::identificacao_aprovador`), não algo que o comando reverifica | `MotivoObrigatorio`, `CupomJaFinalizado` |
+| `ConsultarPreco` | `pdv.preco.consultar` | Baixo | Ainda não implementado | — |
+| `IniciarPagamentoTef` | `pdv.tef.operar` | Médio | Ainda não implementado — `PortaTef` não existe | `TefIndisponivel`, `TefRecusado` |
+| `FinalizarVenda` ✅ | `pdv.venda.finalizar` | Alto | `F2` — valida soma dos pagamentos = total (`validar_pagamentos`), consome estoque de verdade, monta o lançamento combinado (um débito por forma + desconto + CMV), publica evento. **Não imprime nem emite fiscal** nesta fatia | `SomaDePagamentosDivergente`, `CupomSemItens` |
+| `AbrirCaixaPdv` | `financeiro.caixa.abrir` | Baixo | Ainda não implementado como comando próprio — o front-end chama `financeiro.abrir_caixa.v1` direto (a única vantagem real de um `AbrirCaixaPdv` seria reservar `FaixaNumeracao` por lote, e esta versão simplificou a faixa para contador contínuo, sem lote) | `CaixaJaAberto` |
+| `FecharCaixaPdv` | `financeiro.caixa.fechar` | Médio | Ainda não implementado — o front-end chama `financeiro.fechar_caixa.v1` direto | `VendaEmAndamento` |
+| `RegistrarSangriaPdv` | `financeiro.caixa.sangria` | Médio | Ainda não implementado — o front-end chama `financeiro.registrar_sangria.v1` direto | `CaixaFechado` |
+| `RecuperarCupomEmAndamento` | (automático no boot do terminal) | Baixo | Ainda não implementado — não há diário durável nesta fatia (ver nota em `src/migracoes.rs`); a recuperação hoje é só reabrir a conexão e ler `pdv_cupom WHERE estado = 'EmAndamento'`, sem a granularidade de sub-transação que o diário promete | `DiarioCorrompido` |
+
+> **Nota (2026-09-06):** as linhas ✅ estão implementadas com teste de integração de ponta a
+> ponta (`crates/modulos/mod-pdv/tests/comandos.rs`, `Despachante` real contra SQLite):
+> cliente + produto/estoque reais → tabela e regra de preço → caixa cadastrado e aberto
+> (`mod-financeiro`) → cupom aberto, item adicionado com preço resolvido, desconto aplicado,
+> finalizado com uma ou múltiplas formas de pagamento. Antes de desenhar, `../gestao-raiz` foi
+> pesquisado para desconto/múltiplas formas de pagamento/NFC-e — conclusão: o spec deste
+> arquivo já era mais rigoroso que a referência nos três eixos (desconto com teto e
+> autorização, NFC-e assíncrona, sessão de caixa formal via `financeiro`), então o desenho
+> seguiu este documento, não o gestao-raiz. `EstadoCupom` não tem a transição
+> `Finalizado → Cancelado` do §4 (correção pós-fechamento no mesmo dia) — cancelar um cupom já
+> finalizado é recusado (`CupomJaFinalizado`) nesta fatia.
 
 ## 6. Consultas
 
@@ -335,6 +348,16 @@ própria faixa, então esse conflito específico é estruturalmente impossível 
 [doc 03 §3.2–3.3](../03-pilar-resiliencia.md#32-numeração-sem-conflito)).
 
 ## 13. Tabelas
+
+> **Nota (2026-09-06):** este é o esquema-alvo completo. A fatia implementada
+> (`crates/modulos/mod-pdv/src/migracoes.rs`) grava `tabela_preco`/`local_expedicao` em
+> `pdv_cupom` (necessários para `AdicionarItem` resolver preço e para `FinalizarVenda`
+> consumir estoque — o esquema-alvo original não os tinha, porque assumia que viriam de fora),
+> mas **não** tem `entrega_endereco`/`entrega_estado` (submódulo `delivery`, não essencial,
+> sem consumidor) nem `documento_fiscal` (emissão de NFC-e é `mod-fiscal`, que ainda não
+> existe implementado). `pdv_faixa_numeracao` também simplifica a reserva por lote para um
+> contador contínuo por `(empresa, terminal, serie_fiscal)` — `UNIQUE` nesses três campos, sem
+> `reservada_em` na chave — ver a nota em `RepositorioPdv::proximo_numero_cupom`.
 
 ```sql
 CREATE TABLE pdv_faixa_numeracao (

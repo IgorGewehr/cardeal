@@ -8,7 +8,7 @@ use cardeal_kernel::{Id, Preco, Quantidade};
 use cardeal_modkit::Icone;
 use cardeal_ui::atoms::{Botao, Rotulo};
 use cardeal_ui::molecules::{Campo, EstadoVazio, SeletorOpcao};
-use cardeal_ui::organisms::{ColunaGrade, Dialogo, Grade, LayoutTela};
+use cardeal_ui::organisms::{notificar, ColunaGrade, Dialogo, Grade, LayoutTela, Notificacao};
 use cardeal_ui::tokens::{Espaco, TemaUi};
 use eframe::egui;
 use mod_estoque::{
@@ -90,12 +90,6 @@ pub fn mostrar(
         estado,
         |ui, estado| {
             if ui
-                .add(Botao::secundario("Recarregar").atalho("F5"))
-                .clicked()
-            {
-                estado.carregar(motor, sessao);
-            }
-            if ui
                 .add(Botao::primario("+ Novo produto").atalho("Ctrl+N"))
                 .clicked()
             {
@@ -125,9 +119,10 @@ pub fn mostrar(
 
 fn lista(ui: &mut egui::Ui, estado: &mut EstadoTelaEstoque) {
     if estado.produtos.is_empty() {
-        if EstadoVazio::novo(Icone::Estoque, "Nenhum produto cadastrado ainda.")
-            .acao("Cadastrar o primeiro")
-            .mostrar(ui)
+        if estado.erro.is_none()
+            && EstadoVazio::novo(Icone::Estoque, "Nenhum produto cadastrado ainda.")
+                .acao("Cadastrar o primeiro")
+                .mostrar(ui)
         {
             estado.limpar_novo();
             estado.dlg = Dlg::Novo;
@@ -224,7 +219,7 @@ fn dialogo_novo(
                 .clicked()
                 && pronto
             {
-                cadastrar(motor, sessao, estado);
+                cadastrar(ui.ctx(), motor, sessao, estado);
             }
             if ui.add(Botao::secundario("Cancelar")).clicked() {
                 estado.dlg = Dlg::Fechado;
@@ -315,7 +310,7 @@ fn bloco_grupo(
                     estado.carregar(motor, sessao);
                     estado.dlg = Dlg::Novo;
                 }
-                Err(e) => estado.erro = Some(e.mensagem),
+                Err(e) => notificar(ui.ctx(), Notificacao::erro(e.mensagem)),
             }
         }
     } else {
@@ -363,7 +358,7 @@ fn bloco_unidade(
                     estado.carregar(motor, sessao);
                     estado.dlg = Dlg::Novo;
                 }
-                Err(e) => estado.erro = Some(e.mensagem),
+                Err(e) => notificar(ui.ctx(), Notificacao::erro(e.mensagem)),
             }
         }
     } else {
@@ -403,7 +398,7 @@ fn bloco_local(
                     estado.carregar(motor, sessao);
                     estado.dlg = Dlg::Novo;
                 }
-                Err(e) => estado.erro = Some(e.mensagem),
+                Err(e) => notificar(ui.ctx(), Notificacao::erro(e.mensagem)),
             }
         }
     } else {
@@ -418,7 +413,12 @@ fn bloco_local(
     }
 }
 
-fn cadastrar(motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoTelaEstoque) {
+fn cadastrar(
+    ctx: &egui::Context,
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaEstoque,
+) {
     let r = motor.executar(
         sessao,
         "estoque.criar_produto.v1",
@@ -434,7 +434,7 @@ fn cadastrar(motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoTelaEs
     let criado: ProdutoCriado = match r {
         Ok(c) => c,
         Err(e) => {
-            estado.erro = Some(e.mensagem);
+            notificar(ctx, Notificacao::erro(e.mensagem));
             return;
         }
     };
@@ -454,11 +454,16 @@ fn cadastrar(motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoTelaEs
                 custo_unitario: custo,
             },
         ) {
-            estado.erro = Some(e.mensagem);
+            notificar(
+                ctx,
+                Notificacao::aviso("Produto criado, mas o estoque inicial falhou")
+                    .detalhe(e.mensagem),
+            );
         }
     }
 
     estado.limpar_novo();
     estado.dlg = Dlg::Fechado;
     estado.carregar(motor, sessao);
+    notificar(ctx, Notificacao::sucesso("Produto cadastrado"));
 }

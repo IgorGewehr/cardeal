@@ -118,6 +118,12 @@ const PERMISSOES: &[Permissao] = &[
         Some("caixa"),
     ),
     perm(
+        "financeiro.caixa.cadastrar",
+        "Cadastrar caixa físico",
+        Risco::Baixo,
+        Some("caixa"),
+    ),
+    perm(
         "financeiro.caixa.abrir",
         "Abrir sessão de caixa",
         Risco::Baixo,
@@ -240,6 +246,19 @@ const PERMISSOES: &[Permissao] = &[
         "Criar/editar recorrência",
         Risco::Medio,
         Some("projecao"),
+    ),
+    // ── categoria ────────────────────────────────────────────────────────────
+    perm(
+        "financeiro.categoria.ver",
+        "Ver categorias e totais por categoria",
+        Risco::Baixo,
+        None,
+    ),
+    perm(
+        "financeiro.categoria.criar",
+        "Criar categoria",
+        Risco::Baixo,
+        None,
     ),
     // ── centro de custo ──────────────────────────────────────────────────────
     perm(

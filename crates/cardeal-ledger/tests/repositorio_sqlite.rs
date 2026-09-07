@@ -3,8 +3,8 @@
 
 use cardeal_kernel::{Data, Dinheiro, Fuso, Id, Instante};
 use cardeal_ledger::{
-    migracoes, semear_plano_padrao, ConstrutorLancamento, Contas, ErroRazao, EstadoLancamento,
-    PapelConta, PortaRazao, Razao, RepositorioRazao,
+    migracoes, semear_plano_padrao, ConstrutorLancamento, Conta, Contas, ErroRazao,
+    EstadoLancamento, GrupoFluxo, Natureza, PapelConta, PortaRazao, Razao, RepositorioRazao,
 };
 use cardeal_storage::{Armazenamento, ConfigArmazenamento, ContextoEscrita, ErroArmazenamento};
 use tempfile::TempDir;
@@ -138,4 +138,167 @@ fn estorno_marca_o_original_e_grava_o_espelho() {
 
     assert_eq!(estado_original, EstadoLancamento::Estornado);
     assert!(estorno_balanceado);
+}
+
+#[test]
+fn saldo_realizado_conta_o_par_estornado_e_fecha_em_zero_por_conta() {
+    let (_dir, arm, empresa) = base();
+    lancar_venda(&arm, empresa, 100);
+    let segunda = lancar_venda(&arm, empresa, 50);
+
+    let caixa = arm
+        .escritor()
+        .executar(ctx(empresa), move |uow| {
+            let repo = RepositorioRazao::novo(uow);
+            Contas::nova(&repo, empresa)
+                .papel(PapelConta::Caixa)
+                .map_err(liga)
+        })
+        .unwrap()
+        .valor;
+
+    let saldo = arm
+        .escritor()
+        .executar(ctx(empresa), move |uow| {
+            RepositorioRazao::novo(uow)
+                .saldo_realizado(caixa)
+                .map_err(liga)
+        })
+        .unwrap()
+        .valor;
+    assert_eq!(saldo, Dinheiro::reais(150));
+
+    // Estornar a segunda venda soma tanto o original (agora `Estornado`, mas o dinheiro
+    // realmente entrou) quanto o espelho (`Realizado`, o dinheiro realmente saiu) — os dois
+    // se cancelam, sobrando só a primeira venda.
+    arm.escritor()
+        .executar(ctx(empresa), move |uow| {
+            let mut repo = RepositorioRazao::novo(uow);
+            Razao::estornar(&mut repo, segunda, "cliente devolveu a compra", hoje()).map_err(liga)
+        })
+        .unwrap();
+
+    let saldo_apos_estorno = arm
+        .escritor()
+        .executar(ctx(empresa), move |uow| {
+            RepositorioRazao::novo(uow)
+                .saldo_realizado(caixa)
+                .map_err(liga)
+        })
+        .unwrap()
+        .valor;
+    assert_eq!(saldo_apos_estorno, Dinheiro::reais(100));
+}
+
+#[test]
+fn abrir_conta_bancaria_em_runtime_persiste_e_recebe_lancamento() {
+    let (_dir, arm, empresa) = base();
+
+    let pai_id = arm
+        .escritor()
+        .executar(ctx(empresa), move |uow| {
+            RepositorioRazao::novo(uow)
+                .conta_por_codigo(empresa, "1.1")
+                .map_err(liga)
+        })
+        .unwrap()
+        .valor
+        .expect("1.1 (Disponível) existe no plano padrão");
+
+    let conta_nova = arm
+        .escritor()
+        .executar(ctx(empresa), move |uow| {
+            let mut repo = RepositorioRazao::novo(uow);
+            let pai = repo.info_conta(pai_id).map_err(liga)?.expect("info existe");
+            let ultimo = repo.ultimo_codigo_filho(empresa, pai_id).map_err(liga)?;
+            let codigo = cardeal_ledger::CodigoConta::novo(pai.codigo.clone())
+                .proximo_filho(ultimo.as_ref());
+            let conta = Conta::abrir_filha(
+                pai_id,
+                &pai,
+                codigo,
+                "Nubank".to_string(),
+                Natureza::Ativo,
+                Some(GrupoFluxo::Operacional),
+                None,
+                "financeiro",
+            )
+            .map_err(liga)?;
+            repo.inserir_conta(&conta).map_err(liga)?;
+            Ok(conta.id)
+        })
+        .unwrap()
+        .valor;
+
+    // A conta nova recebe lançamento normalmente, como qualquer analítica.
+    let saldo = arm
+        .escritor()
+        .executar(ctx(empresa), move |uow| {
+            let mut repo = RepositorioRazao::novo(uow);
+            let receita = Contas::nova(&repo, empresa)
+                .papel(PapelConta::ReceitaVendas)
+                .map_err(liga)?;
+            let lanc = ConstrutorLancamento::novo(empresa, hoje(), "Depósito de teste")
+                .liquidacao(hoje())
+                .criado_por(repo.usuario(), repo.dispositivo())
+                .debitar(conta_nova, Dinheiro::reais(200))
+                .creditar(receita, Dinheiro::reais(200))
+                .construir()
+                .map_err(liga)?;
+            Razao::registrar(&mut repo, lanc).map_err(liga)?;
+            repo.saldo_realizado(conta_nova).map_err(liga)
+        })
+        .unwrap()
+        .valor;
+    assert_eq!(saldo, Dinheiro::reais(200));
+
+    // "1.1" já tinha 01..04 no plano padrão — a conta nova ocupa "1.1.05".
+    let ultimo_agora = arm
+        .escritor()
+        .executar(ctx(empresa), move |uow| {
+            RepositorioRazao::novo(uow)
+                .ultimo_codigo_filho(empresa, pai_id)
+                .map_err(liga)
+        })
+        .unwrap()
+        .valor;
+    assert_eq!(
+        ultimo_agora,
+        Some(cardeal_ledger::CodigoConta::novo("1.1.05"))
+    );
+}
+
+#[test]
+fn abrir_filha_sob_conta_analitica_e_recusado() {
+    let (_dir, arm, empresa) = base();
+
+    let (caixa_id, caixa_info) = arm
+        .escritor()
+        .executar(ctx(empresa), move |uow| {
+            let repo = RepositorioRazao::novo(uow);
+            let caixa_id = repo
+                .conta_por_codigo(empresa, "1.1.01")
+                .map_err(liga)?
+                .expect("1.1.01 existe");
+            let info = repo
+                .info_conta(caixa_id)
+                .map_err(liga)?
+                .expect("info existe");
+            Ok((caixa_id, info))
+        })
+        .unwrap()
+        .valor;
+
+    let erro = Conta::abrir_filha(
+        caixa_id,
+        &caixa_info,
+        cardeal_ledger::CodigoConta::novo("1.1.01.001"),
+        "Sub-caixa".to_string(),
+        Natureza::Ativo,
+        None,
+        None,
+        "financeiro",
+    )
+    .unwrap_err();
+    assert!(matches!(erro, ErroRazao::ContaPaiNaoESintetica(_)));
 }

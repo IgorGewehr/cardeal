@@ -409,6 +409,7 @@ pub fn confirmar_entrada_comum(
                 primeiro_vencimento: nota.data_emissao,
                 intervalo_dias: 0,
                 observacao: Some(format!("Nota de entrada {}/{}", nota.numero, nota.serie)),
+                categoria: None,
                 origem_modulo: "compras",
                 origem_id: Some(nota.id),
                 papel_contraparte: PapelConta::Fornecedores,

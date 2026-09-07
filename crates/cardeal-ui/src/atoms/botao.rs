@@ -9,6 +9,7 @@
 
 use egui::{Color32, CursorIcon, Response, Sense, Stroke, Ui, Vec2, Widget};
 
+use crate::atoms::Spinner;
 use crate::tokens::{Papel, Raio, Rubro, TemaUi};
 
 /// A variante visual do botão — `docs/12-ui-ux.md` §7 e §2.3.
@@ -26,6 +27,9 @@ pub enum VarianteBotao {
 }
 
 /// Um botão do design system Rubro.
+// `habilitado`/`preenche_largura`/`pequeno`/`carregando` são flags de aparência
+// independentes, não um enum de estado disfarçado.
+#[allow(clippy::struct_excessive_bools)]
 #[must_use]
 pub struct Botao {
     rotulo: String,
@@ -33,6 +37,8 @@ pub struct Botao {
     atalho: Option<String>,
     habilitado: bool,
     preenche_largura: bool,
+    pequeno: bool,
+    carregando: bool,
 }
 
 impl Botao {
@@ -63,6 +69,8 @@ impl Botao {
             atalho: None,
             habilitado: true,
             preenche_largura: false,
+            pequeno: false,
+            carregando: false,
         }
     }
 
@@ -84,6 +92,20 @@ impl Botao {
         self
     }
 
+    /// Versão compacta (~34px de altura) — barras de ferramentas densas, controles
+    /// segmentados, navegação de calendário. Não usar como ação principal de formulário.
+    pub const fn pequeno(mut self) -> Self {
+        self.pequeno = true;
+        self
+    }
+
+    /// Estado de carregamento: troca o rótulo por um spinner e desabilita o clique,
+    /// mantendo o preenchimento da variante (não fica com cara de desabilitado).
+    pub const fn carregando(mut self, v: bool) -> Self {
+        self.carregando = v;
+        self
+    }
+
     fn paleta(&self, resp: &Response, cores: &crate::tokens::Cores) -> (Option<Color32>, Option<Color32>, Color32) {
         if !self.habilitado {
             return match self.variante {
@@ -94,8 +116,8 @@ impl Botao {
             };
         }
 
-        let hover = resp.hovered();
-        let pressed = resp.is_pointer_button_down_on();
+        let hover = resp.hovered() && !self.carregando;
+        let pressed = resp.is_pointer_button_down_on() && !self.carregando;
 
         match self.variante {
             VarianteBotao::Primario => {
@@ -136,8 +158,11 @@ impl Widget for Botao {
             .painter()
             .layout_no_wrap(texto, fonte, Color32::PLACEHOLDER);
 
-        let padding = Vec2::new(20.0_f32, 11.0_f32);
-        let altura_min = 44.0_f32;
+        let (padding, altura_min) = if self.pequeno {
+            (Vec2::new(12.0_f32, 6.0_f32), 34.0_f32)
+        } else {
+            (Vec2::new(20.0_f32, 11.0_f32), 44.0_f32)
+        };
         let largura = if self.preenche_largura {
             ui.available_width()
         } else {
@@ -145,7 +170,8 @@ impl Widget for Botao {
         };
         let tamanho = Vec2::new(largura, altura_min.max(galley.size().y + padding.y * 2.0));
 
-        let sense = if self.habilitado {
+        let interativo = self.habilitado && !self.carregando;
+        let sense = if interativo {
             Sense::click()
         } else {
             Sense::hover()
@@ -160,25 +186,36 @@ impl Widget for Botao {
                 rect_total
             };
             let (fill, stroke, fg) = self.paleta(&resp, &cores);
-            let painter = ui.painter();
-            if let Some(f) = fill {
-                painter.rect_filled(rect, Raio::ITEM, f);
+            {
+                let painter = ui.painter();
+                if let Some(f) = fill {
+                    painter.rect_filled(rect, Raio::ITEM, f);
+                }
+                if let Some(s) = stroke {
+                    painter.rect_stroke(rect, Raio::ITEM, Stroke::new(1.0_f32, s));
+                }
+                if resp.has_focus() {
+                    painter.rect_stroke(
+                        rect.expand(2.0_f32),
+                        Raio::ITEM + 2.0_f32,
+                        Stroke::new(2.0_f32, Rubro::R500),
+                    );
+                }
             }
-            if let Some(s) = stroke {
-                painter.rect_stroke(rect, Raio::ITEM, Stroke::new(1.0_f32, s));
-            }
-            if resp.has_focus() {
-                painter.rect_stroke(
-                    rect.expand(2.0_f32),
-                    Raio::ITEM + 2.0_f32,
-                    Stroke::new(2.0_f32, Rubro::R500),
+            if self.carregando {
+                let mut filho = ui.new_child(
+                    egui::UiBuilder::new().max_rect(rect).layout(
+                        egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+                    ),
                 );
+                filho.add(Spinner::novo().pequeno().cor(fg));
+            } else {
+                let pos = rect.center() - galley.size() / 2.0;
+                ui.painter().galley(pos, galley, fg);
             }
-            let pos = rect.center() - galley.size() / 2.0;
-            painter.galley(pos, galley, fg);
         }
 
-        if self.habilitado && resp.hovered() {
+        if interativo && resp.hovered() {
             ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
         }
         resp

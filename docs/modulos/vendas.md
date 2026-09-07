@@ -168,24 +168,32 @@ stateDiagram-v2
 
 | Comando | Permissão | Risco | O que faz | Erros possíveis |
 |---|---|---|---|---|
-| `CriarOrcamento` | `vendas.orcamento.criar` | Baixo | Monta itens, resolve preço pela `TabelaPreco` | `ProdutoInativo` |
-| `AprovarOrcamento` | `vendas.orcamento.aprovar` | Baixo | | `OrcamentoExpirado` |
-| `ConverterOrcamentoEmPedido` | `vendas.pedido.criar` | Baixo | Copia itens para um novo `Pedido Rascunho` | `OrcamentoJaConvertido` |
-| `CriarPedido` | `vendas.pedido.criar` | Baixo | | — |
-| `AdicionarItemPedido` | `vendas.pedido.editar` | Baixo | Resolve preço vigente na `TabelaPreco` | `ProdutoInativo`, `PrecoNaoEncontrado` |
-| `AplicarDesconto` | `vendas.pedido.descontar` | Médio | Valida contra `vendas.desconto_maximo` do papel; acima disso pede autorização de supervisor | `DescontoAcimaDoLimite` |
-| `ConfirmarPedido` | `vendas.pedido.confirmar` | Médio | Chama `ReservarEstoque` item a item; consulta `LimiteDisponivel` se a prazo | `SaldoInsuficiente`, `LimiteDeCreditoExcedido` |
-| `FaturarPedido` | `vendas.pedido.faturar` | Alto | Chama `RegistrarSaida` em `estoque`, monta `LancamentoBalanceado` (D CMV/C Estoque + D Caixa-Clientes/C Receita), publica `vendas.pedido_faturado.v1` | `PedidoJaFaturado`, `CaixaFechado` (se à vista) |
-| `CancelarPedido` | `vendas.pedido.cancelar` | Médio | Só antes de `Faturado`; libera reserva | `PedidoJaFaturado` |
-| `RegistrarEntrega` | `vendas.entrega.registrar` | Baixo | | `PedidoNaoFaturado` |
-| `SolicitarDevolucao` | `vendas.devolucao.solicitar` | Médio | | `PedidoNaoFaturado` |
-| `AprovarDevolucao` | `vendas.devolucao.aprovar` | Alto | | `DevolucaoJaAprovada` |
-| `ConcluirDevolucao` | `vendas.devolucao.concluir` | Alto | Estorna o lançamento original proporcionalmente, `RegistrarEntrada` do item de volta ao estoque | `ValorSuperaOriginal` |
-| `CriarTabelaPreco` | `vendas.tabela_preco.criar` | Baixo | | `NomeDuplicado` |
-| `CriarRegraPreco` | `vendas.tabela_preco.editar` | Baixo | | `RegraConflitante` |
-| `ApurarComissao` | (tarefa agendada, mensal) | Baixo | Cria `Comissao Apurada` por pedido faturado no mês | — |
-| `PagarComissao` | `vendas.comissao.pagar` | Médio | Lançamento D Despesas comerciais / C Bancos | `ComissaoJaPaga` |
-| `CriarContratoRecorrente` | `vendas.contrato_recorrente.criar` | Baixo | Cria `Recorrencia` correspondente no financeiro via comando explícito (não evento) | `ClienteSemCadastro` |
+| `CriarOrcamento` | `vendas.orcamento.criar` | Baixo | Ainda não implementado — orçamento ficou fora desta fatia (domínio pronto, ver §1.2 do doc 19) | `ProdutoInativo` |
+| `AprovarOrcamento` | `vendas.orcamento.aprovar` | Baixo | Ainda não implementado | `OrcamentoExpirado` |
+| `ConverterOrcamentoEmPedido` | `vendas.pedido.criar` | Baixo | Ainda não implementado | `OrcamentoJaConvertido` |
+| `CriarPedido` ✅ | `vendas.pedido.criar` | Baixo | Abre um `Pedido Rascunho` sem itens | — |
+| `AdicionarItemPedido` ✅ | `vendas.pedido.editar` | Baixo | Resolve preço vigente na `TabelaPreco` do pedido (produto/grupo via `mod-estoque`), congela no item; recusa desconto acima de `vendas.desconto_maximo` na hora (não escala para autorização de supervisor ainda) | `PrecoNaoEncontrado`, `DescontoAcimaDoLimite` |
+| `AplicarDesconto` | `vendas.pedido.descontar` | Médio | Ainda não implementado como comando separado — o desconto é parâmetro de `AdicionarItemPedido` | `DescontoAcimaDoLimite` |
+| `ConfirmarPedido` ✅ | `vendas.pedido.confirmar` | Médio | Só a transição `Rascunho → Confirmado` (§11.2) — **não** reserva estoque nem consulta `LimiteDisponivel` ainda (`ReservarEstoque`/`LimiteDisponivel` não existem em `mod-estoque`/`mod-clientes`) | `PedidoEmEstadoInvalido`, `PedidoSemItens` |
+| `FaturarPedido` ✅ | `vendas.pedido.faturar` | Alto | Consome estoque item a item (`mod_estoque::registrar_saida_comum`, somando o CMV), monta o lançamento combinado (D CMV/C Estoque + D Caixa-Clientes/C Receita) e, só a prazo, cria um título a receber de parcela única vinculado a esse lançamento; publica `vendas.pedido_faturado.v1` | `PedidoEmEstadoInvalido`, `PedidoSemItens` |
+| `CancelarPedido` ✅ | `vendas.pedido.cancelar` | Médio | Só antes de `Faturado` | `PedidoJaFaturado` |
+| `RegistrarEntrega` | `vendas.entrega.registrar` | Baixo | Ainda não implementado | `PedidoNaoFaturado` |
+| `SolicitarDevolucao` | `vendas.devolucao.solicitar` | Médio | Ainda não implementado | `PedidoNaoFaturado` |
+| `AprovarDevolucao` | `vendas.devolucao.aprovar` | Alto | Ainda não implementado | `DevolucaoJaAprovada` |
+| `ConcluirDevolucao` | `vendas.devolucao.concluir` | Alto | Ainda não implementado (domínio pronto: `Devolucao` + `receituario::concluir_devolucao`) | `ValorSuperaOriginal` |
+| `CriarTabelaPreco` ✅ | `vendas.tabela_preco.criar` | Baixo | | `NomeDuplicado` |
+| `CriarRegraPreco` ✅ | `vendas.tabela_preco.editar` | Baixo | Recusa regra que mira produto **e** grupo, ou nenhum dos dois | `RegraPrecoAmbigua` |
+| `ApurarComissao` | (tarefa agendada, mensal) | Baixo | Ainda não implementado (domínio pronto: `Comissao::apurar` + `receituario::apurar_comissao`) | — |
+| `PagarComissao` | `vendas.comissao.pagar` | Médio | Ainda não implementado (domínio pronto: `receituario::pagar_comissao`) | `ComissaoJaPaga` |
+| `CriarContratoRecorrente` | `vendas.contrato_recorrente.criar` | Baixo | Ainda não implementado | `ClienteSemCadastro` |
+
+> **Nota (2026-09-05):** as linhas ✅ estão implementadas com teste de integração de ponta a
+> ponta (`tests/comandos.rs`, `Despachante` real contra SQLite) — cliente + produto/estoque
+> reais → tabela e regra de preço → pedido criado, item adicionado com preço resolvido,
+> confirmado, faturado à vista (sem título) e a prazo (título vinculado ao lançamento). O
+> restante desta tabela (orçamento, devolução, comissão, contrato recorrente, e a reserva de
+> estoque real em `ConfirmarPedido`) fica para quando tiver consumidor — mesmo critério que
+> `mod-compras` usou para cotação/pedido formal.
 
 ## 6. Consultas
 
@@ -352,6 +360,13 @@ foi cobrado do cliente — e o sistema gera relatório de divergência de preço
 jamais alterar retroativamente o valor já cobrado.
 
 ## 13. Tabelas
+
+> **Nota (2026-09-05):** este é o esquema-alvo completo. A fatia implementada
+> (`crates/modulos/mod-vendas/src/migracoes.rs`) tem só `vendas_tabela_preco`/
+> `vendas_regra_preco`/`vendas_pedido`/`vendas_item_pedido` — os únicos submódulos
+> essenciais são `pedido` e `tabela_preco` (§2). `vendas_orcamento` e as tabelas de
+> devolução/comissão/contrato recorrente estão adiadas, então não existem ainda; `criado_em`
+> também não está na versão implementada de `vendas_pedido` (só `criado_por`).
 
 ```sql
 CREATE TABLE vendas_tabela_preco (

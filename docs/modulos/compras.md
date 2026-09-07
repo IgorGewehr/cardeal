@@ -72,16 +72,30 @@ stateDiagram-v2
 
 | Comando | Permissão | Risco | O que faz | Erros possíveis |
 |---|---|---|---|---|
-| `CriarCotacao` | `compras.cotacao.criar` | Baixo | | — |
-| `RegistrarPropostaFornecedor` | `compras.cotacao.editar` | Baixo | | `CotacaoDecidida` |
-| `DecidirCotacao` | `compras.cotacao.decidir` | Médio | Marca vencedor, sugere `PedidoCompra` | — |
-| `CriarPedidoCompra` | `compras.pedido.criar` | Baixo | | — |
-| `ImportarNotaEntrada` | `compras.entrada.importar` | Baixo | Baixa XML via `PortaFiscal`, roda casamento em cascata | `ChaveJaImportada`, `XmlInvalido` |
-| `VincularProdutoManual` | `compras.entrada.conferir` | Baixo | Casa a linha e grava `RegraCasamentoAprendida` | — |
-| `RatearDespesas` | `compras.entrada.conferir` | Baixo | Distribui frete/seguro/outras por valor ou por peso, sem perder centavo | `ReferenciaInvalida` |
-| `ConferirQuantidade` | `compras.entrada.conferir` | Baixo | Compara com `ItemPedidoCompra.quantidade` | `QuantidadeDivergente` (aviso) |
-| `ConfirmarEntrada` | `compras.entrada.confirmar` | Alto | `estoque.RegistrarEntrada` por item + `Lancamento` + publica evento | `ItemNaoCasado`, `NotaJaConfirmada` |
-| `DevolverAoFornecedor` | `compras.devolucao.criar` | Alto | Estorna proporcionalmente estoque e razão | `ValorSuperaOriginal` |
+| `CriarCotacao` | `compras.cotacao.criar` | Baixo | Ainda não implementado — cotação/pedido de compra formal ficaram para quando tiverem consumidor (esta versão vai direto da nota ao estoque, como o `gestao-raiz` faz) | — |
+| `RegistrarPropostaFornecedor` | `compras.cotacao.editar` | Baixo | Ainda não implementado | `CotacaoDecidida` |
+| `DecidirCotacao` | `compras.cotacao.decidir` | Médio | Ainda não implementado | — |
+| `CriarPedidoCompra` | `compras.pedido.criar` | Baixo | Ainda não implementado | — |
+| `importar_nota_da_sefaz` ✅ / `verificar_notas_na_sefaz` ✅ | `compras.entrada.importar` | Baixo | **Não são `Comando`** (dependem de `PortaFiscal`, que o despacho ainda não injeta — ver nota abaixo). `verificar_notas_na_sefaz` varre a distribuição `DFe` desde o último NSU e chama `importar_nota_da_sefaz` por nota nova: interpreta o XML (`cardeal_fiscal::interpretar`), resolve/cadastra o fornecedor por CNPJ, roda o casamento em cascata por item e rateia frete/seguro/outras despesas | `ChaveJaImportada` |
+| `LancarNotaManual` ✅ (não estava no spec original) | `compras.entrada.importar` | Baixo | Compra sem nota fiscal formal — mesma cascata de casamento/rateio de `importar_nota_da_sefaz`, mas os itens vêm digitados (`ItemNotaManual`) em vez de um XML, e `chave_acesso` fica `None` (o índice `UNIQUE` do SQLite trata múltiplos `NULL` como distintos, então não colide com a idempotência das notas importadas) | — |
+| `DefinirPreferenciasCompras` ✅ (não estava no spec original) | `compras.entrada.preferencias` | Médio | Grava `PreferenciasCompras` — confirmação automática, geração de título a pagar, rateio por valor/peso, local padrão — a resposta desta versão ao pedido do usuário por "vários ajustes de preferências" | — |
+| `VincularProdutoManual` ✅ | `compras.entrada.conferir` | Baixo | Casa a linha e grava `RegraCasamentoAprendida` | `ItemNaoPertenceANota` |
+| `RatearDespesas` | `compras.entrada.conferir` | Baixo | Ainda não é um comando separado — o rateio acontece dentro de `importar_nota_da_sefaz`, não como passo manual | `ReferenciaInvalida` |
+| `ConferirQuantidade` | `compras.entrada.conferir` | Baixo | Ainda não implementado (não há `PedidoCompra` para comparar) | `QuantidadeDivergente` (aviso) |
+| `ConfirmarEntrada` ✅ | `compras.entrada.confirmar` | Alto | Exige todo item `Casado`; `mod_estoque::registrar_entrada_comum` por item e, se a preferência mandar, `mod_financeiro::lancar_titulo_comum` — chamados **direto, na mesma transação** (não via despacho — `docs/contratos-internos.md` §7 regra 2). Quando as preferências permitem e a varredura de `verificar_notas_na_sefaz` já casou tudo por regra aprendida, isto roda sozinho (`confirmar_entrada_comum`, mesma função por trás do comando) | `ItemNaoCasado`, `NotaJaConfirmada`, `EstadoDeNotaInvalido` |
+| `DevolverAoFornecedor` | `compras.devolucao.criar` | Alto | Ainda não implementado | `ValorSuperaOriginal` |
+
+> **Nota (2026-09-05):** as linhas ✅ estão implementadas com teste de integração de ponta a
+> ponta contra SQLite real (`crates/modulos/mod-compras/tests/importacao.rs`), com
+> `cardeal_fiscal::FiscalSimulado` no lugar da SEFAZ real — os dois caminhos: confirmação
+> totalmente automática (regra aprendida + preferências) e revisão manual
+> (`VincularProdutoManual` + `ConfirmarEntrada`). `importar_nota_da_sefaz`/
+> `verificar_notas_na_sefaz` não são `Comando` porque dependem de `PortaFiscal`
+> (`cardeal-fiscal`), e `Ctx::porta()` — a forma de injetar uma porta dentro de um comando —
+> ainda está listado como adiado em `docs/contratos-internos.md` §4; até lá, quem tem a
+> porta em mãos chama a função direto, montando o `Ctx` com `cardeal_modkit::Ctx::de_sessao`
+> (novo). `Manifesto::depende_de` declara `clientes`/`estoque`/`financeiro` — sem essas três
+> ativas o módulo não sobe (o código chama `pub fn` delas incondicionalmente).
 
 ## 6. Consultas
 
@@ -159,6 +173,16 @@ fornecedor.
 caminho de `ConfirmarEntrada` em modo autônomo, então não há conflito possível nesse comando.
 
 ## 13. Tabelas
+
+> **Nota (2026-09-05):** este é o esquema-alvo completo. A fatia implementada
+> (`crates/modulos/mod-compras/src/migracoes.rs`) tem só `compras_nota_entrada`/
+> `compras_item_nota_entrada`/`compras_regra_casamento` (sem `pedido_compra_origem`,
+> `custo_final_unitario` fica calculado em `ItemNotaEntrada::custo_final_unitario()`, não
+> persistido) — cotação e pedido de compra estão adiados, então nenhuma tabela deles existe
+> ainda — mais duas novas que este documento não previa: `compras_preferencias` (a resposta a
+> "vários ajustes de preferências" que o usuário pediu — confirmação automática, geração de
+> título a pagar, rateio por valor/peso, local padrão) e `compras_estado_dfe` (o cursor NSU
+> da distribuição `DFe` por empresa, para a varredura nunca reprocessar desde o início).
 
 ```sql
 CREATE TABLE compras_cotacao (

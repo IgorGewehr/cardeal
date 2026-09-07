@@ -47,6 +47,19 @@ pub fn instalar_estilo(ctx: &Context, tema: Tema) {
     sp.icon_width = 18.0_f32;
     sp.icon_width_inner = 10.0_f32;
 
+    // Barra de rolagem flutuante e discreta: some quando não está em uso, reaparece fina no
+    // hover/scroll (o efeito minimalista pedido — nada de trilho cinza sempre visível).
+    let mut sc = egui::style::ScrollStyle::floating();
+    sc.floating_width = 4.0_f32;
+    sc.floating_allocated_width = 0.0_f32;
+    sc.bar_inner_margin = 2.0_f32;
+    sc.dormant_background_opacity = 0.0_f32;
+    sc.dormant_handle_opacity = 0.0_f32;
+    sc.active_background_opacity = 0.0_f32;
+    sc.active_handle_opacity = 0.75_f32;
+    sc.interact_handle_opacity = 1.0_f32;
+    sp.scroll = sc;
+
     // ---- cores ----
     let v = &mut style.visuals;
     v.dark_mode = tema.e_escuro();
@@ -127,6 +140,13 @@ fn sombra(tema: Tema, offset_y: f32, blur: f32, alfa_escuro: u8, alfa_claro: u8)
 #[must_use]
 pub fn sombra_cartao(ctx: &Context) -> egui::epaint::Shadow {
     sombra(ctx.tema(), 1.0_f32, 6.0_f32, 70, 22)
+}
+
+/// A sombra marcada de algo que flutua acima da tela — menu, popover, toast
+/// (`--shadow-dropdown` do gestao-raiz).
+#[must_use]
+pub fn sombra_dropdown(ctx: &Context) -> egui::epaint::Shadow {
+    sombra(ctx.tema(), 10.0_f32, 40.0_f32, 150, 44)
 }
 
 /// Acesso ao tema ativo a partir de qualquer `Ui` — o caminho normal para um componente

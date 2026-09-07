@@ -21,13 +21,18 @@ completo = ["credito", "carteira", "deduplicacao", "score"]
 
 [dependencies]
 cardeal-kernel.workspace  = true
+cardeal-storage.workspace = true
 cardeal-modkit.workspace  = true
 cardeal-ui = { workspace = true, optional = true }
 egui       = { workspace = true, optional = true }
 serde.workspace     = true
+rusqlite.workspace  = true
 thiserror.workspace = true
 smallvec.workspace  = true
 tracing.workspace   = true
 
 [dev-dependencies]
 proptest.workspace = true
+cardeal-auth.workspace = true
+postcard.workspace = true
+tempfile.workspace = true

@@ -20,9 +20,11 @@
 //!
 //! ## O que falta (ver `docs/17-roadmap.md`)
 //!
-//! `fechar_periodo`/`reabrir_periodo` (exigem somar saldos históricos) e as consultas
-//! (saldo, fluxo de caixa, DRE, prova do razão) — todas dependem de uma consulta de
-//! agregação sobre `razao_partida`, próximo passo natural agora que o backend existe.
+//! `fechar_periodo`/`reabrir_periodo` (exigem somar saldos históricos) e as consultas mais
+//! amplas (fluxo de caixa, DRE, prova do razão) — todas dependem de uma agregação genérica
+//! sobre `razao_partida` que ainda não existe. O caso mínimo já está resolvido:
+//! [`RepositorioRazao::saldo_realizado`] soma as partidas `Realizado` de uma conta — é o que
+//! `mod-financeiro` usa para o saldo do caixa físico na sangria e no fechamento cego.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs, clippy::pedantic)]

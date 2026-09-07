@@ -577,16 +577,19 @@ dependencies = [
  "anyhow",
  "cardeal-cliente",
  "cardeal-kernel",
+ "cardeal-ledger",
  "cardeal-modkit",
  "cardeal-ui",
  "eframe",
  "egui",
  "egui_extras",
+ "mod-agenda",
  "mod-clientes",
  "mod-compras",
  "mod-estoque",
  "mod-financeiro",
  "mod-os",
+ "mod-pdv",
  "mod-vendas",
  "serde",
  "tracing",
@@ -2355,6 +2358,7 @@ dependencies = [
 name = "mod-agenda"
 version = "0.1.0"
 dependencies = [
+ "cardeal-auth",
  "cardeal-kernel",
  "cardeal-ledger",
  "cardeal-modkit",
@@ -2362,10 +2366,13 @@ dependencies = [
  "cardeal-testkit",
  "cardeal-ui",
  "egui",
+ "mod-clientes",
+ "postcard",
  "proptest",
  "rusqlite",
  "serde",
  "smallvec",
+ "tempfile",
  "thiserror 2.0.20",
  "tracing",
 ]
@@ -2601,6 +2608,7 @@ dependencies = [
 name = "mod-pdv"
 version = "0.1.0"
 dependencies = [
+ "cardeal-auth",
  "cardeal-kernel",
  "cardeal-ledger",
  "cardeal-modkit",
@@ -2608,10 +2616,16 @@ dependencies = [
  "cardeal-testkit",
  "cardeal-ui",
  "egui",
+ "mod-clientes",
+ "mod-estoque",
+ "mod-financeiro",
+ "mod-vendas",
+ "postcard",
  "proptest",
  "rusqlite",
  "serde",
  "smallvec",
+ "tempfile",
  "thiserror 2.0.20",
  "tracing",
 ]

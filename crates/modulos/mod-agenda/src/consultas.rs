@@ -210,6 +210,8 @@ pub struct CompromissosNoPeriodo {
     pub inicio: Instante,
     /// Fim do período.
     pub fim: Instante,
+    /// Quando `Some`, só os compromissos que reservam este recurso.
+    pub recurso: Option<Id>,
 }
 
 impl Consulta for CompromissosNoPeriodo {
@@ -219,17 +221,24 @@ impl Consulta for CompromissosNoPeriodo {
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         let mut stmt = conexao
             .prepare(
-                "SELECT id, empresa, titulo, tipo, cliente, inicio, fim, estado, origem_modulo,
-                        origem_id, criado_por, versao
-                 FROM agenda_compromisso
-                 WHERE empresa = ?1 AND inicio < ?2 AND fim > ?3 AND estado != 'Cancelado'
-                 ORDER BY inicio ASC
+                "SELECT c.id, c.empresa, c.titulo, c.tipo, c.cliente, c.inicio, c.fim, c.estado,
+                        c.origem_modulo, c.origem_id, c.criado_por, c.versao
+                 FROM agenda_compromisso c
+                 WHERE c.empresa = ?1 AND c.inicio < ?2 AND c.fim > ?3 AND c.estado != 'Cancelado'
+                       AND (?4 IS NULL OR c.id IN (
+                           SELECT compromisso FROM agenda_compromisso_recurso WHERE recurso = ?4))
+                 ORDER BY c.inicio ASC
                  LIMIT 500",
             )
             .map_err(persist)?;
         let linhas = stmt
             .query_map(
-                params![blob(ctx.empresa), self.fim.em_micros(), self.inicio.em_micros()],
+                params![
+                    blob(ctx.empresa),
+                    self.fim.em_micros(),
+                    self.inicio.em_micros(),
+                    self.recurso.map(blob),
+                ],
                 compromisso_de_linha,
             )
             .map_err(persist)?;

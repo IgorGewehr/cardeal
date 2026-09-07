@@ -12,7 +12,7 @@ use cardeal_storage::UnidadeDeTrabalho;
 use rusqlite::{Connection, OptionalExtension};
 use smallvec::SmallVec;
 
-use crate::conta::{GrupoFluxo, Natureza, PapelConta, TipoConta};
+use crate::conta::{CodigoConta, Conta, GrupoFluxo, Natureza, PapelConta, TipoConta};
 use crate::erros::ErroRazao;
 use crate::lancamento::{Contraparte, EstadoLancamento, Lancamento, Origem, Partida};
 use crate::plano::plano_padrao;
@@ -159,6 +159,95 @@ impl<'a, 'b> RepositorioRazao<'a, 'b> {
             });
         }
         Ok(partidas)
+    }
+
+    /// Soma das partidas de uma conta analítica que representam dinheiro que **de fato
+    /// andou** — positivo = saldo devedor.
+    ///
+    /// Para uma conta de Ativo (ex.: Caixa), essa soma já é o saldo disponível: débito
+    /// (`valor` positivo) aumenta, crédito diminui.
+    ///
+    /// Conta tanto [`EstadoLancamento::Realizado`] quanto [`EstadoLancamento::Estornado`] —
+    /// **não** só o primeiro, ao contrário do que [`EstadoLancamento::conta_para_caixa`]
+    /// sugere isoladamente. Um lançamento estornado teve seu efeito de caixa real no
+    /// instante em que aconteceu; excluí-lo e contar só o espelho (que por si só soma zero,
+    /// `docs/05-nucleo-financeiro.md` §6) faria o estorno debitar o dobro do que reverteu.
+    /// A prova é a própria invariante do Razão: original + estorno somam zero **por conta**
+    /// (`razao::testes::estorno_zera_o_saldo_das_contas_envolvidas`) — só bate se os dois
+    /// lados entrarem na soma. `Previsto`/`Confirmado` continuam de fora: são projeção e
+    /// competência, nunca caixa. Consultas de saldo mais amplas (fluxo, DRE) ficam para
+    /// quando existir agregação própria (ver `lib.rs`); esta é o mínimo que os comandos de
+    /// caixa precisam para sangria e fechamento cego.
+    ///
+    /// # Errors
+    /// [`ErroRazao::FalhaDePersistencia`] em erro do SQLite.
+    pub fn saldo_realizado(&self, conta: Id) -> Resultado<Dinheiro> {
+        let centavos: i64 = self
+            .conn()
+            .query_row(
+                "SELECT COALESCE(SUM(rp.valor), 0)
+                 FROM razao_partida rp
+                 JOIN razao_lancamento rl ON rl.id = rp.lancamento
+                 WHERE rp.conta = ?1 AND rl.estado IN ('Realizado', 'Estornado')",
+                [blob(conta)],
+                |r| r.get(0),
+            )
+            .map_err(persist)?;
+        Ok(Dinheiro::centavos(centavos))
+    }
+
+    /// O maior código filho direto de `pai` já cadastrado, se houver — o que
+    /// `CodigoConta::proximo_filho` usa para abrir a próxima conta em runtime
+    /// (`Conta::abrir_filha`).
+    ///
+    /// # Errors
+    /// [`ErroRazao::FalhaDePersistencia`] em erro do SQLite.
+    pub fn ultimo_codigo_filho(&self, empresa: Id, pai: Id) -> Resultado<Option<CodigoConta>> {
+        self.conn()
+            .query_row(
+                "SELECT codigo FROM razao_conta WHERE empresa = ?1 AND pai = ?2
+                 ORDER BY LENGTH(codigo) DESC, codigo DESC LIMIT 1",
+                rusqlite::params![blob(empresa), blob(pai)],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(persist)
+            .map(|opt| opt.map(CodigoConta::novo))
+    }
+
+    /// Grava uma conta analítica nova, aberta em runtime por um módulo
+    /// (`Conta::abrir_filha`).
+    ///
+    /// # Errors
+    /// [`ErroRazao::FalhaDePersistencia`] em erro do SQLite.
+    pub fn inserir_conta(&mut self, c: &Conta) -> Resultado<()> {
+        self.conn()
+            .execute(
+                "INSERT INTO razao_conta
+                   (id, empresa, codigo, nome, natureza, tipo, pai, nivel, grupo_fluxo,
+                    modulo_origem, papel_padrao, ativa, versao)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
+                rusqlite::params![
+                    blob(c.id),
+                    blob(c.empresa),
+                    c.codigo.como_str(),
+                    c.nome,
+                    natureza_txt(c.natureza),
+                    match c.tipo {
+                        TipoConta::Sintetica => "Sintetica",
+                        TipoConta::Analitica => "Analitica",
+                    },
+                    blob_opt(c.pai),
+                    i64::from(c.nivel),
+                    c.grupo_fluxo.map(grupo_fluxo_txt),
+                    c.modulo_origem,
+                    c.papel.map(|p| p.to_string()),
+                    i64::from(c.ativa),
+                    i64::try_from(c.versao.numero()).unwrap_or(i64::MAX),
+                ],
+            )
+            .map_err(persist)?;
+        Ok(())
     }
 }
 

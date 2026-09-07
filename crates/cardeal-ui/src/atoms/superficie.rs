@@ -4,10 +4,11 @@
 //! Base de item de sidebar, linha de lista e linha de grade.
 //!
 //! **O truque que conserta o clique:** o conteúdo (ícone, rótulo) é desenhado *primeiro*,
-//! num `Ui` filho recortado; só *depois* a linha reivindica o clique com `ui.interact` sobre
-//! o `rect` inteiro. Como essa é a última interação registrada naquela posição, ela fica no
-//! topo — nenhum `Label` ou ícone-filho rouba o "hovered" e o `.clicked()` da linha volta a
-//! funcionar. (O hover do fundo usa `rect_contains_pointer`, que não registra widget.)
+//! num `Ui` filho recortado — com `selectable_labels = false`, senão o `Label` do egui 0.29
+//! passa a sentir arrasto/clique para seleção de texto e **come o clique da linha**. Só
+//! *depois* a linha reivindica o clique com `ui.interact` sobre o `rect` inteiro; como é a
+//! última interação registrada ali, fica no topo. (O hover do fundo usa
+//! `rect_contains_pointer`, que não registra widget.)
 
 use egui::{CursorIcon, Layout, Rect, Response, Sense, UiBuilder};
 
@@ -23,7 +24,7 @@ pub fn superficie_clicavel(
     let cores = ui.cores();
     let largura = ui.available_width().max(1.0);
 
-    let (rect, base) = ui.allocate_exact_size(egui::vec2(largura, altura), Sense::hover());
+    let (rect, resposta) = ui.allocate_exact_size(egui::vec2(largura, altura), Sense::click());
     let sob_ponteiro = ui.rect_contains_pointer(rect);
 
     if ui.is_rect_visible(rect) {
@@ -54,11 +55,12 @@ pub fn superficie_clicavel(
         );
         filho.set_clip_rect(rect);
         filho.set_min_size(miolo.size());
+        // Sem seleção de texto: no egui 0.29 um `Label` selecionável sente arrasto e rouba
+        // o clique da linha inteira — o bug histórico de "a label da sidebar não clica".
+        filho.style_mut().interaction.selectable_labels = false;
         conteudo(&mut filho);
     }
 
-    // Reivindica o clique por último → fica no topo da pilha de interação.
-    let resposta = ui.interact(rect, base.id, Sense::click());
     if resposta.hovered() {
         ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
     }

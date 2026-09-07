@@ -1,20 +1,17 @@
 //! Lança um título a receber avulso — cria o [`Titulo`](crate::Titulo), as parcelas e um
 //! lançamento `Confirmado` por parcela.
 //!
-//! Receituário (`docs/modulos/financeiro.md` §7): D Clientes a receber · C Receita
+//! Receituário (`docs/modulos/financeiro.md` §7): D Clientes a receber · C Outras receitas
 //! (a obrigação existe; o dinheiro ainda não andou).
 
-use cardeal_kernel::{Data, Dinheiro, Erro, Id, Resultado};
-use cardeal_ledger::{Contas, Contraparte, PapelConta, Razao, RepositorioRazao};
+use cardeal_kernel::{Data, Dinheiro, Id, Resultado};
+use cardeal_ledger::{Contraparte, PapelConta};
 use cardeal_modkit::{Comando, Ctx, Risco};
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
-use crate::comandos::autoria_de;
-use crate::eventos::TituloLancado;
-use crate::receituario::{lancar_titulo, ContasTitulo};
-use crate::repositorio::RepositorioFinanceiro;
-use crate::titulo::{ConstrutorTitulo, EspecieTitulo};
+use crate::comandos::{lancar_titulo_comum, DadosLancamentoTitulo};
+use crate::titulo::EspecieTitulo;
 
 /// Lança um título a receber com uma ou mais parcelas.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,6 +30,9 @@ pub struct LancarTituloAReceber {
     pub intervalo_dias: i32,
     /// Observação livre.
     pub observacao: Option<String>,
+    /// Categoria de relatório, opcional — "Assinatura `SaaS` — Cliente X" (não afeta a
+    /// contabilização, só alimenta gráficos de receita por categoria/mês).
+    pub categoria: Option<Id>,
 }
 
 /// O que o comando devolve.
@@ -52,73 +52,29 @@ impl Comando for LancarTituloAReceber {
     const RISCO: Risco = Risco::Baixo;
 
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
-        // 1. Validar (domínio puro): monta título + parcelas com rateio que fecha ao centavo.
-        let mut construtor = ConstrutorTitulo::novo(
-            ctx.empresa,
-            EspecieTitulo::Receber,
-            Contraparte::Cliente(self.cliente),
-            self.valor_total,
-            self.emissao,
-        )
-        .parcelas(self.parcelas, self.primeiro_vencimento, self.intervalo_dias);
-        if let Some(obs) = self.observacao {
-            construtor = construtor.observacao(obs);
-        }
-        let mut tcp = construtor.construir().map_err(|e| Erro::de_dominio(&e))?;
-
-        // 2. Resolver contas por papel.
-        let (conta_cliente, conta_receita) = {
-            let repo = RepositorioRazao::novo(uow);
-            let contas = Contas::nova(&repo, ctx.empresa);
-            (
-                contas
-                    .papel(PapelConta::ClientesAReceber)
-                    .map_err(|e| Erro::de_dominio(&e))?,
-                contas
-                    .papel(PapelConta::ReceitaVendas)
-                    .map_err(|e| Erro::de_dominio(&e))?,
-            )
-        };
-
-        // 3. Receituário + Razão: um lançamento por parcela, vinculado a ela.
-        let lancs = lancar_titulo(
-            &tcp,
-            ContasTitulo {
-                contraparte: conta_cliente,
-                resultado: conta_receita,
+        let g = lancar_titulo_comum(
+            DadosLancamentoTitulo {
+                especie: EspecieTitulo::Receber,
+                contraparte: Contraparte::Cliente(self.cliente),
+                valor_total: self.valor_total,
+                emissao: self.emissao,
+                parcelas: self.parcelas,
+                primeiro_vencimento: self.primeiro_vencimento,
+                intervalo_dias: self.intervalo_dias,
+                observacao: self.observacao,
+                categoria: self.categoria,
+                origem_modulo: "avulso",
+                origem_id: None,
+                papel_contraparte: PapelConta::ClientesAReceber,
+                papel_resultado: PapelConta::OutrasReceitas,
             },
-            autoria_de(ctx),
-        )
-        .map_err(|e| Erro::de_dominio(&e))?;
-
-        let mut lancamentos = Vec::with_capacity(lancs.len());
-        {
-            let mut repo = RepositorioRazao::novo(uow);
-            for (parcela, lanc) in tcp.parcelas.iter_mut().zip(lancs) {
-                let id = Razao::registrar(&mut repo, lanc).map_err(|e| Erro::de_dominio(&e))?;
-                parcela.lancamento = Some(id);
-                lancamentos.push(id);
-            }
-        }
-
-        // 4. Persistir.
-        RepositorioFinanceiro::novo(uow).inserir_titulo(&tcp)?;
-
-        // 5. Publicar.
-        let parcelas: Vec<Id> = tcp.parcelas.iter().map(|p| p.id).collect();
-        let quantas = u16::try_from(parcelas.len()).unwrap_or(u16::MAX);
-        uow.publicar(TituloLancado {
-            titulo: tcp.titulo.id,
-            especie: "Receber",
-            valor: tcp.titulo.valor_original,
-            parcelas: quantas,
-        })
-        .map_err(|e| Erro::de_dominio(&e))?;
-
+            ctx,
+            uow,
+        )?;
         Ok(TituloAReceberLancado {
-            titulo: tcp.titulo.id,
-            parcelas,
-            lancamentos,
+            titulo: g.titulo,
+            parcelas: g.parcelas,
+            lancamentos: g.lancamentos,
         })
     }
 }

@@ -74,6 +74,51 @@ fn lancamento_simples(
     c.construir().map_err(|_| ErroEstoque::QuantidadeInvalida)
 }
 
+/// O corpo comum a `ajuste_de_inventario`/`ajuste_manual` — mesma contabilização (sobra:
+/// D Estoque/C Outras receitas; falta: D Perdas/C Estoque, sempre `Realizado`), só muda a
+/// origem registrada e o texto do histórico.
+fn ajuste_saldo(
+    empresa: Id,
+    origem_tipo: &str,
+    agregado: Id,
+    rotulo: &str,
+    ajuste: &AjusteInventario,
+    valor: Dinheiro,
+    contas: ContasEstoque,
+    data: Data,
+    autoria: Autoria,
+) -> Result<Option<LancamentoBalanceado>, ErroEstoque> {
+    if ajuste.delta.e_zero() || valor.e_zero() {
+        return Ok(None);
+    }
+    let sobra = ajuste.delta.e_positiva();
+    let (debito, credito, historico) = if sobra {
+        (
+            (contas.estoque, valor),
+            (contas.outras_receitas, valor),
+            format!("{rotulo} — sobra"),
+        )
+    } else {
+        (
+            (contas.perdas, valor),
+            (contas.estoque, valor),
+            format!("{rotulo} — falta"),
+        )
+    };
+    lancamento_simples(
+        empresa,
+        data,
+        historico,
+        origem(origem_tipo, agregado),
+        autoria,
+        true,
+        debito,
+        credito,
+        Some(ajuste.delta.abs()),
+    )
+    .map(Some)
+}
+
 /// Lançamento de um ajuste de inventário (`docs/modulos/estoque.md` §7).
 ///
 /// - Sobra (`delta > 0`): D Estoque / C Outras receitas, `Realizado`.
@@ -92,35 +137,46 @@ pub fn ajuste_de_inventario(
     data: Data,
     autoria: Autoria,
 ) -> Result<Option<LancamentoBalanceado>, ErroEstoque> {
-    if ajuste.delta.e_zero() || valor.e_zero() {
-        return Ok(None);
-    }
-    let sobra = ajuste.delta.e_positiva();
-    let (debito, credito, historico) = if sobra {
-        (
-            (contas.estoque, valor),
-            (contas.outras_receitas, valor),
-            "Ajuste de inventário — sobra na contagem".to_string(),
-        )
-    } else {
-        (
-            (contas.perdas, valor),
-            (contas.estoque, valor),
-            "Ajuste de inventário — falta na contagem".to_string(),
-        )
-    };
-    lancamento_simples(
+    ajuste_saldo(
         empresa,
+        "inventario",
+        inventario,
+        "Ajuste de inventário na contagem",
+        ajuste,
+        valor,
+        contas,
         data,
-        historico,
-        origem("inventario", inventario),
         autoria,
-        true,
-        debito,
-        credito,
-        Some(ajuste.delta.abs()),
     )
-    .map(Some)
+}
+
+/// Lançamento de um ajuste manual de saldo **fora** do fluxo formal de inventário
+/// (`AjustarSaldo`, `docs/modulos/estoque.md` §5/§11.8) — correção pontual de um erro de
+/// digitação de quantidade sem precisar abrir/fechar um [`crate::Inventario`] inteiro. Mesma
+/// contabilização de [`ajuste_de_inventario`].
+///
+/// # Errors
+/// [`ErroEstoque::QuantidadeInvalida`] se o construtor do Razão recusar (não deve ocorrer).
+pub fn ajuste_manual(
+    empresa: Id,
+    movimento: Id,
+    ajuste: &AjusteInventario,
+    valor: Dinheiro,
+    contas: ContasEstoque,
+    data: Data,
+    autoria: Autoria,
+) -> Result<Option<LancamentoBalanceado>, ErroEstoque> {
+    ajuste_saldo(
+        empresa,
+        "ajuste_manual",
+        movimento,
+        "Ajuste manual de saldo",
+        ajuste,
+        valor,
+        contas,
+        data,
+        autoria,
+    )
 }
 
 /// Lançamento de uma perda por vencimento/quebra: D Perdas / C Estoque, `Realizado`.
@@ -257,6 +313,30 @@ mod testes {
         assert!(l.interno().esta_balanceado());
         assert_eq!(l.interno().estado, EstadoLancamento::Realizado);
         assert_eq!(l.interno().total_debitos(), Dinheiro::reais(12));
+    }
+
+    #[test]
+    fn ajuste_manual_de_falta_debita_perdas() {
+        let ajuste = AjusteInventario {
+            produto: Id::novo(),
+            variacao: None,
+            lote: None,
+            delta: Quantidade::unidades(-2),
+        };
+        let l = ajuste_manual(
+            Id::novo(),
+            Id::novo(),
+            &ajuste,
+            Dinheiro::reais(100),
+            contas(),
+            hoje(),
+            autoria(),
+        )
+        .unwrap()
+        .unwrap();
+        assert!(l.interno().esta_balanceado());
+        assert_eq!(l.interno().estado, EstadoLancamento::Realizado);
+        assert_eq!(l.interno().total_debitos(), Dinheiro::reais(100));
     }
 
     #[test]

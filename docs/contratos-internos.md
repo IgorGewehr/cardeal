@@ -468,6 +468,7 @@ impl Ctx {
     pub fn concede(&self, permissao: &str) -> bool;         // poder secundário
     pub fn limite(&self, chave: &str) -> Option<ValorLimite>;
     pub fn conjunto(&self) -> &ConjuntoEfetivo;
+    pub fn de_sessao(sessao: &Sessao, ambiente: &Ambiente) -> Self;   // ver nota abaixo
     // contas() / config() / porta(): adiados (contas espera um resolvedor não-genérico
     //   em cardeal-ledger; por ora o comando faz `Contas::nova(&RepositorioRazao::novo(uow), empresa)`).
 }
@@ -754,7 +755,17 @@ pub struct Vazio;         // estado vazio com ilustração e ação
 
 1. Módulo **nunca** abre conexão. Recebe `&mut UnidadeDeTrabalho` (escrita) ou
    `&rusqlite::Connection` (leitura).
-2. Módulo **nunca** lê tabela de outro módulo. Prefixo de tabela = id do módulo.
+2. Módulo **nunca** lê tabela de outro módulo. Prefixo de tabela = id do módulo. A regra é
+   sobre SQL cru — chamar a `pub fn` de outro módulo (dentro da mesma transação, mesmo
+   `ctx`/`uow` que o comando de origem já tem) é permitido e é o padrão estabelecido para
+   efeitos que atravessam módulo (`mod-financeiro::lancar_titulo_comum`,
+   `mod-estoque::registrar_entrada_comum`/`registrar_saida_comum`, chamadas por `mod-os` e
+   `mod-compras`). Licenciado por `Manifesto::depende_de`: só chame a função de um módulo que
+   o seu declara como dependência dura — sem isso o módulo não sobe e a chamada não tem
+   garantia de que a tabela do outro lado exista. Para funções que não são `Comando` (porque
+   dependem de algo que o despacho ainda não injeta, como `PortaFiscal` em `mod-compras`) e
+   por isso são chamadas fora do lookup por nome do `Despachante`, monte o `Ctx` com
+   `Ctx::de_sessao` — nunca construa um `Ctx` "de mentira".
 3. Todo efeito financeiro passa por `ConstrutorLancamento` + `Razao::registrar`.
 4. Nenhuma conta é referenciada por código literal: use `ctx.contas().papel(PapelConta::X)`.
 5. Todo comando declara `PERMISSAO`. Sem isso não compila.

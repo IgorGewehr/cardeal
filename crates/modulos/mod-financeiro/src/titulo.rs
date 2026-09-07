@@ -125,6 +125,10 @@ pub struct Titulo {
     pub forma_cobranca: FormaCobranca,
     /// Centro de custo, quando o submódulo está ativo.
     pub centro_custo: Option<Id>,
+    /// Categoria livre para relatório (`docs/modulos/financeiro.md` §11.9) — "Aluguel",
+    /// "Assinatura `SaaS` — Cliente X". Não participa da contabilização; só alimenta
+    /// agregações por categoria/mês.
+    pub categoria: Option<Id>,
     /// Observação livre.
     pub observacao: Option<String>,
     /// Preenchido quando o título é cancelado — nunca é apagado.
@@ -237,6 +241,7 @@ pub struct ConstrutorTitulo {
     origem_id: Option<Id>,
     forma_cobranca: FormaCobranca,
     centro_custo: Option<Id>,
+    categoria: Option<Id>,
     observacao: Option<String>,
     n_parcelas: u16,
     primeiro_vencimento: Option<Data>,
@@ -268,6 +273,7 @@ impl ConstrutorTitulo {
             origem_id: None,
             forma_cobranca: FormaCobranca::Carteira,
             centro_custo: None,
+            categoria: None,
             observacao: None,
             n_parcelas: 1,
             primeiro_vencimento: None,
@@ -299,6 +305,14 @@ impl ConstrutorTitulo {
     #[must_use]
     pub const fn centro_custo(mut self, cc: Id) -> Self {
         self.centro_custo = Some(cc);
+        self
+    }
+
+    /// Associa uma categoria de relatório ao título (`docs/modulos/financeiro.md` §11.9) —
+    /// não afeta a contabilização, só agregações por categoria/mês.
+    #[must_use]
+    pub const fn categoria(mut self, categoria: Id) -> Self {
+        self.categoria = Some(categoria);
         self
     }
 
@@ -415,6 +429,7 @@ impl ConstrutorTitulo {
             valor_original: self.valor_total,
             forma_cobranca: self.forma_cobranca,
             centro_custo: self.centro_custo,
+            categoria: self.categoria,
             observacao: self.observacao,
             cancelado_em: None,
             versao: Versao::INICIAL,
@@ -494,6 +509,19 @@ mod testes {
                 .unwrap_err(),
             ErroFinanceiro::NumeroDeParcelasInvalido(361)
         ));
+    }
+
+    #[test]
+    fn categoria_e_opcional_e_fica_no_titulo() {
+        let sem = construtor(Dinheiro::reais(10)).construir().unwrap();
+        assert_eq!(sem.titulo.categoria, None);
+
+        let cat = Id::novo();
+        let com = construtor(Dinheiro::reais(10))
+            .categoria(cat)
+            .construir()
+            .unwrap();
+        assert_eq!(com.titulo.categoria, Some(cat));
     }
 
     #[test]

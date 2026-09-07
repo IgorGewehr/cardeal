@@ -100,6 +100,23 @@ impl Ctx {
     pub fn conjunto(&self) -> &ConjuntoEfetivo {
         &self.conjunto
     }
+
+    /// Monta um `Ctx` a partir de uma sessão e um ambiente já resolvidos — sem passar pelo
+    /// nome de comando do [`Despachante`].
+    ///
+    /// [`Self::executar_comando`] chama isto por baixo dos panos; existe como construtor
+    /// público para quem precisa de um `Ctx` de verdade (empresa/conjunto/autorizações reais,
+    /// nada de permissivo) fora do lookup por nome — hoje, funções `pub fn` de um módulo que
+    /// chamam direto a `pub fn comum` de outro dentro da mesma transação, mas que não são
+    /// elas próprias um [`Comando`] porque dependem de algo que o despacho ainda não injeta
+    /// (`docs/contratos-internos.md` §4, "adiado": `Ctx::porta()`) — ex.: as funções de
+    /// importação fiscal do `mod-compras`, chamadas por um teste de integração hoje e, no
+    /// futuro, por uma tarefa agendada. Continua exigindo um [`Escritor::executar`] em volta
+    /// para obter a `UnidadeDeTrabalho` — não é um atalho para fora da transação.
+    #[must_use]
+    pub fn de_sessao(sessao: &Sessao, ambiente: &Ambiente) -> Self {
+        montar_ctx(sessao, ambiente)
+    }
 }
 
 /// Um comando: uma intenção de mudar o estado. `docs/15-convencoes-codigo.md` §3 e §6.

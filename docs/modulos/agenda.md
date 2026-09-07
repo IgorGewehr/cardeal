@@ -57,22 +57,39 @@ stateDiagram-v2
 
 | Comando | Permissão | Risco | O que faz | Erros possíveis |
 |---|---|---|---|---|
-| `CriarRecurso` | `agenda.recurso.gerenciar` | Baixo | | `NomeDuplicado` |
-| `DefinirDisponibilidade` | `agenda.recurso.gerenciar` | Baixo | | `IntervaloInvalido` |
-| `CriarCompromisso` | `agenda.compromisso.criar` | Baixo | Verifica sobreposição por recurso antes de gravar | `ConflitoDeAgenda`, `RecursoIndisponivel` |
-| `ConfirmarCompromisso` | `agenda.compromisso.confirmar` | Baixo | | `CompromissoCancelado` |
-| `IniciarCompromisso` / `ConcluirCompromisso` | `agenda.compromisso.confirmar` | Baixo | | `EstadoInvalido` |
-| `CancelarCompromisso` | `agenda.compromisso.cancelar` | Médio | | `CompromissoConcluido` |
-| `RegistrarNaoComparecimento` | (tarefa agendada) | Baixo | Marca `NaoCompareceu` para compromissos vencidos sem início | — |
+| `CriarRecurso` ✅ | `agenda.recurso.gerenciar` | Baixo | | `NomeDuplicado` |
+| `DefinirDisponibilidade` ✅ | `agenda.recurso.gerenciar` | Baixo | | `IntervaloInvalido` |
+| `CriarCompromisso` ✅ | `agenda.compromisso.criar` | Baixo | Verifica sobreposição por recurso antes de gravar | `ConflitoDeAgenda`, `RecursoIndisponivel` |
+| `ConfirmarCompromisso` ✅ | `agenda.compromisso.confirmar` | Baixo | | `CompromissoCancelado` |
+| `IniciarCompromisso` / `ConcluirCompromisso` ✅ | `agenda.compromisso.confirmar` | Baixo | | `EstadoInvalido` |
+| `CancelarCompromisso` ✅ | `agenda.compromisso.cancelar` | Médio | | `CompromissoConcluido` |
+| `RegistrarNaoComparecimento` ✅ | (tarefa agendada) | Baixo | `registrar_nao_comparecimento_pendentes` — marca `NaoCompareceu` para compromissos vencidos sem início | — |
+
+> **Nota (2026-09-06) — primeira versão implementada:** todo o ciclo de `compromisso`/`recurso`
+> saiu do papel numa sessão, a pedido do usuário de que a agenda ficasse **bem interligada a
+> `financeiro` e `clientes`**. Com `clientes`: `agenda_compromisso.cliente` é uma FK de
+> verdade para `clientes_pessoa(id)` (não um `Id` solto) e o manifesto declara
+> `depende_de: &[clientes]` — a agenda não sobe sem o cadastro de clientes ativo. Com
+> `financeiro`: a interligação certa, dado que "agenda não lança dinheiro" (§7) é uma decisão
+> deliberada do próprio design, é o par `origem_modulo`/`origem_id` do compromisso — o mesmo
+> mecanismo de correlação que `financeiro::Titulo::origem_modulo`/`origem_id` já usa com
+> `os`/`vendas`/`compras` — para quando um módulo de negócio (visita técnica, manutenção)
+> precisar amarrar um compromisso ao título que ele mesmo lança; `os`/`hotelaria` ainda não
+> chamam `CriarCompromisso` de verdade (será o próximo passo natural ao revisitar um desses
+> módulos). Simplificações desta primeira fatia: `CriarCompromisso` **sempre** recusa
+> conflito (a "permissão de exceção explícita" do §11.1 não existe ainda — o comportamento
+> mais seguro por padrão); `Lembrete`/`agenda_lembrete` não têm domínio nem tabela ainda,
+> sem consumidor real; `agenda.conflito_detectado.v1` é do fluxo de reconciliação offline do
+> §12, que depende de um `cardeal-sync` que não existe.
 
 ## 6. Consultas
 
 | Consulta | Permissão | Uso na UI | Índice que a sustenta |
 |---|---|---|---|
-| `AgendaDoRecurso` | `agenda.compromisso.ver` | Calendário por sala/técnico | `agenda_compromisso_recurso(recurso, inicio)` |
-| `DisponibilidadeNoPeriodo` | `agenda.compromisso.ver` | Sugestão de horário livre | `agenda_disponibilidade(recurso, dia_semana)` |
-| `ConflitosDeAgenda` | `agenda.compromisso.ver` | Alerta na criação | consulta de sobreposição de intervalo (`inicio < :fim AND fim > :inicio`) |
-| `ProximosCompromissos` | `agenda.compromisso.ver` | "Exige ação hoje" | `agenda_compromisso(empresa, inicio)` |
+| `AgendaDoRecurso` ✅ | `agenda.compromisso.ver` | Calendário por sala/técnico | `agenda_compromisso_recurso(recurso, inicio)` |
+| `DisponibilidadeNoPeriodo` ✅ | `agenda.compromisso.ver` | Sugestão de horário livre — lista as janelas recorrentes; calcular o horário livre concreto é trabalho da UI sobre esta base | `agenda_disponibilidade(recurso, dia_semana)` |
+| `ConflitosDeAgenda` ✅ | `agenda.compromisso.ver` | Alerta na criação | consulta de sobreposição de intervalo (`inicio < :fim AND fim > :inicio`) |
+| `ProximosCompromissos` ✅ | `agenda.compromisso.ver` | "Exige ação hoje" — é a consulta que a tela de agenda (`cardeal-desktop`) já espera | `agenda_compromisso(empresa, inicio)` |
 
 ## 7. Receituário contábil
 
@@ -170,7 +187,7 @@ CREATE TABLE agenda_compromisso (
     empresa        BLOB    NOT NULL,
     titulo         TEXT    NOT NULL,
     tipo           TEXT    NOT NULL CHECK (tipo IN ('Interno','Cliente')),
-    cliente        BLOB,
+    cliente        BLOB    REFERENCES clientes_pessoa(id), -- FK de verdade, ver Nota da §5
     inicio         INTEGER NOT NULL,
     fim            INTEGER NOT NULL,
     estado         TEXT    NOT NULL CHECK (estado IN ('Agendado','Confirmado','EmAndamento','Concluido','Cancelado','NaoCompareceu')),

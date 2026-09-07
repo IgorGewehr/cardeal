@@ -63,18 +63,40 @@ stateDiagram-v2
 
 | Comando | Permissão | Risco | O que faz | Erros possíveis |
 |---|---|---|---|---|
-| `AbrirOrdemServico` | `os.ordem.criar` | Baixo | Opcionalmente chama `agenda.CriarCompromisso` | `ConflitoDeAgenda` |
-| `RegistrarLaudo` | `os.laudo.registrar` | Baixo | | — |
-| `MontarOrcamentoOs` | `os.orcamento.montar` | Baixo | Adiciona `ItemPeca`/`ItemMaoDeObra`, calcula `valor_total` | `PecaSemEstoque` (aviso) |
-| `EnviarParaAprovacao` | `os.orcamento.enviar` | Baixo | | `OrcamentoVazio` |
-| `AprovarOrcamentoOs` | `os.orcamento.aprovar` | Médio | Registra identificação de quem aprovou (cliente ou responsável) | `OrcamentoJaDecidido` |
-| `ReprovarOrcamentoOs` | `os.orcamento.aprovar` | Baixo | | `OrcamentoJaDecidido` |
-| `IniciarExecucao` | `os.execucao.iniciar` | Baixo | | `OrcamentoNaoAprovado` |
-| `AplicarPeca` | `os.peca.aplicar` | Médio | `estoque.RegistrarSaida`, grava `custo_unitario` devolvido | `SaldoInsuficiente` |
-| `RegistrarMaoDeObra` | `os.execucao.registrar_mao_de_obra` | Baixo | | — |
-| `ConcluirExecucao` | `os.execucao.concluir` | Baixo | | `PecaPendenteDeAplicacao` |
-| `FaturarOrdemServico` | `os.faturar` | Alto | Monta `Lancamento` (receita + custo), publica evento | `OsNaoConcluida`, `OsJaFaturada` |
-| `AcionarGarantia` | `os.garantia.acionar` | Médio | Abre nova OS vinculada por `Reincidencia`; peças/mão de obra cobertas ficam `coberto_garantia = Sim` | `ForaDoPrazoDeGarantia` |
+| `AbrirOrdemServico` ✅ | `os.ordem.criar` | Baixo | Numera e abre a OS. O vínculo com `agenda.CriarCompromisso` fica para quando o módulo `agenda` existir — `compromisso` não é gravado ainda | — |
+| `RegistrarLaudo` ✅ | `os.laudo.registrar` | Baixo | Chamável de novo enquanto `EmDiagnostico`, para corrigir um laudo digitado errado — sobrescreve o texto, não transiciona de novo; a consulta sempre lê o laudo mais recente | — |
+| `MontarOrcamentoOs` ✅ | `os.orcamento.montar` | Baixo | Chamado uma vez por item (`ItemOrcamentoNovo::Peca`/`MaoDeObra`); soma ao `valor_total` e incrementa `itens_orcamento` | — |
+| `RemoverItemOrcamento` ✅ (não estava no spec original) | `os.orcamento.montar` | Baixo | Remove um item digitado errado antes da aprovação, sem precisar cancelar a OS inteira | `EstadoInvalido` |
+| `EnviarParaAprovacao` ✅ | `os.orcamento.enviar` | Baixo | | `OrcamentoVazio` |
+| `AprovarOrcamentoOs` ✅ | `os.orcamento.aprovar` | Médio | Exige `identificacao_aprovador` não vazia (`aprovado_por`, coluna nova) | `OrcamentoJaDecidido`, `AprovacaoSemIdentificacao` |
+| `ReprovarOrcamentoOs` ✅ | `os.orcamento.aprovar` | Baixo | | `OrcamentoJaDecidido` |
+| `IniciarExecucao` ✅ | `os.execucao.iniciar` | Baixo | | `OrcamentoNaoAprovado` |
+| `AplicarPeca` ✅ | `os.peca.aplicar` | Médio | Chama `mod_estoque::registrar_saida_comum` **direto, na mesma transação** (não via despacho — ver `docs/contratos-internos.md` §7 regra 2); grava `custo_unitario` devolvido | `ItemNaoPertenceAOrdem`, `PecaJaAplicada` |
+| `RegistrarMaoDeObra` ✅ | `os.execucao.registrar_mao_de_obra` | Baixo | | — |
+| `ConcluirExecucao` ✅ | `os.execucao.concluir` | Baixo | | `PecaPendenteDeAplicacao` |
+| `FaturarOrdemServico` ✅ | `os.faturar` | Alto | Monta **um único lançamento combinado** (D Clientes a receber/C Receita de serviços — pulado se `valor_total` for zero — + D Custo de serviço/C Estoque quando há peça aplicada) e grava o título a receber vinculado a ele, **só se houve cobrança**, com `mod_financeiro::ConstrutorTitulo` + `RepositorioFinanceiro::inserir_titulo` — **não** usa `mod_financeiro::lancar_titulo_comum` (que criaria um segundo lançamento e duplicaria a receita; ver `src/comandos/faturar_ordem_servico.rs`) | `OsNaoConcluida`, `OsJaFaturada` |
+| `CancelarOrdemServico` ✅ | `os.ordem.cancelar` | Médio | Só a partir de `Aberta`/`EmDiagnostico`/`AguardandoAprovacao` (§4, §11 regra 5) — terminal, como `Reprovada` | `EstadoInvalido` |
+| `AcionarGarantia` | `os.garantia.acionar` | Médio | Ainda não implementado — `ItemPeca.coberto_garantia` nunca é `true` nesta versão | `ForaDoPrazoDeGarantia` |
+
+> **Nota (2026-09-05):** as linhas ✅ estão implementadas com teste de integração de ponta a
+> ponta (`crates/modulos/mod-os/tests/comandos.rs`): cliente → peça em estoque → OS aberta →
+> laudo → orçamento → aprovação → execução (consumindo estoque de verdade) → faturamento com
+> título real no financeiro. `os_ordem_servico` ganhou a coluna `aprovado_por` (não estava no
+> §13 original) para que a aprovação nunca seja implícita, conforme a regra §11.2.
+>
+> **Nota (2026-09-06) — auditoria de produção:** encontrou e corrigiu três lacunas reais. (1)
+> Um reparo em garantia (peça a custo zero para o cliente) não conseguia sair de
+> `AguardandoAprovacao`, porque `enviar_para_aprovacao` exigia `valor_total > 0` — agora exige
+> só ter algum item (`os_ordem_servico` ganhou a coluna `itens_orcamento`, v2). Isso por sua
+> vez revelou um bug latente mais sério: `FaturarOrdemServico` sempre debitava/creditava
+> `valor_total` incondicionalmente, e o Razão recusa qualquer partida de valor zero — faturar
+> uma OS de garantia genuína teria **entrado em pânico** (`ConstrutorLancamento::construir`
+> retornando `ValorZerado`, contra um `.expect()` que assumia isso "nunca acontece na
+> prática"); corrigido para pular a partida de cobrança quando `valor_total` é zero, e não
+> gerar lançamento nenhum quando não há cobrança **nem** custo de peça. (2) Não havia como
+> corrigir um item de orçamento digitado errado sem cancelar a OS inteira
+> (`RemoverItemOrcamento`, novo). (3) Um laudo não podia ser corrigido depois de registrado
+> (`RegistrarLaudo` agora aceita ser chamado de novo enquanto `EmDiagnostico`).
 
 ## 6. Consultas
 
@@ -180,6 +202,7 @@ CREATE TABLE os_ordem_servico (
     tecnico_responsavel  BLOB    NOT NULL,
     compromisso          BLOB,
     estado               TEXT    NOT NULL CHECK (estado IN ('Aberta','EmDiagnostico','AguardandoAprovacao','Aprovada','EmExecucao','Concluida','Faturada','Cancelada','Reprovada')),
+    aprovado_por         TEXT,
     garantia_dias        INTEGER NOT NULL DEFAULT 90,
     valor_total          INTEGER NOT NULL DEFAULT 0,
     versao               INTEGER NOT NULL DEFAULT 1,

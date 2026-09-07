@@ -89,6 +89,24 @@ pub enum ErroRazao {
     /// Falha da camada de persistência ao ler ou gravar (erro de SQLite, disco, etc.).
     #[error("Falha de persistência no Razão: {0}")]
     FalhaDePersistencia(String),
+
+    /// `Conta::abrir_filha` pedida sob uma conta que não é sintética — só uma sintética
+    /// agrupa contas filhas.
+    #[error("A conta \"{0}\" não é sintética e não pode ganhar contas filhas")]
+    ContaPaiNaoESintetica(String),
+
+    /// `Conta::abrir_filha` pedida sob uma conta pai inativa.
+    #[error("A conta pai \"{0}\" está inativa")]
+    ContaPaiInativa(String),
+
+    /// O código da conta filha não é filho direto do código da conta pai informada.
+    #[error("O código \"{codigo}\" não é filho direto de \"{pai}\"")]
+    CodigoNaoEhFilhoDoPai {
+        /// O código que se tentou usar.
+        codigo: String,
+        /// O código da conta pai.
+        pai: String,
+    },
 }
 
 impl ErroDominio for ErroRazao {
@@ -105,7 +123,10 @@ impl ErroDominio for ErroRazao {
             Self::ContaSintetica { .. }
             | Self::ContaInativa(_)
             | Self::PapelNaoMapeado(_)
-            | Self::EmpresaDivergente => CodigoErro::REGRA_VIOLADA,
+            | Self::EmpresaDivergente
+            | Self::ContaPaiNaoESintetica(_)
+            | Self::ContaPaiInativa(_)
+            | Self::CodigoNaoEhFilhoDoPai { .. } => CodigoErro::REGRA_VIOLADA,
             Self::PeriodoFechado { .. } => CodigoErro::PERIODO_FECHADO,
             Self::JaEstornado(_) | Self::TransicaoInvalida { .. } => CodigoErro::ESTADO_INVALIDO,
             Self::CodigoNaoEncontrado(_) => CodigoErro::NAO_ENCONTRADO,

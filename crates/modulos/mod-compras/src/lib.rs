@@ -52,8 +52,8 @@
 #![allow(clippy::result_large_err)]
 
 mod casamento;
-mod consultas;
 mod comandos;
+mod consultas;
 mod erros;
 pub mod eventos;
 mod manifesto;
@@ -64,12 +64,12 @@ mod preferencias;
 mod repositorio;
 
 pub use casamento::{casar, RegraCasamentoAprendida, ResultadoCasamento, LIMIAR_SUGESTAO_FORTE};
-pub use consultas::{ItemNota, ItensDaNota, NotasRecentes};
 pub use comandos::{
     confirmar_entrada_comum, importar_nota_da_sefaz, verificar_notas_na_sefaz, ConfirmarEntrada,
     DefinirPreferenciasCompras, EntradaConfirmada, ItemNotaManual, LancarNotaManual,
     RelatorioImportacao, VincularProdutoManual,
 };
+pub use consultas::{ItemNota, ItensDaNota, NotasRecentes};
 pub use erros::ErroCompras;
 pub use manifesto::{manifesto, MANIFESTO};
 pub use modulo::ModuloCompras;
