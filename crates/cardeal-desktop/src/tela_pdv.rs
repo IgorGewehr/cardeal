@@ -233,7 +233,7 @@ pub fn mostrar(
         Dlg::Fechado => {}
         Dlg::CadastrarCaixa { .. } => dialogo_cadastrar(ui.ctx(), motor, sessao, estado),
         Dlg::AbrirCaixa { .. } => dialogo_abrir(ui.ctx(), motor, sessao, estado),
-        Dlg::Pagamento { .. } => dialogo_pagamento(ui.ctx(), motor, sessao, estado),
+        Dlg::Pagamento { .. } => dialogo_pagamento(ui.ctx(), estado),
     }
 }
 
@@ -752,12 +752,7 @@ fn dialogo_abrir(
     }
 }
 
-fn dialogo_pagamento(
-    ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
-    estado: &mut EstadoTelaPdv,
-) {
+fn dialogo_pagamento(ctx: &egui::Context, estado: &mut EstadoTelaPdv) {
     let total = estado.total;
     let fechar = Dialogo::nova("Pagamento").largura(520.0).mostrar(
         ctx,

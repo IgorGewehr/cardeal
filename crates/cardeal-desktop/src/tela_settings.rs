@@ -33,7 +33,6 @@ pub struct EstadoTelaSettings {
     fantasia: String,
     regime: usize,
     erro: Option<String>,
-    ok: Option<String>,
 }
 
 impl EstadoTelaSettings {
@@ -77,11 +76,6 @@ pub fn mostrar(
                 ui.add(Rotulo::interface(e.clone()).quebravel().cor(ui.cores().negativo));
                 ui.add_space(Espaco::E12);
             }
-            if let Some(o) = &estado.ok {
-                ui.add(Rotulo::interface(o.clone()).cor(ui.cores().positivo));
-                ui.add_space(Espaco::E12);
-            }
-
             match estado.aba {
                 Aba::Empresa => secao_empresa(ui, motor, sessao, estado),
                 Aba::Aparencia => secao_aparencia(ui, tema),
@@ -113,7 +107,6 @@ fn abas(ui: &mut egui::Ui, estado: &mut EstadoTelaSettings) {
                     };
                     if ui.add(b).clicked() {
                         estado.aba = aba;
-                        estado.ok = None;
                     }
                 }
             });
