@@ -18,6 +18,6 @@ mod editar_pessoa;
 pub use adicionar_contato::{AdicionarContato, ContatoFoiAdicionado};
 pub use adicionar_endereco::{AdicionarEndereco, EnderecoFoiAdicionado};
 pub use adicionar_papel::{AdicionarPapel, PapelFoiAdicionado};
-pub use criar_pessoa::{CriarPessoa, PessoaCadastrada};
+pub use criar_pessoa::{ContatoInicial, CriarPessoa, EnderecoInicial, PessoaCadastrada};
 pub use definir_limite_credito::{DefinirLimiteCredito, LimiteCreditoDefinido};
 pub use editar_pessoa::{EditarPessoa, PessoaEditada};

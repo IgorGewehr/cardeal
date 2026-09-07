@@ -9,6 +9,7 @@ members = [
     "crates/cardeal-protocol",
     "crates/cardeal-server",
     "crates/cardeal-cliente",
+    "crates/cardeal-pdf",
     "crates/cardeal-ui",
     "crates/cardeal-desktop",
     "crates/cardeal-analytics",
@@ -23,6 +24,7 @@ members = [
     "crates/modulos/mod-crm",
     "crates/modulos/mod-agenda",
     "crates/modulos/mod-os",
+    "crates/modulos/mod-orcamentos",
     "crates/modulos/mod-alugueis",
     "crates/modulos/mod-combustivel",
     "crates/modulos/mod-hotelaria",
@@ -48,6 +50,7 @@ cardeal-modkit    = { path = "crates/cardeal-modkit" }
 cardeal-auth      = { path = "crates/cardeal-auth" }
 cardeal-protocol  = { path = "crates/cardeal-protocol" }
 cardeal-cliente   = { path = "crates/cardeal-cliente" }
+cardeal-pdf       = { path = "crates/cardeal-pdf" }
 cardeal-ui        = { path = "crates/cardeal-ui" }
 cardeal-analytics = { path = "crates/cardeal-analytics" }
 cardeal-fiscal    = { path = "crates/cardeal-fiscal" }
@@ -63,6 +66,7 @@ mod-compras      = { path = "crates/modulos/mod-compras" }
 mod-crm          = { path = "crates/modulos/mod-crm" }
 mod-agenda       = { path = "crates/modulos/mod-agenda" }
 mod-os           = { path = "crates/modulos/mod-os" }
+mod-orcamentos   = { path = "crates/modulos/mod-orcamentos" }
 mod-alugueis     = { path = "crates/modulos/mod-alugueis" }
 mod-combustivel  = { path = "crates/modulos/mod-combustivel" }
 mod-hotelaria    = { path = "crates/modulos/mod-hotelaria" }
@@ -125,6 +129,14 @@ toml        = "0.8"
 clap        = { version = "4", features = ["derive", "env"] }
 mimalloc    = { version = "0.1", default-features = false }
 walkdir     = "2"
+base64      = "0.22"
+
+# --- documentos / PDF -------------------------------------------------------
+# O escritor de PDF de `cardeal-pdf` é próprio (PDF 1.7 mínimo, fontes padrão) —
+# só `image` para decodificar a logo. Ver docs/adr sobre dependências mínimas.
+image       = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+rfd         = "0.15"
+open        = "5"
 
 # --- testes ------------------------------------------------------------------
 proptest    = "1"

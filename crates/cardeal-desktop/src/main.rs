@@ -11,6 +11,7 @@ mod tela_clientes;
 mod tela_compras;
 mod tela_estoque;
 mod tela_financeiro;
+mod tela_orcamentos;
 mod tela_os;
 mod tela_pdv;
 mod tela_settings;
@@ -43,6 +44,7 @@ fn modulos() -> Vec<&'static dyn Modulo> {
         &mod_compras::ModuloCompras,
         &mod_vendas::ModuloVendas,
         &mod_os::ModuloOs,
+        &mod_orcamentos::ModuloOrcamentos,
         &mod_agenda::ModuloAgenda,
         &mod_pdv::ModuloPdv,
     ]

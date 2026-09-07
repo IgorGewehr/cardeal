@@ -9,7 +9,7 @@ use std::str::FromStr;
 
 use egui::{Response, Ui, Widget};
 
-use crate::atoms::Rotulo;
+use crate::atoms::{moldura_foco_campo, Rotulo, MARGEM_CAMPO};
 use crate::tokens::{Espaco, Papel, TemaUi};
 
 /// Máscara aplicada ao valor quando o campo perde o foco.
@@ -142,17 +142,25 @@ impl Widget for Campo<'_> {
                         v.widgets.inactive.bg_stroke = egui::Stroke::new(1.0_f32, cores.negativo);
                         v.widgets.hovered.bg_stroke = egui::Stroke::new(1.0_f32, cores.negativo);
                         v.widgets.active.bg_stroke = egui::Stroke::new(2.0_f32, cores.negativo);
+                        v.selection.stroke = egui::Stroke::new(1.0_f32, cores.negativo);
                     }
                     let mut edicao = egui::TextEdit::singleline(self.valor)
                         .password(self.senha)
                         .font(Papel::Interface.font_id())
                         .text_color(cores.texto)
                         .desired_width(f32::INFINITY)
-                        .margin(egui::Margin::symmetric(10.0_f32, 8.0_f32));
+                        .margin(egui::Margin::symmetric(MARGEM_CAMPO.x, MARGEM_CAMPO.y));
                     if let Some(m) = &self.marcador {
                         edicao = edicao.hint_text(m.clone());
                     }
-                    ui.add(edicao)
+                    let resp = ui.add(edicao);
+                    moldura_foco_campo(
+                        ui,
+                        &resp,
+                        MARGEM_CAMPO,
+                        com_erro.then_some(cores.negativo),
+                    );
+                    resp
                 })
                 .inner;
 

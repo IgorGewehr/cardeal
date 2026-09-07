@@ -8,7 +8,7 @@ use cardeal_cliente::{MotorLocal, SessaoLocal};
 use cardeal_kernel::{Dinheiro, Id, Preco, Quantidade};
 use cardeal_modkit::Icone;
 use cardeal_ui::atoms::{Botao, Rotulo, ValorDinheiro};
-use cardeal_ui::molecules::{Campo, EstadoVazio, Mascara, SeletorOpcao};
+use cardeal_ui::molecules::{Abas, Campo, EstadoVazio, Mascara, SeletorOpcao};
 use cardeal_ui::organisms::{notificar, ColunaGrade, Dialogo, Grade, LayoutTela, Notificacao};
 use cardeal_ui::tokens::{Espaco, TemaUi};
 use eframe::egui;
@@ -52,9 +52,19 @@ impl Dlg {
     }
 }
 
+/// Qual aba da tela de OS está ativa.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+enum AbaOs {
+    #[default]
+    Ordens,
+    Orcamentos,
+}
+
 /// Estado local da tela — sobrevive entre quadros, não entre reinícios.
 #[derive(Default)]
 pub struct EstadoTelaOs {
+    aba: AbaOs,
+    orc: crate::tela_orcamentos::EstadoOrcamentos,
     ordens: Vec<OrdemServico>,
     clientes: Vec<ItemPessoa>,
     produtos: Vec<ItemProdutoComSaldo>,
@@ -95,6 +105,7 @@ impl EstadoTelaOs {
         if let Ok(p) = motor.consultar(sessao, "estoque.produtos_com_saldo.v1", &ProdutosComSaldo) {
             self.produtos = p;
         }
+        self.orc.carregar(motor, sessao);
     }
 
     fn abrir_detalhe(&mut self, motor: &MotorLocal, sessao: &SessaoLocal, id: Id) {
@@ -134,31 +145,64 @@ pub fn mostrar(
     LayoutTela::nova("Ordens de Serviço").mostrar(
         ui,
         estado,
-        |ui, estado| {
-            if ui
-                .add(Botao::primario("+ Nova OS").atalho("Ctrl+N"))
-                .clicked()
-            {
-                estado.dlg = Dlg::nova();
+        |ui, estado| match estado.aba {
+            AbaOs::Ordens => {
+                if ui
+                    .add(Botao::primario("+ Nova OS").atalho("Ctrl+N"))
+                    .clicked()
+                {
+                    estado.dlg = Dlg::nova();
+                }
+            }
+            AbaOs::Orcamentos => {
+                if ui
+                    .add(Botao::primario("+ Novo orçamento").atalho("Ctrl+N"))
+                    .clicked()
+                {
+                    crate::tela_orcamentos::abrir_novo(&mut estado.orc);
+                }
             }
         },
         |ui, estado| {
-            if let Some(erro) = &estado.erro {
-                ui.add(
-                    Rotulo::interface(erro.clone())
-                        .quebravel()
-                        .cor(ui.cores().negativo),
-                );
-                ui.add_space(Espaco::E12);
+            if let Some(nova) = Abas::nova(&[
+                (AbaOs::Ordens, "Ordens de serviço"),
+                (AbaOs::Orcamentos, "Orçamentos"),
+            ])
+            .selecionada(estado.aba)
+            .mostrar(ui)
+            {
+                estado.aba = nova;
             }
-            lista(ui, motor, sessao, estado);
+            ui.add_space(Espaco::E16);
+
+            match estado.aba {
+                AbaOs::Ordens => {
+                    if let Some(erro) = &estado.erro {
+                        ui.add(
+                            Rotulo::interface(erro.clone())
+                                .quebravel()
+                                .cor(ui.cores().negativo),
+                        );
+                        ui.add_space(Espaco::E12);
+                    }
+                    lista(ui, motor, sessao, estado);
+                }
+                AbaOs::Orcamentos => {
+                    crate::tela_orcamentos::corpo(ui, motor, sessao, &mut estado.orc);
+                }
+            }
         },
     );
 
-    match estado.dlg {
-        Dlg::Fechado => {}
-        Dlg::Nova { .. } => dialogo_nova(ui.ctx(), motor, sessao, estado),
-        Dlg::Detalhe => dialogo_detalhe(ui.ctx(), motor, sessao, estado),
+    match estado.aba {
+        AbaOs::Ordens => match estado.dlg {
+            Dlg::Fechado => {}
+            Dlg::Nova { .. } => dialogo_nova(ui.ctx(), motor, sessao, estado),
+            Dlg::Detalhe => dialogo_detalhe(ui.ctx(), motor, sessao, estado),
+        },
+        AbaOs::Orcamentos => {
+            crate::tela_orcamentos::dialogos(ui.ctx(), motor, sessao, &mut estado.orc);
+        }
     }
 }
 
@@ -315,8 +359,11 @@ fn abrir_os(
                 nome,
                 nome_fantasia: None,
                 papel_inicial: PapelCliente::Cliente,
-                documento_tipo: TipoDocumento::Cpf,
-                documento_numero: cpf,
+                documento_tipo: (!cpf.trim().is_empty()).then_some(TipoDocumento::Cpf),
+                documento_numero: (!cpf.trim().is_empty()).then(|| cpf.clone()),
+                data_nascimento: None,
+                endereco: None,
+                contato: None,
             },
         );
         match r {

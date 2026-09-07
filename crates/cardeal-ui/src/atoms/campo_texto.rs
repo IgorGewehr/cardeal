@@ -5,9 +5,46 @@
 //! [`instalar_estilo`](crate::tokens::instalar_estilo); aqui só montamos rótulo + campo e o
 //! preenchimento de largura.
 
-use egui::{Response, Ui, Widget};
+use egui::{Color32, Response, Ui, Vec2, Widget};
 
-use crate::tokens::{Papel, TemaUi};
+use crate::tokens::{ativar, lerp_cor, Mov, Papel, Raio, TemaUi};
+
+/// A margem interna padrão de um campo (`TextEdit`, seletor) — o `frame_rect` do egui é o
+/// `rect` da resposta expandido por esta margem.
+pub(crate) const MARGEM_CAMPO: Vec2 = Vec2::new(10.0, 8.0);
+
+/// Desenha a **moldura responsiva** de um campo por cima da borda crua do `egui`: no hover a
+/// borda ganha contraste; no foco ela vira `acento` (a marca, ou `negativo` num campo com
+/// erro) e um halo suave cresce ao redor. `docs/12-ui-ux.md` §9 (foco sempre visível).
+///
+/// Em repouso não desenha nada — a borda de fábrica do `egui` fica. Só pede repaint enquanto
+/// a transição corre (Pilar I).
+pub(crate) fn moldura_foco_campo(ui: &Ui, resp: &Response, margem: Vec2, acento: Option<Color32>) {
+    let cores = ui.cores();
+    let alvo = acento.unwrap_or(cores.rubro);
+
+    let tf = ativar(ui, resp.id.with("campo-foco"), resp.has_focus(), Mov::PADRAO);
+    let th = ativar(ui, resp.id.with("campo-hover"), resp.hovered(), Mov::RAPIDO);
+    if tf <= 0.001_f32 && th <= 0.001_f32 {
+        return;
+    }
+
+    let frame = resp.rect.expand2(margem);
+    if tf > 0.001_f32 {
+        ui.painter().rect_stroke(
+            frame.expand(3.0_f32),
+            Raio::CAMPO + 3.0_f32,
+            egui::Stroke::new(4.0_f32, alvo.gamma_multiply(0.14_f32 * tf)),
+        );
+    }
+    let cor = lerp_cor(
+        lerp_cor(cores.borda_forte, cores.texto_medio, th * 0.6_f32),
+        alvo,
+        tf,
+    );
+    ui.painter()
+        .rect_stroke(frame, Raio::CAMPO, egui::Stroke::new(1.0_f32 + tf, cor));
+}
 
 /// Um campo de texto de uma linha, com rótulo opcional.
 #[must_use]
@@ -69,14 +106,16 @@ impl Widget for CampoTexto<'_> {
                 .password(self.senha)
                 .font(Papel::Interface.font_id())
                 .text_color(cores.texto)
-                .margin(egui::Margin::symmetric(10.0_f32, 8.0_f32));
+                .margin(egui::Margin::symmetric(MARGEM_CAMPO.x, MARGEM_CAMPO.y));
             if self.preenche_largura {
                 edicao = edicao.desired_width(f32::INFINITY);
             }
             if let Some(marcador) = &self.marcador {
                 edicao = edicao.hint_text(marcador.clone());
             }
-            ui.add(edicao)
+            let resp = ui.add(edicao);
+            moldura_foco_campo(ui, &resp, MARGEM_CAMPO, None);
+            resp
         })
         .inner
     }

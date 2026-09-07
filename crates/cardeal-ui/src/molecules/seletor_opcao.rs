@@ -5,9 +5,9 @@
 //! Genérico sobre o tipo do valor selecionado (`Id`, um enum, etc.), desde que seja
 //! `PartialEq + Copy`.
 
-use egui::{Response, Ui};
+use egui::{Response, Ui, Vec2};
 
-use crate::atoms::Rotulo;
+use crate::atoms::{moldura_foco_campo, Rotulo};
 use crate::tokens::{Espaco, Papel, TemaUi};
 
 /// Um seletor de uma opção entre várias.
@@ -72,19 +72,23 @@ impl<'a, T: PartialEq + Copy> SeletorOpcao<'a, T> {
                 .map_or_else(|| placeholder.clone(), |(_, t)| t.clone());
             let vazio = selecionado.is_none();
 
-            egui::ComboBox::from_id_salt(("seletor", rotulo.as_str()))
+            let resp = egui::ComboBox::from_id_salt(("seletor", rotulo.as_str()))
                 .selected_text(
                     egui::RichText::new(atual)
                         .font(Papel::Interface.font_id())
                         .color(if vazio { cores.texto_fraco } else { cores.texto }),
                 )
-                .width((ui.available_width() - Espaco::E8).max(60.0))
+                .width((ui.available_width() - Espaco::E8).max(60.0_f32))
                 .show_ui(ui, |ui| {
                     for (valor, texto) in &opcoes {
                         ui.selectable_value(selecionado, Some(*valor), texto.clone());
                     }
                 })
-                .response
+                .response;
+            // Mesmo anel de foco responsivo de um `Campo` — o botão do combo não tem margem
+            // interna própria, então a moldura cola no `rect` da resposta.
+            moldura_foco_campo(ui, &resp, Vec2::ZERO, None);
+            resp
         })
         .inner
     }

@@ -5,9 +5,12 @@
 
 use cardeal_modkit::Icone;
 use cardeal_ui::atoms::{
-    desenhar_icone, superficie_clicavel, Botao, CampoTexto, Rotulo, Spinner, ValorDinheiro,
+    desenhar_icone, superficie_clicavel, Botao, CampoTexto, Etiqueta, Rotulo, Spinner, Tom,
+    ValorDinheiro,
 };
-use cardeal_ui::molecules::{CabecalhoTela, Campo, CartaoKpi, EstadoVazio, LinhaDeAcao, Severidade};
+use cardeal_ui::molecules::{
+    Abas, CabecalhoTela, Campo, CartaoKpi, EstadoVazio, LinhaDeAcao, SeletorOpcao, Severidade,
+};
 use cardeal_ui::organisms::{notificar, Notificacao, Notificacoes};
 use cardeal_ui::tokens::{instalar_estilo, instalar_fontes, Espaco, Rubro, Tema, TemaUi};
 use cardeal_kernel::Dinheiro;
@@ -31,6 +34,8 @@ struct Galeria {
     campo: String,
     campo_erro: String,
     item_ativo: usize,
+    opcao: Option<u8>,
+    aba: u8,
 }
 
 impl eframe::App for Galeria {
@@ -118,6 +123,29 @@ impl eframe::App for Galeria {
                     Campo::novo("Campo com erro", &mut self.campo_erro)
                         .erro(Some("CNPJ inválido — 14 dígitos")),
                 );
+                ui.add_space(Espaco::E8);
+                SeletorOpcao::novo("Seletor de opção", &mut self.opcao)
+                    .opcoes([(1_u8, "Dinheiro"), (2, "Pix"), (3, "Cartão de crédito")])
+                    .mostrar(ui);
+
+                ui.add_space(Espaco::E24);
+                ui.add(Rotulo::titulo_secao("Abas (pílula deslizante)"));
+                if let Some(n) = Abas::nova(&[(0_u8, "Visão geral"), (1, "A receber"), (2, "A pagar"), (3, "Fluxo")])
+                    .selecionada(self.aba)
+                    .mostrar(ui)
+                {
+                    self.aba = n;
+                }
+
+                ui.add_space(Espaco::E24);
+                ui.add(Rotulo::titulo_secao("Etiquetas de estado"));
+                ui.horizontal_wrapped(|ui| {
+                    ui.add(Etiqueta::nova("Rascunho", Tom::Neutro));
+                    ui.add(Etiqueta::nova("Enviado", Tom::Info));
+                    ui.add(Etiqueta::nova("Aprovado", Tom::Positivo));
+                    ui.add(Etiqueta::nova("Vence hoje", Tom::Atencao));
+                    ui.add(Etiqueta::nova("Recusado", Tom::Negativo));
+                });
 
                 ui.add_space(Espaco::E24);
                 ui.add(Rotulo::titulo_secao("Cartões de KPI"));

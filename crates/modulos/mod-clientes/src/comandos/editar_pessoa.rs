@@ -3,7 +3,7 @@
 //! `docs/modulos/clientes.md` §5. Recusa sobre pessoa anonimizada (LGPD) — estado terminal,
 //! `docs/modulos/clientes.md` §11.6.
 
-use cardeal_kernel::{Erro, Id, Resultado};
+use cardeal_kernel::{Data, Erro, Id, Resultado};
 use cardeal_modkit::{Comando, Ctx, Risco};
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
@@ -22,6 +22,8 @@ pub struct EditarPessoa {
     pub nome_fantasia: Option<String>,
     /// A nova observação, se for para trocar.
     pub observacao: Option<String>,
+    /// A nova data de nascimento/abertura, se for para trocar.
+    pub data_nascimento: Option<Data>,
 }
 
 /// O que o comando devolve.
@@ -58,6 +60,9 @@ impl Comando for EditarPessoa {
         }
         if self.observacao.is_some() {
             pessoa.observacao = self.observacao;
+        }
+        if self.data_nascimento.is_some() {
+            pessoa.data_nascimento_abertura = self.data_nascimento;
         }
         pessoa.versao = pessoa.versao.proxima();
 

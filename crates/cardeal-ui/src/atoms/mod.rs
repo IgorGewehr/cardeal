@@ -3,6 +3,7 @@
 
 mod botao;
 mod campo_texto;
+mod etiqueta;
 mod icone;
 mod rotulo;
 mod spinner;
@@ -11,6 +12,8 @@ mod valor_dinheiro;
 
 pub use botao::{Botao, VarianteBotao};
 pub use campo_texto::CampoTexto;
+pub(crate) use campo_texto::{moldura_foco_campo, MARGEM_CAMPO};
+pub use etiqueta::{Etiqueta, Tom};
 pub use icone::desenhar as desenhar_icone;
 pub use rotulo::Rotulo;
 pub use spinner::Spinner;

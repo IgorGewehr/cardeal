@@ -12,7 +12,7 @@
 
 use egui::{CursorIcon, Layout, Rect, Response, Sense, UiBuilder};
 
-use crate::tokens::{AlturaLinha, Espaco, Raio, TemaUi};
+use crate::tokens::{ativar, lerp_cor, AlturaLinha, Espaco, Mov, Raio, TemaUi};
 
 /// Desenha uma linha clicável de largura cheia e devolve a `Response` da linha inteira.
 pub fn superficie_clicavel(
@@ -28,23 +28,27 @@ pub fn superficie_clicavel(
     let sob_ponteiro = ui.rect_contains_pointer(rect);
 
     if ui.is_rect_visible(rect) {
-        let fundo = if selecionada {
-            Some(cores.rubro_ativo)
-        } else if sob_ponteiro {
-            Some(cores.superficie_hover)
-        } else {
-            None
-        };
-        if let Some(cor) = fundo {
-            ui.painter().rect_filled(rect, Raio::ITEM, cor);
-        }
-        if selecionada {
-            let h = (rect.height() * 0.55).min(20.0);
-            let barra = Rect::from_center_size(
-                egui::pos2(rect.left() + 1.5, rect.center().y),
-                egui::vec2(3.0, h),
+        // O hover acende e a seleção "entra" deslizando — nunca um corte seco. `ativar` só
+        // mantém o repaint enquanto a transição corre (Pilar I).
+        let th = ativar(ui, resposta.id.with("hover"), sob_ponteiro, Mov::RAPIDO);
+        let ts = ativar(ui, resposta.id.with("sel"), selecionada, Mov::CALMA);
+
+        if th > 0.001_f32 || ts > 0.001_f32 {
+            let fundo = lerp_cor(
+                cores.superficie_hover.gamma_multiply(th),
+                cores.rubro_ativo,
+                ts,
             );
-            ui.painter().rect_filled(barra, Raio::PILULA, cores.rubro);
+            ui.painter().rect_filled(rect, Raio::ITEM, fundo);
+        }
+        if ts > 0.001_f32 {
+            let h = (rect.height() * 0.55_f32).min(20.0_f32) * ts;
+            let barra = Rect::from_center_size(
+                egui::pos2(rect.left() + 1.5_f32, rect.center().y),
+                egui::vec2(3.0_f32, h),
+            );
+            ui.painter()
+                .rect_filled(barra, Raio::PILULA, cores.rubro.gamma_multiply(ts));
         }
 
         let miolo = rect.shrink2(egui::vec2(Espaco::E12, 0.0));

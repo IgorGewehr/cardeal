@@ -1,0 +1,29 @@
+[package]
+name         = "mod-orcamentos"
+description  = "Orçamentos comerciais: documento profissional, filtros, decisão e PDF."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+
+[dependencies]
+cardeal-kernel.workspace  = true
+cardeal-storage.workspace = true
+cardeal-modkit.workspace  = true
+mod-os.workspace          = true
+serde.workspace     = true
+thiserror.workspace = true
+rusqlite.workspace  = true
+tracing.workspace   = true
+
+[dev-dependencies]
+cardeal-auth.workspace    = true
+cardeal-ledger.workspace  = true
+cardeal-testkit.workspace = true
+mod-clientes.workspace    = true
+mod-financeiro.workspace  = true
+mod-estoque.workspace     = true
+postcard.workspace        = true
+tempfile.workspace        = true

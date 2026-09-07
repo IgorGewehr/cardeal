@@ -7,10 +7,10 @@
 //!
 //! É um `Widget`: `ui.add(Botao::primario("Finalizar venda").atalho("F2"))`.
 
-use egui::{Color32, CursorIcon, Response, Sense, Stroke, Ui, Vec2, Widget};
+use egui::{Color32, CursorIcon, Rect, Response, Sense, Stroke, Ui, Vec2, Widget};
 
 use crate::atoms::Spinner;
-use crate::tokens::{Papel, Raio, Rubro, TemaUi};
+use crate::tokens::{ativar, lerp_cor, Mov, Papel, Raio, Rubro, TemaUi};
 
 /// A variante visual do botão — `docs/12-ui-ux.md` §7 e §2.3.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -106,43 +106,70 @@ impl Botao {
         self
     }
 
-    fn paleta(&self, resp: &Response, cores: &crate::tokens::Cores) -> (Option<Color32>, Option<Color32>, Color32) {
-        if !self.habilitado {
-            return match self.variante {
-                VarianteBotao::Primario => (Some(Rubro::R500.gamma_multiply(0.4)), None, Rubro::CONTRASTE.gamma_multiply(0.7)),
-                VarianteBotao::Secundario => (None, Some(cores.borda_forte.gamma_multiply(0.5)), cores.texto_fraco),
-                VarianteBotao::Fantasma => (None, None, cores.texto_fraco),
-                VarianteBotao::Destrutivo => (None, Some(cores.negativo.gamma_multiply(0.4)), cores.negativo.gamma_multiply(0.5)),
-            };
+    /// A paleta desabilitada — estática, sem hover/press/foco.
+    fn paleta_inerte(&self, cores: &crate::tokens::Cores) -> (Option<Color32>, Option<Stroke>, Color32) {
+        match self.variante {
+            VarianteBotao::Primario => (
+                Some(Rubro::R500.gamma_multiply(0.4_f32)),
+                None,
+                Rubro::CONTRASTE.gamma_multiply(0.7_f32),
+            ),
+            VarianteBotao::Secundario => (
+                None,
+                Some(Stroke::new(1.0_f32, cores.borda_forte.gamma_multiply(0.5_f32))),
+                cores.texto_fraco,
+            ),
+            VarianteBotao::Fantasma => (None, None, cores.texto_fraco),
+            VarianteBotao::Destrutivo => (
+                None,
+                Some(Stroke::new(1.0_f32, cores.negativo.gamma_multiply(0.4_f32))),
+                cores.negativo.gamma_multiply(0.5_f32),
+            ),
         }
+    }
 
-        let hover = resp.hovered() && !self.carregando;
-        let pressed = resp.is_pointer_button_down_on() && !self.carregando;
-
+    /// A paleta viva: interpola repouso → hover → pressionado por `th`/`tp` (0..=1). O
+    /// `th`/`tp` vêm de [`ativar`], então a cor **desliza** entre estados em vez de cortar.
+    fn paleta_viva(
+        &self,
+        cores: &crate::tokens::Cores,
+        th: f32,
+        tp: f32,
+    ) -> (Option<Color32>, Option<Stroke>, Color32) {
         match self.variante {
             VarianteBotao::Primario => {
-                let fundo = if pressed {
-                    Rubro::R600
-                } else if hover {
-                    Rubro::R400
-                } else {
-                    Rubro::R500
-                };
+                let fundo = lerp_cor(lerp_cor(Rubro::R500, Rubro::R400, th), Rubro::R600, tp);
                 (Some(fundo), None, Rubro::CONTRASTE)
             }
             VarianteBotao::Secundario => {
-                let fundo = (hover || pressed).then_some(cores.superficie_2);
-                (fundo, Some(cores.borda_forte), cores.texto)
+                let realce = th.max(tp);
+                let fundo = cores.superficie_2.gamma_multiply(realce);
+                let borda = lerp_cor(cores.borda_forte, cores.texto_fraco, realce);
+                (
+                    Some(fundo),
+                    Some(Stroke::new(1.0_f32 + 0.25_f32 * realce, borda)),
+                    cores.texto,
+                )
             }
             VarianteBotao::Fantasma => {
-                let fundo = (hover || pressed).then_some(cores.superficie_2);
-                (fundo, None, cores.texto)
+                let fundo = cores.superficie_2.gamma_multiply(th.max(tp));
+                (Some(fundo), None, cores.texto)
             }
             VarianteBotao::Destrutivo => {
-                let fundo = (hover || pressed).then_some(cores.negativo_suave);
-                (fundo, Some(cores.negativo), cores.negativo)
+                let realce = th.max(tp);
+                let fundo = cores.negativo_suave.gamma_multiply(realce);
+                (
+                    Some(fundo),
+                    Some(Stroke::new(1.0_f32 + 0.4_f32 * realce, cores.negativo)),
+                    cores.negativo,
+                )
             }
         }
+    }
+
+    /// Verdadeiro para as variantes que "levantam" de leve no hover (só a ação de peso).
+    const fn levanta_no_hover(&self) -> bool {
+        matches!(self.variante, VarianteBotao::Primario | VarianteBotao::Destrutivo)
     }
 }
 
@@ -179,27 +206,56 @@ impl Widget for Botao {
         let (rect_total, resp) = ui.allocate_exact_size(tamanho, sense);
 
         if ui.is_rect_visible(rect_total) {
-            // "press-scale": encolhe 1px enquanto pressionado (referência gestao-raiz).
-            let rect = if resp.is_pointer_button_down_on() {
-                rect_total.shrink(1.0_f32)
+            // Transições de estado: o hover acende, o press afunda, o foco cresce — cada um
+            // deslizando entre 0 e 1 em vez de cortar. `ativar` só pede repaint enquanto o
+            // valor está em movimento (Pilar I).
+            let (th, tp, tf) = if interativo {
+                (
+                    ativar(ui, resp.id.with("hover"), resp.hovered(), Mov::RAPIDO),
+                    ativar(
+                        ui,
+                        resp.id.with("press"),
+                        resp.is_pointer_button_down_on(),
+                        Mov::RAPIDO,
+                    ),
+                    ativar(ui, resp.id.with("foco"), resp.has_focus(), Mov::PADRAO),
+                )
             } else {
-                rect_total
+                (0.0, 0.0, 0.0)
             };
-            let (fill, stroke, fg) = self.paleta(&resp, &cores);
+
+            // press-scale (afunda 3%) + hover-lift (sobe 1%, só a ação de peso) —
+            // `gestao-raiz`: `whileTap .97`, `whileHover 1.01`.
+            let lift = if self.levanta_no_hover() { 0.01_f32 } else { 0.0_f32 };
+            let escala = 1.0_f32 + lift * th - 0.03_f32 * tp;
+            let rect = Rect::from_center_size(rect_total.center(), rect_total.size() * escala);
+
+            let (fill, stroke, fg) = if interativo {
+                self.paleta_viva(&cores, th, tp)
+            } else {
+                self.paleta_inerte(&cores)
+            };
             {
                 let painter = ui.painter();
+                // Anel de foco de teclado: um halo externo suave + o anel nítido, ambos
+                // surgindo com `tf` (`docs/12-ui-ux.md` §9 — foco sempre visível).
+                if tf > 0.001_f32 {
+                    painter.rect_stroke(
+                        rect.expand(4.0_f32),
+                        Raio::ITEM + 4.0_f32,
+                        Stroke::new(4.0_f32, Rubro::R500.gamma_multiply(0.18_f32 * tf)),
+                    );
+                    painter.rect_stroke(
+                        rect.expand(2.0_f32),
+                        Raio::ITEM + 2.0_f32,
+                        Stroke::new(2.0_f32, Rubro::R500.gamma_multiply(tf)),
+                    );
+                }
                 if let Some(f) = fill {
                     painter.rect_filled(rect, Raio::ITEM, f);
                 }
                 if let Some(s) = stroke {
-                    painter.rect_stroke(rect, Raio::ITEM, Stroke::new(1.0_f32, s));
-                }
-                if resp.has_focus() {
-                    painter.rect_stroke(
-                        rect.expand(2.0_f32),
-                        Raio::ITEM + 2.0_f32,
-                        Stroke::new(2.0_f32, Rubro::R500),
-                    );
+                    painter.rect_stroke(rect, Raio::ITEM, s);
                 }
             }
             if self.carregando {

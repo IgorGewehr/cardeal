@@ -58,9 +58,9 @@ mod repositorio;
 
 pub use cadastro::{Contato, DocumentoPessoa, Endereco, TipoContato, TipoDocumento, TipoEndereco};
 pub use comandos::{
-    AdicionarContato, AdicionarEndereco, AdicionarPapel, ContatoFoiAdicionado, CriarPessoa,
-    DefinirLimiteCredito, EditarPessoa, EnderecoFoiAdicionado, LimiteCreditoDefinido,
-    PapelFoiAdicionado, PessoaCadastrada, PessoaEditada,
+    AdicionarContato, AdicionarEndereco, AdicionarPapel, ContatoFoiAdicionado, ContatoInicial,
+    CriarPessoa, DefinirLimiteCredito, EditarPessoa, EnderecoFoiAdicionado, EnderecoInicial,
+    LimiteCreditoDefinido, PapelFoiAdicionado, PessoaCadastrada, PessoaEditada,
 };
 pub use consultas::{DetalhePessoa, ItemPessoa, PessoaDetalhada, PessoasPorPapel};
 pub use credito::{

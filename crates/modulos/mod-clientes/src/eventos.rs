@@ -13,8 +13,8 @@ pub struct PessoaCriada {
     pub pessoa: Id,
     /// `"Fisica"` ou `"Juridica"`.
     pub tipo: &'static str,
-    /// O documento principal informado no cadastro.
-    pub documento_principal: Id,
+    /// O documento principal informado no cadastro, quando houve um.
+    pub documento_principal: Option<Id>,
 }
 
 impl EventoDominio for PessoaCriada {

@@ -86,8 +86,11 @@ fn criar_pessoa(d: &Despachante, arm: &Armazenamento, empresa: Id, s: &Sessao) -
         nome: "Mercado Bom Preço LTDA".to_string(),
         nome_fantasia: Some("Mercado Bom Preço".to_string()),
         papel_inicial: Papel::Cliente,
-        documento_tipo: TipoDocumento::Cnpj,
-        documento_numero: "11.222.333/0001-81".to_string(),
+        documento_tipo: Some(TipoDocumento::Cnpj),
+        documento_numero: Some("11.222.333/0001-81".to_string()),
+        data_nascimento: None,
+        endereco: None,
+        contato: None,
     };
     let saida = d
         .executar_comando(
@@ -126,8 +129,11 @@ fn criar_pessoa_com_documento_repetido_e_recusado() {
         nome: "Outra Razão Social LTDA".to_string(),
         nome_fantasia: None,
         papel_inicial: Papel::Fornecedor,
-        documento_tipo: TipoDocumento::Cnpj,
-        documento_numero: "11222333000181".to_string(),
+        documento_tipo: Some(TipoDocumento::Cnpj),
+        documento_numero: Some("11222333000181".to_string()),
+        data_nascimento: None,
+        endereco: None,
+        contato: None,
     };
     let erro = d
         .executar_comando(
@@ -143,6 +149,37 @@ fn criar_pessoa_com_documento_repetido_e_recusado() {
 }
 
 #[test]
+fn criar_pessoa_sem_documento_e_aceito() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloClientes]).unwrap();
+    let s = sessao(empresa, &["clientes.pessoa.criar"]);
+
+    let cmd = CriarPessoa {
+        tipo: TipoPessoa::Fisica,
+        nome: "Cliente de Balcão".to_string(),
+        nome_fantasia: None,
+        papel_inicial: Papel::Cliente,
+        documento_tipo: None,
+        documento_numero: None,
+        data_nascimento: None,
+        endereco: None,
+        contato: None,
+    };
+    // Duas vezes sem documento — nenhuma checagem de duplicidade dispara.
+    for _ in 0..2 {
+        d.executar_comando(
+            "clientes.criar_pessoa.v1",
+            &carga(&cmd),
+            &s,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+        .unwrap();
+    }
+    assert_eq!(conta_pessoas(&arm, empresa), 2);
+}
+
+#[test]
 fn sem_permissao_criar_pessoa_e_recusado() {
     let (_dir, arm, empresa) = base();
     let d = Despachante::construir(&[&ModuloClientes]).unwrap();
@@ -153,8 +190,11 @@ fn sem_permissao_criar_pessoa_e_recusado() {
         nome: "João Silva".to_string(),
         nome_fantasia: None,
         papel_inicial: Papel::Cliente,
-        documento_tipo: TipoDocumento::Cpf,
-        documento_numero: "52998224725".to_string(),
+        documento_tipo: Some(TipoDocumento::Cpf),
+        documento_numero: Some("52998224725".to_string()),
+        data_nascimento: None,
+        endereco: None,
+        contato: None,
     };
     let erro = d
         .executar_comando(
@@ -184,6 +224,7 @@ fn editar_pessoa_atualiza_o_nome() {
         nome: Some("Mercado Bom Preço Comércio LTDA".to_string()),
         nome_fantasia: None,
         observacao: Some("cliente desde 2020".to_string()),
+        data_nascimento: None,
     };
     let saida = d
         .executar_comando(

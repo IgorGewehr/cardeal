@@ -10,7 +10,7 @@ use egui::Ui;
 use egui_extras::{Column, TableBuilder};
 
 use crate::atoms::Rotulo;
-use crate::tokens::AlturaLinha;
+use crate::tokens::{AlturaLinha, TemaUi};
 
 /// Uma coluna da grade: rótulo do cabeçalho e largura inicial (`Column::auto` se `None`).
 pub struct ColunaGrade {
@@ -79,8 +79,29 @@ impl Grade {
         self,
         ui: &mut Ui,
         total_linhas: usize,
+        linha: impl FnMut(usize, &mut egui_extras::TableRow<'_, '_>),
+    ) -> Option<usize> {
+        ui.scope(|ui| self.desenhar(ui, total_linhas, linha)).inner
+    }
+
+    fn desenhar(
+        self,
+        ui: &mut Ui,
+        total_linhas: usize,
         mut linha: impl FnMut(usize, &mut egui_extras::TableRow<'_, '_>),
     ) -> Option<usize> {
+        // Realce de linha on-brand: hover = `superficie_hover` sutil (não o cinza forte de
+        // fábrica), linha selecionada = tint da marca com contorno. O `egui_extras` já pinta
+        // esses fundos por linha — aqui só troca as cores (num `scope`, para não vazar para
+        // o resto da tela).
+        let cores = ui.cores();
+        {
+            let v = ui.visuals_mut();
+            v.widgets.hovered.bg_fill = cores.superficie_hover;
+            v.selection.bg_fill = cores.rubro_ativo;
+            v.selection.stroke = egui::Stroke::new(1.0_f32, cores.rubro);
+        }
+
         let mut builder = TableBuilder::new(ui)
             .striped(false)
             .resizable(true)

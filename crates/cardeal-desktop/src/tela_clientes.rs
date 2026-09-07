@@ -353,17 +353,22 @@ fn criar(
         return;
     };
     let pj = matches!(f.tipo, Some(TipoPessoa::Juridica));
+    let doc = f.documento.trim().to_string();
+    let tem_doc = !doc.is_empty();
     let cmd = CriarPessoa {
         tipo: f.tipo.unwrap_or(TipoPessoa::Fisica),
         nome: f.nome.clone(),
         nome_fantasia: (pj && !f.nome_fantasia.trim().is_empty()).then(|| f.nome_fantasia.clone()),
         papel_inicial: Papel::Cliente,
-        documento_tipo: if pj {
+        documento_tipo: tem_doc.then_some(if pj {
             TipoDocumento::Cnpj
         } else {
             TipoDocumento::Cpf
-        },
-        documento_numero: f.documento.clone(),
+        }),
+        documento_numero: tem_doc.then(|| doc.clone()),
+        data_nascimento: None,
+        endereco: None,
+        contato: None,
     };
     match motor.executar(sessao, "clientes.criar_pessoa.v1", &cmd) {
         Ok(r) => {
@@ -391,6 +396,7 @@ fn salvar(
         nome: Some(f.nome.clone()),
         nome_fantasia: Some(f.nome_fantasia.clone()).filter(|s| !s.trim().is_empty()),
         observacao: Some(f.observacao.clone()).filter(|s| !s.trim().is_empty()),
+        data_nascimento: None,
     };
     match motor.executar(sessao, "clientes.editar_pessoa.v1", &cmd) {
         Ok(r) => {

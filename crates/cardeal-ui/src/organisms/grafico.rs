@@ -13,7 +13,7 @@
 
 use egui::{Color32, Rect, Sense, Ui};
 
-use crate::tokens::{Papel, Raio, TemaUi};
+use crate::tokens::{suave, Papel, Raio, TemaUi};
 
 /// Uma série de valores — uma barra por categoria do eixo X.
 pub struct SerieBarras {
@@ -62,6 +62,12 @@ impl<'a> GraficoBarras<'a> {
     #[allow(clippy::too_many_lines)]
     pub fn mostrar(self, ui: &mut Ui) {
         let cores = ui.cores();
+        // As barras crescem da linha de base ao aparecer pela primeira vez (Pilar I: anima
+        // uma vez e dorme — `animate_bool` com alvo fixo `true` não re-anima em revisitas).
+        let crescer = suave(
+            ui.ctx()
+                .animate_bool_with_time(ui.id().with("grafico-crescer"), true, 0.5_f32),
+        );
         let largura = ui.available_width().max(1.0);
         let altura_legenda = if self.series.len() > 1 { 22.0 } else { 4.0 };
         let (rect, _) = ui.allocate_exact_size(
@@ -128,7 +134,7 @@ impl<'a> GraficoBarras<'a> {
             let grupo_esq = cx - larg_grupo / 2.0;
             for (si, serie) in self.series.iter().enumerate() {
                 let v = serie.valores.get(ci).copied().unwrap_or(0.0).max(0.0);
-                let h = ((v / teto) as f32 * plot.height()).max(0.0);
+                let h = ((v / teto) as f32 * plot.height()).max(0.0) * crescer;
                 let x0 = grupo_esq + si as f32 * (larg_barra + 3.0);
                 let barra = Rect::from_min_max(
                     egui::pos2(x0, plot.bottom() - h),

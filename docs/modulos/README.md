@@ -23,6 +23,7 @@ tabela do doc 05 §5. Nenhum módulo lança dinheiro fora desse contrato.
 | [`crm`](crm.md) | Fase 5 — Verticais | clientes | Serviços/consultoria, Comércio (opcional) |
 | [`agenda`](agenda.md) | Fase 5 — Verticais | núcleo | Assistência técnica, Serviços/consultoria, Hotel/pousada |
 | [`os`](os.md) | Fase 5 — Verticais | vendas, agenda | Assistência técnica |
+| [`orcamentos`](orcamentos.md) | Fase 5 — Verticais | núcleo (melhora com `os`) | Assistência técnica, Serviços/consultoria, Micro indústria |
 | [`alugueis`](alugueis.md) | Fase 5 — Verticais | financeiro, clientes | Locadora |
 | [`combustivel`](combustivel.md) | Fase 5 — Verticais | estoque, pdv | Posto de combustível |
 | [`hotelaria`](hotelaria.md) | Fase 5 — Verticais | financeiro, agenda | Hotel/pousada |

@@ -10,11 +10,11 @@ use cardeal_kernel::{Competencia, Data, Dinheiro, Fuso, Id, Periodo};
 use cardeal_ledger::Contraparte;
 use cardeal_modkit::Icone;
 use cardeal_ui::atoms::{Botao, Rotulo, ValorDinheiro};
-use cardeal_ui::molecules::{Campo, EstadoVazio, Mascara, SeletorOpcao};
+use cardeal_ui::molecules::{Abas, Campo, EstadoVazio, Mascara, SeletorOpcao};
 use cardeal_ui::organisms::{
     notificar, ColunaGrade, Dialogo, Grade, GraficoBarras, LayoutTela, Notificacao, SerieBarras,
 };
-use cardeal_ui::tokens::{Espaco, Raio, TemaUi};
+use cardeal_ui::tokens::{perseguir, sombra_cartao, Espaco, Mov, Raio, TemaUi};
 use eframe::egui;
 use mod_clientes::{ItemPessoa, Papel, PessoasPorPapel};
 use mod_financeiro::{
@@ -846,26 +846,51 @@ fn criar_recorrencia(
     }
 }
 
-/// Um cartão de indicador: rótulo pequeno, valor grande na cor dada, linha de apoio opcional.
-fn kpi(ui: &mut egui::Ui, rotulo: &str, valor: &str, cor: egui::Color32, apoio: Option<&str>) {
+/// Um cartão de indicador: faixa de acento no topo, rótulo pequeno, **valor que sobe
+/// contando** até o número final, linha de apoio opcional. A contagem só dispara quando o
+/// valor muda de verdade (`perseguir` persegue o alvo a partir do último exibido) — entrar
+/// na tela com os mesmos números não re-anima.
+fn kpi(ui: &mut egui::Ui, rotulo: &str, valor: Dinheiro, cor: egui::Color32, apoio: Option<&str>) {
     let cores = ui.cores();
-    egui::Frame::none()
+    let id = ui.id().with(("kpi", rotulo));
+    #[allow(clippy::cast_precision_loss)]
+    let alvo = valor.em_centavos() as f32;
+    let mostrado = perseguir(ui, id, alvo, Mov::CONTAGEM);
+    #[allow(clippy::cast_possible_truncation)]
+    let texto = Dinheiro::centavos(mostrado.round() as i64).formatar_com_simbolo();
+
+    let frame = egui::Frame::none()
         .fill(cores.superficie)
         .stroke(egui::Stroke::new(1.0_f32, cores.borda))
         .rounding(Raio::CARTAO)
+        .shadow(sombra_cartao(ui.ctx()))
         .inner_margin(Espaco::E16)
         .show(ui, |ui| {
-            ui.set_width(212.0);
+            ui.set_width(212.0_f32);
             ui.vertical(|ui| {
                 ui.add(Rotulo::campo(rotulo.to_uppercase()));
                 ui.add_space(Espaco::E4);
-                ui.add(Rotulo::titulo_secao(valor.to_owned()).cor(cor));
+                ui.add(Rotulo::titulo_secao(texto).cor(cor));
                 if let Some(a) = apoio {
                     ui.add_space(Espaco::E4);
                     ui.add(Rotulo::campo(a.to_owned()));
                 }
             });
         });
+
+    // Faixa de acento colada no topo do cartão, na cor semântica do indicador.
+    let r = frame.response.rect;
+    let faixa = egui::Rect::from_min_max(r.min, egui::pos2(r.max.x, r.min.y + 3.0_f32));
+    ui.painter().rect_filled(
+        faixa,
+        egui::Rounding {
+            nw: Raio::CARTAO,
+            ne: Raio::CARTAO,
+            sw: 0.0_f32,
+            se: 0.0_f32,
+        },
+        cor,
+    );
 }
 
 fn painel_visao(
@@ -880,14 +905,14 @@ fn painel_visao(
         kpi(
             ui,
             "A receber em aberto",
-            &estado.dash_receber.formatar_com_simbolo(),
+            estado.dash_receber,
             cores.positivo,
             None,
         );
         kpi(
             ui,
             "A pagar em aberto",
-            &estado.dash_pagar.formatar_com_simbolo(),
+            estado.dash_pagar,
             cores.negativo,
             None,
         );
@@ -895,7 +920,7 @@ fn painel_visao(
         kpi(
             ui,
             "Saldo do mês",
-            &saldo.formatar_com_simbolo(),
+            saldo,
             if saldo.e_negativo() {
                 cores.negativo
             } else {
@@ -1021,12 +1046,12 @@ fn painel_fluxo(
         .fold(Dinheiro::ZERO, |a, b| a + b);
 
     ui.horizontal_wrapped(|ui| {
-        kpi(ui, "Entrou no período", &entrou.formatar_com_simbolo(), cores.positivo, None);
-        kpi(ui, "Saiu no período", &saiu.formatar_com_simbolo(), cores.negativo, None);
+        kpi(ui, "Entrou no período", entrou, cores.positivo, None);
+        kpi(ui, "Saiu no período", saiu, cores.negativo, None);
         kpi(
             ui,
             "Saldo em caixa + bancos",
-            &saldo_total.formatar_com_simbolo(),
+            saldo_total,
             if saldo_total.e_negativo() { cores.negativo } else { cores.texto_forte },
             Some("posição realizada agora"),
         );
@@ -1190,34 +1215,19 @@ fn abas(
     sessao: &SessaoLocal,
     estado: &mut EstadoTelaFinanceiro,
 ) {
-    let cores = ui.cores();
-    egui::Frame::none()
-        .fill(cores.superficie_2)
-        .rounding(Raio::ITEM)
-        .inner_margin(3.0)
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 2.0;
-                for (aba, rotulo) in [
-                    (Aba::Visao, "Visão geral"),
-                    (Aba::Receber, "A receber"),
-                    (Aba::Pagar, "A pagar"),
-                    (Aba::Fluxo, "Fluxo de caixa"),
-                    (Aba::Bancos, "Contas bancárias"),
-                ] {
-                    let ativa = estado.aba == aba;
-                    let b = if ativa {
-                        Botao::primario(rotulo).pequeno()
-                    } else {
-                        Botao::fantasma(rotulo).pequeno()
-                    };
-                    if ui.add(b).clicked() && !ativa {
-                        estado.aba = aba;
-                        estado.carregar(motor, sessao);
-                    }
-                }
-            });
-        });
+    let nova = Abas::nova(&[
+        (Aba::Visao, "Visão geral"),
+        (Aba::Receber, "A receber"),
+        (Aba::Pagar, "A pagar"),
+        (Aba::Fluxo, "Fluxo de caixa"),
+        (Aba::Bancos, "Contas bancárias"),
+    ])
+    .selecionada(estado.aba)
+    .mostrar(ui);
+    if let Some(nova) = nova {
+        estado.aba = nova;
+        estado.carregar(motor, sessao);
+    }
 }
 
 fn lista(ui: &mut egui::Ui, estado: &mut EstadoTelaFinanceiro) {

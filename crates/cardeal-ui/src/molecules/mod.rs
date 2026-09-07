@@ -1,6 +1,7 @@
 //! Camada 2 (molecules): composições de átomos com comportamento próprio.
 //! `docs/12-ui-ux.md` §7.
 
+mod abas;
 mod cabecalho_tela;
 mod campo;
 mod cartao_kpi;
@@ -9,6 +10,7 @@ mod item_lista;
 mod linha_acao;
 mod seletor_opcao;
 
+pub use abas::Abas;
 pub use cabecalho_tela::CabecalhoTela;
 pub use campo::{Campo, Mascara};
 pub use cartao_kpi::CartaoKpi;

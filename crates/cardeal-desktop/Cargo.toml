@@ -18,6 +18,7 @@ cardeal-ledger.workspace  = true
 cardeal-modkit.workspace  = true
 cardeal-ui.workspace      = true
 cardeal-cliente.workspace = true
+cardeal-pdf.workspace     = true
 
 mod-financeiro.workspace = true
 mod-clientes.workspace   = true
@@ -25,6 +26,7 @@ mod-estoque.workspace    = true
 mod-compras.workspace    = true
 mod-vendas.workspace     = true
 mod-os.workspace         = true
+mod-orcamentos.workspace = true
 mod-agenda.workspace     = true
 mod-pdv.workspace        = true
 
@@ -35,3 +37,6 @@ serde.workspace       = true
 anyhow.workspace      = true
 tracing.workspace     = true
 tracing-subscriber.workspace = true
+image.workspace       = true
+rfd.workspace         = true
+open.workspace        = true
