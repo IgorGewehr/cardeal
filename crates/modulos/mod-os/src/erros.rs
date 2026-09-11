@@ -5,9 +5,20 @@ use cardeal_kernel::{CodigoErro, Detalhes, ErroDominio};
 /// Tudo que pode dar errado na ordem de serviço, no orçamento e na execução.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ErroOs {
-    /// O equipamento (descrição livre) veio vazio.
-    #[error("A descrição do equipamento não pode ser vazia")]
-    EquipamentoVazio,
+    /// O defeito relatado (na abertura) veio vazio — junto do nome do cliente, é o único
+    /// texto obrigatório para abrir uma OS.
+    #[error("O defeito relatado não pode ser vazio")]
+    DefeitoRelatadoVazio,
+
+    /// `EditarDadosDaOrdem` chamado sem `equipamento` nem `complemento_defeito_relatado` —
+    /// nada para atualizar.
+    #[error("Informe ao menos o equipamento ou um complemento ao defeito relatado")]
+    NadaParaAtualizar,
+
+    /// `EditarDadosDaOrdem` sobre uma ordem já finalizada (`Faturada`/`Cancelada`/
+    /// `Reprovada`) — a partir daí a OS é histórico, não rascunho.
+    #[error("Esta ordem de serviço já foi finalizada e não aceita mais edição de dados")]
+    OrdemFinalizada,
 
     /// Descrição do problema vazia no laudo.
     #[error("A descrição do problema não pode ser vazia")]
@@ -83,11 +94,12 @@ pub enum ErroOs {
 impl ErroDominio for ErroOs {
     fn codigo(&self) -> CodigoErro {
         match self {
-            Self::EquipamentoVazio
+            Self::DefeitoRelatadoVazio
+            | Self::NadaParaAtualizar
             | Self::DescricaoDoProblemaVazia
             | Self::DescricaoDeServicoVazia
             | Self::OrcamentoVazio => CodigoErro::ENTRADA_INVALIDA,
-            Self::EstadoInvalido { .. } => CodigoErro::ESTADO_INVALIDO,
+            Self::EstadoInvalido { .. } | Self::OrdemFinalizada => CodigoErro::ESTADO_INVALIDO,
             Self::AprovacaoSemIdentificacao | Self::MotivoDeAjusteObrigatorio => {
                 CodigoErro::CAMPO_OBRIGATORIO
             }

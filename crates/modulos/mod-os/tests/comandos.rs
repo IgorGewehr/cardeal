@@ -20,10 +20,11 @@ use mod_estoque::{
 };
 use mod_os::{
     AbrirOrdemServico, AplicarPeca, AprovarOrcamentoOs, BuscarDetalheOrdem, CancelarOrdemServico,
-    ConcluirExecucao, DetalheOrdem, EnviarParaAprovacao, FaturarOrdemServico,
-    HistoricoDoEquipamento, IniciarExecucao, ItemOrcamentoNovo, ModuloOs, MontarOrcamentoOs,
-    OrdemServicoAberta, OrdemServicoFaturada, OrdensAguardandoAprovacao, OrdensEmAberto,
-    PecaFoiAplicada, RegistrarLaudo, RemoverItemOrcamento, TipoItemOrcamento,
+    ConcluirExecucao, DetalheOrdem, EditarDadosDaOrdem, EnviarParaAprovacao, FaturarOrdemServico,
+    HistoricoDoEquipamento, IniciarExecucao, ItemAguardandoEstoque, ItemOrcamentoNovo, ModuloOs,
+    MontarOrcamentoOs, OrdemServicoAberta, OrdemServicoFaturada, OrdensAguardandoAprovacao,
+    OrdensEmAberto, PecaFoiAplicada, PecasAguardandoEstoque, RegistrarLaudo, RemoverItemOrcamento,
+    TipoItemOrcamento,
 };
 use tempfile::TempDir;
 
@@ -84,6 +85,7 @@ fn sessao_completa(empresa: Id) -> Sessao {
         "estoque.local.criar",
         "estoque.movimento.entrada",
         "os.ordem.criar",
+        "os.ordem.editar_dados",
         "os.laudo.registrar",
         "os.orcamento.montar",
         "os.orcamento.enviar",
@@ -206,6 +208,7 @@ fn ciclo_completo_de_os_abre_orca_aprova_executa_e_fatura() {
                 ncm: "85076000".to_string(),
                 unidade_padrao: unidade.unidade,
                 codigo_barras: None,
+                detalhes_tecnicos: None,
             }),
             &s,
             &amb,
@@ -249,6 +252,7 @@ fn ciclo_completo_de_os_abre_orca_aprova_executa_e_fatura() {
             &carga(&AbrirOrdemServico {
                 cliente: cliente.pessoa,
                 equipamento: "Notebook Dell XPS 13".to_string(),
+                defeito_relatado: "Não liga".to_string(),
                 tecnico_responsavel: Id::novo(),
                 garantia_dias: 90,
             }),
@@ -431,6 +435,7 @@ fn concluir_execucao_com_peca_pendente_e_recusado() {
             &carga(&AbrirOrdemServico {
                 cliente: cliente.pessoa,
                 equipamento: "Celular".to_string(),
+                defeito_relatado: "Não liga".to_string(),
                 tecnico_responsavel: Id::novo(),
                 garantia_dias: 90,
             }),
@@ -537,6 +542,7 @@ fn ordens_em_aberto_lista_e_detalhe_traz_laudo_e_itens() {
             &carga(&AbrirOrdemServico {
                 cliente: cliente.pessoa,
                 equipamento: "Impressora HP".to_string(),
+                defeito_relatado: "Não liga".to_string(),
                 tecnico_responsavel: Id::novo(),
                 garantia_dias: 90,
             }),
@@ -629,6 +635,7 @@ fn cancelar_ordem_servico_antes_de_concluida_e_recusado_depois() {
             &carga(&AbrirOrdemServico {
                 cliente: cliente.pessoa,
                 equipamento: "Celular".to_string(),
+                defeito_relatado: "Não liga".to_string(),
                 tecnico_responsavel: Id::novo(),
                 garantia_dias: 90,
             }),
@@ -752,6 +759,7 @@ fn os_de_garantia_com_peca_gratuita_fatura_sem_titulo_mas_com_lancamento_de_cust
                 ncm: "85076000".to_string(),
                 unidade_padrao: unidade.unidade,
                 codigo_barras: None,
+                detalhes_tecnicos: None,
             }),
             &s,
             &amb,
@@ -794,6 +802,7 @@ fn os_de_garantia_com_peca_gratuita_fatura_sem_titulo_mas_com_lancamento_de_cust
             &carga(&AbrirOrdemServico {
                 cliente: cliente.pessoa,
                 equipamento: "Notebook Dell XPS 13".to_string(),
+                defeito_relatado: "Não liga".to_string(),
                 tecnico_responsavel: Id::novo(),
                 garantia_dias: 90,
             }),
@@ -936,6 +945,7 @@ fn remover_item_orcamento_corrige_erro_de_digitacao_e_corrigir_laudo_sobrescreve
             &carga(&AbrirOrdemServico {
                 cliente: cliente.pessoa,
                 equipamento: "Celular".to_string(),
+                defeito_relatado: "Não liga".to_string(),
                 tecnico_responsavel: Id::novo(),
                 garantia_dias: 90,
             }),
@@ -1101,6 +1111,7 @@ fn ordens_aguardando_aprovacao_e_historico_do_equipamento() {
             &carga(&AbrirOrdemServico {
                 cliente: cliente.pessoa,
                 equipamento: "Notebook Dell XPS 13".to_string(),
+                defeito_relatado: "Não liga".to_string(),
                 tecnico_responsavel: Id::novo(),
                 garantia_dias: 90,
             }),
@@ -1146,6 +1157,7 @@ fn ordens_aguardando_aprovacao_e_historico_do_equipamento() {
             &carga(&AbrirOrdemServico {
                 cliente: cliente.pessoa,
                 equipamento: "Notbook Dell XPS13".to_string(),
+                defeito_relatado: "Não liga".to_string(),
                 tecnico_responsavel: Id::novo(),
                 garantia_dias: 90,
             }),
@@ -1163,6 +1175,7 @@ fn ordens_aguardando_aprovacao_e_historico_do_equipamento() {
         &carga(&AbrirOrdemServico {
             cliente: cliente.pessoa,
             equipamento: "Impressora HP".to_string(),
+            defeito_relatado: "Não liga".to_string(),
             tecnico_responsavel: Id::novo(),
             garantia_dias: 90,
         }),
@@ -1204,4 +1217,415 @@ fn ordens_aguardando_aprovacao_e_historico_do_equipamento() {
     let historico: Vec<mod_os::OrdemServico> = postcard::from_bytes(&saida).unwrap();
     assert_eq!(historico.len(), 1);
     assert_eq!(historico[0].id, os1.ordem_servico);
+}
+
+#[test]
+fn abrir_os_so_com_cliente_e_defeito_relatado_funciona_sem_equipamento() {
+    // Pedido explícito do usuário: abrir OS só com nome do cliente + defeito relatado tem
+    // que funcionar — equipamento fica vazio, completável depois.
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloClientes, &ModuloEstoque, &ModuloOs]).unwrap();
+    let s = sessao_completa(empresa);
+    let amb = ambiente(empresa);
+
+    let cliente: PessoaCadastrada = postcard::from_bytes(
+        &d.executar_comando(
+            "clientes.criar_pessoa.v1",
+            &carga(&CriarPessoa {
+                tipo: TipoPessoa::Fisica,
+                nome: "Ana Paula".to_string(),
+                nome_fantasia: None,
+                papel_inicial: Papel::Cliente,
+                documento_tipo: None,
+                documento_numero: None,
+                data_nascimento: None,
+                endereco: None,
+                contato: None,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    let os: OrdemServicoAberta = postcard::from_bytes(
+        &d.executar_comando(
+            "os.abrir_ordem_servico.v1",
+            &carga(&AbrirOrdemServico {
+                cliente: cliente.pessoa,
+                equipamento: String::new(),
+                defeito_relatado: "Não carrega a bateria".to_string(),
+                tecnico_responsavel: Id::novo(),
+                garantia_dias: 90,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    let saida = d
+        .executar_consulta(
+            "os.buscar_detalhe_ordem.v1",
+            &carga(&BuscarDetalheOrdem {
+                ordem_servico: os.ordem_servico,
+            }),
+            &s,
+            &amb,
+            arm.leitor(),
+        )
+        .unwrap();
+    let detalhe: DetalheOrdem = postcard::from_bytes::<Option<DetalheOrdem>>(&saida)
+        .unwrap()
+        .unwrap();
+    assert_eq!(detalhe.ordem.equipamento, "");
+    assert_eq!(detalhe.ordem.defeito_relatado, "Não carrega a bateria");
+}
+
+#[test]
+fn abrir_os_sem_defeito_relatado_e_recusado() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloClientes, &ModuloEstoque, &ModuloOs]).unwrap();
+    let s = sessao_completa(empresa);
+    let amb = ambiente(empresa);
+
+    let cliente: PessoaCadastrada = postcard::from_bytes(
+        &d.executar_comando(
+            "clientes.criar_pessoa.v1",
+            &carga(&CriarPessoa {
+                tipo: TipoPessoa::Fisica,
+                nome: "Ana Paula".to_string(),
+                nome_fantasia: None,
+                papel_inicial: Papel::Cliente,
+                documento_tipo: None,
+                documento_numero: None,
+                data_nascimento: None,
+                endereco: None,
+                contato: None,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    let erro = d
+        .executar_comando(
+            "os.abrir_ordem_servico.v1",
+            &carga(&AbrirOrdemServico {
+                cliente: cliente.pessoa,
+                equipamento: "Celular".to_string(),
+                defeito_relatado: "   ".to_string(),
+                tecnico_responsavel: Id::novo(),
+                garantia_dias: 90,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap_err();
+    assert_eq!(erro.codigo, CodigoErro::ENTRADA_INVALIDA);
+}
+
+#[test]
+fn editar_dados_da_ordem_completa_equipamento_e_complementa_defeito() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloClientes, &ModuloEstoque, &ModuloOs]).unwrap();
+    let s = sessao_completa(empresa);
+    let amb = ambiente(empresa);
+
+    let cliente: PessoaCadastrada = postcard::from_bytes(
+        &d.executar_comando(
+            "clientes.criar_pessoa.v1",
+            &carga(&CriarPessoa {
+                tipo: TipoPessoa::Fisica,
+                nome: "Carlos Lima".to_string(),
+                nome_fantasia: None,
+                papel_inicial: Papel::Cliente,
+                documento_tipo: None,
+                documento_numero: None,
+                data_nascimento: None,
+                endereco: None,
+                contato: None,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    let os: OrdemServicoAberta = postcard::from_bytes(
+        &d.executar_comando(
+            "os.abrir_ordem_servico.v1",
+            &carga(&AbrirOrdemServico {
+                cliente: cliente.pessoa,
+                equipamento: String::new(),
+                defeito_relatado: "Não liga".to_string(),
+                tecnico_responsavel: Id::novo(),
+                garantia_dias: 90,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    // Completa o equipamento e complementa o defeito relatado.
+    d.executar_comando(
+        "os.editar_dados_da_ordem.v1",
+        &carga(&EditarDadosDaOrdem {
+            ordem_servico: os.ordem_servico,
+            equipamento: Some("Notebook Dell XPS 13".to_string()),
+            complemento_defeito_relatado: Some("Também não carrega a bateria".to_string()),
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+
+    let saida = d
+        .executar_consulta(
+            "os.buscar_detalhe_ordem.v1",
+            &carga(&BuscarDetalheOrdem {
+                ordem_servico: os.ordem_servico,
+            }),
+            &s,
+            &amb,
+            arm.leitor(),
+        )
+        .unwrap();
+    let detalhe: DetalheOrdem = postcard::from_bytes::<Option<DetalheOrdem>>(&saida)
+        .unwrap()
+        .unwrap();
+    assert_eq!(detalhe.ordem.equipamento, "Notebook Dell XPS 13");
+    assert_eq!(
+        detalhe.ordem.defeito_relatado,
+        "Não liga | Também não carrega a bateria"
+    );
+
+    // Sem nenhum dos dois campos, o comando recusa (nada para atualizar).
+    let erro = d
+        .executar_comando(
+            "os.editar_dados_da_ordem.v1",
+            &carga(&EditarDadosDaOrdem {
+                ordem_servico: os.ordem_servico,
+                equipamento: None,
+                complemento_defeito_relatado: None,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap_err();
+    assert_eq!(erro.codigo, CodigoErro::ENTRADA_INVALIDA);
+
+    // Cancela a OS e confirma que editar dados depois disso é recusado (finalizada).
+    d.executar_comando(
+        "os.cancelar_ordem_servico.v1",
+        &carga(&CancelarOrdemServico {
+            ordem_servico: os.ordem_servico,
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+    let erro = d
+        .executar_comando(
+            "os.editar_dados_da_ordem.v1",
+            &carga(&EditarDadosDaOrdem {
+                ordem_servico: os.ordem_servico,
+                equipamento: Some("Notebook".to_string()),
+                complemento_defeito_relatado: None,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap_err();
+    assert_eq!(erro.codigo, CodigoErro::ESTADO_INVALIDO);
+}
+
+#[test]
+fn pecas_aguardando_estoque_cruza_orcamento_pendente_com_saldo_real() {
+    // Auditoria de integração (2026-09-11): uma peça orçada mas sem saldo suficiente no
+    // estoque hoje só era descoberta abrindo a OS e o produto em telas separadas.
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloClientes, &ModuloEstoque, &ModuloOs]).unwrap();
+    let s = sessao_completa(empresa);
+    let amb = ambiente(empresa);
+
+    let cliente: PessoaCadastrada = postcard::from_bytes(
+        &d.executar_comando(
+            "clientes.criar_pessoa.v1",
+            &carga(&CriarPessoa {
+                tipo: TipoPessoa::Fisica,
+                nome: "Beatriz Nunes".to_string(),
+                nome_fantasia: None,
+                papel_inicial: Papel::Cliente,
+                documento_tipo: None,
+                documento_numero: None,
+                data_nascimento: None,
+                endereco: None,
+                contato: None,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    let grupo: GrupoProdutoCriado = postcard::from_bytes(
+        &d.executar_comando(
+            "estoque.criar_grupo_produto.v1",
+            &carga(&CriarGrupoProduto {
+                codigo: "TELA".to_string(),
+                nome: "Telas".to_string(),
+                pai: None,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let unidade: UnidadeCriada = postcard::from_bytes(
+        &d.executar_comando(
+            "estoque.criar_unidade.v1",
+            &carga(&CriarUnidade {
+                sigla: "UN".to_string(),
+                nome: "Unidade".to_string(),
+                fracionavel: false,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    // Produto cadastrado, mas SEM nenhuma entrada de estoque — saldo disponível é zero.
+    let produto: ProdutoCriado = postcard::from_bytes(
+        &d.executar_comando(
+            "estoque.criar_produto.v1",
+            &carga(&CriarProduto {
+                grupo_produto: grupo.grupo_produto,
+                nome: "Tela iPhone 11".to_string(),
+                ncm: "85177000".to_string(),
+                unidade_padrao: unidade.unidade,
+                codigo_barras: None,
+                detalhes_tecnicos: None,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    let os: OrdemServicoAberta = postcard::from_bytes(
+        &d.executar_comando(
+            "os.abrir_ordem_servico.v1",
+            &carga(&AbrirOrdemServico {
+                cliente: cliente.pessoa,
+                equipamento: "iPhone 11".to_string(),
+                defeito_relatado: "Tela quebrada".to_string(),
+                tecnico_responsavel: Id::novo(),
+                garantia_dias: 90,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    d.executar_comando(
+        "os.montar_orcamento.v1",
+        &carga(&MontarOrcamentoOs {
+            ordem_servico: os.ordem_servico,
+            item: ItemOrcamentoNovo::Peca {
+                produto: produto.produto,
+                quantidade: Quantidade::unidades(1),
+                preco_unitario: Preco::reais(350),
+            },
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+
+    let saida = d
+        .executar_consulta(
+            "os.pecas_aguardando_estoque.v1",
+            &carga(&PecasAguardandoEstoque),
+            &s,
+            &amb,
+            arm.leitor(),
+        )
+        .unwrap();
+    let pendentes: Vec<ItemAguardandoEstoque> = postcard::from_bytes(&saida).unwrap();
+    assert_eq!(pendentes.len(), 1);
+    assert_eq!(pendentes[0].ordem_servico, os.ordem_servico);
+    assert_eq!(pendentes[0].produto, produto.produto);
+    assert_eq!(pendentes[0].quantidade_necessaria, Quantidade::unidades(1));
+    assert_eq!(pendentes[0].saldo_disponivel, Quantidade::ZERO);
+
+    // Repõe o estoque com quantidade suficiente — a peça sai do radar.
+    let local: LocalCriado = postcard::from_bytes(
+        &d.executar_comando(
+            "estoque.criar_local.v1",
+            &carga(&CriarLocal {
+                nome: "Depósito".to_string(),
+                tipo: TipoLocal::Deposito,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    d.executar_comando(
+        "estoque.registrar_entrada.v1",
+        &carga(&mod_estoque::RegistrarEntrada {
+            produto: produto.produto,
+            local: local.local,
+            quantidade: Quantidade::unidades(5),
+            custo_unitario: Preco::reais(200),
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+
+    let saida = d
+        .executar_consulta(
+            "os.pecas_aguardando_estoque.v1",
+            &carga(&PecasAguardandoEstoque),
+            &s,
+            &amb,
+            arm.leitor(),
+        )
+        .unwrap();
+    let pendentes: Vec<ItemAguardandoEstoque> = postcard::from_bytes(&saida).unwrap();
+    assert!(pendentes.is_empty());
 }

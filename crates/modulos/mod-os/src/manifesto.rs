@@ -86,6 +86,12 @@ const PERMISSOES: &[Permissao] = &[
         None,
     ),
     perm(
+        "os.ordem.editar_dados",
+        "Completar/corrigir equipamento e defeito relatado",
+        Risco::Baixo,
+        None,
+    ),
+    perm(
         "os.laudo.registrar",
         "Registrar laudo técnico",
         Risco::Baixo,

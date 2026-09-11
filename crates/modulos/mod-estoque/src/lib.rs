@@ -33,6 +33,15 @@
 //! dependente chamar direto, na própria transação — mesmo padrão de
 //! `mod_financeiro::lancar_titulo_comum`.
 //!
+//! **Pedido do usuário (2026-09-11):** cadastro técnico de peça de microeletrônica —
+//! [`Produto`] ganhou sete campos opcionais agrupados em [`DetalhesTecnicos`] (fabricante,
+//! MPN/`codigo_fabricante`, categoria técnica, especificação/datasheet-resumo,
+//! compatibilidade, garantia do fornecedor em dias, localização física) via
+//! [`Produto::com_detalhes_tecnicos`] — nome/preço continuam sendo o único essencial do
+//! cadastro rápido. `CriarProduto` aceita `detalhes_tecnicos` opcional na criação;
+//! **[`EditarDetalhesTecnicosProduto`]** (novo) edita depois, sem tocar nome/NCM/código de
+//! barras (que continuam sem comando de edição nesta fatia).
+//!
 //! ## O que falta (ver `docs/17-roadmap.md`, Fase 2)
 //!
 //! Grade/variação, lote/validade, o fluxo formal de inventário (contagem cega — o domínio
@@ -63,18 +72,22 @@ mod saldo;
 
 pub use comandos::{
     registrar_entrada_comum, registrar_saida_comum, AjustarSaldo, CriarGrupoProduto, CriarLocal,
-    CriarProduto, CriarUnidade, DadosEntrada, DadosSaida, EntradaGravada, EntradaRegistrada,
-    GrupoProdutoCriado, LocalCriado, ProdutoCriado, RegistrarEntrada, RegistrarSaida, SaidaGravada,
-    SaidaRegistrada, SaldoAjustado, TipoLocal, UnidadeCriada,
+    CriarProduto, CriarUnidade, DadosEntrada, DadosSaida, EditarDetalhesTecnicosProduto,
+    EntradaGravada, EntradaRegistrada, GrupoProdutoCriado, LocalCriado, ProdutoCriado,
+    RegistrarEntrada, RegistrarSaida, SaidaGravada, SaidaRegistrada, SaldoAjustado, TipoLocal,
+    UnidadeCriada,
 };
 pub use consultas::{
-    GruposProduto, ItemGrupoProduto, ItemLocal, ItemProdutoComSaldo, ItemUnidade, Locais,
-    ProdutoPorCodigoBarras, ProdutosComSaldo, Unidades,
+    saldo_disponivel_do_produto, GruposProduto, ItemGrupoProduto, ItemLocal, ItemProdutoComSaldo,
+    ItemUnidade, Locais, ProdutoPorCodigoBarras, ProdutosComSaldo, SaldoDisponivelDoProduto,
+    Unidades,
 };
 pub use erros::ErroEstoque;
 pub use inventario::{AjusteInventario, ContagemItem, EstadoInventario, Inventario};
 pub use manifesto::{manifesto, MANIFESTO};
 pub use modulo::ModuloEstoque;
-pub use produto::{validar_gtin, Conversao, EstadoLote, Lote, Produto, Unidade, Variacao};
+pub use produto::{
+    validar_gtin, Conversao, DetalhesTecnicos, EstadoLote, Lote, Produto, Unidade, Variacao,
+};
 pub use repositorio::RepositorioEstoque;
 pub use saldo::{custo_medio_movel, Movimento, SaidaAplicada, SaldoLocal, TipoMovimento};

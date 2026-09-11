@@ -14,9 +14,10 @@ use cardeal_ui::organisms::{
 use cardeal_ui::tokens::{Espaco, TemaUi};
 use eframe::egui;
 use mod_estoque::{
-    CriarGrupoProduto, CriarLocal, CriarProduto, CriarUnidade, GrupoProdutoCriado, GruposProduto,
-    ItemGrupoProduto, ItemLocal, ItemProdutoComSaldo, ItemUnidade, Locais, LocalCriado,
-    ProdutoCriado, ProdutosComSaldo, RegistrarEntrada, TipoLocal, UnidadeCriada, Unidades,
+    CriarGrupoProduto, CriarLocal, CriarProduto, CriarUnidade, DetalhesTecnicos,
+    GrupoProdutoCriado, GruposProduto, ItemGrupoProduto, ItemLocal, ItemProdutoComSaldo,
+    ItemUnidade, Locais, LocalCriado, ProdutoCriado, ProdutosComSaldo, RegistrarEntrada, TipoLocal,
+    UnidadeCriada, Unidades,
 };
 
 #[derive(Default, PartialEq)]
@@ -51,6 +52,15 @@ pub struct EstadoTelaEstoque {
     local_selecionado: Option<Id>,
     estoque_inicial_qtd: String,
     estoque_inicial_custo: String,
+
+    // Detalhes técnicos (opcional) — cadastro de peça de microeletrônica.
+    det_fabricante: String,
+    det_codigo_fabricante: String,
+    det_categoria_tecnica: String,
+    det_especificacao_tecnica: String,
+    det_compatibilidade: String,
+    det_garantia_fornecedor_dias: String,
+    det_localizacao_fisica: String,
 }
 
 impl EstadoTelaEstoque {
@@ -77,6 +87,13 @@ impl EstadoTelaEstoque {
         self.produto_codigo_barras.clear();
         self.estoque_inicial_qtd.clear();
         self.estoque_inicial_custo.clear();
+        self.det_fabricante.clear();
+        self.det_codigo_fabricante.clear();
+        self.det_categoria_tecnica.clear();
+        self.det_especificacao_tecnica.clear();
+        self.det_compatibilidade.clear();
+        self.det_garantia_fornecedor_dias.clear();
+        self.det_localizacao_fisica.clear();
     }
 }
 
@@ -291,6 +308,61 @@ fn corpo_novo(
             Campo::novo("Custo unitário", &mut estado.estoque_inicial_custo).marcador("90,00"),
         );
     });
+
+    ui.add_space(Espaco::E16);
+    ui.separator();
+    ui.add_space(Espaco::E12);
+    ui.add(Rotulo::campo("Detalhes técnicos (opcional)"));
+    ui.add_space(Espaco::E8);
+    ui.columns(2, |c| {
+        c[0].add(
+            Campo::novo("Fabricante", &mut estado.det_fabricante)
+                .marcador("ex.: Texas Instruments"),
+        );
+        c[1].add(
+            Campo::novo(
+                "Código do fabricante (MPN)",
+                &mut estado.det_codigo_fabricante,
+            )
+            .marcador("part number"),
+        );
+    });
+    ui.add_space(Espaco::E8);
+    ui.columns(2, |c| {
+        c[0].add(
+            Campo::novo("Categoria técnica", &mut estado.det_categoria_tecnica)
+                .marcador("IC, capacitor, tela, bateria…"),
+        );
+        c[1].add(
+            Campo::novo(
+                "Garantia do fornecedor (dias)",
+                &mut estado.det_garantia_fornecedor_dias,
+            )
+            .marcador("90"),
+        );
+    });
+    ui.add_space(Espaco::E8);
+    ui.add(
+        Campo::novo(
+            "Especificação / resumo do datasheet",
+            &mut estado.det_especificacao_tecnica,
+        )
+        .marcador("tensão, corrente, pinagem…"),
+    );
+    ui.add_space(Espaco::E8);
+    ui.columns(2, |c| {
+        c[0].add(
+            Campo::novo(
+                "Compatibilidade / aplicação",
+                &mut estado.det_compatibilidade,
+            )
+            .marcador("ex.: iPhone 11 / 11 Pro"),
+        );
+        c[1].add(
+            Campo::novo("Localização física", &mut estado.det_localizacao_fisica)
+                .marcador("ex.: Gaveta 12, prateleira B"),
+        );
+    });
 }
 
 fn bloco_grupo(
@@ -432,6 +504,24 @@ fn cadastrar(
     sessao: &SessaoLocal,
     estado: &mut EstadoTelaEstoque,
 ) {
+    let detalhes_tecnicos = DetalhesTecnicos {
+        fabricante: (!estado.det_fabricante.trim().is_empty())
+            .then(|| estado.det_fabricante.clone()),
+        codigo_fabricante: (!estado.det_codigo_fabricante.trim().is_empty())
+            .then(|| estado.det_codigo_fabricante.clone()),
+        categoria_tecnica: (!estado.det_categoria_tecnica.trim().is_empty())
+            .then(|| estado.det_categoria_tecnica.clone()),
+        especificacao_tecnica: (!estado.det_especificacao_tecnica.trim().is_empty())
+            .then(|| estado.det_especificacao_tecnica.clone()),
+        compatibilidade: (!estado.det_compatibilidade.trim().is_empty())
+            .then(|| estado.det_compatibilidade.clone()),
+        garantia_fornecedor_dias: estado.det_garantia_fornecedor_dias.trim().parse().ok(),
+        localizacao_fisica: (!estado.det_localizacao_fisica.trim().is_empty())
+            .then(|| estado.det_localizacao_fisica.clone()),
+    };
+    let detalhes_tecnicos =
+        (detalhes_tecnicos != DetalhesTecnicos::default()).then_some(detalhes_tecnicos);
+
     let r = motor.executar(
         sessao,
         "estoque.criar_produto.v1",
@@ -442,6 +532,7 @@ fn cadastrar(
             unidade_padrao: estado.unidade_selecionada.unwrap_or(Id::NULO),
             codigo_barras: (!estado.produto_codigo_barras.trim().is_empty())
                 .then(|| estado.produto_codigo_barras.clone()),
+            detalhes_tecnicos,
         },
     );
     let criado: ProdutoCriado = match r {

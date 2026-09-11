@@ -6,10 +6,13 @@ use cardeal_modkit::{Manifesto, Modulo, Registro};
 use cardeal_storage::ConjuntoMigracoes;
 
 use crate::comandos::{
-    AjustarSaldo, CriarGrupoProduto, CriarLocal, CriarProduto, CriarUnidade, RegistrarEntrada,
-    RegistrarSaida,
+    AjustarSaldo, CriarGrupoProduto, CriarLocal, CriarProduto, CriarUnidade,
+    EditarDetalhesTecnicosProduto, RegistrarEntrada, RegistrarSaida,
 };
-use crate::consultas::{GruposProduto, Locais, ProdutoPorCodigoBarras, ProdutosComSaldo, Unidades};
+use crate::consultas::{
+    GruposProduto, Locais, ProdutoPorCodigoBarras, ProdutosComSaldo, SaldoDisponivelDoProduto,
+    Unidades,
+};
 use crate::manifesto::MANIFESTO;
 use crate::migracoes;
 
@@ -30,12 +33,14 @@ impl Modulo for ModuloEstoque {
             .comando::<CriarGrupoProduto>("estoque.criar_grupo_produto.v1")
             .comando::<CriarUnidade>("estoque.criar_unidade.v1")
             .comando::<CriarProduto>("estoque.criar_produto.v1")
+            .comando::<EditarDetalhesTecnicosProduto>("estoque.editar_detalhes_tecnicos_produto.v1")
             .comando::<CriarLocal>("estoque.criar_local.v1")
             .comando::<RegistrarEntrada>("estoque.registrar_entrada.v1")
             .comando::<RegistrarSaida>("estoque.registrar_saida.v1")
             .comando::<AjustarSaldo>("estoque.ajustar_saldo.v1")
             .consulta::<ProdutosComSaldo>("estoque.produtos_com_saldo.v1")
             .consulta::<ProdutoPorCodigoBarras>("estoque.produto_por_codigo_barras.v1")
+            .consulta::<SaldoDisponivelDoProduto>("estoque.saldo_disponivel_do_produto.v1")
             .consulta::<GruposProduto>("estoque.grupos_produto.v1")
             .consulta::<Unidades>("estoque.unidades.v1")
             .consulta::<Locais>("estoque.locais.v1");

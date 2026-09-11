@@ -7,13 +7,13 @@ use cardeal_storage::ConjuntoMigracoes;
 
 use crate::comandos::{
     AbrirOrdemServico, AjustarApontamento, AplicarPeca, AprovarOrcamentoOs, CancelarOrdemServico,
-    ConcluirExecucao, EncerrarApontamento, EnviarParaAprovacao, FaturarOrdemServico,
-    IniciarApontamento, IniciarExecucao, MontarOrcamentoOs, RegistrarLaudo, RegistrarMaoDeObra,
-    RemoverItemOrcamento, ReprovarOrcamentoOs,
+    ConcluirExecucao, EditarDadosDaOrdem, EncerrarApontamento, EnviarParaAprovacao,
+    FaturarOrdemServico, IniciarApontamento, IniciarExecucao, MontarOrcamentoOs, RegistrarLaudo,
+    RegistrarMaoDeObra, RemoverItemOrcamento, ReprovarOrcamentoOs,
 };
 use crate::consultas::{
     ApontamentosDaOrdem, BuscarDetalheOrdem, HistoricoDoEquipamento, OrdensAguardandoAprovacao,
-    OrdensEmAberto, TempoPorTecnicoNoPeriodo, TempoTotalDaOrdem,
+    OrdensEmAberto, PecasAguardandoEstoque, TempoPorTecnicoNoPeriodo, TempoTotalDaOrdem,
 };
 use crate::manifesto::MANIFESTO;
 use crate::migracoes;
@@ -34,6 +34,7 @@ impl Modulo for ModuloOs {
     fn registrar(&self, registro: &mut Registro) -> Resultado<()> {
         registro
             .comando::<AbrirOrdemServico>("os.abrir_ordem_servico.v1")
+            .comando::<EditarDadosDaOrdem>("os.editar_dados_da_ordem.v1")
             .comando::<RegistrarLaudo>("os.registrar_laudo.v1")
             .comando::<MontarOrcamentoOs>("os.montar_orcamento.v1")
             .comando::<RemoverItemOrcamento>("os.remover_item_orcamento.v1")
@@ -53,6 +54,7 @@ impl Modulo for ModuloOs {
             .consulta::<BuscarDetalheOrdem>("os.buscar_detalhe_ordem.v1")
             .consulta::<OrdensAguardandoAprovacao>("os.ordens_aguardando_aprovacao.v1")
             .consulta::<HistoricoDoEquipamento>("os.historico_do_equipamento.v1")
+            .consulta::<PecasAguardandoEstoque>("os.pecas_aguardando_estoque.v1")
             .consulta::<ApontamentosDaOrdem>("os.apontamentos_da_ordem.v1")
             .consulta::<TempoTotalDaOrdem>("os.tempo_total_da_ordem.v1")
             .consulta::<TempoPorTecnicoNoPeriodo>("os.tempo_por_tecnico_no_periodo.v1");

@@ -64,6 +64,13 @@
 | `unidade_padrao` | Id | sim | referencia `Unidade` |
 | `ponto_pedido` | Quantidade | não | dispara alerta no Pulso quando saldo disponível cruza abaixo |
 | `estoque_minimo` / `estoque_maximo` | Quantidade | não | usados na curva ABC e sugestão de compra |
+| `fabricante` | String | não | quem fabrica a peça, não quem vende (§5 — cadastro técnico, 2026-09-11) |
+| `codigo_fabricante` | String | não | MPN — o part number que bate com o datasheet, diferente do código de barras |
+| `categoria_tecnica` | String | não | etiqueta livre de bancada ("IC", "capacitor", "tela", "bateria", "fonte") — não substitui `grupo_produto` |
+| `especificacao_tecnica` | String | não | resumo de datasheet em texto livre (tensão, corrente, pinagem…), sem parser |
+| `compatibilidade` | String | não | em quais aparelhos/modelos a peça serve, texto livre |
+| `garantia_fornecedor_dias` | Quantidade (inteiro) | não | garantia do fornecedor sobre a peça — diferente da garantia que a assistência dá ao cliente |
+| `localizacao_fisica` | String | não | prateleira/gaveta — ajuda no balcão |
 | `ativo` | enum(`Sim`,`Nao`) | sim | |
 | `versao` | Quantidade (inteiro) | sim | |
 
@@ -191,9 +198,10 @@ stateDiagram-v2
 
 | Comando | Permissão | Risco | O que faz | Erros possíveis |
 |---|---|---|---|---|
-| `CriarProduto` ✅ | `estoque.produto.criar` | Baixo | Cria `Produto` + unidade padrão; aceita `codigo_barras` opcional já na criação (valida dígito verificador via `Produto::com_codigo_barras`) | `NcmInvalido`, `GtinInvalido` |
+| `CriarProduto` ✅ | `estoque.produto.criar` | Baixo | Cria `Produto` + unidade padrão; aceita `codigo_barras` opcional já na criação (valida dígito verificador via `Produto::com_codigo_barras`) e `detalhes_tecnicos` opcional (fabricante, MPN, categoria técnica, especificação, compatibilidade, garantia do fornecedor, localização física — 2026-09-11) | `NcmInvalido`, `GtinInvalido` |
+| `EditarDetalhesTecnicosProduto` ✅ (novo, 2026-09-11) | `estoque.produto.editar` | Baixo | Edita depois os sete campos técnicos opcionais (substitui por completo — campo não informado vira `None`); não toca nome/NCM/código de barras | — |
 | `CriarVariacao` | `estoque.produto.criar` | Baixo | Ainda não implementado | `ProdutoSemGrade` |
-| `DefinirCodigoBarras` | `estoque.produto.editar` | Baixo | Ainda não implementado como comando de edição separado — hoje só se define na criação (`CriarProduto`); não há `EditarProduto` nesta fatia | `GtinDuplicado`, `DigitoInvalido` |
+| `DefinirCodigoBarras` | `estoque.produto.editar` | Baixo | Ainda não implementado como comando de edição separado — hoje só se define na criação (`CriarProduto`); não há `EditarProduto` de nome/NCM nesta fatia | `GtinDuplicado`, `DigitoInvalido` |
 | `CriarLocal` ✅ | `estoque.local.criar` | Baixo | | `NomeDuplicado` |
 | `RegistrarEntrada` ✅ | `estoque.movimento.entrada` | Baixo | Cria `Movimento Entrada`, recalcula custo médio | `QuantidadeInvalida` |
 | `RegistrarSaida` ✅ | `estoque.movimento.saida` | Médio | Cria `Movimento Saida`, decrementa disponível | `SaldoInsuficiente` (aviso, não bloqueia por padrão — ver regra 2) |
@@ -222,12 +230,26 @@ stateDiagram-v2
 > `nucleo_trava`, fluxo de várias etapas); o `AjustarSaldo` cobre o caso do dia a dia (um
 > item, um erro, corrige na hora).
 
+> **Nota (2026-09-11) — cadastro técnico de microeletrônica:** pedido do usuário — "state of
+> art do que vamos precisar na nossa microeletrônica para operar no mais alto nível no dia a
+> dia". `Produto` ganhou sete campos opcionais (migração v3, todos `NULL` por padrão,
+> aditiva): `fabricante`, `codigo_fabricante` (MPN), `categoria_tecnica`,
+> `especificacao_tecnica`, `compatibilidade`, `garantia_fornecedor_dias`,
+> `localizacao_fisica`. Nome e preço continuam sendo o único essencial do cadastro rápido —
+> nenhum dos sete é obrigatório. `CriarProduto` aceita `detalhes_tecnicos` opcional na
+> criação; `EditarDetalhesTecnicosProduto` (novo) edita depois. Também nesta sessão,
+> **`SaldoDisponivelDoProduto`** (nova consulta + `pub fn saldo_disponivel_do_produto`) —
+> fecha uma lacuna de auditoria de integração: `mod-os::PecasAguardandoEstoque` cruza peça
+> orçada/não aplicada com o saldo real via esta porta pública, sem nunca ler
+> `estoque_saldo_local` direto.
+
 ## 6. Consultas
 
 | Consulta | Permissão | Uso na UI | Índice que a sustenta |
 |---|---|---|---|
 | `SaldoPorLocal` | `estoque.saldo.ver` | Ficha do produto, PDV (consulta de preço/saldo) | `estoque_saldo_local(produto, variacao, local)` |
 | `SaldoConsolidado` | `estoque.saldo.ver` | Relatório multi-loja | agregação sobre `SaldoPorLocal` por `produto` |
+| `SaldoDisponivelDoProduto` ✅ (novo, 2026-09-11) | `estoque.saldo.ver` | Saldo somado entre locais de **um** produto — a porta pública que outro módulo chama para cruzar dados sem ler `estoque_saldo_local` direto (`mod-os::PecasAguardandoEstoque` é o primeiro consumidor) | `estoque_saldo_local(produto)` |
 | `MovimentosDoProduto` | `estoque.movimento.ver` | Aba "Movimentação" da ficha | `estoque_movimento(produto, criado_em DESC)` |
 | `ProdutosAbaixoPontoPedido` | `estoque.compra_sugerida.ver` | "Radar" do Pulso, sugestão de pedido de compra | `estoque_saldo_local` filtrado em memória contra `ponto_pedido` |
 | `CurvaAbc` | `estoque.abc.ver` | Relatório de curva ABC | agregação de `estoque_movimento` por valor no período |
@@ -464,6 +486,14 @@ CREATE TABLE estoque_produto (
     nome                TEXT    NOT NULL,
     ncm                 TEXT    NOT NULL,
     cest                TEXT,
+    -- Migração v3 (2026-09-11): cadastro técnico de peça de microeletrônica, tudo opcional.
+    fabricante                TEXT,
+    codigo_fabricante         TEXT,  -- MPN, diferente do código de barras (embalagem)
+    categoria_tecnica         TEXT,
+    especificacao_tecnica     TEXT,
+    compatibilidade           TEXT,
+    garantia_fornecedor_dias  INTEGER,
+    localizacao_fisica        TEXT,
     controla_grade      INTEGER NOT NULL DEFAULT 0 CHECK (controla_grade IN (0,1)),
     controla_lote       INTEGER NOT NULL DEFAULT 0 CHECK (controla_lote IN (0,1)),
     controla_validade   INTEGER NOT NULL DEFAULT 0 CHECK (controla_validade IN (0,1)),

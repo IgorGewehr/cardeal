@@ -9,10 +9,11 @@ use cardeal_ledger::semear_plano_padrao;
 use cardeal_modkit::{Ambiente, Despachante, Modulo, PedidoAtivacao, RegistroModulos};
 use cardeal_storage::{Armazenamento, ConfigArmazenamento, ContextoEscrita, ErroArmazenamento};
 use mod_estoque::{
-    AjustarSaldo, CriarGrupoProduto, CriarLocal, CriarProduto, CriarUnidade, EntradaRegistrada,
-    GrupoProdutoCriado, ItemProdutoComSaldo, LocalCriado, ModuloEstoque, Produto, ProdutoCriado,
-    ProdutoPorCodigoBarras, ProdutosComSaldo, RegistrarEntrada, RegistrarSaida, SaidaRegistrada,
-    SaldoAjustado, TipoLocal, UnidadeCriada, MANIFESTO,
+    AjustarSaldo, CriarGrupoProduto, CriarLocal, CriarProduto, CriarUnidade, DetalhesTecnicos,
+    EditarDetalhesTecnicosProduto, EntradaRegistrada, GrupoProdutoCriado, ItemProdutoComSaldo,
+    LocalCriado, ModuloEstoque, Produto, ProdutoCriado, ProdutoPorCodigoBarras, ProdutosComSaldo,
+    RegistrarEntrada, RegistrarSaida, SaidaRegistrada, SaldoAjustado, TipoLocal, UnidadeCriada,
+    MANIFESTO,
 };
 use tempfile::TempDir;
 
@@ -115,6 +116,7 @@ fn cadastro_basico(d: &Despachante, arm: &Armazenamento, empresa: Id, s: &Sessao
                 ncm: "85076000".to_string(),
                 unidade_padrao: unidade.unidade,
                 codigo_barras: None,
+                detalhes_tecnicos: None,
             }),
             s,
             &ambiente(empresa),
@@ -372,6 +374,7 @@ fn criar_produto_com_codigo_de_barras_e_encontrado_pelo_bipe() {
                 ncm: "22021000".to_string(),
                 unidade_padrao: unidade.unidade,
                 codigo_barras: Some("7894900011517".to_string()),
+                detalhes_tecnicos: None,
             }),
             &s,
             &ambiente(empresa),
@@ -391,6 +394,7 @@ fn criar_produto_com_codigo_de_barras_e_encontrado_pelo_bipe() {
                 ncm: "22021000".to_string(),
                 unidade_padrao: unidade.unidade,
                 codigo_barras: Some("7894900011518".to_string()),
+                detalhes_tecnicos: None,
             }),
             &s,
             &ambiente(empresa),
@@ -521,4 +525,135 @@ fn ajustar_saldo_corrige_contagem_errada_e_posta_no_razao() {
         )
         .unwrap_err();
     assert_eq!(erro.codigo, CodigoErro::ENTRADA_INVALIDA);
+}
+
+#[test]
+fn produto_com_detalhes_tecnicos_na_criacao_e_editado_depois() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloEstoque]).unwrap();
+    let s = sessao(
+        empresa,
+        &[
+            "estoque.produto.criar",
+            "estoque.produto.editar",
+            "estoque.produto.ver",
+        ],
+    );
+
+    let grupo: GrupoProdutoCriado = postcard::from_bytes(
+        &d.executar_comando(
+            "estoque.criar_grupo_produto.v1",
+            &carga(&CriarGrupoProduto {
+                codigo: "IC".to_string(),
+                nome: "Circuitos Integrados".to_string(),
+                pai: None,
+            }),
+            &s,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let unidade: UnidadeCriada = postcard::from_bytes(
+        &d.executar_comando(
+            "estoque.criar_unidade.v1",
+            &carga(&CriarUnidade {
+                sigla: "UN".to_string(),
+                nome: "Unidade".to_string(),
+                fracionavel: false,
+            }),
+            &s,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    // Cadastro já com os detalhes técnicos preenchidos.
+    let produto: ProdutoCriado = postcard::from_bytes(
+        &d.executar_comando(
+            "estoque.criar_produto.v1",
+            &carga(&CriarProduto {
+                grupo_produto: grupo.grupo_produto,
+                nome: "IC de carga USB-C".to_string(),
+                ncm: "85423900".to_string(),
+                unidade_padrao: unidade.unidade,
+                codigo_barras: Some("40170725".to_string()),
+                detalhes_tecnicos: Some(DetalhesTecnicos {
+                    fabricante: Some("Texas Instruments".to_string()),
+                    codigo_fabricante: Some("BQ25895".to_string()),
+                    categoria_tecnica: Some("IC".to_string()),
+                    especificacao_tecnica: Some("Carregador Li-Ion 5A".to_string()),
+                    compatibilidade: Some("iPhone 11 / 11 Pro".to_string()),
+                    garantia_fornecedor_dias: Some(90),
+                    localizacao_fisica: Some("Gaveta 3".to_string()),
+                }),
+            }),
+            &s,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    let achado: Produto = postcard::from_bytes::<Option<Produto>>(
+        &d.executar_consulta(
+            "estoque.produto_por_codigo_barras.v1",
+            &carga(&ProdutoPorCodigoBarras {
+                codigo_barras: "40170725".to_string(),
+            }),
+            &s,
+            &ambiente(empresa),
+            arm.leitor(),
+        )
+        .unwrap(),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(achado.fabricante.as_deref(), Some("Texas Instruments"));
+    assert_eq!(achado.codigo_fabricante.as_deref(), Some("BQ25895"));
+    assert_eq!(achado.categoria_tecnica.as_deref(), Some("IC"));
+    assert_eq!(achado.garantia_fornecedor_dias, Some(90));
+    assert_eq!(achado.localizacao_fisica.as_deref(), Some("Gaveta 3"));
+
+    // Edita depois: troca a localização física e limpa a compatibilidade.
+    d.executar_comando(
+        "estoque.editar_detalhes_tecnicos_produto.v1",
+        &carga(&EditarDetalhesTecnicosProduto {
+            produto: produto.produto,
+            detalhes: DetalhesTecnicos {
+                fabricante: Some("Texas Instruments".to_string()),
+                codigo_fabricante: Some("BQ25895".to_string()),
+                categoria_tecnica: Some("IC".to_string()),
+                especificacao_tecnica: Some("Carregador Li-Ion 5A".to_string()),
+                compatibilidade: None,
+                garantia_fornecedor_dias: Some(90),
+                localizacao_fisica: Some("Gaveta 7".to_string()),
+            },
+        }),
+        &s,
+        &ambiente(empresa),
+        arm.escritor(),
+    )
+    .unwrap();
+
+    let editado: Produto = postcard::from_bytes::<Option<Produto>>(
+        &d.executar_consulta(
+            "estoque.produto_por_codigo_barras.v1",
+            &carga(&ProdutoPorCodigoBarras {
+                codigo_barras: "40170725".to_string(),
+            }),
+            &s,
+            &ambiente(empresa),
+            arm.leitor(),
+        )
+        .unwrap(),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(editado.localizacao_fisica.as_deref(), Some("Gaveta 7"));
+    assert_eq!(editado.compatibilidade, None);
 }

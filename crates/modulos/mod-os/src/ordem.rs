@@ -66,8 +66,16 @@ pub struct OrdemServico {
     pub numero: u64,
     /// O cliente (papel `Cliente` em `clientes_pessoa`).
     pub cliente: Id,
-    /// Descrição livre do equipamento ("Notebook Dell XPS 13").
+    /// Descrição livre do equipamento ("Notebook Dell XPS 13"). **Opcional** — pode ficar
+    /// vazia na abertura (o cliente às vezes não sabe o modelo exato de cabeça) e ser
+    /// completada depois via [`OrdemServico::completar_equipamento`]/`EditarDadosDaOrdem`.
     pub equipamento: String,
+    /// O que o cliente relatou querer resolver, capturado na recepção — junto do nome do
+    /// cliente, o único texto obrigatório para abrir uma OS (pedido explícito do usuário:
+    /// "ele pode abrir OS somente com nome do cliente e problema relatado"). **Não** é o
+    /// parecer/diagnóstico técnico — isso é [`crate::laudo::LaudoTecnico`], escrito pelo
+    /// técnico depois, em outro momento do fluxo.
+    pub defeito_relatado: String,
     /// Quando foi aberta.
     pub data_abertura: Data,
     /// O técnico responsável.
@@ -91,22 +99,26 @@ pub struct OrdemServico {
 }
 
 impl OrdemServico {
-    /// Abre uma ordem de serviço nova.
+    /// Abre uma ordem de serviço nova. `equipamento` é opcional (vazio = "ainda não
+    /// informado" — completável depois); `defeito_relatado` é o único texto obrigatório além
+    /// do cliente.
     ///
     /// # Errors
-    /// [`ErroOs::EquipamentoVazio`].
+    /// [`ErroOs::DefeitoRelatadoVazio`].
     pub fn abrir(
         empresa: Id,
         numero: u64,
         cliente: Id,
         equipamento: impl Into<String>,
+        defeito_relatado: impl Into<String>,
         tecnico_responsavel: Id,
         data_abertura: Data,
         garantia_dias: u16,
     ) -> Result<Self, ErroOs> {
         let equipamento = equipamento.into().trim().to_string();
-        if equipamento.is_empty() {
-            return Err(ErroOs::EquipamentoVazio);
+        let defeito_relatado = defeito_relatado.into().trim().to_string();
+        if defeito_relatado.is_empty() {
+            return Err(ErroOs::DefeitoRelatadoVazio);
         }
         Ok(Self {
             id: Id::novo(),
@@ -114,6 +126,7 @@ impl OrdemServico {
             numero,
             cliente,
             equipamento,
+            defeito_relatado,
             data_abertura,
             tecnico_responsavel,
             estado: EstadoOs::Aberta,
@@ -123,6 +136,57 @@ impl OrdemServico {
             itens_orcamento: 0,
             versao: Versao::INICIAL,
         })
+    }
+
+    /// Verdadeiro se a OS ainda aceita edição de dados gerais (equipamento/defeito
+    /// relatado) — qualquer estado não-terminal. Uma OS finalizada é histórico, não
+    /// rascunho.
+    #[must_use]
+    pub const fn aceita_edicao_de_dados(&self) -> bool {
+        !matches!(
+            self.estado,
+            EstadoOs::Faturada | EstadoOs::Cancelada | EstadoOs::Reprovada
+        )
+    }
+
+    fn exigir_nao_finalizada(&self) -> Result<(), ErroOs> {
+        if self.aceita_edicao_de_dados() {
+            Ok(())
+        } else {
+            Err(ErroOs::OrdemFinalizada)
+        }
+    }
+
+    /// Completa ou corrige a descrição do equipamento — para quando ela não foi informada na
+    /// abertura, ou veio incompleta.
+    ///
+    /// # Errors
+    /// [`ErroOs::OrdemFinalizada`] se a OS já estiver `Faturada`/`Cancelada`/`Reprovada`.
+    pub fn completar_equipamento(&mut self, equipamento: impl Into<String>) -> Result<(), ErroOs> {
+        self.exigir_nao_finalizada()?;
+        self.equipamento = equipamento.into().trim().to_string();
+        self.versao = self.versao.proxima();
+        Ok(())
+    }
+
+    /// Acrescenta um complemento ao defeito relatado — para quando o cliente lembra de mais
+    /// detalhe depois da abertura. **Nunca sobrescreve** o relato original; some a ele.
+    ///
+    /// # Errors
+    /// [`ErroOs::OrdemFinalizada`]; [`ErroOs::DefeitoRelatadoVazio`] se o complemento vier
+    /// vazio.
+    pub fn complementar_defeito_relatado(
+        &mut self,
+        complemento: impl Into<String>,
+    ) -> Result<(), ErroOs> {
+        self.exigir_nao_finalizada()?;
+        let complemento = complemento.into().trim().to_string();
+        if complemento.is_empty() {
+            return Err(ErroOs::DefeitoRelatadoVazio);
+        }
+        self.defeito_relatado = format!("{} | {}", self.defeito_relatado, complemento);
+        self.versao = self.versao.proxima();
+        Ok(())
     }
 
     fn transitar(&mut self, novo: EstadoOs) {
@@ -332,6 +396,7 @@ mod testes {
             1,
             Id::novo(),
             "Notebook Dell XPS 13",
+            "Não liga",
             Id::novo(),
             hoje(),
             90,
@@ -340,10 +405,76 @@ mod testes {
     }
 
     #[test]
-    fn equipamento_vazio_e_recusado() {
-        let erro = OrdemServico::abrir(Id::novo(), 1, Id::novo(), "   ", Id::novo(), hoje(), 90)
-            .unwrap_err();
-        assert_eq!(erro, ErroOs::EquipamentoVazio);
+    fn defeito_relatado_vazio_e_recusado() {
+        let erro = OrdemServico::abrir(
+            Id::novo(),
+            1,
+            Id::novo(),
+            "Notebook Dell XPS 13",
+            "   ",
+            Id::novo(),
+            hoje(),
+            90,
+        )
+        .unwrap_err();
+        assert_eq!(erro, ErroOs::DefeitoRelatadoVazio);
+    }
+
+    #[test]
+    fn equipamento_vazio_e_aceito_na_abertura() {
+        // Pedido do usuário: só nome do cliente + defeito relatado são obrigatórios —
+        // equipamento pode ficar vazio e ser completado depois.
+        let os = OrdemServico::abrir(
+            Id::novo(),
+            1,
+            Id::novo(),
+            "   ",
+            "Não liga",
+            Id::novo(),
+            hoje(),
+            90,
+        )
+        .unwrap();
+        assert_eq!(os.equipamento, "");
+        assert_eq!(os.defeito_relatado, "Não liga");
+    }
+
+    #[test]
+    fn completar_equipamento_e_complementar_defeito_relatado() {
+        let mut os = os_aberta();
+        os.completar_equipamento("Notebook Dell XPS 13 - N7548")
+            .unwrap();
+        assert_eq!(os.equipamento, "Notebook Dell XPS 13 - N7548");
+
+        os.complementar_defeito_relatado("Também não carrega a bateria")
+            .unwrap();
+        assert_eq!(
+            os.defeito_relatado,
+            "Não liga | Também não carrega a bateria"
+        );
+
+        assert_eq!(
+            os.complementar_defeito_relatado("   ").unwrap_err(),
+            ErroOs::DefeitoRelatadoVazio
+        );
+    }
+
+    #[test]
+    fn editar_dados_e_recusado_apos_finalizar() {
+        let mut os = os_aberta();
+        os.adicionar_ao_orcamento(Dinheiro::reais(100)).unwrap();
+        os.enviar_para_aprovacao().unwrap();
+        os.reprovar().unwrap();
+        assert!(!os.aceita_edicao_de_dados());
+        assert_eq!(
+            os.completar_equipamento("Notebook").unwrap_err(),
+            ErroOs::OrdemFinalizada
+        );
+        assert_eq!(
+            os.complementar_defeito_relatado("mais detalhe")
+                .unwrap_err(),
+            ErroOs::OrdemFinalizada
+        );
     }
 
     #[test]

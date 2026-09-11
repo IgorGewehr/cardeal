@@ -83,6 +83,7 @@ fn abrir_uma_os(d: &Despachante, s: &Sessao, amb: &Ambiente, arm: &Armazenamento
             &carga(&AbrirOrdemServico {
                 cliente: Id::novo(),
                 equipamento: "Notebook Dell XPS 13".to_string(),
+                defeito_relatado: "Não liga".to_string(),
                 tecnico_responsavel: Id::novo(),
                 garantia_dias: 90,
             }),
