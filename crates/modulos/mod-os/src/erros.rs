@@ -61,6 +61,23 @@ pub enum ErroOs {
     /// `FaturarOrdemServico` sobre uma OS já faturada.
     #[error("Esta ordem de serviço já foi faturada")]
     OsJaFaturada,
+
+    /// `IniciarApontamento` quando o técnico já tem outro apontamento aberto — ele não pode
+    /// estar "trabalhando" em duas ordens de serviço ao mesmo tempo.
+    #[error("Este técnico já tem um apontamento de tempo em aberto (em outra ordem de serviço)")]
+    TecnicoJaTemApontamentoAberto,
+
+    /// `EncerrarApontamento` sobre um apontamento que já foi encerrado.
+    #[error("Este apontamento de tempo já foi encerrado")]
+    ApontamentoJaEncerrado,
+
+    /// `EncerrarApontamento`/`AjustarApontamento` com fim anterior ao início.
+    #[error("O fim do apontamento não pode ser antes do início")]
+    FimAntesDoInicio,
+
+    /// `AjustarApontamento` sem motivo — correção pós-fato nunca é silenciosa.
+    #[error("Ajustar um apontamento de tempo exige informar o motivo")]
+    MotivoDeAjusteObrigatorio,
 }
 
 impl ErroDominio for ErroOs {
@@ -71,14 +88,19 @@ impl ErroDominio for ErroOs {
             | Self::DescricaoDeServicoVazia
             | Self::OrcamentoVazio => CodigoErro::ENTRADA_INVALIDA,
             Self::EstadoInvalido { .. } => CodigoErro::ESTADO_INVALIDO,
-            Self::AprovacaoSemIdentificacao => CodigoErro::CAMPO_OBRIGATORIO,
+            Self::AprovacaoSemIdentificacao | Self::MotivoDeAjusteObrigatorio => {
+                CodigoErro::CAMPO_OBRIGATORIO
+            }
             Self::OrcamentoJaDecidido
             | Self::OrcamentoNaoAprovado
             | Self::ItemNaoPertenceAOrdem
             | Self::PecaJaAplicada
             | Self::PecaPendenteDeAplicacao(_)
             | Self::OsNaoConcluida
-            | Self::OsJaFaturada => CodigoErro::REGRA_VIOLADA,
+            | Self::OsJaFaturada
+            | Self::TecnicoJaTemApontamentoAberto
+            | Self::ApontamentoJaEncerrado
+            | Self::FimAntesDoInicio => CodigoErro::REGRA_VIOLADA,
         }
     }
 

@@ -841,7 +841,7 @@ fn parcela_de_linha(r: &rusqlite::Row<'_>) -> rusqlite::Result<Parcela> {
     })
 }
 
-fn titulo_de_linha(r: &rusqlite::Row<'_>) -> rusqlite::Result<Titulo> {
+pub(crate) fn titulo_de_linha(r: &rusqlite::Row<'_>) -> rusqlite::Result<Titulo> {
     let cp_tipo: String = r.get(3)?;
     let cp_id: Vec<u8> = r.get(4)?;
     Ok(Titulo {

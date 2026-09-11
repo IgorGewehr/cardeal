@@ -8,16 +8,16 @@ use std::collections::HashMap;
 use cardeal_kernel::{Competencia, Data, Dinheiro, Id, Periodo, Resultado};
 use cardeal_ledger::Contraparte;
 use cardeal_modkit::{Consulta, Ctx};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::categoria::CategoriaFinanceira;
 use crate::recorrencia::Recorrencia;
 use crate::repositorio::{
     blob, categoria_de_linha, contraparte_join, data_de, especie_de, especie_txt, estado_de, id_de,
-    persist, recorrencia_de_linha,
+    persist, recorrencia_de_linha, titulo_de_linha,
 };
-use crate::titulo::{EspecieTitulo, EstadoParcela};
+use crate::titulo::{EspecieTitulo, EstadoParcela, Titulo};
 
 /// Uma parcela em aberto, já com o suficiente para a grade de Contas a Receber/Pagar sem
 /// consulta adicional: vencimento, contraparte, valores e estado.
@@ -118,6 +118,54 @@ impl Consulta for TitulosAPagarEmAberto {
 
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         titulos_em_aberto(conexao, ctx.empresa, EspecieTitulo::Pagar)
+    }
+}
+
+/// O título mais recente originado por um agregado de outro módulo (`origem_modulo` +
+/// `origem_id`) — o mesmo par de correlação que `Titulo` já carrega desde a origem
+/// (`docs/19-estado-e-processo.md` §1.1). Usado por telas de outro módulo (ex.: o detalhe de
+/// uma OS faturada) para mostrar "qual título isto gerou no financeiro", sem o outro módulo
+/// nunca ler `financeiro_titulo` direto (`docs/contratos-internos.md` §7 regra 2).
+///
+/// # Errors
+/// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+pub fn titulo_da_origem(
+    conexao: &Connection,
+    empresa: Id,
+    origem_modulo: &str,
+    origem_id: Id,
+) -> Resultado<Option<Titulo>> {
+    conexao
+        .query_row(
+            "SELECT id, empresa, especie, contraparte_tipo, contraparte_id, origem_modulo,
+                    origem_id, emissao, valor_original, forma_cobranca, centro_custo,
+                    categoria, observacao, cancelado_em, versao
+             FROM financeiro_titulo
+             WHERE empresa = ?1 AND origem_modulo = ?2 AND origem_id = ?3
+             ORDER BY emissao DESC LIMIT 1",
+            params![blob(empresa), origem_modulo, blob(origem_id)],
+            titulo_de_linha,
+        )
+        .optional()
+        .map_err(persist)
+}
+
+/// Busca o título gerado por um agregado de outro módulo (ex.: uma ordem de serviço
+/// faturada), pelo par `origem_modulo`/`origem_id`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TituloDaOrigem {
+    /// O módulo de origem (`"os"`, `"vendas"`, `"compras"`…).
+    pub origem_modulo: String,
+    /// O id do agregado de origem.
+    pub origem_id: Id,
+}
+
+impl Consulta for TituloDaOrigem {
+    type Saida = Option<Titulo>;
+    const PERMISSAO: &'static str = "financeiro.receber.ver";
+
+    fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        titulo_da_origem(conexao, ctx.empresa, &self.origem_modulo, self.origem_id)
     }
 }
 

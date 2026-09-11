@@ -12,7 +12,8 @@ use crate::comandos::{
 };
 use crate::consultas::{
     Caixas, Categorias, ContasDeCaixa, ContasDeResultado, ContasDisponiveis, ExtratoDisponivel,
-    Recorrencias, TitulosAPagarEmAberto, TitulosAReceberEmAberto, TotalPorCategoriaNoPeriodo,
+    Recorrencias, TituloDaOrigem, TitulosAPagarEmAberto, TitulosAReceberEmAberto,
+    TotalPorCategoriaNoPeriodo,
 };
 use crate::manifesto::MANIFESTO;
 use crate::migracoes;
@@ -54,7 +55,8 @@ impl Modulo for ModuloFinanceiro {
             .consulta::<Caixas>("financeiro.caixas.v1")
             .consulta::<ContasDeCaixa>("financeiro.contas_caixa.v1")
             .consulta::<ContasDisponiveis>("financeiro.contas_disponiveis.v1")
-            .consulta::<ExtratoDisponivel>("financeiro.extrato_disponivel.v1");
+            .consulta::<ExtratoDisponivel>("financeiro.extrato_disponivel.v1")
+            .consulta::<TituloDaOrigem>("financeiro.titulo_da_origem.v1");
         Ok(())
     }
 }

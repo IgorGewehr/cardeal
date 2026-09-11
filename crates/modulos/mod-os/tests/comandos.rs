@@ -20,9 +20,10 @@ use mod_estoque::{
 };
 use mod_os::{
     AbrirOrdemServico, AplicarPeca, AprovarOrcamentoOs, BuscarDetalheOrdem, CancelarOrdemServico,
-    ConcluirExecucao, DetalheOrdem, EnviarParaAprovacao, FaturarOrdemServico, IniciarExecucao,
-    ItemOrcamentoNovo, ModuloOs, MontarOrcamentoOs, OrdemServicoAberta, OrdemServicoFaturada,
-    OrdensEmAberto, PecaFoiAplicada, RegistrarLaudo, RemoverItemOrcamento, TipoItemOrcamento,
+    ConcluirExecucao, DetalheOrdem, EnviarParaAprovacao, FaturarOrdemServico,
+    HistoricoDoEquipamento, IniciarExecucao, ItemOrcamentoNovo, ModuloOs, MontarOrcamentoOs,
+    OrdemServicoAberta, OrdemServicoFaturada, OrdensAguardandoAprovacao, OrdensEmAberto,
+    PecaFoiAplicada, RegistrarLaudo, RemoverItemOrcamento, TipoItemOrcamento,
 };
 use tempfile::TempDir;
 
@@ -1062,4 +1063,145 @@ fn remover_item_orcamento_corrige_erro_de_digitacao_e_corrigir_laudo_sobrescreve
         arm.escritor(),
     )
     .unwrap();
+}
+
+#[test]
+fn ordens_aguardando_aprovacao_e_historico_do_equipamento() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloClientes, &ModuloEstoque, &ModuloOs]).unwrap();
+    let s = sessao_completa(empresa);
+    let amb = ambiente(empresa);
+
+    let cliente: PessoaCadastrada = postcard::from_bytes(
+        &d.executar_comando(
+            "clientes.criar_pessoa.v1",
+            &carga(&CriarPessoa {
+                tipo: TipoPessoa::Fisica,
+                nome: "Carlos Lima".to_string(),
+                nome_fantasia: None,
+                papel_inicial: Papel::Cliente,
+                documento_tipo: Some(TipoDocumento::Cpf),
+                documento_numero: Some("52998224725".to_string()),
+                data_nascimento: None,
+                endereco: None,
+                contato: None,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    // Primeira OS deste cliente/equipamento, chega até aguardar aprovação.
+    let os1: OrdemServicoAberta = postcard::from_bytes(
+        &d.executar_comando(
+            "os.abrir_ordem_servico.v1",
+            &carga(&AbrirOrdemServico {
+                cliente: cliente.pessoa,
+                equipamento: "Notebook Dell XPS 13".to_string(),
+                tecnico_responsavel: Id::novo(),
+                garantia_dias: 90,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    d.executar_comando(
+        "os.montar_orcamento.v1",
+        &carga(&MontarOrcamentoOs {
+            ordem_servico: os1.ordem_servico,
+            item: ItemOrcamentoNovo::MaoDeObra {
+                descricao: "Diagnóstico".to_string(),
+                valor: Dinheiro::reais(50),
+                tecnico: Id::novo(),
+                horas: None,
+            },
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+    d.executar_comando(
+        "os.enviar_para_aprovacao.v1",
+        &carga(&EnviarParaAprovacao {
+            ordem_servico: os1.ordem_servico,
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+
+    // Segunda OS do MESMO cliente, equipamento parecido (erro de digitação) — reincidência,
+    // continua só `Aberta`.
+    let os2: OrdemServicoAberta = postcard::from_bytes(
+        &d.executar_comando(
+            "os.abrir_ordem_servico.v1",
+            &carga(&AbrirOrdemServico {
+                cliente: cliente.pessoa,
+                equipamento: "Notbook Dell XPS13".to_string(),
+                tecnico_responsavel: Id::novo(),
+                garantia_dias: 90,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    // Uma terceira OS de outro equipamento não deve aparecer no histórico.
+    d.executar_comando(
+        "os.abrir_ordem_servico.v1",
+        &carga(&AbrirOrdemServico {
+            cliente: cliente.pessoa,
+            equipamento: "Impressora HP".to_string(),
+            tecnico_responsavel: Id::novo(),
+            garantia_dias: 90,
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+
+    // `OrdensAguardandoAprovacao` só lista a primeira (a segunda ainda está `Aberta`).
+    let saida = d
+        .executar_consulta(
+            "os.ordens_aguardando_aprovacao.v1",
+            &carga(&OrdensAguardandoAprovacao),
+            &s,
+            &amb,
+            arm.leitor(),
+        )
+        .unwrap();
+    let fila: Vec<mod_os::OrdemServico> = postcard::from_bytes(&saida).unwrap();
+    assert_eq!(fila.len(), 1);
+    assert_eq!(fila[0].id, os1.ordem_servico);
+
+    // `HistoricoDoEquipamento` a partir da OS2, comparando contra o texto dela, encontra a
+    // OS1 (equipamento parecido) mas não a da impressora.
+    let saida = d
+        .executar_consulta(
+            "os.historico_do_equipamento.v1",
+            &carga(&HistoricoDoEquipamento {
+                cliente: cliente.pessoa,
+                equipamento: "Notbook Dell XPS13".to_string(),
+                excluir: Some(os2.ordem_servico),
+            }),
+            &s,
+            &amb,
+            arm.leitor(),
+        )
+        .unwrap();
+    let historico: Vec<mod_os::OrdemServico> = postcard::from_bytes(&saida).unwrap();
+    assert_eq!(historico.len(), 1);
+    assert_eq!(historico[0].id, os1.ordem_servico);
 }

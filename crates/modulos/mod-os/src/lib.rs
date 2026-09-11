@@ -46,6 +46,7 @@
 // Ver a mesma justificativa em cardeal-kernel: Erro carrega Detalhes de propósito.
 #![allow(clippy::result_large_err)]
 
+mod apontamento;
 mod comandos;
 mod consultas;
 mod erros;
@@ -59,13 +60,18 @@ mod ordem;
 pub mod receituario;
 mod repositorio;
 
+pub use apontamento::ApontamentoDeTempo;
 pub use comandos::{
-    AbrirOrdemServico, AplicarPeca, AprovarOrcamentoOs, CancelarOrdemServico, ConcluirExecucao,
-    EnviarParaAprovacao, FaturarOrdemServico, IniciarExecucao, ItemOrcamentoNovo,
-    MontarOrcamentoOs, OrdemServicoAberta, OrdemServicoFaturada, PecaFoiAplicada, RegistrarLaudo,
-    RegistrarMaoDeObra, RemoverItemOrcamento, ReprovarOrcamentoOs, TipoItemOrcamento,
+    AbrirOrdemServico, AjustarApontamento, AplicarPeca, ApontamentoIniciado, AprovarOrcamentoOs,
+    CancelarOrdemServico, ConcluirExecucao, EncerrarApontamento, EnviarParaAprovacao,
+    FaturarOrdemServico, IniciarApontamento, IniciarExecucao, ItemOrcamentoNovo, MontarOrcamentoOs,
+    OrdemServicoAberta, OrdemServicoFaturada, PecaFoiAplicada, RegistrarLaudo, RegistrarMaoDeObra,
+    RemoverItemOrcamento, ReprovarOrcamentoOs, TipoItemOrcamento,
 };
-pub use consultas::{BuscarDetalheOrdem, DetalheOrdem, OrdensEmAberto};
+pub use consultas::{
+    ApontamentosDaOrdem, BuscarDetalheOrdem, DetalheOrdem, HistoricoDoEquipamento,
+    OrdensAguardandoAprovacao, OrdensEmAberto, TempoPorTecnicoNoPeriodo, TempoTotalDaOrdem,
+};
 pub use erros::ErroOs;
 pub use execucao::{ItemMaoDeObra, ItemPeca};
 pub use laudo::LaudoTecnico;

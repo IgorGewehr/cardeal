@@ -5,10 +5,13 @@
 //! `os_item_mao_de_obra` sobre a [`UnidadeDeTrabalho`](cardeal_storage::UnidadeDeTrabalho)
 //! do escritor único — mesmo padrão do `RepositorioFinanceiro`.
 
-use cardeal_kernel::{CodigoErro, Data, Dinheiro, Erro, Id, Preco, Quantidade, Resultado, Versao};
+use cardeal_kernel::{
+    CodigoErro, Data, Dinheiro, Erro, Id, Instante, Preco, Quantidade, Resultado, Versao,
+};
 use cardeal_storage::UnidadeDeTrabalho;
 use rusqlite::{params, Connection, OptionalExtension};
 
+use crate::apontamento::ApontamentoDeTempo;
 use crate::execucao::{ItemMaoDeObra, ItemPeca};
 use crate::laudo::LaudoTecnico;
 use crate::ordem::{EstadoOs, OrdemServico};
@@ -326,6 +329,98 @@ impl<'a, 'b> RepositorioOs<'a, 'b> {
             .map_err(persist)?;
         Ok(usize::try_from(n).unwrap_or(0))
     }
+
+    /// Grava um apontamento de tempo (aberto ou já com os campos definidos).
+    ///
+    /// # Errors
+    /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+    pub fn inserir_apontamento(&mut self, ap: &ApontamentoDeTempo) -> Resultado<()> {
+        self.conn()
+            .execute(
+                "INSERT INTO os_apontamento_tempo
+                   (id, ordem_servico, tecnico, inicio, fim, ajustado, motivo_ajuste, versao)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+                params![
+                    blob(ap.id),
+                    blob(ap.ordem_servico),
+                    blob(ap.tecnico),
+                    ap.inicio.em_micros(),
+                    ap.fim.map(Instante::em_micros),
+                    i64::from(ap.ajustado),
+                    ap.motivo_ajuste,
+                    versao_i64(ap.versao),
+                ],
+            )
+            .map_err(persist)?;
+        Ok(())
+    }
+
+    /// Regrava um apontamento (encerrado ou ajustado).
+    ///
+    /// # Errors
+    /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+    pub fn atualizar_apontamento(&mut self, ap: &ApontamentoDeTempo) -> Resultado<()> {
+        self.conn()
+            .execute(
+                "UPDATE os_apontamento_tempo
+                 SET inicio = ?2, fim = ?3, ajustado = ?4, motivo_ajuste = ?5, versao = ?6
+                 WHERE id = ?1",
+                params![
+                    blob(ap.id),
+                    ap.inicio.em_micros(),
+                    ap.fim.map(Instante::em_micros),
+                    i64::from(ap.ajustado),
+                    ap.motivo_ajuste,
+                    versao_i64(ap.versao),
+                ],
+            )
+            .map_err(persist)?;
+        Ok(())
+    }
+
+    /// Busca um apontamento pelo id. `Ok(None)` = não existe.
+    ///
+    /// # Errors
+    /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+    pub fn buscar_apontamento(&self, id: Id) -> Resultado<Option<ApontamentoDeTempo>> {
+        self.conn()
+            .query_row(
+                "SELECT id, ordem_servico, tecnico, inicio, fim, ajustado, motivo_ajuste, versao
+                 FROM os_apontamento_tempo WHERE id = ?1",
+                [blob(id)],
+                apontamento_de_linha,
+            )
+            .optional()
+            .map_err(persist)
+    }
+
+    /// O apontamento aberto do técnico, se houver — em QUALQUER ordem de serviço, é essa
+    /// varredura que impede um técnico de "trabalhar" em duas OS ao mesmo tempo.
+    ///
+    /// # Errors
+    /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+    pub fn apontamento_aberto_do_tecnico(
+        &self,
+        tecnico: Id,
+    ) -> Resultado<Option<ApontamentoDeTempo>> {
+        self.conn()
+            .query_row(
+                "SELECT id, ordem_servico, tecnico, inicio, fim, ajustado, motivo_ajuste, versao
+                 FROM os_apontamento_tempo WHERE tecnico = ?1 AND fim IS NULL",
+                [blob(tecnico)],
+                apontamento_de_linha,
+            )
+            .optional()
+            .map_err(persist)
+    }
+
+    /// Todos os apontamentos de uma ordem de serviço, mais antigo primeiro.
+    ///
+    /// # Errors
+    /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+    pub fn apontamentos_da_ordem(&self, ordem_servico: Id) -> Resultado<Vec<ApontamentoDeTempo>> {
+        crate::consultas::apontamentos_da_ordem(self.conn(), ordem_servico)
+    }
 }
 
 pub(crate) fn ordem_de_linha(r: &rusqlite::Row<'_>) -> rusqlite::Result<OrdemServico> {
@@ -367,5 +462,18 @@ pub(crate) fn item_peca_de_linha(r: &rusqlite::Row<'_>) -> rusqlite::Result<Item
         custo_unitario: Preco::interna(r.get::<_, i64>(5)?),
         coberto_garantia: r.get::<_, i64>(6)? != 0,
         aplicada: r.get::<_, i64>(7)? != 0,
+    })
+}
+
+pub(crate) fn apontamento_de_linha(r: &rusqlite::Row<'_>) -> rusqlite::Result<ApontamentoDeTempo> {
+    Ok(ApontamentoDeTempo {
+        id: id_de(r.get::<_, Vec<u8>>(0)?),
+        ordem_servico: id_de(r.get::<_, Vec<u8>>(1)?),
+        tecnico: id_de(r.get::<_, Vec<u8>>(2)?),
+        inicio: Instante::de_micros(r.get::<_, i64>(3)?),
+        fim: r.get::<_, Option<i64>>(4)?.map(Instante::de_micros),
+        ajustado: r.get::<_, i64>(5)? != 0,
+        motivo_ajuste: r.get::<_, Option<String>>(6)?,
+        versao: versao_de(r.get::<_, i64>(7)?),
     })
 }
