@@ -7,11 +7,13 @@ use cardeal_modkit::{Consulta, Ctx};
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
+use crate::apontamento::ApontamentoDeTempo;
 use crate::execucao::{ItemMaoDeObra, ItemPeca};
 use crate::laudo::LaudoTecnico;
 use crate::ordem::OrdemServico;
 use crate::repositorio::{
-    blob, id_de, item_mao_de_obra_de_linha, item_peca_de_linha, ordem_de_linha, persist,
+    apontamento_de_linha, blob, id_de, item_mao_de_obra_de_linha, item_peca_de_linha,
+    ordem_de_linha, persist,
 };
 
 /// Busca uma ordem de serviço pelo id.
@@ -179,5 +181,224 @@ impl Consulta for BuscarDetalheOrdem {
             itens_peca,
             itens_mao_de_obra,
         }))
+    }
+}
+
+/// As ordens paradas em `AguardandoAprovacao` — a fila de aprovação do cliente
+/// (`docs/modulos/os.md` §6), sem precisar filtrar `OrdensEmAberto` na mão.
+///
+/// # Errors
+/// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+pub fn ordens_aguardando_aprovacao(
+    conexao: &Connection,
+    empresa: Id,
+) -> Resultado<Vec<OrdemServico>> {
+    let mut stmt = conexao
+        .prepare(
+            "SELECT id, empresa, numero, cliente, equipamento, data_abertura,
+                    tecnico_responsavel, estado, aprovado_por, garantia_dias, valor_total,
+                    itens_orcamento, versao
+             FROM os_ordem_servico
+             WHERE empresa = ?1 AND estado = 'AguardandoAprovacao'
+             ORDER BY numero DESC
+             LIMIT 500",
+        )
+        .map_err(persist)?;
+    let linhas = stmt
+        .query_map([blob(empresa)], ordem_de_linha)
+        .map_err(persist)?;
+    linhas
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(persist)
+}
+
+/// Lista as ordens paradas aguardando decisão do cliente.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrdensAguardandoAprovacao;
+
+impl Consulta for OrdensAguardandoAprovacao {
+    type Saida = Vec<OrdemServico>;
+    const PERMISSAO: &'static str = "os.ordem.ver";
+
+    fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        ordens_aguardando_aprovacao(conexao, ctx.empresa)
+    }
+}
+
+/// Limiar de similaridade (`docs/modulos/os.md` §6) para considerar duas descrições de
+/// equipamento "o mesmo aparelho" apesar de erro de digitação ou variação de texto — mais
+/// permissivo que o casamento de item de compra (0,82) porque aqui o custo de um falso
+/// positivo é só aparecer uma linha a mais no histórico, não um vínculo automático de custo.
+const LIMIAR_MESMO_EQUIPAMENTO: f32 = 0.5;
+
+/// Todas as ordens de serviço do mesmo cliente cujo equipamento é "parecido" com o
+/// informado — reincidência mesmo sem `AcionarGarantia` formal (`docs/modulos/os.md` §6).
+/// Inclui a própria ordem de referência, se `excluir` apontar para uma.
+///
+/// # Errors
+/// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+pub fn historico_do_equipamento(
+    conexao: &Connection,
+    cliente: Id,
+    equipamento: &str,
+    excluir: Option<Id>,
+) -> Resultado<Vec<OrdemServico>> {
+    let mut stmt = conexao
+        .prepare(
+            "SELECT id, empresa, numero, cliente, equipamento, data_abertura,
+                    tecnico_responsavel, estado, aprovado_por, garantia_dias, valor_total,
+                    itens_orcamento, versao
+             FROM os_ordem_servico WHERE cliente = ?1 ORDER BY numero DESC LIMIT 500",
+        )
+        .map_err(persist)?;
+    let linhas = stmt
+        .query_map([blob(cliente)], ordem_de_linha)
+        .map_err(persist)?;
+    let todas = linhas
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(persist)?;
+    Ok(todas
+        .into_iter()
+        .filter(|os| Some(os.id) != excluir)
+        .filter(|os| {
+            cardeal_kernel::texto::similaridade(&os.equipamento, equipamento)
+                >= LIMIAR_MESMO_EQUIPAMENTO
+        })
+        .collect())
+}
+
+/// Busca o histórico de ordens de um cliente para um equipamento parecido.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HistoricoDoEquipamento {
+    /// O cliente.
+    pub cliente: Id,
+    /// A descrição do equipamento a comparar.
+    pub equipamento: String,
+    /// A própria ordem de referência, para excluir da lista (opcional).
+    pub excluir: Option<Id>,
+}
+
+impl Consulta for HistoricoDoEquipamento {
+    type Saida = Vec<OrdemServico>;
+    const PERMISSAO: &'static str = "os.ordem.ver";
+
+    fn executar(self, _ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        historico_do_equipamento(conexao, self.cliente, &self.equipamento, self.excluir)
+    }
+}
+
+/// Todos os apontamentos de tempo de uma ordem, mais antigo primeiro.
+///
+/// # Errors
+/// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+pub fn apontamentos_da_ordem(
+    conexao: &Connection,
+    ordem_servico: Id,
+) -> Resultado<Vec<ApontamentoDeTempo>> {
+    let mut stmt = conexao
+        .prepare(
+            "SELECT id, ordem_servico, tecnico, inicio, fim, ajustado, motivo_ajuste, versao
+             FROM os_apontamento_tempo WHERE ordem_servico = ?1 ORDER BY inicio",
+        )
+        .map_err(persist)?;
+    let linhas = stmt
+        .query_map([blob(ordem_servico)], apontamento_de_linha)
+        .map_err(persist)?;
+    linhas
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(persist)
+}
+
+/// Lista os apontamentos de tempo de uma ordem — a UI usa para mostrar o histórico e o
+/// cronômetro em andamento.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApontamentosDaOrdem {
+    /// A ordem de serviço.
+    pub ordem_servico: Id,
+}
+
+impl Consulta for ApontamentosDaOrdem {
+    type Saida = Vec<ApontamentoDeTempo>;
+    const PERMISSAO: &'static str = "os.ordem.ver";
+
+    fn executar(self, _ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        apontamentos_da_ordem(conexao, self.ordem_servico)
+    }
+}
+
+/// O tempo total apontado numa ordem, em segundos — soma só os apontamentos **encerrados**
+/// (um apontamento ainda aberto está em andamento; a UI mostra o parcial dele à parte, com
+/// `Instante::agora()`, para não gravar um número que muda a cada consulta).
+///
+/// # Errors
+/// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+pub fn tempo_total_da_ordem(conexao: &Connection, ordem_servico: Id) -> Resultado<i64> {
+    let total: i64 = conexao
+        .query_row(
+            "SELECT COALESCE(SUM(fim - inicio), 0)
+             FROM os_apontamento_tempo WHERE ordem_servico = ?1 AND fim IS NOT NULL",
+            [blob(ordem_servico)],
+            |r| r.get(0),
+        )
+        .map_err(persist)?;
+    Ok(total / 1_000_000)
+}
+
+/// O tempo total apontado (encerrado) por uma ordem de serviço, em segundos.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TempoTotalDaOrdem {
+    /// A ordem de serviço.
+    pub ordem_servico: Id,
+}
+
+impl Consulta for TempoTotalDaOrdem {
+    type Saida = i64;
+    const PERMISSAO: &'static str = "os.ordem.ver";
+
+    fn executar(self, _ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        tempo_total_da_ordem(conexao, self.ordem_servico)
+    }
+}
+
+/// O tempo total apontado (encerrado) por um técnico num período — a base de produtividade
+/// por técnico que alimenta `cardeal-analytics`.
+///
+/// # Errors
+/// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+pub fn tempo_por_tecnico_no_periodo(
+    conexao: &Connection,
+    tecnico: Id,
+    de: cardeal_kernel::Instante,
+    ate: cardeal_kernel::Instante,
+) -> Resultado<i64> {
+    let total: i64 = conexao
+        .query_row(
+            "SELECT COALESCE(SUM(fim - inicio), 0)
+             FROM os_apontamento_tempo
+             WHERE tecnico = ?1 AND fim IS NOT NULL AND inicio >= ?2 AND inicio < ?3",
+            rusqlite::params![blob(tecnico), de.em_micros(), ate.em_micros()],
+            |r| r.get(0),
+        )
+        .map_err(persist)?;
+    Ok(total / 1_000_000)
+}
+
+/// O tempo total apontado por um técnico num período.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TempoPorTecnicoNoPeriodo {
+    /// O técnico.
+    pub tecnico: Id,
+    /// Início do período (inclusive).
+    pub de: cardeal_kernel::Instante,
+    /// Fim do período (exclusive).
+    pub ate: cardeal_kernel::Instante,
+}
+
+impl Consulta for TempoPorTecnicoNoPeriodo {
+    type Saida = i64;
+    const PERMISSAO: &'static str = "os.ordem.ver";
+
+    fn executar(self, _ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        tempo_por_tecnico_no_periodo(conexao, self.tecnico, self.de, self.ate)
     }
 }

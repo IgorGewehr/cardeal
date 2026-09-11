@@ -31,6 +31,7 @@
 | `ordem` | Ordem de Serviço | sim | — | Não pode ser desligado. |
 | `laudo` | Laudo Técnico | não | `ordem` | Aba "Laudo" some; OS vai direto para orçamento. |
 | `garantia` | Garantia e Reincidência | não | `ordem` | Campo "Prazo de garantia" e alerta de reincidência somem. |
+| `apontamento` | Apontamento de Tempo | não | `ordem` | Botão "Iniciar/Encerrar apontamento" e o tempo acumulado somem do detalhe da OS. |
 
 ## 3. Entidades
 
@@ -39,8 +40,9 @@
 | **OrdemServico** | `id`, `empresa`, `numero`, `cliente`, `equipamento`(String), `data_abertura`(Data), `tecnico_responsavel`, `compromisso`(Id de `agenda_compromisso`), `estado`, `garantia_dias`(Quantidade inteiro), `valor_total`(Dinheiro), `versao` | ver §4 para `estado` |
 | **LaudoTecnico** | `id`, `ordem_servico`, `descricao_problema`(String), `diagnostico`(String), `tecnico`, `criado_em`(Instante) | |
 | **ItemPeca** | `id`, `ordem_servico`, `produto`, `quantidade`(Quantidade), `preco_unitario`(Preco), `custo_unitario`(Preco), `coberto_garantia`(enum) | `coberto_garantia = Sim` não gera receita |
-| **ItemMaoDeObra** | `id`, `ordem_servico`, `descricao`(String), `valor`(Dinheiro), `tecnico`, `horas`(Quantidade) | |
-| **Reincidencia** | `id`, `ordem_nova`, `ordem_anterior`, `dias_entre`(Quantidade inteiro), `coberto_garantia`(enum) | vincula OS repetida do mesmo equipamento |
+| **ItemMaoDeObra** | `id`, `ordem_servico`, `descricao`(String), `valor`(Dinheiro), `tecnico`, `horas`(Quantidade) | isto é a mão de obra **orçada/cobrada** do cliente — não confundir com `ApontamentoDeTempo`, o relógio de ponto real |
+| **Reincidencia** | `id`, `ordem_nova`, `ordem_anterior`, `dias_entre`(Quantidade inteiro), `coberto_garantia`(enum) | vincula OS repetida do mesmo equipamento — ainda não implementada (`AcionarGarantia`) |
+| **ApontamentoDeTempo** ✅ (novo) | `id`, `ordem_servico`, `tecnico`, `inicio`(Instante), `fim`(Option\<Instante\>), `ajustado`(bool), `motivo_ajuste`(Option\<String\>), `versao` | `fim = None` = cronômetro rodando. Alimenta produtividade e o custo real de mão de obra em `cardeal-analytics` — completamente separado de `ItemMaoDeObra.horas` (aquele é o orçado/cobrado; isto é o tempo real gasto, que pode divergir) |
 
 ## 4. Máquinas de estado
 
@@ -76,6 +78,9 @@ stateDiagram-v2
 | `ConcluirExecucao` ✅ | `os.execucao.concluir` | Baixo | | `PecaPendenteDeAplicacao` |
 | `FaturarOrdemServico` ✅ | `os.faturar` | Alto | Monta **um único lançamento combinado** (D Clientes a receber/C Receita de serviços — pulado se `valor_total` for zero — + D Custo de serviço/C Estoque quando há peça aplicada) e grava o título a receber vinculado a ele, **só se houve cobrança**, com `mod_financeiro::ConstrutorTitulo` + `RepositorioFinanceiro::inserir_titulo` — **não** usa `mod_financeiro::lancar_titulo_comum` (que criaria um segundo lançamento e duplicaria a receita; ver `src/comandos/faturar_ordem_servico.rs`) | `OsNaoConcluida`, `OsJaFaturada` |
 | `CancelarOrdemServico` ✅ | `os.ordem.cancelar` | Médio | Só a partir de `Aberta`/`EmDiagnostico`/`AguardandoAprovacao` (§4, §11 regra 5) — terminal, como `Reprovada` | `EstadoInvalido` |
+| `IniciarApontamento` ✅ (novo) | `os.apontamento.iniciar` | Baixo | Abre um `ApontamentoDeTempo` para o técnico na OS informada — recusa se o técnico já tem outro apontamento aberto **em qualquer OS** (ele não trabalha em duas ao mesmo tempo) | `TecnicoJaTemApontamentoAberto` |
+| `EncerrarApontamento` ✅ (novo) | `os.apontamento.encerrar` | Baixo | Fecha o apontamento aberto (`fim = agora`); devolve a duração em segundos | `ApontamentoJaEncerrado`, `FimAntesDoInicio` |
+| `AjustarApontamento` ✅ (novo) | `os.apontamento.ajustar` | Médio | Corrige manualmente início/fim de um apontamento (aberto ou já encerrado) — para quando o técnico esquece de parar o cronômetro. Sempre exige motivo; marca `ajustado = true` | `MotivoDeAjusteObrigatorio`, `FimAntesDoInicio` |
 | `AcionarGarantia` | `os.garantia.acionar` | Médio | Ainda não implementado — `ItemPeca.coberto_garantia` nunca é `true` nesta versão | `ForaDoPrazoDeGarantia` |
 
 > **Nota (2026-09-05):** as linhas ✅ estão implementadas com teste de integração de ponta a
@@ -97,15 +102,28 @@ stateDiagram-v2
 > corrigir um item de orçamento digitado errado sem cancelar a OS inteira
 > (`RemoverItemOrcamento`, novo). (3) Um laudo não podia ser corrigido depois de registrado
 > (`RegistrarLaudo` agora aceita ser chamado de novo enquanto `EmDiagnostico`).
+>
+> **Nota (2026-09-11):** pedido explícito do usuário — apontamento de tempo real por OS, para
+> alimentar produtividade e custo real de mão de obra em `cardeal-analytics` (novo crate, ver
+> §14). `IniciarApontamento`/`EncerrarApontamento`/`AjustarApontamento` são novos, junto com a
+> tabela `os_apontamento_tempo` (migração v3) e o domínio `ApontamentoDeTempo` (§3). Também
+> fechados os dois gaps de consulta conhecidos (`OrdensAguardandoAprovacao`,
+> `HistoricoDoEquipamento` — este por similaridade de texto do equipamento, limiar 0,5) e
+> adicionada `financeiro.titulo_da_origem.v1` (novo, em `mod-financeiro`) para a UI de OS
+> mostrar qual título foi gerado ao faturar, sem `os` nunca ler `financeiro_titulo` direto.
 
 ## 6. Consultas
 
 | Consulta | Permissão | Uso na UI | Índice que a sustenta |
 |---|---|---|---|
-| `OrdensAbertas` | `os.ordem.ver` | Painel de OS | `os_ordem_servico(empresa, estado)` |
-| `OrdensAguardandoAprovacao` | `os.ordem.ver` | Fila de aprovação | `os_ordem_servico(estado) WHERE estado = 'AguardandoAprovacao'` |
-| `HistoricoDoEquipamento` | `os.ordem.ver` | Aba "Histórico" na abertura de nova OS | `os_ordem_servico(cliente, equipamento)` |
-| `TaxaDeReincidencia` | `os.garantia.ver` | Relatório de qualidade técnica | `os_reincidencia(ordem_anterior)` |
+| `OrdensEmAberto` ✅ | `os.ordem.ver` | Painel de OS (lista principal) | `os_ordem_servico(empresa, estado)` |
+| `OrdensAguardandoAprovacao` ✅ | `os.ordem.ver` | Fila de aprovação | `os_ordem_servico(estado) WHERE estado = 'AguardandoAprovacao'` |
+| `HistoricoDoEquipamento` ✅ | `os.ordem.ver` | Aba "Histórico" na abertura de nova OS | `os_ordem_servico(cliente, equipamento)` — filtro por similaridade de texto (limiar 0,5) em memória, não índice |
+| `BuscarDetalheOrdem` ✅ | `os.ordem.ver` | Dialog de detalhe da OS | `os_ordem_servico(id)` |
+| `ApontamentosDaOrdem` ✅ (novo) | `os.ordem.ver` | Histórico de apontamento no detalhe da OS | `os_apontamento_tempo(ordem_servico)` |
+| `TempoTotalDaOrdem` ✅ (novo) | `os.ordem.ver` | Tempo acumulado no detalhe da OS — só soma apontamentos **encerrados** | idem |
+| `TempoPorTecnicoNoPeriodo` ✅ (novo) | `os.ordem.ver` | Produtividade por técnico (`cardeal-analytics`) | `os_apontamento_tempo(tecnico, inicio)` |
+| `TaxaDeReincidencia` | `os.garantia.ver` | Relatório de qualidade técnica | `os_reincidencia(ordem_anterior)` — ainda não implementada, depende de `AcionarGarantia` |
 
 ## 7. Receituário contábil
 
@@ -139,6 +157,8 @@ está ocupado.
 | `os.faturar` | Faturar ordem de serviço | Alto |
 | `os.garantia.acionar` | Acionar garantia | Médio |
 | `os.garantia.ver` | Ver relatório de reincidência | Baixo |
+| `os.apontamento.iniciar` / `.encerrar` | Iniciar/encerrar apontamento de tempo | Baixo |
+| `os.apontamento.ajustar` | Corrigir manualmente um apontamento de tempo | Médio |
 
 ## 10. Telas
 
@@ -165,6 +185,14 @@ está ocupado.
 │                    [Aprovar]  [Reprovar]                    │
 └─────────────────────────────────────────────────────────┘
 ```
+
+**Apontamento de tempo** (`cardeal-desktop::tela_os`, seção "Apontamento de tempo" no rodapé
+do detalhe): tempo total acumulado + botão "Iniciar apontamento"/"Encerrar apontamento" para
+o técnico logado, conforme ele já tenha (ou não) um apontamento aberto nesta OS. **Título
+gerado** (mesmo dialog, seção "Financeiro", só quando `Faturada`): mostra o título a receber
+que `FaturarOrdemServico` gerou (via `financeiro.titulo_da_origem.v1`), ou deixa explícito
+"faturada sem cobrança" numa OS de garantia/cortesia — o usuário nunca precisa abrir a tela de
+financeiro só para confirmar que o título nasceu.
 
 **Comprovante em PDF** (`cardeal-pdf::gerar_comprovante_os`, botão "Comprovante (PDF)" no
 rodapé do dialog de detalhe): documento único que cobre as duas pontas do atendimento — cabeçalho
@@ -258,4 +286,48 @@ CREATE TABLE os_reincidencia (
     coberto_garantia  INTEGER NOT NULL CHECK (coberto_garantia IN (0,1))
 ) STRICT;
 CREATE INDEX os_reincidencia_anterior ON os_reincidencia(ordem_anterior);
+
+-- Migração v3 (2026-09-11): apontamento de tempo real por técnico/OS.
+CREATE TABLE os_apontamento_tempo (
+    id             BLOB PRIMARY KEY,
+    ordem_servico  BLOB    NOT NULL REFERENCES os_ordem_servico(id),
+    tecnico        BLOB    NOT NULL,
+    inicio         INTEGER NOT NULL,
+    fim            INTEGER,
+    ajustado       INTEGER NOT NULL DEFAULT 0 CHECK (ajustado IN (0,1)),
+    motivo_ajuste  TEXT,
+    versao         INTEGER NOT NULL DEFAULT 1
+) STRICT;
+CREATE INDEX os_apontamento_ordem ON os_apontamento_tempo(ordem_servico);
+CREATE INDEX os_apontamento_tecnico_aberto ON os_apontamento_tempo(tecnico, fim);
 ```
+
+## 14. Apontamento de tempo e lucratividade (`cardeal-analytics`)
+
+Pedido explícito do usuário (2026-09-11): saber quanto tempo cada técnico gasta em cada
+trabalho, e a partir disso, onde a assistência está ganhando ou perdendo dinheiro de verdade.
+
+**`ApontamentoDeTempo`** é o relógio de ponto real — `iniciar`/`encerrar`/`ajustar` — e é
+propositalmente **diferente** de `ItemMaoDeObra.horas` (a mão de obra orçada/cobrada do
+cliente): o mesmo conserto pode ser orçado em 1h de mão de obra e o apontamento real mostrar
+2h30 — a divergência em si é dado útil. Um técnico só pode ter **um** apontamento aberto por
+vez, em qualquer OS (`IniciarApontamento` recusa um segundo). `AjustarApontamento` cobre o
+caso do dia a dia de esquecer o cronômetro ligado — sempre com motivo obrigatório, nunca uma
+edição silenciosa.
+
+**`cardeal-analytics`** (novo crate, antes um stub) consome só as consultas públicas de `os`
+(`BuscarDetalheOrdem`, `ApontamentosDaOrdem` — nunca lê `os_*` direto,
+`docs/contratos-internos.md` §7 regra 2) e calcula, em domínio puro e testado:
+
+- **`MargemDeOs`**: receita (peça + mão de obra cobradas), custo real de peça
+  (`ItemPeca::custo_unitario`, o valor real do estoque, não o orçado), margem bruta (sempre
+  calculável) e margem líquida — que depende de custo/hora por técnico. Sem essa tabela
+  cadastrada ainda no sistema, `custo_mao_de_obra`/`margem_liquida` vêm `None` — "não
+  calculável" de forma explícita, nunca um número inventado.
+- **`MargemAgregada`**: soma de várias `MargemDeOs` (ex.: todas as OS de um mês) — a base de
+  um dashboard futuro (`docs/17-roadmap.md` Fase 4).
+
+A tela (`cardeal-desktop::tela_os`) ganhou uma aba "Lucratividade" com a margem calculada sob
+demanda para as ordens carregadas — sem uma consulta de "OS faturadas no período" ainda (gap
+conhecido, ver §6), o cálculo hoje roda sobre a mesma lista de `OrdensEmAberto` da aba
+principal. `cardeal-analytics` em si não tem UI própria — é consumida diretamente pela tela.

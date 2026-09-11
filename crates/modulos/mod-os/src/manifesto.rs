@@ -64,6 +64,12 @@ const SUBMODULOS: &[Submodulo] = &[
         essencial: false,
         depende_de: &["ordem"],
     },
+    Submodulo {
+        id: "apontamento",
+        nome: "Apontamento de Tempo",
+        essencial: false,
+        depende_de: &["ordem"],
+    },
 ];
 
 const PERMISSOES: &[Permissao] = &[
@@ -146,6 +152,24 @@ const PERMISSOES: &[Permissao] = &[
         Risco::Baixo,
         Some("garantia"),
     ),
+    perm(
+        "os.apontamento.iniciar",
+        "Iniciar apontamento de tempo",
+        Risco::Baixo,
+        Some("apontamento"),
+    ),
+    perm(
+        "os.apontamento.encerrar",
+        "Encerrar apontamento de tempo",
+        Risco::Baixo,
+        Some("apontamento"),
+    ),
+    perm(
+        "os.apontamento.ajustar",
+        "Corrigir manualmente um apontamento de tempo",
+        Risco::Medio,
+        Some("apontamento"),
+    ),
 ];
 
 const MENU: &[EntradaMenu] = &[menu(
@@ -224,7 +248,7 @@ mod testes {
     #[test]
     fn so_a_ordem_e_essencial() {
         assert!(MANIFESTO.submodulo_essencial("ordem"));
-        for sub in ["laudo", "garantia"] {
+        for sub in ["laudo", "garantia", "apontamento"] {
             assert!(!MANIFESTO.submodulo_essencial(sub));
         }
     }

@@ -62,6 +62,21 @@ const SQL_ITENS_ORCAMENTO: &str = r"
 ALTER TABLE os_ordem_servico ADD COLUMN itens_orcamento INTEGER NOT NULL DEFAULT 0;
 ";
 
+const SQL_APONTAMENTO_TEMPO: &str = r"
+CREATE TABLE os_apontamento_tempo (
+    id             BLOB PRIMARY KEY,
+    ordem_servico  BLOB    NOT NULL REFERENCES os_ordem_servico(id),
+    tecnico        BLOB    NOT NULL,
+    inicio         INTEGER NOT NULL,
+    fim            INTEGER,
+    ajustado       INTEGER NOT NULL DEFAULT 0 CHECK (ajustado IN (0,1)),
+    motivo_ajuste  TEXT,
+    versao         INTEGER NOT NULL DEFAULT 1
+) STRICT;
+CREATE INDEX os_apontamento_ordem ON os_apontamento_tempo(ordem_servico);
+CREATE INDEX os_apontamento_tecnico_aberto ON os_apontamento_tempo(tecnico, fim);
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -73,6 +88,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 2,
         nome: "os_ordem_itens_orcamento",
         sql: SQL_ITENS_ORCAMENTO,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 3,
+        nome: "os_apontamento_tempo",
+        sql: SQL_APONTAMENTO_TEMPO,
         tipo: TipoMigracao::Esquema,
     },
 ];

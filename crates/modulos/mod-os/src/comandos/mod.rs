@@ -2,12 +2,15 @@
 //! `docs/15-convencoes-codigo.md` §3. `AcionarGarantia` fica para depois (ver `src/lib.rs`).
 
 mod abrir_ordem_servico;
+mod ajustar_apontamento;
 mod aplicar_peca;
 mod aprovar_orcamento_os;
 mod cancelar_ordem_servico;
 mod concluir_execucao;
+mod encerrar_apontamento;
 mod enviar_para_aprovacao;
 mod faturar_ordem_servico;
+mod iniciar_apontamento;
 mod iniciar_execucao;
 mod montar_orcamento_os;
 mod registrar_laudo;
@@ -16,12 +19,15 @@ mod remover_item_orcamento;
 mod reprovar_orcamento_os;
 
 pub use abrir_ordem_servico::{AbrirOrdemServico, OrdemServicoAberta};
+pub use ajustar_apontamento::AjustarApontamento;
 pub use aplicar_peca::{AplicarPeca, PecaFoiAplicada};
 pub use aprovar_orcamento_os::AprovarOrcamentoOs;
 pub use cancelar_ordem_servico::CancelarOrdemServico;
 pub use concluir_execucao::ConcluirExecucao;
+pub use encerrar_apontamento::EncerrarApontamento;
 pub use enviar_para_aprovacao::EnviarParaAprovacao;
 pub use faturar_ordem_servico::{FaturarOrdemServico, OrdemServicoFaturada};
+pub use iniciar_apontamento::{ApontamentoIniciado, IniciarApontamento};
 pub use iniciar_execucao::IniciarExecucao;
 pub use montar_orcamento_os::{ItemOrcamentoNovo, MontarOrcamentoOs};
 pub use registrar_laudo::RegistrarLaudo;
