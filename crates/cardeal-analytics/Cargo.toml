@@ -12,6 +12,7 @@ repository.workspace   = true
 [dependencies]
 cardeal-kernel.workspace = true
 cardeal-storage.workspace = true
+mod-os.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
