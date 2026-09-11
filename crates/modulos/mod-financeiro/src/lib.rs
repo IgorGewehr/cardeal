@@ -99,7 +99,7 @@ pub use comandos::{
 pub use consultas::{
     Caixas, Categorias, ContasDeCaixa, ContasDeResultado, ContasDisponiveis, ExtratoDisponivel,
     ItemCaixa, ItemContaDisponivel, ItemContaResultado, ItemMovimentoDisponivel,
-    ItemTituloEmAberto, ItemTotalPorCategoria, Recorrencias, TitulosAPagarEmAberto,
+    ItemTituloEmAberto, ItemTotalPorCategoria, Recorrencias, TituloDaOrigem, TitulosAPagarEmAberto,
     TitulosAReceberEmAberto, TotalPorCategoriaNoPeriodo,
 };
 pub use erros::ErroFinanceiro;

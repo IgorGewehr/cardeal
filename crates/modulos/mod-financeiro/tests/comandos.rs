@@ -11,12 +11,13 @@ use cardeal_storage::{Armazenamento, ConfigArmazenamento, ContextoEscrita, ErroA
 use mod_financeiro::{
     materializar_recorrencias_pendentes, AbrirCaixa, BaixarPagamento, BaixarRecebimento,
     CadastrarCaixa, CaixaFoiAberto, CaixaFoiFechado, CategoriaCriada, CategoriaFinanceira,
-    Categorias, CriarCategoria, CriarContaBancaria, CriarRecorrencia, EstornarBaixa, FecharCaixa,
-    ItemTituloEmAberto, ItemTotalPorCategoria, LancarTituloAPagar, LancarTituloAReceber,
-    ModuloFinanceiro, PagamentoBaixado, Periodicidade, PoliticaJuros, RecebimentoBaixado,
-    RecorrenciaCriada, RegistrarSangria, RegistrarSuprimento, RenegociarTitulo,
-    SangriaFoiRegistrada, SuprimentoFoiRegistrado, TipoValor, TituloAPagarLancado,
-    TituloAReceberLancado, TitulosAReceberEmAberto, TotalPorCategoriaNoPeriodo, MANIFESTO,
+    Categorias, ConstrutorTitulo, CriarCategoria, CriarContaBancaria, CriarRecorrencia,
+    EspecieTitulo, EstornarBaixa, FecharCaixa, ItemTituloEmAberto, ItemTotalPorCategoria,
+    LancarTituloAPagar, LancarTituloAReceber, ModuloFinanceiro, PagamentoBaixado, Periodicidade,
+    PoliticaJuros, RecebimentoBaixado, RecorrenciaCriada, RegistrarSangria, RegistrarSuprimento,
+    RenegociarTitulo, RepositorioFinanceiro, SangriaFoiRegistrada, SuprimentoFoiRegistrado,
+    TipoValor, TituloAPagarLancado, TituloAReceberLancado, TituloDaOrigem, TitulosAReceberEmAberto,
+    TotalPorCategoriaNoPeriodo, MANIFESTO,
 };
 use serde::Serialize;
 use tempfile::TempDir;
@@ -1176,4 +1177,72 @@ fn total_por_categoria_no_periodo_agrega_o_que_foi_baixado() {
     assert_eq!(totais[0].categoria, Some(categoria.categoria));
     assert_eq!(totais[0].total_baixado, Dinheiro::reais(500));
     assert_eq!(totais[0].competencia, hoje().competencia());
+}
+
+#[test]
+fn titulo_da_origem_encontra_o_titulo_vinculado_a_outro_modulo() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloFinanceiro]).unwrap();
+    let s = sessao(empresa, &["financeiro.receber.ver"]);
+    let amb = ambiente(empresa);
+    let cliente = Id::novo();
+    let ordem_de_servico = Id::novo();
+
+    // Um título gravado do jeito que `mod-os::FaturarOrdemServico` grava — direto pelo
+    // construtor + `inserir_titulo`, com `origem("os", Some(id))` — não pelo comando
+    // `LancarTituloAReceber` (que sempre nasce "avulso").
+    let ctx_escrita = ContextoEscrita::novo(empresa, Id::novo(), Id::novo(), Id::novo());
+    let titulo_id = arm
+        .escritor()
+        .executar(ctx_escrita, move |uow| {
+            let tcp = ConstrutorTitulo::novo(
+                empresa,
+                EspecieTitulo::Receber,
+                Contraparte::Cliente(cliente),
+                Dinheiro::reais(240),
+                hoje(),
+            )
+            .origem("os", Some(ordem_de_servico))
+            .parcelas(1, hoje(), 0)
+            .construir()
+            .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))?;
+            RepositorioFinanceiro::novo(uow).inserir_titulo(&tcp)?;
+            Ok(tcp.titulo.id)
+        })
+        .unwrap()
+        .valor;
+
+    // Encontra pelo par origem_modulo/origem_id.
+    let achado: Option<mod_financeiro::Titulo> = postcard::from_bytes(
+        &d.executar_consulta(
+            "financeiro.titulo_da_origem.v1",
+            &carga(&TituloDaOrigem {
+                origem_modulo: "os".to_string(),
+                origem_id: ordem_de_servico,
+            }),
+            &s,
+            &amb,
+            arm.leitor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(achado.unwrap().id, titulo_id);
+
+    // Um id de origem diferente não encontra nada.
+    let nada: Option<mod_financeiro::Titulo> = postcard::from_bytes(
+        &d.executar_consulta(
+            "financeiro.titulo_da_origem.v1",
+            &carga(&TituloDaOrigem {
+                origem_modulo: "os".to_string(),
+                origem_id: Id::novo(),
+            }),
+            &s,
+            &amb,
+            arm.leitor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(nada.is_none());
 }
