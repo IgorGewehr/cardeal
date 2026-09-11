@@ -730,6 +730,7 @@ version = "0.1.0"
 dependencies = [
  "cardeal-kernel",
  "cardeal-storage",
+ "mod-os",
  "serde",
  "thiserror 2.0.20",
  "tracing",
@@ -780,6 +781,7 @@ name = "cardeal-desktop"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "cardeal-analytics",
  "cardeal-cliente",
  "cardeal-kernel",
  "cardeal-ledger",

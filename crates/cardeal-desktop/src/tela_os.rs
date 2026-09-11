@@ -4,6 +4,7 @@
 //! abrem o mesmo `Dialogo`. OS é workflow (máquina de estados), então o dialog de detalhe
 //! mostra as infos + a ação certa pro estado atual, em vez de um "Editar" genérico.
 
+use cardeal_analytics::{calcular_margem_de_os, CustoHorario, MargemDeOs};
 use cardeal_cliente::{IdentidadeVisual, MotorLocal, SessaoLocal, UsuarioResumo};
 use cardeal_kernel::{Dinheiro, Id, Instante, Percentual, Preco, Quantidade};
 use cardeal_modkit::Icone;
@@ -18,11 +19,13 @@ use mod_clientes::{
     TipoDocumento, TipoPessoa,
 };
 use mod_estoque::{ItemProdutoComSaldo, ProdutosComSaldo};
+use mod_financeiro::{Titulo, TituloDaOrigem};
 use mod_os::{
-    AbrirOrdemServico, AprovarOrcamentoOs, BuscarDetalheOrdem, ConcluirExecucao, DetalheOrdem,
-    EnviarParaAprovacao, EstadoOs, FaturarOrdemServico, IniciarExecucao, ItemOrcamentoNovo,
+    AbrirOrdemServico, ApontamentoDeTempo, ApontamentosDaOrdem, AprovarOrcamentoOs,
+    BuscarDetalheOrdem, ConcluirExecucao, DetalheOrdem, EncerrarApontamento, EnviarParaAprovacao,
+    EstadoOs, FaturarOrdemServico, IniciarApontamento, IniciarExecucao, ItemOrcamentoNovo,
     MontarOrcamentoOs, OrdemServico, OrdemServicoAberta, OrdensEmAberto, RegistrarLaudo,
-    ReprovarOrcamentoOs,
+    ReprovarOrcamentoOs, TempoTotalDaOrdem,
 };
 
 /// Qual dialog está aberto.
@@ -59,6 +62,7 @@ enum AbaOs {
     #[default]
     Ordens,
     Orcamentos,
+    Lucratividade,
 }
 
 /// Estado local da tela — sobrevive entre quadros, não entre reinícios.
@@ -72,6 +76,11 @@ pub struct EstadoTelaOs {
     usuarios: Vec<UsuarioResumo>,
     identidade: Option<IdentidadeVisual>,
     detalhe: Option<DetalheOrdem>,
+    apontamentos: Vec<ApontamentoDeTempo>,
+    tempo_total_ordem: i64,
+    titulo_gerado: Option<Titulo>,
+    margens: Vec<MargemDeOs>,
+    calculando_margens: bool,
     erro: Option<String>,
     dlg: Dlg,
 
@@ -127,9 +136,47 @@ impl EstadoTelaOs {
                 self.detalhe = detalhe;
                 self.dlg = Dlg::Detalhe;
                 self.limpar_campos();
+                self.carregar_apontamentos(motor, sessao, id);
+                self.titulo_gerado = None;
+                if let Some(d) = &self.detalhe {
+                    if d.ordem.estado == EstadoOs::Faturada {
+                        if let Ok(t) = motor.consultar(
+                            sessao,
+                            "financeiro.titulo_da_origem.v1",
+                            &TituloDaOrigem {
+                                origem_modulo: "os".to_string(),
+                                origem_id: id,
+                            },
+                        ) {
+                            self.titulo_gerado = t;
+                        }
+                    }
+                }
             }
             Err(e) => self.erro = Some(e.mensagem),
         }
+    }
+
+    /// Recarrega os apontamentos de tempo e o total acumulado da ordem.
+    fn carregar_apontamentos(&mut self, motor: &MotorLocal, sessao: &SessaoLocal, ordem: Id) {
+        self.apontamentos = motor
+            .consultar(
+                sessao,
+                "os.apontamentos_da_ordem.v1",
+                &ApontamentosDaOrdem {
+                    ordem_servico: ordem,
+                },
+            )
+            .unwrap_or_default();
+        self.tempo_total_ordem = motor
+            .consultar(
+                sessao,
+                "os.tempo_total_da_ordem.v1",
+                &TempoTotalDaOrdem {
+                    ordem_servico: ordem,
+                },
+            )
+            .unwrap_or(0);
     }
 
     fn limpar_campos(&mut self) {
@@ -171,11 +218,22 @@ pub fn mostrar(
                     crate::tela_orcamentos::abrir_novo(&mut estado.orc);
                 }
             }
+            AbaOs::Lucratividade => {
+                let rotulo = if estado.calculando_margens {
+                    "Calculando…"
+                } else {
+                    "Calcular lucratividade"
+                };
+                if ui.add(Botao::primario(rotulo)).clicked() && !estado.calculando_margens {
+                    calcular_margens(motor, sessao, estado);
+                }
+            }
         },
         |ui, estado| {
             if let Some(nova) = Abas::nova(&[
                 (AbaOs::Ordens, "Ordens de serviço"),
                 (AbaOs::Orcamentos, "Orçamentos"),
+                (AbaOs::Lucratividade, "Lucratividade"),
             ])
             .selecionada(estado.aba)
             .mostrar(ui)
@@ -199,6 +257,7 @@ pub fn mostrar(
                 AbaOs::Orcamentos => {
                     crate::tela_orcamentos::corpo(ui, motor, sessao, &mut estado.orc);
                 }
+                AbaOs::Lucratividade => lucratividade(ui, estado),
             }
         },
     );
@@ -212,7 +271,99 @@ pub fn mostrar(
         AbaOs::Orcamentos => {
             crate::tela_orcamentos::dialogos(ui.ctx(), motor, sessao, &mut estado.orc);
         }
+        AbaOs::Lucratividade => {}
     }
+}
+
+/// Recalcula a margem de cada ordem hoje carregada (`OrdensEmAberto` — ver a limitação
+/// documentada em `lucratividade`) buscando detalhe + apontamentos de cada uma. Sem custo
+/// por hora de técnico cadastrado ainda, a margem líquida vem `None` ("não calculável") em
+/// vez de inventar um número — `cardeal_analytics::calcular_margem_de_os` já trata isso.
+fn calcular_margens(motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoTelaOs) {
+    estado.calculando_margens = true;
+    let custo_horario = CustoHorario::nova();
+    let mut margens = Vec::with_capacity(estado.ordens.len());
+    for os in estado.ordens.clone() {
+        let detalhe: Option<DetalheOrdem> = motor
+            .consultar(
+                sessao,
+                "os.buscar_detalhe_ordem.v1",
+                &BuscarDetalheOrdem {
+                    ordem_servico: os.id,
+                },
+            )
+            .unwrap_or(None);
+        let Some(detalhe) = detalhe else { continue };
+        let apontamentos: Vec<ApontamentoDeTempo> = motor
+            .consultar(
+                sessao,
+                "os.apontamentos_da_ordem.v1",
+                &ApontamentosDaOrdem {
+                    ordem_servico: os.id,
+                },
+            )
+            .unwrap_or_default();
+        margens.push(calcular_margem_de_os(
+            &detalhe,
+            &apontamentos,
+            &custo_horario,
+        ));
+    }
+    estado.margens = margens;
+    estado.calculando_margens = false;
+}
+
+/// A aba "Lucratividade": receita, custo real de peça e margem de cada OS **atualmente em
+/// aberto** (mesma lista da aba "Ordens" — não há hoje uma consulta de OS faturadas por
+/// período; ver `docs/modulos/os.md` §6 e o gap anotado lá). Ainda assim é útil para ver, de
+/// trabalhos em andamento, quais já estão com a peça consumida a um custo maior que o
+/// orçado.
+fn lucratividade(ui: &mut egui::Ui, estado: &mut EstadoTelaOs) {
+    if estado.margens.is_empty() {
+        ui.add(Rotulo::interface(
+            "Clique em \"Calcular lucratividade\" para ver a margem de cada ordem em aberto.",
+        ));
+        return;
+    }
+
+    let colunas = vec![
+        ColunaGrade::nova("Nº").largura(56.0),
+        ColunaGrade::nova("Receita").largura(110.0),
+        ColunaGrade::nova("Custo peça").largura(110.0),
+        ColunaGrade::nova("Margem bruta").largura(120.0),
+        ColunaGrade::nova("Margem líquida").largura(130.0),
+        ColunaGrade::nova("Tempo apontado").largura(120.0),
+    ];
+    Grade::nova(colunas)
+        .selecionavel(None)
+        .mostrar(ui, estado.margens.len(), |i, row| {
+            let m = &estado.margens[i];
+            row.col(|ui| {
+                ui.add(Rotulo::interface(m.numero.to_string()));
+            });
+            row.col(|ui| {
+                ui.add(ValorDinheiro::novo(m.receita_total()));
+            });
+            row.col(|ui| {
+                ui.add(ValorDinheiro::novo(m.custo_pecas));
+            });
+            row.col(|ui| {
+                ui.add(ValorDinheiro::novo(m.margem_bruta));
+            });
+            row.col(|ui| match m.margem_liquida {
+                Some(v) => {
+                    ui.add(ValorDinheiro::novo(v));
+                }
+                None => {
+                    ui.add(Rotulo::interface("não calculável"));
+                }
+            });
+            row.col(|ui| {
+                ui.add(Rotulo::interface(formatar_duracao(
+                    m.tempo_apontado_segundos,
+                )));
+            });
+        });
 }
 
 fn lista(ui: &mut egui::Ui, motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoTelaOs) {
@@ -605,7 +756,116 @@ fn corpo_detalhe(
     }
 
     ui.add_space(Espaco::E16);
+    secao_apontamento(ui, motor, sessao, estado, os.id);
+
+    if os.estado == EstadoOs::Faturada {
+        ui.add_space(Espaco::E16);
+        ui.add(Rotulo::titulo_secao("Financeiro"));
+        ui.add_space(Espaco::E8);
+        match &estado.titulo_gerado {
+            Some(titulo) => {
+                ui.add(Rotulo::interface(format!(
+                    "Título a receber gerado: {}",
+                    titulo.id.curto()
+                )));
+                ui.add(ValorDinheiro::novo(titulo.valor_original));
+            }
+            None => {
+                ui.add(Rotulo::interface(
+                    "Faturada sem cobrança (garantia/cortesia) — nenhum título gerado.",
+                ));
+            }
+        }
+    }
+
+    ui.add_space(Espaco::E16);
     acoes_por_estado(ui, motor, sessao, estado, detalhe);
+}
+
+/// Formata segundos como `Hh MMmin` — o suficiente para a UI mostrar tempo acumulado sem
+/// exigir uma dependência de formatação de duração no kernel só para isto.
+fn formatar_duracao(segundos: i64) -> String {
+    let segundos = segundos.max(0);
+    let horas = segundos / 3600;
+    let minutos = (segundos % 3600) / 60;
+    if horas > 0 {
+        format!("{horas}h {minutos:02}min")
+    } else {
+        format!("{minutos}min")
+    }
+}
+
+/// A seção "Apontamento de tempo" do detalhe da OS: tempo total acumulado (encerrado) +
+/// cronômetro do técnico logado, se houver um apontamento aberto dele nesta ordem — botão
+/// simples "Iniciar"/"Encerrar apontamento", sem exigir uma tela própria
+/// (`docs/modulos/os.md`: apontamento de tempo real, diferente da mão de obra orçada).
+fn secao_apontamento(
+    ui: &mut egui::Ui,
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaOs,
+    ordem_servico: Id,
+) {
+    ui.add(Rotulo::titulo_secao("Apontamento de tempo"));
+    ui.add_space(Espaco::E8);
+
+    let aberto_do_usuario = estado
+        .apontamentos
+        .iter()
+        .find(|a| a.tecnico == sessao.usuario() && a.esta_aberto())
+        .cloned();
+
+    ui.horizontal(|ui| {
+        ui.add(Rotulo::campo("Tempo total registrado"));
+        let total = match &aberto_do_usuario {
+            Some(ap) => estado.tempo_total_ordem + ap.duracao_segundos(Instante::agora()),
+            None => estado.tempo_total_ordem,
+        };
+        ui.add(Rotulo::interface(formatar_duracao(total)));
+    });
+    ui.add_space(Espaco::E8);
+
+    match aberto_do_usuario {
+        Some(ap) => {
+            ui.add(Rotulo::interface(format!(
+                "Cronômetro rodando desde {}",
+                ap.inicio.formatar(cardeal_kernel::Fuso::BRASILIA)
+            )));
+            if ui.add(Botao::secundario("Encerrar apontamento")).clicked() {
+                let r = motor.executar(
+                    sessao,
+                    "os.encerrar_apontamento.v1",
+                    &EncerrarApontamento { apontamento: ap.id },
+                );
+                match r {
+                    Ok(_duracao) => {
+                        estado.carregar_apontamentos(motor, sessao, ordem_servico);
+                        notificar(ui.ctx(), Notificacao::sucesso("Apontamento encerrado"));
+                    }
+                    Err(e) => notificar(ui.ctx(), Notificacao::erro(e.mensagem)),
+                }
+            }
+        }
+        None => {
+            if ui.add(Botao::primario("Iniciar apontamento")).clicked() {
+                let r = motor.executar(
+                    sessao,
+                    "os.iniciar_apontamento.v1",
+                    &IniciarApontamento {
+                        ordem_servico,
+                        tecnico: sessao.usuario(),
+                    },
+                );
+                match r {
+                    Ok(_) => {
+                        estado.carregar_apontamentos(motor, sessao, ordem_servico);
+                        notificar(ui.ctx(), Notificacao::sucesso("Apontamento iniciado"));
+                    }
+                    Err(e) => notificar(ui.ctx(), Notificacao::erro(e.mensagem)),
+                }
+            }
+        }
+    }
 }
 
 fn adicionar_mao_de_obra(
