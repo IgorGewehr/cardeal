@@ -23,6 +23,7 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
+use base64::Engine as _;
 use cardeal_auth::{
     AutorizacoesEfetivas, EmissaoSessao, Escopo, Papel, PoliticaSenha, RepositorioAuth, Sessao,
     Usuario,
@@ -34,7 +35,6 @@ use cardeal_modkit::{
     RegistroModulos,
 };
 use cardeal_storage::{Armazenamento, ConfigArmazenamento, ContextoEscrita, ErroArmazenamento};
-use base64::Engine as _;
 use rusqlite::OptionalExtension;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -492,7 +492,10 @@ impl MotorLocal {
             .map(|_| ())
     }
 
-    /// Todos os usuários cadastrados (login, nome, ativo).
+    /// Todos os usuários cadastrados (id, login, nome, ativo). `id` existe desde sempre em
+    /// `nucleo_usuario` — só não era selecionado porque a tela de Configurações (única
+    /// consumidora até aqui) não precisava dele; o comprovante de OS precisa para resolver
+    /// `tecnico_responsavel`/`aprovado_por` num nome exibível.
     ///
     /// # Errors
     /// Erro de leitura do armazenamento.
@@ -501,16 +504,16 @@ impl MotorLocal {
             .leitor()
             .consultar(|c| {
                 let mut stmt = c
-                    .prepare(
-                        "SELECT login, nome, ativo FROM nucleo_usuario ORDER BY nome",
-                    )
+                    .prepare("SELECT id, login, nome, ativo FROM nucleo_usuario ORDER BY nome")
                     .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))?;
                 let linhas = stmt
                     .query_map([], |r| {
+                        let id_bytes = r.get::<_, Vec<u8>>(0)?;
                         Ok(UsuarioResumo {
-                            login: r.get(0)?,
-                            nome: r.get(1)?,
-                            ativo: r.get::<_, i64>(2)? != 0,
+                            id: <[u8; 16]>::try_from(id_bytes).map_or(Id::NULO, Id::de_bytes),
+                            login: r.get(1)?,
+                            nome: r.get(2)?,
+                            ativo: r.get::<_, i64>(3)? != 0,
                         })
                     })
                     .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))?;
@@ -594,6 +597,8 @@ pub struct IdentidadeVisual {
 /// Um usuário, resumido para a lista de Configurações.
 #[derive(Debug, Clone)]
 pub struct UsuarioResumo {
+    /// Identidade.
+    pub id: Id,
     /// Login.
     pub login: String,
     /// Nome.

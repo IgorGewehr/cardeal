@@ -162,7 +162,8 @@ impl EstadoOrcamentos {
             estado: self.f_estado,
             cliente: self.f_cliente,
             texto: (!self.f_texto.trim().is_empty()).then(|| self.f_texto.trim().to_owned()),
-            desde: (self.f_dias > 0).then(|| hoje.mais_dias(-i32::try_from(self.f_dias).unwrap_or(0))),
+            desde: (self.f_dias > 0)
+                .then(|| hoje.mais_dias(-i32::try_from(self.f_dias).unwrap_or(0))),
             ate: None,
         };
         match motor.consultar(sessao, "orcamentos.orcamentos_recentes.v1", &consulta) {
@@ -221,7 +222,11 @@ pub fn corpo(
     estado: &mut EstadoOrcamentos,
 ) {
     if let Some(erro) = &estado.erro {
-        ui.add(Rotulo::interface(erro.clone()).quebravel().cor(ui.cores().negativo));
+        ui.add(
+            Rotulo::interface(erro.clone())
+                .quebravel()
+                .cor(ui.cores().negativo),
+        );
         ui.add_space(Espaco::E12);
     }
 
@@ -250,37 +255,38 @@ pub fn corpo(
         ColunaGrade::nova("Total").largura(120.0),
         ColunaGrade::nova("Estado").largura(140.0),
     ];
-    let clicada = Grade::nova(colunas)
-        .selecionavel(None)
-        .mostrar(ui, estado.lista.len(), |i, row| {
-            let o = &estado.lista[i];
-            row.col(|ui| {
-                ui.add(Rotulo::interface(format!("{:04}", o.numero)));
-            });
-            row.col(|ui| {
-                ui.add(Rotulo::interface(o.cliente_nome.clone()));
-            });
-            row.col(|ui| {
-                ui.add(Rotulo::interface(o.assunto.clone()));
-            });
-            row.col(|ui| {
-                ui.add(Rotulo::campo(o.data_emissao.formatar_curta()));
-            });
-            row.col(|ui| {
-                let r = Rotulo::campo(o.validade.formatar_curta());
-                ui.add(if o.validade < hoje && o.vencido {
-                    r.cor(ui.cores().negativo)
-                } else {
-                    r
+    let clicada =
+        Grade::nova(colunas)
+            .selecionavel(None)
+            .mostrar(ui, estado.lista.len(), |i, row| {
+                let o = &estado.lista[i];
+                row.col(|ui| {
+                    ui.add(Rotulo::interface(format!("{:04}", o.numero)));
+                });
+                row.col(|ui| {
+                    ui.add(Rotulo::interface(o.cliente_nome.clone()));
+                });
+                row.col(|ui| {
+                    ui.add(Rotulo::interface(o.assunto.clone()));
+                });
+                row.col(|ui| {
+                    ui.add(Rotulo::campo(o.data_emissao.formatar_curta()));
+                });
+                row.col(|ui| {
+                    let r = Rotulo::campo(o.validade.formatar_curta());
+                    ui.add(if o.validade < hoje && o.vencido {
+                        r.cor(ui.cores().negativo)
+                    } else {
+                        r
+                    });
+                });
+                row.col(|ui| {
+                    ui.add(ValorDinheiro::novo(o.total));
+                });
+                row.col(|ui| {
+                    ui.add(etiqueta_estado(o.estado, o.vencido));
                 });
             });
-            row.col(|ui| {
-                ui.add(ValorDinheiro::novo(o.total));
-            });
-            row.col(|ui| {
-                ui.add(etiqueta_estado(o.estado, o.vencido));
-            });
-        });
     if let Some(i) = clicada {
         let id = estado.lista[i].orcamento;
         estado.abrir_detalhe(motor, sessao, id);
@@ -424,7 +430,10 @@ fn filtros(
                 });
                 ui.add_space(Espaco::E8);
                 ui.allocate_ui(egui::vec2(280.0, 40.0), |ui| {
-                    let resp = ui.add(Campo::novo("Busca (assunto ou cliente)", &mut estado.f_texto));
+                    let resp = ui.add(Campo::novo(
+                        "Busca (assunto ou cliente)",
+                        &mut estado.f_texto,
+                    ));
                     if resp.lost_focus() || resp.changed() {
                         estado.carregar(motor, sessao);
                     }
@@ -455,7 +464,9 @@ fn dialogo_form(
         ctx,
         estado,
         |ui, estado| {
-            let Dlg::Form(f) = &mut estado.dlg else { return };
+            let Dlg::Form(f) = &mut estado.dlg else {
+                return;
+            };
 
             ui.horizontal(|ui| {
                 let existente = if f.cliente_avulso {
@@ -490,18 +501,31 @@ fn dialogo_form(
             }
             ui.add_space(Espaco::E12);
 
-            ui.add(Campo::novo("Assunto", &mut f.assunto).marcador("ex.: Reforma do motor elétrico"));
+            ui.add(
+                Campo::novo("Assunto", &mut f.assunto).marcador("ex.: Reforma do motor elétrico"),
+            );
             ui.add_space(Espaco::E8);
-            ui.add(Campo::novo("Descrição / escopo (opcional)", &mut f.descricao));
+            ui.add(Campo::novo(
+                "Descrição / escopo (opcional)",
+                &mut f.descricao,
+            ));
             ui.add_space(Espaco::E12);
             ui.columns(2, |c| {
                 c[0].add(Campo::novo("Validade (dias)", &mut f.validade_dias));
-                c[1].add(Campo::novo("Desconto geral (%) (opcional)", &mut f.desconto).marcador("0"));
+                c[1].add(
+                    Campo::novo("Desconto geral (%) (opcional)", &mut f.desconto).marcador("0"),
+                );
             });
             ui.add_space(Espaco::E8);
             ui.columns(2, |c| {
-                c[0].add(Campo::novo("Condições de pagamento (opcional)", &mut f.cond_pagamento));
-                c[1].add(Campo::novo("Prazo de entrega (opcional)", &mut f.prazo_entrega));
+                c[0].add(Campo::novo(
+                    "Condições de pagamento (opcional)",
+                    &mut f.cond_pagamento,
+                ));
+                c[1].add(Campo::novo(
+                    "Prazo de entrega (opcional)",
+                    &mut f.prazo_entrega,
+                ));
             });
             ui.add_space(Espaco::E8);
             ui.add(Campo::novo("Observações (opcional)", &mut f.observacoes));
@@ -540,19 +564,31 @@ fn editor_itens(ui: &mut egui::Ui, f: &mut FormOrcamento) {
     for (i, linha) in f.itens.iter_mut().enumerate() {
         ui.horizontal(|ui| {
             ui.allocate_ui(egui::vec2(300.0, 40.0), |ui| {
-                ui.add(Campo::novo(if i == 0 { "Descrição" } else { "" }, &mut linha.descricao));
+                ui.add(Campo::novo(
+                    if i == 0 { "Descrição" } else { "" },
+                    &mut linha.descricao,
+                ));
             });
             ui.allocate_ui(egui::vec2(58.0, 40.0), |ui| {
                 ui.add(Campo::novo(if i == 0 { "Qtd" } else { "" }, &mut linha.qtd));
             });
             ui.allocate_ui(egui::vec2(52.0, 40.0), |ui| {
-                ui.add(Campo::novo(if i == 0 { "Un" } else { "" }, &mut linha.unidade));
+                ui.add(Campo::novo(
+                    if i == 0 { "Un" } else { "" },
+                    &mut linha.unidade,
+                ));
             });
             ui.allocate_ui(egui::vec2(96.0, 40.0), |ui| {
-                ui.add(Campo::novo(if i == 0 { "Preço unit." } else { "" }, &mut linha.preco));
+                ui.add(Campo::novo(
+                    if i == 0 { "Preço unit." } else { "" },
+                    &mut linha.preco,
+                ));
             });
             ui.allocate_ui(egui::vec2(64.0, 40.0), |ui| {
-                ui.add(Campo::novo(if i == 0 { "Desc.%" } else { "" }, &mut linha.desconto));
+                ui.add(Campo::novo(
+                    if i == 0 { "Desc.%" } else { "" },
+                    &mut linha.desconto,
+                ));
             });
             if ui.add(Botao::fantasma("✕").pequeno()).clicked() {
                 remover = Some(i);
@@ -576,9 +612,10 @@ fn previsao_totais(f: &FormOrcamento) -> (Dinheiro, Dinheiro) {
     let mut subtotal = Dinheiro::ZERO;
     let mut liquido = Dinheiro::ZERO;
     for l in &f.itens {
-        let (Ok(qtd), Ok(preco)) =
-            (l.qtd.trim().parse::<Quantidade>(), l.preco.trim().parse::<Preco>())
-        else {
+        let (Ok(qtd), Ok(preco)) = (
+            l.qtd.trim().parse::<Quantidade>(),
+            l.preco.trim().parse::<Preco>(),
+        ) else {
             continue;
         };
         let bruto = Dinheiro::de_total(qtd, preco, cardeal_kernel::Arredondamento::MeioAcima);
@@ -590,7 +627,11 @@ fn previsao_totais(f: &FormOrcamento) -> (Dinheiro, Dinheiro) {
         subtotal += bruto;
         liquido += bruto - bruto.aplicar(desc, cardeal_kernel::Arredondamento::MeioAcima);
     }
-    let desc_cab = f.desconto.trim().parse::<Percentual>().unwrap_or(Percentual::ZERO);
+    let desc_cab = f
+        .desconto
+        .trim()
+        .parse::<Percentual>()
+        .unwrap_or(Percentual::ZERO);
     let total = liquido - liquido.aplicar(desc_cab, cardeal_kernel::Arredondamento::MeioAcima);
     (subtotal, total)
 }
@@ -638,7 +679,11 @@ fn salvar_form(
 ) {
     let Dlg::Form(f) = &estado.dlg else { return };
 
-    let cliente = if f.cliente_avulso { None } else { f.cliente_sel };
+    let cliente = if f.cliente_avulso {
+        None
+    } else {
+        f.cliente_sel
+    };
     let cliente_nome = if f.cliente_avulso {
         f.cliente_nome.trim().to_owned()
     } else {
@@ -650,7 +695,10 @@ fn salvar_form(
             .unwrap_or_default()
     };
     if cliente_nome.is_empty() {
-        notificar(ctx, Notificacao::aviso("Escolha um cliente ou informe o nome."));
+        notificar(
+            ctx,
+            Notificacao::aviso("Escolha um cliente ou informe o nome."),
+        );
         return;
     }
     if f.assunto.trim().is_empty() {
@@ -681,7 +729,8 @@ fn salvar_form(
     };
 
     let doc = (!f.cliente_doc.trim().is_empty()).then(|| f.cliente_doc.trim().to_owned());
-    let contato = (!f.cliente_contato.trim().is_empty()).then(|| f.cliente_contato.trim().to_owned());
+    let contato =
+        (!f.cliente_contato.trim().is_empty()).then(|| f.cliente_contato.trim().to_owned());
     let descricao = (!f.descricao.trim().is_empty()).then(|| f.descricao.trim().to_owned());
     let cond = (!f.cond_pagamento.trim().is_empty()).then(|| f.cond_pagamento.trim().to_owned());
     let prazo = (!f.prazo_entrega.trim().is_empty()).then(|| f.prazo_entrega.trim().to_owned());
@@ -711,7 +760,10 @@ fn salvar_form(
                 .executar(
                     sessao,
                     "orcamentos.definir_itens.v1",
-                    &DefinirItensOrcamento { orcamento: id, itens },
+                    &DefinirItensOrcamento {
+                        orcamento: id,
+                        itens,
+                    },
                 )
                 .map(|()| id)
                 .map_err(|e| e.mensagem),
@@ -900,15 +952,31 @@ fn acoes_detalhe(
     match estado_atual {
         EstadoOrcamento::Rascunho => {
             if ui.add(Botao::destrutivo("Cancelar orçamento")).clicked() {
-                aplicar(ui.ctx(), motor, sessao, estado, id, "orcamentos.cancelar_orcamento.v1",
-                    &CancelarOrcamento { orcamento: id }, "Orçamento cancelado");
+                aplicar(
+                    ui.ctx(),
+                    motor,
+                    sessao,
+                    estado,
+                    id,
+                    "orcamentos.cancelar_orcamento.v1",
+                    &CancelarOrcamento { orcamento: id },
+                    "Orçamento cancelado",
+                );
             }
             if ui.add(Botao::secundario("Editar")).clicked() {
                 estado.dlg = Dlg::Form(Box::new(FormOrcamento::de_detalhe(d)));
             }
             if ui.add(Botao::primario("Enviar ao cliente")).clicked() {
-                aplicar(ui.ctx(), motor, sessao, estado, id, "orcamentos.enviar_orcamento.v1",
-                    &EnviarOrcamento { orcamento: id }, "Orçamento enviado");
+                aplicar(
+                    ui.ctx(),
+                    motor,
+                    sessao,
+                    estado,
+                    id,
+                    "orcamentos.enviar_orcamento.v1",
+                    &EnviarOrcamento { orcamento: id },
+                    "Orçamento enviado",
+                );
             }
         }
         EstadoOrcamento::Enviado => {
@@ -916,19 +984,35 @@ fn acoes_detalhe(
                 estado.dlg = Dlg::Form(Box::new(FormOrcamento::de_detalhe(d)));
             }
             if ui.add(Botao::destrutivo("Recusado")).clicked() {
-                estado.dlg = Dlg::Decisao { aprovado: false, identificacao: String::new() };
+                estado.dlg = Dlg::Decisao {
+                    aprovado: false,
+                    identificacao: String::new(),
+                };
             }
             if ui.add(Botao::primario("Registrar aprovação")).clicked() {
-                estado.dlg = Dlg::Decisao { aprovado: true, identificacao: String::new() };
+                estado.dlg = Dlg::Decisao {
+                    aprovado: true,
+                    identificacao: String::new(),
+                };
             }
         }
         EstadoOrcamento::Aprovado => {
             if ui.add(Botao::destrutivo("Cancelar")).clicked() {
-                aplicar(ui.ctx(), motor, sessao, estado, id, "orcamentos.cancelar_orcamento.v1",
-                    &CancelarOrcamento { orcamento: id }, "Orçamento cancelado");
+                aplicar(
+                    ui.ctx(),
+                    motor,
+                    sessao,
+                    estado,
+                    id,
+                    "orcamentos.cancelar_orcamento.v1",
+                    &CancelarOrcamento { orcamento: id },
+                    "Orçamento cancelado",
+                );
             }
             if ui.add(Botao::primario("Converter em OS")).clicked() {
-                estado.dlg = Dlg::Converter { garantia: "90".to_owned() };
+                estado.dlg = Dlg::Converter {
+                    garantia: "90".to_owned(),
+                };
             }
         }
         EstadoOrcamento::Recusado
@@ -951,7 +1035,11 @@ fn dialogo_decisao(
             return;
         }
     };
-    let titulo = if aprovado { "Registrar aprovação" } else { "Registrar recusa" };
+    let titulo = if aprovado {
+        "Registrar aprovação"
+    } else {
+        "Registrar recusa"
+    };
     let fechar = Dialogo::nova(titulo).largura(520.0).mostrar(
         ctx,
         estado,
@@ -1134,7 +1222,10 @@ fn gerar_pdf(ctx: &egui::Context, estado: &EstadoOrcamentos, d: &DetalheOrcament
                 Notificacao::sucesso(format!("PDF salvo em {}", caminho.display())),
             );
         }
-        Err(e) => notificar(ctx, Notificacao::erro(format!("Não foi possível salvar: {e}"))),
+        Err(e) => notificar(
+            ctx,
+            Notificacao::erro(format!("Não foi possível salvar: {e}")),
+        ),
     }
 }
 

@@ -182,7 +182,11 @@ pub fn mostrar(
             ui.add_space(Espaco::E12);
 
             if let Some(e) = &estado.erro {
-                ui.add(Rotulo::interface(e.clone()).quebravel().cor(ui.cores().negativo));
+                ui.add(
+                    Rotulo::interface(e.clone())
+                        .quebravel()
+                        .cor(ui.cores().negativo),
+                );
                 ui.add_space(Espaco::E12);
             }
             if let Some((numero, total)) = estado.ultima_venda {
@@ -462,7 +466,9 @@ fn carrinho(
             };
         }
         if estado.cupom.is_some()
-            && ui.add(Botao::destrutivo("Cancelar cupom").pequeno()).clicked()
+            && ui
+                .add(Botao::destrutivo("Cancelar cupom").pequeno())
+                .clicked()
         {
             cancelar_cupom(ui.ctx(), motor, sessao, estado);
         }
@@ -822,7 +828,10 @@ fn dialogo_pagamento(ctx: &egui::Context, estado: &mut EstadoTelaPdv) {
                 );
                 ui.ctx().request_repaint();
             }
-            if ui.add(Botao::secundario("Voltar").habilitado(!carregando)).clicked() {
+            if ui
+                .add(Botao::secundario("Voltar").habilitado(!carregando))
+                .clicked()
+            {
                 estado.dlg = Dlg::Fechado;
             }
         },
@@ -863,7 +872,10 @@ fn finalizar(
             continue;
         }
         let Ok(valor) = t.parse::<Dinheiro>() else {
-            notificar(ctx, Notificacao::erro("Valor de pagamento inválido.").id(fiscal));
+            notificar(
+                ctx,
+                Notificacao::erro("Valor de pagamento inválido.").id(fiscal),
+            );
             return;
         };
         if valor.e_negativo() || valor == Dinheiro::ZERO {
@@ -901,7 +913,10 @@ fn finalizar(
             notificar(
                 ctx,
                 Notificacao::sucesso(format!("Venda #{numero} concluída"))
-                    .detalhe(format!("NFC-e autorizada · {}", total.formatar_com_simbolo()))
+                    .detalhe(format!(
+                        "NFC-e autorizada · {}",
+                        total.formatar_com_simbolo()
+                    ))
                     .id(fiscal),
             );
         }

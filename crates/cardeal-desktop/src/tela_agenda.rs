@@ -56,7 +56,10 @@ enum Dlg {
     Fechado,
     Novo(FormComp),
     Ver(Id),
-    NovoRecurso { nome: String, tipo: usize },
+    NovoRecurso {
+        nome: String,
+        tipo: usize,
+    },
 }
 
 #[derive(Default, Clone)]
@@ -130,7 +133,10 @@ impl EstadoTelaAgenda {
         if let Ok(cli) = motor.consultar(
             sessao,
             "clientes.pessoas_por_papel.v1",
-            &PessoasPorPapel { papel: Papel::Cliente, busca: None },
+            &PessoasPorPapel {
+                papel: Papel::Cliente,
+                busca: None,
+            },
         ) {
             self.nomes = cli.iter().map(|p| (p.pessoa, p.nome.clone())).collect();
             self.clientes = cli;
@@ -149,9 +155,8 @@ impl EstadoTelaAgenda {
 }
 
 fn periodo(base: Data, modo: Modo) -> (Instante, Instante) {
-    let meia_noite = |d: Data| {
-        Instante::de_data_hora(d, Hora::de_hms(0, 0, 0).unwrap_or_default(), FUSO)
-    };
+    let meia_noite =
+        |d: Data| Instante::de_data_hora(d, Hora::de_hms(0, 0, 0).unwrap_or_default(), FUSO);
     match modo {
         Modo::Dia => (meia_noite(base), meia_noite(base.mais_dias(1))),
         Modo::Semana => {
@@ -188,7 +193,11 @@ pub fn mostrar(
             barra_controles(ui, motor, sessao, estado);
             ui.add_space(Espaco::E12);
             if let Some(e) = &estado.erro {
-                ui.add(Rotulo::interface(e.clone()).quebravel().cor(ui.cores().negativo));
+                ui.add(
+                    Rotulo::interface(e.clone())
+                        .quebravel()
+                        .cor(ui.cores().negativo),
+                );
                 ui.add_space(Espaco::E8);
             }
 
@@ -236,8 +245,8 @@ pub fn mostrar(
                 AcaoAgenda::Vazio { data, hora } => {
                     let mut f = form_em(estado, data, hora.hora());
                     f.hora_ini = hora.formatar();
-                    let fim = Hora::de_hms((hora.hora() + 1).min(23), hora.minuto(), 0)
-                        .unwrap_or(hora);
+                    let fim =
+                        Hora::de_hms((hora.hora() + 1).min(23), hora.minuto(), 0).unwrap_or(hora);
                     f.hora_fim = fim.formatar();
                     estado.dlg = Dlg::Novo(f);
                 }
@@ -281,7 +290,11 @@ fn barra_controles(
             .inner_margin(3.0)
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing.x = 2.0;
-                for (m, r) in [(Modo::Dia, "Dia"), (Modo::Semana, "Semana"), (Modo::Mes, "Mês")] {
+                for (m, r) in [
+                    (Modo::Dia, "Dia"),
+                    (Modo::Semana, "Semana"),
+                    (Modo::Mes, "Mês"),
+                ] {
                     let b = if estado.modo == m {
                         Botao::primario(r).pequeno()
                     } else {
@@ -353,7 +366,11 @@ fn titulo_periodo(base: Data, modo: Modo) -> String {
         Modo::Mes => base.competencia().formatar_extenso(),
         Modo::Semana => {
             let seg = base.mais_dias(-((base.dia_da_semana() as i32 + 6) % 7));
-            format!("{} – {}", seg.formatar_curta(), seg.mais_dias(6).formatar_curta())
+            format!(
+                "{} – {}",
+                seg.formatar_curta(),
+                seg.mais_dias(6).formatar_curta()
+            )
         }
     }
 }
@@ -374,7 +391,9 @@ fn resumo_dia_texto(
         })
         .collect();
     hoje_c.sort_by_key(|c| c.inicio.em_micros());
-    let prox = hoje_c.iter().find(|c| c.fim.em_micros() > agora.em_micros());
+    let prox = hoje_c
+        .iter()
+        .find(|c| c.fim.em_micros() > agora.em_micros());
 
     match (hoje_c.len(), prox) {
         (0, _) => ("Nada hoje".to_owned(), cores.texto_fraco),
@@ -395,17 +414,25 @@ fn dialogo_novo(
     sessao: &SessaoLocal,
     estado: &mut EstadoTelaAgenda,
 ) {
-    let ops_cli: Vec<(Id, String)> =
-        estado.clientes.iter().map(|c| (c.pessoa, c.nome.clone())).collect();
-    let ops_rec: Vec<(Id, String)> =
-        estado.recursos.iter().map(|r| (r.id, r.nome.clone())).collect();
+    let ops_cli: Vec<(Id, String)> = estado
+        .clientes
+        .iter()
+        .map(|c| (c.pessoa, c.nome.clone()))
+        .collect();
+    let ops_rec: Vec<(Id, String)> = estado
+        .recursos
+        .iter()
+        .map(|r| (r.id, r.nome.clone()))
+        .collect();
     let sem_recurso = estado.recursos.is_empty();
 
     let fechar = Dialogo::nova("Novo compromisso").largura(560.0).mostrar(
         ctx,
         estado,
         |ui, estado| {
-            let Dlg::Novo(f) = &mut estado.dlg else { return };
+            let Dlg::Novo(f) = &mut estado.dlg else {
+                return;
+            };
             ui.add(Campo::novo("Título", &mut f.titulo).marcador("ex.: Reunião, Visita técnica"));
             ui.add_space(Espaco::E12);
             SeletorOpcao::novo("Cliente (opcional)", &mut f.cliente)
@@ -431,7 +458,10 @@ fn dialogo_novo(
         },
         |ui, estado| {
             if ui.add(Botao::secundario("Novo recurso")).clicked() {
-                estado.dlg = Dlg::NovoRecurso { nome: String::new(), tipo: 0 };
+                estado.dlg = Dlg::NovoRecurso {
+                    nome: String::new(),
+                    tipo: 0,
+                };
                 return;
             }
             if ui.add(Botao::primario("Agendar")).clicked() {
@@ -473,7 +503,10 @@ fn agendar(
     let inicio = Instante::de_data_hora(data, hi, FUSO);
     let fim = Instante::de_data_hora(data, hf, FUSO);
     if fim.em_micros() <= inicio.em_micros() {
-        notificar(ctx, Notificacao::aviso("O fim tem de ser depois do início."));
+        notificar(
+            ctx,
+            Notificacao::aviso("O fim tem de ser depois do início."),
+        );
         return;
     }
 
@@ -520,7 +553,9 @@ fn dialogo_recurso(
         ctx,
         estado,
         |ui, estado| {
-            let Dlg::NovoRecurso { nome, tipo } = &mut estado.dlg else { return };
+            let Dlg::NovoRecurso { nome, tipo } = &mut estado.dlg else {
+                return;
+            };
             ui.add(Campo::novo("Nome", nome).marcador("Sala 1, Carlos, Furadeira"));
             ui.add_space(Espaco::E12);
             ui.horizontal_wrapped(|ui| {
@@ -543,7 +578,11 @@ fn dialogo_recurso(
                     match motor.executar(
                         sessao,
                         "agenda.criar_recurso.v1",
-                        &CriarRecurso { nome, tipo, capacidade: None },
+                        &CriarRecurso {
+                            nome,
+                            tipo,
+                            capacidade: None,
+                        },
                     ) {
                         Ok(_) => {
                             estado.carregar(motor, sessao);
@@ -637,23 +676,63 @@ fn acoes_estado(
     ui.horizontal(|ui| match c.estado {
         EstadoCompromisso::Agendado => {
             if ui.add(Botao::primario("Confirmar")).clicked() {
-                aplicar(ui.ctx(), motor, sessao, estado, "agenda.confirmar_compromisso.v1", &ConfirmarCompromisso { compromisso: id }, "Compromisso confirmado");
+                aplicar(
+                    ui.ctx(),
+                    motor,
+                    sessao,
+                    estado,
+                    "agenda.confirmar_compromisso.v1",
+                    &ConfirmarCompromisso { compromisso: id },
+                    "Compromisso confirmado",
+                );
             }
             if ui.add(Botao::destrutivo("Cancelar")).clicked() {
-                aplicar(ui.ctx(), motor, sessao, estado, "agenda.cancelar_compromisso.v1", &CancelarCompromisso { compromisso: id }, "Compromisso cancelado");
+                aplicar(
+                    ui.ctx(),
+                    motor,
+                    sessao,
+                    estado,
+                    "agenda.cancelar_compromisso.v1",
+                    &CancelarCompromisso { compromisso: id },
+                    "Compromisso cancelado",
+                );
             }
         }
         EstadoCompromisso::Confirmado => {
             if ui.add(Botao::primario("Iniciar")).clicked() {
-                aplicar(ui.ctx(), motor, sessao, estado, "agenda.iniciar_compromisso.v1", &IniciarCompromisso { compromisso: id }, "Compromisso iniciado");
+                aplicar(
+                    ui.ctx(),
+                    motor,
+                    sessao,
+                    estado,
+                    "agenda.iniciar_compromisso.v1",
+                    &IniciarCompromisso { compromisso: id },
+                    "Compromisso iniciado",
+                );
             }
             if ui.add(Botao::destrutivo("Cancelar")).clicked() {
-                aplicar(ui.ctx(), motor, sessao, estado, "agenda.cancelar_compromisso.v1", &CancelarCompromisso { compromisso: id }, "Compromisso cancelado");
+                aplicar(
+                    ui.ctx(),
+                    motor,
+                    sessao,
+                    estado,
+                    "agenda.cancelar_compromisso.v1",
+                    &CancelarCompromisso { compromisso: id },
+                    "Compromisso cancelado",
+                );
             }
         }
         EstadoCompromisso::EmAndamento => {
             if ui.add(Botao::primario("Concluir")).clicked() {
-                aplicar(ui.ctx(), motor, sessao, estado, "agenda.concluir_compromisso.v1", &ConcluirCompromisso { compromisso: id }, "Compromisso concluído");
+                aplicar(
+                    ui.ctx(),
+                    motor,
+                    sessao,
+                    estado,
+                    "agenda.concluir_compromisso.v1",
+                    &ConcluirCompromisso { compromisso: id },
+                    "Compromisso concluído",
+                );
             }
         }
         EstadoCompromisso::Concluido
@@ -687,7 +766,10 @@ fn aplicar<C: cardeal_modkit::Comando + serde::Serialize>(
 
 fn kv(ui: &mut egui::Ui, chave: &str, valor: &str) {
     ui.add(Rotulo::campo(chave));
-    ui.add(Rotulo::interface(if valor.trim().is_empty() { "—" } else { valor }));
+    ui.add(Rotulo::interface(if valor.trim().is_empty() {
+        "—"
+    } else {
+        valor
+    }));
     ui.add_space(Espaco::E8);
 }
-

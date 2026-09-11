@@ -1,8 +1,11 @@
 //! # cardeal-pdf
 //!
-//! Geração dos documentos PDF do Cardeal. Hoje: o **orçamento profissional** — cabeçalho com
-//! a logo e os dados da empresa, tabela de itens paginada, quadro de totais, condições
-//! comerciais e rodapé de aceite.
+//! Geração dos documentos PDF do Cardeal: o **orçamento profissional** e o **comprovante de
+//! ordem de serviço** — ambos com cabeçalho com a logo e os dados da empresa, tabela de itens
+//! paginada, quadro de totais e rodapé de aceite. Os dois documentos compartilham o mesmo
+//! motor de composição (`layout::Compositor`) — cabeçalho, tabela, totais e aceite são
+//! literalmente o mesmo código; só os blocos de identificação (cliente+assunto vs.
+//! cliente+equipamento+diagnóstico+garantia) são específicos de cada um.
 //!
 //! O escritor de PDF é próprio ([`documento`]) — PDF 1.7 mínimo com as fontes padrão
 //! (Helvetica / Helvetica-Bold, `WinAnsiEncoding`), sem nenhuma biblioteca de PDF ou de
@@ -129,4 +132,53 @@ pub fn gerar_orcamento(
     gerado_em: Instante,
 ) -> Result<Vec<u8>, ErroPdf> {
     layout::gerar(empresa, orcamento, gerado_em)
+}
+
+/// Os dados de um comprovante/laudo de Ordem de Serviço a imprimir — o registro que fica com
+/// a assistência técnica e a via que o cliente leva na entrega do equipamento: o que era, o
+/// diagnóstico, o que foi aplicado (peças + mão de obra), quanto custou e a garantia.
+#[derive(Debug, Clone)]
+pub struct ComprovanteOsPdf {
+    /// Número sequencial da OS.
+    pub numero: u64,
+    /// Situação atual, já em texto amigável (ex.: "Concluída e faturada").
+    pub situacao: String,
+    /// Nome do cliente.
+    pub cliente_nome: String,
+    /// Documento do cliente (pode ser vazio).
+    pub cliente_documento: String,
+    /// Contato do cliente — telefone/e-mail (pode ser vazio).
+    pub cliente_contato: String,
+    /// Descrição do equipamento ("Notebook Dell XPS 13").
+    pub equipamento: String,
+    /// Data de abertura.
+    pub data_abertura: Data,
+    /// Defeito relatado pelo cliente na abertura (pode ser vazio se ainda não há laudo).
+    pub defeito_relatado: String,
+    /// Diagnóstico técnico (pode ser vazio se ainda não há laudo).
+    pub diagnostico: String,
+    /// As linhas de peça e mão de obra aplicadas/orçadas, já formatadas para impressão.
+    pub itens: Vec<ItemPdf>,
+    /// Soma dos itens.
+    pub subtotal: Dinheiro,
+    /// Total (igual a `subtotal` — a OS não tem desconto de cabeçalho separado).
+    pub total: Dinheiro,
+    /// Dias de garantia sobre o serviço (0 = sem garantia).
+    pub garantia_dias: u16,
+    /// Nome de quem aprovou o orçamento, se já aprovado (pode ser vazio).
+    pub aprovado_por: String,
+    /// Nome do técnico responsável (pode ser vazio, se não resolvido).
+    pub tecnico_responsavel: String,
+}
+
+/// Gera os bytes do PDF de um comprovante de Ordem de Serviço.
+///
+/// # Errors
+/// [`ErroPdf::Logo`] se `empresa.logo_png` não decodificar.
+pub fn gerar_comprovante_os(
+    empresa: &IdentidadeEmpresa,
+    comprovante: &ComprovanteOsPdf,
+    gerado_em: Instante,
+) -> Result<Vec<u8>, ErroPdf> {
+    layout::gerar_os(empresa, comprovante, gerado_em)
 }

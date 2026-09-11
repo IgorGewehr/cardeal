@@ -3,7 +3,10 @@
 //! `cargo run -p cardeal-pdf --example amostra`
 
 use cardeal_kernel::{Data, Dinheiro, Instante, Percentual, Preco, Quantidade};
-use cardeal_pdf::{gerar_orcamento, IdentidadeEmpresa, ItemPdf, OrcamentoPdf};
+use cardeal_pdf::{
+    gerar_comprovante_os, gerar_orcamento, ComprovanteOsPdf, IdentidadeEmpresa, ItemPdf,
+    OrcamentoPdf,
+};
 
 fn main() {
     let empresa = IdentidadeEmpresa {
@@ -19,16 +22,40 @@ fn main() {
 
     let itens = vec![
         item("Diagnóstico completo e laudo técnico", 1, "un", 180_00, 0),
-        item("Rebobinamento do estator (fio de cobre esmaltado 1,2mm)", 1, "un", 1_450_00, 5),
+        item(
+            "Rebobinamento do estator (fio de cobre esmaltado 1,2mm)",
+            1,
+            "un",
+            1_450_00,
+            5,
+        ),
         item("Rolamento blindado 6206-2RS", 2, "un", 62_00, 0),
         item("Rolamento blindado 6204-2RS", 2, "un", 41_00, 0),
-        item("Verniz isolante classe H — impregnação a vácuo", 1, "un", 210_00, 0),
+        item(
+            "Verniz isolante classe H — impregnação a vácuo",
+            1,
+            "un",
+            210_00,
+            0,
+        ),
         item("Balanceamento dinâmico do rotor", 1, "un", 160_00, 0),
-        item("Mão de obra de montagem e teste em bancada", 4, "h", 90_00, 0),
+        item(
+            "Mão de obra de montagem e teste em bancada",
+            4,
+            "h",
+            90_00,
+            0,
+        ),
     ];
     let subtotal: Dinheiro = itens
         .iter()
-        .map(|i| Dinheiro::de_total(i.quantidade, i.preco_unitario, cardeal_kernel::Arredondamento::MeioAcima))
+        .map(|i| {
+            Dinheiro::de_total(
+                i.quantidade,
+                i.preco_unitario,
+                cardeal_kernel::Arredondamento::MeioAcima,
+            )
+        })
         .sum();
     let liquido: Dinheiro = itens.iter().map(|i| i.total).sum();
 
@@ -39,13 +66,14 @@ fn main() {
         cliente_contato: "Sr. Antônio — (31) 98888-1234".to_owned(),
         assunto: "Reforma completa do motor elétrico trifásico WEG 15 cv, 4 polos, carcaça 132M"
             .to_owned(),
-        descricao: "Escopo: desmontagem, laudo, substituição de rolamentos, rebobinamento total do \
+        descricao:
+            "Escopo: desmontagem, laudo, substituição de rolamentos, rebobinamento total do \
                     estator, impregnação, balanceamento e teste em bancada com relatório."
-            .to_owned(),
+                .to_owned(),
         data_emissao: Data::de_ymd(2026, 9, 7).unwrap(),
         validade: Data::de_ymd(2026, 9, 22).unwrap(),
-        condicoes_pagamento: "50% na aprovação e 50% na retirada — Pix, boleto ou cartão em até 3x."
-            .to_owned(),
+        condicoes_pagamento:
+            "50% na aprovação e 50% na retirada — Pix, boleto ou cartão em até 3x.".to_owned(),
         prazo_entrega: "7 dias úteis após a aprovação e o adiantamento.".to_owned(),
         observacoes: "Garantia de 90 dias sobre o serviço executado. Não inclui transporte do \
                       equipamento."
@@ -60,13 +88,50 @@ fn main() {
     let bytes = gerar_orcamento(&empresa, &orc, Instante::agora()).expect("gerar PDF");
     std::fs::write("amostra-orcamento.pdf", &bytes).expect("escrever arquivo");
     println!("amostra-orcamento.pdf ({} bytes)", bytes.len());
+
+    let itens_os = vec![
+        item("Peça — Fonte ADP-400DR", 1, "un", 390_00, 0),
+        item(
+            "Mão de obra — Diagnóstico e substituição da fonte",
+            1,
+            "srv",
+            120_00,
+            0,
+        ),
+    ];
+    let subtotal_os: Dinheiro = itens_os.iter().map(|i| i.total).sum();
+    let os = ComprovanteOsPdf {
+        numero: 42,
+        situacao: "Concluída e faturada".to_owned(),
+        cliente_nome: "Pedro Lima".to_owned(),
+        cliente_documento: "CPF 529.982.247-25".to_owned(),
+        cliente_contato: "(31) 98877-1234".to_owned(),
+        equipamento: "Console Sony PS5 CFI-1214A — nº série X1234".to_owned(),
+        data_abertura: Data::de_ymd(2026, 9, 1).unwrap(),
+        defeito_relatado: "Desliga sozinho após 10 minutos de uso.".to_owned(),
+        diagnostico: "Pasta térmica ressecada e capacitor da fonte estufado. Fonte substituída e \
+                      aplicada nova pasta térmica no processador."
+            .to_owned(),
+        itens: itens_os,
+        subtotal: subtotal_os,
+        total: subtotal_os,
+        garantia_dias: 90,
+        aprovado_por: "Pedro Lima - CPF 529.982.247-25".to_owned(),
+        tecnico_responsavel: "Igor Gewehr".to_owned(),
+    };
+    let bytes_os = gerar_comprovante_os(&empresa, &os, Instante::agora()).expect("gerar PDF");
+    std::fs::write("amostra-comprovante-os.pdf", &bytes_os).expect("escrever arquivo");
+    println!("amostra-comprovante-os.pdf ({} bytes)", bytes_os.len());
 }
 
 fn item(desc: &str, qtd: i64, un: &str, preco_cent: i64, desc_pct: i64) -> ItemPdf {
     let quantidade = Quantidade::unidades(qtd);
     let preco_unitario = Preco::centavos(preco_cent);
-    let bruto =
-        Dinheiro::de_total(quantidade, preco_unitario, cardeal_kernel::Arredondamento::MeioAcima);
+    let bruto = Dinheiro::de_total(
+        quantidade,
+        preco_unitario,
+        cardeal_kernel::Arredondamento::MeioAcima,
+    );
     let desconto_pct = Percentual::pontos(desc_pct);
     let total = bruto - bruto.aplicar(desconto_pct, cardeal_kernel::Arredondamento::MeioAcima);
     ItemPdf {
@@ -156,7 +221,11 @@ fn crc32(data: &[u8]) -> u32 {
     for &byte in data {
         crc ^= u32::from(byte);
         for _ in 0..8 {
-            crc = if crc & 1 != 0 { (crc >> 1) ^ 0xEDB8_8320 } else { crc >> 1 };
+            crc = if crc & 1 != 0 {
+                (crc >> 1) ^ 0xEDB8_8320
+            } else {
+                crc >> 1
+            };
         }
     }
     !crc

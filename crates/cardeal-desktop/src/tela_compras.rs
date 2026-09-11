@@ -301,7 +301,10 @@ fn lancar(
 ) {
     let f = &estado.nova;
     let Ok(data_emissao) = f.data.parse() else {
-        notificar(ctx, Notificacao::aviso("Data de emissão inválida (dd/mm/aaaa)."));
+        notificar(
+            ctx,
+            Notificacao::aviso("Data de emissão inválida (dd/mm/aaaa)."),
+        );
         return;
     };
     let frete = f.frete.parse().unwrap_or(Dinheiro::ZERO);
@@ -490,7 +493,10 @@ fn confirmar(
     nota: Id,
 ) {
     let Some(local) = estado.local_sel else {
-        notificar(ctx, Notificacao::aviso("Escolha o local de estoque que recebe."));
+        notificar(
+            ctx,
+            Notificacao::aviso("Escolha o local de estoque que recebe."),
+        );
         return;
     };
     match motor.executar(

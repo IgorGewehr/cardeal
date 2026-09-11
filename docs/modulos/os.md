@@ -166,6 +166,15 @@ está ocupado.
 └─────────────────────────────────────────────────────────┘
 ```
 
+**Comprovante em PDF** (`cardeal-pdf::gerar_comprovante_os`, botão "Comprovante (PDF)" no
+rodapé do dialog de detalhe): documento único que cobre as duas pontas do atendimento — cabeçalho
+com a marca da empresa, cliente, equipamento, defeito relatado, diagnóstico, itens de peça/mão
+de obra com totais, garantia e quem aprovou o orçamento. Gerável em QUALQUER estado da OS: recém-
+aberta (sem laudo/itens ainda) vira o comprovante de entrada que o cliente leva ao deixar o
+equipamento; faturada leva o documento completo para a retirada. Mesmo motor de composição do
+PDF de orçamento (`cardeal_pdf::layout`) — cabeçalho, tabela de itens, totais e aceite são o
+mesmo código, só o bloco de identificação muda.
+
 ## 11. Regras de negócio críticas
 
 1. **Peça só é aplicada com orçamento aprovado**, salvo emergência com permissão explícita —

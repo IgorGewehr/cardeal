@@ -61,7 +61,10 @@ pub fn largura_texto(texto: &str, fonte: Fonte, tam_pt: f32) -> f32 {
         Fonte::Regular => &HELVETICA,
         Fonte::Negrito => &HELVETICA_BOLD,
     };
-    let milhares: u32 = texto.chars().map(|c| u32::from(largura_glifo(c, tabela))).sum();
+    let milhares: u32 = texto
+        .chars()
+        .map(|c| u32::from(largura_glifo(c, tabela)))
+        .sum();
     (milhares as f32) * tam_pt / 1000.0
 }
 

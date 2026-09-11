@@ -52,10 +52,7 @@ impl EstadoTelaSettings {
             Ok(e) => {
                 self.razao = e.razao_social.clone();
                 self.fantasia = e.nome_fantasia.clone();
-                self.regime = REGIMES
-                    .iter()
-                    .position(|r| *r == e.regime)
-                    .unwrap_or(1);
+                self.regime = REGIMES.iter().position(|r| *r == e.regime).unwrap_or(1);
                 self.empresa = Some(e);
             }
             Err(e) => self.erro = Some(e.mensagem),
@@ -94,7 +91,11 @@ pub fn mostrar(
             ui.add_space(Espaco::E16);
 
             if let Some(e) = &estado.erro {
-                ui.add(Rotulo::interface(e.clone()).quebravel().cor(ui.cores().negativo));
+                ui.add(
+                    Rotulo::interface(e.clone())
+                        .quebravel()
+                        .cor(ui.cores().negativo),
+                );
                 ui.add_space(Espaco::E12);
             }
             match estado.aba {
@@ -179,7 +180,10 @@ fn secao_empresa(
             ) {
                 Ok(()) => {
                     estado.carregar(motor, sessao);
-                    notificar(ui.ctx(), Notificacao::sucesso("Dados da empresa atualizados"));
+                    notificar(
+                        ui.ctx(),
+                        Notificacao::sucesso("Dados da empresa atualizados"),
+                    );
                 }
                 Err(e) => notificar(ui.ctx(), Notificacao::erro(e.mensagem)),
             }
@@ -256,8 +260,11 @@ fn secao_identidade(
         ui.add(Campo::novo("Site", &mut estado.id_site).marcador("empresa.com.br"));
         ui.add_space(Espaco::E12);
         ui.add(
-            Campo::novo("Endereço (uma linha, para o documento)", &mut estado.id_endereco)
-                .marcador("Rua Exemplo, 100 — Centro, Cidade/UF"),
+            Campo::novo(
+                "Endereço (uma linha, para o documento)",
+                &mut estado.id_endereco,
+            )
+            .marcador("Rua Exemplo, 100 — Centro, Cidade/UF"),
         );
         ui.add_space(Espaco::E16);
         if ui.add(Botao::primario("Salvar identidade")).clicked() {
@@ -318,7 +325,11 @@ fn garantir_textura_logo(ui: &egui::Ui, estado: &mut EstadoTelaSettings) {
     let rgba = img.to_rgba8();
     let (w, h) = (rgba.width() as usize, rgba.height() as usize);
     let cor = egui::ColorImage::from_rgba_unmultiplied([w, h], rgba.as_raw());
-    estado.logo_tex = Some(ui.ctx().load_texture("logo-empresa", cor, egui::TextureOptions::LINEAR));
+    estado.logo_tex = Some(ui.ctx().load_texture(
+        "logo-empresa",
+        cor,
+        egui::TextureOptions::LINEAR,
+    ));
 }
 
 fn secao_aparencia(ui: &mut egui::Ui, tema: &mut Tema) {

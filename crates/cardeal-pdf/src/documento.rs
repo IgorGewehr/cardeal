@@ -3,6 +3,7 @@
 //! depende de nenhuma biblioteca de compressão).
 
 use std::fmt::Write as _;
+use std::io::Write as _;
 
 use crate::fonte::{literal_pdf, Fonte};
 
@@ -40,8 +41,16 @@ impl Imagem {
     /// Se `rgb.len() != largura * altura * 3`.
     #[must_use]
     pub fn rgb8(largura: u32, altura: u32, rgb: Vec<u8>) -> Self {
-        assert_eq!(rgb.len(), (largura * altura * 3) as usize, "buffer RGB inconsistente");
-        Self { largura, altura, rgb }
+        assert_eq!(
+            rgb.len(),
+            (largura * altura * 3) as usize,
+            "buffer RGB inconsistente"
+        );
+        Self {
+            largura,
+            altura,
+            rgb,
+        }
     }
 
     /// A proporção largura/altura.
@@ -54,7 +63,12 @@ impl Imagem {
 /// Uma superfície de desenho de uma página, em coordenadas de milímetro com origem no
 /// canto superior esquerdo (y cresce para baixo).
 pub struct Canvas {
-    ops: String,
+    // Vec<u8>, não String: o operador `Tj` de texto embute bytes crus em WinAnsiEncoding
+    // (`literal_pdf`, ver fonte.rs) — um caractere acentuado vira um byte 0x80..=0xFF que não
+    // é UTF-8 válido isolado. Guardar isso como `String` forçaria decodificar como UTF-8 em
+    // algum ponto (era exatamente o bug: `String::from_utf8_lossy` trocava cada acento pelo
+    // caractere de substituição, 3 bytes UTF-8 que o leitor de PDF então exibia como "ï¿½").
+    ops: Vec<u8>,
     altura_pt: f32,
 }
 
@@ -63,14 +77,15 @@ impl Canvas {
     #[must_use]
     pub fn nova_a4() -> Self {
         Self {
-            ops: String::new(),
+            ops: Vec::new(),
             altura_pt: A4_ALTURA,
         }
     }
 
-    /// Consome a superfície e devolve o fluxo de operadores de conteúdo.
+    /// Consome a superfície e devolve o fluxo de operadores de conteúdo (bytes crus, não UTF-8
+    /// — ver o comentário do campo `ops`).
     #[must_use]
-    pub fn em_operadores(self) -> String {
+    pub fn em_operadores(self) -> Vec<u8> {
         self.ops
     }
 
@@ -117,12 +132,21 @@ impl Canvas {
         );
     }
 
-    /// Texto com a âncora na linha de base, alinhado à esquerda de `x_mm`.
-    pub fn texto(&mut self, x_mm: f32, y_base_mm: f32, fonte: Fonte, tam_pt: f32, cor: Cor, s: &str) {
-        let literal = String::from_utf8_lossy(&literal_pdf(s)).into_owned();
-        let _ = writeln!(
+    /// Texto com a âncora na linha de base, alinhado à esquerda de `x_mm`. A literal
+    /// (`literal_pdf`) é bytes `WinAnsi` crus — escrita direto no buffer, nunca através de uma
+    /// `String`/formatação `{}` (que exigiria UTF-8 válido e corromperia todo acento).
+    pub fn texto(
+        &mut self,
+        x_mm: f32,
+        y_base_mm: f32,
+        fonte: Fonte,
+        tam_pt: f32,
+        cor: Cor,
+        s: &str,
+    ) {
+        let _ = write!(
             self.ops,
-            "BT /{} {:.2} Tf {:.3} {:.3} {:.3} rg 1 0 0 1 {:.2} {:.2} Tm {} Tj ET",
+            "BT /{} {:.2} Tf {:.3} {:.3} {:.3} rg 1 0 0 1 {:.2} {:.2} Tm ",
             fonte.recurso(),
             tam_pt,
             cor.0,
@@ -130,8 +154,9 @@ impl Canvas {
             cor.2,
             x_mm * MM,
             self.y(y_base_mm),
-            literal,
         );
+        self.ops.extend_from_slice(&literal_pdf(s));
+        let _ = writeln!(self.ops, " Tj ET");
     }
 
     /// Desenha a `indice`-ésima imagem do documento numa caixa em mm.
@@ -150,7 +175,7 @@ impl Canvas {
 
 /// O documento em construção.
 pub struct Documento {
-    paginas: Vec<String>,
+    paginas: Vec<Vec<u8>>,
     imagens: Vec<Imagem>,
 }
 
@@ -170,8 +195,9 @@ impl Documento {
         self.imagens.len() - 1
     }
 
-    /// Adiciona uma página a partir de um fluxo de operadores já montado.
-    pub fn pagina_bruta(&mut self, operadores: String) {
+    /// Adiciona uma página a partir de um fluxo de operadores já montado (bytes crus — ver
+    /// o comentário de `Canvas::ops`).
+    pub fn pagina_bruta(&mut self, operadores: Vec<u8>) {
         self.paginas.push(operadores);
     }
 
@@ -242,9 +268,8 @@ impl Documento {
                 )
                 .into_bytes(),
             );
-            let mut o =
-                format!("<< /Length {} >>\nstream\n", conteudo.len()).into_bytes();
-            o.extend_from_slice(conteudo.as_bytes());
+            let mut o = format!("<< /Length {} >>\nstream\n", conteudo.len()).into_bytes();
+            o.extend_from_slice(conteudo);
             o.extend_from_slice(b"\nendstream");
             push(o);
         }
@@ -279,10 +304,8 @@ impl Documento {
             out.extend_from_slice(format!("{off:010} 00000 n \n").as_bytes());
         }
         out.extend_from_slice(
-            format!(
-                "trailer\n<< /Size {total} /Root 1 0 R >>\nstartxref\n{xref_pos}\n%%EOF\n"
-            )
-            .as_bytes(),
+            format!("trailer\n<< /Size {total} /Root 1 0 R >>\nstartxref\n{xref_pos}\n%%EOF\n")
+                .as_bytes(),
         );
         out
     }

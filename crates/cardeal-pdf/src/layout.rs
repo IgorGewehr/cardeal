@@ -6,7 +6,7 @@ use cardeal_kernel::Instante;
 use crate::documento::{Canvas, Cor, Documento, MM};
 use crate::fonte::{largura_texto, Fonte};
 use crate::imagem::decodificar_logo;
-use crate::{ErroPdf, IdentidadeEmpresa, OrcamentoPdf};
+use crate::{ComprovanteOsPdf, ErroPdf, IdentidadeEmpresa, OrcamentoPdf};
 
 // ── Paleta (espelha os tokens do design system Rubro) ─────────────────────────
 const TEXTO_FORTE: Cor = Cor::rgb(17, 17, 20);
@@ -74,11 +74,63 @@ pub fn gerar(
     c.bloco_titulo(orc);
     c.bloco_cliente(orc);
     c.bloco_assunto(orc);
-    c.tabela_itens(orc);
-    c.quadro_totais(orc);
+    c.tabela_itens(&orc.itens);
+    c.quadro_totais(orc.subtotal, orc.desconto, orc.total);
     c.bloco_condicoes(orc);
     c.aceite();
-    c.rodape_em_todas(orc);
+    c.rodape_em_todas(&orc.responsavel);
+
+    for pagina in c.paginas {
+        doc.pagina_bruta(pagina.em_operadores());
+    }
+    Ok(doc.finalizar())
+}
+
+/// Gera o PDF do comprovante de Ordem de Serviço — mesmo motor de composição de [`gerar`]
+/// (cabeçalho, tabela de itens, totais, aceite são literalmente os mesmos métodos); só o bloco
+/// de identificação (cliente + equipamento + diagnóstico + garantia) é próprio deste documento.
+///
+/// # Errors
+/// [`ErroPdf::Logo`] se a logo cadastrada não for uma imagem válida.
+pub fn gerar_os(
+    empresa: &IdentidadeEmpresa,
+    os: &ComprovanteOsPdf,
+    gerado_em: Instante,
+) -> Result<Vec<u8>, ErroPdf> {
+    let mut doc = Documento::novo();
+    let logo = match &empresa.logo_png {
+        Some(bytes) if !bytes.is_empty() => {
+            let img = decodificar_logo(bytes)?;
+            let prop = img.proporcao();
+            Some((doc.adicionar_imagem(img), prop))
+        }
+        _ => None,
+    };
+
+    let mut c = Compositor {
+        paginas: vec![Canvas::nova_a4()],
+        y: TOPO,
+        logo,
+        empresa,
+        gerado_em: gerado_em.formatar(cardeal_kernel::Fuso::BRASILIA),
+    };
+
+    c.cabecalho_marca();
+    c.bloco_titulo_os(os);
+    c.bloco_cliente_equipamento(os);
+    if !os.defeito_relatado.is_empty() {
+        c.bloco_texto("DEFEITO RELATADO", &os.defeito_relatado);
+    }
+    if !os.diagnostico.is_empty() {
+        c.bloco_texto("DIAGNÓSTICO TÉCNICO", &os.diagnostico);
+    }
+    if !os.itens.is_empty() {
+        c.tabela_itens(&os.itens);
+        c.quadro_totais(os.subtotal, cardeal_kernel::Dinheiro::ZERO, os.total);
+    }
+    c.bloco_garantia_e_aprovacao(os);
+    c.aceite();
+    c.rodape_em_todas(&os.tecnico_responsavel);
 
     for pagina in c.paginas {
         doc.pagina_bruta(pagina.em_operadores());
@@ -141,7 +193,14 @@ impl Compositor<'_> {
             y += 3.8;
         }
         if !e.cnpj.is_empty() {
-            self.texto_direita(DIR, y, Fonte::Regular, 8.0, TEXTO_MEDIO, &format!("CNPJ {}", e.cnpj));
+            self.texto_direita(
+                DIR,
+                y,
+                Fonte::Regular,
+                8.0,
+                TEXTO_MEDIO,
+                &format!("CNPJ {}", e.cnpj),
+            );
             y += 3.8;
         }
         if !e.endereco.is_empty() {
@@ -207,7 +266,14 @@ impl Compositor<'_> {
             linha2.push(orc.cliente_contato.clone());
         }
         if !linha2.is_empty() {
-            self.texto_em(MX, y + 4.4, Fonte::Regular, 9.0, TEXTO_MEDIO, &linha2.join("   ·   "));
+            self.texto_em(
+                MX,
+                y + 4.4,
+                Fonte::Regular,
+                9.0,
+                TEXTO_MEDIO,
+                &linha2.join("   ·   "),
+            );
             self.y = y + 4.4;
         }
         self.y += 8.0;
@@ -239,12 +305,12 @@ impl Compositor<'_> {
         self.y += 6.0;
     }
 
-    // ── Tabela de itens ─────────────────────────────────────────────────────
-    fn tabela_itens(&mut self, orc: &OrcamentoPdf) {
+    // ── Tabela de itens (compartilhada entre orçamento e comprovante de OS) ──
+    pub(crate) fn tabela_itens(&mut self, itens: &[crate::ItemPdf]) {
         self.garantir(18.0);
         self.cabecalho_tabela();
 
-        for (i, item) in orc.itens.iter().enumerate() {
+        for (i, item) in itens.iter().enumerate() {
             let linhas_desc = quebrar(&item.descricao, Fonte::Regular, 9.0, COL_DESC_LARG);
             let altura = (linhas_desc.len() as f32 * 4.4).max(7.0) + 1.6;
 
@@ -255,26 +321,69 @@ impl Compositor<'_> {
 
             if i % 2 == 1 {
                 let y = self.y;
-                self.canvas().retangulo(MX, y - 1.0, LARGURA_CONTEUDO, altura, ZEBRA);
+                self.canvas()
+                    .retangulo(MX, y - 1.0, LARGURA_CONTEUDO, altura, ZEBRA);
             }
 
             let base = self.y + 3.6;
-            self.texto_em(COL_NUM, base, Fonte::Regular, 8.5, TEXTO_FRACO, &format!("{:02}", i + 1));
+            self.texto_em(
+                COL_NUM,
+                base,
+                Fonte::Regular,
+                8.5,
+                TEXTO_FRACO,
+                &format!("{:02}", i + 1),
+            );
             for (k, linha) in linhas_desc.iter().enumerate() {
-                self.texto_em(COL_DESC, base + k as f32 * 4.4, Fonte::Regular, 9.0, TEXTO, linha);
+                self.texto_em(
+                    COL_DESC,
+                    base + k as f32 * 4.4,
+                    Fonte::Regular,
+                    9.0,
+                    TEXTO,
+                    linha,
+                );
             }
-            self.texto_direita(COL_QTD_DIR, base, Fonte::Regular, 9.0, TEXTO, &item.quantidade.formatar(0));
+            self.texto_direita(
+                COL_QTD_DIR,
+                base,
+                Fonte::Regular,
+                9.0,
+                TEXTO,
+                &item.quantidade.formatar(0),
+            );
             if !item.unidade.is_empty() {
-                self.texto_em(COL_UN, base, Fonte::Regular, 9.0, TEXTO_MEDIO, &item.unidade);
+                self.texto_em(
+                    COL_UN,
+                    base,
+                    Fonte::Regular,
+                    9.0,
+                    TEXTO_MEDIO,
+                    &item.unidade,
+                );
             }
-            self.texto_direita(COL_UNIT_DIR, base, Fonte::Regular, 9.0, TEXTO, &item.preco_unitario.formatar());
+            self.texto_direita(
+                COL_UNIT_DIR,
+                base,
+                Fonte::Regular,
+                9.0,
+                TEXTO,
+                &item.preco_unitario.formatar(),
+            );
             let desc = if item.desconto_pct.e_zero() {
                 "—".to_owned()
             } else {
                 format!("{}%", item.desconto_pct.formatar(1))
             };
             self.texto_direita(COL_DESCP_DIR, base, Fonte::Regular, 9.0, TEXTO_MEDIO, &desc);
-            self.texto_direita(COL_TOTAL_DIR, base, Fonte::Negrito, 9.0, TEXTO_FORTE, &item.total.formatar());
+            self.texto_direita(
+                COL_TOTAL_DIR,
+                base,
+                Fonte::Negrito,
+                9.0,
+                TEXTO_FORTE,
+                &item.total.formatar(),
+            );
 
             self.y += altura;
             let y = self.y;
@@ -285,37 +394,71 @@ impl Compositor<'_> {
 
     fn cabecalho_tabela(&mut self) {
         let y = self.y;
-        self.canvas().retangulo(MX, y, LARGURA_CONTEUDO, 7.0, CABECALHO_TABELA);
+        self.canvas()
+            .retangulo(MX, y, LARGURA_CONTEUDO, 7.0, CABECALHO_TABELA);
         let base = y + 4.7;
         self.texto_em(COL_NUM, base, Fonte::Negrito, 7.5, TEXTO_MEDIO, "#");
-        self.texto_em(COL_DESC, base, Fonte::Negrito, 7.5, TEXTO_MEDIO, "DESCRIÇÃO");
+        self.texto_em(
+            COL_DESC,
+            base,
+            Fonte::Negrito,
+            7.5,
+            TEXTO_MEDIO,
+            "DESCRIÇÃO",
+        );
         self.texto_direita(COL_QTD_DIR, base, Fonte::Negrito, 7.5, TEXTO_MEDIO, "QTD");
         self.texto_em(COL_UN, base, Fonte::Negrito, 7.5, TEXTO_MEDIO, "UN");
-        self.texto_direita(COL_UNIT_DIR, base, Fonte::Negrito, 7.5, TEXTO_MEDIO, "VL UNIT");
-        self.texto_direita(COL_DESCP_DIR, base, Fonte::Negrito, 7.5, TEXTO_MEDIO, "DESC");
-        self.texto_direita(COL_TOTAL_DIR, base, Fonte::Negrito, 7.5, TEXTO_MEDIO, "TOTAL");
+        self.texto_direita(
+            COL_UNIT_DIR,
+            base,
+            Fonte::Negrito,
+            7.5,
+            TEXTO_MEDIO,
+            "VL UNIT",
+        );
+        self.texto_direita(
+            COL_DESCP_DIR,
+            base,
+            Fonte::Negrito,
+            7.5,
+            TEXTO_MEDIO,
+            "DESC",
+        );
+        self.texto_direita(
+            COL_TOTAL_DIR,
+            base,
+            Fonte::Negrito,
+            7.5,
+            TEXTO_MEDIO,
+            "TOTAL",
+        );
         self.y = y + 8.6;
     }
 
-    // ── Quadro de totais ────────────────────────────────────────────────────
-    fn quadro_totais(&mut self, orc: &OrcamentoPdf) {
+    // ── Quadro de totais (compartilhado) ────────────────────────────────────
+    pub(crate) fn quadro_totais(
+        &mut self,
+        subtotal: cardeal_kernel::Dinheiro,
+        desconto: cardeal_kernel::Dinheiro,
+        total: cardeal_kernel::Dinheiro,
+    ) {
         self.garantir(26.0);
         let x = DIR - 78.0;
         let mut y = self.y + 2.0;
 
-        y = self.linha_total(x, y, "Subtotal", &orc.subtotal.formatar_com_simbolo(), false);
-        if !orc.desconto.e_zero() {
+        y = self.linha_total(x, y, "Subtotal", &subtotal.formatar_com_simbolo(), false);
+        if !desconto.e_zero() {
             y = self.linha_total(
                 x,
                 y,
                 "Desconto",
-                &format!("- {}", orc.desconto.formatar_com_simbolo()),
+                &format!("- {}", desconto.formatar_com_simbolo()),
                 false,
             );
         }
         self.canvas().linha(x, y - 2.0, DIR, y - 2.0, 0.6, BORDA);
         y += 1.0;
-        y = self.linha_total(x, y, "TOTAL", &orc.total.formatar_com_simbolo(), true);
+        y = self.linha_total(x, y, "TOTAL", &total.formatar_com_simbolo(), true);
 
         self.y = y + 6.0;
     }
@@ -355,6 +498,104 @@ impl Compositor<'_> {
         }
     }
 
+    // ── Título — comprovante de OS ────────────────────────────────────────
+    fn bloco_titulo_os(&mut self, os: &ComprovanteOsPdf) {
+        let y = self.y;
+        self.texto_em(
+            MX,
+            y,
+            Fonte::Negrito,
+            17.0,
+            TEXTO_FORTE,
+            &format!("Ordem de Serviço Nº {:04}", os.numero),
+        );
+        self.texto_direita(
+            DIR,
+            y - 3.5,
+            Fonte::Regular,
+            9.0,
+            TEXTO_MEDIO,
+            &format!("Abertura  {}", os.data_abertura.formatar()),
+        );
+        self.texto_direita(DIR, y + 1.0, Fonte::Negrito, 9.0, RUBRO, &os.situacao);
+        self.y = y + 9.0;
+    }
+
+    // ── Cliente + equipamento — comprovante de OS ────────────────────────
+    fn bloco_cliente_equipamento(&mut self, os: &ComprovanteOsPdf) {
+        self.rotulo("CLIENTE");
+        self.y += 4.6;
+        let y = self.y;
+        self.texto_em(MX, y, Fonte::Negrito, 10.5, TEXTO_FORTE, &os.cliente_nome);
+        let mut linha2: Vec<String> = Vec::new();
+        if !os.cliente_documento.is_empty() {
+            linha2.push(os.cliente_documento.clone());
+        }
+        if !os.cliente_contato.is_empty() {
+            linha2.push(os.cliente_contato.clone());
+        }
+        if !linha2.is_empty() {
+            self.texto_em(
+                MX,
+                y + 4.4,
+                Fonte::Regular,
+                9.0,
+                TEXTO_MEDIO,
+                &linha2.join("   ·   "),
+            );
+            self.y = y + 4.4;
+        }
+        self.y += 8.0;
+
+        self.rotulo("EQUIPAMENTO");
+        self.y += 4.6;
+        let y = self.y;
+        self.texto_em(MX, y, Fonte::Negrito, 10.5, TEXTO_FORTE, &os.equipamento);
+        self.y = y + 8.0;
+    }
+
+    /// Bloco de texto livre com quebra de linha — reusado por DEFEITO RELATADO e
+    /// DIAGNÓSTICO TÉCNICO no comprovante de OS (mesmo estilo de [`Self::bloco_assunto`]).
+    fn bloco_texto(&mut self, rotulo: &str, texto: &str) {
+        self.garantir(14.0);
+        self.rotulo(rotulo);
+        self.y += 4.6;
+        for linha in quebrar(texto, Fonte::Regular, 9.5, LARGURA_CONTEUDO) {
+            self.garantir(6.0);
+            let y = self.y;
+            self.texto_em(MX, y, Fonte::Regular, 9.5, TEXTO, &linha);
+            self.y += 4.6;
+        }
+        self.y += 6.0;
+    }
+
+    // ── Garantia + aprovação — comprovante de OS ─────────────────────────
+    fn bloco_garantia_e_aprovacao(&mut self, os: &ComprovanteOsPdf) {
+        self.garantir(16.0);
+        self.rotulo("GARANTIA");
+        self.y += 4.6;
+        let y = self.y;
+        let texto_garantia = if os.garantia_dias > 0 {
+            format!(
+                "{} dias sobre o serviço executado, a partir da entrega do equipamento.",
+                os.garantia_dias
+            )
+        } else {
+            "Sem garantia sobre este serviço.".to_owned()
+        };
+        self.texto_em(MX, y, Fonte::Regular, 9.5, TEXTO, &texto_garantia);
+        self.y = y + 6.0;
+
+        if !os.aprovado_por.is_empty() {
+            self.garantir(10.0);
+            self.rotulo("ORÇAMENTO APROVADO POR");
+            self.y += 4.6;
+            let y = self.y;
+            self.texto_em(MX, y, Fonte::Regular, 9.5, TEXTO, &os.aprovado_por);
+            self.y = y + 6.0;
+        }
+    }
+
     // ── Aceite (última página) ──────────────────────────────────────────────
     fn aceite(&mut self) {
         self.garantir(24.0);
@@ -362,17 +603,31 @@ impl Compositor<'_> {
         let y = self.y;
         self.canvas().linha(MX, y, MX + 80.0, y, 0.6, TEXTO_FRACO);
         self.canvas().linha(DIR - 55.0, y, DIR, y, 0.6, TEXTO_FRACO);
-        self.texto_em(MX, y + 4.0, Fonte::Regular, 8.0, TEXTO_MEDIO, "Assinatura — de acordo");
-        self.texto_em(DIR - 55.0, y + 4.0, Fonte::Regular, 8.0, TEXTO_MEDIO, "Data");
+        self.texto_em(
+            MX,
+            y + 4.0,
+            Fonte::Regular,
+            8.0,
+            TEXTO_MEDIO,
+            "Assinatura — de acordo",
+        );
+        self.texto_em(
+            DIR - 55.0,
+            y + 4.0,
+            Fonte::Regular,
+            8.0,
+            TEXTO_MEDIO,
+            "Data",
+        );
     }
 
-    // ── Rodapé em toda página ───────────────────────────────────────────────
-    fn rodape_em_todas(&mut self, orc: &OrcamentoPdf) {
+    // ── Rodapé em toda página (compartilhado) ───────────────────────────────
+    pub(crate) fn rodape_em_todas(&mut self, responsavel: &str) {
         let total = self.paginas.len();
-        let responsavel = if orc.responsavel.is_empty() {
+        let responsavel = if responsavel.is_empty() {
             String::new()
         } else {
-            format!("  ·  Responsável: {}", orc.responsavel)
+            format!("  ·  Responsável: {responsavel}")
         };
         let esquerda = format!("Gerado pelo Cardeal em {}{}", self.gerado_em, responsavel);
         for (i, pagina) in self.paginas.iter_mut().enumerate() {
@@ -387,7 +642,8 @@ impl Compositor<'_> {
 
     fn rotulo(&mut self, texto: &str) {
         let y = self.y;
-        self.canvas().texto(MX, y, Fonte::Negrito, 7.0, TEXTO_FRACO, texto);
+        self.canvas()
+            .texto(MX, y, Fonte::Negrito, 7.0, TEXTO_FRACO, texto);
     }
 }
 

@@ -93,7 +93,11 @@ fn icone_janela() -> egui::IconData {
             }
         }
     }
-    egui::IconData { rgba, width: L as u32, height: L as u32 }
+    egui::IconData {
+        rgba,
+        width: L as u32,
+        height: L as u32,
+    }
 }
 
 /// Um botão-chevron (‹ / ›) desenhado à mão — recolher/expandir a sidebar. `aponta_esquerda`
@@ -113,14 +117,10 @@ fn chevron(ui: &mut egui::Ui, aponta_esquerda: bool, cor: egui::Color32) -> egui
             (c.x - dx / 2.0, c.x + dx / 2.0)
         };
         let traco = egui::Stroke::new(2.0_f32, cor);
-        ui.painter().line_segment(
-            [egui::pos2(perto, c.y - dy), egui::pos2(longe, c.y)],
-            traco,
-        );
-        ui.painter().line_segment(
-            [egui::pos2(longe, c.y), egui::pos2(perto, c.y + dy)],
-            traco,
-        );
+        ui.painter()
+            .line_segment([egui::pos2(perto, c.y - dy), egui::pos2(longe, c.y)], traco);
+        ui.painter()
+            .line_segment([egui::pos2(longe, c.y), egui::pos2(perto, c.y + dy)], traco);
     }
     if resp.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);

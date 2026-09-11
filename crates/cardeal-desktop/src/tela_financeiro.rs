@@ -22,8 +22,8 @@ use mod_financeiro::{
     ContasDeResultado, ContasDisponiveis, CriarContaBancaria, CriarRecorrencia, EspecieTitulo,
     ExtratoDisponivel, ItemContaDisponivel, ItemContaResultado, ItemMovimentoDisponivel,
     ItemTituloEmAberto, ItemTotalPorCategoria, LancarTituloAPagar, LancarTituloAReceber,
-    Periodicidade, Recorrencia, Recorrencias, TitulosAPagarEmAberto, TitulosAReceberEmAberto,
-    TipoValor, TotalPorCategoriaNoPeriodo,
+    Periodicidade, Recorrencia, Recorrencias, TipoValor, TitulosAPagarEmAberto,
+    TitulosAReceberEmAberto, TotalPorCategoriaNoPeriodo,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
@@ -63,7 +63,9 @@ enum Dlg {
     Analise,
     Recorrencias,
     NovaRecorrencia(FormRecorrencia),
-    NovaContaBancaria { nome: String },
+    NovaContaBancaria {
+        nome: String,
+    },
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -253,7 +255,9 @@ impl EstadoTelaFinanceiro {
             .unwrap_or_default();
 
         let soma = |v: &[ItemTituloEmAberto]| {
-            v.iter().map(ItemTituloEmAberto::saldo).fold(Dinheiro::ZERO, |a, b| a + b)
+            v.iter()
+                .map(ItemTituloEmAberto::saldo)
+                .fold(Dinheiro::ZERO, |a, b| a + b)
         };
         let venc = |v: &[ItemTituloEmAberto]| {
             let atrasa_ou_vence: Vec<&ItemTituloEmAberto> =
@@ -298,9 +302,8 @@ impl EstadoTelaFinanceiro {
             });
             comp = comp.proxima();
         }
-        self.dash_recebido_mes = Dinheiro::centavos(
-            (serie.last().map_or(0.0, |m| m.receita) * 100.0).round() as i64,
-        );
+        self.dash_recebido_mes =
+            Dinheiro::centavos((serie.last().map_or(0.0, |m| m.receita) * 100.0).round() as i64);
         self.dash_pago_mes =
             Dinheiro::centavos((serie.last().map_or(0.0, |m| m.custo) * 100.0).round() as i64);
         self.serie = serie;
@@ -311,7 +314,10 @@ impl EstadoTelaFinanceiro {
             self.fluxo_dias = 30;
         }
         let hoje = Data::hoje(Fuso::BRASILIA);
-        let periodo = Periodo::novo(hoje.mais_dias(-i32::try_from(self.fluxo_dias).unwrap_or(30)), hoje);
+        let periodo = Periodo::novo(
+            hoje.mais_dias(-i32::try_from(self.fluxo_dias).unwrap_or(30)),
+            hoje,
+        );
         match motor.consultar(
             sessao,
             "financeiro.extrato_disponivel.v1",
@@ -468,7 +474,9 @@ fn dialogo_analise(
         std::collections::BTreeMap::new();
     for it in &estado.analise {
         let nome = estado.nome_categoria(it.categoria);
-        let e = por_cat.entry(nome).or_insert((Dinheiro::ZERO, Dinheiro::ZERO));
+        let e = por_cat
+            .entry(nome)
+            .or_insert((Dinheiro::ZERO, Dinheiro::ZERO));
         match it.especie {
             EspecieTitulo::Receber => e.0 += it.total_baixado,
             EspecieTitulo::Pagar => e.1 += it.total_baixado,
@@ -573,57 +581,55 @@ fn dialogo_recorrencias(
         })
         .collect();
 
-    let fechar = Dialogo::nova("Recorrências")
-        .largura(760.0)
-        .mostrar(
-            ctx,
-            estado,
-            |ui, _estado| {
-                ui.add(Rotulo::campo(
-                    "Regras que geram títulos automaticamente — aluguel, internet, assinaturas. \
+    let fechar = Dialogo::nova("Recorrências").largura(760.0).mostrar(
+        ctx,
+        estado,
+        |ui, _estado| {
+            ui.add(Rotulo::campo(
+                "Regras que geram títulos automaticamente — aluguel, internet, assinaturas. \
                      Nenhum título é criado agora; cada ocorrência vira título real na data.",
-                ));
-                ui.add_space(Espaco::E12);
-                if linhas.is_empty() {
-                    ui.add(Rotulo::campo("Nenhuma recorrência cadastrada."));
-                } else {
-                    let colunas = vec![
-                        ColunaGrade::nova("Descrição"),
-                        ColunaGrade::nova("Espécie").largura(100.0),
-                        ColunaGrade::nova("Periodicidade").largura(120.0),
-                        ColunaGrade::nova("Valor").largura(130.0),
-                        ColunaGrade::nova("Ativa").largura(70.0),
-                    ];
-                    Grade::nova(colunas).mostrar(ui, linhas.len(), |i, row| {
-                        let (desc, esp, per, val, ativa) = &linhas[i];
-                        row.col(|ui| {
-                            ui.add(Rotulo::interface(desc.clone()));
-                        });
-                        row.col(|ui| {
-                            ui.add(Rotulo::interface(esp.clone()));
-                        });
-                        row.col(|ui| {
-                            ui.add(Rotulo::interface(per.clone()));
-                        });
-                        row.col(|ui| {
-                            ui.add(Rotulo::interface(val.clone()));
-                        });
-                        row.col(|ui| {
-                            ui.add(Rotulo::campo(if *ativa { "sim" } else { "não" }));
-                        });
+            ));
+            ui.add_space(Espaco::E12);
+            if linhas.is_empty() {
+                ui.add(Rotulo::campo("Nenhuma recorrência cadastrada."));
+            } else {
+                let colunas = vec![
+                    ColunaGrade::nova("Descrição"),
+                    ColunaGrade::nova("Espécie").largura(100.0),
+                    ColunaGrade::nova("Periodicidade").largura(120.0),
+                    ColunaGrade::nova("Valor").largura(130.0),
+                    ColunaGrade::nova("Ativa").largura(70.0),
+                ];
+                Grade::nova(colunas).mostrar(ui, linhas.len(), |i, row| {
+                    let (desc, esp, per, val, ativa) = &linhas[i];
+                    row.col(|ui| {
+                        ui.add(Rotulo::interface(desc.clone()));
                     });
-                }
-            },
-            |ui, estado| {
-                if ui.add(Botao::primario("+ Nova recorrência")).clicked() {
-                    estado.carregar_contas(motor, sessao, false);
-                    estado.dlg = Dlg::NovaRecorrencia(FormRecorrencia::default());
-                }
-                if ui.add(Botao::secundario("Fechar")).clicked() {
-                    estado.dlg = Dlg::Fechado;
-                }
-            },
-        );
+                    row.col(|ui| {
+                        ui.add(Rotulo::interface(esp.clone()));
+                    });
+                    row.col(|ui| {
+                        ui.add(Rotulo::interface(per.clone()));
+                    });
+                    row.col(|ui| {
+                        ui.add(Rotulo::interface(val.clone()));
+                    });
+                    row.col(|ui| {
+                        ui.add(Rotulo::campo(if *ativa { "sim" } else { "não" }));
+                    });
+                });
+            }
+        },
+        |ui, estado| {
+            if ui.add(Botao::primario("+ Nova recorrência")).clicked() {
+                estado.carregar_contas(motor, sessao, false);
+                estado.dlg = Dlg::NovaRecorrencia(FormRecorrencia::default());
+            }
+            if ui.add(Botao::secundario("Fechar")).clicked() {
+                estado.dlg = Dlg::Fechado;
+            }
+        },
+    );
     if fechar {
         estado.dlg = Dlg::Fechado;
     }
@@ -660,101 +666,99 @@ fn dialogo_nova_recorrencia(
         .map(|c| (c.id, c.nome.clone()))
         .collect();
 
-    let fechar = Dialogo::nova("Nova recorrência")
-        .largura(720.0)
-        .mostrar(
-            ctx,
-            estado,
-            |ui, estado| {
-                let Dlg::NovaRecorrencia(f) = &mut estado.dlg else {
-                    return;
-                };
-                ui.horizontal(|ui| {
-                    for (rot, receber) in [("A pagar", false), ("A receber", true)] {
-                        let sel = f.a_receber == receber;
-                        let b = if sel {
-                            Botao::primario(rot)
-                        } else {
-                            Botao::fantasma(rot)
-                        };
-                        if ui.add(b).clicked() && !sel {
-                            f.a_receber = receber;
-                            f.contraparte = None;
-                            f.conta = None;
-                        }
-                    }
-                });
-                ui.add_space(Espaco::E12);
-                ui.add(Campo::novo("Descrição", &mut f.descricao).marcador("Aluguel da loja"));
-                ui.add_space(Espaco::E12);
-                SeletorOpcao::novo(
-                    if a_receber { "Cliente" } else { "Fornecedor" },
-                    &mut f.contraparte,
-                )
-                .opcoes(pessoas.clone())
-                .mostrar(ui);
-                ui.add_space(Espaco::E12);
-                SeletorOpcao::novo(
-                    if a_receber {
-                        "Conta de receita"
+    let fechar = Dialogo::nova("Nova recorrência").largura(720.0).mostrar(
+        ctx,
+        estado,
+        |ui, estado| {
+            let Dlg::NovaRecorrencia(f) = &mut estado.dlg else {
+                return;
+            };
+            ui.horizontal(|ui| {
+                for (rot, receber) in [("A pagar", false), ("A receber", true)] {
+                    let sel = f.a_receber == receber;
+                    let b = if sel {
+                        Botao::primario(rot)
                     } else {
-                        "Conta de despesa"
-                    },
-                    &mut f.conta,
-                )
-                .opcoes(contas.clone())
-                .placeholder("Escolha a conta do plano")
-                .mostrar(ui);
-                ui.add_space(Espaco::E12);
-                ui.columns(2, |c| {
-                    c[0].add(Campo::novo("Valor mensal", &mut f.valor).marcador("0,00"));
-                    SeletorOpcao::novo("Categoria (opcional)", &mut f.categoria)
-                        .opcoes(cats.clone())
-                        .placeholder("Sem categoria")
-                        .mostrar(&mut c[1]);
-                });
-                ui.add_space(Espaco::E12);
-                ui.horizontal(|ui| {
-                    ui.add(Rotulo::campo("Periodicidade"));
-                    for (rot, p) in [
-                        ("Mensal", PeriodoRec::Mensal),
-                        ("Semanal", PeriodoRec::Semanal),
-                        ("Anual", PeriodoRec::Anual),
-                    ] {
-                        let sel = f.periodicidade == p;
-                        let b = if sel {
-                            Botao::primario(rot)
-                        } else {
-                            Botao::fantasma(rot)
-                        };
-                        if ui.add(b).clicked() {
-                            f.periodicidade = p;
-                        }
-                    }
-                });
-                ui.add_space(Espaco::E12);
-                ui.columns(3, |c| {
-                    let rot_dia = match f.periodicidade {
-                        PeriodoRec::Semanal => "Dia da semana (0=dom)",
-                        _ => "Dia do mês",
+                        Botao::fantasma(rot)
                     };
-                    c[0].add(Campo::novo(rot_dia, &mut f.dia_referencia));
-                    c[1].add(Campo::novo("Início", &mut f.inicio).mascara(Mascara::Data));
-                    c[2].add(Campo::novo("Gerar com (dias)", &mut f.antecedencia));
-                });
-                ui.add_space(Espaco::E12);
-                ui.add(Campo::novo("Fim (opcional)", &mut f.fim).mascara(Mascara::Data));
-            },
-            |ui, estado| {
-                if ui.add(Botao::primario("Criar recorrência")).clicked() {
-                    criar_recorrencia(ui.ctx(), motor, sessao, estado);
+                    if ui.add(b).clicked() && !sel {
+                        f.a_receber = receber;
+                        f.contraparte = None;
+                        f.conta = None;
+                    }
                 }
-                if ui.add(Botao::secundario("Cancelar")).clicked() {
-                    estado.carregar_recorrencias(motor, sessao);
-                    estado.dlg = Dlg::Recorrencias;
+            });
+            ui.add_space(Espaco::E12);
+            ui.add(Campo::novo("Descrição", &mut f.descricao).marcador("Aluguel da loja"));
+            ui.add_space(Espaco::E12);
+            SeletorOpcao::novo(
+                if a_receber { "Cliente" } else { "Fornecedor" },
+                &mut f.contraparte,
+            )
+            .opcoes(pessoas.clone())
+            .mostrar(ui);
+            ui.add_space(Espaco::E12);
+            SeletorOpcao::novo(
+                if a_receber {
+                    "Conta de receita"
+                } else {
+                    "Conta de despesa"
+                },
+                &mut f.conta,
+            )
+            .opcoes(contas.clone())
+            .placeholder("Escolha a conta do plano")
+            .mostrar(ui);
+            ui.add_space(Espaco::E12);
+            ui.columns(2, |c| {
+                c[0].add(Campo::novo("Valor mensal", &mut f.valor).marcador("0,00"));
+                SeletorOpcao::novo("Categoria (opcional)", &mut f.categoria)
+                    .opcoes(cats.clone())
+                    .placeholder("Sem categoria")
+                    .mostrar(&mut c[1]);
+            });
+            ui.add_space(Espaco::E12);
+            ui.horizontal(|ui| {
+                ui.add(Rotulo::campo("Periodicidade"));
+                for (rot, p) in [
+                    ("Mensal", PeriodoRec::Mensal),
+                    ("Semanal", PeriodoRec::Semanal),
+                    ("Anual", PeriodoRec::Anual),
+                ] {
+                    let sel = f.periodicidade == p;
+                    let b = if sel {
+                        Botao::primario(rot)
+                    } else {
+                        Botao::fantasma(rot)
+                    };
+                    if ui.add(b).clicked() {
+                        f.periodicidade = p;
+                    }
                 }
-            },
-        );
+            });
+            ui.add_space(Espaco::E12);
+            ui.columns(3, |c| {
+                let rot_dia = match f.periodicidade {
+                    PeriodoRec::Semanal => "Dia da semana (0=dom)",
+                    _ => "Dia do mês",
+                };
+                c[0].add(Campo::novo(rot_dia, &mut f.dia_referencia));
+                c[1].add(Campo::novo("Início", &mut f.inicio).mascara(Mascara::Data));
+                c[2].add(Campo::novo("Gerar com (dias)", &mut f.antecedencia));
+            });
+            ui.add_space(Espaco::E12);
+            ui.add(Campo::novo("Fim (opcional)", &mut f.fim).mascara(Mascara::Data));
+        },
+        |ui, estado| {
+            if ui.add(Botao::primario("Criar recorrência")).clicked() {
+                criar_recorrencia(ui.ctx(), motor, sessao, estado);
+            }
+            if ui.add(Botao::secundario("Cancelar")).clicked() {
+                estado.carregar_recorrencias(motor, sessao);
+                estado.dlg = Dlg::Recorrencias;
+            }
+        },
+    );
     if fechar {
         estado.dlg = Dlg::Fechado;
     }
@@ -939,7 +943,11 @@ fn painel_visao(
     let (nr, vr) = estado.dash_venc_receber;
     let (np, vp) = estado.dash_venc_pagar;
     egui::Frame::none()
-        .fill(if np > 0 { cores.atencao_suave } else { cores.superficie_2 })
+        .fill(if np > 0 {
+            cores.atencao_suave
+        } else {
+            cores.superficie_2
+        })
         .rounding(Raio::ITEM)
         .inner_margin(egui::Margin::symmetric(Espaco::E12, Espaco::E8))
         .show(ui, |ui| {
@@ -947,19 +955,13 @@ fn painel_visao(
                 ui.add(Rotulo::campo("PRÓXIMOS 7 DIAS"));
                 ui.add_space(Espaco::E16);
                 ui.add(
-                    Rotulo::interface(format!(
-                        "{np} a pagar · {}",
-                        vp.formatar_com_simbolo()
-                    ))
-                    .cor(cores.negativo),
+                    Rotulo::interface(format!("{np} a pagar · {}", vp.formatar_com_simbolo()))
+                        .cor(cores.negativo),
                 );
                 ui.add_space(Espaco::E16);
                 ui.add(
-                    Rotulo::interface(format!(
-                        "{nr} a receber · {}",
-                        vr.formatar_com_simbolo()
-                    ))
-                    .cor(cores.positivo),
+                    Rotulo::interface(format!("{nr} a receber · {}", vr.formatar_com_simbolo()))
+                        .cor(cores.positivo),
                 );
             });
         });
@@ -967,7 +969,10 @@ fn painel_visao(
 
     ui.add(Rotulo::titulo_secao("Recebido × pago — últimos 6 meses"));
     ui.add_space(Espaco::E8);
-    let tem_dados = estado.serie.iter().any(|m| m.receita > 0.0 || m.custo > 0.0);
+    let tem_dados = estado
+        .serie
+        .iter()
+        .any(|m| m.receita > 0.0 || m.custo > 0.0);
     if tem_dados {
         let eixo: Vec<String> = estado.serie.iter().map(|m| m.rotulo.clone()).collect();
         let series = [
@@ -1052,7 +1057,11 @@ fn painel_fluxo(
             ui,
             "Saldo em caixa + bancos",
             saldo_total,
-            if saldo_total.e_negativo() { cores.negativo } else { cores.texto_forte },
+            if saldo_total.e_negativo() {
+                cores.negativo
+            } else {
+                cores.texto_forte
+            },
             Some("posição realizada agora"),
         );
     });
