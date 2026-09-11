@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/marca/cardeal-icone-256.png" alt="Cardeal" width="96" height="96">
+
 # Cardeal ERP
 
 **Um ERP brasileiro de código aberto escrito em Rust, com o financeiro no centro.**

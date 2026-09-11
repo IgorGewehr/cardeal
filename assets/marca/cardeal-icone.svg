@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <rect x="0" y="0" width="200" height="200" rx="44" fill="#EF443B"/>
+  <g fill="#FFFFFF">
+    <!-- tail: one solid wedge with a shallow notch for feather character -->
+    <path d="M 82 112 L 34 158 L 66 146 L 62 168 L 88 138 Z"/>
+    <!-- body -->
+    <ellipse cx="98" cy="118" rx="38" ry="46" transform="rotate(-24 98 118)"/>
+    <!-- crest, sitting on top of the head -->
+    <path d="M 118 58 L 107 26 L 131 55 Z"/>
+    <path d="M 129 56 L 137 19 L 149 55 Z"/>
+    <path d="M 141 55 L 157 28 L 161 57 Z"/>
+    <!-- head -->
+    <circle cx="138" cy="76" r="29"/>
+  </g>
+  <!-- wing crease -->
+  <path d="M 82 96 C 100 100, 108 118, 100 142 C 92 128, 82 114, 78 100 Z" fill="#EF443B" opacity="0.9"/>
+  <!-- beak -->
+  <path d="M 162 70 L 186 65 L 160 84 Z" fill="#2A2A2E"/>
+  <!-- eye -->
+  <circle cx="148" cy="68" r="6.5" fill="#EF443B"/>
+</svg>

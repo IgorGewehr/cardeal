@@ -106,34 +106,20 @@ fn pedido_ativacao() -> PedidoAtivacao {
 
 /// Ícone da janela — quadrado `rubro-500` com cantos arredondados, gerado em código
 /// (não há asset ainda). 48×48 RGBA.
+/// Bytes do PNG mestre da marca (cardeal geométrico em Rubro 500, ver `assets/marca/`) —
+/// embutidos no binário, decodificados uma vez no boot. Substitui o quadrado arredondado
+/// gerado por código que existia antes da marca ter sido desenhada.
+const LOGO_PNG: &[u8] = include_bytes!("../../../assets/marca/cardeal-icone-256.png");
+
 fn icone_janela() -> egui::IconData {
-    const L: usize = 48;
-    const R: f32 = 10.0;
-    let (cr, cg, cb) = (0xEF, 0x44, 0x3B); // Rubro::R500
-    let mut rgba = vec![0u8; L * L * 4];
-    for y in 0..L {
-        for x in 0..L {
-            let fx = (x as f32).min((L - 1 - x) as f32);
-            let fy = (y as f32).min((L - 1 - y) as f32);
-            let dentro = if fx >= R || fy >= R {
-                true
-            } else {
-                let (dx, dy) = (R - fx, R - fy);
-                dx * dx + dy * dy <= R * R
-            };
-            let i = (y * L + x) * 4;
-            if dentro {
-                rgba[i] = cr;
-                rgba[i + 1] = cg;
-                rgba[i + 2] = cb;
-                rgba[i + 3] = 255;
-            }
-        }
-    }
+    let img = image::load_from_memory(LOGO_PNG)
+        .expect("assets/marca/cardeal-icone-256.png deve ser um PNG válido")
+        .to_rgba8();
+    let (largura, altura) = img.dimensions();
     egui::IconData {
-        rgba,
-        width: L as u32,
-        height: L as u32,
+        rgba: img.into_raw(),
+        width: largura,
+        height: altura,
     }
 }
 

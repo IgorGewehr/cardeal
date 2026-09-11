@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 200">
+  <g transform="translate(0,0)">
+    <rect x="0" y="0" width="200" height="200" rx="44" fill="#EF443B"/>
+    <g fill="#FFFFFF">
+      <path d="M 82 112 L 34 158 L 66 146 L 62 168 L 88 138 Z"/>
+      <ellipse cx="98" cy="118" rx="38" ry="46" transform="rotate(-24 98 118)"/>
+      <path d="M 118 58 L 107 26 L 131 55 Z"/>
+      <path d="M 129 56 L 137 19 L 149 55 Z"/>
+      <path d="M 141 55 L 157 28 L 161 57 Z"/>
+      <circle cx="138" cy="76" r="29"/>
+    </g>
+    <path d="M 82 96 C 100 100, 108 118, 100 142 C 92 128, 82 114, 78 100 Z" fill="#EF443B" opacity="0.9"/>
+    <path d="M 162 70 L 186 65 L 160 84 Z" fill="#2A2A2E"/>
+    <circle cx="148" cy="68" r="6.5" fill="#EF443B"/>
+  </g>
+  <text x="228" y="128" font-family="'DejaVu Sans', 'Segoe UI', Arial, sans-serif" font-size="92" font-weight="700" fill="#18181B" letter-spacing="-1">Cardeal</text>
+</svg>
