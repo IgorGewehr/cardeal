@@ -29,3 +29,7 @@ cardeal.toml
 .idea/
 *.swp
 .DS_Store
+
+# Worktrees de agentes (Claude Code) — repositórios git próprios, nunca devem virar gitlink
+# dentro deste repo (aconteceu por acidente com um `git add -A` sem essa regra).
+.claude/worktrees/
