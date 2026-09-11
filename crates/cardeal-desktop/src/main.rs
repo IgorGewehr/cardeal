@@ -29,9 +29,46 @@ use cardeal_ui::organisms::{
 use cardeal_ui::tokens::{instalar_estilo, instalar_fontes, Espaco, Rubro, Tema, TemaUi};
 use eframe::egui;
 
+/// Diretório de dados persistente do app, por plataforma.
+///
+/// Antes disto caía em `std::env::temp_dir()` fora do Windows (a variável `APPDATA` só
+/// existe lá) — no Linux isso é tipicamente `/tmp`, que `systemd-tmpfiles` limpa
+/// periodicamente e sempre no reboot. Resultado: toda OS/venda/financeiro do usuário seria
+/// apagada no próximo reinício da máquina. Escrito à mão (em vez de puxar a crate `dirs`)
+/// porque são só três `cfg` e o projeto evita dependência nova quando ~15 linhas resolvem.
+fn diretorio_de_dados() -> PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        // Convenção do Windows: dados de app não-roaming ficam sob `%APPDATA%\<App>`.
+        let base = std::env::var_os("APPDATA").map_or_else(std::env::temp_dir, PathBuf::from);
+        base.join("Cardeal")
+    }
+    #[cfg(target_os = "macos")]
+    {
+        // Convenção do macOS: `~/Library/Application Support/<App>`.
+        let base = dirs_home().unwrap_or_else(std::env::temp_dir);
+        base.join("Library/Application Support/Cardeal")
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        // XDG Base Directory: `$XDG_DATA_HOME/cardeal`, ou `~/.local/share/cardeal` se a
+        // variável não estiver definida — sobrevive a reboot, não é limpo por tmpfiles.
+        let base = std::env::var_os("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .or_else(|| dirs_home().map(|h| h.join(".local/share")))
+            .unwrap_or_else(std::env::temp_dir);
+        base.join("cardeal")
+    }
+}
+
+/// `$HOME` do usuário atual, quando definido.
+#[cfg(not(target_os = "windows"))]
+fn dirs_home() -> Option<PathBuf> {
+    std::env::var_os("HOME").map(PathBuf::from)
+}
+
 fn caminho_da_base() -> PathBuf {
-    let base = std::env::var_os("APPDATA").map_or_else(std::env::temp_dir, PathBuf::from);
-    let dir = base.join("Cardeal");
+    let dir = diretorio_de_dados();
     let _ = std::fs::create_dir_all(&dir);
     dir.join("cardeal.db")
 }
@@ -798,5 +835,36 @@ impl eframe::App for App {
 
         // Toasts — por último, para ficar acima de tudo (inclusive de qualquer dialog).
         Notificacoes::mostrar(ctx);
+    }
+}
+
+#[cfg(all(test, not(target_os = "windows")))]
+mod testes_caminho_da_base {
+    use super::diretorio_de_dados;
+
+    // Um teste só, sequencial: `env::set_var` é global ao processo e `cargo test` roda
+    // testes em paralelo por padrão — dois testes mexendo em XDG_DATA_HOME/HOME ao mesmo
+    // tempo se atropelariam.
+    #[test]
+    fn resolve_por_xdg_e_por_home() {
+        // SAFETY: só este teste mexe nessas duas variáveis, e o faz sequencialmente.
+        unsafe {
+            std::env::set_var("XDG_DATA_HOME", "/tmp/cardeal-teste-xdg");
+            std::env::remove_var("HOME");
+        }
+        assert_eq!(
+            diretorio_de_dados(),
+            std::path::PathBuf::from("/tmp/cardeal-teste-xdg/cardeal")
+        );
+
+        // SAFETY: idem — sequencial dentro do mesmo teste.
+        unsafe {
+            std::env::remove_var("XDG_DATA_HOME");
+            std::env::set_var("HOME", "/tmp/cardeal-teste-home");
+        }
+        assert_eq!(
+            diretorio_de_dados(),
+            std::path::PathBuf::from("/tmp/cardeal-teste-home/.local/share/cardeal")
+        );
     }
 }
