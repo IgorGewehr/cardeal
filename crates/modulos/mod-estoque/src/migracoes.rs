@@ -99,6 +99,21 @@ CREATE UNIQUE INDEX estoque_produto_codigo_barras ON estoque_produto(empresa, co
     WHERE codigo_barras IS NOT NULL;
 ";
 
+// Migração v3 (2026-09-11): cadastro técnico de peça de microeletrônica (fabricante, MPN,
+// categoria, especificação, compatibilidade, garantia do fornecedor, localização física) —
+// pedido do usuário. Aditiva, todas as colunas NULL por padrão: linhas existentes continuam
+// válidas sem preencher nada. Nunca edite as migrações v1/v2 acima — o usuário já tem um
+// banco local de verdade rodando.
+const SQL_DETALHES_TECNICOS: &str = r"
+ALTER TABLE estoque_produto ADD COLUMN fabricante TEXT;
+ALTER TABLE estoque_produto ADD COLUMN codigo_fabricante TEXT;
+ALTER TABLE estoque_produto ADD COLUMN categoria_tecnica TEXT;
+ALTER TABLE estoque_produto ADD COLUMN especificacao_tecnica TEXT;
+ALTER TABLE estoque_produto ADD COLUMN compatibilidade TEXT;
+ALTER TABLE estoque_produto ADD COLUMN garantia_fornecedor_dias INTEGER;
+ALTER TABLE estoque_produto ADD COLUMN localizacao_fisica TEXT;
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -110,6 +125,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 2,
         nome: "estoque_produto_codigo_barras",
         sql: SQL_CODIGO_BARRAS,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 3,
+        nome: "estoque_produto_detalhes_tecnicos",
+        sql: SQL_DETALHES_TECNICOS,
         tipo: TipoMigracao::Esquema,
     },
 ];

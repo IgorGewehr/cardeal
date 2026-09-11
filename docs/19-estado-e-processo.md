@@ -37,6 +37,27 @@ garantia deliberada deste projeto (ver §4 e §7 sobre por quê isso importa tan
 
 **Total: 448 testes passando via `cargo test --workspace` (unit + integração SQLite + doctests). Tudo verde.** (Este número já refletia sessões posteriores a 409 antes mesmo da sessão de apontamento de tempo/analytics de 2026-09-11 chegar; ver as notas de sessão em cada linha da tabela para o que mudou desde então — mantido aqui só o total, para não reescrever cada linha retroativamente.)
 
+**Sessão paralela de 2026-09-11 (worktree isolado, `mod-os`/`mod-estoque` + dois dialogs de
+`cardeal-desktop`):** três pedidos do usuário atendidos em conjunto. **(A)** Abertura de OS
+passou a exigir só `cliente` + `defeito_relatado` (novo campo em `OrdemServico`, migração
+`os` v4, aditiva) — `equipamento` virou opcional; `EditarDadosDaOrdem` (novo comando) completa
+os dois depois, em qualquer estado não-terminal. `LaudoTecnico.descricao_problema` foi
+deliberadamente mantido como está (decisão registrada em `docs/modulos/os.md` §5) para não
+sair do escopo desta sessão (o dialog de detalhe de OS pertence à revisão geral de UI/UX,
+rodando em paralelo). **(B)** `mod-estoque::Produto` ganhou sete campos técnicos opcionais
+(`DetalhesTecnicos`: fabricante, MPN, categoria técnica, especificação, compatibilidade,
+garantia do fornecedor, localização física — migração `estoque` v3, aditiva) com
+`EditarDetalhesTecnicosProduto` (novo comando) para editar depois da criação. **(C)** Auditoria
+de integração fechou uma lacuna real de visibilidade: `mod-estoque::SaldoDisponivelDoProduto`
+(nova porta pública) + `mod-os::PecasAguardandoEstoque` (nova consulta) — cruza peça orçada
+e ainda não aplicada contra o saldo real do estoque, sem nunca ler tabela de outro módulo
+direto. `cargo test --workspace` foi de 450 (linha de base desta rodada de três agentes em
+paralelo) para **459** (9 testes novos: 7 em `mod-os`, 2 em `mod-estoque`), zero regressões.
+Consumidores fora do escopo direto tiveram que ser ajustados pontualmente para a assinatura
+nova de `OrdemServico::abrir`/`CriarProduto` (regra do projeto: nunca deixar
+`cargo check --workspace` quebrado) — `mod-orcamentos::ConverterOrcamentoEmOs` e o helper de
+teste de `cardeal-analytics::margem`.
+
 **Auditoria de produção (2026-09-06):** com o front-end já em construção contra este backend e
 uso real da assistência técnica prestes a começar, veio uma segunda rodada de revisão em
 `mod-financeiro`/`mod-clientes`/`mod-estoque`/`mod-os` — desta vez focada não em corretude

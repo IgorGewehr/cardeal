@@ -14,6 +14,7 @@ mod criar_grupo_produto;
 mod criar_local;
 mod criar_produto;
 mod criar_unidade;
+mod editar_detalhes_tecnicos_produto;
 mod registrar_entrada;
 mod registrar_saida;
 
@@ -22,6 +23,7 @@ pub use criar_grupo_produto::{CriarGrupoProduto, GrupoProdutoCriado};
 pub use criar_local::{CriarLocal, LocalCriado, TipoLocal};
 pub use criar_produto::{CriarProduto, ProdutoCriado};
 pub use criar_unidade::{CriarUnidade, UnidadeCriada};
+pub use editar_detalhes_tecnicos_produto::EditarDetalhesTecnicosProduto;
 pub use registrar_entrada::{EntradaRegistrada, RegistrarEntrada};
 pub use registrar_saida::{RegistrarSaida, SaidaRegistrada};
 

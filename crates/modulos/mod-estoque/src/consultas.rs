@@ -95,7 +95,9 @@ pub fn produto_por_codigo_barras(
 ) -> Resultado<Option<Produto>> {
     conexao
         .query_row(
-            "SELECT id, empresa, grupo_produto, nome, ncm, cest, codigo_barras,
+            "SELECT id, empresa, grupo_produto, nome, ncm, cest, codigo_barras, fabricante,
+                    codigo_fabricante, categoria_tecnica, especificacao_tecnica,
+                    compatibilidade, garantia_fornecedor_dias, localizacao_fisica,
                     controla_grade, controla_lote, controla_validade, unidade_padrao,
                     ponto_pedido, estoque_minimo, estoque_maximo, ativo, versao
              FROM estoque_produto WHERE empresa = ?1 AND codigo_barras = ?2",
@@ -198,6 +200,42 @@ impl Consulta for Unidades {
         linhas
             .collect::<rusqlite::Result<Vec<_>>>()
             .map_err(persist)
+    }
+}
+
+/// O saldo disponível de um produto somado entre todos os locais — versão "só este produto"
+/// de [`produtos_com_saldo`], para quem já tem o `Id` do produto e não precisa da lista
+/// inteira (ex.: `mod-os` cruzando itens de peça pendentes de aplicação contra o estoque
+/// real, via a porta pública desta consulta — nunca lendo `estoque_saldo_local` direto,
+/// `docs/contratos-internos.md` §7 regra 2).
+///
+/// # Errors
+/// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+pub fn saldo_disponivel_do_produto(conexao: &Connection, produto: Id) -> Resultado<Quantidade> {
+    let soma: i64 = conexao
+        .query_row(
+            "SELECT COALESCE(SUM(quantidade_disponivel), 0) FROM estoque_saldo_local
+             WHERE produto = ?1",
+            [blob(produto)],
+            |r| r.get(0),
+        )
+        .map_err(persist)?;
+    Ok(Quantidade::interna(soma))
+}
+
+/// Consulta o saldo disponível de um produto (somado entre locais).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct SaldoDisponivelDoProduto {
+    /// O produto.
+    pub produto: Id,
+}
+
+impl Consulta for SaldoDisponivelDoProduto {
+    type Saida = Quantidade;
+    const PERMISSAO: &'static str = "estoque.saldo.ver";
+
+    fn executar(self, _ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        saldo_disponivel_do_produto(conexao, self.produto)
     }
 }
 

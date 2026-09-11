@@ -53,12 +53,19 @@ impl Comando for ConverterOrcamentoEmOs {
         let itens = RepositorioOrcamentos::novo(uow).itens_do_orcamento(orcamento.id)?;
 
         // ── Abre a OS ───────────────────────────────────────────────────────
+        // `defeito_relatado` (obrigatório em `mod_os`) vem da descrição/escopo do orçamento
+        // quando houver; sem ela, o próprio assunto serve — nunca fica vazio.
+        let defeito_relatado = orcamento
+            .descricao
+            .clone()
+            .unwrap_or_else(|| orcamento.assunto.clone());
         let numero_os = RepositorioOs::novo(uow).proximo_numero()?;
         let mut os = OrdemServico::abrir(
             ctx.empresa,
             numero_os,
             cliente,
             orcamento.assunto.clone(),
+            defeito_relatado,
             self.tecnico_responsavel,
             ctx.hoje(),
             self.garantia_dias,

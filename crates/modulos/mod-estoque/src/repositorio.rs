@@ -133,10 +133,14 @@ impl<'a, 'b> RepositorioEstoque<'a, 'b> {
         self.conn()
             .execute(
                 "INSERT INTO estoque_produto
-                   (id, empresa, grupo_produto, nome, ncm, cest, codigo_barras, controla_grade,
-                    controla_lote, controla_validade, unidade_padrao, ponto_pedido,
-                    estoque_minimo, estoque_maximo, ativo, versao)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
+                   (id, empresa, grupo_produto, nome, ncm, cest, codigo_barras, fabricante,
+                    codigo_fabricante, categoria_tecnica, especificacao_tecnica,
+                    compatibilidade, garantia_fornecedor_dias, localizacao_fisica,
+                    controla_grade, controla_lote, controla_validade, unidade_padrao,
+                    ponto_pedido, estoque_minimo, estoque_maximo, ativo, versao)
+                 VALUES
+                   (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,
+                    ?22,?23)",
                 params![
                     blob(p.id),
                     blob(p.empresa),
@@ -145,6 +149,13 @@ impl<'a, 'b> RepositorioEstoque<'a, 'b> {
                     p.ncm,
                     p.cest,
                     p.codigo_barras,
+                    p.fabricante,
+                    p.codigo_fabricante,
+                    p.categoria_tecnica,
+                    p.especificacao_tecnica,
+                    p.compatibilidade,
+                    p.garantia_fornecedor_dias.map(i64::from),
+                    p.localizacao_fisica,
                     i64::from(p.controla_grade),
                     i64::from(p.controla_lote),
                     i64::from(p.controla_validade),
@@ -160,6 +171,35 @@ impl<'a, 'b> RepositorioEstoque<'a, 'b> {
         Ok(())
     }
 
+    /// Regrava só os detalhes técnicos de um produto já cadastrado (fabricante, MPN,
+    /// categoria, especificação, compatibilidade, garantia do fornecedor, localização
+    /// física) — nome/NCM/código de barras continuam sem comando de edição nesta fatia.
+    ///
+    /// # Errors
+    /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+    pub fn atualizar_detalhes_tecnicos(&mut self, p: &Produto) -> Resultado<()> {
+        self.conn()
+            .execute(
+                "UPDATE estoque_produto
+                 SET fabricante = ?2, codigo_fabricante = ?3, categoria_tecnica = ?4,
+                     especificacao_tecnica = ?5, compatibilidade = ?6,
+                     garantia_fornecedor_dias = ?7, localizacao_fisica = ?8
+                 WHERE id = ?1",
+                params![
+                    blob(p.id),
+                    p.fabricante,
+                    p.codigo_fabricante,
+                    p.categoria_tecnica,
+                    p.especificacao_tecnica,
+                    p.compatibilidade,
+                    p.garantia_fornecedor_dias.map(i64::from),
+                    p.localizacao_fisica,
+                ],
+            )
+            .map_err(persist)?;
+        Ok(())
+    }
+
     /// Busca um produto pelo id. `Ok(None)` = não existe.
     ///
     /// # Errors
@@ -167,7 +207,9 @@ impl<'a, 'b> RepositorioEstoque<'a, 'b> {
     pub fn buscar_produto(&self, id: Id) -> Resultado<Option<Produto>> {
         self.conn()
             .query_row(
-                "SELECT id, empresa, grupo_produto, nome, ncm, cest, codigo_barras,
+                "SELECT id, empresa, grupo_produto, nome, ncm, cest, codigo_barras, fabricante,
+                        codigo_fabricante, categoria_tecnica, especificacao_tecnica,
+                        compatibilidade, garantia_fornecedor_dias, localizacao_fisica,
                         controla_grade, controla_lote, controla_validade, unidade_padrao,
                         ponto_pedido, estoque_minimo, estoque_maximo, ativo, versao
                  FROM estoque_produto WHERE id = ?1",
@@ -344,15 +386,24 @@ pub(crate) fn produto_de_linha(r: &rusqlite::Row<'_>) -> rusqlite::Result<Produt
         ncm: r.get(4)?,
         cest: r.get::<_, Option<String>>(5)?,
         codigo_barras: r.get::<_, Option<String>>(6)?,
-        controla_grade: r.get::<_, i64>(7)? != 0,
-        controla_lote: r.get::<_, i64>(8)? != 0,
-        controla_validade: r.get::<_, i64>(9)? != 0,
-        unidade_padrao: id_de(r.get::<_, Vec<u8>>(10)?),
-        ponto_pedido: r.get::<_, Option<i64>>(11)?.map(Quantidade::interna),
-        estoque_minimo: r.get::<_, Option<i64>>(12)?.map(Quantidade::interna),
-        estoque_maximo: r.get::<_, Option<i64>>(13)?.map(Quantidade::interna),
-        ativo: r.get::<_, i64>(14)? != 0,
-        versao: versao_de(r.get::<_, i64>(15)?),
+        fabricante: r.get::<_, Option<String>>(7)?,
+        codigo_fabricante: r.get::<_, Option<String>>(8)?,
+        categoria_tecnica: r.get::<_, Option<String>>(9)?,
+        especificacao_tecnica: r.get::<_, Option<String>>(10)?,
+        compatibilidade: r.get::<_, Option<String>>(11)?,
+        garantia_fornecedor_dias: r
+            .get::<_, Option<i64>>(12)?
+            .map(|v| u16::try_from(v).unwrap_or(0)),
+        localizacao_fisica: r.get::<_, Option<String>>(13)?,
+        controla_grade: r.get::<_, i64>(14)? != 0,
+        controla_lote: r.get::<_, i64>(15)? != 0,
+        controla_validade: r.get::<_, i64>(16)? != 0,
+        unidade_padrao: id_de(r.get::<_, Vec<u8>>(17)?),
+        ponto_pedido: r.get::<_, Option<i64>>(18)?.map(Quantidade::interna),
+        estoque_minimo: r.get::<_, Option<i64>>(19)?.map(Quantidade::interna),
+        estoque_maximo: r.get::<_, Option<i64>>(20)?.map(Quantidade::interna),
+        ativo: r.get::<_, i64>(21)? != 0,
+        versao: versao_de(r.get::<_, i64>(22)?),
     })
 }
 

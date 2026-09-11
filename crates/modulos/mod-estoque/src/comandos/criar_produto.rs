@@ -5,7 +5,7 @@ use cardeal_modkit::{Comando, Ctx, Risco};
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
-use crate::produto::Produto;
+use crate::produto::{DetalhesTecnicos, Produto};
 use crate::repositorio::RepositorioEstoque;
 
 /// Cadastra um produto.
@@ -21,6 +21,11 @@ pub struct CriarProduto {
     pub unidade_padrao: Id,
     /// Código de barras (GTIN), quando o produto tem um impresso.
     pub codigo_barras: Option<String>,
+    /// Detalhes técnicos opcionais (fabricante, MPN, categoria, especificação,
+    /// compatibilidade, garantia do fornecedor, localização física) — cadastro rápido
+    /// continua exigindo só nome/NCM/unidade; isto é para quem quer detalhar a peça de
+    /// microeletrônica na hora.
+    pub detalhes_tecnicos: Option<DetalhesTecnicos>,
 }
 
 /// O que o comando devolve.
@@ -49,6 +54,9 @@ impl Comando for CriarProduto {
             produto = produto
                 .com_codigo_barras(gtin)
                 .map_err(|e| Erro::de_dominio(&e))?;
+        }
+        if let Some(detalhes) = self.detalhes_tecnicos {
+            produto = produto.com_detalhes_tecnicos(detalhes);
         }
 
         // 4. Persistir.

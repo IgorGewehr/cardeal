@@ -37,8 +37,8 @@
 
 | Entidade | Campos principais | Observações |
 |---|---|---|
-| **OrdemServico** | `id`, `empresa`, `numero`, `cliente`, `equipamento`(String), `data_abertura`(Data), `tecnico_responsavel`, `compromisso`(Id de `agenda_compromisso`), `estado`, `garantia_dias`(Quantidade inteiro), `valor_total`(Dinheiro), `versao` | ver §4 para `estado` |
-| **LaudoTecnico** | `id`, `ordem_servico`, `descricao_problema`(String), `diagnostico`(String), `tecnico`, `criado_em`(Instante) | |
+| **OrdemServico** | `id`, `empresa`, `numero`, `cliente`, `equipamento`(String, **opcional**), `defeito_relatado`(String, **obrigatório**), `data_abertura`(Data), `tecnico_responsavel`, `compromisso`(Id de `agenda_compromisso`), `estado`, `garantia_dias`(Quantidade inteiro), `valor_total`(Dinheiro), `versao` | ver §4 para `estado`. `defeito_relatado` ✅ (2026-09-11, pedido explícito do usuário) é o que o cliente relatou querer resolver, capturado **na recepção** — junto do nome do cliente, o único texto obrigatório para abrir a OS; `equipamento` virou opcional (completável depois via `EditarDadosDaOrdem`) |
+| **LaudoTecnico** | `id`, `ordem_servico`, `descricao_problema`(String), `diagnostico`(String), `tecnico`, `criado_em`(Instante) | `descricao_problema` foi **mantido como está** na sessão de 2026-09-11 mesmo com `OrdemServico.defeito_relatado` cobrindo o mesmo papel — ver nota ao fim de §5 |
 | **ItemPeca** | `id`, `ordem_servico`, `produto`, `quantidade`(Quantidade), `preco_unitario`(Preco), `custo_unitario`(Preco), `coberto_garantia`(enum) | `coberto_garantia = Sim` não gera receita |
 | **ItemMaoDeObra** | `id`, `ordem_servico`, `descricao`(String), `valor`(Dinheiro), `tecnico`, `horas`(Quantidade) | isto é a mão de obra **orçada/cobrada** do cliente — não confundir com `ApontamentoDeTempo`, o relógio de ponto real |
 | **Reincidencia** | `id`, `ordem_nova`, `ordem_anterior`, `dias_entre`(Quantidade inteiro), `coberto_garantia`(enum) | vincula OS repetida do mesmo equipamento — ainda não implementada (`AcionarGarantia`) |
@@ -65,7 +65,8 @@ stateDiagram-v2
 
 | Comando | Permissão | Risco | O que faz | Erros possíveis |
 |---|---|---|---|---|
-| `AbrirOrdemServico` ✅ | `os.ordem.criar` | Baixo | Numera e abre a OS. O vínculo com `agenda.CriarCompromisso` fica para quando o módulo `agenda` existir — `compromisso` não é gravado ainda | — |
+| `AbrirOrdemServico` ✅ | `os.ordem.criar` | Baixo | Numera e abre a OS. **Só `cliente` + `defeito_relatado` são obrigatórios** (2026-09-11); `equipamento` pode vir vazio. O vínculo com `agenda.CriarCompromisso` fica para quando o módulo `agenda` existir — `compromisso` não é gravado ainda | `DefeitoRelatadoVazio` |
+| `EditarDadosDaOrdem` ✅ (novo, 2026-09-11) | `os.ordem.editar_dados` | Baixo | Completa/corrige `equipamento` e/ou complementa `defeito_relatado` (nunca sobrescreve — soma ao relato original) depois da abertura, em qualquer estado não-terminal | `NadaParaAtualizar`, `OrdemFinalizada`, `DefeitoRelatadoVazio` |
 | `RegistrarLaudo` ✅ | `os.laudo.registrar` | Baixo | Chamável de novo enquanto `EmDiagnostico`, para corrigir um laudo digitado errado — sobrescreve o texto, não transiciona de novo; a consulta sempre lê o laudo mais recente | — |
 | `MontarOrcamentoOs` ✅ | `os.orcamento.montar` | Baixo | Chamado uma vez por item (`ItemOrcamentoNovo::Peca`/`MaoDeObra`); soma ao `valor_total` e incrementa `itens_orcamento` | — |
 | `RemoverItemOrcamento` ✅ (não estava no spec original) | `os.orcamento.montar` | Baixo | Remove um item digitado errado antes da aprovação, sem precisar cancelar a OS inteira | `EstadoInvalido` |
@@ -111,6 +112,20 @@ stateDiagram-v2
 > `HistoricoDoEquipamento` — este por similaridade de texto do equipamento, limiar 0,5) e
 > adicionada `financeiro.titulo_da_origem.v1` (novo, em `mod-financeiro`) para a UI de OS
 > mostrar qual título foi gerado ao faturar, sem `os` nunca ler `financeiro_titulo` direto.
+>
+> **Nota (2026-09-11, sessão seguinte) — abertura mínima e visibilidade de estoque:** pedido
+> explícito do usuário — "de obrigatório só o nome, [...] problema relatado" — abrir uma OS
+> passou a exigir só `cliente` + `defeito_relatado` (migração v4, `os_ordem_servico.
+> defeito_relatado TEXT NOT NULL DEFAULT ''`, aditiva); `equipamento` virou opcional. Decisão
+> registrada: `LaudoTecnico.descricao_problema` **não** foi removido/renomeado — o parecer
+> técnico continua um campo separado, sem invariante nova, e mexer nele tocaria a tela de
+> detalhe da OS fora do escopo desta sessão; a duplicação latente não causa dano (o campo só
+> deixou de ser a única fonte do relato do cliente). `EditarDadosDaOrdem` (novo) completa
+> equipamento/defeito relatado depois, em qualquer estado não-terminal. Auditoria de
+> integração também fechou uma lacuna real: **`PecasAguardandoEstoque`** (§6) cruza os itens
+> de peça orçados e ainda não aplicados contra o saldo real do estoque (via a porta pública
+> `mod_estoque::saldo_disponivel_do_produto`, nova) — antes, só dava para descobrir que uma OS
+> estava parada esperando peça abrindo a OS e o produto em telas separadas.
 
 ## 6. Consultas
 
@@ -123,6 +138,7 @@ stateDiagram-v2
 | `ApontamentosDaOrdem` ✅ (novo) | `os.ordem.ver` | Histórico de apontamento no detalhe da OS | `os_apontamento_tempo(ordem_servico)` |
 | `TempoTotalDaOrdem` ✅ (novo) | `os.ordem.ver` | Tempo acumulado no detalhe da OS — só soma apontamentos **encerrados** | idem |
 | `TempoPorTecnicoNoPeriodo` ✅ (novo) | `os.ordem.ver` | Produtividade por técnico (`cardeal-analytics`) | `os_apontamento_tempo(tecnico, inicio)` |
+| `PecasAguardandoEstoque` ✅ (novo, 2026-09-11 — auditoria de integração) | `os.ordem.ver` | Radar de "OS parada esperando peça": peça orçada, ainda não aplicada, cujo saldo disponível no estoque não cobre a quantidade pedida — cruza `os_item_peca`/`os_ordem_servico` com `mod_estoque::saldo_disponivel_do_produto` (porta pública nova, nunca lê `estoque_saldo_local` direto) | varredura de `os_item_peca(aplicada)` por ordem não finalizada, uma consulta de saldo por produto |
 | `TaxaDeReincidencia` | `os.garantia.ver` | Relatório de qualidade técnica | `os_reincidencia(ordem_anterior)` — ainda não implementada, depende de `AcionarGarantia` |
 
 ## 7. Receituário contábil
@@ -148,6 +164,7 @@ está ocupado.
 | Chave | Descrição | Risco |
 |---|---|---|
 | `os.ordem.ver` / `.criar` | Consultar/abrir OS | Baixo |
+| `os.ordem.editar_dados` | Completar/corrigir equipamento e defeito relatado | Baixo |
 | `os.laudo.registrar` | Registrar laudo técnico | Baixo |
 | `os.orcamento.montar` / `.enviar` | Montar e enviar orçamento | Baixo |
 | `os.orcamento.aprovar` | Registrar aprovação/reprovação do cliente | Médio |
@@ -235,6 +252,7 @@ CREATE TABLE os_ordem_servico (
     numero               INTEGER NOT NULL,
     cliente              BLOB    NOT NULL,
     equipamento          TEXT    NOT NULL,
+    defeito_relatado     TEXT    NOT NULL DEFAULT '',  -- migração v4, ver nota abaixo
     data_abertura        INTEGER NOT NULL,
     tecnico_responsavel  BLOB    NOT NULL,
     compromisso          BLOB,
@@ -300,6 +318,11 @@ CREATE TABLE os_apontamento_tempo (
 ) STRICT;
 CREATE INDEX os_apontamento_ordem ON os_apontamento_tempo(ordem_servico);
 CREATE INDEX os_apontamento_tecnico_aberto ON os_apontamento_tempo(tecnico, fim);
+
+-- Migração v4 (2026-09-11): defeito relatado pelo cliente, capturado na recepção — pedido
+-- explícito do usuário. Aditiva (DEFAULT '' preenche as linhas existentes); nunca altere as
+-- migrações v1-v3 acima, o usuário já tem um banco local de verdade rodando.
+ALTER TABLE os_ordem_servico ADD COLUMN defeito_relatado TEXT NOT NULL DEFAULT '';
 ```
 
 ## 14. Apontamento de tempo e lucratividade (`cardeal-analytics`)

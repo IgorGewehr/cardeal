@@ -96,16 +96,17 @@ impl<'a, 'b> RepositorioOs<'a, 'b> {
         self.conn()
             .execute(
                 "INSERT INTO os_ordem_servico
-                   (id, empresa, numero, cliente, equipamento, data_abertura,
+                   (id, empresa, numero, cliente, equipamento, defeito_relatado, data_abertura,
                     tecnico_responsavel, estado, aprovado_por, garantia_dias, valor_total,
                     itens_orcamento, versao)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
                 params![
                     blob(os.id),
                     blob(os.empresa),
                     i64::try_from(os.numero).unwrap_or(i64::MAX),
                     blob(os.cliente),
                     os.equipamento,
+                    os.defeito_relatado,
                     dias(os.data_abertura),
                     blob(os.tecnico_responsavel),
                     estado_txt(os.estado),
@@ -120,7 +121,8 @@ impl<'a, 'b> RepositorioOs<'a, 'b> {
         Ok(())
     }
 
-    /// Regrava uma ordem de serviço (transição de estado, total atualizado).
+    /// Regrava uma ordem de serviço (transição de estado, total atualizado, equipamento e/ou
+    /// defeito relatado completados via `EditarDadosDaOrdem`).
     ///
     /// # Errors
     /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
@@ -128,11 +130,13 @@ impl<'a, 'b> RepositorioOs<'a, 'b> {
         self.conn()
             .execute(
                 "UPDATE os_ordem_servico
-                 SET estado = ?2, aprovado_por = ?3, valor_total = ?4, itens_orcamento = ?5,
-                     versao = ?6
+                 SET equipamento = ?2, defeito_relatado = ?3, estado = ?4, aprovado_por = ?5,
+                     valor_total = ?6, itens_orcamento = ?7, versao = ?8
                  WHERE id = ?1",
                 params![
                     blob(os.id),
+                    os.equipamento,
+                    os.defeito_relatado,
                     estado_txt(os.estado),
                     os.aprovado_por,
                     os.valor_total.em_centavos(),
@@ -430,14 +434,15 @@ pub(crate) fn ordem_de_linha(r: &rusqlite::Row<'_>) -> rusqlite::Result<OrdemSer
         numero: u64::try_from(r.get::<_, i64>(2)?).unwrap_or(0),
         cliente: id_de(r.get::<_, Vec<u8>>(3)?),
         equipamento: r.get(4)?,
-        data_abertura: data_de(r.get::<_, i64>(5)?),
-        tecnico_responsavel: id_de(r.get::<_, Vec<u8>>(6)?),
-        estado: estado_de(&r.get::<_, String>(7)?),
-        aprovado_por: r.get::<_, Option<String>>(8)?,
-        garantia_dias: u16::try_from(r.get::<_, i64>(9)?).unwrap_or(0),
-        valor_total: Dinheiro::centavos(r.get::<_, i64>(10)?),
-        itens_orcamento: u32::try_from(r.get::<_, i64>(11)?).unwrap_or(0),
-        versao: versao_de(r.get::<_, i64>(12)?),
+        defeito_relatado: r.get(5)?,
+        data_abertura: data_de(r.get::<_, i64>(6)?),
+        tecnico_responsavel: id_de(r.get::<_, Vec<u8>>(7)?),
+        estado: estado_de(&r.get::<_, String>(8)?),
+        aprovado_por: r.get::<_, Option<String>>(9)?,
+        garantia_dias: u16::try_from(r.get::<_, i64>(10)?).unwrap_or(0),
+        valor_total: Dinheiro::centavos(r.get::<_, i64>(11)?),
+        itens_orcamento: u32::try_from(r.get::<_, i64>(12)?).unwrap_or(0),
+        versao: versao_de(r.get::<_, i64>(13)?),
     })
 }
 

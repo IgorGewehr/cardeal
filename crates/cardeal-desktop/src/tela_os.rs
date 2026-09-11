@@ -15,8 +15,9 @@ use cardeal_ui::organisms::{notificar, ColunaGrade, Dialogo, Grade, LayoutTela, 
 use cardeal_ui::tokens::{Espaco, TemaUi};
 use eframe::egui;
 use mod_clientes::{
-    CriarPessoa, ItemPessoa, Papel as PapelCliente, PessoaCadastrada, PessoasPorPapel,
-    TipoDocumento, TipoPessoa,
+    AdicionarContato, ContatoInicial, CriarPessoa, EnderecoInicial, ItemPessoa,
+    Papel as PapelCliente, PessoaCadastrada, PessoasPorPapel, TipoContato, TipoDocumento,
+    TipoEndereco, TipoPessoa,
 };
 use mod_estoque::{ItemProdutoComSaldo, ProdutosComSaldo};
 use mod_financeiro::{Titulo, TituloDaOrigem};
@@ -38,8 +39,23 @@ enum Dlg {
         cliente_novo: bool,
         cliente_sel: Option<Id>,
         nome: String,
-        cpf: String,
+        /// CPF ou CNPJ — opcional (pedido do usuário: só o nome do cliente é obrigatório).
+        documento: String,
+        /// Telefone/WhatsApp — opcional.
+        telefone: String,
+        /// E-mail — opcional.
+        email: String,
+        end_logradouro: String,
+        end_numero: String,
+        end_bairro: String,
+        end_cidade: String,
+        end_uf: String,
+        end_cep: String,
+        /// Descrição livre do equipamento — opcional (completável depois na edição da OS).
         equipamento: String,
+        /// O que o cliente relatou querer resolver — **obrigatório** (junto do nome do
+        /// cliente, o único campo que a abertura exige).
+        defeito_relatado: String,
     },
     Detalhe,
 }
@@ -50,8 +66,17 @@ impl Dlg {
             cliente_novo: false,
             cliente_sel: None,
             nome: String::new(),
-            cpf: String::new(),
+            documento: String::new(),
+            telefone: String::new(),
+            email: String::new(),
+            end_logradouro: String::new(),
+            end_numero: String::new(),
+            end_bairro: String::new(),
+            end_cidade: String::new(),
+            end_uf: String::new(),
+            end_cep: String::new(),
             equipamento: String::new(),
+            defeito_relatado: String::new(),
         }
     }
 }
@@ -430,8 +455,17 @@ fn dialogo_nova(
                     cliente_novo,
                     cliente_sel,
                     nome,
-                    cpf,
+                    documento,
+                    telefone,
+                    email,
+                    end_logradouro,
+                    end_numero,
+                    end_bairro,
+                    end_cidade,
+                    end_uf,
+                    end_cep,
                     equipamento,
+                    defeito_relatado,
                 } = &mut estado.dlg
                 else {
                     return;
@@ -458,13 +492,35 @@ fn dialogo_nova(
                 ui.add_space(Espaco::E12);
 
                 if *cliente_novo {
+                    // Só o nome é obrigatório — documento, telefone, e-mail e endereço são
+                    // opcionais (pedido do usuário: "de obrigatório só o nome").
                     ui.columns(2, |c| {
                         c[0].add(Campo::novo("Nome do cliente", nome));
                         c[1].add(
-                            Campo::novo("CPF do cliente", cpf)
+                            Campo::novo("Documento (opcional)", documento)
                                 .mascara(Mascara::Documento)
-                                .marcador("000.000.000-00"),
+                                .marcador("CPF ou CNPJ"),
                         );
+                    });
+                    ui.add_space(Espaco::E8);
+                    ui.columns(2, |c| {
+                        c[0].add(Campo::novo("Telefone/WhatsApp (opcional)", telefone));
+                        c[1].add(Campo::novo("E-mail (opcional)", email));
+                    });
+                    ui.add_space(Espaco::E8);
+                    ui.add(Rotulo::campo("Endereço (opcional)"));
+                    ui.add_space(Espaco::E4);
+                    ui.columns(2, |c| {
+                        c[0].add(Campo::novo("Logradouro", end_logradouro));
+                        c[1].add(Campo::novo("Número", end_numero));
+                    });
+                    ui.columns(2, |c| {
+                        c[0].add(Campo::novo("Bairro", end_bairro));
+                        c[1].add(Campo::novo("Cidade", end_cidade));
+                    });
+                    ui.columns(2, |c| {
+                        c[0].add(Campo::novo("UF", end_uf).marcador("MG"));
+                        c[1].add(Campo::novo("CEP", end_cep).marcador("00000-000"));
                     });
                 } else {
                     SeletorOpcao::novo("Cliente", cliente_sel)
@@ -472,9 +528,20 @@ fn dialogo_nova(
                         .placeholder("Buscar cliente cadastrado…")
                         .mostrar(ui);
                 }
+                ui.add_space(Espaco::E16);
+                ui.separator();
                 ui.add_space(Espaco::E12);
                 ui.add(
-                    Campo::novo("Equipamento", equipamento).marcador("ex.: Furadeira Bosch GSB 13"),
+                    Campo::novo(
+                        "Defeito relatado — o que o cliente quer resolver",
+                        defeito_relatado,
+                    )
+                    .marcador("ex.: não liga, tela quebrada, não carrega"),
+                );
+                ui.add_space(Espaco::E8);
+                ui.add(
+                    Campo::novo("Equipamento (opcional)", equipamento)
+                        .marcador("ex.: Furadeira Bosch GSB 13 — pode completar depois"),
                 );
             },
             |ui, estado| {
@@ -501,16 +568,76 @@ fn abrir_os(
         cliente_novo,
         cliente_sel,
         nome,
-        cpf,
+        documento,
+        telefone,
+        email,
+        end_logradouro,
+        end_numero,
+        end_bairro,
+        end_cidade,
+        end_uf,
+        end_cep,
         equipamento,
+        defeito_relatado,
     } = &estado.dlg
     else {
         return;
     };
     let (cliente_novo, cliente_sel) = (*cliente_novo, *cliente_sel);
-    let (nome, cpf, equipamento) = (nome.clone(), cpf.clone(), equipamento.clone());
+    let nome = nome.clone();
+    let documento = documento.clone();
+    let telefone = telefone.clone();
+    let email = email.clone();
+    let end_logradouro = end_logradouro.clone();
+    let end_numero = end_numero.clone();
+    let end_bairro = end_bairro.clone();
+    let end_cidade = end_cidade.clone();
+    let end_uf = end_uf.clone();
+    let end_cep = end_cep.clone();
+    let equipamento = equipamento.clone();
+    let defeito_relatado = defeito_relatado.clone();
+
+    if defeito_relatado.trim().is_empty() {
+        notificar(
+            ctx,
+            Notificacao::aviso("Informe o defeito relatado pelo cliente."),
+        );
+        return;
+    }
 
     let cliente_id = if cliente_novo {
+        if nome.trim().is_empty() {
+            notificar(ctx, Notificacao::aviso("Informe o nome do cliente."));
+            return;
+        }
+        let digitos_doc: String = documento.chars().filter(char::is_ascii_digit).collect();
+        let endereco = (!end_logradouro.trim().is_empty()).then(|| EnderecoInicial {
+            tipo: TipoEndereco::Residencial,
+            logradouro: end_logradouro,
+            numero: end_numero,
+            complemento: None,
+            bairro: end_bairro,
+            cidade: end_cidade,
+            uf: end_uf,
+            cep: end_cep,
+        });
+        // `CriarPessoa` só aceita um contato inicial — quando telefone E e-mail vêm
+        // preenchidos, o telefone entra na criação e o e-mail via `AdicionarContato` logo
+        // depois.
+        let contato_inicial = if !telefone.trim().is_empty() {
+            Some(ContatoInicial {
+                tipo: TipoContato::Whatsapp,
+                valor: telefone.clone(),
+            })
+        } else if !email.trim().is_empty() {
+            Some(ContatoInicial {
+                tipo: TipoContato::Email,
+                valor: email.clone(),
+            })
+        } else {
+            None
+        };
+
         let r = motor.executar(
             sessao,
             "clientes.criar_pessoa.v1",
@@ -519,14 +646,18 @@ fn abrir_os(
                 nome,
                 nome_fantasia: None,
                 papel_inicial: PapelCliente::Cliente,
-                documento_tipo: (!cpf.trim().is_empty()).then_some(TipoDocumento::Cpf),
-                documento_numero: (!cpf.trim().is_empty()).then(|| cpf.clone()),
+                documento_tipo: (!digitos_doc.is_empty()).then_some(if digitos_doc.len() == 14 {
+                    TipoDocumento::Cnpj
+                } else {
+                    TipoDocumento::Cpf
+                }),
+                documento_numero: (!digitos_doc.is_empty()).then_some(documento),
                 data_nascimento: None,
-                endereco: None,
-                contato: None,
+                endereco,
+                contato: contato_inicial,
             },
         );
-        match r {
+        let pessoa = match r {
             Ok(c) => {
                 let c: PessoaCadastrada = c;
                 c.pessoa
@@ -535,7 +666,28 @@ fn abrir_os(
                 notificar(ctx, Notificacao::erro(e.mensagem));
                 return;
             }
+        };
+
+        if !telefone.trim().is_empty() && !email.trim().is_empty() {
+            if let Err(e) = motor.executar(
+                sessao,
+                "clientes.adicionar_contato.v1",
+                &AdicionarContato {
+                    pessoa,
+                    tipo: TipoContato::Email,
+                    valor: email,
+                    principal: true,
+                },
+            ) {
+                notificar(
+                    ctx,
+                    Notificacao::aviso("Cliente criado, mas o e-mail não foi salvo")
+                        .detalhe(e.mensagem),
+                );
+            }
         }
+
+        pessoa
     } else if let Some(id) = cliente_sel {
         id
     } else {
@@ -552,6 +704,7 @@ fn abrir_os(
         &AbrirOrdemServico {
             cliente: cliente_id,
             equipamento,
+            defeito_relatado,
             tecnico_responsavel: sessao.usuario(),
             garantia_dias: 90,
         },
@@ -1181,10 +1334,16 @@ fn gerar_pdf(ctx: &egui::Context, estado: &EstadoTelaOs, d: &DetalheOrdem) {
         cliente_contato: String::new(),
         equipamento: os.equipamento.clone(),
         data_abertura: os.data_abertura,
-        defeito_relatado: d
-            .laudo
-            .as_ref()
-            .map_or_else(String::new, |l| l.descricao_problema.clone()),
+        // O defeito relatado agora é capturado na abertura (`OrdemServico::defeito_relatado`,
+        // obrigatório) — o laudo só entra como respaldo para uma OS aberta antes desta versão
+        // (migração aditiva, coluna nova preenchida com "" nas linhas antigas).
+        defeito_relatado: if os.defeito_relatado.trim().is_empty() {
+            d.laudo
+                .as_ref()
+                .map_or_else(String::new, |l| l.descricao_problema.clone())
+        } else {
+            os.defeito_relatado.clone()
+        },
         diagnostico: d
             .laudo
             .as_ref()

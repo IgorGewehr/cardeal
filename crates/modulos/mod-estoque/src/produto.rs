@@ -29,6 +29,33 @@ pub struct Produto {
     /// Código de barras (GTIN — EAN-8/12/13/14), validado por dígito verificador. `None`
     /// para produtos sem código impresso (peça avulsa, serviço).
     pub codigo_barras: Option<String>,
+    /// Fabricante da peça (ex.: "Texas Instruments", "Samsung SDI") — quem fabrica, não quem
+    /// vende. Cadastro técnico de microeletrônica (§3): todos os campos abaixo são
+    /// opcionais e "state of art" para peça de conserto (IC, capacitor, conector, tela,
+    /// bateria, fonte), não para o catálogo genérico.
+    pub fabricante: Option<String>,
+    /// Código/part number do fabricante (MPN) — o identificador que bate com o datasheet;
+    /// diferente do [`Produto::codigo_barras`] (que é do distribuidor/embalagem, não da peça
+    /// em si).
+    pub codigo_fabricante: Option<String>,
+    /// Categoria técnica livre (ex.: "IC", "capacitor", "conector", "tela", "bateria",
+    /// "fonte") — uma etiqueta rápida de bancada para filtrar por tipo de componente;
+    /// **não** substitui [`Produto::grupo_produto`] (que é hierárquico e carrega o perfil
+    /// tributário).
+    pub categoria_tecnica: Option<String>,
+    /// Resumo técnico/datasheet em texto livre (tensão, corrente, pinagem, o que for
+    /// relevante para o técnico de bancada). Sem parser de datasheet — só o que foi anotado.
+    pub especificacao_tecnica: Option<String>,
+    /// Em quais aparelhos/modelos esta peça serve, texto livre (ex.: "iPhone 11 / 11 Pro /
+    /// XR").
+    pub compatibilidade: Option<String>,
+    /// Garantia do fornecedor sobre esta peça, em dias — **diferente** da garantia que a
+    /// assistência dá ao cliente sobre o serviço (`OrdemServico::garantia_dias`, em
+    /// `mod-os`).
+    pub garantia_fornecedor_dias: Option<u16>,
+    /// Localização física no estoque (prateleira/gaveta) — ajuda muito no balcão na hora de
+    /// achar a peça rápido.
+    pub localizacao_fisica: Option<String>,
     /// Se o saldo vive em [`Variacao`] (grade cor/tamanho).
     pub controla_grade: bool,
     /// Se o produto é rastreado por lote.
@@ -77,6 +104,13 @@ impl Produto {
             ncm,
             cest: None,
             codigo_barras: None,
+            fabricante: None,
+            codigo_fabricante: None,
+            categoria_tecnica: None,
+            especificacao_tecnica: None,
+            compatibilidade: None,
+            garantia_fornecedor_dias: None,
+            localizacao_fisica: None,
             controla_grade: false,
             controla_lote: false,
             controla_validade: false,
@@ -120,6 +154,49 @@ impl Produto {
         self.codigo_barras = Some(validar_gtin(gtin)?);
         Ok(self)
     }
+
+    /// Define os detalhes técnicos (todos opcionais) — string vazia normaliza para `None`,
+    /// para o formulário poder enviar `""` sem sujar o banco com string vazia em vez de
+    /// `NULL`.
+    #[must_use]
+    pub fn com_detalhes_tecnicos(mut self, detalhes: DetalhesTecnicos) -> Self {
+        self.fabricante = normalizar_opcional(detalhes.fabricante);
+        self.codigo_fabricante = normalizar_opcional(detalhes.codigo_fabricante);
+        self.categoria_tecnica = normalizar_opcional(detalhes.categoria_tecnica);
+        self.especificacao_tecnica = normalizar_opcional(detalhes.especificacao_tecnica);
+        self.compatibilidade = normalizar_opcional(detalhes.compatibilidade);
+        self.garantia_fornecedor_dias = detalhes.garantia_fornecedor_dias;
+        self.localizacao_fisica = normalizar_opcional(detalhes.localizacao_fisica);
+        self
+    }
+}
+
+/// `Some("  ")`/`Some("")` viram `None`; qualquer outro `Some` vem trimado.
+fn normalizar_opcional(s: Option<String>) -> Option<String> {
+    s.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+}
+
+/// Detalhes técnicos opcionais de um produto — o cadastro para peça de microeletrônica
+/// (`docs/modulos/estoque.md` §3): fabricante/MPN para casar com o datasheet, categoria
+/// técnica e especificação em texto livre, compatibilidade com aparelhos, garantia do
+/// fornecedor sobre a peça e localização física no estoque. Nenhum campo é obrigatório —
+/// nome e preço continuam sendo o essencial do cadastro rápido.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DetalhesTecnicos {
+    /// Fabricante da peça.
+    pub fabricante: Option<String>,
+    /// Código/part number do fabricante (MPN).
+    pub codigo_fabricante: Option<String>,
+    /// Categoria técnica livre (ex.: "IC", "capacitor", "tela").
+    pub categoria_tecnica: Option<String>,
+    /// Especificação/resumo de datasheet em texto livre.
+    pub especificacao_tecnica: Option<String>,
+    /// Compatibilidade/aplicação em texto livre.
+    pub compatibilidade: Option<String>,
+    /// Garantia do fornecedor sobre a peça, em dias.
+    pub garantia_fornecedor_dias: Option<u16>,
+    /// Localização física (prateleira/gaveta).
+    pub localizacao_fisica: Option<String>,
 }
 
 /// Uma variação de grade (cor/tamanho) — só existe se `produto.controla_grade`.
@@ -312,6 +389,26 @@ mod testes {
             produto().com_codigo_barras("7894900011518").unwrap_err(),
             ErroEstoque::GtinInvalido
         );
+    }
+
+    #[test]
+    fn detalhes_tecnicos_normaliza_vazio_para_none() {
+        let p = produto().com_detalhes_tecnicos(DetalhesTecnicos {
+            fabricante: Some("Texas Instruments".to_string()),
+            codigo_fabricante: Some("  ".to_string()),
+            categoria_tecnica: Some("IC".to_string()),
+            especificacao_tecnica: Some(String::new()),
+            compatibilidade: Some("iPhone 11 / 11 Pro".to_string()),
+            garantia_fornecedor_dias: Some(90),
+            localizacao_fisica: None,
+        });
+        assert_eq!(p.fabricante.as_deref(), Some("Texas Instruments"));
+        assert_eq!(p.codigo_fabricante, None); // só espaços -> None
+        assert_eq!(p.categoria_tecnica.as_deref(), Some("IC"));
+        assert_eq!(p.especificacao_tecnica, None); // vazio -> None
+        assert_eq!(p.compatibilidade.as_deref(), Some("iPhone 11 / 11 Pro"));
+        assert_eq!(p.garantia_fornecedor_dias, Some(90));
+        assert_eq!(p.localizacao_fisica, None);
     }
 
     #[test]

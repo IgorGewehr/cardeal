@@ -2,7 +2,7 @@
 //! `os_item_peca`/`os_item_mao_de_obra` — `docs/modulos/os.md` §10 (a tela de OS precisa da
 //! lista de ordens em aberto e do detalhe completo de uma ordem).
 
-use cardeal_kernel::{Id, Resultado};
+use cardeal_kernel::{Id, Quantidade, Resultado};
 use cardeal_modkit::{Consulta, Ctx};
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -23,7 +23,7 @@ use crate::repositorio::{
 pub fn buscar_ordem(conexao: &Connection, id: Id) -> Resultado<Option<OrdemServico>> {
     conexao
         .query_row(
-            "SELECT id, empresa, numero, cliente, equipamento, data_abertura,
+            "SELECT id, empresa, numero, cliente, equipamento, defeito_relatado, data_abertura,
                     tecnico_responsavel, estado, aprovado_por, garantia_dias, valor_total,
                     itens_orcamento, versao
              FROM os_ordem_servico WHERE id = ?1",
@@ -113,7 +113,7 @@ pub fn laudo_mais_recente(
 pub fn ordens_nao_finalizadas(conexao: &Connection, empresa: Id) -> Resultado<Vec<OrdemServico>> {
     let mut stmt = conexao
         .prepare(
-            "SELECT id, empresa, numero, cliente, equipamento, data_abertura,
+            "SELECT id, empresa, numero, cliente, equipamento, defeito_relatado, data_abertura,
                     tecnico_responsavel, estado, aprovado_por, garantia_dias, valor_total,
                     itens_orcamento, versao
              FROM os_ordem_servico
@@ -195,7 +195,7 @@ pub fn ordens_aguardando_aprovacao(
 ) -> Resultado<Vec<OrdemServico>> {
     let mut stmt = conexao
         .prepare(
-            "SELECT id, empresa, numero, cliente, equipamento, data_abertura,
+            "SELECT id, empresa, numero, cliente, equipamento, defeito_relatado, data_abertura,
                     tecnico_responsavel, estado, aprovado_por, garantia_dias, valor_total,
                     itens_orcamento, versao
              FROM os_ordem_servico
@@ -245,7 +245,7 @@ pub fn historico_do_equipamento(
 ) -> Resultado<Vec<OrdemServico>> {
     let mut stmt = conexao
         .prepare(
-            "SELECT id, empresa, numero, cliente, equipamento, data_abertura,
+            "SELECT id, empresa, numero, cliente, equipamento, defeito_relatado, data_abertura,
                     tecnico_responsavel, estado, aprovado_por, garantia_dias, valor_total,
                     itens_orcamento, versao
              FROM os_ordem_servico WHERE cliente = ?1 ORDER BY numero DESC LIMIT 500",
@@ -400,5 +400,72 @@ impl Consulta for TempoPorTecnicoNoPeriodo {
 
     fn executar(self, _ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         tempo_por_tecnico_no_periodo(conexao, self.tecnico, self.de, self.ate)
+    }
+}
+
+/// Uma peça orçada, ainda não aplicada, cujo saldo disponível no estoque **não cobre** a
+/// quantidade necessária — auditoria de integração (2026-09-11): hoje, saber que uma OS está
+/// parada esperando peça exige abrir a OS e o produto em telas separadas e comparar na
+/// cabeça; esta consulta cruza os dois de uma vez, só pela porta pública de `mod_estoque`
+/// (`saldo_disponivel_do_produto` — nunca lendo `estoque_saldo_local` direto,
+/// `docs/contratos-internos.md` §7 regra 2).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ItemAguardandoEstoque {
+    /// A ordem de serviço.
+    pub ordem_servico: Id,
+    /// O número da OS (para exibir sem outra consulta).
+    pub numero: u64,
+    /// O item de peça no orçamento.
+    pub item_peca: Id,
+    /// O produto.
+    pub produto: Id,
+    /// Quanto o orçamento pede.
+    pub quantidade_necessaria: Quantidade,
+    /// Quanto há disponível no estoque agora (soma entre locais).
+    pub saldo_disponivel: Quantidade,
+}
+
+/// Todas as peças orçadas (em ordens não finalizadas) ainda não aplicadas cujo saldo
+/// disponível no estoque é insuficiente para a quantidade pedida.
+///
+/// # Errors
+/// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+pub fn pecas_aguardando_estoque(
+    conexao: &Connection,
+    empresa: Id,
+) -> Resultado<Vec<ItemAguardandoEstoque>> {
+    let mut pendentes = Vec::new();
+    for os in ordens_nao_finalizadas(conexao, empresa)? {
+        for item in itens_peca_da_ordem(conexao, os.id)? {
+            if item.aplicada {
+                continue;
+            }
+            let saldo_disponivel = mod_estoque::saldo_disponivel_do_produto(conexao, item.produto)?;
+            if saldo_disponivel < item.quantidade {
+                pendentes.push(ItemAguardandoEstoque {
+                    ordem_servico: os.id,
+                    numero: os.numero,
+                    item_peca: item.id,
+                    produto: item.produto,
+                    quantidade_necessaria: item.quantidade,
+                    saldo_disponivel,
+                });
+            }
+        }
+    }
+    Ok(pendentes)
+}
+
+/// Lista as peças orçadas e ainda não aplicadas cujo estoque disponível é insuficiente — o
+/// radar de "OS parada esperando peça".
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct PecasAguardandoEstoque;
+
+impl Consulta for PecasAguardandoEstoque {
+    type Saida = Vec<ItemAguardandoEstoque>;
+    const PERMISSAO: &'static str = "os.ordem.ver";
+
+    fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        pecas_aguardando_estoque(conexao, ctx.empresa)
     }
 }

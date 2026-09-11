@@ -224,6 +224,7 @@ fn montar_cenario(
                 ncm: "39269090".to_string(),
                 unidade_padrao: unidade.unidade,
                 codigo_barras: None,
+                detalhes_tecnicos: None,
             }),
             s,
             amb,

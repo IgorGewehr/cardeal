@@ -215,6 +215,7 @@ mod testes {
             numero,
             cliente: Id::novo(),
             equipamento: "Notebook".to_string(),
+            defeito_relatado: "Não liga".to_string(),
             data_abertura: cardeal_kernel::Data::de_dias(20_000),
             tecnico_responsavel: Id::novo(),
             estado: EstadoOs::Faturada,

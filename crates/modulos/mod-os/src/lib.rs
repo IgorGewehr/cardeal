@@ -25,6 +25,16 @@
 //!   cobrança**: uma OS de garantia/cortesia (`valor_total == 0`) não gera título, e se
 //!   também não houve custo de peça, não gera lançamento nenhum.
 //!
+//! **Pedido explícito do usuário (2026-09-11):** na abertura de OS, só o nome do cliente e o
+//! `defeito_relatado` (o que o cliente relatou querer resolver, capturado na recepção) são
+//! obrigatórios — `equipamento` virou opcional. `LaudoTecnico::descricao_problema` foi
+//! deliberadamente **mantido como está** (não removido/renomeado): a parte técnica
+//! (`docs/modulos/os.md` §14 e adiante) que consome `RegistrarLaudo`/`LaudoTecnico` está fora
+//! do escopo desta sessão, e o campo não causa dano — só deixa de ser a fonte de verdade do
+//! relato do cliente, que agora é `OrdemServico::defeito_relatado`. [`EditarDadosDaOrdem`]
+//! (novo) completa/corrige `equipamento` e complementa `defeito_relatado` depois da abertura,
+//! em qualquer estado não-terminal.
+//!
 //! Auditoria de produção (2026-09-06) encontrou e corrigiu três lacunas reais: um reparo em
 //! garantia (itens a custo zero) não conseguia sair de `AguardandoAprovacao` porque
 //! `enviar_para_aprovacao` exigia `valor_total > 0` — agora exige só ter algum item
@@ -63,14 +73,16 @@ mod repositorio;
 pub use apontamento::ApontamentoDeTempo;
 pub use comandos::{
     AbrirOrdemServico, AjustarApontamento, AplicarPeca, ApontamentoIniciado, AprovarOrcamentoOs,
-    CancelarOrdemServico, ConcluirExecucao, EncerrarApontamento, EnviarParaAprovacao,
-    FaturarOrdemServico, IniciarApontamento, IniciarExecucao, ItemOrcamentoNovo, MontarOrcamentoOs,
-    OrdemServicoAberta, OrdemServicoFaturada, PecaFoiAplicada, RegistrarLaudo, RegistrarMaoDeObra,
-    RemoverItemOrcamento, ReprovarOrcamentoOs, TipoItemOrcamento,
+    CancelarOrdemServico, ConcluirExecucao, EditarDadosDaOrdem, EncerrarApontamento,
+    EnviarParaAprovacao, FaturarOrdemServico, IniciarApontamento, IniciarExecucao,
+    ItemOrcamentoNovo, MontarOrcamentoOs, OrdemServicoAberta, OrdemServicoFaturada,
+    PecaFoiAplicada, RegistrarLaudo, RegistrarMaoDeObra, RemoverItemOrcamento, ReprovarOrcamentoOs,
+    TipoItemOrcamento,
 };
 pub use consultas::{
     ApontamentosDaOrdem, BuscarDetalheOrdem, DetalheOrdem, HistoricoDoEquipamento,
-    OrdensAguardandoAprovacao, OrdensEmAberto, TempoPorTecnicoNoPeriodo, TempoTotalDaOrdem,
+    ItemAguardandoEstoque, OrdensAguardandoAprovacao, OrdensEmAberto, PecasAguardandoEstoque,
+    TempoPorTecnicoNoPeriodo, TempoTotalDaOrdem,
 };
 pub use erros::ErroOs;
 pub use execucao::{ItemMaoDeObra, ItemPeca};

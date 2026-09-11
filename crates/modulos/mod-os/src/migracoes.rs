@@ -77,6 +77,16 @@ CREATE INDEX os_apontamento_ordem ON os_apontamento_tempo(ordem_servico);
 CREATE INDEX os_apontamento_tecnico_aberto ON os_apontamento_tempo(tecnico, fim);
 ";
 
+// Migração v4 (2026-09-11): defeito relatado pelo cliente, capturado na recepção — pedido
+// explícito do usuário de que abrir OS exija só nome do cliente + este campo. Aditiva:
+// `DEFAULT ''` preenche as linhas existentes sem quebrar o banco local já em uso. Não
+// alteramos/removemos `os_laudo_tecnico.descricao_problema` — mesma cautela: uma DROP COLUMN
+// arrisca a base de produção do usuário sem necessidade real (o campo só deixa de ser a fonte
+// de verdade do relato do cliente, sem causar dano ficando onde está).
+const SQL_DEFEITO_RELATADO: &str = r"
+ALTER TABLE os_ordem_servico ADD COLUMN defeito_relatado TEXT NOT NULL DEFAULT '';
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -94,6 +104,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 3,
         nome: "os_apontamento_tempo",
         sql: SQL_APONTAMENTO_TEMPO,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 4,
+        nome: "os_defeito_relatado",
+        sql: SQL_DEFEITO_RELATADO,
         tipo: TipoMigracao::Esquema,
     },
 ];
