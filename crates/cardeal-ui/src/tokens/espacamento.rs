@@ -42,14 +42,17 @@ impl Raio {
 }
 
 /// Altura de linha de grade — configurável pelo usuário (`docs/12-ui-ux.md` §4).
+///
+/// Aumentada em 2026-09-11 (revisão de UI/UX — linhas de tabela densas demais para o
+/// tamanho real da janela); valores antigos entre parênteses.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum AlturaLinha {
-    /// 28px.
+    /// 32px (era 28px).
     Compacta,
-    /// 32px — padrão.
+    /// 38px — padrão (era 32px).
     #[default]
     Confortavel,
-    /// 36px, para telas de toque (PDV).
+    /// 44px, para telas de toque (PDV) (era 36px).
     Toque,
 }
 
@@ -58,9 +61,9 @@ impl AlturaLinha {
     /// A altura em pixels lógicos.
     pub const fn pixels(self) -> f32 {
         match self {
-            Self::Compacta => 28.0,
-            Self::Confortavel => 32.0,
-            Self::Toque => 36.0,
+            Self::Compacta => 32.0,
+            Self::Confortavel => 38.0,
+            Self::Toque => 44.0,
         }
     }
 }

@@ -10,8 +10,10 @@ use cardeal_kernel::{Dinheiro, Id, Instante, Percentual, Preco, Quantidade};
 use cardeal_modkit::Icone;
 use cardeal_pdf::{gerar_comprovante_os, ComprovanteOsPdf, IdentidadeEmpresa, ItemPdf};
 use cardeal_ui::atoms::{Botao, Rotulo, ValorDinheiro};
-use cardeal_ui::molecules::{Abas, Campo, EstadoVazio, Mascara, SeletorOpcao};
-use cardeal_ui::organisms::{notificar, ColunaGrade, Dialogo, Grade, LayoutTela, Notificacao};
+use cardeal_ui::molecules::{Abas, Campo, CartaoKpi, EstadoVazio, Mascara, SeletorOpcao};
+use cardeal_ui::organisms::{
+    notificar, ColunaGrade, Dialogo, FaixaKpi, Grade, LayoutTela, Notificacao,
+};
 use cardeal_ui::tokens::{Espaco, TemaUi};
 use eframe::egui;
 use mod_clientes::{
@@ -327,12 +329,12 @@ fn lucratividade(ui: &mut egui::Ui, estado: &mut EstadoTelaOs) {
     }
 
     let colunas = vec![
-        ColunaGrade::nova("Nº").largura(56.0),
-        ColunaGrade::nova("Receita").largura(110.0),
-        ColunaGrade::nova("Custo peça").largura(110.0),
-        ColunaGrade::nova("Margem bruta").largura(120.0),
-        ColunaGrade::nova("Margem líquida").largura(130.0),
-        ColunaGrade::nova("Tempo apontado").largura(120.0),
+        ColunaGrade::nova("Nº").largura(56.0).numero(),
+        ColunaGrade::nova("Receita").largura(110.0).numero(),
+        ColunaGrade::nova("Custo peça").largura(110.0).numero(),
+        ColunaGrade::nova("Margem bruta").largura(120.0).numero(),
+        ColunaGrade::nova("Margem líquida").largura(130.0).numero(),
+        ColunaGrade::nova("Tempo apontado").largura(120.0).numero(),
     ];
     Grade::nova(colunas)
         .selecionavel(None)
@@ -378,11 +380,24 @@ fn lista(ui: &mut egui::Ui, motor: &MotorLocal, sessao: &SessaoLocal, estado: &m
         return;
     }
 
+    // Dois agregados que a lista já carrega e antes ficavam perdidos entre as linhas —
+    // vira cabeçalho de indicador visual (`docs/12-ui-ux.md` §6), a pedido explícito da
+    // revisão de UI/UX de 2026-09-11 ("total de OS abertas, valor parado").
+    let valor_parado = estado
+        .ordens
+        .iter()
+        .fold(Dinheiro::ZERO, |acc, os| acc + os.valor_total);
+    FaixaKpi::nova(vec![
+        CartaoKpi::contagem("Ordens em aberto", estado.ordens.len()),
+        CartaoKpi::novo("Valor em aberto", valor_parado).variacao("soma do total de cada OS"),
+    ])
+    .mostrar(ui);
+
     let colunas = vec![
-        ColunaGrade::nova("Nº").largura(56.0),
+        ColunaGrade::nova("Nº").largura(56.0).numero(),
         ColunaGrade::nova("Equipamento"),
         ColunaGrade::nova("Estado").largura(160.0),
-        ColunaGrade::nova("Total").largura(120.0),
+        ColunaGrade::nova("Total").largura(120.0).numero(),
     ];
     let clicada =
         Grade::nova(colunas)

@@ -76,7 +76,11 @@ impl<'a, T: PartialEq + Copy> SeletorOpcao<'a, T> {
                 .selected_text(
                     egui::RichText::new(atual)
                         .font(Papel::Interface.font_id())
-                        .color(if vazio { cores.texto_fraco } else { cores.texto }),
+                        .color(if vazio {
+                            cores.texto_fraco
+                        } else {
+                            cores.texto
+                        }),
                 )
                 .width((ui.available_width() - Espaco::E8).max(60.0_f32))
                 .show_ui(ui, |ui| {

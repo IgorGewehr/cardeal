@@ -7,8 +7,10 @@ use cardeal_cliente::{MotorLocal, SessaoLocal};
 use cardeal_kernel::{Id, Preco, Quantidade};
 use cardeal_modkit::Icone;
 use cardeal_ui::atoms::{Botao, Rotulo};
-use cardeal_ui::molecules::{Campo, EstadoVazio, SeletorOpcao};
-use cardeal_ui::organisms::{notificar, ColunaGrade, Dialogo, Grade, LayoutTela, Notificacao};
+use cardeal_ui::molecules::{Campo, CartaoKpi, EstadoVazio, SeletorOpcao};
+use cardeal_ui::organisms::{
+    notificar, ColunaGrade, Dialogo, FaixaKpi, Grade, LayoutTela, Notificacao,
+};
 use cardeal_ui::tokens::{Espaco, TemaUi};
 use eframe::egui;
 use mod_estoque::{
@@ -130,12 +132,23 @@ fn lista(ui: &mut egui::Ui, estado: &mut EstadoTelaEstoque) {
         return;
     }
 
+    let sem_estoque = estado
+        .produtos
+        .iter()
+        .filter(|p| p.disponivel.e_zero())
+        .count();
+    FaixaKpi::nova(vec![
+        CartaoKpi::contagem("Produtos cadastrados", estado.produtos.len()),
+        CartaoKpi::contagem("Sem estoque disponível", sem_estoque),
+    ])
+    .mostrar(ui);
+
     let colunas = vec![
         ColunaGrade::nova("Produto"),
         ColunaGrade::nova("NCM").largura(110.0),
-        ColunaGrade::nova("Disponível").largura(110.0),
-        ColunaGrade::nova("Reservado").largura(110.0),
-        ColunaGrade::nova("Custo médio").largura(120.0),
+        ColunaGrade::nova("Disponível").largura(110.0).numero(),
+        ColunaGrade::nova("Reservado").largura(110.0).numero(),
+        ColunaGrade::nova("Custo médio").largura(120.0).numero(),
     ];
     let clicada =
         Grade::nova(colunas)

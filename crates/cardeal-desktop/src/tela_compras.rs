@@ -191,8 +191,8 @@ fn lista(
         ColunaGrade::nova("Fornecedor"),
         ColunaGrade::nova("Nº / série").largura(120.0),
         ColunaGrade::nova("Emissão").largura(120.0),
-        ColunaGrade::nova("Itens").largura(70.0),
-        ColunaGrade::nova("Total").largura(130.0),
+        ColunaGrade::nova("Itens").largura(70.0).numero(),
+        ColunaGrade::nova("Total").largura(130.0).numero(),
         ColunaGrade::nova("Estado").largura(110.0),
     ];
     let clicada =
@@ -246,13 +246,18 @@ fn dialogo_nova(
                     c[1].add(Campo::novo("Razão social", &mut f.nome));
                 });
                 ui.add_space(Espaco::E8);
+                // CNPJ/razão social são obrigatórios de verdade (`lancar`, abaixo, valida o
+                // CNPJ e `LancarNotaManual::executar` resolve o fornecedor por ele — não dá
+                // pra lançar nota sem saber de quem). Número/série/NCM/código do fornecedor
+                // são só texto livre no domínio (`ItemNotaManual`/`LancarNotaManual`) — a
+                // cascata de casamento usa o NCM quando ele existe, mas não exige.
                 ui.columns(3, |c| {
-                    c[0].add(Campo::novo("Número", &mut f.numero));
-                    c[1].add(Campo::novo("Série", &mut f.serie));
+                    c[0].add(Campo::novo("Número (opcional)", &mut f.numero));
+                    c[1].add(Campo::novo("Série (opcional)", &mut f.serie));
                     c[2].add(Campo::novo("Emissão", &mut f.data).mascara(Mascara::Data));
                 });
                 ui.add_space(Espaco::E8);
-                ui.add(Campo::novo("Frete", &mut f.frete).marcador("0,00"));
+                ui.add(Campo::novo("Frete (opcional)", &mut f.frete).marcador("0,00"));
 
                 ui.add_space(Espaco::E12);
                 ui.add(Rotulo::titulo_secao("Itens"));
@@ -261,9 +266,9 @@ fn dialogo_nova(
                 let n_itens = f.itens.len();
                 for (idx, it) in f.itens.iter_mut().enumerate() {
                     ui.columns(5, |c| {
-                        c[0].add(Campo::novo("Código", &mut it.codigo));
+                        c[0].add(Campo::novo("Código (opcional)", &mut it.codigo));
                         c[1].add(Campo::novo("Descrição", &mut it.descricao));
-                        c[2].add(Campo::novo("NCM", &mut it.ncm));
+                        c[2].add(Campo::novo("NCM (opcional)", &mut it.ncm));
                         c[3].add(Campo::novo("Qtd", &mut it.quantidade));
                         c[4].add(Campo::novo("Vlr unit.", &mut it.valor_unitario));
                     });

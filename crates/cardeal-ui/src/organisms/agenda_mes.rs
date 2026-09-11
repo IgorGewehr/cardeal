@@ -5,7 +5,12 @@
 //! (com horário), com "+N" quando não cabem. Clicar no número do dia abre a visão diária;
 //! clicar numa pílula abre o compromisso; clicar no vazio propõe um novo às 9h.
 
-#![allow(clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::many_single_char_names)]
+#![allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::many_single_char_names
+)]
 
 use cardeal_kernel::{Data, Fuso, Hora};
 use egui::{CursorIcon, Rect, Sense, Ui};

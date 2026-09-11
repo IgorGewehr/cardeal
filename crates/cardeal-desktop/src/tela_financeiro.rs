@@ -10,9 +10,10 @@ use cardeal_kernel::{Competencia, Data, Dinheiro, Fuso, Id, Periodo};
 use cardeal_ledger::Contraparte;
 use cardeal_modkit::Icone;
 use cardeal_ui::atoms::{Botao, Rotulo, ValorDinheiro};
-use cardeal_ui::molecules::{Abas, Campo, EstadoVazio, Mascara, SeletorOpcao};
+use cardeal_ui::molecules::{Abas, Campo, CartaoKpi, EstadoVazio, Mascara, SeletorOpcao};
 use cardeal_ui::organisms::{
-    notificar, ColunaGrade, Dialogo, Grade, GraficoBarras, LayoutTela, Notificacao, SerieBarras,
+    notificar, ColunaGrade, Dialogo, FaixaKpi, Grade, GraficoBarras, LayoutTela, Notificacao,
+    SerieBarras,
 };
 use cardeal_ui::tokens::{perseguir, sombra_cartao, Espaco, Mov, Raio, TemaUi};
 use eframe::egui;
@@ -516,9 +517,9 @@ fn dialogo_analise(
 
                 let colunas = vec![
                     ColunaGrade::nova("Categoria"),
-                    ColunaGrade::nova("Recebido").largura(140.0),
-                    ColunaGrade::nova("Pago").largura(140.0),
-                    ColunaGrade::nova("Saldo").largura(140.0),
+                    ColunaGrade::nova("Recebido").largura(140.0).numero(),
+                    ColunaGrade::nova("Pago").largura(140.0).numero(),
+                    ColunaGrade::nova("Saldo").largura(140.0).numero(),
                 ];
                 Grade::nova(colunas).mostrar(ui, linhas.len(), |i, row| {
                     let (nome, rec, pago) = &linhas[i];
@@ -597,7 +598,7 @@ fn dialogo_recorrencias(
                     ColunaGrade::nova("Descrição"),
                     ColunaGrade::nova("Espécie").largura(100.0),
                     ColunaGrade::nova("Periodicidade").largura(120.0),
-                    ColunaGrade::nova("Valor").largura(130.0),
+                    ColunaGrade::nova("Valor").largura(130.0).numero(),
                     ColunaGrade::nova("Ativa").largura(70.0),
                 ];
                 Grade::nova(colunas).mostrar(ui, linhas.len(), |i, row| {
@@ -1078,8 +1079,8 @@ fn painel_fluxo(
         ColunaGrade::nova("Data").largura(96.0),
         ColunaGrade::nova("Histórico"),
         ColunaGrade::nova("Conta").largura(140.0),
-        ColunaGrade::nova("Valor").largura(130.0),
-        ColunaGrade::nova("Acumulado").largura(130.0),
+        ColunaGrade::nova("Valor").largura(130.0).numero(),
+        ColunaGrade::nova("Acumulado").largura(130.0).numero(),
     ];
     let mut acc = Dinheiro::ZERO;
     let linhas: Vec<(String, String, String, Dinheiro, Dinheiro)> = estado
@@ -1138,7 +1139,7 @@ fn painel_bancos(ui: &mut egui::Ui, estado: &mut EstadoTelaFinanceiro) {
         ColunaGrade::nova("Conta"),
         ColunaGrade::nova("Código").largura(90.0),
         ColunaGrade::nova("Tipo").largura(90.0),
-        ColunaGrade::nova("Saldo").largura(140.0),
+        ColunaGrade::nova("Saldo").largura(140.0).numero(),
     ];
     Grade::nova(colunas).mostrar(ui, estado.contas_disp.len(), |i, row| {
         let c = &estado.contas_disp[i];
@@ -1250,11 +1251,31 @@ fn lista(ui: &mut egui::Ui, estado: &mut EstadoTelaFinanceiro) {
         return;
     }
     let hoje = Data::hoje(Fuso::BRASILIA);
+
+    // Três agregados que a lista já tem em mãos (soma de saldo, contagem de vencidas) e que
+    // antes só davam pra ver rolando a tabela inteira — viram cabeçalho de indicador
+    // (`docs/12-ui-ux.md` §6), mesmo racional do cabeçalho de KPI aplicado à lista de OS.
+    let valor_em_aberto = estado
+        .parcelas
+        .iter()
+        .fold(Dinheiro::ZERO, |acc, p| acc + p.saldo());
+    let vencidas = estado
+        .parcelas
+        .iter()
+        .filter(|p| p.vencimento < hoje)
+        .count();
+    FaixaKpi::nova(vec![
+        CartaoKpi::contagem("Em aberto", estado.parcelas.len()),
+        CartaoKpi::novo("Valor em aberto", valor_em_aberto),
+        CartaoKpi::contagem("Vencidas", vencidas),
+    ])
+    .mostrar(ui);
+
     let colunas = vec![
         ColunaGrade::nova("Contraparte"),
-        ColunaGrade::nova("Parc.").largura(60.0),
+        ColunaGrade::nova("Parc.").largura(60.0).numero(),
         ColunaGrade::nova("Vencimento").largura(120.0),
-        ColunaGrade::nova("Saldo").largura(130.0),
+        ColunaGrade::nova("Saldo").largura(130.0).numero(),
         ColunaGrade::nova("Estado").largura(110.0),
     ];
     let clicada =

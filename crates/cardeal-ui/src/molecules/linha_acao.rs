@@ -95,10 +95,7 @@ impl LinhaDeAcao {
                     ui.add_space(Espaco::E8);
                     ui.vertical(|ui| {
                         ui.horizontal(|ui| {
-                            ui.add(
-                                Rotulo::interface(self.titulo)
-                                    .cor(self.severidade.cor(&cores)),
-                            );
+                            ui.add(Rotulo::interface(self.titulo).cor(self.severidade.cor(&cores)));
                             if let Some(valor) = self.valor {
                                 ui.add(ValorDinheiro::novo(valor));
                             }

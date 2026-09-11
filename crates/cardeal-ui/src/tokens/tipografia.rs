@@ -24,21 +24,27 @@ const FAMILIA_FORTE: &str = "cardeal-forte";
 const FAMILIA_NUM: &str = "cardeal-num";
 
 /// Um papel tipográfico — tamanho, peso e família. `docs/12-ui-ux.md` §3.
+///
+/// **Escala aumentada em 2026-09-11** (revisão de UI/UX pedida pelo usuário: "as coisas
+/// estão muito pequenas" — evidenciado por capturas de tela reais do app rodando em
+/// 1920×1080 com o conteúdo espremido e ilegível de longe). Valores antigos entre
+/// parênteses. O aumento é só aqui — todo componente que já lê `Papel` cresce junto, sem
+/// precisar mexer em cada tela.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Papel {
-    /// Texto de interface padrão. 13px / 400.
+    /// Texto de interface padrão. 14px / 400 (era 13px).
     Interface,
-    /// Título de tela. 20px / 600.
+    /// Título de tela. 23px / 600 (era 20px).
     TituloTela,
-    /// Título de seção. 15px / 600.
+    /// Título de seção. 17px / 600 (era 15px).
     TituloSecao,
-    /// Rótulo de campo. 12px / 500, `texto_medio`.
+    /// Rótulo de campo. 13px / 500, `texto_medio` (era 12px).
     RotuloCampo,
-    /// Números e dinheiro — tabular. 13px / 500.
+    /// Números e dinheiro — tabular. 14px / 500 (era 13px).
     Numero,
-    /// Valor em destaque (Pulso). 32px / 600, tabular.
+    /// Valor em destaque (Pulso). 36px / 600, tabular (era 32px).
     ValorDestaque,
-    /// Código, chave de acesso, log. 12px / 400, monoespaçada.
+    /// Código, chave de acesso, log. 13px / 400, monoespaçada (era 12px).
     Codigo,
 }
 
@@ -47,11 +53,11 @@ impl Papel {
     #[must_use]
     pub const fn tamanho(self) -> f32 {
         match self {
-            Self::TituloTela => 20.0,
-            Self::ValorDestaque => 32.0,
-            Self::TituloSecao => 15.0,
-            Self::RotuloCampo | Self::Codigo => 12.0,
-            Self::Interface | Self::Numero => 13.0,
+            Self::TituloTela => 23.0,
+            Self::ValorDestaque => 36.0,
+            Self::TituloSecao => 17.0,
+            Self::RotuloCampo | Self::Codigo => 13.0,
+            Self::Interface | Self::Numero => 14.0,
         }
     }
 
@@ -59,7 +65,10 @@ impl Papel {
     /// O **peso** de verdade vem da família (`cardeal-forte`), não daqui.
     #[must_use]
     pub const fn enfatico(self) -> bool {
-        matches!(self, Self::TituloTela | Self::TituloSecao | Self::ValorDestaque)
+        matches!(
+            self,
+            Self::TituloTela | Self::TituloSecao | Self::ValorDestaque
+        )
     }
 
     /// Verdadeiro para papéis que usam algarismos tabulares.
@@ -131,7 +140,10 @@ pub fn instalar_fontes(ctx: &egui::Context) {
     let tem_forte = ler(
         &mut defs,
         "cardeal-ui-forte",
-        &[r"C:\Windows\Fonts\seguisb.ttf", r"C:\Windows\Fonts\segoeuib.ttf"],
+        &[
+            r"C:\Windows\Fonts\seguisb.ttf",
+            r"C:\Windows\Fonts\segoeuib.ttf",
+        ],
     );
     let tem_mono = ler(
         &mut defs,

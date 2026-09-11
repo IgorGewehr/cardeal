@@ -82,7 +82,8 @@ impl<'a, T: PartialEq + Copy> Abas<'a, T> {
             return None;
         }
 
-        ui.painter().rect_filled(rect, Raio::ITEM, cores.superficie_2);
+        ui.painter()
+            .rect_filled(rect, Raio::ITEM, cores.superficie_2);
 
         let idx_sel = self
             .selecionada
@@ -102,18 +103,19 @@ impl<'a, T: PartialEq + Copy> Abas<'a, T> {
             egui::pos2(rect.left() + MARGEM + x_anim, rect.top() + MARGEM),
             egui::vec2(larg_anim, ALTURA),
         );
-        ui.painter().rect_filled(pilula, Raio::CAMPO, cores.superficie);
-        ui.painter().rect_stroke(
-            pilula,
-            Raio::CAMPO,
-            egui::Stroke::new(1.0_f32, cores.borda),
-        );
+        ui.painter()
+            .rect_filled(pilula, Raio::CAMPO, cores.superficie);
+        ui.painter()
+            .rect_stroke(pilula, Raio::CAMPO, egui::Stroke::new(1.0_f32, cores.borda));
 
         // Segmentos clicáveis.
         let mut clicada = None;
         let mut x = rect.left() + MARGEM;
         for (i, ((valor, rotulo), larg)) in self.itens.iter().zip(&larguras).enumerate() {
-            let seg = Rect::from_min_size(egui::pos2(x, rect.top() + MARGEM), egui::vec2(*larg, ALTURA));
+            let seg = Rect::from_min_size(
+                egui::pos2(x, rect.top() + MARGEM),
+                egui::vec2(*larg, ALTURA),
+            );
             let resp = ui.interact(seg, id.with(i), Sense::click());
             let ativa = i == idx_sel;
             let cor = if ativa {

@@ -261,7 +261,11 @@ fn card(ui: &mut Ui, a: &Ativa, agora: f64, largura: f32) -> bool {
                 ui.spacing_mut().item_spacing.x = Espaco::E12;
                 selo(ui, a.n.tom, cor_tom);
                 ui.vertical(|ui| {
-                    ui.add(Rotulo::interface(a.n.titulo.clone()).cor(cores.texto_forte).quebravel());
+                    ui.add(
+                        Rotulo::interface(a.n.titulo.clone())
+                            .cor(cores.texto_forte)
+                            .quebravel(),
+                    );
                     if let Some(d) = &a.n.detalhe {
                         ui.add_space(2.0);
                         ui.add(Rotulo::campo(d.clone()).quebravel());
@@ -279,10 +283,12 @@ fn card(ui: &mut Ui, a: &Ativa, agora: f64, largura: f32) -> bool {
                 let dur = (exp - a.criada).max(0.001);
                 let frac = (((exp - agora) / dur).clamp(0.0, 1.0)) as f32;
                 ui.add_space(Espaco::E8);
-                let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 2.0), Sense::hover());
+                let (rect, _) =
+                    ui.allocate_exact_size(vec2(ui.available_width(), 2.0), Sense::hover());
                 ui.painter().rect_filled(rect, Raio::PILULA, cores.borda);
                 let cheio = Rect::from_min_size(rect.min, vec2(rect.width() * frac, rect.height()));
-                ui.painter().rect_filled(cheio, Raio::PILULA, cor_tom.gamma_multiply(0.7));
+                ui.painter()
+                    .rect_filled(cheio, Raio::PILULA, cor_tom.gamma_multiply(0.7));
             }
         });
 
@@ -302,11 +308,9 @@ fn selo(ui: &mut Ui, tom: Tom, cor: Color32) {
         .circle_filled(rect.center(), lado / 2.0, cor.gamma_multiply(0.15));
 
     if tom == Tom::Carregando {
-        let mut filho = ui.new_child(
-            UiBuilder::new()
-                .max_rect(rect)
-                .layout(egui::Layout::centered_and_justified(egui::Direction::LeftToRight)),
-        );
+        let mut filho = ui.new_child(UiBuilder::new().max_rect(rect).layout(
+            egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+        ));
         filho.add(Spinner::novo().pequeno().cor(cor));
         return;
     }
@@ -340,14 +344,21 @@ fn botao_fechar(ui: &mut Ui, sempre: bool) -> bool {
     let visivel = sempre || resp.hovered() || ui.rect_contains_pointer(rect);
     if ui.is_rect_visible(rect) && visivel {
         if resp.hovered() {
-            ui.painter().rect_filled(rect, Raio::CAMPO, cores.superficie_hover);
+            ui.painter()
+                .rect_filled(rect, Raio::CAMPO, cores.superficie_hover);
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
         let c = rect.center();
-        let cor = if resp.hovered() { cores.texto } else { cores.texto_fraco };
+        let cor = if resp.hovered() {
+            cores.texto
+        } else {
+            cores.texto_fraco
+        };
         let t = Stroke::new(1.4_f32, cor);
-        ui.painter().line_segment([c + vec2(-3.5, -3.5), c + vec2(3.5, 3.5)], t);
-        ui.painter().line_segment([c + vec2(3.5, -3.5), c + vec2(-3.5, 3.5)], t);
+        ui.painter()
+            .line_segment([c + vec2(-3.5, -3.5), c + vec2(3.5, 3.5)], t);
+        ui.painter()
+            .line_segment([c + vec2(3.5, -3.5), c + vec2(-3.5, 3.5)], t);
     }
     resp.clicked()
 }

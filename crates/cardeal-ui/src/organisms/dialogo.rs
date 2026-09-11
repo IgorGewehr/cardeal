@@ -110,14 +110,12 @@ impl Dialogo {
                         ui.add_space(Espaco::E16);
                         ui.separator();
                         ui.add_space(Espaco::E12);
-                        ui.with_layout(
-                            egui::Layout::right_to_left(egui::Align::Center),
-                            |ui| rodape(ui, estado),
-                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            rodape(ui, estado)
+                        });
                     });
             });
 
         fechar
     }
 }
-
