@@ -25,3 +25,14 @@ reqwest.workspace = true
 parking_lot.workspace = true
 tracing.workspace = true
 base64.workspace = true
+
+[dev-dependencies]
+# Só para o teste de integração de configurar_inicial/permissões — MotorLocal em si nunca
+# depende de um módulo concreto (o Core não conhece módulo concreto, regra de ouro da
+# arquitetura); aqui é o INVERSO — provar o contrato "admin recém-criado tem acesso a tudo
+# que está ativo" exige módulos concretos de verdade, os mesmos que cardeal-desktop liga.
+mod-financeiro.workspace = true
+mod-clientes.workspace   = true
+mod-estoque.workspace    = true
+mod-os.workspace         = true
+tempfile.workspace       = true
