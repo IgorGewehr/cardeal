@@ -11,11 +11,14 @@
 //!
 //! Chame uma vez no boot e de novo só quando o tema muda — **nunca todo frame**.
 
-use egui::{Color32, Context, FontFamily, FontId, Id, Margin, Rounding, Stroke, TextStyle, Ui, Vec2};
+use egui::{
+    Color32, Context, FontFamily, FontId, Id, Margin, Rounding, Stroke, TextStyle, Ui, Vec2,
+};
 
 use super::cores::Rubro;
 use super::cores::{Cores, Tema};
 use super::espacamento::{Espaco, Raio};
+use super::tipografia::Papel;
 
 const CHAVE_TEMA: &str = "cardeal:tema";
 
@@ -28,22 +31,42 @@ pub fn instalar_estilo(ctx: &Context, tema: Tema) {
     let mut style = (*ctx.style()).clone();
 
     // ---- tipografia base (os componentes usam `Papel` direto; isto é para o egui cru) ----
+    // Lidos de `Papel`, não repetidos como literal — duas escalas divergindo silenciosamente
+    // era exatamente a causa da "falta de padrão" que a revisão de UI de 2026-09-11 apontou.
     style.text_styles = [
-        (TextStyle::Small, FontId::new(12.0_f32, FontFamily::Proportional)),
-        (TextStyle::Body, FontId::new(13.0_f32, FontFamily::Proportional)),
-        (TextStyle::Button, FontId::new(13.0_f32, FontFamily::Proportional)),
-        (TextStyle::Heading, FontId::new(20.0_f32, FontFamily::Proportional)),
-        (TextStyle::Monospace, FontId::new(12.0_f32, FontFamily::Monospace)),
+        (
+            TextStyle::Small,
+            FontId::new(Papel::RotuloCampo.tamanho(), FontFamily::Proportional),
+        ),
+        (
+            TextStyle::Body,
+            FontId::new(Papel::Interface.tamanho(), FontFamily::Proportional),
+        ),
+        (
+            TextStyle::Button,
+            FontId::new(Papel::Interface.tamanho(), FontFamily::Proportional),
+        ),
+        (
+            TextStyle::Heading,
+            FontId::new(Papel::TituloTela.tamanho(), FontFamily::Proportional),
+        ),
+        (
+            TextStyle::Monospace,
+            FontId::new(Papel::Codigo.tamanho(), FontFamily::Monospace),
+        ),
     ]
     .into();
 
     // ---- espaçamento e forma ----
     let sp = &mut style.spacing;
     sp.item_spacing = Vec2::new(Espaco::E8, Espaco::E8);
-    sp.button_padding = Vec2::new(Espaco::E12, Espaco::E8);
+    sp.button_padding = Vec2::new(Espaco::E12, 10.0_f32);
     sp.menu_margin = Margin::same(Espaco::E4);
     sp.window_margin = Margin::same(Espaco::E16);
-    sp.interact_size.y = 32.0_f32;
+    // Altura mínima de widget interativo cru (combo, checkbox...) — acompanha
+    // `AlturaLinha::Confortavel`, para um dropdown não ficar mais fino que uma linha de
+    // grade (a queixa do PDV: "Selecione..." fino e sem destaque).
+    sp.interact_size.y = 38.0_f32;
     sp.icon_width = 18.0_f32;
     sp.icon_width_inner = 10.0_f32;
 
@@ -73,7 +96,11 @@ pub fn instalar_estilo(ctx: &Context, tema: Tema) {
     v.menu_rounding = Rounding::same(Raio::CARTAO);
     v.popup_shadow = sombra(tema, 1.0_f32, 3.0_f32, 90, 16);
     v.window_shadow = sombra(tema, 4.0_f32, 14.0_f32, 120, 26);
-    v.hyperlink_color = if tema.e_escuro() { Rubro::R400 } else { Rubro::R600 };
+    v.hyperlink_color = if tema.e_escuro() {
+        Rubro::R400
+    } else {
+        Rubro::R600
+    };
     v.error_fg_color = c.negativo;
     v.warn_fg_color = c.atencao;
 
@@ -118,7 +145,11 @@ pub fn instalar_estilo(ctx: &Context, tema: Tema) {
     v.selection.bg_fill = Rubro::R500.gamma_multiply(alfa_sel);
     v.selection.stroke = Stroke::new(
         1.0_f32,
-        if tema.e_escuro() { Rubro::R400 } else { Rubro::R600 },
+        if tema.e_escuro() {
+            Rubro::R400
+        } else {
+            Rubro::R600
+        },
     );
 
     // Foco sempre visível (`docs/12-ui-ux.md` §9).
@@ -127,12 +158,22 @@ pub fn instalar_estilo(ctx: &Context, tema: Tema) {
     ctx.set_style(style);
 }
 
-fn sombra(tema: Tema, offset_y: f32, blur: f32, alfa_escuro: u8, alfa_claro: u8) -> egui::epaint::Shadow {
+fn sombra(
+    tema: Tema,
+    offset_y: f32,
+    blur: f32,
+    alfa_escuro: u8,
+    alfa_claro: u8,
+) -> egui::epaint::Shadow {
     egui::epaint::Shadow {
         offset: Vec2::new(0.0_f32, offset_y),
         blur,
         spread: 0.0_f32,
-        color: Color32::from_black_alpha(if tema.e_escuro() { alfa_escuro } else { alfa_claro }),
+        color: Color32::from_black_alpha(if tema.e_escuro() {
+            alfa_escuro
+        } else {
+            alfa_claro
+        }),
     }
 }
 

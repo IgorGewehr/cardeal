@@ -154,12 +154,7 @@ impl Widget for Campo<'_> {
                         edicao = edicao.hint_text(m.clone());
                     }
                     let resp = ui.add(edicao);
-                    moldura_foco_campo(
-                        ui,
-                        &resp,
-                        MARGEM_CAMPO,
-                        com_erro.then_some(cores.negativo),
-                    );
+                    moldura_foco_campo(ui, &resp, MARGEM_CAMPO, com_erro.then_some(cores.negativo));
                     resp
                 })
                 .inner;

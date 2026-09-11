@@ -199,8 +199,8 @@ fn lista(
     let colunas = vec![
         ColunaGrade::nova("Cliente"),
         ColunaGrade::nova("Data").largura(120.0),
-        ColunaGrade::nova("Itens").largura(70.0),
-        ColunaGrade::nova("Total").largura(130.0),
+        ColunaGrade::nova("Itens").largura(70.0).numero(),
+        ColunaGrade::nova("Total").largura(130.0).numero(),
         ColunaGrade::nova("Estado").largura(120.0),
     ];
     let clicada =

@@ -71,8 +71,11 @@ impl<'a> Sidebar<'a> {
                                 egui::pos2(tick.left() + 4.5, tick.center().y),
                                 egui::vec2(3.0, 11.0),
                             );
-                            ui.painter()
-                                .rect_filled(barra, 999.0, cores.rubro.gamma_multiply(0.55));
+                            ui.painter().rect_filled(
+                                barra,
+                                999.0,
+                                cores.rubro.gamma_multiply(0.55),
+                            );
                             let espacado: String = titulo
                                 .to_uppercase()
                                 .chars()
@@ -138,12 +141,14 @@ impl<'a> Sidebar<'a> {
 }
 
 fn badge(ui: &mut Ui, n: u32, cor: egui::Color32) {
-    let texto = if n > 99 { "99+".to_owned() } else { n.to_string() };
-    let galley = ui.painter().layout_no_wrap(
-        texto,
-        Papel::RotuloCampo.font_id(),
-        egui::Color32::WHITE,
-    );
+    let texto = if n > 99 {
+        "99+".to_owned()
+    } else {
+        n.to_string()
+    };
+    let galley =
+        ui.painter()
+            .layout_no_wrap(texto, Papel::RotuloCampo.font_id(), egui::Color32::WHITE);
     let w = galley.size().x.max(10.0) + 10.0;
     let (rect, _) = ui.allocate_exact_size(egui::vec2(w, 18.0), egui::Sense::hover());
     ui.painter().rect_filled(rect, 9.0, cor);

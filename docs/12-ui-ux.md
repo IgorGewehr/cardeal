@@ -72,15 +72,20 @@ em telas OLED.
 
 ## 3. Tipografia
 
+Escala aumentada em 2026-09-11 (revisão de UI/UX pedida pelo usuário a partir de capturas de
+tela reais do app: texto pequeno demais para uma janela 1920×1080). Valores antigos entre
+parênteses — o token central é [`Papel`](../crates/cardeal-ui/src/tokens/tipografia.rs), nunca
+um tamanho solto numa tela.
+
 | Papel | Fonte | Tamanho | Peso |
 |---|---|---|---|
-| Interface | **Inter** | 13 px | 400 / 500 |
-| Título de tela | Inter | 20 px | 600 |
-| Título de seção | Inter | 15 px | 600 |
-| Rótulo de campo | Inter | 12 px | 500, `texto-medio` |
-| **Números / dinheiro** | **Inter Tabular** (`font-feature-settings: "tnum"`) | 13 px | 500 |
-| Valor em destaque (Pulso) | Inter Display | 30–46 px | 600, `tnum` |
-| Código, chave de acesso, log | **JetBrains Mono** | 12 px | 400 |
+| Interface | **Inter** | 14 px (era 13) | 400 / 500 |
+| Título de tela | Inter | 23 px (era 20) | 600 |
+| Título de seção | Inter | 17 px (era 15) | 600 |
+| Rótulo de campo | Inter | 13 px (era 12) | 500, `texto-medio` |
+| **Números / dinheiro** | **Inter Tabular** (`font-feature-settings: "tnum"`) | 14 px (era 13) | 500 |
+| Valor em destaque (Pulso) | Inter Display | 36 px (era 32) | 600, `tnum` |
+| Código, chave de acesso, log | **JetBrains Mono** | 13 px (era 12) | 400 |
 
 Fontes embutidas no binário (~4 MB) para garantir renderização idêntica em qualquer Windows.
 Escala global ajustável (90% a 150%) para telas de balcão e para acessibilidade.
@@ -91,7 +96,8 @@ Escala global ajustável (90% a 150%) para telas de balcão e para acessibilidad
 - Raio: `4` (campo, botão), `8` (cartão), `14` (modal), `999` (pílula/badge).
 - Elevação por borda + sombra mínima; nada de sombras dramáticas.
   `nivel-0` sem sombra; `nivel-1` = `0 1px 2px rgba(0,0,0,.06)`; `nivel-2` = `0 4px 12px rgba(0,0,0,.10)`.
-- Altura de linha de grade: **28 px** (compacta), 32 px (confortável), 36 px (toque). Configurável.
+- Altura de linha de grade: **32 px** (compacta, era 28), 38 px (confortável, era 32), 44 px
+  (toque, era 36). Configurável (aumentada junto da tipografia em 2026-09-11).
 
 ## 5. Sidebar retrátil
 

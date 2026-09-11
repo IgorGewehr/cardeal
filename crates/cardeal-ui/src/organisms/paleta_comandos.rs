@@ -112,8 +112,7 @@ impl<'a> PaletaComandos<'a> {
                                 .margin(egui::Margin::symmetric(10.0_f32, 9.0_f32)),
                         );
                         campo.request_focus();
-                        let enter = campo.lost_focus()
-                            && ui.input(|i| i.key_pressed(Key::Enter));
+                        let enter = campo.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
 
                         ui.add_space(Espaco::E8);
                         egui::ScrollArea::vertical()

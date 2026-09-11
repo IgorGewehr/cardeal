@@ -247,12 +247,12 @@ pub fn corpo(
 
     let hoje = Data::hoje(Fuso::BRASILIA);
     let colunas = vec![
-        ColunaGrade::nova("Nº").largura(52.0),
+        ColunaGrade::nova("Nº").largura(52.0).numero(),
         ColunaGrade::nova("Cliente"),
         ColunaGrade::nova("Assunto"),
         ColunaGrade::nova("Emissão").largura(92.0),
         ColunaGrade::nova("Validade").largura(92.0),
-        ColunaGrade::nova("Total").largura(120.0),
+        ColunaGrade::nova("Total").largura(120.0).numero(),
         ColunaGrade::nova("Estado").largura(140.0),
     ];
     let clicada =
@@ -860,10 +860,10 @@ fn corpo_detalhe(ui: &mut egui::Ui, d: &DetalheOrcamento) {
     ui.add_space(Espaco::E4);
     let colunas = vec![
         ColunaGrade::nova("Descrição"),
-        ColunaGrade::nova("Qtd").largura(50.0),
+        ColunaGrade::nova("Qtd").largura(50.0).numero(),
         ColunaGrade::nova("Un").largura(40.0),
-        ColunaGrade::nova("Vl unit.").largura(96.0),
-        ColunaGrade::nova("Total").largura(110.0),
+        ColunaGrade::nova("Vl unit.").largura(96.0).numero(),
+        ColunaGrade::nova("Total").largura(110.0).numero(),
     ];
     Grade::nova(colunas).mostrar(ui, d.itens.len(), |i, row| {
         let it = &d.itens[i];

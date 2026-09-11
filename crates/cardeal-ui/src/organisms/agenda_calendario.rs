@@ -5,7 +5,13 @@
 //! devolve o que foi tocado — um bloco existente ou um espaço vazio (para criar). O cálculo
 //! de sobreposição divide a largura da coluna entre blocos concorrentes.
 
-#![allow(clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_lossless, clippy::many_single_char_names)]
+#![allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_lossless,
+    clippy::many_single_char_names
+)]
 
 use cardeal_kernel::{Data, Fuso, Hora, Instante};
 use egui::{Color32, CursorIcon, Rect, Sense, Ui};
@@ -193,7 +199,11 @@ impl<'a> AgendaCalendario<'a> {
                 egui::Align2::CENTER_TOP,
                 d.dia_da_semana().abreviacao().to_uppercase(),
                 Papel::RotuloCampo.font_id(),
-                if e_hoje { cores.rubro } else { cores.texto_fraco },
+                if e_hoje {
+                    cores.rubro
+                } else {
+                    cores.texto_fraco
+                },
             );
             let centro_num = egui::pos2(cx, rect.top() + 46.0);
             if e_hoje {
@@ -204,7 +214,11 @@ impl<'a> AgendaCalendario<'a> {
                 egui::Align2::CENTER_CENTER,
                 d.dia().to_string(),
                 Papel::TituloSecao.font_id(),
-                if e_hoje { Rubro::CONTRASTE } else { cores.texto_forte },
+                if e_hoje {
+                    Rubro::CONTRASTE
+                } else {
+                    cores.texto_forte
+                },
             );
         }
         p.hline(
@@ -304,10 +318,18 @@ impl<'a> AgendaCalendario<'a> {
                 );
                 p.rect_filled(barra, Raio::PILULA, acc);
                 if b.conflito {
-                    p.rect_stroke(bloco, Raio::CAMPO, egui::Stroke::new(1.5_f32, cores.atencao));
+                    p.rect_stroke(
+                        bloco,
+                        Raio::CAMPO,
+                        egui::Stroke::new(1.5_f32, cores.atencao),
+                    );
                 }
 
-                let cor_titulo = if esmaecido { cores.texto_fraco } else { cores.texto_forte };
+                let cor_titulo = if esmaecido {
+                    cores.texto_fraco
+                } else {
+                    cores.texto_forte
+                };
                 let texto = ui.painter().layout(
                     b.titulo.to_owned(),
                     Papel::Interface.font_id(),

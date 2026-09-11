@@ -8,8 +8,10 @@ use cardeal_cliente::{MotorLocal, SessaoLocal};
 use cardeal_kernel::Id;
 use cardeal_modkit::Icone;
 use cardeal_ui::atoms::{Botao, Rotulo};
-use cardeal_ui::molecules::{Campo, EstadoVazio, Mascara, SeletorOpcao};
-use cardeal_ui::organisms::{notificar, ColunaGrade, Dialogo, Grade, LayoutTela, Notificacao};
+use cardeal_ui::molecules::{Campo, CartaoKpi, EstadoVazio, Mascara, SeletorOpcao};
+use cardeal_ui::organisms::{
+    notificar, ColunaGrade, Dialogo, FaixaKpi, Grade, LayoutTela, Notificacao,
+};
 use cardeal_ui::tokens::{Espaco, TemaUi};
 use eframe::egui;
 use mod_clientes::{
@@ -155,6 +157,20 @@ pub fn mostrar(
             }
         },
         |ui, estado| {
+            if !estado.pessoas.is_empty() {
+                let sem_documento = estado
+                    .pessoas
+                    .iter()
+                    .filter(|p| p.documento.is_none())
+                    .count();
+                FaixaKpi::nova(vec![
+                    CartaoKpi::contagem("Clientes cadastrados", estado.pessoas.len()),
+                    CartaoKpi::contagem("Sem documento", sem_documento)
+                        .variacao("CPF/CNPJ ainda não informado"),
+                ])
+                .mostrar(ui);
+            }
+
             ui.horizontal(|ui| {
                 ui.set_max_width(360.0);
                 if ui
@@ -265,25 +281,43 @@ fn dialogo(
                 ui.add_space(Espaco::E12);
             }
 
+            // Cadastro rápido de assistência técnica: o nome é o único campo que de fato
+            // bloqueia o salvamento (ver `criar`, mais abaixo) — documento, nome fantasia e
+            // observação são todos opcionais no backend há tempos (`CriarPessoa` já aceita
+            // `documento_*: None`), mas a tela nunca avisava isso visualmente, então o
+            // atendente hesitava tentando preencher CPF de um cliente que só quer deixar o
+            // aparelho e buscar depois. Rotulados explicitamente agora.
             ui.columns(2, |c| {
                 c[0].add(
                     Campo::novo(if pj { "Razão social" } else { "Nome" }, &mut f.nome)
                         .somente_leitura(leitura),
                 );
                 c[1].add(
-                    Campo::novo(if pj { "CNPJ" } else { "CPF" }, &mut f.documento)
-                        .mascara(Mascara::Documento)
-                        .somente_leitura(leitura || f.modo == Modo::Editar),
+                    Campo::novo(
+                        if pj {
+                            "CNPJ (opcional)"
+                        } else {
+                            "CPF (opcional)"
+                        },
+                        &mut f.documento,
+                    )
+                    .mascara(Mascara::Documento)
+                    .somente_leitura(leitura || f.modo == Modo::Editar),
                 );
             });
             ui.add_space(Espaco::E12);
 
             if pj {
-                ui.add(Campo::novo("Nome fantasia", &mut f.nome_fantasia).somente_leitura(leitura));
+                ui.add(
+                    Campo::novo("Nome fantasia (opcional)", &mut f.nome_fantasia)
+                        .somente_leitura(leitura),
+                );
                 ui.add_space(Espaco::E12);
             }
 
-            ui.add(Campo::novo("Observação", &mut f.observacao).somente_leitura(leitura));
+            ui.add(
+                Campo::novo("Observação (opcional)", &mut f.observacao).somente_leitura(leitura),
+            );
 
             if f.modo == Modo::Ver {
                 ui.add_space(Espaco::E16);

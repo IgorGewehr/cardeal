@@ -5,6 +5,7 @@ mod agenda_calendario;
 mod agenda_mes;
 mod cartao;
 mod dialogo;
+mod faixa_kpi;
 mod grade;
 mod grafico;
 mod layout_tela;
@@ -16,7 +17,8 @@ pub use agenda_calendario::{AcaoAgenda, AgendaCalendario, BlocoAgenda, ModoCalen
 pub use agenda_mes::AgendaMes;
 pub use cartao::Cartao;
 pub use dialogo::Dialogo;
-pub use grade::{ColunaGrade, Grade};
+pub use faixa_kpi::FaixaKpi;
+pub use grade::{ColunaGrade, Grade, LinhaGrade};
 pub use grafico::{GraficoBarras, SerieBarras};
 pub use layout_tela::LayoutTela;
 pub use notificacoes::{notificar, Notificacao, Notificacoes, Tom};

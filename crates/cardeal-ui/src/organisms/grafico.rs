@@ -64,16 +64,14 @@ impl<'a> GraficoBarras<'a> {
         let cores = ui.cores();
         // As barras crescem da linha de base ao aparecer pela primeira vez (Pilar I: anima
         // uma vez e dorme — `animate_bool` com alvo fixo `true` não re-anima em revisitas).
-        let crescer = suave(
-            ui.ctx()
-                .animate_bool_with_time(ui.id().with("grafico-crescer"), true, 0.5_f32),
-        );
+        let crescer = suave(ui.ctx().animate_bool_with_time(
+            ui.id().with("grafico-crescer"),
+            true,
+            0.5_f32,
+        ));
         let largura = ui.available_width().max(1.0);
         let altura_legenda = if self.series.len() > 1 { 22.0 } else { 4.0 };
-        let (rect, _) = ui.allocate_exact_size(
-            egui::vec2(largura, self.altura),
-            Sense::hover(),
-        );
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(largura, self.altura), Sense::hover());
         let p = ui.painter_at(rect);
 
         let gutter_e = 56.0_f32;
@@ -192,7 +190,11 @@ impl<'a> GraficoBarras<'a> {
                     cores.texto_medio,
                 );
                 let largura_txt = galley.size().x;
-                p.galley(egui::pos2(x + 16.0, y - galley.size().y / 2.0), galley, cores.texto_medio);
+                p.galley(
+                    egui::pos2(x + 16.0, y - galley.size().y / 2.0),
+                    galley,
+                    cores.texto_medio,
+                );
                 x += 16.0 + largura_txt + 18.0;
             }
         }

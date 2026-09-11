@@ -79,9 +79,7 @@ impl Widget for Etiqueta {
         };
 
         let fonte = Papel::RotuloCampo.font_id();
-        let galley = ui
-            .painter()
-            .layout_no_wrap(self.texto, fonte, fg);
+        let galley = ui.painter().layout_no_wrap(self.texto, fonte, fg);
 
         let padding = egui::vec2(9.0, 3.5);
         let tamanho = egui::vec2(

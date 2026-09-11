@@ -107,7 +107,10 @@ impl Botao {
     }
 
     /// A paleta desabilitada — estática, sem hover/press/foco.
-    fn paleta_inerte(&self, cores: &crate::tokens::Cores) -> (Option<Color32>, Option<Stroke>, Color32) {
+    fn paleta_inerte(
+        &self,
+        cores: &crate::tokens::Cores,
+    ) -> (Option<Color32>, Option<Stroke>, Color32) {
         match self.variante {
             VarianteBotao::Primario => (
                 Some(Rubro::R500.gamma_multiply(0.4_f32)),
@@ -116,7 +119,10 @@ impl Botao {
             ),
             VarianteBotao::Secundario => (
                 None,
-                Some(Stroke::new(1.0_f32, cores.borda_forte.gamma_multiply(0.5_f32))),
+                Some(Stroke::new(
+                    1.0_f32,
+                    cores.borda_forte.gamma_multiply(0.5_f32),
+                )),
                 cores.texto_fraco,
             ),
             VarianteBotao::Fantasma => (None, None, cores.texto_fraco),
@@ -169,7 +175,10 @@ impl Botao {
 
     /// Verdadeiro para as variantes que "levantam" de leve no hover (só a ação de peso).
     const fn levanta_no_hover(&self) -> bool {
-        matches!(self.variante, VarianteBotao::Primario | VarianteBotao::Destrutivo)
+        matches!(
+            self.variante,
+            VarianteBotao::Primario | VarianteBotao::Destrutivo
+        )
     }
 }
 
@@ -226,7 +235,11 @@ impl Widget for Botao {
 
             // press-scale (afunda 3%) + hover-lift (sobe 1%, só a ação de peso) —
             // `gestao-raiz`: `whileTap .97`, `whileHover 1.01`.
-            let lift = if self.levanta_no_hover() { 0.01_f32 } else { 0.0_f32 };
+            let lift = if self.levanta_no_hover() {
+                0.01_f32
+            } else {
+                0.0_f32
+            };
             let escala = 1.0_f32 + lift * th - 0.03_f32 * tp;
             let rect = Rect::from_center_size(rect_total.center(), rect_total.size() * escala);
 
@@ -259,11 +272,9 @@ impl Widget for Botao {
                 }
             }
             if self.carregando {
-                let mut filho = ui.new_child(
-                    egui::UiBuilder::new().max_rect(rect).layout(
-                        egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
-                    ),
-                );
+                let mut filho = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(
+                    egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+                ));
                 filho.add(Spinner::novo().pequeno().cor(fg));
             } else {
                 let pos = rect.center() - galley.size() / 2.0;

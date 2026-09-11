@@ -10,8 +10,9 @@ use egui::{Color32, Response, Ui, Vec2, Widget};
 use crate::tokens::{ativar, lerp_cor, Mov, Papel, Raio, TemaUi};
 
 /// A margem interna padrão de um campo (`TextEdit`, seletor) — o `frame_rect` do egui é o
-/// `rect` da resposta expandido por esta margem.
-pub(crate) const MARGEM_CAMPO: Vec2 = Vec2::new(10.0, 8.0);
+/// `rect` da resposta expandido por esta margem. Aumentada em 2026-09-11 (era `(10.0, 8.0)`)
+/// junto da escala tipográfica — campo e dropdown ganham a mesma altura de toque confortável.
+pub(crate) const MARGEM_CAMPO: Vec2 = Vec2::new(12.0, 10.0);
 
 /// Desenha a **moldura responsiva** de um campo por cima da borda crua do `egui`: no hover a
 /// borda ganha contraste; no foco ela vira `acento` (a marca, ou `negativo` num campo com
@@ -23,7 +24,12 @@ pub(crate) fn moldura_foco_campo(ui: &Ui, resp: &Response, margem: Vec2, acento:
     let cores = ui.cores();
     let alvo = acento.unwrap_or(cores.rubro);
 
-    let tf = ativar(ui, resp.id.with("campo-foco"), resp.has_focus(), Mov::PADRAO);
+    let tf = ativar(
+        ui,
+        resp.id.with("campo-foco"),
+        resp.has_focus(),
+        Mov::PADRAO,
+    );
     let th = ativar(ui, resp.id.with("campo-hover"), resp.hovered(), Mov::RAPIDO);
     if tf <= 0.001_f32 && th <= 0.001_f32 {
         return;
