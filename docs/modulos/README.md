@@ -40,6 +40,12 @@ tabela do doc 05 §5. Nenhum módulo lança dinheiro fora desse contrato.
   `id BLOB` (UUIDv7), dinheiro em `INTEGER` (centavos), data em `INTEGER` (dias desde 1970-01-01),
   instante em `INTEGER` (microssegundos UTC), enum em `TEXT` com `CHECK`, coluna `versao` em toda
   entidade mutável, coluna `empresa` como primeira coluna de todo índice de negócio.
-- Nenhum módulo depende de outro no `Cargo.toml` ([`doc 04 §8`](../04-pilar-modularidade.md#8-regras-invioláveis-de-módulo)); a comunicação entre eles acontece pelo Razão, por eventos de domínio
-  (`modulo.substantivo_particípio.vN`) ou por portas (traits) resolvidas na composição do
-  `cardeal-server`.
+- O núcleo transacional (`financeiro`, `clientes`, `estoque`, `vendas`, `pdv`, `compras`, `agenda`,
+  `os`, `orcamentos`) pode depender diretamente uns dos outros no `Cargo.toml` — evoluem juntos e
+  estão presentes na maioria dos perfis. Já os módulos verticais de segmento (`crm`, `alugueis`,
+  `combustivel`, `hotelaria`, `industria`, `contabil`) **nunca** dependem de outro módulo no
+  `Cargo.toml` — nem entre si, nem do núcleo — para continuarem ligáveis/desligáveis por perfil sem
+  arrastar código de um segmento alheio ([`doc 04 §8`](../04-pilar-modularidade.md#8-regras-invioláveis-de-módulo)).
+  Nos dois casos, quando não houver dependência direta, a comunicação acontece pelo Razão, por
+  eventos de domínio (`modulo.substantivo_particípio.vN`) ou por portas (traits) resolvidas na
+  composição do `cardeal-server`.

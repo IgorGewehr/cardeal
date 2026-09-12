@@ -212,7 +212,17 @@ funcionalidade nova: o sistema fala a língua do negócio dele.
 
 ## 5. Comunicação entre módulos
 
-Módulos **não** dependem uns dos outros no `Cargo.toml`. Três canais, nesta ordem de preferência:
+O núcleo transacional — `financeiro`, `clientes`, `estoque`, `vendas`, `pdv`, `compras`, `agenda`,
+`os`, `orcamentos` — forma a espinha dorsal presente na maioria dos perfis e **pode** depender
+diretamente uns dos outros no `Cargo.toml`: são compilados e evoluem juntos, e o acoplamento direto
+entre eles não custa modularidade real (nenhum perfil liga `os` sem `estoque`, por exemplo).
+
+Já os módulos verticais de segmento — específicos de um tipo de negócio e feitos para serem
+ligados/desligados por perfil sem levar o resto junto (`crm`, `alugueis`, `combustivel`,
+`hotelaria`, `industria`, `contabil`) — **não** dependem de nenhum outro módulo no `Cargo.toml`,
+nem entre si nem do núcleo. É isso que garante que desligar `mod-hotelaria` não force
+`mod-combustivel` a compilar junto, e que o binário de um posto não carregue código de pousada.
+Três canais, nesta ordem de preferência, para essa comunicação:
 
 ### 5.1 O Razão (preferido)
 
@@ -312,7 +322,11 @@ E registra o módulo no `cardeal-server`. A partir daí, o módulo aparece no as
 
 ## 8. Regras invioláveis de módulo
 
-1. Um módulo **nunca** depende de outro módulo no `Cargo.toml`.
+1. Um módulo vertical de segmento (`crm`, `alugueis`, `combustivel`, `hotelaria`, `industria`,
+   `contabil`) **nunca** depende de outro módulo — vertical ou núcleo — no `Cargo.toml`; usa razão,
+   eventos ou portas (§5). Os módulos do núcleo transacional (`financeiro`, `clientes`, `estoque`,
+   `vendas`, `pdv`, `compras`, `agenda`, `os`, `orcamentos`) podem depender uns dos outros
+   diretamente no `Cargo.toml` — nunca o inverso: núcleo **nunca** depende de um módulo vertical.
 2. Um módulo **nunca** lê ou escreve tabela de outro módulo. Prefixo de tabela = prefixo do módulo.
 3. Todo efeito financeiro passa pelo razão. Não existe "tabela de saldo" paralela.
 4. Todo comando declara sua permissão. Comando sem permissão não compila (verificado por macro).
