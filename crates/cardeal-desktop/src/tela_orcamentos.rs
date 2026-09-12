@@ -255,7 +255,7 @@ pub fn corpo(
         ColunaGrade::nova("Total").largura(120.0).numero(),
         ColunaGrade::nova("Estado").largura(140.0),
     ];
-    let clicada =
+    let resposta =
         Grade::nova(colunas)
             .selecionavel(None)
             .mostrar(ui, estado.lista.len(), |i, row| {
@@ -287,7 +287,7 @@ pub fn corpo(
                     ui.add(etiqueta_estado(o.estado, o.vencido));
                 });
             });
-    if let Some(i) = clicada {
+    if let Some(i) = resposta.linha_clicada {
         let id = estado.lista[i].orcamento;
         estado.abrir_detalhe(motor, sessao, id);
     }

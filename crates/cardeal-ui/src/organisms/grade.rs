@@ -19,11 +19,11 @@
 //! alinhamento à direita configurável por coluna (`ColunaGrade::numero`) para número/dinheiro
 //! não ficarem colados à esquerda do texto.
 
-use egui::{Rounding, Stroke, Ui};
+use egui::{CursorIcon, Response, Rounding, Sense, Stroke, Ui};
 use egui_extras::{Column, TableBuilder};
 
 use crate::atoms::Rotulo;
-use crate::tokens::{AlturaLinha, Espaco, Raio, TemaUi};
+use crate::tokens::{ativar, AlturaLinha, Espaco, Mov, Raio, TemaUi};
 
 /// Altura do cabeçalho da grade — acompanha a escala tipográfica atual (era 28px fixo,
 /// pequeno demais para o `RotuloCampo` maior da revisão de 2026-09-11).
@@ -40,6 +40,35 @@ enum Alinhamento {
     #[default]
     Esquerda,
     Direita,
+}
+
+/// Direção de ordenação de uma coluna — devolvida pela tela em [`Grade::ordenacao`] para
+/// desenhar a seta ▲/▼ ao lado do rótulo da coluna ativa.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Direcao {
+    /// Do menor para o maior.
+    Ascendente,
+    /// Do maior para o menor.
+    Descendente,
+}
+
+impl Direcao {
+    /// A direção oposta — a tela normalmente chama isto ao receber de volta um clique na
+    /// coluna que já era a ativa (`RespostaGrade::coluna_clicada`), para alternar o sentido.
+    #[must_use]
+    pub const fn invertida(self) -> Self {
+        match self {
+            Self::Ascendente => Self::Descendente,
+            Self::Descendente => Self::Ascendente,
+        }
+    }
+
+    const fn seta(self) -> &'static str {
+        match self {
+            Self::Ascendente => "▲",
+            Self::Descendente => "▼",
+        }
+    }
 }
 
 /// Uma coluna da grade: rótulo do cabeçalho e largura inicial (`Column::remainder` se
@@ -124,6 +153,21 @@ impl LinhaGrade<'_, '_, '_> {
     }
 }
 
+/// O que aconteceu na [`Grade`] neste frame — devolvido por [`Grade::mostrar`].
+///
+/// `Grade` é um componente controlado: ela não reordena os próprios dados nem alterna
+/// direção sozinha. `coluna_clicada` só avisa qual cabeçalho foi clicado; a tela decide a
+/// nova direção (tipicamente invertendo a atual, se for a mesma coluna, `Direcao::invertida`)
+/// e ordena o seu vetor de dados, devolvendo o novo estado no próximo frame via
+/// [`Grade::ordenacao`] — o mesmo padrão já usado por `selecionavel`/`selecionada`.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RespostaGrade {
+    /// Índice da linha clicada, quando a grade é `selecionavel`.
+    pub linha_clicada: Option<usize>,
+    /// Índice da coluna cujo cabeçalho foi clicado.
+    pub coluna_clicada: Option<usize>,
+}
+
 /// Uma tabela densa, redimensionável, com seleção de linha inteira.
 #[must_use]
 pub struct Grade {
@@ -131,6 +175,7 @@ pub struct Grade {
     altura_linha: AlturaLinha,
     selecionada: Option<usize>,
     selecionavel: bool,
+    ordenacao: Option<(usize, Direcao)>,
 }
 
 impl Grade {
@@ -141,6 +186,7 @@ impl Grade {
             altura_linha: AlturaLinha::Confortavel,
             selecionada: None,
             selecionavel: false,
+            ordenacao: None,
         }
     }
 
@@ -158,15 +204,24 @@ impl Grade {
         self
     }
 
+    /// Marca qual coluna (índice) e direção está ordenando a tabela agora — desenha a seta
+    /// ▲/▼ ao lado do rótulo dela. Componente controlado: a tela guarda esse estado e o
+    /// devolve aqui a cada frame, veja [`RespostaGrade`].
+    pub const fn ordenacao(mut self, o: Option<(usize, Direcao)>) -> Self {
+        self.ordenacao = o;
+        self
+    }
+
     /// Desenha a grade. `total_linhas` é a contagem exata (só as linhas visíveis são
-    /// montadas); `linha` preenche cada coluna na ordem declarada. Devolve o índice da
-    /// linha clicada, quando a grade é `selecionavel`.
+    /// montadas); `linha` preenche cada coluna na ordem declarada. Devolve o que foi
+    /// clicado neste frame — linha (quando `selecionavel`) e/ou cabeçalho de coluna (quando
+    /// alguma coluna foi clicada para ordenar).
     pub fn mostrar(
         self,
         ui: &mut Ui,
         total_linhas: usize,
         linha: impl FnMut(usize, &mut LinhaGrade<'_, '_, '_>),
-    ) -> Option<usize> {
+    ) -> RespostaGrade {
         ui.scope(|ui| self.desenhar(ui, total_linhas, linha)).inner
     }
 
@@ -175,7 +230,7 @@ impl Grade {
         ui: &mut Ui,
         total_linhas: usize,
         mut linha: impl FnMut(usize, &mut LinhaGrade<'_, '_, '_>),
-    ) -> Option<usize> {
+    ) -> RespostaGrade {
         let cores = ui.cores();
 
         // Moldura: a grade ganha borda + cantos arredondados próprios (antes flutuava solta
@@ -244,33 +299,27 @@ impl Grade {
 
                 let colunas = &self.colunas;
                 let selecionada = self.selecionada;
+                let ordenacao = self.ordenacao;
                 let mut clicada = None;
+                let mut coluna_clicada = None;
 
                 builder
                     .header(ALTURA_CABECALHO, |mut cabecalho| {
-                        for coluna in colunas {
+                        for (indice, coluna) in colunas.iter().enumerate() {
                             // O cabeçalho acompanha o alinhamento da própria coluna — um
                             // rótulo "Total" à esquerda não guia o olho até o número que
-                            // fica à direita, embaixo dele.
-                            match coluna.alinhamento {
-                                Alinhamento::Esquerda => {
-                                    cabecalho.col(|ui| {
-                                        ui.add_space(Espaco::E4);
-                                        ui.add(Rotulo::campo(coluna.rotulo));
-                                    });
+                            // fica à direita, embaixo dele. O clique de ordenação usa o
+                            // `Response` que `cabecalho_coluna` monta na mão (via
+                            // `ui.interact`), não o da célula: a tabela sente só `hover`
+                            // quando a grade não é `selecionavel`, e o cabeçalho precisa
+                            // clicar mesmo assim.
+                            cabecalho.col(|ui| {
+                                if cabecalho_coluna(ui, &cores, coluna, indice, ordenacao)
+                                    .clicked()
+                                {
+                                    coluna_clicada = Some(indice);
                                 }
-                                Alinhamento::Direita => {
-                                    cabecalho.col(|ui| {
-                                        ui.with_layout(
-                                            egui::Layout::right_to_left(egui::Align::Center),
-                                            |ui| {
-                                                ui.add_space(Espaco::E4);
-                                                ui.add(Rotulo::campo(coluna.rotulo));
-                                            },
-                                        );
-                                    });
-                                }
-                            }
+                            });
                         }
                     })
                     .body(|corpo| {
@@ -291,8 +340,61 @@ impl Grade {
                         });
                     });
 
-                clicada
+                RespostaGrade {
+                    linha_clicada: clicada,
+                    coluna_clicada,
+                }
             })
             .inner
     }
+}
+
+/// Desenha um cabeçalho de coluna clicável: rótulo + seta ▲/▼ quando é a coluna ativa da
+/// ordenação, realce sutil no hover (`docs/12-ui-ux.md` §9: nenhum alvo clicável fica sem
+/// feedback). Devolve a `Response` do próprio cabeçalho — a célula da tabela por trás só
+/// sente `hover` quando a grade não é `selecionavel`, então o clique de ordenar precisa da
+/// sua própria área interativa, não da da célula.
+fn cabecalho_coluna(
+    ui: &mut Ui,
+    cores: &crate::tokens::Cores,
+    coluna: &ColunaGrade,
+    indice: usize,
+    ordenacao: Option<(usize, Direcao)>,
+) -> Response {
+    let rect = ui.max_rect();
+    let id = ui.id().with("ordenar");
+    let resp = ui.interact(rect, id, Sense::click());
+
+    let th = ativar(ui, id.with("hover"), resp.hovered(), Mov::RAPIDO);
+    if th > 0.001_f32 {
+        ui.painter()
+            .rect_filled(rect, 0.0, cores.superficie_hover.gamma_multiply(th));
+    }
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+    }
+
+    let direcao_ativa = ordenacao.and_then(|(i, d)| (i == indice).then_some(d));
+    let cor_rotulo = direcao_ativa.map(|_| cores.rubro);
+
+    let montar = |ui: &mut Ui| {
+        ui.add_space(Espaco::E4);
+        let mut rotulo = Rotulo::campo(coluna.rotulo);
+        if let Some(cor) = cor_rotulo {
+            rotulo = rotulo.cor(cor);
+        }
+        ui.add(rotulo);
+        if let Some(direcao) = direcao_ativa {
+            ui.add_space(2.0_f32);
+            ui.add(Rotulo::campo(direcao.seta()).cor(cores.rubro));
+        }
+    };
+    match coluna.alinhamento {
+        Alinhamento::Esquerda => montar(ui),
+        Alinhamento::Direita => {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), montar);
+        }
+    }
+
+    resp
 }

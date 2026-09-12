@@ -9,7 +9,7 @@ use cardeal_modkit::Icone;
 use cardeal_ui::atoms::{Botao, Rotulo};
 use cardeal_ui::molecules::{Campo, CartaoKpi, EstadoVazio, SeletorOpcao};
 use cardeal_ui::organisms::{
-    notificar, ColunaGrade, Dialogo, FaixaKpi, Grade, LayoutTela, Notificacao,
+    notificar, ColunaGrade, Dialogo, Direcao, FaixaKpi, Grade, LayoutTela, Notificacao,
 };
 use cardeal_ui::tokens::{Espaco, TemaUi};
 use eframe::egui;
@@ -37,6 +37,7 @@ pub struct EstadoTelaEstoque {
     locais: Vec<ItemLocal>,
     erro: Option<String>,
     dlg: Dlg,
+    ordenacao: Option<(usize, Direcao)>,
 
     novo_grupo_codigo: String,
     novo_grupo_nome: String,
@@ -167,9 +168,10 @@ fn lista(ui: &mut egui::Ui, estado: &mut EstadoTelaEstoque) {
         ColunaGrade::nova("Reservado").largura(110.0).numero(),
         ColunaGrade::nova("Custo médio").largura(120.0).numero(),
     ];
-    let clicada =
+    let resposta =
         Grade::nova(colunas)
             .selecionavel(None)
+            .ordenacao(estado.ordenacao)
             .mostrar(ui, estado.produtos.len(), |i, row| {
                 let p = &estado.produtos[i];
                 row.col(|ui| {
@@ -188,9 +190,37 @@ fn lista(ui: &mut egui::Ui, estado: &mut EstadoTelaEstoque) {
                     ui.add(Rotulo::interface(p.custo_medio.to_string()));
                 });
             });
-    if let Some(i) = clicada {
+
+    if let Some(coluna) = resposta.coluna_clicada {
+        let direcao = match estado.ordenacao {
+            Some((atual, direcao)) if atual == coluna => direcao.invertida(),
+            _ => Direcao::Ascendente,
+        };
+        estado.ordenacao = Some((coluna, direcao));
+        ordenar_produtos(&mut estado.produtos, coluna, direcao);
+    }
+    if let Some(i) = resposta.linha_clicada {
         estado.dlg = Dlg::Ver(i);
     }
+}
+
+/// Ordena `produtos` pela coluna clicada no cabeçalho da [`Grade`] (mesma ordem das colunas
+/// declaradas em `lista`: Produto, NCM, Disponível, Reservado, Custo médio).
+fn ordenar_produtos(produtos: &mut [ItemProdutoComSaldo], coluna: usize, direcao: Direcao) {
+    produtos.sort_by(|a, b| {
+        let ordem = match coluna {
+            0 => a.nome.cmp(&b.nome),
+            1 => a.ncm.cmp(&b.ncm),
+            2 => a.disponivel.cmp(&b.disponivel),
+            3 => a.reservado.cmp(&b.reservado),
+            4 => a.custo_medio.cmp(&b.custo_medio),
+            _ => std::cmp::Ordering::Equal,
+        };
+        match direcao {
+            Direcao::Ascendente => ordem,
+            Direcao::Descendente => ordem.reverse(),
+        }
+    });
 }
 
 fn dialogo_ver(ctx: &egui::Context, estado: &mut EstadoTelaEstoque, i: usize) {

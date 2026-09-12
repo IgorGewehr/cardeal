@@ -195,7 +195,7 @@ fn lista(
         ColunaGrade::nova("Total").largura(130.0).numero(),
         ColunaGrade::nova("Estado").largura(110.0),
     ];
-    let clicada =
+    let resposta =
         Grade::nova(colunas)
             .selecionavel(None)
             .mostrar(ui, estado.notas.len(), |i, row| {
@@ -219,7 +219,7 @@ fn lista(
                     ui.add(Rotulo::campo(n.estado.rotulo()));
                 });
             });
-    if let Some(i) = clicada {
+    if let Some(i) = resposta.linha_clicada {
         estado.abrir_nota(motor, sessao, i);
     }
 }

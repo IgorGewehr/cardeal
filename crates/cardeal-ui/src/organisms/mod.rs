@@ -18,7 +18,7 @@ pub use agenda_mes::AgendaMes;
 pub use cartao::Cartao;
 pub use dialogo::Dialogo;
 pub use faixa_kpi::FaixaKpi;
-pub use grade::{ColunaGrade, Grade, LinhaGrade};
+pub use grade::{ColunaGrade, Direcao, Grade, LinhaGrade, RespostaGrade};
 pub use grafico::{GraficoBarras, SerieBarras};
 pub use layout_tela::LayoutTela;
 pub use notificacoes::{notificar, Notificacao, Notificacoes, Tom};

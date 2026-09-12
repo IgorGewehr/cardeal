@@ -245,6 +245,10 @@ impl Widget for Botao {
 
             let (fill, stroke, fg) = if interativo {
                 self.paleta_viva(&cores, th, tp)
+            } else if self.habilitado {
+                // Carregando, mas habilitado: mantém o preenchimento cheio da variante —
+                // só o clique fica desabilitado, não a cor (`carregando` não é `desabilitado`).
+                self.paleta_viva(&cores, 0.0_f32, 0.0_f32)
             } else {
                 self.paleta_inerte(&cores)
             };

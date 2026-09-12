@@ -424,7 +424,7 @@ fn lista(ui: &mut egui::Ui, motor: &MotorLocal, sessao: &SessaoLocal, estado: &m
         ColunaGrade::nova("Estado").largura(160.0),
         ColunaGrade::nova("Total").largura(120.0).numero(),
     ];
-    let clicada =
+    let resposta =
         Grade::nova(colunas)
             .selecionavel(None)
             .mostrar(ui, estado.ordens.len(), |i, row| {
@@ -442,7 +442,7 @@ fn lista(ui: &mut egui::Ui, motor: &MotorLocal, sessao: &SessaoLocal, estado: &m
                     ui.add(ValorDinheiro::novo(os.valor_total));
                 });
             });
-    if let Some(i) = clicada {
+    if let Some(i) = resposta.linha_clicada {
         let id = estado.ordens[i].id;
         estado.abrir_detalhe(motor, sessao, id);
     }

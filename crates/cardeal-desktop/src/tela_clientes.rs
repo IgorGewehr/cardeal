@@ -228,7 +228,7 @@ fn lista(
         ColunaGrade::nova("Nome"),
         ColunaGrade::nova("Documento").largura(200.0),
     ];
-    let clicada =
+    let resposta =
         Grade::nova(colunas)
             .selecionavel(None)
             .mostrar(ui, estado.pessoas.len(), |i, row| {
@@ -242,7 +242,7 @@ fn lista(
                     ));
                 });
             });
-    if let Some(i) = clicada {
+    if let Some(i) = resposta.linha_clicada {
         let id = estado.pessoas[i].pessoa;
         estado.abrir_detalhe(motor, sessao, id);
     }

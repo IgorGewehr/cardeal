@@ -139,6 +139,11 @@ impl Widget for Campo<'_> {
                 .scope(|ui| {
                     if com_erro {
                         let v = ui.visuals_mut();
+                        // Tint de fundo do erro: precisa aparecer em repouso (sem foco/hover),
+                        // não só na moldura que `moldura_foco_campo` interpola — por isso vai
+                        // direto no `extreme_bg_color`, que é o fundo real que o `TextEdit`
+                        // pinta (`docs/12-ui-ux.md` §9).
+                        v.extreme_bg_color = cores.negativo_suave;
                         v.widgets.inactive.bg_stroke = egui::Stroke::new(1.0_f32, cores.negativo);
                         v.widgets.hovered.bg_stroke = egui::Stroke::new(1.0_f32, cores.negativo);
                         v.widgets.active.bg_stroke = egui::Stroke::new(2.0_f32, cores.negativo);

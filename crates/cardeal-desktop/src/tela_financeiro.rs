@@ -1278,7 +1278,7 @@ fn lista(ui: &mut egui::Ui, estado: &mut EstadoTelaFinanceiro) {
         ColunaGrade::nova("Saldo").largura(130.0).numero(),
         ColunaGrade::nova("Estado").largura(110.0),
     ];
-    let clicada =
+    let resposta =
         Grade::nova(colunas)
             .selecionavel(None)
             .mostrar(ui, estado.parcelas.len(), |i, row| {
@@ -1305,7 +1305,7 @@ fn lista(ui: &mut egui::Ui, estado: &mut EstadoTelaFinanceiro) {
                     ui.add(Rotulo::campo(format!("{:?}", p.estado)));
                 });
             });
-    if let Some(i) = clicada {
+    if let Some(i) = resposta.linha_clicada {
         estado.dlg = Dlg::Baixar {
             indice: i,
             valor: estado.parcelas[i].saldo().formatar(),
