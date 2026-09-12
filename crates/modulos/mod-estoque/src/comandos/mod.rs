@@ -14,6 +14,7 @@ mod criar_grupo_produto;
 mod criar_local;
 mod criar_produto;
 mod criar_unidade;
+mod definir_ponto_pedido;
 mod editar_detalhes_tecnicos_produto;
 mod registrar_entrada;
 mod registrar_saida;
@@ -23,6 +24,7 @@ pub use criar_grupo_produto::{CriarGrupoProduto, GrupoProdutoCriado};
 pub use criar_local::{CriarLocal, LocalCriado, TipoLocal};
 pub use criar_produto::{CriarProduto, ProdutoCriado};
 pub use criar_unidade::{CriarUnidade, UnidadeCriada};
+pub use definir_ponto_pedido::DefinirPontoPedido;
 pub use editar_detalhes_tecnicos_produto::EditarDetalhesTecnicosProduto;
 pub use registrar_entrada::{EntradaRegistrada, RegistrarEntrada};
 pub use registrar_saida::{RegistrarSaida, SaidaRegistrada};
@@ -31,6 +33,7 @@ use cardeal_kernel::{Erro, Id, Preco, Quantidade, Resultado};
 use cardeal_modkit::Ctx;
 use cardeal_storage::UnidadeDeTrabalho;
 
+use crate::eventos::AbaixoPontoPedido;
 use crate::repositorio::RepositorioEstoque;
 use crate::saldo::{Movimento, SaidaAplicada, SaldoLocal, TipoMovimento};
 
@@ -195,6 +198,21 @@ pub fn registrar_saida_comum(
         criado_por: ctx.usuario,
     };
     repo.inserir_movimento(&movimento)?;
+
+    // 5. Avisar se a saída deixou o disponível do local abaixo do ponto de pedido —
+    // best-effort, sem consumidor ainda (`docs/modulos/estoque.md` §8). Usa o `saldo` já
+    // carregado (barato: nenhuma consulta extra além do produto).
+    if let Some(produto) = RepositorioEstoque::novo(uow).buscar_produto(dados.produto)? {
+        if produto.abaixo_do_ponto(saldo.quantidade_disponivel) {
+            uow.publicar(AbaixoPontoPedido {
+                produto: dados.produto,
+                local: dados.local,
+                disponivel: saldo.quantidade_disponivel,
+                ponto_pedido: produto.ponto_pedido.unwrap_or(Quantidade::ZERO),
+            })
+            .map_err(|e| Erro::de_dominio(&e))?;
+        }
+    }
 
     Ok(SaidaGravada {
         movimento: movimento.id,

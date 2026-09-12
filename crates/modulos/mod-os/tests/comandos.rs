@@ -1629,3 +1629,210 @@ fn pecas_aguardando_estoque_cruza_orcamento_pendente_com_saldo_real() {
     let pendentes: Vec<ItemAguardandoEstoque> = postcard::from_bytes(&saida).unwrap();
     assert!(pendentes.is_empty());
 }
+
+#[test]
+fn abrir_os_com_cliente_inexistente_e_recusado() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloClientes, &ModuloEstoque, &ModuloOs]).unwrap();
+    let s = sessao_completa(empresa);
+    let amb = ambiente(empresa);
+
+    let erro = d
+        .executar_comando(
+            "os.abrir_ordem_servico.v1",
+            &carga(&AbrirOrdemServico {
+                cliente: Id::novo(),
+                equipamento: "Celular".to_string(),
+                defeito_relatado: "Não liga".to_string(),
+                tecnico_responsavel: Id::novo(),
+                garantia_dias: 90,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap_err();
+    assert_eq!(erro.codigo, CodigoErro::NAO_ENCONTRADO);
+}
+
+#[test]
+fn montar_orcamento_aceita_peca_nova_com_os_em_execucao() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloClientes, &ModuloEstoque, &ModuloOs]).unwrap();
+    let s = sessao_completa(empresa);
+    let amb = ambiente(empresa);
+
+    let cliente: PessoaCadastrada = postcard::from_bytes(
+        &d.executar_comando(
+            "clientes.criar_pessoa.v1",
+            &carga(&CriarPessoa {
+                tipo: TipoPessoa::Fisica,
+                nome: "Carlos Souza".to_string(),
+                nome_fantasia: None,
+                papel_inicial: Papel::Cliente,
+                documento_tipo: None,
+                documento_numero: None,
+                data_nascimento: None,
+                endereco: None,
+                contato: None,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    let os: OrdemServicoAberta = postcard::from_bytes(
+        &d.executar_comando(
+            "os.abrir_ordem_servico.v1",
+            &carga(&AbrirOrdemServico {
+                cliente: cliente.pessoa,
+                equipamento: "Notebook".to_string(),
+                defeito_relatado: "Não carrega".to_string(),
+                tecnico_responsavel: Id::novo(),
+                garantia_dias: 90,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    d.executar_comando(
+        "os.montar_orcamento.v1",
+        &carga(&MontarOrcamentoOs {
+            ordem_servico: os.ordem_servico,
+            item: ItemOrcamentoNovo::MaoDeObra {
+                descricao: "Diagnóstico".to_string(),
+                valor: Dinheiro::reais(50),
+                tecnico: Id::novo(),
+                horas: None,
+            },
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+
+    d.executar_comando(
+        "os.enviar_para_aprovacao.v1",
+        &carga(&EnviarParaAprovacao {
+            ordem_servico: os.ordem_servico,
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+
+    d.executar_comando(
+        "os.aprovar_orcamento.v1",
+        &carga(&AprovarOrcamentoOs {
+            ordem_servico: os.ordem_servico,
+            identificacao_aprovador: "Carlos Souza - CPF 529.982.247-25".to_string(),
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+
+    d.executar_comando(
+        "os.iniciar_execucao.v1",
+        &carga(&IniciarExecucao {
+            ordem_servico: os.ordem_servico,
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+
+    // Uma peça que só se revelou necessária depois de abrir o equipamento — orçada com a OS
+    // já `EmExecucao`, sem precisar reabrir o diagnóstico.
+    let grupo: GrupoProdutoCriado = postcard::from_bytes(
+        &d.executar_comando(
+            "estoque.criar_grupo_produto.v1",
+            &carga(&CriarGrupoProduto {
+                codigo: "PECAS".to_string(),
+                nome: "Peças".to_string(),
+                pai: None,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let unidade: UnidadeCriada = postcard::from_bytes(
+        &d.executar_comando(
+            "estoque.criar_unidade.v1",
+            &carga(&CriarUnidade {
+                sigla: "UN".to_string(),
+                nome: "Unidade".to_string(),
+                fracionavel: false,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let produto: ProdutoCriado = postcard::from_bytes(
+        &d.executar_comando(
+            "estoque.criar_produto.v1",
+            &carga(&CriarProduto {
+                grupo_produto: grupo.grupo_produto,
+                nome: "Carregador original".to_string(),
+                ncm: "85044090".to_string(),
+                unidade_padrao: unidade.unidade,
+                codigo_barras: None,
+                detalhes_tecnicos: None,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    d.executar_comando(
+        "os.montar_orcamento.v1",
+        &carga(&MontarOrcamentoOs {
+            ordem_servico: os.ordem_servico,
+            item: ItemOrcamentoNovo::Peca {
+                produto: produto.produto,
+                quantidade: Quantidade::unidades(1),
+                preco_unitario: Preco::reais(120),
+            },
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+
+    let saida = d
+        .executar_consulta(
+            "os.buscar_detalhe_ordem.v1",
+            &carga(&BuscarDetalheOrdem {
+                ordem_servico: os.ordem_servico,
+            }),
+            &s,
+            &amb,
+            arm.leitor(),
+        )
+        .unwrap();
+    let detalhe: Option<DetalheOrdem> = postcard::from_bytes(&saida).unwrap();
+    let detalhe = detalhe.unwrap();
+    assert_eq!(detalhe.itens_peca.len(), 1);
+    assert_eq!(detalhe.itens_peca[0].produto, produto.produto);
+}

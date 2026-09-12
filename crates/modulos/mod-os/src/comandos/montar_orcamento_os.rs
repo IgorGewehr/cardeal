@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::comandos::carregar_ordem;
 use crate::erros::ErroOs;
 use crate::execucao::{ItemMaoDeObra, ItemPeca};
+use crate::ordem::EstadoOs;
 use crate::repositorio::RepositorioOs;
 
 /// Um item novo para o orçamento — peça ou mão de obra.
@@ -56,11 +57,13 @@ impl Comando for MontarOrcamentoOs {
         // 1. Carregar.
         let mut os = carregar_ordem(uow, self.ordem_servico)?;
 
-        // 2. Validar (domínio puro): estado aceita edição, antes de qualquer escrita.
-        if !os.estado.aceita_edicao_de_orcamento() {
+        // 2. Validar (domínio puro): estado aceita edição, antes de qualquer escrita. Peça
+        // nova também pode ser orçada em `EmExecucao` — mesma brecha que
+        // `OrdemServico::adicionar_ao_orcamento` já concede a `RegistrarMaoDeObra`.
+        if !os.estado.aceita_edicao_de_orcamento() && os.estado != EstadoOs::EmExecucao {
             return Err(Erro::de_dominio(&ErroOs::EstadoInvalido {
                 atual: os.estado.rotulo(),
-                esperado: "Aberta ou EmDiagnostico",
+                esperado: "Aberta, EmDiagnostico ou EmExecucao",
             }));
         }
 

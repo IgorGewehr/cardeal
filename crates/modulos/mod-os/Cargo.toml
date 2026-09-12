@@ -25,6 +25,7 @@ cardeal-storage.workspace = true
 cardeal-modkit.workspace  = true
 mod-financeiro.workspace  = true
 mod-estoque.workspace     = true
+mod-clientes.workspace    = true
 cardeal-ui = { workspace = true, optional = true }
 egui       = { workspace = true, optional = true }
 serde.workspace     = true
@@ -37,6 +38,5 @@ tracing.workspace   = true
 cardeal-testkit.workspace = true
 proptest.workspace        = true
 cardeal-auth.workspace    = true
-mod-clientes.workspace    = true
 postcard.workspace        = true
 tempfile.workspace        = true

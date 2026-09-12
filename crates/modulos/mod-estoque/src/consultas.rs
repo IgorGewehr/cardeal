@@ -8,7 +8,8 @@ use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::produto::Produto;
-use crate::repositorio::{blob, id_de, persist, produto_de_linha};
+use crate::repositorio::{blob, id_de, movimento_de_linha, persist, produto_de_linha};
+use crate::saldo::Movimento;
 
 /// Um produto com o saldo somado entre todos os locais — o que sustenta a lista principal da
 /// tela de Estoque. `custo_medio` aqui é uma aproximação (o maior custo médio entre os
@@ -274,5 +275,121 @@ impl Consulta for Locais {
         linhas
             .collect::<rusqlite::Result<Vec<_>>>()
             .map_err(persist)
+    }
+}
+
+/// Um produto cujo disponível (somado entre todos os locais) caiu abaixo do ponto de
+/// pedido — o radar de reposição sobre [`crate::produto::Produto::abaixo_do_ponto`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ItemAbaixoDoPontoPedido {
+    /// O produto.
+    pub produto: Id,
+    /// O nome.
+    pub nome: String,
+    /// A soma do disponível em todos os locais.
+    pub disponivel: Quantidade,
+    /// O ponto de pedido cadastrado.
+    pub ponto_pedido: Quantidade,
+    /// O estoque mínimo cadastrado, se houver.
+    pub estoque_minimo: Option<Quantidade>,
+}
+
+/// Os produtos ativos, com ponto de pedido definido, cujo disponível agregado está abaixo
+/// dele — o que sustenta o radar de reposição. Mesmo teto das demais listas desta fatia
+/// (`docs/09-protocolo-api.md` §5).
+///
+/// # Errors
+/// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+pub fn produtos_abaixo_do_ponto_pedido(
+    conexao: &Connection,
+    empresa: Id,
+) -> Resultado<Vec<ItemAbaixoDoPontoPedido>> {
+    let mut stmt = conexao
+        .prepare(
+            "SELECT p.id, p.nome, p.ponto_pedido, p.estoque_minimo,
+                    COALESCE(SUM(s.quantidade_disponivel), 0) AS disponivel
+             FROM estoque_produto p
+             LEFT JOIN estoque_saldo_local s ON s.produto = p.id
+             WHERE p.empresa = ?1 AND p.ativo = 1 AND p.ponto_pedido IS NOT NULL
+             GROUP BY p.id, p.nome, p.ponto_pedido, p.estoque_minimo
+             HAVING disponivel < p.ponto_pedido
+             ORDER BY p.nome ASC
+             LIMIT 500",
+        )
+        .map_err(persist)?;
+    let linhas = stmt
+        .query_map([blob(empresa)], |r| {
+            Ok(ItemAbaixoDoPontoPedido {
+                produto: id_de(r.get::<_, Vec<u8>>(0)?),
+                nome: r.get(1)?,
+                ponto_pedido: Quantidade::interna(r.get::<_, i64>(2)?),
+                estoque_minimo: r.get::<_, Option<i64>>(3)?.map(Quantidade::interna),
+                disponivel: Quantidade::interna(r.get::<_, i64>(4)?),
+            })
+        })
+        .map_err(persist)?;
+    linhas
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(persist)
+}
+
+/// Consulta os produtos abaixo do ponto de pedido.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProdutosAbaixoDoPontoPedido;
+
+impl Consulta for ProdutosAbaixoDoPontoPedido {
+    type Saida = Vec<ItemAbaixoDoPontoPedido>;
+    const PERMISSAO: &'static str = "estoque.compra_sugerida.ver";
+
+    fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        produtos_abaixo_do_ponto_pedido(conexao, ctx.empresa)
+    }
+}
+
+/// Os movimentos de um produto — a rastreabilidade peça↔origem (ex.: `os` cruzando a peça
+/// aplicada com a ordem de serviço que a consumiu), sobre os índices
+/// `estoque_movimento_produto`/`estoque_movimento_origem`. Mais recente primeiro; sem
+/// cursor real ainda, mesmo teto das demais listas desta fatia.
+///
+/// # Errors
+/// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+pub fn movimentos_do_produto(
+    conexao: &Connection,
+    produto: Id,
+    origem_modulo: Option<&str>,
+) -> Resultado<Vec<Movimento>> {
+    let mut stmt = conexao
+        .prepare(
+            "SELECT id, empresa, produto, variacao, local, tipo, quantidade, custo_unitario,
+                    lote, origem_modulo, origem_id, lancamento, criado_em, criado_por
+             FROM estoque_movimento
+             WHERE produto = ?1 AND (?2 IS NULL OR origem_modulo = ?2)
+             ORDER BY criado_em DESC
+             LIMIT 500",
+        )
+        .map_err(persist)?;
+    let linhas = stmt
+        .query_map(rusqlite::params![blob(produto), origem_modulo], movimento_de_linha)
+        .map_err(persist)?;
+    linhas
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(persist)
+}
+
+/// Consulta os movimentos de um produto, opcionalmente filtrados por módulo de origem.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MovimentosDoProduto {
+    /// O produto.
+    pub produto: Id,
+    /// Filtra por módulo de origem (ex.: `"os"`), quando informado.
+    pub origem_modulo: Option<String>,
+}
+
+impl Consulta for MovimentosDoProduto {
+    type Saida = Vec<Movimento>;
+    const PERMISSAO: &'static str = "estoque.movimento.ver";
+
+    fn executar(self, _ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        movimentos_do_produto(conexao, self.produto, self.origem_modulo.as_deref())
     }
 }

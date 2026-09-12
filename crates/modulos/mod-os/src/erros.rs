@@ -10,6 +10,10 @@ pub enum ErroOs {
     #[error("O defeito relatado não pode ser vazio")]
     DefeitoRelatadoVazio,
 
+    /// `AbrirOrdemServico` com um `cliente` que não existe em `clientes_pessoa`.
+    #[error("O cliente informado não existe")]
+    ClienteInexistente,
+
     /// `EditarDadosDaOrdem` chamado sem `equipamento` nem `complemento_defeito_relatado` —
     /// nada para atualizar.
     #[error("Informe ao menos o equipamento ou um complemento ao defeito relatado")]
@@ -99,6 +103,7 @@ impl ErroDominio for ErroOs {
             | Self::DescricaoDoProblemaVazia
             | Self::DescricaoDeServicoVazia
             | Self::OrcamentoVazio => CodigoErro::ENTRADA_INVALIDA,
+            Self::ClienteInexistente => CodigoErro::NAO_ENCONTRADO,
             Self::EstadoInvalido { .. } | Self::OrdemFinalizada => CodigoErro::ESTADO_INVALIDO,
             Self::AprovacaoSemIdentificacao | Self::MotivoDeAjusteObrigatorio => {
                 CodigoErro::CAMPO_OBRIGATORIO

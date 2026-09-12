@@ -61,6 +61,7 @@
 mod comandos;
 mod consultas;
 mod erros;
+pub mod eventos;
 mod inventario;
 mod manifesto;
 pub mod migracoes;
@@ -72,15 +73,16 @@ mod saldo;
 
 pub use comandos::{
     registrar_entrada_comum, registrar_saida_comum, AjustarSaldo, CriarGrupoProduto, CriarLocal,
-    CriarProduto, CriarUnidade, DadosEntrada, DadosSaida, EditarDetalhesTecnicosProduto,
-    EntradaGravada, EntradaRegistrada, GrupoProdutoCriado, LocalCriado, ProdutoCriado,
-    RegistrarEntrada, RegistrarSaida, SaidaGravada, SaidaRegistrada, SaldoAjustado, TipoLocal,
-    UnidadeCriada,
+    CriarProduto, CriarUnidade, DadosEntrada, DadosSaida, DefinirPontoPedido,
+    EditarDetalhesTecnicosProduto, EntradaGravada, EntradaRegistrada, GrupoProdutoCriado,
+    LocalCriado, ProdutoCriado, RegistrarEntrada, RegistrarSaida, SaidaGravada, SaidaRegistrada,
+    SaldoAjustado, TipoLocal, UnidadeCriada,
 };
 pub use consultas::{
-    saldo_disponivel_do_produto, GruposProduto, ItemGrupoProduto, ItemLocal, ItemProdutoComSaldo,
-    ItemUnidade, Locais, ProdutoPorCodigoBarras, ProdutosComSaldo, SaldoDisponivelDoProduto,
-    Unidades,
+    movimentos_do_produto, produtos_abaixo_do_ponto_pedido, saldo_disponivel_do_produto,
+    GruposProduto, ItemAbaixoDoPontoPedido, ItemGrupoProduto, ItemLocal, ItemProdutoComSaldo,
+    ItemUnidade, Locais, MovimentosDoProduto, ProdutoPorCodigoBarras, ProdutosAbaixoDoPontoPedido,
+    ProdutosComSaldo, SaldoDisponivelDoProduto, Unidades,
 };
 pub use erros::ErroEstoque;
 pub use inventario::{AjusteInventario, ContagemItem, EstadoInventario, Inventario};

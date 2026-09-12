@@ -1,16 +1,19 @@
 //! Abre uma ordem de serviço.
 //!
 //! `docs/modulos/os.md` §5. Pedido explícito do usuário: na abertura, só o nome do cliente
-//! (resolvido antes deste comando, em `mod_clientes`) e `defeito_relatado` são obrigatórios
-//! — `equipamento` é opcional, completável depois via `EditarDadosDaOrdem`. O vínculo com
+//! e `defeito_relatado` são obrigatórios — `equipamento` é opcional, completável depois via
+//! `EditarDadosDaOrdem`. O cliente precisa já existir em `clientes_pessoa` (verificado aqui
+//! via `mod_clientes::pessoa_por_id`, a mesma transação). O vínculo com
 //! `agenda.CriarCompromisso` fica para quando o módulo `agenda` existir — por ora
 //! `compromisso` não é gravado.
 
 use cardeal_kernel::{Erro, Id, Resultado};
 use cardeal_modkit::{Comando, Ctx, Risco};
 use cardeal_storage::UnidadeDeTrabalho;
+use mod_clientes::pessoa_por_id;
 use serde::{Deserialize, Serialize};
 
+use crate::erros::ErroOs;
 use crate::eventos::OrdemAberta;
 use crate::ordem::OrdemServico;
 use crate::repositorio::RepositorioOs;
@@ -49,7 +52,14 @@ impl Comando for AbrirOrdemServico {
         // 1. Numerar.
         let numero = RepositorioOs::novo(uow).proximo_numero()?;
 
-        // 2. Validar (domínio puro).
+        // 2. Validar: o cliente precisa existir em `clientes_pessoa` (porta pública de
+        // `mod_clientes`, nunca lendo a tabela direto — `docs/contratos-internos.md` §7
+        // regra 2).
+        if pessoa_por_id(uow.conexao(), self.cliente)?.is_none() {
+            return Err(Erro::de_dominio(&ErroOs::ClienteInexistente));
+        }
+
+        // 3. Validar (domínio puro).
         let os = OrdemServico::abrir(
             ctx.empresa,
             numero,

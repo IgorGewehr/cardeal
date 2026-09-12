@@ -10,6 +10,7 @@ use cardeal_kernel::{CodigoErro, Id, Instante};
 use cardeal_ledger::semear_plano_padrao;
 use cardeal_modkit::{Ambiente, Despachante, Modulo, PedidoAtivacao, RegistroModulos};
 use cardeal_storage::{Armazenamento, ConfigArmazenamento, ContextoEscrita, ErroArmazenamento};
+use mod_clientes::ModuloClientes;
 use mod_os::{
     AbrirOrdemServico, AjustarApontamento, ApontamentoIniciado, ApontamentosDaOrdem,
     EncerrarApontamento, IniciarApontamento, ModuloOs, OrdemServicoAberta,
@@ -20,8 +21,12 @@ fn base() -> (TempDir, Armazenamento, Id) {
     let dir = tempfile::tempdir().unwrap();
     let arm =
         Armazenamento::abrir(ConfigArmazenamento::arquivo(dir.path().join("cardeal.db"))).unwrap();
-    arm.migrar(&[cardeal_ledger::migracoes::conjunto(), ModuloOs.migracoes()])
-        .unwrap();
+    arm.migrar(&[
+        cardeal_ledger::migracoes::conjunto(),
+        ModuloClientes.migracoes(),
+        ModuloOs.migracoes(),
+    ])
+    .unwrap();
 
     let empresa = Id::novo();
     let ctx = ContextoEscrita::novo(empresa, Id::novo(), Id::novo(), Id::novo());
@@ -76,12 +81,32 @@ fn carga(v: &impl serde::Serialize) -> Vec<u8> {
     postcard::to_stdvec(v).unwrap()
 }
 
-fn abrir_uma_os(d: &Despachante, s: &Sessao, amb: &Ambiente, arm: &Armazenamento) -> Id {
+/// Grava uma pessoa direto em `clientes_pessoa` (sem passar por `mod_clientes::CriarPessoa`
+/// — este arquivo testa apontamento, não cadastro) só para satisfazer a validação de
+/// existência que `AbrirOrdemServico` agora faz.
+fn criar_cliente(arm: &Armazenamento, empresa: Id) -> Id {
+    let cliente = Id::novo();
+    let ctx = ContextoEscrita::novo(empresa, Id::novo(), Id::novo(), Id::novo());
+    arm.escritor()
+        .executar(ctx, move |uow| {
+            uow.conexao()
+                .execute(
+                    "INSERT INTO clientes_pessoa (id, empresa, tipo, nome, estado, versao, criado_em)
+                     VALUES (?1,?2,'Fisica','Cliente Teste','Ativa',1,0)",
+                    [cliente.em_bytes().as_slice(), empresa.em_bytes().as_slice()],
+                )
+                .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+        })
+        .unwrap();
+    cliente
+}
+
+fn abrir_uma_os(d: &Despachante, s: &Sessao, amb: &Ambiente, arm: &Armazenamento, cliente: Id) -> Id {
     let saida = d
         .executar_comando(
             "os.abrir_ordem_servico.v1",
             &carga(&AbrirOrdemServico {
-                cliente: Id::novo(),
+                cliente,
                 equipamento: "Notebook Dell XPS 13".to_string(),
                 defeito_relatado: "Não liga".to_string(),
                 tecnico_responsavel: Id::novo(),
@@ -103,9 +128,10 @@ fn tecnico_nao_pode_ter_dois_apontamentos_abertos_ao_mesmo_tempo() {
     let s = sessao_completa(empresa);
     let amb = ambiente(empresa);
     let tecnico = Id::novo();
+    let cliente = criar_cliente(&arm, empresa);
 
-    let os1 = abrir_uma_os(&d, &s, &amb, &arm);
-    let os2 = abrir_uma_os(&d, &s, &amb, &arm);
+    let os1 = abrir_uma_os(&d, &s, &amb, &arm, cliente);
+    let os2 = abrir_uma_os(&d, &s, &amb, &arm, cliente);
 
     // Começa a trabalhar na primeira OS.
     d.executar_comando(
@@ -156,9 +182,10 @@ fn encerrar_libera_o_tecnico_para_outra_os_e_a_consulta_lista_o_apontamento() {
     let s = sessao_completa(empresa);
     let amb = ambiente(empresa);
     let tecnico = Id::novo();
+    let cliente = criar_cliente(&arm, empresa);
 
-    let os1 = abrir_uma_os(&d, &s, &amb, &arm);
-    let os2 = abrir_uma_os(&d, &s, &amb, &arm);
+    let os1 = abrir_uma_os(&d, &s, &amb, &arm, cliente);
+    let os2 = abrir_uma_os(&d, &s, &amb, &arm, cliente);
 
     let saida = d
         .executar_comando(
@@ -240,7 +267,8 @@ fn ajustar_corrige_um_esquecimento_e_marca_ajustado() {
     let s = sessao_completa(empresa);
     let amb = ambiente(empresa);
     let tecnico = Id::novo();
-    let os1 = abrir_uma_os(&d, &s, &amb, &arm);
+    let cliente = criar_cliente(&arm, empresa);
+    let os1 = abrir_uma_os(&d, &s, &amb, &arm, cliente);
 
     let saida = d
         .executar_comando(

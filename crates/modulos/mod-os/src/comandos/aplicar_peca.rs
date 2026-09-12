@@ -34,6 +34,11 @@ pub struct PecaFoiAplicada {
     pub item_peca: Id,
     /// O custo unitário real, devolvido pelo estoque.
     pub custo_unitario: Preco,
+    /// Verdadeiro se o consumo deixou (ou manteve) o disponível do produto negativo no
+    /// local — divergência a conferir, devolvida por `mod_estoque::registrar_saida_comum`
+    /// (`docs/modulos/estoque.md` §11.2). Quem chama (a tela) avisa na hora, sem precisar
+    /// consultar o estoque de novo.
+    pub gerou_divergencia: bool,
 }
 
 impl Comando for AplicarPeca {
@@ -77,6 +82,7 @@ impl Comando for AplicarPeca {
         Ok(PecaFoiAplicada {
             item_peca: item.id,
             custo_unitario: item.custo_unitario,
+            gerou_divergencia: saida.aplicada.gerou_divergencia,
         })
     }
 }

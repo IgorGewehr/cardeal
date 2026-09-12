@@ -200,6 +200,25 @@ impl<'a, 'b> RepositorioEstoque<'a, 'b> {
         Ok(())
     }
 
+    /// Regrava só o ponto de pedido e o estoque mínimo de um produto já cadastrado —
+    /// o gatilho de reposição (`Produto::abaixo_do_ponto`).
+    ///
+    /// # Errors
+    /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+    pub fn atualizar_ponto_pedido(&mut self, p: &Produto) -> Resultado<()> {
+        self.conn()
+            .execute(
+                "UPDATE estoque_produto SET ponto_pedido = ?2, estoque_minimo = ?3 WHERE id = ?1",
+                params![
+                    blob(p.id),
+                    p.ponto_pedido.map(Quantidade::unidades_internas),
+                    p.estoque_minimo.map(Quantidade::unidades_internas),
+                ],
+            )
+            .map_err(persist)?;
+        Ok(())
+    }
+
     /// Busca um produto pelo id. `Ok(None)` = não existe.
     ///
     /// # Errors
@@ -419,5 +438,42 @@ fn saldo_de_linha(r: &rusqlite::Row<'_>) -> rusqlite::Result<SaldoLocal> {
         custo_medio: Preco::interna(r.get::<_, i64>(7)?),
         atualizado_em: Instante::de_micros(r.get::<_, i64>(8)?),
         versao: versao_de(r.get::<_, i64>(9)?),
+    })
+}
+
+fn tipo_movimento_de(t: &str) -> TipoMovimento {
+    match t {
+        "Entrada" => TipoMovimento::Entrada,
+        "TransferenciaSaida" => TipoMovimento::TransferenciaSaida,
+        "TransferenciaEntrada" => TipoMovimento::TransferenciaEntrada,
+        "AjustePositivo" => TipoMovimento::AjustePositivo,
+        "AjusteNegativo" => TipoMovimento::AjusteNegativo,
+        "Reserva" => TipoMovimento::Reserva,
+        "LiberacaoReserva" => TipoMovimento::LiberacaoReserva,
+        "Producao" => TipoMovimento::Producao,
+        "Perda" => TipoMovimento::Perda,
+        _ => TipoMovimento::Saida,
+    }
+}
+
+/// Monta um [`Movimento`] a partir de uma linha de `estoque_movimento`, nas mesmas colunas
+/// (e ordem) gravadas por [`RepositorioEstoque::inserir_movimento`] — usado por
+/// [`crate::consultas::movimentos_do_produto`].
+pub(crate) fn movimento_de_linha(r: &rusqlite::Row<'_>) -> rusqlite::Result<Movimento> {
+    Ok(Movimento {
+        id: id_de(r.get::<_, Vec<u8>>(0)?),
+        empresa: id_de(r.get::<_, Vec<u8>>(1)?),
+        produto: id_de(r.get::<_, Vec<u8>>(2)?),
+        variacao: variacao_de(r.get::<_, Vec<u8>>(3)?),
+        local: id_de(r.get::<_, Vec<u8>>(4)?),
+        tipo: tipo_movimento_de(&r.get::<_, String>(5)?),
+        quantidade: Quantidade::interna(r.get::<_, i64>(6)?),
+        custo_unitario: r.get::<_, Option<i64>>(7)?.map(Preco::interna),
+        lote: r.get::<_, Option<Vec<u8>>>(8)?.map(id_de),
+        origem_modulo: r.get(9)?,
+        origem_id: r.get::<_, Option<Vec<u8>>>(10)?.map(id_de),
+        lancamento: r.get::<_, Option<Vec<u8>>>(11)?.map(id_de),
+        criado_em: Instante::de_micros(r.get::<_, i64>(12)?),
+        criado_por: id_de(r.get::<_, Vec<u8>>(13)?),
     })
 }

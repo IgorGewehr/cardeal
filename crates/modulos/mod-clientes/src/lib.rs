@@ -62,7 +62,7 @@ pub use comandos::{
     CriarPessoa, DefinirLimiteCredito, EditarPessoa, EnderecoFoiAdicionado, EnderecoInicial,
     LimiteCreditoDefinido, PapelFoiAdicionado, PessoaCadastrada, PessoaEditada,
 };
-pub use consultas::{DetalhePessoa, ItemPessoa, PessoaDetalhada, PessoasPorPapel};
+pub use consultas::{pessoa_por_id, DetalhePessoa, ItemPessoa, PessoaDetalhada, PessoasPorPapel};
 pub use credito::{
     DisponivelCredito, EventoCredito, LimiteCredito, Score, SituacaoCredito, SCORE_INICIAL,
     SCORE_MAXIMO, SCORE_MINIMO,

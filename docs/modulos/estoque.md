@@ -215,7 +215,7 @@ stateDiagram-v2
 | `IniciarContagem` | `estoque.inventario.contar` | Baixo | Ainda não implementado (idem) | `LocalJaEmInventario` |
 | `RegistrarContagem` | `estoque.inventario.contar` | Baixo | Ainda não implementado (idem) | — |
 | `EncerrarInventario` | `estoque.inventario.encerrar` | Alto | Ainda não implementado (idem) | `ContagensPendentes` |
-| `DefinirPontoPedido` | `estoque.produto.editar` | Baixo | Ainda não implementado | — |
+| `DefinirPontoPedido` ✅ (novo, 2026-09-12) | `estoque.produto.editar` | Baixo | Define/limpa `ponto_pedido` e `estoque_minimo` de um produto — o gatilho que `Produto::abaixo_do_ponto`/`ProdutosAbaixoPontoPedido`/`estoque.abaixo_ponto_pedido.v1` consultam | — |
 | `VincularPerfilTributario` | `estoque.tributario.editar` | Médio | Ainda não implementado | — |
 
 > **Nota (2026-09-06) — auditoria de produção:** `CriarProduto` ganhou `codigo_barras`
@@ -250,8 +250,8 @@ stateDiagram-v2
 | `SaldoPorLocal` | `estoque.saldo.ver` | Ficha do produto, PDV (consulta de preço/saldo) | `estoque_saldo_local(produto, variacao, local)` |
 | `SaldoConsolidado` | `estoque.saldo.ver` | Relatório multi-loja | agregação sobre `SaldoPorLocal` por `produto` |
 | `SaldoDisponivelDoProduto` ✅ (novo, 2026-09-11) | `estoque.saldo.ver` | Saldo somado entre locais de **um** produto — a porta pública que outro módulo chama para cruzar dados sem ler `estoque_saldo_local` direto (`mod-os::PecasAguardandoEstoque` é o primeiro consumidor) | `estoque_saldo_local(produto)` |
-| `MovimentosDoProduto` | `estoque.movimento.ver` | Aba "Movimentação" da ficha | `estoque_movimento(produto, criado_em DESC)` |
-| `ProdutosAbaixoPontoPedido` | `estoque.compra_sugerida.ver` | "Radar" do Pulso, sugestão de pedido de compra | `estoque_saldo_local` filtrado em memória contra `ponto_pedido` |
+| `MovimentosDoProduto` ✅ (novo, 2026-09-12) | `estoque.movimento.ver` | Aba "Movimentação" da ficha — rastreabilidade peça↔origem (ex.: peça↔OS), opcionalmente filtrada por `origem_modulo` | `estoque_movimento_produto`/`estoque_movimento_origem` |
+| `ProdutosAbaixoPontoPedido` ✅ (novo, 2026-09-12; nome Rust `ProdutosAbaixoDoPontoPedido`) | `estoque.compra_sugerida.ver` | "Radar" do Pulso, sugestão de pedido de compra | `estoque_saldo_local` agregado por produto, comparado a `estoque_produto.ponto_pedido` |
 | `CurvaAbc` | `estoque.abc.ver` | Relatório de curva ABC | agregação de `estoque_movimento` por valor no período |
 | `LotesProximosDoVencimento` | `estoque.lote.ver` | Alerta de validade | `estoque_lote(validade)` índice parcial `WHERE estado = 'Ativo'` |
 | `EstoqueEmTransito` | `estoque.transferencia.ver` | Painel de transferências pendentes | `estoque_saldo_local(local) WHERE local = local_em_transito` |
