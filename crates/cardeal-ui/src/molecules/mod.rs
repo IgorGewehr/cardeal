@@ -8,6 +8,8 @@ mod cartao_kpi;
 mod estado_vazio;
 mod item_lista;
 mod linha_acao;
+mod secao_expansivel;
+mod seletor_busca;
 mod seletor_opcao;
 
 pub use abas::Abas;
@@ -17,4 +19,6 @@ pub use cartao_kpi::CartaoKpi;
 pub use estado_vazio::EstadoVazio;
 pub use item_lista::ItemDeLista;
 pub use linha_acao::{LinhaDeAcao, Severidade};
+pub use secao_expansivel::SecaoExpansivel;
+pub use seletor_busca::{OpcaoBusca, SeletorBusca};
 pub use seletor_opcao::SeletorOpcao;

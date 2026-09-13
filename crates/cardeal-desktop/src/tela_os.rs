@@ -9,10 +9,12 @@ use cardeal_cliente::{IdentidadeVisual, MotorLocal, SessaoLocal, UsuarioResumo};
 use cardeal_kernel::{Dinheiro, Id, Instante, Percentual, Preco, Quantidade};
 use cardeal_modkit::Icone;
 use cardeal_pdf::{gerar_comprovante_os, ComprovanteOsPdf, IdentidadeEmpresa, ItemPdf};
-use cardeal_ui::atoms::{Botao, Rotulo, ValorDinheiro};
-use cardeal_ui::molecules::{Abas, Campo, CartaoKpi, EstadoVazio, Mascara, SeletorOpcao};
+use cardeal_ui::atoms::{Botao, Etiqueta, Rotulo, Tom, ValorDinheiro};
+use cardeal_ui::molecules::{
+    Abas, Campo, CartaoKpi, EstadoVazio, Mascara, OpcaoBusca, SecaoExpansivel, SeletorBusca,
+};
 use cardeal_ui::organisms::{
-    notificar, ColunaGrade, Dialogo, FaixaKpi, Grade, LayoutTela, Notificacao,
+    notificar, ColunaGrade, Dialogo, Direcao, FaixaKpi, Grade, LayoutTela, Notificacao,
 };
 use cardeal_ui::tokens::{Espaco, TemaUi};
 use eframe::egui;
@@ -40,6 +42,9 @@ enum Dlg {
         /// `true` = cadastrar cliente novo; `false` = escolher da lista.
         cliente_novo: bool,
         cliente_sel: Option<Id>,
+        /// O texto digitado no lookup de cliente (`SeletorBusca`) — filtra por nome e
+        /// documento.
+        cliente_busca: String,
         nome: String,
         /// CPF ou CNPJ — opcional (pedido do usuário: só o nome do cliente é obrigatório).
         documento: String,
@@ -67,6 +72,7 @@ impl Dlg {
         Self::Nova {
             cliente_novo: false,
             cliente_sel: None,
+            cliente_busca: String::new(),
             nome: String::new(),
             documento: String::new(),
             telefone: String::new(),
@@ -110,12 +116,20 @@ pub struct EstadoTelaOs {
     calculando_margens: bool,
     erro: Option<String>,
     dlg: Dlg,
+    /// Filtro da lista de ordens (nº, equipamento ou nome do cliente) — client-side, mesma
+    /// decisão de `tela_estoque`/`tela_clientes` (a consulta já traz tudo de uma vez).
+    busca: String,
+    ordenacao: Option<(usize, Direcao)>,
 
     laudo_problema: String,
     laudo_diagnostico: String,
     mao_de_obra_descricao: String,
     mao_de_obra_valor: String,
     peca_produto: Option<Id>,
+    /// O texto digitado no lookup de peça (`SeletorBusca`) — hoje filtra por nome; fica
+    /// pronto para somar o código curto de bancada assim que o backend o expuser (ver
+    /// `TODO(backend)` em `adicionar_peca`/`corpo_detalhe`).
+    peca_busca: String,
     peca_qtd: String,
     peca_preco: String,
     aprovador: String,
@@ -212,6 +226,7 @@ impl EstadoTelaOs {
         self.mao_de_obra_descricao.clear();
         self.mao_de_obra_valor.clear();
         self.peca_produto = None;
+        self.peca_busca.clear();
         self.peca_qtd.clear();
         self.peca_preco.clear();
         self.aprovador.clear();
@@ -405,47 +420,158 @@ fn lista(ui: &mut egui::Ui, motor: &MotorLocal, sessao: &SessaoLocal, estado: &m
         return;
     }
 
-    // Dois agregados que a lista já carrega e antes ficavam perdidos entre as linhas —
-    // vira cabeçalho de indicador visual (`docs/12-ui-ux.md` §6), a pedido explícito da
-    // revisão de UI/UX de 2026-09-11 ("total de OS abertas, valor parado").
+    // Três agregados que a lista já carrega e antes ficavam perdidos entre as linhas —
+    // vira cabeçalho de indicador visual (`docs/12-ui-ux.md` §6): total de OS abertas, valor
+    // parado e quantas estão esperando uma decisão do cliente (fila de cobrança/follow-up).
     let valor_parado = estado
         .ordens
         .iter()
         .fold(Dinheiro::ZERO, |acc, os| acc + os.valor_total);
+    let aguardando_cliente = estado
+        .ordens
+        .iter()
+        .filter(|os| os.estado == EstadoOs::AguardandoAprovacao)
+        .count();
     FaixaKpi::nova(vec![
         CartaoKpi::contagem("Ordens em aberto", estado.ordens.len()),
         CartaoKpi::novo("Valor em aberto", valor_parado).variacao("soma do total de cada OS"),
+        CartaoKpi::contagem("Aguardando aprovação", aguardando_cliente)
+            .variacao("orçamento com o cliente"),
     ])
     .mostrar(ui);
+
+    ui.horizontal(|ui| {
+        ui.set_max_width(360.0);
+        ui.add(
+            Campo::novo("", &mut estado.busca).marcador("Buscar por nº, equipamento ou cliente"),
+        );
+    });
+    ui.add_space(Espaco::E12);
+
+    let termo = estado.busca.trim().to_lowercase();
+    let indices: Vec<usize> = (0..estado.ordens.len())
+        .filter(|&i| {
+            if termo.is_empty() {
+                return true;
+            }
+            let os = &estado.ordens[i];
+            os.numero.to_string().contains(&termo)
+                || equipamento_label(os).to_lowercase().contains(&termo)
+                || nome_cliente(&estado.clientes, os.cliente)
+                    .to_lowercase()
+                    .contains(&termo)
+        })
+        .collect();
+    if indices.is_empty() {
+        ui.add(Rotulo::interface("Nenhuma ordem para essa busca.").cor(ui.cores().texto_medio));
+        return;
+    }
 
     let colunas = vec![
         ColunaGrade::nova("Nº").largura(56.0).numero(),
         ColunaGrade::nova("Equipamento"),
-        ColunaGrade::nova("Estado").largura(160.0),
-        ColunaGrade::nova("Total").largura(120.0).numero(),
+        ColunaGrade::nova("Cliente").largura(180.0),
+        ColunaGrade::nova("Estado").largura(170.0),
+        ColunaGrade::nova("Total").largura(110.0).numero(),
     ];
-    let resposta =
-        Grade::nova(colunas)
-            .selecionavel(None)
-            .mostrar(ui, estado.ordens.len(), |i, row| {
-                let os = &estado.ordens[i];
-                row.col(|ui| {
-                    ui.add(Rotulo::interface(os.numero.to_string()));
-                });
-                row.col(|ui| {
-                    ui.add(Rotulo::interface(os.equipamento.clone()));
-                });
-                row.col(|ui| {
-                    ui.add(Rotulo::campo(os.estado.rotulo()));
-                });
-                row.col(|ui| {
-                    ui.add(ValorDinheiro::novo(os.valor_total));
-                });
+    let resposta = Grade::nova(colunas)
+        .selecionavel(None)
+        .ordenacao(estado.ordenacao)
+        .mostrar(ui, indices.len(), |i, row| {
+            let os = &estado.ordens[indices[i]];
+            row.col(|ui| {
+                ui.add(Rotulo::interface(os.numero.to_string()));
             });
+            row.col(|ui| {
+                ui.add(Rotulo::interface(equipamento_label(os).to_owned()));
+            });
+            row.col(|ui| {
+                ui.add(Rotulo::interface(nome_cliente(
+                    &estado.clientes,
+                    os.cliente,
+                )));
+            });
+            row.col(|ui| {
+                let (rotulo, tom) = estado_etiqueta(os.estado);
+                ui.add(Etiqueta::nova(rotulo, tom));
+            });
+            row.col(|ui| {
+                ui.add(ValorDinheiro::novo(os.valor_total));
+            });
+        });
+
+    if let Some(coluna) = resposta.coluna_clicada {
+        let direcao = match estado.ordenacao {
+            Some((atual, direcao)) if atual == coluna => direcao.invertida(),
+            _ => Direcao::Ascendente,
+        };
+        estado.ordenacao = Some((coluna, direcao));
+        ordenar_ordens(&mut estado.ordens, &estado.clientes, coluna, direcao);
+    }
     if let Some(i) = resposta.linha_clicada {
-        let id = estado.ordens[i].id;
+        let id = estado.ordens[indices[i]].id;
         estado.abrir_detalhe(motor, sessao, id);
     }
+}
+
+/// O texto que a lista mostra na coluna "Equipamento" — cai para o defeito relatado quando o
+/// equipamento ainda não foi preenchido (ele é opcional na abertura), pra linha nunca ficar
+/// em branco.
+fn equipamento_label(os: &OrdemServico) -> &str {
+    if os.equipamento.trim().is_empty() {
+        &os.defeito_relatado
+    } else {
+        &os.equipamento
+    }
+}
+
+/// O nome do cliente dono da ordem, a partir do catálogo já carregado (`estado.clientes`) —
+/// `OrdemServico` só guarda o `Id`.
+fn nome_cliente(clientes: &[ItemPessoa], cliente: Id) -> &str {
+    clientes
+        .iter()
+        .find(|c| c.pessoa == cliente)
+        .map_or("Cliente", |c| c.nome.as_str())
+}
+
+/// Rótulo em português + tom da etiqueta de status para a `Grade` — mesma ideia de
+/// `situacao_amigavel` (usada no PDF), só que mais curta para caber numa pílula de grade.
+const fn estado_etiqueta(e: EstadoOs) -> (&'static str, Tom) {
+    match e {
+        EstadoOs::Aberta => ("Aberta", Tom::Info),
+        EstadoOs::EmDiagnostico => ("Em diagnóstico", Tom::Info),
+        EstadoOs::AguardandoAprovacao => ("Aguardando aprovação", Tom::Atencao),
+        EstadoOs::Aprovada => ("Aprovada", Tom::Info),
+        EstadoOs::Reprovada => ("Reprovada", Tom::Negativo),
+        EstadoOs::EmExecucao => ("Em execução", Tom::Atencao),
+        EstadoOs::Concluida => ("Pronta p/ faturar", Tom::Atencao),
+        EstadoOs::Faturada => ("Faturada", Tom::Positivo),
+        EstadoOs::Cancelada => ("Cancelada", Tom::Negativo),
+    }
+}
+
+/// Ordena `ordens` pela coluna clicada no cabeçalho da [`Grade`] (Nº, Equipamento, Cliente,
+/// Estado, Total).
+fn ordenar_ordens(
+    ordens: &mut [OrdemServico],
+    clientes: &[ItemPessoa],
+    coluna: usize,
+    direcao: Direcao,
+) {
+    ordens.sort_by(|a, b| {
+        let ordem = match coluna {
+            0 => a.numero.cmp(&b.numero),
+            1 => equipamento_label(a).cmp(equipamento_label(b)),
+            2 => nome_cliente(clientes, a.cliente).cmp(nome_cliente(clientes, b.cliente)),
+            3 => estado_etiqueta(a.estado).0.cmp(estado_etiqueta(b.estado).0),
+            4 => a.valor_total.cmp(&b.valor_total),
+            _ => std::cmp::Ordering::Equal,
+        };
+        match direcao {
+            Direcao::Ascendente => ordem,
+            Direcao::Descendente => ordem.reverse(),
+        }
+    });
 }
 
 fn dialogo_nova(
@@ -454,11 +580,22 @@ fn dialogo_nova(
     sessao: &SessaoLocal,
     estado: &mut EstadoTelaOs,
 ) {
-    let ops_cli: Vec<(Id, String)> = estado
+    let opcoes_cliente: Vec<OpcaoBusca<Id>> = estado
         .clientes
         .iter()
-        .map(|c| (c.pessoa, c.nome.clone()))
+        .map(|c| {
+            let opcao = OpcaoBusca::nova(c.pessoa, c.nome.clone());
+            match &c.documento {
+                Some(doc) => opcao.subtitulo(doc.clone()),
+                None => opcao,
+            }
+        })
         .collect();
+    // Enter confirma "Abrir OS" — o mesmo botão que já valida (`abrir_os` mostra o aviso
+    // certo se faltar cliente/defeito). Não dispara dentro de um popup aberto (ex.: o combo
+    // de UF do endereço).
+    let enter =
+        ctx.input(|i| i.key_pressed(egui::Key::Enter)) && !ctx.memory(|m| m.any_popup_open());
 
     let fechar = Dialogo::nova("Nova ordem de serviço")
         .largura(640.0)
@@ -469,6 +606,7 @@ fn dialogo_nova(
                 let Dlg::Nova {
                     cliente_novo,
                     cliente_sel,
+                    cliente_busca,
                     nome,
                     documento,
                     telefone,
@@ -523,24 +661,27 @@ fn dialogo_nova(
                         c[1].add(Campo::novo("E-mail (opcional)", email));
                     });
                     ui.add_space(Espaco::E8);
-                    ui.add(Rotulo::campo("Endereço (opcional)"));
-                    ui.add_space(Espaco::E4);
-                    ui.columns(2, |c| {
-                        c[0].add(Campo::novo("Logradouro", end_logradouro));
-                        c[1].add(Campo::novo("Número", end_numero));
-                    });
-                    ui.columns(2, |c| {
-                        c[0].add(Campo::novo("Bairro", end_bairro));
-                        c[1].add(Campo::novo("Cidade", end_cidade));
-                    });
-                    ui.columns(2, |c| {
-                        c[0].add(Campo::novo("UF", end_uf).marcador("MG"));
-                        c[1].add(Campo::novo("CEP", end_cep).marcador("00000-000"));
+                    // Endereço é o bloco mais raramente preenchido na recepção (o cliente só
+                    // quer deixar o aparelho) — fica recolhido para não competir com nome e
+                    // defeito relatado, que são o que de fato importa pra abrir rápido.
+                    SecaoExpansivel::nova("Endereço (opcional)").mostrar(ui, |ui| {
+                        ui.columns(2, |c| {
+                            c[0].add(Campo::novo("Logradouro", end_logradouro));
+                            c[1].add(Campo::novo("Número", end_numero));
+                        });
+                        ui.columns(2, |c| {
+                            c[0].add(Campo::novo("Bairro", end_bairro));
+                            c[1].add(Campo::novo("Cidade", end_cidade));
+                        });
+                        ui.columns(2, |c| {
+                            c[0].add(Campo::novo("UF", end_uf).marcador("MG"));
+                            c[1].add(Campo::novo("CEP", end_cep).marcador("00000-000"));
+                        });
                     });
                 } else {
-                    SeletorOpcao::novo("Cliente", cliente_sel)
-                        .opcoes(ops_cli.clone())
-                        .placeholder("Buscar cliente cadastrado…")
+                    SeletorBusca::novo("Cliente", cliente_busca, cliente_sel)
+                        .opcoes(opcoes_cliente)
+                        .marcador("Buscar por nome ou documento…")
                         .mostrar(ui);
                 }
                 ui.add_space(Espaco::E16);
@@ -560,7 +701,7 @@ fn dialogo_nova(
                 );
             },
             |ui, estado| {
-                if ui.add(Botao::primario("Abrir OS")).clicked() {
+                if ui.add(Botao::primario("Abrir OS")).clicked() || enter {
                     abrir_os(ui.ctx(), motor, sessao, estado);
                 }
                 if ui.add(Botao::secundario("Cancelar")).clicked() {
@@ -582,6 +723,7 @@ fn abrir_os(
     let Dlg::Nova {
         cliente_novo,
         cliente_sel,
+        cliente_busca: _,
         nome,
         documento,
         telefone,
@@ -749,14 +891,22 @@ fn dialogo_detalhe(
         return;
     };
     let os = detalhe.ordem.clone();
-    let titulo = format!("OS #{} · {}", os.numero, os.equipamento);
+    let titulo = format!("OS #{} · {}", os.numero, equipamento_label(&os));
 
     let fechar = Dialogo::nova(titulo).mostrar(
         ctx,
         estado,
         |ui, estado| corpo_detalhe(ui, motor, sessao, estado, &detalhe),
         |ui, estado| {
-            if ui.add(Botao::secundario("Comprovante (PDF)")).clicked() {
+            // A ponta final do fluxo do técnico — laudo/orçamento/execução terminam aqui: o
+            // comprovante em PDF pra entregar/mandar ao cliente, disponível em qualquer
+            // estado (`gerar_pdf` já cobre da entrada à quitação). Ação de peso, então
+            // primário — igual à ação de workflow do estado atual, mas em outra zona da tela
+            // (rodapé fixo, sempre visível, em vez de escondida no fim do corpo rolável). O
+            // rodapé desenha da direita para a esquerda (`Dialogo::mostrar`), então o botão
+            // adicionado primeiro fica mais à direita — a mesma convenção de "ação primária
+            // primeiro" já usada no resto da tela.
+            if ui.add(Botao::primario("Comprovante (PDF)")).clicked() {
                 gerar_pdf(ui.ctx(), estado, &detalhe);
             }
             if ui.add(Botao::secundario("Fechar")).clicked() {
@@ -779,7 +929,8 @@ fn corpo_detalhe(
     let os = &detalhe.ordem;
     ui.horizontal(|ui| {
         ui.add(Rotulo::campo("Estado"));
-        ui.add(Rotulo::interface(os.estado.rotulo()));
+        let (rotulo, tom) = estado_etiqueta(os.estado);
+        ui.add(Etiqueta::nova(rotulo, tom));
     });
     ui.add_space(Espaco::E16);
 
@@ -879,19 +1030,26 @@ fn corpo_detalhe(
         }
 
         ui.add_space(Espaco::E12);
-        ui.add(Rotulo::campo("Peça do estoque"));
-        ui.add_space(Espaco::E4);
-        {
-            let ops: Vec<(Id, String)> = estado
-                .produtos
-                .iter()
-                .map(|p| (p.produto, format!("{}  ({} disp.)", p.nome, p.disponivel)))
-                .collect();
-            SeletorOpcao::novo("Produto", &mut estado.peca_produto)
-                .opcoes(ops)
-                .placeholder("Buscar produto…")
-                .mostrar(ui);
-        }
+        // TODO(backend): a busca aqui compara só o nome do produto — quando o código curto de
+        // rastreabilidade (post-it físico na peça) existir em `ItemProdutoComSaldo`, somar
+        // `p.codigo_curto` ao `subtitulo` abaixo é o suficiente para o técnico bipar/digitar o
+        // código de bancada em vez de catar o nome numa lista de centenas de peças.
+        let opcoes_peca: Vec<OpcaoBusca<Id>> = estado
+            .produtos
+            .iter()
+            .map(|p| {
+                OpcaoBusca::nova(p.produto, p.nome.clone())
+                    .subtitulo(format!("{} disponível(is)", p.disponivel))
+            })
+            .collect();
+        SeletorBusca::novo(
+            "Peça do estoque",
+            &mut estado.peca_busca,
+            &mut estado.peca_produto,
+        )
+        .opcoes(opcoes_peca)
+        .marcador("Buscar peça por nome…")
+        .mostrar(ui);
         ui.add_space(Espaco::E4);
         ui.columns(2, |c| {
             c[0].add(Campo::novo("Quantidade", &mut estado.peca_qtd).marcador("1"));
@@ -1114,6 +1272,7 @@ fn adicionar_peca(
         Ok(id) => {
             let _: Id = id;
             estado.peca_produto = None;
+            estado.peca_busca.clear();
             estado.peca_qtd.clear();
             estado.peca_preco.clear();
             estado.abrir_detalhe(motor, sessao, os);

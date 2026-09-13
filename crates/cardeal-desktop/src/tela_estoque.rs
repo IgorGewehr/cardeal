@@ -1,24 +1,36 @@
-//! Tela de Estoque — lista de produtos + dialog (criar / ver). `docs/modulos/estoque.md`.
+//! Tela de Estoque — lista de produtos + radar de reposição + dialog (criar / ver / repor).
+//! `docs/modulos/estoque.md`.
 //!
 //! Padrão de UI do projeto: a tela abre na lista inteira; "+ Novo produto" e o clique numa
-//! linha abrem o mesmo `Dialogo`.
+//! linha abrem o mesmo `Dialogo`. Duas abas: "Produtos" (o catálogo) e "Radar de reposição"
+//! (produtos abaixo do ponto de pedido — `estoque.produtos_abaixo_do_ponto_pedido.v1`, já
+//! existia no backend mas não estava ligado a nenhuma tela).
 
 use cardeal_cliente::{MotorLocal, SessaoLocal};
-use cardeal_kernel::{Id, Preco, Quantidade};
+use cardeal_kernel::{Fuso, Id, Preco, Quantidade};
 use cardeal_modkit::Icone;
-use cardeal_ui::atoms::{Botao, Rotulo};
-use cardeal_ui::molecules::{Campo, CartaoKpi, EstadoVazio, SeletorOpcao};
+use cardeal_ui::atoms::{Botao, Etiqueta, Rotulo, Tom};
+use cardeal_ui::molecules::{Abas, Campo, CartaoKpi, EstadoVazio, SecaoExpansivel, SeletorOpcao};
 use cardeal_ui::organisms::{
     notificar, ColunaGrade, Dialogo, Direcao, FaixaKpi, Grade, LayoutTela, Notificacao,
 };
 use cardeal_ui::tokens::{Espaco, TemaUi};
 use eframe::egui;
 use mod_estoque::{
-    CriarGrupoProduto, CriarLocal, CriarProduto, CriarUnidade, DetalhesTecnicos,
-    GrupoProdutoCriado, GruposProduto, ItemGrupoProduto, ItemLocal, ItemProdutoComSaldo,
-    ItemUnidade, Locais, LocalCriado, ProdutoCriado, ProdutosComSaldo, RegistrarEntrada, TipoLocal,
-    UnidadeCriada, Unidades,
+    CriarGrupoProduto, CriarLocal, CriarProduto, CriarUnidade, DefinirPontoPedido,
+    DetalhesTecnicos, EntradaRegistrada, GrupoProdutoCriado, GruposProduto,
+    ItemAbaixoDoPontoPedido, ItemGrupoProduto, ItemLocal, ItemProdutoComSaldo, ItemUnidade, Locais,
+    LocalCriado, Movimento, MovimentosDoProduto, ProdutoCriado, ProdutosAbaixoDoPontoPedido,
+    ProdutosComSaldo, RegistrarEntrada, TipoLocal, TipoMovimento, UnidadeCriada, Unidades,
 };
+
+/// Qual aba da tela de Estoque está ativa.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+enum AbaEstoque {
+    #[default]
+    Produtos,
+    Radar,
+}
 
 #[derive(Default, PartialEq)]
 enum Dlg {
@@ -26,15 +38,23 @@ enum Dlg {
     Fechado,
     Novo,
     Ver(usize),
+    /// Repor estoque de um item do radar (índice em `estado.radar`).
+    Repor(usize),
 }
 
 /// O estado local da tela.
 #[derive(Default)]
 pub struct EstadoTelaEstoque {
+    aba: AbaEstoque,
     produtos: Vec<ItemProdutoComSaldo>,
     grupos: Vec<ItemGrupoProduto>,
     unidades: Vec<ItemUnidade>,
     locais: Vec<ItemLocal>,
+    radar: Vec<ItemAbaixoDoPontoPedido>,
+    /// Movimentações recentes do produto aberto no dialog "Ver" — a rastreabilidade
+    /// peça↔origem já existente no backend (`estoque.movimentos_do_produto.v1`).
+    movimentos: Vec<Movimento>,
+    busca: String,
     erro: Option<String>,
     dlg: Dlg,
     ordenacao: Option<(usize, Direcao)>,
@@ -62,10 +82,17 @@ pub struct EstadoTelaEstoque {
     det_compatibilidade: String,
     det_garantia_fornecedor_dias: String,
     det_localizacao_fisica: String,
+
+    // Reposição (radar → `Dlg::Repor`).
+    rep_local: Option<Id>,
+    rep_qtd: String,
+    rep_custo: String,
+    rep_ponto: String,
+    rep_minimo: String,
 }
 
 impl EstadoTelaEstoque {
-    /// Recarrega produtos, grupos, unidades e locais.
+    /// Recarrega produtos, grupos, unidades, locais e o radar de reposição.
     pub fn carregar(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
         match motor.consultar(sessao, "estoque.produtos_com_saldo.v1", &ProdutosComSaldo) {
             Ok(p) => self.produtos = p,
@@ -79,6 +106,13 @@ impl EstadoTelaEstoque {
         }
         if let Ok(l) = motor.consultar(sessao, "estoque.locais.v1", &Locais) {
             self.locais = l;
+        }
+        if let Ok(r) = motor.consultar(
+            sessao,
+            "estoque.produtos_abaixo_do_ponto_pedido.v1",
+            &ProdutosAbaixoDoPontoPedido,
+        ) {
+            self.radar = r;
         }
     }
 
@@ -95,6 +129,25 @@ impl EstadoTelaEstoque {
         self.det_compatibilidade.clear();
         self.det_garantia_fornecedor_dias.clear();
         self.det_localizacao_fisica.clear();
+    }
+
+    /// Filtra `produtos` pelo termo de busca (nome ou NCM) — client-side: a consulta não
+    /// aceita termo de busca (traz até 500 linhas de uma vez), e o catálogo típico de uma
+    /// assistência cabe folgado nisso.
+    ///
+    /// `TODO(backend)`: quando a rastreabilidade por código curto (post-it) ganhar um campo
+    /// em `ItemProdutoComSaldo`/`estoque_produto`, somar `p.codigo_curto` aqui é o suficiente
+    /// para a busca já cobrir o código — nenhuma outra mudança de UI necessária.
+    fn produtos_filtrados(&self) -> Vec<usize> {
+        let termo = self.busca.trim().to_lowercase();
+        (0..self.produtos.len())
+            .filter(|&i| {
+                termo.is_empty() || {
+                    let p = &self.produtos[i];
+                    p.nome.to_lowercase().contains(&termo) || p.ncm.contains(&termo)
+                }
+            })
+            .collect()
     }
 }
 
@@ -118,6 +171,17 @@ pub fn mostrar(
             }
         },
         |ui, estado| {
+            if let Some(nova) = Abas::nova(&[
+                (AbaEstoque::Produtos, "Produtos"),
+                (AbaEstoque::Radar, "Radar de reposição"),
+            ])
+            .selecionada(estado.aba)
+            .mostrar(ui)
+            {
+                estado.aba = nova;
+            }
+            ui.add_space(Espaco::E16);
+
             if let Some(erro) = &estado.erro {
                 ui.add(
                     Rotulo::interface(erro.clone())
@@ -126,14 +190,19 @@ pub fn mostrar(
                 );
                 ui.add_space(Espaco::E12);
             }
-            lista(ui, estado);
+
+            match estado.aba {
+                AbaEstoque::Produtos => lista(ui, estado),
+                AbaEstoque::Radar => radar(ui, estado),
+            }
         },
     );
 
     match estado.dlg {
         Dlg::Fechado => {}
         Dlg::Novo => dialogo_novo(ui.ctx(), motor, sessao, estado),
-        Dlg::Ver(i) => dialogo_ver(ui.ctx(), estado, i),
+        Dlg::Ver(i) => dialogo_ver(ui.ctx(), motor, sessao, estado, i),
+        Dlg::Repor(i) => dialogo_repor(ui.ctx(), motor, sessao, estado, i),
     }
 }
 
@@ -158,38 +227,64 @@ fn lista(ui: &mut egui::Ui, estado: &mut EstadoTelaEstoque) {
     FaixaKpi::nova(vec![
         CartaoKpi::contagem("Produtos cadastrados", estado.produtos.len()),
         CartaoKpi::contagem("Sem estoque disponível", sem_estoque),
+        CartaoKpi::contagem("Abaixo do ponto de pedido", estado.radar.len()).variacao(
+            if estado.radar.is_empty() {
+                "radar limpo"
+            } else {
+                "ver aba Radar de reposição"
+            },
+        ),
     ])
     .mostrar(ui);
+
+    ui.horizontal(|ui| {
+        ui.set_max_width(360.0);
+        // TODO(backend): quando o código curto de rastreabilidade existir, o marcador vira
+        // "Buscar por nome, NCM ou código" e `produtos_filtrados` passa a comparar contra
+        // ele também.
+        ui.add(Campo::novo("", &mut estado.busca).marcador("Buscar por nome ou NCM"));
+    });
+    ui.add_space(Espaco::E12);
+
+    let indices = estado.produtos_filtrados();
+    if indices.is_empty() {
+        ui.add(Rotulo::interface("Nenhum produto para essa busca.").cor(ui.cores().texto_medio));
+        return;
+    }
 
     let colunas = vec![
         ColunaGrade::nova("Produto"),
         ColunaGrade::nova("NCM").largura(110.0),
-        ColunaGrade::nova("Disponível").largura(110.0).numero(),
+        ColunaGrade::nova("Disponível").largura(130.0).numero(),
         ColunaGrade::nova("Reservado").largura(110.0).numero(),
         ColunaGrade::nova("Custo médio").largura(120.0).numero(),
     ];
-    let resposta =
-        Grade::nova(colunas)
-            .selecionavel(None)
-            .ordenacao(estado.ordenacao)
-            .mostrar(ui, estado.produtos.len(), |i, row| {
-                let p = &estado.produtos[i];
-                row.col(|ui| {
-                    ui.add(Rotulo::interface(p.nome.clone()));
-                });
-                row.col(|ui| {
-                    ui.add(Rotulo::campo(p.ncm.clone()));
-                });
-                row.col(|ui| {
+    let resposta = Grade::nova(colunas)
+        .selecionavel(None)
+        .ordenacao(estado.ordenacao)
+        .mostrar(ui, indices.len(), |i, row| {
+            let p = &estado.produtos[indices[i]];
+            row.col(|ui| {
+                ui.add(Rotulo::interface(p.nome.clone()));
+            });
+            row.col(|ui| {
+                ui.add(Rotulo::campo(p.ncm.clone()));
+            });
+            row.col(|ui| {
+                ui.horizontal(|ui| {
                     ui.add(Rotulo::interface(p.disponivel.to_string()));
-                });
-                row.col(|ui| {
-                    ui.add(Rotulo::interface(p.reservado.to_string()));
-                });
-                row.col(|ui| {
-                    ui.add(Rotulo::interface(p.custo_medio.to_string()));
+                    if p.disponivel.e_zero() {
+                        ui.add(Etiqueta::negativa("sem estoque"));
+                    }
                 });
             });
+            row.col(|ui| {
+                ui.add(Rotulo::interface(p.reservado.to_string()));
+            });
+            row.col(|ui| {
+                ui.add(Rotulo::interface(p.custo_medio.to_string()));
+            });
+        });
 
     if let Some(coluna) = resposta.coluna_clicada {
         let direcao = match estado.ordenacao {
@@ -200,7 +295,68 @@ fn lista(ui: &mut egui::Ui, estado: &mut EstadoTelaEstoque) {
         ordenar_produtos(&mut estado.produtos, coluna, direcao);
     }
     if let Some(i) = resposta.linha_clicada {
-        estado.dlg = Dlg::Ver(i);
+        estado.dlg = Dlg::Ver(indices[i]);
+    }
+}
+
+/// A aba "Radar de reposição": produtos cujo disponível caiu abaixo do ponto de pedido
+/// cadastrado (`ItemAbaixoDoPontoPedido`). Clicar numa linha abre "Repor estoque", que já
+/// mostra os números atuais e deixa lançar a entrada sem sair do fluxo.
+fn radar(ui: &mut egui::Ui, estado: &mut EstadoTelaEstoque) {
+    if estado.radar.is_empty() {
+        EstadoVazio::novo(
+            Icone::Alerta,
+            "Nada abaixo do ponto de pedido — estoque saudável.",
+        )
+        .mostrar(ui);
+        return;
+    }
+
+    let colunas = vec![
+        ColunaGrade::nova("Produto"),
+        ColunaGrade::nova("Disponível").largura(110.0).numero(),
+        ColunaGrade::nova("Ponto de pedido").largura(130.0).numero(),
+        ColunaGrade::nova("Estoque mínimo").largura(130.0).numero(),
+        ColunaGrade::nova("Situação").largura(140.0),
+    ];
+    let resposta =
+        Grade::nova(colunas)
+            .selecionavel(None)
+            .mostrar(ui, estado.radar.len(), |i, row| {
+                let item = &estado.radar[i];
+                row.col(|ui| {
+                    ui.add(Rotulo::interface(item.nome.clone()));
+                });
+                row.col(|ui| {
+                    ui.add(Rotulo::interface(item.disponivel.to_string()));
+                });
+                row.col(|ui| {
+                    ui.add(Rotulo::interface(item.ponto_pedido.to_string()));
+                });
+                row.col(|ui| {
+                    ui.add(Rotulo::interface(
+                        item.estoque_minimo
+                            .map_or_else(|| "—".to_owned(), |m| m.to_string()),
+                    ));
+                });
+                row.col(|ui| {
+                    if item.disponivel.e_zero() {
+                        ui.add(Etiqueta::negativa("Sem estoque"));
+                    } else {
+                        ui.add(Etiqueta::atencao("Abaixo do ponto"));
+                    }
+                });
+            });
+    if let Some(i) = resposta.linha_clicada {
+        let item = &estado.radar[i];
+        estado.rep_local = estado.locais.first().map(|l| l.id);
+        estado.rep_qtd.clear();
+        estado.rep_custo.clear();
+        estado.rep_ponto = item.ponto_pedido.to_string();
+        estado.rep_minimo = item
+            .estoque_minimo
+            .map_or_else(String::new, |m| m.to_string());
+        estado.dlg = Dlg::Repor(i);
     }
 }
 
@@ -223,15 +379,52 @@ fn ordenar_produtos(produtos: &mut [ItemProdutoComSaldo], coluna: usize, direcao
     });
 }
 
-fn dialogo_ver(ctx: &egui::Context, estado: &mut EstadoTelaEstoque, i: usize) {
+/// Rótulo em português + tom da etiqueta para um [`TipoMovimento`] — o mesmo papel que
+/// `situacao_amigavel` cumpre para `EstadoOs` em `tela_os.rs`.
+const fn rotulo_movimento(tipo: TipoMovimento) -> (&'static str, Tom) {
+    match tipo {
+        TipoMovimento::Entrada => ("Entrada", Tom::Positivo),
+        TipoMovimento::Saida => ("Saída", Tom::Info),
+        TipoMovimento::TransferenciaSaida => ("Transferência (saída)", Tom::Info),
+        TipoMovimento::TransferenciaEntrada => ("Transferência (entrada)", Tom::Info),
+        TipoMovimento::AjustePositivo => ("Ajuste (+)", Tom::Positivo),
+        TipoMovimento::AjusteNegativo => ("Ajuste (-)", Tom::Negativo),
+        TipoMovimento::Reserva => ("Reserva", Tom::Neutro),
+        TipoMovimento::LiberacaoReserva => ("Liberação de reserva", Tom::Neutro),
+        TipoMovimento::Producao => ("Produção", Tom::Positivo),
+        TipoMovimento::Perda => ("Perda", Tom::Negativo),
+    }
+}
+
+fn dialogo_ver(
+    ctx: &egui::Context,
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaEstoque,
+    i: usize,
+) {
     let Some(p) = estado.produtos.get(i).cloned() else {
         estado.dlg = Dlg::Fechado;
         return;
     };
+    // Rastreabilidade: carrega uma vez por abertura do dialog, não a cada frame.
+    if estado.movimentos.is_empty() {
+        estado.movimentos = motor
+            .consultar(
+                sessao,
+                "estoque.movimentos_do_produto.v1",
+                &MovimentosDoProduto {
+                    produto: p.produto,
+                    origem_modulo: None,
+                },
+            )
+            .unwrap_or_default();
+    }
+
     let fechar = Dialogo::nova(p.nome.clone()).largura(620.0).mostrar(
         ctx,
         estado,
-        |ui, _estado| {
+        |ui, estado| {
             ui.columns(2, |c| {
                 campo_ver(&mut c[0], "NCM", &p.ncm);
                 campo_ver(&mut c[1], "Custo médio", &p.custo_medio.to_string());
@@ -240,15 +433,49 @@ fn dialogo_ver(ctx: &egui::Context, estado: &mut EstadoTelaEstoque, i: usize) {
                 campo_ver(&mut c[0], "Disponível", &p.disponivel.to_string());
                 campo_ver(&mut c[1], "Reservado", &p.reservado.to_string());
             });
+
+            // TODO(backend): não existe hoje uma consulta "produto por id" que devolva
+            // `Produto` completo (fabricante, MPN, categoria/especificação técnica,
+            // compatibilidade, localização física) — só `ProdutoPorCodigoBarras`, que exige
+            // saber o GTIN de antemão. Cadastro técnico continua um caminho só de ida (só
+            // aparece aqui de novo quando essa consulta existir); até lá não arriscamos
+            // mostrar/editar campos que não temos como ler de volta.
+            ui.add_space(Espaco::E16);
+            ui.separator();
+            ui.add_space(Espaco::E12);
+            ui.add(Rotulo::titulo_secao("Movimentações recentes"));
+            ui.add_space(Espaco::E8);
+            if estado.movimentos.is_empty() {
+                ui.add(Rotulo::campo("Nenhuma movimentação registrada ainda."));
+            } else {
+                for mov in estado.movimentos.iter().take(8) {
+                    let (rotulo, tom) = rotulo_movimento(mov.tipo);
+                    ui.horizontal(|ui| {
+                        ui.add(Etiqueta::nova(rotulo, tom));
+                        ui.add(Rotulo::interface(mov.quantidade.to_string()));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.add(Rotulo::campo(mov.criado_em.formatar(Fuso::BRASILIA)));
+                        });
+                    });
+                }
+                if estado.movimentos.len() > 8 {
+                    ui.add(Rotulo::campo(format!(
+                        "+ {} movimentações mais antigas",
+                        estado.movimentos.len() - 8
+                    )));
+                }
+            }
         },
         |ui, estado| {
             if ui.add(Botao::secundario("Fechar")).clicked() {
                 estado.dlg = Dlg::Fechado;
+                estado.movimentos.clear();
             }
         },
     );
     if fechar {
         estado.dlg = Dlg::Fechado;
+        estado.movimentos.clear();
     }
 }
 
@@ -262,23 +489,190 @@ fn campo_ver(ui: &mut egui::Ui, chave: &str, valor: &str) {
     ui.add_space(Espaco::E12);
 }
 
+/// O dialog "Repor estoque" aberto a partir de uma linha do radar — mostra os números atuais
+/// (já conhecidos, vieram do próprio radar) e permite lançar uma entrada e/ou ajustar o
+/// ponto de pedido sem sair do fluxo.
+fn dialogo_repor(
+    ctx: &egui::Context,
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaEstoque,
+    i: usize,
+) {
+    let Some(item) = estado.radar.get(i).cloned() else {
+        estado.dlg = Dlg::Fechado;
+        return;
+    };
+
+    let fechar = Dialogo::nova(format!("Repor estoque — {}", item.nome))
+        .largura(560.0)
+        .mostrar(
+            ctx,
+            estado,
+            |ui, estado| {
+                ui.columns(3, |c| {
+                    campo_ver(&mut c[0], "Disponível", &item.disponivel.to_string());
+                    campo_ver(&mut c[1], "Ponto de pedido", &item.ponto_pedido.to_string());
+                    campo_ver(
+                        &mut c[2],
+                        "Estoque mínimo",
+                        &item
+                            .estoque_minimo
+                            .map_or_else(String::new, |m| m.to_string()),
+                    );
+                });
+
+                ui.add_space(Espaco::E8);
+                ui.separator();
+                ui.add_space(Espaco::E12);
+                ui.add(Rotulo::titulo_secao("Registrar entrada"));
+                ui.add_space(Espaco::E8);
+                if estado.locais.is_empty() {
+                    ui.add(Rotulo::interface(
+                        "Nenhum local cadastrado ainda — cadastre um em \"+ Novo produto\".",
+                    ));
+                } else {
+                    let ops: Vec<(Id, String)> = estado
+                        .locais
+                        .iter()
+                        .map(|l| (l.id, l.nome.clone()))
+                        .collect();
+                    SeletorOpcao::novo("Local", &mut estado.rep_local)
+                        .opcoes(ops)
+                        .mostrar(ui);
+                    ui.add_space(Espaco::E8);
+                    ui.columns(2, |c| {
+                        c[0].add(Campo::novo("Quantidade", &mut estado.rep_qtd).marcador("10"));
+                        c[1].add(
+                            Campo::novo("Custo unitário", &mut estado.rep_custo).marcador("90,00"),
+                        );
+                    });
+                }
+
+                ui.add_space(Espaco::E16);
+                ui.separator();
+                ui.add_space(Espaco::E12);
+                ui.add(Rotulo::titulo_secao("Ponto de pedido"));
+                ui.add_space(Espaco::E8);
+                ui.columns(2, |c| {
+                    c[0].add(Campo::novo("Ponto de pedido", &mut estado.rep_ponto));
+                    c[1].add(Campo::novo(
+                        "Estoque mínimo (opcional)",
+                        &mut estado.rep_minimo,
+                    ));
+                });
+            },
+            |ui, estado| {
+                if ui.add(Botao::secundario("Fechar")).clicked() {
+                    estado.dlg = Dlg::Fechado;
+                }
+                if ui.add(Botao::primario("Salvar ponto de pedido")).clicked() {
+                    salvar_ponto_pedido(ui.ctx(), motor, sessao, estado, item.produto);
+                }
+                if !estado.locais.is_empty()
+                    && ui.add(Botao::primario("Registrar entrada")).clicked()
+                {
+                    registrar_entrada_radar(ui.ctx(), motor, sessao, estado, item.produto);
+                }
+            },
+        );
+    if fechar {
+        estado.dlg = Dlg::Fechado;
+    }
+}
+
+fn registrar_entrada_radar(
+    ctx: &egui::Context,
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaEstoque,
+    produto: Id,
+) {
+    let Some(local) = estado.rep_local else {
+        notificar(ctx, Notificacao::aviso("Escolha o local que recebe."));
+        return;
+    };
+    let (Ok(quantidade), Ok(custo_unitario)) = (
+        estado.rep_qtd.parse::<Quantidade>(),
+        estado.rep_custo.parse::<Preco>(),
+    ) else {
+        notificar(ctx, Notificacao::aviso("Quantidade ou custo inválidos."));
+        return;
+    };
+    match motor.executar(
+        sessao,
+        "estoque.registrar_entrada.v1",
+        &RegistrarEntrada {
+            produto,
+            local,
+            quantidade,
+            custo_unitario,
+        },
+    ) {
+        Ok(r) => {
+            let _: EntradaRegistrada = r;
+            estado.dlg = Dlg::Fechado;
+            estado.carregar(motor, sessao);
+            notificar(ctx, Notificacao::sucesso("Entrada registrada"));
+        }
+        Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
+    }
+}
+
+fn salvar_ponto_pedido(
+    ctx: &egui::Context,
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaEstoque,
+    produto: Id,
+) {
+    let ponto_pedido = estado.rep_ponto.trim().parse::<Quantidade>().ok();
+    if !estado.rep_ponto.trim().is_empty() && ponto_pedido.is_none() {
+        notificar(ctx, Notificacao::aviso("Ponto de pedido inválido."));
+        return;
+    }
+    let estoque_minimo = estado.rep_minimo.trim().parse::<Quantidade>().ok();
+    if !estado.rep_minimo.trim().is_empty() && estoque_minimo.is_none() {
+        notificar(ctx, Notificacao::aviso("Estoque mínimo inválido."));
+        return;
+    }
+    match motor.executar(
+        sessao,
+        "estoque.definir_ponto_pedido.v1",
+        &DefinirPontoPedido {
+            produto,
+            ponto_pedido,
+            estoque_minimo,
+        },
+    ) {
+        Ok(()) => {
+            estado.dlg = Dlg::Fechado;
+            estado.carregar(motor, sessao);
+            notificar(ctx, Notificacao::sucesso("Ponto de pedido atualizado"));
+        }
+        Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
+    }
+}
+
 fn dialogo_novo(
     ctx: &egui::Context,
     motor: &MotorLocal,
     sessao: &SessaoLocal,
     estado: &mut EstadoTelaEstoque,
 ) {
+    let pronto = estado.grupo_selecionado.is_some() && estado.unidade_selecionada.is_some();
+    let enter =
+        ctx.input(|i| i.key_pressed(egui::Key::Enter)) && !ctx.memory(|m| m.any_popup_open());
+
     let fechar = Dialogo::nova("Novo produto").largura(680.0).mostrar(
         ctx,
         estado,
         |ui, estado| corpo_novo(ui, motor, sessao, estado),
         |ui, estado| {
-            let pronto = estado.grupo_selecionado.is_some() && estado.unidade_selecionada.is_some();
-            if ui
+            let clicou = ui
                 .add(Botao::primario("Cadastrar produto").habilitado(pronto))
-                .clicked()
-                && pronto
-            {
+                .clicked();
+            if (clicou || enter) && pronto {
                 cadastrar(ui.ctx(), motor, sessao, estado);
             }
             if ui.add(Botao::secundario("Cancelar")).clicked() {
@@ -325,73 +719,76 @@ fn corpo_novo(
         .marcador("GTIN / EAN"),
     );
 
-    ui.add_space(Espaco::E16);
-    ui.separator();
+    // Estoque inicial e detalhes técnicos são os dois blocos opcionais/secundários do
+    // formulário — cadastrar um produto rápido (nome + NCM + grupo/unidade) não deveria
+    // exigir rolar por eles; ficam atrás de uma `SecaoExpansivel`, fechada por padrão.
     ui.add_space(Espaco::E12);
-    ui.add(Rotulo::campo("Estoque inicial (opcional)"));
-    ui.add_space(Espaco::E8);
-    bloco_local(ui, motor, sessao, estado);
-    ui.add_space(Espaco::E8);
-    ui.columns(2, |c| {
-        c[0].add(Campo::novo("Quantidade", &mut estado.estoque_inicial_qtd));
-        c[1].add(
-            Campo::novo("Custo unitário", &mut estado.estoque_inicial_custo).marcador("90,00"),
-        );
+    SecaoExpansivel::nova("Estoque inicial (opcional)").mostrar(ui, |ui| {
+        bloco_local(ui, motor, sessao, estado);
+        ui.add_space(Espaco::E8);
+        ui.columns(2, |c| {
+            c[0].add(Campo::novo("Quantidade", &mut estado.estoque_inicial_qtd));
+            c[1].add(
+                Campo::novo("Custo unitário", &mut estado.estoque_inicial_custo).marcador("90,00"),
+            );
+        });
     });
 
-    ui.add_space(Espaco::E16);
-    ui.separator();
-    ui.add_space(Espaco::E12);
-    ui.add(Rotulo::campo("Detalhes técnicos (opcional)"));
     ui.add_space(Espaco::E8);
-    ui.columns(2, |c| {
-        c[0].add(
-            Campo::novo("Fabricante", &mut estado.det_fabricante)
-                .marcador("ex.: Texas Instruments"),
-        );
-        c[1].add(
+    SecaoExpansivel::nova("Detalhes técnicos (opcional)").mostrar(ui, |ui| {
+        // TODO(backend): campo de código curto de rastreabilidade (post-it físico) ainda
+        // não existe em `DetalhesTecnicos`/`estoque_produto` — quando existir, entra aqui
+        // como mais um `Campo` (ex.: "Código de bancada") e já alimenta a busca da lista
+        // e o lookup de peça na abertura de OS (ver `tela_os::adicionar_peca`).
+        ui.columns(2, |c| {
+            c[0].add(
+                Campo::novo("Fabricante", &mut estado.det_fabricante)
+                    .marcador("ex.: Texas Instruments"),
+            );
+            c[1].add(
+                Campo::novo(
+                    "Código do fabricante (MPN)",
+                    &mut estado.det_codigo_fabricante,
+                )
+                .marcador("part number"),
+            );
+        });
+        ui.add_space(Espaco::E8);
+        ui.columns(2, |c| {
+            c[0].add(
+                Campo::novo("Categoria técnica", &mut estado.det_categoria_tecnica)
+                    .marcador("IC, capacitor, tela, bateria…"),
+            );
+            c[1].add(
+                Campo::novo(
+                    "Garantia do fornecedor (dias)",
+                    &mut estado.det_garantia_fornecedor_dias,
+                )
+                .marcador("90"),
+            );
+        });
+        ui.add_space(Espaco::E8);
+        ui.add(
             Campo::novo(
-                "Código do fabricante (MPN)",
-                &mut estado.det_codigo_fabricante,
+                "Especificação / resumo do datasheet",
+                &mut estado.det_especificacao_tecnica,
             )
-            .marcador("part number"),
+            .marcador("tensão, corrente, pinagem…"),
         );
-    });
-    ui.add_space(Espaco::E8);
-    ui.columns(2, |c| {
-        c[0].add(
-            Campo::novo("Categoria técnica", &mut estado.det_categoria_tecnica)
-                .marcador("IC, capacitor, tela, bateria…"),
-        );
-        c[1].add(
-            Campo::novo(
-                "Garantia do fornecedor (dias)",
-                &mut estado.det_garantia_fornecedor_dias,
-            )
-            .marcador("90"),
-        );
-    });
-    ui.add_space(Espaco::E8);
-    ui.add(
-        Campo::novo(
-            "Especificação / resumo do datasheet",
-            &mut estado.det_especificacao_tecnica,
-        )
-        .marcador("tensão, corrente, pinagem…"),
-    );
-    ui.add_space(Espaco::E8);
-    ui.columns(2, |c| {
-        c[0].add(
-            Campo::novo(
-                "Compatibilidade / aplicação",
-                &mut estado.det_compatibilidade,
-            )
-            .marcador("ex.: iPhone 11 / 11 Pro"),
-        );
-        c[1].add(
-            Campo::novo("Localização física", &mut estado.det_localizacao_fisica)
-                .marcador("ex.: Gaveta 12, prateleira B"),
-        );
+        ui.add_space(Espaco::E8);
+        ui.columns(2, |c| {
+            c[0].add(
+                Campo::novo(
+                    "Compatibilidade / aplicação",
+                    &mut estado.det_compatibilidade,
+                )
+                .marcador("ex.: iPhone 11 / 11 Pro"),
+            );
+            c[1].add(
+                Campo::novo("Localização física", &mut estado.det_localizacao_fisica)
+                    .marcador("ex.: Gaveta 12, prateleira B"),
+            );
+        });
     });
 }
 
