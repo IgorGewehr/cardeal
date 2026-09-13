@@ -37,6 +37,13 @@ pub struct PreferenciasCompras {
     /// `confirma_automaticamente_quando_tudo_casa` for `true` — `DefinirPreferenciasCompras`
     /// recusa a combinação sem local.
     pub local_padrao: Option<Id>,
+    /// Se a confirmação de entrada (manual ou automática) considera a compra já paga à
+    /// vista, na hora — quando `true` **e** um título é gerado (`gera_titulo_a_pagar`), a
+    /// mesma transação já dá baixa completa nele em vez de deixá-lo pendente. Padrão:
+    /// `false` — o conservador é sempre nascer em aberto, como uma compra a prazo comum;
+    /// quem paga à vista liga isto (ou manda `pago_no_ato: Some(true)` pontualmente em
+    /// `ConfirmarEntrada`, sem mudar a preferência da empresa).
+    pub pago_no_ato_padrao: bool,
 }
 
 impl PreferenciasCompras {
@@ -49,6 +56,7 @@ impl PreferenciasCompras {
             gera_titulo_a_pagar: true,
             rateio_por: RateioPor::Valor,
             local_padrao: None,
+            pago_no_ato_padrao: false,
         }
     }
 }

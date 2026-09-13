@@ -8,11 +8,13 @@
 
 mod confirmar_entrada;
 mod definir_preferencias_compras;
+mod importar_nota_de_arquivo_xml;
 mod lancar_nota_manual;
 mod vincular_produto_manual;
 
 pub use confirmar_entrada::{ConfirmarEntrada, EntradaConfirmada};
 pub use definir_preferencias_compras::DefinirPreferenciasCompras;
+pub use importar_nota_de_arquivo_xml::ImportarNotaDeArquivoXml;
 pub use lancar_nota_manual::{ItemNotaManual, LancarNotaManual};
 pub use vincular_produto_manual::VincularProdutoManual;
 
@@ -25,14 +27,16 @@ use mod_clientes::{
     ConstrutorPessoa, DocumentoPessoa, Papel, RepositorioClientes, TipoDocumento, TipoPessoa,
 };
 use mod_estoque::{registrar_entrada_comum, DadosEntrada, RepositorioEstoque};
-use mod_financeiro::{lancar_titulo_comum, DadosLancamentoTitulo, EspecieTitulo};
+use mod_financeiro::{
+    baixar_pagamento_comum, lancar_titulo_comum, DadosLancamentoTitulo, EspecieTitulo,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::casamento::{casar, ResultadoCasamento};
 use crate::erros::ErroCompras;
 use crate::eventos::{EntradaAConferir, NotaConfirmada};
 use crate::nota::{EstadoCasamento, EstadoNotaEntrada, ItemNotaEntrada, NotaEntrada};
-use crate::preferencias::RateioPor;
+use crate::preferencias::{PreferenciasCompras, RateioPor};
 use crate::repositorio::RepositorioCompras;
 
 fn carregar_nota(uow: &mut UnidadeDeTrabalho, id: Id) -> Resultado<NotaEntrada> {
@@ -88,17 +92,45 @@ pub struct RelatorioImportacao {
     pub estado: EstadoNotaEntrada,
     /// Quantos itens ainda precisam de casamento confirmado.
     pub itens_nao_casados: usize,
+    /// O título a pagar gerado, se a nota já saiu confirmada sozinha (preferência de
+    /// confirmação automática) e a preferência mandou gerar título. `None` se a nota ficou
+    /// `AConferir`, ou se confirmou sem gerar título.
+    pub titulo: Option<Id>,
+    /// Verdadeiro se `titulo` já nasceu com baixa completa (`pago_no_ato_padrao`).
+    /// Irrelevante (`false`) quando `titulo` é `None`.
+    pub titulo_pago: bool,
 }
 
-/// Interpreta um XML já baixado e cria a `NotaEntrada` em conferência, rodando a cascata de
-/// casamento em cada item. Idempotente por `(empresa, chave_acesso)`. Se a preferência
-/// `confirma_automaticamente_quando_tudo_casa` estiver ligada e **todos** os itens casarem
-/// por regra aprendida (nunca por sugestão), confirma a entrada sozinha.
+/// Interpreta um XML já baixado (via `PortaFiscal`/`DFe`) e importa a nota — só um envelope
+/// fino sobre [`importar_nota_interpretada`], mantido para a assinatura que
+/// [`verificar_notas_na_sefaz`] já usava.
 ///
 /// # Errors
 /// Erro de domínio (`ErroFiscal::XmlInvalido` já vem tratado pelo chamador — este recebe o
 /// XML já interpretado) ou de infraestrutura (SQLite).
 pub fn importar_nota_da_sefaz(
+    nota_xml: &cardeal_fiscal::NotaFiscalXml,
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<RelatorioImportacao> {
+    importar_nota_interpretada(nota_xml, ctx, uow)
+}
+
+/// O miolo comum de toda importação de nota por XML — chamado por
+/// [`importar_nota_da_sefaz`] (XML baixado da distribuição `DFe`, via `PortaFiscal`) e por
+/// [`ImportarNotaDeArquivoXml`](crate::ImportarNotaDeArquivoXml) (XML lido de um arquivo
+/// local, sem `PortaFiscal` nenhum — a única diferença entre os dois é de onde o XML veio;
+/// depois de interpretado, é o mesmo `NotaFiscalXml` e o mesmo fluxo). Cria a `NotaEntrada`
+/// em conferência, rodando a cascata de casamento (GTIN → regra aprendida → NCM+similaridade
+/// → nada) em cada item. Idempotente por `(empresa, chave_acesso)` — reimportar o mesmo XML
+/// (mesma chave) nunca duplica a nota, só devolve o relatório da que já existe. Se a
+/// preferência `confirma_automaticamente_quando_tudo_casa` estiver ligada e **todos** os
+/// itens casarem por GTIN ou regra aprendida (nunca por sugestão), confirma a entrada
+/// sozinha — e dá baixa no título na hora se `pago_no_ato_padrao` também mandar.
+///
+/// # Errors
+/// Erro de domínio ou de infraestrutura (SQLite).
+pub(crate) fn importar_nota_interpretada(
     nota_xml: &cardeal_fiscal::NotaFiscalXml,
     ctx: &Ctx,
     uow: &mut UnidadeDeTrabalho,
@@ -113,6 +145,8 @@ pub fn importar_nota_da_sefaz(
             nota_entrada: nota.id,
             estado: nota.estado,
             itens_nao_casados: pendentes,
+            titulo: None,
+            titulo_pago: false,
         });
     }
 
@@ -166,6 +200,7 @@ pub fn importar_nota_da_sefaz(
                 i.codigo_fornecedor.as_str(),
                 i.descricao.as_str(),
                 i.ncm.as_str(),
+                i.codigo_barras.as_deref(),
                 i.quantidade,
                 i.valor_unitario,
             )
@@ -187,16 +222,10 @@ pub fn importar_nota_da_sefaz(
         .filter(|i| i.estado_casamento != EstadoCasamento::Casado)
         .count();
 
-    if preferencias.confirma_automaticamente_quando_tudo_casa && itens_nao_casados == 0 {
-        if let Some(local) = preferencias.local_padrao {
-            confirmar_entrada_comum(nota.id, local, preferencias.gera_titulo_a_pagar, ctx, uow)?;
-            let confirmada = carregar_nota(uow, nota.id)?;
-            return Ok(RelatorioImportacao {
-                nota_entrada: nota.id,
-                estado: confirmada.estado,
-                itens_nao_casados: 0,
-            });
-        }
+    if let Some(relatorio) =
+        tentar_confirmar_automaticamente(nota.id, &preferencias, itens_nao_casados, ctx, uow)?
+    {
+        return Ok(relatorio);
     }
 
     uow.publicar(EntradaAConferir {
@@ -210,13 +239,53 @@ pub fn importar_nota_da_sefaz(
         nota_entrada: nota.id,
         estado: EstadoNotaEntrada::AConferir,
         itens_nao_casados,
+        titulo: None,
+        titulo_pago: false,
     })
+}
+
+/// Confirma a entrada sozinha quando a preferência `confirma_automaticamente_quando_tudo_casa`
+/// permite (todo item já `Casado`, nunca por `SugestaoForte`) e há um `local_padrao`
+/// configurado — compartilhado entre [`importar_nota_interpretada`] e
+/// [`LancarNotaManual`](crate::LancarNotaManual), que só diferem em como os itens chegaram.
+/// `Ok(None)` = não confirmou (preferência desligada, itens pendentes, ou sem local padrão) —
+/// o chamador segue o caminho normal (`AConferir` + evento).
+fn tentar_confirmar_automaticamente(
+    nota_id: Id,
+    preferencias: &PreferenciasCompras,
+    itens_nao_casados: usize,
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<Option<RelatorioImportacao>> {
+    if !preferencias.confirma_automaticamente_quando_tudo_casa || itens_nao_casados != 0 {
+        return Ok(None);
+    }
+    let Some(local) = preferencias.local_padrao else {
+        return Ok(None);
+    };
+    let confirmacao = confirmar_entrada_comum(
+        nota_id,
+        local,
+        preferencias.gera_titulo_a_pagar,
+        preferencias.pago_no_ato_padrao,
+        ctx,
+        uow,
+    )?;
+    let confirmada = carregar_nota(uow, nota_id)?;
+    Ok(Some(RelatorioImportacao {
+        nota_entrada: nota_id,
+        estado: confirmada.estado,
+        itens_nao_casados: 0,
+        titulo: confirmacao.titulo,
+        titulo_pago: confirmacao.pago,
+    }))
 }
 
 /// Rateia as despesas acessórias entre os itens (nunca perde centavo,
 /// `Dinheiro::ratear_por_pesos`) e roda a cascata de casamento em cada um — o miolo comum
 /// entre [`importar_nota_da_sefaz`] (itens vindos do XML) e
 /// [`LancarNotaManual`](crate::LancarNotaManual) (itens digitados).
+#[allow(clippy::type_complexity)] // a tupla espelha os campos de `ItemNfe`/`ItemNotaManual`
 fn montar_itens<'a>(
     nota_id: Id,
     fornecedor: Id,
@@ -227,6 +296,7 @@ fn montar_itens<'a>(
             &'a str,
             &'a str,
             &'a str,
+            Option<&'a str>,
             cardeal_kernel::Quantidade,
             cardeal_kernel::Preco,
         ),
@@ -241,7 +311,7 @@ fn montar_itens<'a>(
     };
 
     let mut itens = Vec::with_capacity(pesos.len());
-    for ((codigo_fornecedor, descricao, ncm, quantidade, valor_unitario), rateio) in
+    for ((codigo_fornecedor, descricao, ncm, codigo_barras, quantidade, valor_unitario), rateio) in
         campos.zip(rateios)
     {
         itens.push(montar_item_casado(
@@ -250,6 +320,7 @@ fn montar_itens<'a>(
             codigo_fornecedor,
             descricao,
             ncm,
+            codigo_barras,
             quantidade,
             valor_unitario,
             rateio,
@@ -261,9 +332,10 @@ fn montar_itens<'a>(
 }
 
 /// Monta um item de nota já rodado pela cascata de casamento (`crate::casamento::casar`) —
-/// compartilhado entre [`importar_nota_da_sefaz`] (campos vindos do XML) e
-/// [`LancarNotaManual`](crate::LancarNotaManual) (campos digitados) — os dois só diferem na
-/// origem do dado, não na lógica de casamento/rateio.
+/// compartilhado entre [`importar_nota_interpretada`] (campos vindos do XML, `codigo_barras`
+/// = `cEAN`) e [`LancarNotaManual`](crate::LancarNotaManual) (campos digitados,
+/// `codigo_barras` opcional) — os dois só diferem na origem do dado, não na lógica de
+/// casamento/rateio.
 #[allow(clippy::too_many_arguments)]
 fn montar_item_casado(
     nota_id: Id,
@@ -271,12 +343,21 @@ fn montar_item_casado(
     codigo_fornecedor: &str,
     descricao: &str,
     ncm: &str,
+    codigo_barras: Option<&str>,
     quantidade: cardeal_kernel::Quantidade,
     valor_unitario: cardeal_kernel::Preco,
     rateio: Dinheiro,
     ctx: &Ctx,
     uow: &mut UnidadeDeTrabalho,
 ) -> Resultado<ItemNotaEntrada> {
+    // GTIN primeiro: mais forte que a regra aprendida (é o fabricante identificando o
+    // produto, não uma inferência por fornecedor+código) — `crate::casamento` §cascata.
+    let produto_por_gtin = match codigo_barras.filter(|g| !g.is_empty()) {
+        Some(gtin) => RepositorioEstoque::novo(uow)
+            .buscar_produto_por_codigo_barras(ctx.empresa, gtin)?
+            .map(|p| p.id),
+        None => None,
+    };
     let regra = RepositorioCompras::novo(uow).buscar_regra_casamento(
         ctx.empresa,
         fornecedor,
@@ -300,7 +381,7 @@ fn montar_item_casado(
         valor_rateio: rateio,
         estado_casamento: EstadoCasamento::NaoCasado,
     };
-    match casar(regra, descricao, &candidatos_ref) {
+    match casar(produto_por_gtin, regra, descricao, &candidatos_ref) {
         ResultadoCasamento::Certo(p) => item.vincular(p),
         ResultadoCasamento::Sugestao(p) => item.sugerir(p),
         ResultadoCasamento::Nenhum => {}
@@ -344,6 +425,17 @@ pub fn verificar_notas_na_sefaz(
     Ok(relatorios)
 }
 
+/// O que [`confirmar_entrada_comum`] devolve: o título gerado (se algum) e se ele já nasceu
+/// pago.
+#[derive(Debug, Clone, Copy)]
+pub struct ConfirmacaoEntrada {
+    /// O título a pagar gerado, se `gerar_titulo` mandou gerar um.
+    pub titulo: Option<Id>,
+    /// Verdadeiro se `titulo` já nasceu com baixa completa (`pago_no_ato`). Sempre `false`
+    /// quando `titulo` é `None` — nada para dar baixa.
+    pub pago: bool,
+}
+
 /// Confirma a entrada de uma nota com todos os itens casados: consome
 /// `mod_estoque::registrar_entrada_comum` por item (custo já com rateio embutido) e,
 /// opcionalmente, gera o título a pagar no financeiro com
@@ -353,9 +445,17 @@ pub fn verificar_notas_na_sefaz(
 /// duplicata ainda (assume um único vencimento na emissão) — o XML de condições de
 /// pagamento (`cobr/dup`) não é lido nesta versão.
 ///
+/// Quando `gerar_titulo` e `pago_no_ato` são ambos verdadeiros — a compra já foi paga à
+/// vista, na hora —, a mesma transação também dá baixa completa no título recém-criado, na
+/// data da confirmação (`ctx.hoje()`), via `mod_financeiro::baixar_pagamento_comum`: o título
+/// nunca fica de fato "em aberto" um instante sequer no Contas a Pagar. `pago_no_ato` sem
+/// `gerar_titulo` não faz nada (não há título nenhum para baixar).
+///
 /// # Errors
 /// [`ErroCompras::ItemNaoCasado`] se algum item não estiver `Casado`;
-/// [`ErroCompras::NotaJaConfirmada`] se a nota já não aceitar confirmação.
+/// [`ErroCompras::NotaJaConfirmada`] se a nota já não aceitar confirmação; erro de domínio do
+/// financeiro se a baixa (`pago_no_ato`) não puder ser aplicada (não deveria acontecer: o
+/// título acabou de nascer, sem baixa nenhuma ainda).
 ///
 /// # Panics
 /// Nunca, na prática: o `.expect()` interno em `produto_casado` só executa depois de já ter
@@ -365,9 +465,10 @@ pub fn confirmar_entrada_comum(
     nota_id: Id,
     local: Id,
     gerar_titulo: bool,
+    pago_no_ato: bool,
     ctx: &Ctx,
     uow: &mut UnidadeDeTrabalho,
-) -> Resultado<Option<Id>> {
+) -> Resultado<ConfirmacaoEntrada> {
     let mut nota = carregar_nota(uow, nota_id)?;
     let itens = RepositorioCompras::novo(uow).itens_da_nota(nota_id)?;
     let nao_casados = itens
@@ -398,7 +499,7 @@ pub fn confirmar_entrada_comum(
         )?;
     }
 
-    let titulo = if gerar_titulo {
+    let (titulo, pago) = if gerar_titulo {
         let gravado = lancar_titulo_comum(
             DadosLancamentoTitulo {
                 especie: EspecieTitulo::Pagar,
@@ -418,9 +519,22 @@ pub fn confirmar_entrada_comum(
             ctx,
             uow,
         )?;
-        Some(gravado.titulo)
+
+        let pago = if pago_no_ato {
+            let parcela = gravado
+                .parcelas
+                .first()
+                .copied()
+                .expect("lancar_titulo_comum com parcelas: 1 sempre grava uma parcela");
+            baixar_pagamento_comum(parcela, nota.valor_total, ctx.hoje(), None, ctx, uow)?;
+            true
+        } else {
+            false
+        };
+
+        (Some(gravado.titulo), pago)
     } else {
-        None
+        (None, false)
     };
 
     RepositorioCompras::novo(uow).atualizar_nota(&nota)?;
@@ -430,8 +544,9 @@ pub fn confirmar_entrada_comum(
         fornecedor: nota.fornecedor,
         valor_total: nota.valor_total,
         titulo,
+        pago,
     })
     .map_err(|e| Erro::de_dominio(&e))?;
 
-    Ok(titulo)
+    Ok(ConfirmacaoEntrada { titulo, pago })
 }

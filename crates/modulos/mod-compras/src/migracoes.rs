@@ -66,12 +66,27 @@ CREATE TABLE compras_estado_dfe (
 ) STRICT, WITHOUT ROWID;
 ";
 
-const MIGRACOES: &[Migracao] = &[Migracao {
-    versao: 1,
-    nome: "compras_entrada_casamento_preferencias",
-    sql: SQL_ENTRADA,
-    tipo: TipoMigracao::Esquema,
-}];
+// `pago_no_ato_padrao`: a compra já foi paga à vista, na hora — quando ligado (e um título é
+// gerado), `ConfirmarEntrada` dá baixa completa nele na mesma transação em vez de deixá-lo
+// pendente (`docs/modulos/compras.md` §5, `ConfirmarEntrada`/`confirmar_entrada_comum`).
+const SQL_PAGO_NO_ATO: &str = r"
+ALTER TABLE compras_preferencias ADD COLUMN pago_no_ato_padrao INTEGER NOT NULL DEFAULT 0 CHECK (pago_no_ato_padrao IN (0,1));
+";
+
+const MIGRACOES: &[Migracao] = &[
+    Migracao {
+        versao: 1,
+        nome: "compras_entrada_casamento_preferencias",
+        sql: SQL_ENTRADA,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 2,
+        nome: "compras_pago_no_ato",
+        sql: SQL_PAGO_NO_ATO,
+        tipo: TipoMigracao::Esquema,
+    },
+];
 
 /// O conjunto de migrações do módulo de compras.
 #[must_use]

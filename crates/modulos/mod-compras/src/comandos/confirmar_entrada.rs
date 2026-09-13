@@ -19,6 +19,11 @@ pub struct ConfirmarEntrada {
     pub local: Id,
     /// Gerar o título a pagar agora — `None` usa a preferência da empresa.
     pub gerar_titulo_a_pagar: Option<bool>,
+    /// A compra já foi paga à vista, na hora (dinheiro, cartão, PIX na entrega) — se
+    /// verdadeiro e um título foi gerado, a mesma transação já dá baixa completa nele em vez
+    /// de deixá-lo pendente no Contas a Pagar. `None` usa a preferência da empresa
+    /// (`PreferenciasCompras::pago_no_ato_padrao`). Sem efeito se nenhum título for gerado.
+    pub pago_no_ato: Option<bool>,
 }
 
 /// O que o comando devolve.
@@ -26,6 +31,9 @@ pub struct ConfirmarEntrada {
 pub struct EntradaConfirmada {
     /// O título a pagar gerado, se algum.
     pub titulo: Option<Id>,
+    /// Verdadeiro se `titulo` já nasceu com baixa completa (`pago_no_ato`). Sempre `false`
+    /// quando `titulo` é `None`.
+    pub pago: bool,
 }
 
 impl Comando for ConfirmarEntrada {
@@ -35,16 +43,24 @@ impl Comando for ConfirmarEntrada {
     const AUDITA: bool = true;
 
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
-        let gerar_titulo = match self.gerar_titulo_a_pagar {
-            Some(g) => g,
-            None => {
-                RepositorioCompras::novo(uow)
-                    .preferencias(ctx.empresa)?
-                    .gera_titulo_a_pagar
-            }
-        };
-        let titulo =
-            confirmar_entrada_comum(self.nota_entrada, self.local, gerar_titulo, ctx, uow)?;
-        Ok(EntradaConfirmada { titulo })
+        let preferencias = RepositorioCompras::novo(uow).preferencias(ctx.empresa)?;
+        let gerar_titulo = self
+            .gerar_titulo_a_pagar
+            .unwrap_or(preferencias.gera_titulo_a_pagar);
+        let pago_no_ato = self
+            .pago_no_ato
+            .unwrap_or(preferencias.pago_no_ato_padrao);
+        let confirmacao = confirmar_entrada_comum(
+            self.nota_entrada,
+            self.local,
+            gerar_titulo,
+            pago_no_ato,
+            ctx,
+            uow,
+        )?;
+        Ok(EntradaConfirmada {
+            titulo: confirmacao.titulo,
+            pago: confirmacao.pago,
+        })
     }
 }

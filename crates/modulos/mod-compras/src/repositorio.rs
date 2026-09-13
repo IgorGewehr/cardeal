@@ -352,7 +352,7 @@ impl<'a, 'b> RepositorioCompras<'a, 'b> {
         self.conn()
             .query_row(
                 "SELECT confirma_automaticamente_quando_tudo_casa, gera_titulo_a_pagar,
-                        rateio_por, local_padrao
+                        rateio_por, local_padrao, pago_no_ato_padrao
                  FROM compras_preferencias WHERE empresa = ?1",
                 [blob(empresa)],
                 |r| {
@@ -362,6 +362,7 @@ impl<'a, 'b> RepositorioCompras<'a, 'b> {
                         gera_titulo_a_pagar: r.get::<_, i64>(1)? != 0,
                         rateio_por: rateio_por_de(&r.get::<_, String>(2)?),
                         local_padrao: r.get::<_, Option<Vec<u8>>>(3)?.map(id_de),
+                        pago_no_ato_padrao: r.get::<_, i64>(4)? != 0,
                     })
                 },
             )
@@ -379,19 +380,21 @@ impl<'a, 'b> RepositorioCompras<'a, 'b> {
             .execute(
                 "INSERT INTO compras_preferencias
                    (empresa, confirma_automaticamente_quando_tudo_casa, gera_titulo_a_pagar,
-                    rateio_por, local_padrao)
-                 VALUES (?1,?2,?3,?4,?5)
+                    rateio_por, local_padrao, pago_no_ato_padrao)
+                 VALUES (?1,?2,?3,?4,?5,?6)
                  ON CONFLICT (empresa) DO UPDATE SET
                    confirma_automaticamente_quando_tudo_casa = excluded.confirma_automaticamente_quando_tudo_casa,
                    gera_titulo_a_pagar = excluded.gera_titulo_a_pagar,
                    rateio_por = excluded.rateio_por,
-                   local_padrao = excluded.local_padrao",
+                   local_padrao = excluded.local_padrao,
+                   pago_no_ato_padrao = excluded.pago_no_ato_padrao",
                 params![
                     blob(p.empresa),
                     i64::from(p.confirma_automaticamente_quando_tudo_casa),
                     i64::from(p.gera_titulo_a_pagar),
                     rateio_por_txt(p.rateio_por),
                     blob_opt(p.local_padrao),
+                    i64::from(p.pago_no_ato_padrao),
                 ],
             )
             .map_err(persist)?;

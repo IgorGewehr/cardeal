@@ -38,6 +38,9 @@ pub struct NotaConfirmada {
     pub valor_total: Dinheiro,
     /// O título a pagar gerado, se a preferência mandou gerar um.
     pub titulo: Option<Id>,
+    /// Verdadeiro se `titulo` já nasceu com baixa completa (compra paga à vista, na hora —
+    /// `ConfirmarEntrada::pago_no_ato`). Sempre `false` quando `titulo` é `None`.
+    pub pago: bool,
 }
 
 impl EventoDominio for NotaConfirmada {

@@ -13,7 +13,7 @@ use crate::nota::{EstadoCasamento, EstadoNotaEntrada, NotaEntrada};
 use crate::preferencias::RateioPor;
 use crate::repositorio::RepositorioCompras;
 
-use super::{carregar_nota, confirmar_entrada_comum, resolver_fornecedor, RelatorioImportacao};
+use super::{resolver_fornecedor, RelatorioImportacao};
 use crate::eventos::EntradaAConferir;
 
 /// Um item digitado à mão — mesmos campos de um item de XML, sem a origem fiscal.
@@ -25,6 +25,11 @@ pub struct ItemNotaManual {
     pub descricao: String,
     /// O NCM (8 dígitos) — usado na cascata de casamento por NCM + similaridade.
     pub ncm: String,
+    /// O código de barras (GTIN), se o operador tiver em mãos (bipado, ou copiado da
+    /// embalagem) — usado como a primeira tentativa da cascata de casamento, antes da regra
+    /// aprendida. `None` = pula direto para a regra aprendida (comportamento de antes deste
+    /// campo existir).
+    pub codigo_barras: Option<String>,
     /// A quantidade comprada.
     pub quantidade: Quantidade,
     /// O valor unitário cobrado.
@@ -55,6 +60,29 @@ pub struct LancarNotaManual {
     pub valor_outras_despesas: Dinheiro,
 }
 
+/// A soma bruta dos itens (`quantidade × valor_unitario`, sem rateio) e o peso de cada um
+/// para `Dinheiro::ratear_por_pesos` — computados juntos porque, no rateio por valor, o peso
+/// **é** o valor bruto do item, então não faz sentido calcular `Dinheiro::de_total` duas
+/// vezes por item.
+fn valor_produtos_e_pesos(itens: &[ItemNotaManual], rateio_por: RateioPor) -> (Dinheiro, Vec<i64>) {
+    let brutos: Vec<Dinheiro> = itens
+        .iter()
+        .map(|i| {
+            Dinheiro::de_total(
+                i.quantidade,
+                i.valor_unitario,
+                cardeal_kernel::Arredondamento::MeioAcima,
+            )
+        })
+        .collect();
+    let valor_produtos = brutos.iter().copied().sum();
+    let pesos = match rateio_por {
+        RateioPor::Valor => brutos.iter().map(|d| d.em_centavos()).collect(),
+        RateioPor::Peso => itens.iter().map(|i| i.quantidade.unidades_internas()).collect(),
+    };
+    (valor_produtos, pesos)
+}
+
 impl Comando for LancarNotaManual {
     type Saida = RelatorioImportacao;
     const PERMISSAO: &'static str = "compras.entrada.importar";
@@ -65,17 +93,7 @@ impl Comando for LancarNotaManual {
         let fornecedor = resolver_fornecedor(&cnpj, &self.fornecedor_nome, ctx, uow)?;
         let preferencias = RepositorioCompras::novo(uow).preferencias(ctx.empresa)?;
 
-        let valor_produtos: Dinheiro = self
-            .itens
-            .iter()
-            .map(|i| {
-                Dinheiro::de_total(
-                    i.quantidade,
-                    i.valor_unitario,
-                    cardeal_kernel::Arredondamento::MeioAcima,
-                )
-            })
-            .sum();
+        let (valor_produtos, pesos) = valor_produtos_e_pesos(&self.itens, preferencias.rateio_por);
         let despesas = self.valor_frete + self.valor_seguro + self.valor_outras_despesas;
 
         let nota = NotaEntrada {
@@ -95,25 +113,6 @@ impl Comando for LancarNotaManual {
             versao: cardeal_kernel::Versao::INICIAL,
         };
 
-        let pesos: Vec<i64> = match preferencias.rateio_por {
-            RateioPor::Valor => self
-                .itens
-                .iter()
-                .map(|i| {
-                    Dinheiro::de_total(
-                        i.quantidade,
-                        i.valor_unitario,
-                        cardeal_kernel::Arredondamento::MeioAcima,
-                    )
-                    .em_centavos()
-                })
-                .collect(),
-            RateioPor::Peso => self
-                .itens
-                .iter()
-                .map(|i| i.quantidade.unidades_internas())
-                .collect(),
-        };
         let itens = super::montar_itens(
             nota.id,
             fornecedor,
@@ -124,6 +123,7 @@ impl Comando for LancarNotaManual {
                     i.codigo_fornecedor.as_str(),
                     i.descricao.as_str(),
                     i.ncm.as_str(),
+                    i.codigo_barras.as_deref(),
                     i.quantidade,
                     i.valor_unitario,
                 )
@@ -145,22 +145,14 @@ impl Comando for LancarNotaManual {
             .filter(|i| i.estado_casamento != EstadoCasamento::Casado)
             .count();
 
-        if preferencias.confirma_automaticamente_quando_tudo_casa && itens_nao_casados == 0 {
-            if let Some(local) = preferencias.local_padrao {
-                confirmar_entrada_comum(
-                    nota.id,
-                    local,
-                    preferencias.gera_titulo_a_pagar,
-                    ctx,
-                    uow,
-                )?;
-                let confirmada = carregar_nota(uow, nota.id)?;
-                return Ok(RelatorioImportacao {
-                    nota_entrada: nota.id,
-                    estado: confirmada.estado,
-                    itens_nao_casados: 0,
-                });
-            }
+        if let Some(relatorio) = super::tentar_confirmar_automaticamente(
+            nota.id,
+            &preferencias,
+            itens_nao_casados,
+            ctx,
+            uow,
+        )? {
+            return Ok(relatorio);
         }
 
         uow.publicar(EntradaAConferir {
@@ -174,6 +166,8 @@ impl Comando for LancarNotaManual {
             nota_entrada: nota.id,
             estado: EstadoNotaEntrada::AConferir,
             itens_nao_casados,
+            titulo: None,
+            titulo_pago: false,
         })
     }
 }

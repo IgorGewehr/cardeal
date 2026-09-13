@@ -22,7 +22,9 @@
 - **Não assina nem transmite XML.** Recebe o XML já autorizado via `PortaFiscal::baixar_xml`; emissão
   e assinatura são do provedor externo (ver [doc 10](../10-modulo-fiscal.md)).
 - **Não paga o fornecedor.** Confirmar a entrada gera o `Titulo` a pagar por evento; a baixa é do
-  `financeiro`.
+  `financeiro` — mesmo quando a compra já foi paga à vista (`pago_no_ato`), quem executa a baixa
+  é `mod_financeiro::baixar_pagamento_comum`, chamado direto pela mesma transação; `compras` não
+  reimplementa nem decide a lógica de baixa, só decide *se* ela acontece na hora.
 - **Não decide o que comprar.** A sugestão de ponto de pedido vem de `estoque`; `compras` só
   transforma a sugestão (ou uma decisão manual) em cotação/pedido.
 
@@ -76,15 +78,32 @@ stateDiagram-v2
 | `RegistrarPropostaFornecedor` | `compras.cotacao.editar` | Baixo | Ainda não implementado | `CotacaoDecidida` |
 | `DecidirCotacao` | `compras.cotacao.decidir` | Médio | Ainda não implementado | — |
 | `CriarPedidoCompra` | `compras.pedido.criar` | Baixo | Ainda não implementado | — |
-| `importar_nota_da_sefaz` ✅ / `verificar_notas_na_sefaz` ✅ | `compras.entrada.importar` | Baixo | **Não são `Comando`** (dependem de `PortaFiscal`, que o despacho ainda não injeta — ver nota abaixo). `verificar_notas_na_sefaz` varre a distribuição `DFe` desde o último NSU e chama `importar_nota_da_sefaz` por nota nova: interpreta o XML (`cardeal_fiscal::interpretar`), resolve/cadastra o fornecedor por CNPJ, roda o casamento em cascata por item e rateia frete/seguro/outras despesas | `ChaveJaImportada` |
-| `LancarNotaManual` ✅ (não estava no spec original) | `compras.entrada.importar` | Baixo | Compra sem nota fiscal formal — mesma cascata de casamento/rateio de `importar_nota_da_sefaz`, mas os itens vêm digitados (`ItemNotaManual`) em vez de um XML, e `chave_acesso` fica `None` (o índice `UNIQUE` do SQLite trata múltiplos `NULL` como distintos, então não colide com a idempotência das notas importadas) | — |
-| `DefinirPreferenciasCompras` ✅ (não estava no spec original) | `compras.entrada.preferencias` | Médio | Grava `PreferenciasCompras` — confirmação automática, geração de título a pagar, rateio por valor/peso, local padrão — a resposta desta versão ao pedido do usuário por "vários ajustes de preferências" | — |
+| `importar_nota_da_sefaz` ✅ / `verificar_notas_na_sefaz` ✅ | `compras.entrada.importar` | Baixo | **Não são `Comando`** (dependem de `PortaFiscal`, que o despacho ainda não injeta — ver nota abaixo). `verificar_notas_na_sefaz` varre a distribuição `DFe` desde o último NSU e chama `importar_nota_da_sefaz` por nota nova: interpreta o XML (`cardeal_fiscal::interpretar`), resolve/cadastra o fornecedor por CNPJ, roda o casamento em cascata por item (GTIN → regra aprendida → NCM+similaridade) e rateia frete/seguro/outras despesas | `ChaveJaImportada` |
+| `ImportarNotaDeArquivoXml` ✅ (não estava no spec original) | `compras.entrada.importar` | Baixo | Mesmo XML de NF-e de `importar_nota_da_sefaz`, mas lido de um arquivo local (a UI escolhe o arquivo via `rfd`; este comando só recebe o texto já em UTF-8) em vez de baixado da distribuição `DFe` — não depende de `PortaFiscal`, então **é** um `Comando` de despacho de verdade. Corpo compartilhado com `importar_nota_da_sefaz` (`importar_nota_interpretada`, `pub(crate)`): mesma resolução de fornecedor, cascata de casamento, rateio e idempotência por `(empresa, chave_acesso)` | `ChaveJaImportada` (idempotente: reimportar não duplica, devolve o relatório da nota existente) |
+| `LancarNotaManual` ✅ (não estava no spec original) | `compras.entrada.importar` | Baixo | Compra sem nota fiscal formal — mesma cascata de casamento/rateio de `importar_nota_da_sefaz`, mas os itens vêm digitados (`ItemNotaManual`, com `codigo_barras` opcional para entrar na cascata por GTIN também) em vez de um XML, e `chave_acesso` fica `None` (o índice `UNIQUE` do SQLite trata múltiplos `NULL` como distintos, então não colide com a idempotência das notas importadas) | — |
+| `DefinirPreferenciasCompras` ✅ (não estava no spec original) | `compras.entrada.preferencias` | Médio | Grava `PreferenciasCompras` — confirmação automática, geração de título a pagar, rateio por valor/peso, local padrão, `pago_no_ato_padrao` — a resposta desta versão ao pedido do usuário por "vários ajustes de preferências" e por "permitir gerar ou não registro automático no financeiro seja algo pago ou não" | — |
 | `VincularProdutoManual` ✅ | `compras.entrada.conferir` | Baixo | Casa a linha e grava `RegraCasamentoAprendida` | `ItemNaoPertenceANota` |
 | `RatearDespesas` | `compras.entrada.conferir` | Baixo | Ainda não é um comando separado — o rateio acontece dentro de `importar_nota_da_sefaz`, não como passo manual | `ReferenciaInvalida` |
 | `ConferirQuantidade` | `compras.entrada.conferir` | Baixo | Ainda não implementado (não há `PedidoCompra` para comparar) | `QuantidadeDivergente` (aviso) |
-| `ConfirmarEntrada` ✅ | `compras.entrada.confirmar` | Alto | Exige todo item `Casado`; `mod_estoque::registrar_entrada_comum` por item e, se a preferência mandar, `mod_financeiro::lancar_titulo_comum` — chamados **direto, na mesma transação** (não via despacho — `docs/contratos-internos.md` §7 regra 2). Quando as preferências permitem e a varredura de `verificar_notas_na_sefaz` já casou tudo por regra aprendida, isto roda sozinho (`confirmar_entrada_comum`, mesma função por trás do comando) | `ItemNaoCasado`, `NotaJaConfirmada`, `EstadoDeNotaInvalido` |
+| `ConfirmarEntrada` ✅ | `compras.entrada.confirmar` | Alto | Exige todo item `Casado`; `mod_estoque::registrar_entrada_comum` por item e, se a preferência (ou o campo `gerar_titulo_a_pagar`) mandar, `mod_financeiro::lancar_titulo_comum` — chamados **direto, na mesma transação** (não via despacho — `docs/contratos-internos.md` §7 regra 2). Quando `pago_no_ato` (campo do comando, ou a preferência `pago_no_ato_padrao`) também é verdadeiro, a mesma transação já dá baixa completa no título recém-criado com `mod_financeiro::baixar_pagamento_comum`, na data da confirmação — a compra paga à vista nunca aparece "em aberto" no Contas a Pagar. Quando as preferências permitem e a varredura de `verificar_notas_na_sefaz` já casou tudo por GTIN ou regra aprendida, isto roda sozinho (`confirmar_entrada_comum`, mesma função por trás do comando) | `ItemNaoCasado`, `NotaJaConfirmada`, `EstadoDeNotaInvalido` |
 | `DevolverAoFornecedor` | `compras.devolucao.criar` | Alto | Ainda não implementado | `ValorSuperaOriginal` |
 
+> **Nota (2026-09-13):** casamento por GTIN, importação por arquivo local e pago-no-ato
+> entraram nesta rodada — ver o histórico de "Nota (2026-09-05)" abaixo para o que já vinha de
+> antes. GTIN deixou de ser "fora desta fatia": `estoque_produto.codigo_barras` (GTIN,
+> validado por dígito verificador) já existia em `mod-estoque`, então a cascata de casamento
+> (`crate::casamento::casar`) ganhou o GTIN como primeira tentativa, antes da regra aprendida
+> — `det/prod/cEAN` do XML (`cardeal_fiscal::ItemNfe::codigo_barras`, com o literal
+> `"SEM GTIN"` da NF-e tratado como ausência) ou o `codigo_barras` opcional de
+> `ItemNotaManual`. `ImportarNotaDeArquivoXml` fecha o pedido de "importação de notas de
+> compra reto pro estoque" a partir de um arquivo — sem depender da SEFAZ estar disponível —
+> reaproveitando o mesmo miolo (`importar_nota_interpretada`, `pub(crate)`) que
+> `importar_nota_da_sefaz` já usava. `ConfirmarEntrada`/`PreferenciasCompras` ganharam
+> `pago_no_ato`/`pago_no_ato_padrao` para "gerar ou não registro automático no financeiro seja
+> algo pago ou não": quando ligado, a baixa é dada com `mod_financeiro::baixar_pagamento_comum`
+> (novo, mesmo padrão de `lancar_titulo_comum` — chamável direto por outro módulo, na mesma
+> transação, sem passar pelo despacho de `Comando`).
+>
 > **Nota (2026-09-05):** as linhas ✅ estão implementadas com teste de integração de ponta a
 > ponta contra SQLite real (`crates/modulos/mod-compras/tests/importacao.rs`), com
 > `cardeal_fiscal::FiscalSimulado` no lugar da SEFAZ real — os dois caminhos: confirmação
@@ -105,6 +124,20 @@ stateDiagram-v2
 | `CotacoesAbertas` | `compras.cotacao.ver` | Painel de cotação | `compras_cotacao(empresa, estado)` |
 | `PedidosPendentesDeRecebimento` | `compras.pedido.ver` | Painel de recebimento | `compras_pedido_compra(empresa, estado)` |
 | `SugestaoDeCasamento` | `compras.entrada.conferir` | Tela de conferência | `compras_regra_casamento(fornecedor, codigo_fornecedor)` |
+
+> **Nota (2026-09-13):** a fatia implementada (`crates/modulos/mod-compras/src/consultas.rs`)
+> tem `NotasRecentes` (as 200 notas mais recentes da empresa, com `estado` — a UI filtra por
+> `AConferir` para a fila do Pulso; não há um índice/consulta dedicado só para `AConferir`
+> ainda, então não é literalmente `NotasAConferir`) e `ItensDaNota` (os itens de uma nota, com
+> `estado_casamento` — cobre o papel de `SugestaoDeCasamento` embutido no item, não como
+> consulta separada). `CotacoesAbertas`/`PedidosPendentesDeRecebimento` não existem — cotação
+> e pedido de compra formal estão adiados (§5). Nem `NotasRecentes` nem `ItensDaNota` expõem
+> quem confirmou uma entrada nem se ela nasceu paga — isso está disponível na resposta
+> imediata de `ConfirmarEntrada`/`ImportarNotaDeArquivoXml`/`LancarNotaManual` (`pago`/
+> `titulo_pago`), mas não persiste como coluna própria de `compras` (ver `docs/modulos/compras.md`
+> §1, "Não paga o fornecedor" — quem sabe o estado de um título é o `financeiro`, via
+> `TituloDaOrigem`/`TitulosAPagarEmAberto`, consultado à parte pela UI quando reabre uma nota
+> já confirmada).
 
 ## 7. Receituário contábil
 
@@ -181,7 +214,8 @@ caminho de `ConfirmarEntrada` em modo autônomo, então não há conflito possí
 > persistido) — cotação e pedido de compra estão adiados, então nenhuma tabela deles existe
 > ainda — mais duas novas que este documento não previa: `compras_preferencias` (a resposta a
 > "vários ajustes de preferências" que o usuário pediu — confirmação automática, geração de
-> título a pagar, rateio por valor/peso, local padrão) e `compras_estado_dfe` (o cursor NSU
+> título a pagar, rateio por valor/peso, local padrão e, desde a migração `v2`
+> `compras_pago_no_ato`, `pago_no_ato_padrao`) e `compras_estado_dfe` (o cursor NSU
 > da distribuição `DFe` por empresa, para a varredura nunca reprocessar desde o início).
 
 ```sql

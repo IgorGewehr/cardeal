@@ -22,6 +22,9 @@ pub struct DefinirPreferenciasCompras {
     /// O local de estoque para confirmação automática — obrigatório se
     /// `confirma_automaticamente_quando_tudo_casa` for `true`.
     pub local_padrao: Option<Id>,
+    /// Se a confirmação de entrada considera, por padrão, a compra já paga à vista — dá
+    /// baixa completa no título assim que ele nasce (ver `PreferenciasCompras::pago_no_ato_padrao`).
+    pub pago_no_ato_padrao: bool,
 }
 
 impl Comando for DefinirPreferenciasCompras {
@@ -43,6 +46,7 @@ impl Comando for DefinirPreferenciasCompras {
             gera_titulo_a_pagar: self.gera_titulo_a_pagar,
             rateio_por: self.rateio_por,
             local_padrao: self.local_padrao,
+            pago_no_ato_padrao: self.pago_no_ato_padrao,
         };
         RepositorioCompras::novo(uow).definir_preferencias(&preferencias)?;
         Ok(())

@@ -22,6 +22,11 @@ pub struct ItemNfe {
     pub descricao: String,
     /// O NCM (8 dígitos).
     pub ncm: String,
+    /// O código de barras (GTIN, `det/prod/cEAN`) — `None` quando o campo vem ausente ou com
+    /// o literal `"SEM GTIN"` que a NF-e usa para produto sem código de barras. Usado por
+    /// `mod-compras` como a primeira tentativa da cascata de casamento (mais forte que a
+    /// regra aprendida: um GTIN batendo é o próprio fabricante confirmando o produto).
+    pub codigo_barras: Option<String>,
     /// A quantidade comercial (`qCom`).
     pub quantidade: Quantidade,
     /// O valor unitário comercial (`vUnCom`).
@@ -190,10 +195,15 @@ struct ItemParcial {
     codigo_fornecedor: Option<String>,
     descricao: Option<String>,
     ncm: Option<String>,
+    codigo_barras: Option<String>,
     quantidade: Option<Quantidade>,
     valor_unitario: Option<Preco>,
     valor_total: Option<Dinheiro>,
 }
+
+/// O literal que a NF-e usa em `cEAN`/`cEANTrib` para "este produto não tem código de
+/// barras" — não é um GTIN de verdade, então vira `None`.
+const SEM_GTIN: &str = "SEM GTIN";
 
 impl ItemParcial {
     fn finalizar(self) -> Result<ItemNfe, ErroFiscal> {
@@ -205,6 +215,7 @@ impl ItemParcial {
                 .descricao
                 .ok_or_else(|| campo_ausente("det/prod/xProd"))?,
             ncm: self.ncm.ok_or_else(|| campo_ausente("det/prod/NCM"))?,
+            codigo_barras: self.codigo_barras,
             quantidade: self
                 .quantidade
                 .ok_or_else(|| campo_ausente("det/prod/qCom"))?,
@@ -255,6 +266,19 @@ fn processar_texto(
         }
         [.., "prod", "xProd"] => set_item(item_atual, |i| i.descricao = Some(texto.to_string())),
         [.., "prod", "NCM"] => set_item(item_atual, |i| i.ncm = Some(texto.to_string())),
+        // Só `cEAN` (a embalagem/unidade comercializada), nunca `cEANTrib` (a unidade
+        // tributável, que pode ser um GTIN diferente para fracionados) — é `cEAN` que
+        // identifica o item que `mod-compras` está casando contra o cadastro do estoque.
+        [.., "prod", "cEAN"] => {
+            let gtin = texto.trim();
+            set_item(item_atual, |i| {
+                i.codigo_barras = if gtin.is_empty() || gtin.eq_ignore_ascii_case(SEM_GTIN) {
+                    None
+                } else {
+                    Some(gtin.to_string())
+                };
+            });
+        }
         [.., "prod", "qCom"] => {
             let q = Quantidade::de_str(texto)
                 .map_err(|_| ErroFiscal::XmlInvalido(format!("qCom inválido: {texto}")))?;
@@ -300,6 +324,7 @@ mod testes {
       <det nItem="1">
         <prod>
           <cProd>REF-8821</cProd>
+          <cEAN>7894900011517</cEAN>
           <xProd>REFRIG COLA PET 2L</xProd>
           <NCM>22021000</NCM>
           <qCom>120.0000</qCom>
@@ -310,6 +335,7 @@ mod testes {
       <det nItem="2">
         <prod>
           <cProd>REF-8822</cProd>
+          <cEAN>SEM GTIN</cEAN>
           <xProd>REFRIG GUARANA PET 2L</xProd>
           <NCM>22021000</NCM>
           <qCom>60.0000</qCom>
@@ -344,6 +370,18 @@ mod testes {
             nota.valor_total,
             Dinheiro::reais(957) + Dinheiro::centavos(60)
         );
+    }
+
+    #[test]
+    fn ce_an_vira_codigo_de_barras_e_sem_gtin_vira_none() {
+        let nota = interpretar(XML_EXEMPLO).unwrap();
+        assert_eq!(
+            nota.itens[0].codigo_barras.as_deref(),
+            Some("7894900011517")
+        );
+        // "SEM GTIN" é o literal da NF-e para "sem código de barras" — não é um GTIN de
+        // verdade, então vira `None`, não a string literal.
+        assert_eq!(nota.itens[1].codigo_barras, None);
     }
 
     #[test]

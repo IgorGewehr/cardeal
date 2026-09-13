@@ -6,7 +6,8 @@ use cardeal_modkit::{Manifesto, Modulo, Registro};
 use cardeal_storage::ConjuntoMigracoes;
 
 use crate::comandos::{
-    ConfirmarEntrada, DefinirPreferenciasCompras, LancarNotaManual, VincularProdutoManual,
+    ConfirmarEntrada, DefinirPreferenciasCompras, ImportarNotaDeArquivoXml, LancarNotaManual,
+    VincularProdutoManual,
 };
 use crate::consultas::{ItensDaNota, NotasRecentes};
 use crate::manifesto::MANIFESTO;
@@ -30,6 +31,7 @@ impl Modulo for ModuloCompras {
             .comando::<VincularProdutoManual>("compras.vincular_produto_manual.v1")
             .comando::<ConfirmarEntrada>("compras.confirmar_entrada.v1")
             .comando::<LancarNotaManual>("compras.lancar_nota_manual.v1")
+            .comando::<ImportarNotaDeArquivoXml>("compras.importar_nota_de_arquivo_xml.v1")
             .consulta::<NotasRecentes>("compras.notas_recentes.v1")
             .consulta::<ItensDaNota>("compras.itens_da_nota.v1");
         Ok(())
