@@ -169,6 +169,71 @@ impl Consulta for TituloDaOrigem {
     }
 }
 
+/// Uma baixa já registrada numa parcela — o histórico que a tela de baixa mostra, com o
+/// suficiente para decidir se vale a pena estornar (`docs/modulos/financeiro.md` §5,
+/// `EstornarBaixa`): quando, quanto de principal/juros/multa/desconto, e se já foi estornada.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ItemBaixa {
+    /// A baixa.
+    pub baixa: Id,
+    /// A data em que foi dada.
+    pub data: Data,
+    /// O valor total que entrou/saiu nesta baixa (principal + juros + multa − desconto).
+    pub valor_recebido: Dinheiro,
+    /// A parte que abateu o principal da parcela.
+    pub principal: Dinheiro,
+    /// Juros de mora cobrados nesta baixa.
+    pub juros: Dinheiro,
+    /// Multa cobrada nesta baixa.
+    pub multa: Dinheiro,
+    /// Desconto por antecipação concedido nesta baixa.
+    pub desconto: Dinheiro,
+    /// Verdadeiro se esta baixa já foi estornada.
+    pub estornada: bool,
+}
+
+/// O histórico de baixas de uma parcela, mais recente primeiro — alimenta o painel de
+/// "baixas anteriores" no diálogo de baixa da tela, de onde o operador estorna uma baixa
+/// dada por engano.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BaixasDaParcela {
+    /// A parcela.
+    pub parcela: Id,
+}
+
+impl Consulta for BaixasDaParcela {
+    type Saida = Vec<ItemBaixa>;
+    const PERMISSAO: &'static str = "financeiro.receber.ver";
+
+    fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        let mut stmt = conexao
+            .prepare(
+                "SELECT id, data, valor_recebido, principal, juros, multa, desconto, estornada_em
+                 FROM financeiro_baixa
+                 WHERE empresa = ?1 AND parcela = ?2
+                 ORDER BY data DESC, criado_em DESC",
+            )
+            .map_err(persist)?;
+        let linhas = stmt
+            .query_map(params![blob(ctx.empresa), blob(self.parcela)], |r| {
+                Ok(ItemBaixa {
+                    baixa: id_de(r.get(0)?),
+                    data: data_de(r.get::<_, i64>(1)?),
+                    valor_recebido: Dinheiro::centavos(r.get(2)?),
+                    principal: Dinheiro::centavos(r.get(3)?),
+                    juros: Dinheiro::centavos(r.get(4)?),
+                    multa: Dinheiro::centavos(r.get(5)?),
+                    desconto: Dinheiro::centavos(r.get(6)?),
+                    estornada: r.get::<_, Option<i64>>(7)?.is_some(),
+                })
+            })
+            .map_err(persist)?;
+        linhas
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(persist)
+    }
+}
+
 /// As categorias ativas de uma empresa, por nome.
 ///
 /// # Errors

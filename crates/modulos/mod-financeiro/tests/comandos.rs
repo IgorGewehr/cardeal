@@ -876,6 +876,79 @@ fn renegociar_titulo_consolida_o_saldo_em_aberto_num_titulo_novo() {
 }
 
 #[test]
+fn estornar_baixa_de_parcela_ja_renegociada_e_recusado() {
+    // Regressão: `Parcela::reverter_baixa` sempre pousa em `Parcial`/`Aberta`, sem saber que
+    // a parcela pode ter avançado para `Renegociada` — reverter uma baixa antiga sem checar
+    // isso reabriria uma parcela cujo saldo já foi consolidado no título novo da
+    // renegociação, duplicando a dívida.
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloFinanceiro]).unwrap();
+    let s = sessao(
+        empresa,
+        &[
+            "financeiro.receber.criar",
+            "financeiro.receber.baixar",
+            "financeiro.receber.renegociar",
+            "financeiro.receber.estornar",
+        ],
+    );
+
+    let titulo = lancar(&d, &arm, empresa, &s, Dinheiro::reais(200), 1);
+    // Baixa parcial: a parcela fica `Parcial`, ainda com saldo — e com uma baixa no histórico.
+    let baixada: RecebimentoBaixado = postcard::from_bytes(
+        &d.executar_comando(
+            "financeiro.baixar_recebimento.v1",
+            &carga(&BaixarRecebimento {
+                parcela: titulo.parcelas[0],
+                valor: Dinheiro::reais(80),
+                data: hoje(),
+                conta_destino: None,
+            }),
+            &s,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(!baixada.parcela_quitada);
+
+    // Renegocia o saldo em aberto (120) — a parcela original vira `Renegociada`.
+    d.executar_comando(
+        "financeiro.renegociar_titulo.v1",
+        &carga(&RenegociarTitulo {
+            titulo: titulo.titulo,
+            numero_parcelas: 1,
+            primeiro_vencimento: hoje().mais_dias(30),
+            intervalo_dias: 0,
+            politica_juros: PoliticaJuros::Nenhum,
+            taxa_juros: None,
+            multa: None,
+        }),
+        &s,
+        &ambiente(empresa),
+        arm.escritor(),
+    )
+    .unwrap();
+
+    // Estornar a baixa parcial dada antes da renegociação é recusado — não pousaria em lugar
+    // nenhum coerente (a parcela já não representa a dívida viva).
+    let erro = d
+        .executar_comando(
+            "financeiro.estornar_baixa.v1",
+            &carga(&EstornarBaixa {
+                baixa: baixada.baixa,
+                motivo: "tentativa de estorno pós-renegociação".to_string(),
+            }),
+            &s,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+        .unwrap_err();
+    assert_eq!(erro.codigo, CodigoErro::ESTADO_INVALIDO);
+}
+
+#[test]
 fn criar_conta_bancaria_abre_contas_sucessivas_e_recebe_baixa() {
     let (_dir, arm, empresa) = base();
     let d = Despachante::construir(&[&ModuloFinanceiro]).unwrap();
@@ -1245,4 +1318,102 @@ fn titulo_da_origem_encontra_o_titulo_vinculado_a_outro_modulo() {
     )
     .unwrap();
     assert!(nada.is_none());
+}
+
+#[test]
+fn baixas_da_parcela_lista_o_historico_mais_recente_primeiro_e_marca_estorno() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloFinanceiro]).unwrap();
+    let s = sessao(
+        empresa,
+        &[
+            "financeiro.receber.criar",
+            "financeiro.receber.baixar",
+            "financeiro.receber.estornar",
+            "financeiro.receber.ver",
+        ],
+    );
+    let amb = ambiente(empresa);
+
+    let titulo = lancar(&d, &arm, empresa, &s, Dinheiro::reais(200), 1);
+    let baixa1: RecebimentoBaixado = postcard::from_bytes(
+        &d.executar_comando(
+            "financeiro.baixar_recebimento.v1",
+            &carga(&BaixarRecebimento {
+                parcela: titulo.parcelas[0],
+                valor: Dinheiro::reais(50),
+                data: hoje(),
+                conta_destino: None,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let _baixa2: RecebimentoBaixado = postcard::from_bytes(
+        &d.executar_comando(
+            "financeiro.baixar_recebimento.v1",
+            &carga(&BaixarRecebimento {
+                parcela: titulo.parcelas[0],
+                valor: Dinheiro::reais(150),
+                data: hoje().mais_dias(1),
+                conta_destino: None,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    let historico: Vec<mod_financeiro::ItemBaixa> = postcard::from_bytes(
+        &d.executar_consulta(
+            "financeiro.baixas_da_parcela.v1",
+            &carga(&mod_financeiro::BaixasDaParcela {
+                parcela: titulo.parcelas[0],
+            }),
+            &s,
+            &amb,
+            arm.leitor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(historico.len(), 2);
+    // Mais recente primeiro.
+    assert_eq!(historico[0].valor_recebido, Dinheiro::reais(150));
+    assert_eq!(historico[1].valor_recebido, Dinheiro::reais(50));
+    assert!(!historico[0].estornada && !historico[1].estornada);
+
+    // Estorna a primeira baixa (a mais antiga) e confere que o histórico reflete isso.
+    d.executar_comando(
+        "financeiro.estornar_baixa.v1",
+        &carga(&EstornarBaixa {
+            baixa: baixa1.baixa,
+            motivo: "valor lançado errado".to_string(),
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+
+    let historico: Vec<mod_financeiro::ItemBaixa> = postcard::from_bytes(
+        &d.executar_consulta(
+            "financeiro.baixas_da_parcela.v1",
+            &carga(&mod_financeiro::BaixasDaParcela {
+                parcela: titulo.parcelas[0],
+            }),
+            &s,
+            &amb,
+            arm.leitor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let estornada = historico.iter().find(|b| b.baixa == baixa1.baixa).unwrap();
+    assert!(estornada.estornada);
 }

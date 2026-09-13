@@ -9,22 +9,25 @@ use cardeal_cliente::{MotorLocal, SessaoLocal};
 use cardeal_kernel::{Competencia, Data, Dinheiro, Fuso, Id, Periodo};
 use cardeal_ledger::Contraparte;
 use cardeal_modkit::Icone;
-use cardeal_ui::atoms::{Botao, Rotulo, ValorDinheiro};
-use cardeal_ui::molecules::{Abas, Campo, CartaoKpi, EstadoVazio, Mascara, SeletorOpcao};
+use cardeal_ui::atoms::{Botao, Etiqueta, Rotulo, ValorDinheiro};
+use cardeal_ui::molecules::{
+    Abas, Campo, CartaoKpi, EstadoVazio, Mascara, SecaoExpansivel, SeletorOpcao,
+};
 use cardeal_ui::organisms::{
-    notificar, ColunaGrade, Dialogo, FaixaKpi, Grade, GraficoBarras, LayoutTela, Notificacao,
-    SerieBarras,
+    notificar, ColunaGrade, Dialogo, Direcao, FaixaKpi, Grade, GraficoBarras, LayoutTela,
+    Notificacao, SerieBarras,
 };
 use cardeal_ui::tokens::{perseguir, sombra_cartao, Espaco, Mov, Raio, TemaUi};
 use eframe::egui;
 use mod_clientes::{ItemPessoa, Papel, PessoasPorPapel};
 use mod_financeiro::{
-    BaixarPagamento, BaixarRecebimento, CategoriaFinanceira, Categorias, ContaBancariaCriada,
-    ContasDeResultado, ContasDisponiveis, CriarContaBancaria, CriarRecorrencia, EspecieTitulo,
-    ExtratoDisponivel, ItemContaDisponivel, ItemContaResultado, ItemMovimentoDisponivel,
-    ItemTituloEmAberto, ItemTotalPorCategoria, LancarTituloAPagar, LancarTituloAReceber,
-    Periodicidade, Recorrencia, Recorrencias, TipoValor, TitulosAPagarEmAberto,
-    TitulosAReceberEmAberto, TotalPorCategoriaNoPeriodo,
+    BaixarPagamento, BaixarRecebimento, BaixasDaParcela, CategoriaFinanceira, Categorias,
+    ContaBancariaCriada, ContasDeResultado, ContasDisponiveis, CriarCategoria, CriarContaBancaria,
+    CriarRecorrencia, EspecieTitulo, EstadoParcela, EstornarBaixa, ExtratoDisponivel, ItemBaixa,
+    ItemContaDisponivel, ItemContaResultado, ItemMovimentoDisponivel, ItemTituloEmAberto,
+    ItemTotalPorCategoria, LancarTituloAPagar, LancarTituloAReceber, Periodicidade, Recorrencia,
+    Recorrencias, TipoValor, TitulosAPagarEmAberto, TitulosAReceberEmAberto,
+    TotalPorCategoriaNoPeriodo,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
@@ -60,12 +63,25 @@ enum Dlg {
         indice: usize,
         valor: String,
         data: String,
+        /// O histórico de baixas da parcela — carregado uma vez na abertura do diálogo
+        /// (`baixas_carregadas` marca isso, já que uma parcela recém-lançada legitimamente
+        /// tem histórico vazio).
+        baixas: Vec<ItemBaixa>,
+        baixas_carregadas: bool,
+        /// O motivo do estorno, digitado antes de clicar em "Estornar" numa baixa do
+        /// histórico — `EstornarBaixa` exige um motivo não vazio.
+        motivo_estorno: String,
     },
     Analise,
     Recorrencias,
     NovaRecorrencia(FormRecorrencia),
     NovaContaBancaria {
         nome: String,
+    },
+    NovaCategoria {
+        nome: String,
+        /// `None` = serve para as duas espécies.
+        especie: Option<EspecieTitulo>,
     },
 }
 
@@ -150,6 +166,8 @@ impl Default for FormLancar {
 pub struct EstadoTelaFinanceiro {
     aba: Aba,
     parcelas: Vec<ItemTituloEmAberto>,
+    busca: String,
+    ordenacao: Option<(usize, Direcao)>,
     nomes: HashMap<Id, String>,
     clientes: Vec<ItemPessoa>,
     fornecedores: Vec<ItemPessoa>,
@@ -223,9 +241,7 @@ impl EstadoTelaFinanceiro {
         ) {
             self.fornecedores = f;
         }
-        if let Ok(cat) = motor.consultar(sessao, "financeiro.categorias.v1", &Categorias) {
-            self.categorias = cat;
-        }
+        self.carregar_categorias(motor, sessao);
         self.nomes = self
             .clientes
             .iter()
@@ -384,6 +400,31 @@ impl EstadoTelaFinanceiro {
         }
     }
 
+    /// Recarrega só as categorias — usado depois de criar uma nova, sem repetir o resto do
+    /// que `carregar` busca.
+    fn carregar_categorias(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
+        match motor.consultar(sessao, "financeiro.categorias.v1", &Categorias) {
+            Ok(v) => self.categorias = v,
+            Err(e) => self.erro = Some(e.mensagem),
+        }
+    }
+
+    /// Índices de `parcelas` cujo nome de contraparte bate com `busca` — filtro client-side,
+    /// mesmo racional de `tela_estoque.rs::produtos_filtrados`: a consulta já trouxe até 500
+    /// linhas de uma vez, e o volume de uma assistência cabe folgado nisso.
+    fn parcelas_filtradas(&self) -> Vec<usize> {
+        let termo = self.busca.trim().to_lowercase();
+        (0..self.parcelas.len())
+            .filter(|&i| {
+                termo.is_empty()
+                    || self
+                        .nome_contraparte(&self.parcelas[i].contraparte)
+                        .to_lowercase()
+                        .contains(&termo)
+            })
+            .collect()
+    }
+
     fn nome_categoria(&self, id: Option<Id>) -> String {
         id.and_then(|i| self.categorias.iter().find(|c| c.id == i))
             .map_or_else(|| "Sem categoria".to_owned(), |c| c.nome.clone())
@@ -431,6 +472,12 @@ pub fn mostrar(
                 estado.carregar_recorrencias(motor, sessao);
                 estado.dlg = Dlg::Recorrencias;
             }
+            if ui.add(Botao::secundario("+ Categoria")).clicked() {
+                estado.dlg = Dlg::NovaCategoria {
+                    nome: String::new(),
+                    especie: None,
+                };
+            }
         },
         |ui, estado| {
             abas(ui, motor, sessao, estado);
@@ -461,6 +508,7 @@ pub fn mostrar(
         Dlg::Recorrencias => dialogo_recorrencias(ui.ctx(), motor, sessao, estado),
         Dlg::NovaRecorrencia(_) => dialogo_nova_recorrencia(ui.ctx(), motor, sessao, estado),
         Dlg::NovaContaBancaria { .. } => dialogo_conta_bancaria(ui.ctx(), motor, sessao, estado),
+        Dlg::NovaCategoria { .. } => dialogo_categoria(ui.ctx(), motor, sessao, estado),
     }
 }
 
@@ -1219,6 +1267,81 @@ fn dialogo_conta_bancaria(
     }
 }
 
+fn dialogo_categoria(
+    ctx: &egui::Context,
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaFinanceiro,
+) {
+    let fechar = Dialogo::nova("Nova categoria").largura(460.0).mostrar(
+        ctx,
+        estado,
+        |ui, estado| {
+            let Dlg::NovaCategoria { nome, especie } = &mut estado.dlg else {
+                return;
+            };
+            ui.add(Rotulo::campo(
+                "Rótulo livre para relatório — \"Aluguel\", \"Peças\", \"Assinatura SaaS\". \
+                 Não afeta a contabilização, só agrupa os gráficos de \"Por categoria\".",
+            ));
+            ui.add_space(Espaco::E8);
+            ui.add(Campo::novo("Nome", nome).marcador("Aluguel"));
+            ui.add_space(Espaco::E12);
+            ui.horizontal(|ui| {
+                ui.add(Rotulo::campo("Serve para"));
+                for (rot, valor) in [
+                    ("Ambas", None),
+                    ("Só a receber", Some(EspecieTitulo::Receber)),
+                    ("Só a pagar", Some(EspecieTitulo::Pagar)),
+                ] {
+                    let sel = *especie == valor;
+                    let b = if sel {
+                        Botao::primario(rot)
+                    } else {
+                        Botao::fantasma(rot)
+                    };
+                    if ui.add(b).clicked() {
+                        *especie = valor;
+                    }
+                }
+            });
+        },
+        |ui, estado| {
+            if ui.add(Botao::primario("Criar")).clicked() {
+                if let Dlg::NovaCategoria { nome, especie } = &estado.dlg {
+                    let nome = nome.trim().to_owned();
+                    if nome.is_empty() {
+                        notificar(ui.ctx(), Notificacao::aviso("Informe o nome da categoria."));
+                        return;
+                    }
+                    let especie = *especie;
+                    match motor
+                        .executar(
+                            sessao,
+                            "financeiro.criar_categoria.v1",
+                            &CriarCategoria { nome, especie },
+                        )
+                        .map(|_: mod_financeiro::CategoriaCriada| ())
+                    {
+                        Ok(()) => {
+                            estado.dlg = Dlg::Fechado;
+                            estado.carregar_categorias(motor, sessao);
+                            notificar(ui.ctx(), Notificacao::sucesso("Categoria criada"));
+                        }
+                        Err(e) => notificar(ui.ctx(), Notificacao::erro(e.mensagem)),
+                    }
+                }
+            }
+            if ui.add(Botao::secundario("Cancelar")).clicked() {
+                estado.dlg = Dlg::Fechado;
+            }
+        },
+    );
+    if fechar {
+        estado.dlg = Dlg::Fechado;
+    }
+}
+
 fn abas(
     ui: &mut egui::Ui,
     motor: &MotorLocal,
@@ -1270,6 +1393,19 @@ fn lista(ui: &mut egui::Ui, estado: &mut EstadoTelaFinanceiro) {
         CartaoKpi::contagem("Vencidas", vencidas),
     ])
     .mostrar(ui);
+    ui.add_space(Espaco::E12);
+
+    ui.horizontal(|ui| {
+        ui.set_max_width(360.0);
+        ui.add(Campo::novo("", &mut estado.busca).marcador("Buscar por cliente/fornecedor"));
+    });
+    ui.add_space(Espaco::E12);
+
+    let indices = estado.parcelas_filtradas();
+    if indices.is_empty() {
+        ui.add(Rotulo::interface("Nenhuma parcela para essa busca.").cor(ui.cores().texto_medio));
+        return;
+    }
 
     let colunas = vec![
         ColunaGrade::nova("Contraparte"),
@@ -1278,40 +1414,102 @@ fn lista(ui: &mut egui::Ui, estado: &mut EstadoTelaFinanceiro) {
         ColunaGrade::nova("Saldo").largura(130.0).numero(),
         ColunaGrade::nova("Estado").largura(110.0),
     ];
-    let resposta =
-        Grade::nova(colunas)
-            .selecionavel(None)
-            .mostrar(ui, estado.parcelas.len(), |i, row| {
-                let p = &estado.parcelas[i];
-                row.col(|ui| {
-                    ui.add(Rotulo::interface(estado.nome_contraparte(&p.contraparte)));
-                });
-                row.col(|ui| {
-                    ui.add(Rotulo::interface(p.numero.to_string()));
-                });
-                row.col(|ui| {
-                    let venceu = p.vencimento < hoje;
-                    let r = Rotulo::interface(p.vencimento.to_string());
-                    ui.add(if venceu {
-                        r.cor(ui.cores().negativo)
-                    } else {
-                        r
-                    });
-                });
-                row.col(|ui| {
-                    ui.add(ValorDinheiro::novo(p.saldo()));
-                });
-                row.col(|ui| {
-                    ui.add(Rotulo::campo(format!("{:?}", p.estado)));
+    let resposta = Grade::nova(colunas)
+        .selecionavel(None)
+        .ordenacao(estado.ordenacao)
+        .mostrar(ui, indices.len(), |i, row| {
+            let p = &estado.parcelas[indices[i]];
+            row.col(|ui| {
+                ui.add(Rotulo::interface(estado.nome_contraparte(&p.contraparte)));
+            });
+            row.col(|ui| {
+                ui.add(Rotulo::interface(p.numero.to_string()));
+            });
+            row.col(|ui| {
+                let venceu = p.vencimento < hoje;
+                let r = Rotulo::interface(p.vencimento.to_string());
+                ui.add(if venceu {
+                    r.cor(ui.cores().negativo)
+                } else {
+                    r
                 });
             });
+            row.col(|ui| {
+                ui.add(ValorDinheiro::novo(p.saldo()));
+            });
+            row.col(|ui| {
+                ui.add(etiqueta_estado_parcela(p.estado, p.vencimento < hoje));
+            });
+        });
+
+    if let Some(coluna) = resposta.coluna_clicada {
+        let direcao = match estado.ordenacao {
+            Some((atual, direcao)) if atual == coluna => direcao.invertida(),
+            _ => Direcao::Ascendente,
+        };
+        estado.ordenacao = Some((coluna, direcao));
+        let nomes = estado.nomes.clone();
+        ordenar_parcelas(&mut estado.parcelas, &nomes, coluna, direcao);
+    }
     if let Some(i) = resposta.linha_clicada {
+        let indice = indices[i];
         estado.dlg = Dlg::Baixar {
-            indice: i,
-            valor: estado.parcelas[i].saldo().formatar(),
+            indice,
+            valor: estado.parcelas[indice].saldo().formatar(),
             data: Data::hoje(Fuso::BRASILIA).to_string(),
+            baixas: Vec::new(),
+            baixas_carregadas: false,
+            motivo_estorno: String::new(),
         };
     }
+}
+
+/// Etiqueta colorida para o estado de uma parcela em aberto (só `Aberta`/`Parcial` chegam
+/// aqui — `titulos_em_aberto` já filtra o resto): vencida pesa mais que o estado em si, por
+/// isso entra primeiro na escolha do tom.
+fn etiqueta_estado_parcela(estado: EstadoParcela, vencida: bool) -> Etiqueta {
+    match (estado, vencida) {
+        (EstadoParcela::Parcial, true) => Etiqueta::negativa("Parcial · vencida"),
+        (EstadoParcela::Parcial, false) => Etiqueta::info("Parcial"),
+        (EstadoParcela::Aberta, true) => Etiqueta::negativa("Vencida"),
+        (EstadoParcela::Aberta, false) => Etiqueta::neutra("Aberta"),
+        (outro, _) => Etiqueta::neutra(outro.rotulo()),
+    }
+}
+
+/// Ordena `parcelas` pela coluna clicada no cabeçalho da [`Grade`] de `lista` (mesma ordem
+/// das colunas: Contraparte, Parc., Vencimento, Saldo, Estado). `nomes` resolve o nome de
+/// exibição da contraparte — a própria coluna 0 ordena por ele, não pelo id.
+fn ordenar_parcelas(
+    parcelas: &mut [ItemTituloEmAberto],
+    nomes: &HashMap<Id, String>,
+    coluna: usize,
+    direcao: Direcao,
+) {
+    let nome_de = |p: &ItemTituloEmAberto| -> String {
+        let id = match &p.contraparte {
+            Contraparte::Cliente(i)
+            | Contraparte::Fornecedor(i)
+            | Contraparte::Funcionario(i)
+            | Contraparte::Socio(i)
+            | Contraparte::Outro(i) => *i,
+        };
+        nomes.get(&id).cloned().unwrap_or_default()
+    };
+    parcelas.sort_by(|a, b| {
+        let ordem = match coluna {
+            0 => nome_de(a).cmp(&nome_de(b)),
+            1 => a.numero.cmp(&b.numero),
+            2 => a.vencimento.cmp(&b.vencimento),
+            3 => a.saldo().cmp(&b.saldo()),
+            4 => a.estado.rotulo().cmp(b.estado.rotulo()),
+            _ => std::cmp::Ordering::Equal,
+        };
+        match direcao {
+            Direcao::Ascendente => ordem,
+            Direcao::Descendente => ordem.reverse(),
+        }
+    });
 }
 
 fn dialogo_lancar(
@@ -1481,6 +1679,31 @@ fn dialogo_baixar(
     };
     let nome = estado.nome_contraparte(&p.contraparte);
 
+    // Carrega o histórico de baixas uma vez por abertura do diálogo — não a cada frame
+    // (mesmo padrão de `tela_estoque.rs::dialogo_ver` para os movimentos de rastreabilidade).
+    if let Dlg::Baixar {
+        baixas_carregadas: false,
+        ..
+    } = &estado.dlg
+    {
+        let historico: Vec<ItemBaixa> = motor
+            .consultar(
+                sessao,
+                "financeiro.baixas_da_parcela.v1",
+                &BaixasDaParcela { parcela: p.parcela },
+            )
+            .unwrap_or_default();
+        if let Dlg::Baixar {
+            baixas,
+            baixas_carregadas,
+            ..
+        } = &mut estado.dlg
+        {
+            *baixas = historico;
+            *baixas_carregadas = true;
+        }
+    }
+
     let fechar = Dialogo::nova(format!("Parcela {} · {}", p.numero, nome))
         .largura(560.0)
         .mostrar(
@@ -1515,6 +1738,36 @@ fn dialogo_baixar(
                     c[0].add(Campo::novo("Valor recebido", valor));
                     c[1].add(Campo::novo("Data", data).mascara(Mascara::Data));
                 });
+
+                let Dlg::Baixar { baixas, .. } = &estado.dlg else {
+                    return;
+                };
+                if !baixas.is_empty() {
+                    ui.add_space(Espaco::E16);
+                    let titulo = format!("Baixas anteriores ({})", baixas.len());
+                    let baixas = baixas.clone();
+                    let mut estornar_clicada = None;
+                    SecaoExpansivel::nova(titulo)
+                        .aberta_por_padrao(true)
+                        .mostrar(ui, |ui| {
+                            for b in &baixas {
+                                if let Some(id) = baixa_historico(ui, b) {
+                                    estornar_clicada = Some(id);
+                                }
+                            }
+                            ui.add_space(Espaco::E8);
+                            let Dlg::Baixar { motivo_estorno, .. } = &mut estado.dlg else {
+                                return;
+                            };
+                            ui.add(
+                                Campo::novo("Motivo do estorno", motivo_estorno)
+                                    .marcador("obrigatório para estornar uma baixa acima"),
+                            );
+                        });
+                    if let Some(baixa_id) = estornar_clicada {
+                        estornar(ui.ctx(), motor, sessao, estado, baixa_id);
+                    }
+                }
             },
             |ui, estado| {
                 if ui.add(Botao::primario("Confirmar baixa")).clicked() {
@@ -1528,6 +1781,45 @@ fn dialogo_baixar(
     if fechar {
         estado.dlg = Dlg::Fechado;
     }
+}
+
+/// Uma linha do histórico de baixas: data, valor, e "Estornar" quando ainda não estornada.
+/// Devolve o id da baixa cujo botão "Estornar" foi clicado neste frame, se algum.
+fn baixa_historico(ui: &mut egui::Ui, b: &ItemBaixa) -> Option<Id> {
+    let cores = ui.cores();
+    let mut clicada = None;
+    egui::Frame::none()
+        .fill(cores.superficie_2)
+        .rounding(Raio::ITEM)
+        .inner_margin(egui::Margin::symmetric(Espaco::E12, Espaco::E8))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.add(Rotulo::interface(format!(
+                        "{} · {}",
+                        b.data.formatar_curta(),
+                        b.valor_recebido.formatar_com_simbolo()
+                    )));
+                    if (b.juros + b.multa + b.desconto).e_positivo() {
+                        ui.add(Rotulo::campo(format!(
+                            "principal {} · juros {} · multa {} · desconto {}",
+                            b.principal.formatar_com_simbolo(),
+                            b.juros.formatar_com_simbolo(),
+                            b.multa.formatar_com_simbolo(),
+                            b.desconto.formatar_com_simbolo()
+                        )));
+                    }
+                });
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if b.estornada {
+                        ui.add(Etiqueta::neutra("Estornada"));
+                    } else if ui.add(Botao::fantasma("Estornar").pequeno()).clicked() {
+                        clicada = Some(b.baixa);
+                    }
+                });
+            });
+        });
+    clicada
 }
 
 fn baixar(
@@ -1579,6 +1871,43 @@ fn baixar(
             estado.dlg = Dlg::Fechado;
             estado.carregar(motor, sessao);
             notificar(ctx, Notificacao::sucesso("Baixa registrada"));
+        }
+        Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
+    }
+}
+
+/// Estorna uma baixa do histórico exibido no diálogo — reverte o lançamento no Razão e
+/// reabre a parcela (`EstornarBaixa`, `docs/modulos/financeiro.md` §5). Fecha o diálogo e
+/// recarrega a lista no sucesso, como `baixar` — o índice guardado em `Dlg::Baixar` não
+/// sobrevive a um recarregamento (a ordem pode mudar), então manter o diálogo aberto
+/// arriscaria apontar para a parcela errada.
+fn estornar(
+    ctx: &egui::Context,
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaFinanceiro,
+    baixa: Id,
+) {
+    let Dlg::Baixar { motivo_estorno, .. } = &estado.dlg else {
+        return;
+    };
+    let motivo = motivo_estorno.trim();
+    if motivo.is_empty() {
+        notificar(
+            ctx,
+            Notificacao::aviso("Informe o motivo do estorno antes de confirmar."),
+        );
+        return;
+    }
+    let motivo = motivo.to_owned();
+    match motor
+        .executar(sessao, "financeiro.estornar_baixa.v1", &EstornarBaixa { baixa, motivo })
+        .map(|_: mod_financeiro::BaixaFoiEstornada| ())
+    {
+        Ok(()) => {
+            estado.dlg = Dlg::Fechado;
+            estado.carregar(motor, sessao);
+            notificar(ctx, Notificacao::sucesso("Baixa estornada"));
         }
         Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
     }

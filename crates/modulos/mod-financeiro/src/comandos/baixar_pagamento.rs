@@ -49,25 +49,48 @@ impl Comando for BaixarPagamento {
     const AUDITA: bool = true;
 
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
-        let b = baixar_parcela_comum(
-            DadosBaixa {
-                parcela: self.parcela,
-                valor: self.valor,
-                data: self.data,
-                conta_destino: self.conta_destino,
-                especie: EspecieTitulo::Pagar,
-                papel_destino_padrao: PapelConta::Bancos,
-                papel_encargos: PapelConta::DespesaFinanceira,
-                papel_desconto: PapelConta::OutrasReceitas,
-            },
-            ctx,
-            uow,
-        )?;
-        Ok(PagamentoBaixado {
-            baixa: b.baixa,
-            lancamento: b.lancamento,
-            parcela_quitada: b.quitada,
-            saldo_restante: b.saldo_restante,
-        })
+        baixar_pagamento_comum(self.parcela, self.valor, self.data, self.conta_destino, ctx, uow)
     }
+}
+
+/// Dá baixa completa (ou parcial) numa parcela a pagar, direto-na-transação — mesmo corpo de
+/// [`BaixarPagamento`], só chamável sem passar pelo despacho de `Comando`. Para quem já tem a
+/// `UnidadeDeTrabalho` em mãos e quer baixar um título que acabou de lançar na mesma
+/// transação (ex.: `mod_compras::confirmar_entrada_comum` quando a compra já foi paga no ato
+/// — `ConfirmarEntrada::pago_no_ato`), mesmo padrão de `lancar_titulo_comum` para outro
+/// módulo chamar direto (`docs/contratos-internos.md` §7 regra 2).
+///
+/// `conta_destino: None` usa a conta de Bancos da empresa, igual ao comando.
+///
+/// # Errors
+/// Igual a [`BaixarPagamento`]: erro de domínio (parcela não encontrada, título de espécie
+/// diferente de `Pagar`, valor inválido ou maior que o devido) ou de infraestrutura.
+pub fn baixar_pagamento_comum(
+    parcela: Id,
+    valor: Dinheiro,
+    data: Data,
+    conta_destino: Option<Id>,
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<PagamentoBaixado> {
+    let b = baixar_parcela_comum(
+        DadosBaixa {
+            parcela,
+            valor,
+            data,
+            conta_destino,
+            especie: EspecieTitulo::Pagar,
+            papel_destino_padrao: PapelConta::Bancos,
+            papel_encargos: PapelConta::DespesaFinanceira,
+            papel_desconto: PapelConta::OutrasReceitas,
+        },
+        ctx,
+        uow,
+    )?;
+    Ok(PagamentoBaixado {
+        baixa: b.baixa,
+        lancamento: b.lancamento,
+        parcela_quitada: b.quitada,
+        saldo_restante: b.saldo_restante,
+    })
 }

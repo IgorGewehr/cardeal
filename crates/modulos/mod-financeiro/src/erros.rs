@@ -107,6 +107,15 @@ pub enum ErroFinanceiro {
     #[error("Esta baixa já foi estornada")]
     BaixaJaEstornada,
 
+    /// `EstornarBaixa` pedido sobre uma baixa cuja parcela já foi cancelada ou renegociada —
+    /// reverter reabriria uma parcela cujo saldo já foi absorvido em outro lugar (o título
+    /// novo da renegociação, ou o cancelamento), duplicando a dívida.
+    #[error(
+        "Esta parcela está \"{0:?}\" — para estornar essa baixa, desfaça antes a renegociação \
+         (ou o cancelamento) que a encerrou"
+    )]
+    ParcelaEncerradaNaoReverte(EstadoParcela),
+
     /// `CriarCategoria` com nome vazio.
     #[error("A categoria precisa de um nome")]
     NomeDeCategoriaVazio,
@@ -132,7 +141,8 @@ impl ErroDominio for ErroFinanceiro {
             Self::ParcelaNaoBaixavel(_)
             | Self::EstadoDeSessaoInvalido { .. }
             | Self::CaixaJaAberto
-            | Self::BaixaJaEstornada => CodigoErro::ESTADO_INVALIDO,
+            | Self::BaixaJaEstornada
+            | Self::ParcelaEncerradaNaoReverte(_) => CodigoErro::ESTADO_INVALIDO,
             Self::CaixaFechado => CodigoErro::CAIXA_FECHADO,
         }
     }

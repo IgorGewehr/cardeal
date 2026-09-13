@@ -156,6 +156,15 @@ CREATE INDEX financeiro_recorrencia_empresa_ativa
 ALTER TABLE financeiro_titulo ADD COLUMN categoria BLOB REFERENCES financeiro_categoria(id);
 ";
 
+// `titulo_da_origem` (`consultas.rs`) filtra por `empresa, origem_modulo, origem_id` a cada
+// abertura de tela de OS/compra faturada — sem índice, isso varria `financeiro_titulo`
+// inteira. As duas colunas de correlação nunca tinham índice próprio (só `origem_modulo`
+// entrava, de graça, no índice de contraparte, que não ajuda essa busca).
+const SQL_INDICE_ORIGEM: &str = r"
+CREATE INDEX financeiro_titulo_origem
+    ON financeiro_titulo(empresa, origem_modulo, origem_id);
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -173,6 +182,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 3,
         nome: "financeiro_categoria_e_recorrencia",
         sql: SQL_CATEGORIA_E_RECORRENCIA,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 4,
+        nome: "financeiro_indice_origem",
+        sql: SQL_INDICE_ORIGEM,
         tipo: TipoMigracao::Esquema,
     },
 ];

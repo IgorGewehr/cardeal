@@ -11,9 +11,9 @@ use crate::comandos::{
     LancarTituloAReceber, RegistrarSangria, RegistrarSuprimento, RenegociarTitulo,
 };
 use crate::consultas::{
-    Caixas, Categorias, ContasDeCaixa, ContasDeResultado, ContasDisponiveis, ExtratoDisponivel,
-    Recorrencias, TituloDaOrigem, TitulosAPagarEmAberto, TitulosAReceberEmAberto,
-    TotalPorCategoriaNoPeriodo,
+    BaixasDaParcela, Caixas, Categorias, ContasDeCaixa, ContasDeResultado, ContasDisponiveis,
+    ExtratoDisponivel, Recorrencias, TituloDaOrigem, TitulosAPagarEmAberto,
+    TitulosAReceberEmAberto, TotalPorCategoriaNoPeriodo,
 };
 use crate::manifesto::MANIFESTO;
 use crate::migracoes;
@@ -56,7 +56,8 @@ impl Modulo for ModuloFinanceiro {
             .consulta::<ContasDeCaixa>("financeiro.contas_caixa.v1")
             .consulta::<ContasDisponiveis>("financeiro.contas_disponiveis.v1")
             .consulta::<ExtratoDisponivel>("financeiro.extrato_disponivel.v1")
-            .consulta::<TituloDaOrigem>("financeiro.titulo_da_origem.v1");
+            .consulta::<TituloDaOrigem>("financeiro.titulo_da_origem.v1")
+            .consulta::<BaixasDaParcela>("financeiro.baixas_da_parcela.v1");
         Ok(())
     }
 }

@@ -100,6 +100,18 @@ impl EstadoParcela {
     pub const fn aceita_baixa(self) -> bool {
         matches!(self, Self::Aberta | Self::Parcial)
     }
+
+    /// O rótulo em português — o que a UI mostra em vez do nome da variante Rust.
+    #[must_use]
+    pub const fn rotulo(self) -> &'static str {
+        match self {
+            Self::Aberta => "Aberta",
+            Self::Parcial => "Parcial",
+            Self::Quitada => "Quitada",
+            Self::Cancelada => "Cancelada",
+            Self::Renegociada => "Renegociada",
+        }
+    }
 }
 
 /// A obrigação inteira, antes de fatiada em parcelas.

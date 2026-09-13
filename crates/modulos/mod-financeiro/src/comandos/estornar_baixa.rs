@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use crate::erros::ErroFinanceiro;
 use crate::eventos::BaixaEstornada;
 use crate::repositorio::RepositorioFinanceiro;
+use crate::titulo::EstadoParcela;
 
 /// Estorna uma baixa já aplicada.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,6 +52,20 @@ impl Comando for EstornarBaixa {
         // 2. Validar (domínio puro): idempotência do estorno.
         if baixa.estornada_em.is_some() {
             return Err(Erro::de_dominio(&ErroFinanceiro::BaixaJaEstornada));
+        }
+        // A parcela pode ter avançado para um estado terminal depois desta baixa (renegociada
+        // absorveu o saldo num título novo; cancelada por estorno do título de origem).
+        // `Parcela::reverter_baixa` não conhece esses estados — ela sempre pousa em `Parcial`
+        // ou `Aberta` — então reverter aqui reabriria uma parcela cujo saldo já vive em outro
+        // lugar, duplicando a dívida. Bloqueia até a raiz (renegociação/cancelamento) ser
+        // desfeita primeiro.
+        if matches!(
+            parcela.estado,
+            EstadoParcela::Renegociada | EstadoParcela::Cancelada
+        ) {
+            return Err(Erro::de_dominio(&ErroFinanceiro::ParcelaEncerradaNaoReverte(
+                parcela.estado,
+            )));
         }
 
         // 3. Lançar: estorna o `Realizado` original.
