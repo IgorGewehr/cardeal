@@ -2,14 +2,20 @@
 //! devolvido.
 //!
 //! `docs/modulos/os.md` §5 e §11.1: peça só é aplicada com orçamento aprovado (`EmExecucao`
-//! só se chega depois de `Aprovada`). Chama `mod_estoque::registrar_saida_comum` **direto,
-//! na mesma transação** — mesma decisão de arquitetura documentada em
-//! `mod_financeiro::lancar_titulo_comum` e `docs/contratos-internos.md` §7 regra 2.
+//! só se chega depois de `Aprovada`). Chama `mod_estoque::registrar_saida_comum`/
+//! `registrar_saida_de_lote_comum` **direto, na mesma transação** — mesma decisão de
+//! arquitetura documentada em `mod_financeiro::lancar_titulo_comum` e
+//! `docs/contratos-internos.md` §7 regra 2.
+//!
+//! Grava também o `local` (para `CancelarOrdemServico` saber para onde devolver, se a OS for
+//! cancelada depois de aplicada) e, quando o técnico identificou a peça física pelo código do
+//! post-it, o `lote` — a rastreabilidade completa pedida pelo dono da assistência técnica
+//! (`docs/modulos/estoque.md` §3): "em que OS/aparelho foi aplicada, quando".
 
 use cardeal_kernel::{Erro, Id, Preco, Resultado};
 use cardeal_modkit::{Comando, Ctx, Risco};
 use cardeal_storage::UnidadeDeTrabalho;
-use mod_estoque::{registrar_saida_comum, DadosSaida};
+use mod_estoque::{registrar_saida_comum, registrar_saida_de_lote_comum, DadosSaida};
 use serde::{Deserialize, Serialize};
 
 use crate::comandos::carregar_ordem;
@@ -25,6 +31,11 @@ pub struct AplicarPeca {
     pub item_peca: Id,
     /// O local de estoque de onde a peça sai.
     pub local: Id,
+    /// O lote/peça rastreável específico a consumir (o código do post-it que o técnico
+    /// digitou ou escolheu na lista), quando a rastreabilidade individual estiver em uso.
+    /// `None` = consome só do saldo agregado do produto, sem vincular a uma peça física
+    /// específica — continua funcionando exatamente como antes para quem não usa lote.
+    pub lote: Option<Id>,
 }
 
 /// O que o comando devolve.
@@ -60,20 +71,21 @@ impl Comando for AplicarPeca {
             return Err(Erro::de_dominio(&ErroOs::ItemNaoPertenceAOrdem));
         }
 
-        // 3. Consumir o estoque (chamada direta a outro módulo, mesma transação).
-        let saida = registrar_saida_comum(
-            DadosSaida {
-                produto: item.produto,
-                local: self.local,
-                quantidade: item.quantidade,
-                origem_modulo: "os",
-                origem_id: Some(os.id),
-            },
-            ctx,
-            uow,
-        )?;
+        // 3. Consumir o estoque (chamada direta a outro módulo, mesma transação) — do lote
+        // específico quando o técnico identificou a peça física, senão do saldo agregado.
+        let dados_saida = DadosSaida {
+            produto: item.produto,
+            local: self.local,
+            quantidade: item.quantidade,
+            origem_modulo: "os",
+            origem_id: Some(os.id),
+        };
+        let saida = match self.lote {
+            Some(lote) => registrar_saida_de_lote_comum(dados_saida, lote, ctx, uow)?,
+            None => registrar_saida_comum(dados_saida, ctx, uow)?,
+        };
 
-        item.aplicar(saida.aplicada.custo_unitario)
+        item.aplicar(saida.aplicada.custo_unitario, self.local, self.lote)
             .map_err(|e| Erro::de_dominio(&e))?;
 
         // 4. Persistir.

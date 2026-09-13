@@ -87,6 +87,19 @@ const SQL_DEFEITO_RELATADO: &str = r"
 ALTER TABLE os_ordem_servico ADD COLUMN defeito_relatado TEXT NOT NULL DEFAULT '';
 ";
 
+// Migração v5 (2026-09-13): rastreabilidade de peça aplicada e estorno em cancelamento —
+// `docs/modulos/os.md` §11 regra 5 ("peça já aplicada precisa de estorno explícito"), que
+// antes não tinha como ser cumprida: `AplicarPeca` nunca gravava o local de onde a peça saiu,
+// então `CancelarOrdemServico` não tinha para onde devolver. `local`/`lote` ficam `NULL` até
+// `AplicarPeca` preenchê-los; peças aplicadas antes desta migração (`local` `NULL`) não podem
+// ser estornadas automaticamente — o cancelamento sinaliza isso no retorno do comando, para
+// correção manual. Aditiva: nenhuma coluna existente muda.
+const SQL_RASTREABILIDADE_E_ESTORNO_DE_PECA: &str = r"
+ALTER TABLE os_item_peca ADD COLUMN local BLOB;
+ALTER TABLE os_item_peca ADD COLUMN lote BLOB;
+ALTER TABLE os_item_peca ADD COLUMN estornada INTEGER NOT NULL DEFAULT 0 CHECK (estornada IN (0,1));
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -110,6 +123,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 4,
         nome: "os_defeito_relatado",
         sql: SQL_DEFEITO_RELATADO,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 5,
+        nome: "os_item_peca_rastreabilidade_e_estorno",
+        sql: SQL_RASTREABILIDADE_E_ESTORNO_DE_PECA,
         tipo: TipoMigracao::Esquema,
     },
 ];

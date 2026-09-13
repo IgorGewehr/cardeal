@@ -23,7 +23,7 @@ pub use abrir_ordem_servico::{AbrirOrdemServico, OrdemServicoAberta};
 pub use ajustar_apontamento::AjustarApontamento;
 pub use aplicar_peca::{AplicarPeca, PecaFoiAplicada};
 pub use aprovar_orcamento_os::AprovarOrcamentoOs;
-pub use cancelar_ordem_servico::CancelarOrdemServico;
+pub use cancelar_ordem_servico::{CancelarOrdemServico, OrdemServicoCancelada};
 pub use concluir_execucao::ConcluirExecucao;
 pub use editar_dados_da_ordem::EditarDadosDaOrdem;
 pub use encerrar_apontamento::EncerrarApontamento;

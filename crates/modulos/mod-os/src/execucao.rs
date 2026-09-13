@@ -30,6 +30,17 @@ pub struct ItemPeca {
     pub coberto_garantia: bool,
     /// Se já foi de fato consumida do estoque (`AplicarPeca`).
     pub aplicada: bool,
+    /// O local de estoque de onde a peça foi consumida — preenchido só quando aplicada;
+    /// é o que permite devolver a peça ao estoque certo se a OS for cancelada depois
+    /// (`docs/modulos/os.md` §11 regra 5).
+    pub local: Option<Id>,
+    /// O lote/peça rastreável específico consumido (o código do post-it), quando o técnico
+    /// identificou qual unidade física aplicou — `None` quando a aplicação foi só pelo saldo
+    /// agregado do produto, sem rastro individual.
+    pub lote: Option<Id>,
+    /// Se o consumo desta peça já foi estornado (devolvido ao estoque) por um cancelamento
+    /// de OS depois de aplicada — nunca `true` sem `aplicada` também `true`.
+    pub estornada: bool,
 }
 
 impl ItemPeca {
@@ -50,6 +61,9 @@ impl ItemPeca {
             custo_unitario: Preco::ZERO,
             coberto_garantia: false,
             aplicada: false,
+            local: None,
+            lote: None,
+            estornada: false,
         }
     }
 
@@ -66,10 +80,11 @@ impl ItemPeca {
         )
     }
 
-    /// O custo real deste item, já aplicado (zero se ainda não foi aplicado).
+    /// O custo real deste item, já aplicado (zero se ainda não foi aplicado, ou se o consumo
+    /// já foi estornado — um cancelamento de OS não deixa custo fantasma).
     #[must_use]
     pub fn total_custo(&self) -> Dinheiro {
-        if !self.aplicada {
+        if !self.aplicada || self.estornada {
             return Dinheiro::ZERO;
         }
         Dinheiro::de_total(
@@ -79,16 +94,35 @@ impl ItemPeca {
         )
     }
 
-    /// Marca a peça como aplicada, gravando o custo unitário real devolvido pelo estoque.
+    /// Marca a peça como aplicada, gravando o custo unitário real devolvido pelo estoque, o
+    /// local de onde saiu (para poder devolver depois, se a OS for cancelada) e o
+    /// lote/peça rastreável específico consumido, quando o técnico identificou um.
     ///
     /// # Errors
     /// [`ErroOs::PecaJaAplicada`] se já havia sido aplicada.
-    pub fn aplicar(&mut self, custo_unitario: Preco) -> Result<(), ErroOs> {
+    pub fn aplicar(&mut self, custo_unitario: Preco, local: Id, lote: Option<Id>) -> Result<(), ErroOs> {
         if self.aplicada {
             return Err(ErroOs::PecaJaAplicada);
         }
         self.custo_unitario = custo_unitario;
         self.aplicada = true;
+        self.local = Some(local);
+        self.lote = lote;
+        Ok(())
+    }
+
+    /// Estorna o consumo desta peça (devolve ao estoque) — chamado por
+    /// `CancelarOrdemServico` quando a OS é cancelada depois de peças já aplicadas
+    /// (`docs/modulos/os.md` §11 regra 5: "peça já aplicada precisa de estorno explícito").
+    ///
+    /// # Errors
+    /// [`ErroOs::PecaNaoAplicadaOuJaEstornada`] se a peça nunca foi aplicada, ou já foi
+    /// estornada antes.
+    pub fn estornar(&mut self) -> Result<(), ErroOs> {
+        if !self.aplicada || self.estornada {
+            return Err(ErroOs::PecaNaoAplicadaOuJaEstornada);
+        }
+        self.estornada = true;
         Ok(())
     }
 }
@@ -152,12 +186,41 @@ mod testes {
         assert_eq!(item.total_cobrado(), Dinheiro::reais(320));
         assert_eq!(item.total_custo(), Dinheiro::ZERO);
 
-        item.aplicar(Preco::reais(90)).unwrap();
+        let local = Id::novo();
+        item.aplicar(Preco::reais(90), local, None).unwrap();
         assert!(item.aplicada);
+        assert_eq!(item.local, Some(local));
         assert_eq!(item.total_custo(), Dinheiro::reais(180));
         assert_eq!(
-            item.aplicar(Preco::reais(90)).unwrap_err(),
+            item.aplicar(Preco::reais(90), local, None).unwrap_err(),
             ErroOs::PecaJaAplicada
+        );
+    }
+
+    #[test]
+    fn item_peca_estornada_nao_conta_custo() {
+        let mut item = ItemPeca::novo(
+            Id::novo(),
+            Id::novo(),
+            Quantidade::unidades(1),
+            Preco::reais(100),
+        );
+        assert_eq!(
+            item.estornar().unwrap_err(),
+            ErroOs::PecaNaoAplicadaOuJaEstornada
+        );
+
+        let lote = Id::novo();
+        item.aplicar(Preco::reais(70), Id::novo(), Some(lote)).unwrap();
+        assert_eq!(item.lote, Some(lote));
+        assert_eq!(item.total_custo(), Dinheiro::reais(70));
+
+        item.estornar().unwrap();
+        assert!(item.estornada);
+        assert_eq!(item.total_custo(), Dinheiro::ZERO);
+        assert_eq!(
+            item.estornar().unwrap_err(),
+            ErroOs::PecaNaoAplicadaOuJaEstornada
         );
     }
 

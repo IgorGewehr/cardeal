@@ -42,7 +42,7 @@ pub fn itens_peca_da_ordem(conexao: &Connection, ordem_servico: Id) -> Resultado
     let mut stmt = conexao
         .prepare(
             "SELECT id, ordem_servico, produto, quantidade, preco_unitario, custo_unitario,
-                    coberto_garantia, aplicada
+                    coberto_garantia, aplicada, local, lote, estornada
              FROM os_item_peca WHERE ordem_servico = ?1 ORDER BY rowid",
         )
         .map_err(persist)?;

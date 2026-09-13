@@ -58,6 +58,7 @@
 #![allow(clippy::module_name_repetitions, clippy::must_use_candidate)]
 #![allow(clippy::result_large_err)]
 
+mod aparelho_origem;
 mod comandos;
 mod consultas;
 mod erros;
@@ -71,25 +72,30 @@ pub mod receituario;
 mod repositorio;
 mod saldo;
 
+pub use aparelho_origem::AparelhoOrigem;
 pub use comandos::{
-    registrar_entrada_comum, registrar_saida_comum, AjustarSaldo, CriarGrupoProduto, CriarLocal,
-    CriarProduto, CriarUnidade, DadosEntrada, DadosSaida, DefinirPontoPedido,
-    EditarDetalhesTecnicosProduto, EntradaGravada, EntradaRegistrada, GrupoProdutoCriado,
-    LocalCriado, ProdutoCriado, RegistrarEntrada, RegistrarSaida, SaidaGravada, SaidaRegistrada,
+    registrar_entrada_com_lote_comum, registrar_entrada_comum, registrar_saida_comum,
+    registrar_saida_de_lote_comum, AjustarSaldo, AparelhoOrigemRegistrado, CriarGrupoProduto,
+    CriarLocal, CriarProduto, CriarUnidade, DadosEntrada, DadosNovoLote, DadosSaida,
+    DefinirPontoPedido, EditarDetalhesTecnicosProduto, EntradaComLoteRegistrada, EntradaGravada,
+    EntradaRegistrada, GrupoProdutoCriado, LocalCriado, ProdutoCriado, RegistrarAparelhoOrigem,
+    RegistrarEntrada, RegistrarEntradaComLote, RegistrarSaida, SaidaGravada, SaidaRegistrada,
     SaldoAjustado, TipoLocal, UnidadeCriada,
 };
 pub use consultas::{
     movimentos_do_produto, produtos_abaixo_do_ponto_pedido, saldo_disponivel_do_produto,
-    GruposProduto, ItemAbaixoDoPontoPedido, ItemGrupoProduto, ItemLocal, ItemProdutoComSaldo,
-    ItemUnidade, Locais, MovimentosDoProduto, ProdutoPorCodigoBarras, ProdutosAbaixoDoPontoPedido,
-    ProdutosComSaldo, SaldoDisponivelDoProduto, Unidades,
+    AparelhoOrigemResumo, DetalheDoLotePorCodigo, DetalheLote, GruposProduto,
+    ItemAbaixoDoPontoPedido, ItemGrupoProduto, ItemLocal, ItemLoteDisponivel, ItemProdutoComSaldo,
+    ItemUnidade, Locais, LotesDisponiveisDoProduto, MovimentosDoProduto, ProdutoPorCodigoBarras,
+    ProdutosAbaixoDoPontoPedido, ProdutosComSaldo, SaldoDisponivelDoProduto, Unidades,
 };
 pub use erros::ErroEstoque;
 pub use inventario::{AjusteInventario, ContagemItem, EstadoInventario, Inventario};
 pub use manifesto::{manifesto, MANIFESTO};
 pub use modulo::ModuloEstoque;
 pub use produto::{
-    validar_gtin, Conversao, DetalhesTecnicos, EstadoLote, Lote, Produto, Unidade, Variacao,
+    validar_gtin, Conversao, DetalhesTecnicos, EstadoLote, Lote, OrigemLote, Produto, Unidade,
+    Variacao,
 };
 pub use repositorio::RepositorioEstoque;
 pub use saldo::{custo_medio_movel, Movimento, SaidaAplicada, SaldoLocal, TipoMovimento};

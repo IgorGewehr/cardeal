@@ -363,18 +363,28 @@ impl OrdemServico {
         Ok(())
     }
 
-    /// Cancela a ordem antes de faturar — nunca depois (`docs/modulos/os.md` §4).
+    /// Cancela a ordem antes de faturar — nunca depois (`docs/modulos/os.md` §4 e §11 regra
+    /// 5). Aceita cancelar também a partir de `Aprovada`/`EmExecucao` — o cliente pode desistir
+    /// depois de aprovar (peça indisponível, mudou de ideia), e o técnico pode precisar
+    /// abortar em plena execução (peça quebrou, cliente cancelou no meio do conserto); quando
+    /// já há peça aplicada, quem chama este método (`CancelarOrdemServico`) é responsável por
+    /// estornar cada [`crate::execucao::ItemPeca`] aplicado de volta ao estoque — nunca fica
+    /// consumo órfão sem contrapartida.
     ///
     /// # Errors
     /// [`ErroOs::EstadoInvalido`] se já `Concluida`/`Faturada`/`Cancelada`/`Reprovada`.
     pub fn cancelar(&mut self) -> Result<(), ErroOs> {
         if !matches!(
             self.estado,
-            EstadoOs::Aberta | EstadoOs::EmDiagnostico | EstadoOs::AguardandoAprovacao
+            EstadoOs::Aberta
+                | EstadoOs::EmDiagnostico
+                | EstadoOs::AguardandoAprovacao
+                | EstadoOs::Aprovada
+                | EstadoOs::EmExecucao
         ) {
             return Err(ErroOs::EstadoInvalido {
                 atual: self.estado.rotulo(),
-                esperado: "Aberta, EmDiagnostico ou AguardandoAprovacao",
+                esperado: "Aberta, EmDiagnostico, AguardandoAprovacao, Aprovada ou EmExecucao",
             });
         }
         self.transitar(EstadoOs::Cancelada);
@@ -534,6 +544,31 @@ mod testes {
         os.iniciar_execucao().unwrap();
         os.concluir_execucao().unwrap();
         assert!(os.cancelar().is_err());
+    }
+
+    #[test]
+    fn cancelar_a_partir_de_aprovada_ou_em_execucao_funciona() {
+        // O cliente aprovou, mas a peça não chegou — precisa poder cancelar antes de
+        // iniciar a execução, não só antes de aprovar.
+        let mut os = os_aberta();
+        os.adicionar_ao_orcamento(Dinheiro::reais(100)).unwrap();
+        os.enviar_para_aprovacao().unwrap();
+        os.aprovar("João Silva - CPF 529.982.247-25").unwrap();
+        assert_eq!(os.estado, EstadoOs::Aprovada);
+        os.cancelar().unwrap();
+        assert_eq!(os.estado, EstadoOs::Cancelada);
+
+        // Já em execução (com peça possivelmente aplicada) — o comando
+        // `CancelarOrdemServico` é quem estorna o consumo; o domínio só precisa aceitar a
+        // transição.
+        let mut os2 = os_aberta();
+        os2.adicionar_ao_orcamento(Dinheiro::reais(100)).unwrap();
+        os2.enviar_para_aprovacao().unwrap();
+        os2.aprovar("João Silva - CPF 529.982.247-25").unwrap();
+        os2.iniciar_execucao().unwrap();
+        assert_eq!(os2.estado, EstadoOs::EmExecucao);
+        os2.cancelar().unwrap();
+        assert_eq!(os2.estado, EstadoOs::Cancelada);
     }
 
     #[test]

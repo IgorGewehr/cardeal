@@ -74,6 +74,37 @@ pub enum ErroEstoque {
     /// `EncerrarInventario` com itens ainda sem contagem.
     #[error("Ainda há {0} item(ns) sem contagem")]
     ContagensPendentes(usize),
+
+    /// Código de lote/peça (o do post-it) vazio.
+    #[error("O código do lote/peça não pode ser vazio")]
+    CodigoLoteVazio,
+
+    /// `Lote` com `origem = AparelhoUsado` sem `aparelho_origem` informado.
+    #[error("Peça de aparelho usado exige informar de qual aparelho de origem ela saiu")]
+    AparelhoOrigemAusente,
+
+    /// Descrição vazia no cadastro de um aparelho de origem (trade-in).
+    #[error("A descrição do aparelho de origem não pode ser vazia")]
+    DescricaoDoAparelhoVazia,
+
+    /// Consumo de um lote específico além do que ele ainda tem disponível — diferente de
+    /// [`ErroEstoque::SaldoInsuficiente`] (que é do saldo agregado do produto/local): este é
+    /// sobre a peça física identificada pelo código, que já foi total ou parcialmente usada.
+    #[error("Este lote/peça só tem {disponivel} disponível, foram pedidos {pedido}")]
+    LoteSaldoInsuficiente {
+        /// O disponível no lote.
+        disponivel: String,
+        /// O que foi pedido.
+        pedido: String,
+    },
+
+    /// Lote referenciado que não existe (código digitado errado, ou já removido).
+    #[error("Lote/peça não encontrado")]
+    LoteInexistente,
+
+    /// O lote informado é de um produto diferente do item que está sendo aplicado/movimentado.
+    #[error("Este lote/peça é de outro produto")]
+    LoteDeOutroProduto,
 }
 
 impl ErroDominio for ErroEstoque {
@@ -85,16 +116,23 @@ impl ErroDominio for ErroEstoque {
             | Self::GtinComprimento
             | Self::QuantidadeInvalida
             | Self::CustoUnitarioAusente
-            | Self::MotivoObrigatorio => CodigoErro::ENTRADA_INVALIDA,
+            | Self::MotivoObrigatorio
+            | Self::CodigoLoteVazio
+            | Self::AparelhoOrigemAusente
+            | Self::DescricaoDoAparelhoVazia => CodigoErro::ENTRADA_INVALIDA,
             Self::GtinInvalido => CodigoErro::DOCUMENTO_INVALIDO,
-            Self::ProdutoSemGrade | Self::LocalIgual | Self::ReservaInsuficiente => {
-                CodigoErro::REGRA_VIOLADA
+            Self::ProdutoSemGrade
+            | Self::LocalIgual
+            | Self::ReservaInsuficiente
+            | Self::LoteDeOutroProduto => CodigoErro::REGRA_VIOLADA,
+            Self::SaldoInsuficiente { .. } | Self::LoteSaldoInsuficiente { .. } => {
+                CodigoErro::ESTOQUE_INSUFICIENTE
             }
-            Self::SaldoInsuficiente { .. } => CodigoErro::ESTOQUE_INSUFICIENTE,
             Self::LocalCongelado => CodigoErro::RECURSO_TRAVADO,
             Self::EstadoDeInventarioInvalido { .. } | Self::ContagensPendentes(_) => {
                 CodigoErro::ESTADO_INVALIDO
             }
+            Self::LoteInexistente => CodigoErro::NAO_ENCONTRADO,
         }
     }
 
@@ -111,6 +149,14 @@ impl ErroDominio for ErroEstoque {
                 "Inventário em andamento",
                 "Entradas e saídas neste local ficam bloqueadas até o inventário sair do \
                  estado Congelado — é o que impede a contagem de perseguir um alvo que se move.",
+            )),
+            Self::LoteSaldoInsuficiente { disponivel, pedido } => Some(Detalhes::nova(
+                "Peça específica indisponível",
+                format!(
+                    "O lote/peça identificado pelo código só tem {disponivel} disponível, mas \
+                     foram pedidos {pedido} — confira se é o código certo ou se a peça já foi \
+                     usada em outra OS."
+                ),
             )),
             _ => None,
         }

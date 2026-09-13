@@ -75,9 +75,9 @@ pub use comandos::{
     AbrirOrdemServico, AjustarApontamento, AplicarPeca, ApontamentoIniciado, AprovarOrcamentoOs,
     CancelarOrdemServico, ConcluirExecucao, EditarDadosDaOrdem, EncerrarApontamento,
     EnviarParaAprovacao, FaturarOrdemServico, IniciarApontamento, IniciarExecucao,
-    ItemOrcamentoNovo, MontarOrcamentoOs, OrdemServicoAberta, OrdemServicoFaturada,
-    PecaFoiAplicada, RegistrarLaudo, RegistrarMaoDeObra, RemoverItemOrcamento, ReprovarOrcamentoOs,
-    TipoItemOrcamento,
+    ItemOrcamentoNovo, MontarOrcamentoOs, OrdemServicoAberta, OrdemServicoCancelada,
+    OrdemServicoFaturada, PecaFoiAplicada, RegistrarLaudo, RegistrarMaoDeObra,
+    RemoverItemOrcamento, ReprovarOrcamentoOs, TipoItemOrcamento,
 };
 pub use consultas::{
     ApontamentosDaOrdem, BuscarDetalheOrdem, DetalheOrdem, HistoricoDoEquipamento,

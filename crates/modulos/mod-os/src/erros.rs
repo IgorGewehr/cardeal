@@ -65,6 +65,12 @@ pub enum ErroOs {
     #[error("Esta peça já foi aplicada")]
     PecaJaAplicada,
 
+    /// `ItemPeca::estornar` chamado sobre uma peça que nunca foi aplicada, ou que já havia
+    /// sido estornada antes — o estorno (devolução ao estoque) só faz sentido uma vez, sobre
+    /// uma peça de fato consumida.
+    #[error("Esta peça não está aplicada, ou seu consumo já foi estornado")]
+    PecaNaoAplicadaOuJaEstornada,
+
     /// `ConcluirExecucao` com peça do orçamento ainda não aplicada.
     #[error("Ainda há {0} peça(s) do orçamento pendente(s) de aplicação")]
     PecaPendenteDeAplicacao(usize),
@@ -112,6 +118,7 @@ impl ErroDominio for ErroOs {
             | Self::OrcamentoNaoAprovado
             | Self::ItemNaoPertenceAOrdem
             | Self::PecaJaAplicada
+            | Self::PecaNaoAplicadaOuJaEstornada
             | Self::PecaPendenteDeAplicacao(_)
             | Self::OsNaoConcluida
             | Self::OsJaFaturada

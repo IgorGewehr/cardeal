@@ -16,7 +16,9 @@ mod criar_produto;
 mod criar_unidade;
 mod definir_ponto_pedido;
 mod editar_detalhes_tecnicos_produto;
+mod registrar_aparelho_origem;
 mod registrar_entrada;
+mod registrar_entrada_com_lote;
 mod registrar_saida;
 
 pub use ajustar_saldo::{AjustarSaldo, SaldoAjustado};
@@ -26,14 +28,17 @@ pub use criar_produto::{CriarProduto, ProdutoCriado};
 pub use criar_unidade::{CriarUnidade, UnidadeCriada};
 pub use definir_ponto_pedido::DefinirPontoPedido;
 pub use editar_detalhes_tecnicos_produto::EditarDetalhesTecnicosProduto;
+pub use registrar_aparelho_origem::{AparelhoOrigemRegistrado, RegistrarAparelhoOrigem};
 pub use registrar_entrada::{EntradaRegistrada, RegistrarEntrada};
+pub use registrar_entrada_com_lote::{EntradaComLoteRegistrada, RegistrarEntradaComLote};
 pub use registrar_saida::{RegistrarSaida, SaidaRegistrada};
 
-use cardeal_kernel::{Erro, Id, Preco, Quantidade, Resultado};
+use cardeal_kernel::{Data, Erro, Id, Preco, Quantidade, Resultado};
 use cardeal_modkit::Ctx;
 use cardeal_storage::UnidadeDeTrabalho;
 
 use crate::eventos::AbaixoPontoPedido;
+use crate::produto::{Lote, OrigemLote};
 use crate::repositorio::RepositorioEstoque;
 use crate::saldo::{Movimento, SaidaAplicada, SaldoLocal, TipoMovimento};
 
@@ -44,6 +49,26 @@ pub(crate) fn autoria_de(ctx: &Ctx) -> crate::receituario::Autoria {
         dispositivo: ctx.dispositivo,
         agora: ctx.agora,
     }
+}
+
+/// Os dados para criar um [`Lote`] (peça com código de post-it) junto de uma entrada —
+/// rastreabilidade opcional, pedido do dono da assistência técnica (`docs/modulos/estoque.md`
+/// §3): o código curto que vai na peça, de onde ela veio (compra ou aparelho usado
+/// desmontado) e, quando aplicável, o aparelho de origem.
+#[derive(Debug, Clone)]
+pub struct DadosNovoLote {
+    /// O código curto e digitável (o texto do post-it), único por empresa.
+    pub codigo: String,
+    /// De onde veio.
+    pub origem: OrigemLote,
+    /// O fornecedor, quando `origem = Compra`.
+    pub fornecedor: Option<Id>,
+    /// O aparelho usado de origem, obrigatório quando `origem = AparelhoUsado`.
+    pub aparelho_origem: Option<Id>,
+    /// Data de fabricação, quando conhecida.
+    pub fabricacao: Option<Data>,
+    /// Data de validade, quando o produto controla validade.
+    pub validade: Option<Data>,
 }
 
 /// Os dados que `RegistrarEntrada` e chamadas diretas de outros módulos passam ao corpo
@@ -70,15 +95,16 @@ pub struct EntradaGravada {
     pub movimento: Id,
     /// O custo médio resultante após a entrada.
     pub custo_medio: Preco,
+    /// O lote criado, quando a entrada veio de [`registrar_entrada_com_lote_comum`].
+    pub lote: Option<Id>,
 }
 
 /// Carregar/validar/persistir uma entrada — igual para o comando de despacho e para
-/// chamadas diretas de outros módulos.
-///
-/// # Errors
-/// Erro de domínio (`QuantidadeInvalida`, `CustoUnitarioAusente`).
-pub fn registrar_entrada_comum(
+/// chamadas diretas de outros módulos. Corpo compartilhado com
+/// [`registrar_entrada_com_lote_comum`] — `dados_lote` é `None` aqui, sempre.
+fn registrar_entrada_interna(
     dados: DadosEntrada,
+    dados_lote: Option<DadosNovoLote>,
     ctx: &Ctx,
     uow: &mut UnidadeDeTrabalho,
 ) -> Resultado<EntradaGravada> {
@@ -94,12 +120,37 @@ pub fn registrar_entrada_comum(
         .entrada(dados.quantidade, dados.custo_unitario, ctx.agora)
         .map_err(|e| Erro::de_dominio(&e))?;
 
+    // 3. Validar (domínio puro) o lote, quando esta entrada cria uma peça rastreável com
+    // código de post-it.
+    let lote = dados_lote
+        .map(|l| {
+            Lote::novo(
+                ctx.empresa,
+                dados.produto,
+                dados.local,
+                l.codigo,
+                l.origem,
+                l.fornecedor,
+                l.aparelho_origem,
+                l.fabricacao,
+                l.validade,
+                dados.quantidade,
+                dados.custo_unitario,
+                ctx.agora,
+            )
+        })
+        .transpose()
+        .map_err(|e| Erro::de_dominio(&e))?;
+
     // 4. Persistir.
     let mut repo = RepositorioEstoque::novo(uow);
     if saldo_e_novo {
         repo.inserir_saldo(&saldo)?;
     } else {
         repo.atualizar_saldo(&saldo)?;
+    }
+    if let Some(lote) = &lote {
+        repo.inserir_lote(lote)?;
     }
     let movimento = Movimento {
         id: Id::novo(),
@@ -110,7 +161,7 @@ pub fn registrar_entrada_comum(
         tipo: TipoMovimento::Entrada,
         quantidade: dados.quantidade,
         custo_unitario: Some(dados.custo_unitario),
-        lote: None,
+        lote: lote.as_ref().map(|l| l.id),
         origem_modulo: dados.origem_modulo.to_string(),
         origem_id: dados.origem_id,
         lancamento: None,
@@ -122,7 +173,39 @@ pub fn registrar_entrada_comum(
     Ok(EntradaGravada {
         movimento: movimento.id,
         custo_medio: saldo.custo_medio,
+        lote: lote.map(|l| l.id),
     })
+}
+
+/// Carregar/validar/persistir uma entrada — igual para o comando de despacho e para
+/// chamadas diretas de outros módulos.
+///
+/// # Errors
+/// Erro de domínio (`QuantidadeInvalida`, `CustoUnitarioAusente`).
+pub fn registrar_entrada_comum(
+    dados: DadosEntrada,
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<EntradaGravada> {
+    registrar_entrada_interna(dados, None, ctx, uow)
+}
+
+/// Como [`registrar_entrada_comum`], mas cria também um [`Lote`] rastreável (o código do
+/// post-it) para esta entrada — o que `RegistrarEntrada` usa quando a peça precisa de
+/// rastreabilidade individual (`docs/modulos/estoque.md` §3). Função própria, em vez de mais
+/// um campo em [`DadosEntrada`], para não quebrar quem já constrói `DadosEntrada` sem saber
+/// de lote (`compras`, por exemplo).
+///
+/// # Errors
+/// Erro de domínio (`QuantidadeInvalida`, `CustoUnitarioAusente`, `CodigoLoteVazio`,
+/// `AparelhoOrigemAusente`), ou de persistência se o código já existir na empresa.
+pub fn registrar_entrada_com_lote_comum(
+    dados: DadosEntrada,
+    lote: DadosNovoLote,
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<EntradaGravada> {
+    registrar_entrada_interna(dados, Some(lote), ctx, uow)
 }
 
 /// Os dados que `RegistrarSaida` e chamadas diretas de outros módulos passam ao corpo
@@ -152,13 +235,16 @@ pub struct SaidaGravada {
 
 /// Carregar/validar/persistir uma saída — igual para o comando de despacho e para chamadas
 /// diretas de outros módulos. Aceita saldo insuficiente (fica negativo e sinalizado, nunca
-/// bloqueia — `docs/modulos/estoque.md` §11.2).
+/// bloqueia — `docs/modulos/estoque.md` §11.2). Corpo compartilhado com
+/// [`registrar_saida_de_lote_comum`] — `lote` é `None` aqui, sempre.
 ///
 /// # Errors
 /// [`cardeal_kernel::Erro`] com [`crate::ErroEstoque::QuantidadeInvalida`] se a quantidade
-/// não for positiva.
-pub fn registrar_saida_comum(
+/// não for positiva; [`crate::ErroEstoque::LoteInexistente`]/`LoteDeOutroProduto`/
+/// `LoteSaldoInsuficiente` quando `lote` é informado e não confere.
+fn registrar_saida_interna(
     dados: DadosSaida,
+    lote: Option<Id>,
     ctx: &Ctx,
     uow: &mut UnidadeDeTrabalho,
 ) -> Resultado<SaidaGravada> {
@@ -173,6 +259,31 @@ pub fn registrar_saida_comum(
     let aplicada = saldo
         .saida(dados.quantidade, ctx.agora)
         .map_err(|e| Erro::de_dominio(&e))?;
+
+    // 3. Validar o lote específico, quando informado: precisa ser do mesmo produto e ter
+    // saldo (derivado de `estoque_movimento`) suficiente para a quantidade pedida. A peça
+    // física é o que realmente saiu do balcão — travar aqui é o que evita aplicar/vender a
+    // mesma peça (ou mais do que ela tem) duas vezes.
+    let mut lote_carregado = None;
+    if let Some(lote_id) = lote {
+        let repo = RepositorioEstoque::novo(uow);
+        let lote = repo
+            .buscar_lote(lote_id)?
+            .ok_or_else(|| Erro::de_dominio(&crate::erros::ErroEstoque::LoteInexistente))?;
+        if lote.produto != dados.produto {
+            return Err(Erro::de_dominio(&crate::erros::ErroEstoque::LoteDeOutroProduto));
+        }
+        let disponivel = repo.saldo_do_lote(lote_id)?;
+        if disponivel < dados.quantidade {
+            return Err(Erro::de_dominio(
+                &crate::erros::ErroEstoque::LoteSaldoInsuficiente {
+                    disponivel: disponivel.formatar(0),
+                    pedido: dados.quantidade.formatar(0),
+                },
+            ));
+        }
+        lote_carregado = Some((lote, disponivel));
+    }
 
     // 4. Persistir.
     let mut repo = RepositorioEstoque::novo(uow);
@@ -190,7 +301,7 @@ pub fn registrar_saida_comum(
         tipo: TipoMovimento::Saida,
         quantidade: dados.quantidade,
         custo_unitario: Some(aplicada.custo_unitario),
-        lote: None,
+        lote,
         origem_modulo: dados.origem_modulo.to_string(),
         origem_id: dados.origem_id,
         lancamento: None,
@@ -198,6 +309,16 @@ pub fn registrar_saida_comum(
         criado_por: ctx.usuario,
     };
     repo.inserir_movimento(&movimento)?;
+
+    // Se este consumo esgotou o lote, marca o estado — best-effort de UX (evita que a
+    // consulta pelo código mostre uma peça "ativa" que já foi toda usada).
+    if let Some((lote, disponivel_antes)) = lote_carregado {
+        if disponivel_antes - dados.quantidade <= Quantidade::ZERO
+            && lote.estado != crate::produto::EstadoLote::Esgotado
+        {
+            repo.atualizar_estado_lote(lote.id, crate::produto::EstadoLote::Esgotado)?;
+        }
+    }
 
     // 5. Avisar se a saída deixou o disponível do local abaixo do ponto de pedido —
     // best-effort, sem consumidor ainda (`docs/modulos/estoque.md` §8). Usa o `saldo` já
@@ -218,4 +339,38 @@ pub fn registrar_saida_comum(
         movimento: movimento.id,
         aplicada,
     })
+}
+
+/// Carregar/validar/persistir uma saída — igual para o comando de despacho e para chamadas
+/// diretas de outros módulos. Aceita saldo insuficiente (fica negativo e sinalizado, nunca
+/// bloqueia — `docs/modulos/estoque.md` §11.2).
+///
+/// # Errors
+/// [`cardeal_kernel::Erro`] com [`crate::ErroEstoque::QuantidadeInvalida`] se a quantidade
+/// não for positiva.
+pub fn registrar_saida_comum(
+    dados: DadosSaida,
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<SaidaGravada> {
+    registrar_saida_interna(dados, None, ctx, uow)
+}
+
+/// Como [`registrar_saida_comum`], mas consome de um lote/peça rastreável específico — o
+/// código do post-it que o técnico digitou — em vez de só abater o saldo agregado do
+/// produto. Valida que o lote é do mesmo produto e que ainda tem saldo suficiente (a peça
+/// física não pode ser aplicada/vendida duas vezes), e grava o movimento com o lote para o
+/// histórico. Função própria, em vez de mais um campo em [`DadosSaida`], para não quebrar
+/// quem já constrói `DadosSaida` sem saber de lote (`vendas`/`pdv`, por exemplo).
+///
+/// # Errors
+/// [`crate::ErroEstoque::LoteInexistente`], [`crate::ErroEstoque::LoteDeOutroProduto`],
+/// [`crate::ErroEstoque::LoteSaldoInsuficiente`], além dos erros de [`registrar_saida_comum`].
+pub fn registrar_saida_de_lote_comum(
+    dados: DadosSaida,
+    lote: Id,
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<SaidaGravada> {
+    registrar_saida_interna(dados, Some(lote), ctx, uow)
 }

@@ -2,12 +2,12 @@
 //! — `docs/modulos/estoque.md` §10 (a ficha de produto precisa do saldo agregado por
 //! produto para a lista principal da tela).
 
-use cardeal_kernel::{Id, Preco, Quantidade, Resultado};
+use cardeal_kernel::{Data, Dinheiro, Id, Instante, Preco, Quantidade, Resultado};
 use cardeal_modkit::{Consulta, Ctx};
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
-use crate::produto::Produto;
+use crate::produto::{EstadoLote, OrigemLote, Produto};
 use crate::repositorio::{blob, id_de, movimento_de_linha, persist, produto_de_linha};
 use crate::saldo::Movimento;
 
@@ -391,5 +391,333 @@ impl Consulta for MovimentosDoProduto {
 
     fn executar(self, _ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         movimentos_do_produto(conexao, self.produto, self.origem_modulo.as_deref())
+    }
+}
+
+// ── Lote/peça rastreável e aparelho de origem (o caso de uso do post-it) ──────────────────
+
+/// Busca um aparelho de origem pelo id.
+///
+/// # Errors
+/// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+pub fn buscar_aparelho_origem(
+    conexao: &Connection,
+    id: Id,
+) -> Resultado<Option<crate::aparelho_origem::AparelhoOrigem>> {
+    conexao
+        .query_row(
+            "SELECT id, empresa, descricao, identificador, custo_aquisicao, adquirido_em,
+                    fornecedor, observacoes
+             FROM estoque_aparelho_origem WHERE id = ?1",
+            [blob(id)],
+            crate::repositorio::aparelho_origem_de_linha,
+        )
+        .optional()
+        .map_err(persist)
+}
+
+const COLUNAS_LOTE: &str = "id, empresa, produto, local, codigo, origem, fornecedor, \
+    aparelho_origem, fabricacao, validade, quantidade_inicial, custo_unitario, estado, criado_em";
+
+/// Busca um lote pelo id.
+///
+/// # Errors
+/// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+pub fn buscar_lote(conexao: &Connection, id: Id) -> Resultado<Option<crate::produto::Lote>> {
+    conexao
+        .query_row(
+            &format!("SELECT {COLUNAS_LOTE} FROM estoque_lote WHERE id = ?1"),
+            [blob(id)],
+            crate::repositorio::lote_de_linha,
+        )
+        .optional()
+        .map_err(persist)
+}
+
+/// Busca um lote pelo código digitado à mão — o que sustenta a busca pelo post-it colado na
+/// peça. Único por empresa, não só por produto: o técnico digita sem saber de antemão a qual
+/// produto o código pertence.
+///
+/// # Errors
+/// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+pub fn buscar_lote_por_codigo(
+    conexao: &Connection,
+    empresa: Id,
+    codigo: &str,
+) -> Resultado<Option<crate::produto::Lote>> {
+    conexao
+        .query_row(
+            &format!("SELECT {COLUNAS_LOTE} FROM estoque_lote WHERE empresa = ?1 AND codigo = ?2"),
+            rusqlite::params![blob(empresa), codigo],
+            crate::repositorio::lote_de_linha,
+        )
+        .optional()
+        .map_err(persist)
+}
+
+/// A quantidade ainda disponível de um lote específico — a soma das entradas menos as saídas
+/// registradas com este `lote` em `estoque_movimento` (o log é a própria fonte da verdade;
+/// não há coluna de saldo redundante no lote).
+///
+/// # Errors
+/// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+pub fn saldo_do_lote(conexao: &Connection, lote: Id) -> Resultado<Quantidade> {
+    let saldo: i64 = conexao
+        .query_row(
+            "SELECT COALESCE(SUM(CASE WHEN tipo = 'Entrada' THEN quantidade ELSE -quantidade END), 0)
+             FROM estoque_movimento WHERE lote = ?1",
+            [blob(lote)],
+            |r| r.get(0),
+        )
+        .map_err(persist)?;
+    Ok(Quantidade::interna(saldo))
+}
+
+/// Os movimentos de um lote específico, mais recente primeiro.
+///
+/// # Errors
+/// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+pub fn movimentos_do_lote(conexao: &Connection, lote: Id) -> Resultado<Vec<Movimento>> {
+    let mut stmt = conexao
+        .prepare(
+            "SELECT id, empresa, produto, variacao, local, tipo, quantidade, custo_unitario,
+                    lote, origem_modulo, origem_id, lancamento, criado_em, criado_por
+             FROM estoque_movimento WHERE lote = ?1 ORDER BY criado_em DESC",
+        )
+        .map_err(persist)?;
+    let linhas = stmt
+        .query_map([blob(lote)], movimento_de_linha)
+        .map_err(persist)?;
+    linhas
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(persist)
+}
+
+/// Um resumo do aparelho de origem — o suficiente para a consulta de detalhe do lote
+/// responder "custo desse aparelho usado" sem expor a entidade inteira.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AparelhoOrigemResumo {
+    /// O aparelho de origem.
+    pub id: Id,
+    /// Descrição livre.
+    pub descricao: String,
+    /// Identificador livre (IMEI/serial), quando anotado.
+    pub identificador: Option<String>,
+    /// Quanto custou adquirir o aparelho inteiro.
+    pub custo_aquisicao: Dinheiro,
+    /// Quando foi adquirido.
+    pub adquirido_em: Data,
+}
+
+/// O detalhe completo de um lote/peça rastreável — a resposta a "digitando esse código, o
+/// técnico precisa achar": origem, custo, aparelho de origem (se houver) com o custo dele,
+/// localização física e o histórico de movimentações (entrada, e em qual OS/aparelho saiu,
+/// quando). `docs/modulos/estoque.md` §3.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DetalheLote {
+    /// O lote.
+    pub lote: Id,
+    /// O código digitado (o texto do post-it).
+    pub codigo: String,
+    /// O produto.
+    pub produto: Id,
+    /// O nome do produto.
+    pub produto_nome: String,
+    /// O local de estoque.
+    pub local: Id,
+    /// O nome do local.
+    pub local_nome: String,
+    /// A localização física (prateleira/gaveta) cadastrada no produto, quando houver.
+    pub localizacao_fisica: Option<String>,
+    /// De onde a peça veio.
+    pub origem: OrigemLote,
+    /// O fornecedor, quando `origem = Compra`.
+    pub fornecedor: Option<Id>,
+    /// O aparelho de origem (com o custo dele), quando `origem = AparelhoUsado`.
+    pub aparelho_origem: Option<AparelhoOrigemResumo>,
+    /// Data de fabricação, quando conhecida.
+    pub fabricacao: Option<Data>,
+    /// Data de validade, quando o produto controla validade.
+    pub validade: Option<Data>,
+    /// Quantidade da entrada original.
+    pub quantidade_inicial: Quantidade,
+    /// Quantidade ainda disponível deste lote especificamente.
+    pub quantidade_atual: Quantidade,
+    /// O custo unitário desta peça específica.
+    pub custo_unitario: Preco,
+    /// O estado atual.
+    pub estado: EstadoLote,
+    /// Quando o lote foi criado.
+    pub criado_em: Instante,
+    /// O histórico de movimentações deste lote — entrada, e em qual OS/venda/aparelho saiu,
+    /// quando (mais recente primeiro).
+    pub movimentos: Vec<Movimento>,
+}
+
+/// Busca o detalhe completo de um lote pelo código digitado.
+///
+/// # Errors
+/// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+pub fn detalhe_do_lote_por_codigo(
+    conexao: &Connection,
+    empresa: Id,
+    codigo: &str,
+) -> Resultado<Option<DetalheLote>> {
+    let Some(lote) = buscar_lote_por_codigo(conexao, empresa, codigo)? else {
+        return Ok(None);
+    };
+    let produto = produto_de_por_id(conexao, lote.produto)?;
+    let (produto_nome, localizacao_fisica) = produto.map_or_else(
+        || (String::new(), None),
+        |p| (p.nome, p.localizacao_fisica),
+    );
+    let local_nome = local_nome_de(conexao, lote.local)?;
+    let aparelho_origem = match lote.aparelho_origem {
+        Some(id) => buscar_aparelho_origem(conexao, id)?.map(|a| AparelhoOrigemResumo {
+            id: a.id,
+            descricao: a.descricao,
+            identificador: a.identificador,
+            custo_aquisicao: a.custo_aquisicao,
+            adquirido_em: a.adquirido_em,
+        }),
+        None => None,
+    };
+    let quantidade_atual = saldo_do_lote(conexao, lote.id)?;
+    let movimentos = movimentos_do_lote(conexao, lote.id)?;
+    Ok(Some(DetalheLote {
+        lote: lote.id,
+        codigo: lote.codigo,
+        produto: lote.produto,
+        produto_nome,
+        local: lote.local,
+        local_nome,
+        localizacao_fisica,
+        origem: lote.origem,
+        fornecedor: lote.fornecedor,
+        aparelho_origem,
+        fabricacao: lote.fabricacao,
+        validade: lote.validade,
+        quantidade_inicial: lote.quantidade_inicial,
+        quantidade_atual,
+        custo_unitario: lote.custo_unitario,
+        estado: lote.estado,
+        criado_em: lote.criado_em,
+        movimentos,
+    }))
+}
+
+fn produto_de_por_id(conexao: &Connection, id: Id) -> Resultado<Option<Produto>> {
+    conexao
+        .query_row(
+            "SELECT id, empresa, grupo_produto, nome, ncm, cest, codigo_barras, fabricante,
+                    codigo_fabricante, categoria_tecnica, especificacao_tecnica,
+                    compatibilidade, garantia_fornecedor_dias, localizacao_fisica,
+                    controla_grade, controla_lote, controla_validade, unidade_padrao,
+                    ponto_pedido, estoque_minimo, estoque_maximo, ativo, versao
+             FROM estoque_produto WHERE id = ?1",
+            [blob(id)],
+            produto_de_linha,
+        )
+        .optional()
+        .map_err(persist)
+}
+
+fn local_nome_de(conexao: &Connection, id: Id) -> Resultado<String> {
+    conexao
+        .query_row(
+            "SELECT nome FROM estoque_local WHERE id = ?1",
+            [blob(id)],
+            |r| r.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(persist)
+        .map(Option::unwrap_or_default)
+}
+
+/// Busca o detalhe completo de um lote/peça rastreável pelo código digitado (o post-it).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DetalheDoLotePorCodigo {
+    /// O código digitado.
+    pub codigo: String,
+}
+
+impl Consulta for DetalheDoLotePorCodigo {
+    type Saida = Option<DetalheLote>;
+    const PERMISSAO: &'static str = "estoque.lote.ver";
+
+    fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        detalhe_do_lote_por_codigo(conexao, ctx.empresa, &self.codigo)
+    }
+}
+
+/// Um lote/peça disponível de um produto — o suficiente para listar as opções ao aplicar uma
+/// peça sem o técnico precisar digitar o código (ele pode escolher da lista quando souber o
+/// produto, ou digitar o código direto quando só tem o post-it em mãos).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ItemLoteDisponivel {
+    /// O lote.
+    pub id: Id,
+    /// O código (post-it).
+    pub codigo: String,
+    /// O local onde está.
+    pub local: Id,
+    /// Quantidade ainda disponível.
+    pub quantidade_disponivel: Quantidade,
+    /// O custo unitário desta peça específica.
+    pub custo_unitario: Preco,
+    /// De onde veio.
+    pub origem: OrigemLote,
+}
+
+/// Lista os lotes de um produto que ainda têm saldo disponível e não estão esgotados.
+///
+/// # Errors
+/// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+pub fn lotes_disponiveis_do_produto(
+    conexao: &Connection,
+    produto: Id,
+) -> Resultado<Vec<ItemLoteDisponivel>> {
+    let mut stmt = conexao
+        .prepare(&format!(
+            "SELECT {COLUNAS_LOTE} FROM estoque_lote WHERE produto = ?1 AND estado != 'Esgotado' \
+             ORDER BY criado_em ASC"
+        ))
+        .map_err(persist)?;
+    let linhas = stmt
+        .query_map([blob(produto)], crate::repositorio::lote_de_linha)
+        .map_err(persist)?;
+    let lotes = linhas
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(persist)?;
+    let mut itens = Vec::with_capacity(lotes.len());
+    for lote in lotes {
+        let disponivel = saldo_do_lote(conexao, lote.id)?;
+        if disponivel.e_positiva() {
+            itens.push(ItemLoteDisponivel {
+                id: lote.id,
+                codigo: lote.codigo,
+                local: lote.local,
+                quantidade_disponivel: disponivel,
+                custo_unitario: lote.custo_unitario,
+                origem: lote.origem,
+            });
+        }
+    }
+    Ok(itens)
+}
+
+/// Lista os lotes disponíveis (com saldo) de um produto.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LotesDisponiveisDoProduto {
+    /// O produto.
+    pub produto: Id,
+}
+
+impl Consulta for LotesDisponiveisDoProduto {
+    type Saida = Vec<ItemLoteDisponivel>;
+    const PERMISSAO: &'static str = "estoque.lote.ver";
+
+    fn executar(self, _ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        lotes_disponiveis_do_produto(conexao, self.produto)
     }
 }

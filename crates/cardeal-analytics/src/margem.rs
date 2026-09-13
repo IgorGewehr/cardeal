@@ -234,7 +234,7 @@ mod testes {
             Quantidade::unidades(1),
             preco_unitario,
         );
-        item.aplicar(custo_unitario).unwrap();
+        item.aplicar(custo_unitario, Id::novo(), None).unwrap();
         item
     }
 

@@ -4,16 +4,18 @@
 #![allow(clippy::result_large_err)] // `ErroArmazenamento` carrega detalhes de propósito
 
 use cardeal_auth::{AutorizacoesEfetivas, EmissaoSessao, Escopo, Papel as PapelAuth, Sessao};
-use cardeal_kernel::{CodigoErro, Id, Instante, Preco, Quantidade};
+use cardeal_kernel::{CodigoErro, Data, Dinheiro, Id, Instante, Preco, Quantidade};
 use cardeal_ledger::semear_plano_padrao;
 use cardeal_modkit::{Ambiente, Despachante, Modulo, PedidoAtivacao, RegistroModulos};
 use cardeal_storage::{Armazenamento, ConfigArmazenamento, ContextoEscrita, ErroArmazenamento};
 use mod_estoque::{
-    AjustarSaldo, CriarGrupoProduto, CriarLocal, CriarProduto, CriarUnidade, DetalhesTecnicos,
-    EditarDetalhesTecnicosProduto, EntradaRegistrada, GrupoProdutoCriado, ItemProdutoComSaldo,
-    LocalCriado, ModuloEstoque, Produto, ProdutoCriado, ProdutoPorCodigoBarras, ProdutosComSaldo,
-    RegistrarEntrada, RegistrarSaida, SaidaRegistrada, SaldoAjustado, TipoLocal, UnidadeCriada,
-    MANIFESTO,
+    AjustarSaldo, AparelhoOrigemRegistrado, CriarGrupoProduto, CriarLocal, CriarProduto,
+    CriarUnidade, DetalheLote, DetalheDoLotePorCodigo, DetalhesTecnicos,
+    EditarDetalhesTecnicosProduto, EntradaComLoteRegistrada, EntradaRegistrada, GrupoProdutoCriado,
+    ItemLoteDisponivel, ItemProdutoComSaldo, LocalCriado, LotesDisponiveisDoProduto, ModuloEstoque,
+    OrigemLote, Produto, ProdutoCriado, ProdutoPorCodigoBarras, ProdutosComSaldo,
+    RegistrarAparelhoOrigem, RegistrarEntrada, RegistrarEntradaComLote, RegistrarSaida,
+    SaidaRegistrada, SaldoAjustado, TipoLocal, UnidadeCriada, MANIFESTO,
 };
 use tempfile::TempDir;
 
@@ -656,4 +658,253 @@ fn produto_com_detalhes_tecnicos_na_criacao_e_editado_depois() {
     .unwrap();
     assert_eq!(editado.localizacao_fisica.as_deref(), Some("Gaveta 7"));
     assert_eq!(editado.compatibilidade, None);
+}
+
+const PERMISSOES_LOTE: &[&str] = &[
+    "estoque.produto.criar",
+    "estoque.local.criar",
+    "estoque.movimento.entrada_com_lote",
+    "estoque.aparelho_origem.criar",
+    "estoque.lote.ver",
+];
+
+#[test]
+fn entrada_com_lote_de_aparelho_usado_e_encontrada_pelo_codigo() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloEstoque]).unwrap();
+    let s = sessao(empresa, PERMISSOES_LOTE);
+    let (produto, local, _unidade) = cadastro_basico(&d, &arm, empresa, &s);
+
+    // 1. Registra o aparelho usado desmontado — o custo de aquisição dele.
+    let aparelho: AparelhoOrigemRegistrado = postcard::from_bytes(
+        &d.executar_comando(
+            "estoque.registrar_aparelho_origem.v1",
+            &carga(&RegistrarAparelhoOrigem {
+                descricao: "iPhone 11 Pro - tela trincada, comprado para peças".to_string(),
+                identificador: Some("IMEI 123456789012345".to_string()),
+                custo_aquisicao: Dinheiro::reais(300),
+                adquirido_em: Data::de_dias(20_000),
+                fornecedor: None,
+                observacoes: None,
+            }),
+            &s,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    // 2. Retira a bateria dele e registra a entrada com o código do post-it.
+    let entrada: EntradaComLoteRegistrada = postcard::from_bytes(
+        &d.executar_comando(
+            "estoque.registrar_entrada_com_lote.v1",
+            &carga(&RegistrarEntradaComLote {
+                produto,
+                local,
+                quantidade: Quantidade::unidades(1),
+                custo_unitario: Preco::reais(60),
+                codigo_lote: "BAT-01".to_string(),
+                origem: OrigemLote::AparelhoUsado,
+                fornecedor: None,
+                aparelho_origem: Some(aparelho.aparelho_origem),
+                fabricacao: None,
+                validade: None,
+            }),
+            &s,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(entrada.custo_medio, Preco::reais(60));
+
+    // 3. O técnico digita o código do post-it e acha tudo: origem, custo, aparelho de
+    // origem com o custo dele, e o histórico (a própria entrada).
+    let detalhe: DetalheLote = postcard::from_bytes::<Option<DetalheLote>>(
+        &d.executar_consulta(
+            "estoque.detalhe_do_lote_por_codigo.v1",
+            &carga(&DetalheDoLotePorCodigo {
+                codigo: "BAT-01".to_string(),
+            }),
+            &s,
+            &ambiente(empresa),
+            arm.leitor(),
+        )
+        .unwrap(),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(detalhe.lote, entrada.lote);
+    assert_eq!(detalhe.produto, produto);
+    assert_eq!(detalhe.origem, OrigemLote::AparelhoUsado);
+    assert_eq!(detalhe.custo_unitario, Preco::reais(60));
+    assert_eq!(detalhe.quantidade_inicial, Quantidade::unidades(1));
+    assert_eq!(detalhe.quantidade_atual, Quantidade::unidades(1));
+    let ap = detalhe.aparelho_origem.unwrap();
+    assert_eq!(ap.id, aparelho.aparelho_origem);
+    assert_eq!(ap.custo_aquisicao, Dinheiro::reais(300));
+    assert_eq!(detalhe.movimentos.len(), 1);
+
+    // Código inexistente devolve `None`, não erro.
+    let nenhum: Option<DetalheLote> = postcard::from_bytes(
+        &d.executar_consulta(
+            "estoque.detalhe_do_lote_por_codigo.v1",
+            &carga(&DetalheDoLotePorCodigo {
+                codigo: "NAO-EXISTE".to_string(),
+            }),
+            &s,
+            &ambiente(empresa),
+            arm.leitor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(nenhum.is_none());
+}
+
+#[test]
+fn lote_de_aparelho_usado_sem_aparelho_origem_e_recusado() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloEstoque]).unwrap();
+    let s = sessao(empresa, PERMISSOES_LOTE);
+    let (produto, local, _unidade) = cadastro_basico(&d, &arm, empresa, &s);
+
+    let erro = d
+        .executar_comando(
+            "estoque.registrar_entrada_com_lote.v1",
+            &carga(&RegistrarEntradaComLote {
+                produto,
+                local,
+                quantidade: Quantidade::unidades(1),
+                custo_unitario: Preco::reais(60),
+                codigo_lote: "BAT-02".to_string(),
+                origem: OrigemLote::AparelhoUsado,
+                fornecedor: None,
+                aparelho_origem: None,
+                fabricacao: None,
+                validade: None,
+            }),
+            &s,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+        .unwrap_err();
+    assert_eq!(erro.codigo, CodigoErro::ENTRADA_INVALIDA);
+}
+
+#[test]
+fn codigo_de_lote_duplicado_na_empresa_e_recusado() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloEstoque]).unwrap();
+    let s = sessao(empresa, PERMISSOES_LOTE);
+    let (produto, local, _unidade) = cadastro_basico(&d, &arm, empresa, &s);
+
+    let novo_lote = || RegistrarEntradaComLote {
+        produto,
+        local,
+        quantidade: Quantidade::unidades(1),
+        custo_unitario: Preco::reais(60),
+        codigo_lote: "DUP-01".to_string(),
+        origem: OrigemLote::Compra,
+        fornecedor: None,
+        aparelho_origem: None,
+        fabricacao: None,
+        validade: None,
+    };
+    d.executar_comando(
+        "estoque.registrar_entrada_com_lote.v1",
+        &carga(&novo_lote()),
+        &s,
+        &ambiente(empresa),
+        arm.escritor(),
+    )
+    .unwrap();
+
+    // Mesmo código, mesma empresa — o UNIQUE(empresa, codigo) recusa o segundo.
+    let erro = d
+        .executar_comando(
+            "estoque.registrar_entrada_com_lote.v1",
+            &carga(&novo_lote()),
+            &s,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+        .unwrap_err();
+    assert_eq!(erro.codigo, CodigoErro::FALHA_INTERNA);
+}
+
+#[test]
+fn lotes_disponiveis_do_produto_esconde_esgotados() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloEstoque]).unwrap();
+    let mut permissoes = PERMISSOES_LOTE.to_vec();
+    permissoes.push("estoque.movimento.saida");
+    let s = sessao(empresa, &permissoes);
+    let (produto, local, _unidade) = cadastro_basico(&d, &arm, empresa, &s);
+
+    for codigo in ["TELA-01", "TELA-02"] {
+        d.executar_comando(
+            "estoque.registrar_entrada_com_lote.v1",
+            &carga(&RegistrarEntradaComLote {
+                produto,
+                local,
+                quantidade: Quantidade::unidades(1),
+                custo_unitario: Preco::reais(80),
+                codigo_lote: codigo.to_string(),
+                origem: OrigemLote::Compra,
+                fornecedor: None,
+                aparelho_origem: None,
+                fabricacao: None,
+                validade: None,
+            }),
+            &s,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+        .unwrap();
+    }
+
+    let disponiveis: Vec<ItemLoteDisponivel> = postcard::from_bytes(
+        &d.executar_consulta(
+            "estoque.lotes_disponiveis_do_produto.v1",
+            &carga(&LotesDisponiveisDoProduto { produto }),
+            &s,
+            &ambiente(empresa),
+            arm.leitor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(disponiveis.len(), 2);
+
+    // Vende uma saída comum (sem lote) que esvazia o saldo agregado — não afeta o saldo por
+    // lote (mecanismos independentes), então ainda aparecem os dois. O objetivo deste teste é
+    // só confirmar que a consulta lista os lotes com saldo; o consumo específico por lote é
+    // coberto pelos testes de `mod-os` (`AplicarPeca` com `lote`).
+    d.executar_comando(
+        "estoque.registrar_saida.v1",
+        &carga(&RegistrarSaida {
+            produto,
+            local,
+            quantidade: Quantidade::unidades(2),
+        }),
+        &s,
+        &ambiente(empresa),
+        arm.escritor(),
+    )
+    .unwrap();
+    let disponiveis: Vec<ItemLoteDisponivel> = postcard::from_bytes(
+        &d.executar_consulta(
+            "estoque.lotes_disponiveis_do_produto.v1",
+            &carga(&LotesDisponiveisDoProduto { produto }),
+            &s,
+            &ambiente(empresa),
+            arm.leitor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(disponiveis.len(), 2);
 }

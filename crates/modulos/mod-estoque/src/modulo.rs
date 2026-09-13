@@ -7,11 +7,13 @@ use cardeal_storage::ConjuntoMigracoes;
 
 use crate::comandos::{
     AjustarSaldo, CriarGrupoProduto, CriarLocal, CriarProduto, CriarUnidade, DefinirPontoPedido,
-    EditarDetalhesTecnicosProduto, RegistrarEntrada, RegistrarSaida,
+    EditarDetalhesTecnicosProduto, RegistrarAparelhoOrigem, RegistrarEntrada,
+    RegistrarEntradaComLote, RegistrarSaida,
 };
 use crate::consultas::{
-    GruposProduto, Locais, MovimentosDoProduto, ProdutoPorCodigoBarras, ProdutosAbaixoDoPontoPedido,
-    ProdutosComSaldo, SaldoDisponivelDoProduto, Unidades,
+    DetalheDoLotePorCodigo, GruposProduto, Locais, LotesDisponiveisDoProduto, MovimentosDoProduto,
+    ProdutoPorCodigoBarras, ProdutosAbaixoDoPontoPedido, ProdutosComSaldo, SaldoDisponivelDoProduto,
+    Unidades,
 };
 use crate::manifesto::MANIFESTO;
 use crate::migracoes;
@@ -37,8 +39,10 @@ impl Modulo for ModuloEstoque {
             .comando::<DefinirPontoPedido>("estoque.definir_ponto_pedido.v1")
             .comando::<CriarLocal>("estoque.criar_local.v1")
             .comando::<RegistrarEntrada>("estoque.registrar_entrada.v1")
+            .comando::<RegistrarEntradaComLote>("estoque.registrar_entrada_com_lote.v1")
             .comando::<RegistrarSaida>("estoque.registrar_saida.v1")
             .comando::<AjustarSaldo>("estoque.ajustar_saldo.v1")
+            .comando::<RegistrarAparelhoOrigem>("estoque.registrar_aparelho_origem.v1")
             .consulta::<ProdutosComSaldo>("estoque.produtos_com_saldo.v1")
             .consulta::<ProdutoPorCodigoBarras>("estoque.produto_por_codigo_barras.v1")
             .consulta::<SaldoDisponivelDoProduto>("estoque.saldo_disponivel_do_produto.v1")
@@ -46,7 +50,9 @@ impl Modulo for ModuloEstoque {
             .consulta::<MovimentosDoProduto>("estoque.movimentos_do_produto.v1")
             .consulta::<GruposProduto>("estoque.grupos_produto.v1")
             .consulta::<Unidades>("estoque.unidades.v1")
-            .consulta::<Locais>("estoque.locais.v1");
+            .consulta::<Locais>("estoque.locais.v1")
+            .consulta::<DetalheDoLotePorCodigo>("estoque.detalhe_do_lote_por_codigo.v1")
+            .consulta::<LotesDisponiveisDoProduto>("estoque.lotes_disponiveis_do_produto.v1");
         Ok(())
     }
 }

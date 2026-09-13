@@ -188,8 +188,8 @@ impl<'a, 'b> RepositorioOs<'a, 'b> {
             .execute(
                 "INSERT INTO os_item_peca
                    (id, ordem_servico, produto, quantidade, preco_unitario, custo_unitario,
-                    coberto_garantia, aplicada)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+                    coberto_garantia, aplicada, local, lote, estornada)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
                 params![
                     blob(item.id),
                     blob(item.ordem_servico),
@@ -199,24 +199,32 @@ impl<'a, 'b> RepositorioOs<'a, 'b> {
                     item.custo_unitario.unidades_internas(),
                     i64::from(item.coberto_garantia),
                     i64::from(item.aplicada),
+                    item.local.map(blob),
+                    item.lote.map(blob),
+                    i64::from(item.estornada),
                 ],
             )
             .map_err(persist)?;
         Ok(())
     }
 
-    /// Regrava um item de peça (depois de `AplicarPeca`).
+    /// Regrava um item de peça (depois de `AplicarPeca`/`CancelarOrdemServico`).
     ///
     /// # Errors
     /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
     pub fn atualizar_item_peca(&mut self, item: &ItemPeca) -> Resultado<()> {
         self.conn()
             .execute(
-                "UPDATE os_item_peca SET custo_unitario = ?2, aplicada = ?3 WHERE id = ?1",
+                "UPDATE os_item_peca
+                 SET custo_unitario = ?2, aplicada = ?3, local = ?4, lote = ?5, estornada = ?6
+                 WHERE id = ?1",
                 params![
                     blob(item.id),
                     item.custo_unitario.unidades_internas(),
                     i64::from(item.aplicada),
+                    item.local.map(blob),
+                    item.lote.map(blob),
+                    i64::from(item.estornada),
                 ],
             )
             .map_err(persist)?;
@@ -231,7 +239,7 @@ impl<'a, 'b> RepositorioOs<'a, 'b> {
         self.conn()
             .query_row(
                 "SELECT id, ordem_servico, produto, quantidade, preco_unitario, custo_unitario,
-                        coberto_garantia, aplicada
+                        coberto_garantia, aplicada, local, lote, estornada
                  FROM os_item_peca WHERE id = ?1",
                 [blob(id)],
                 item_peca_de_linha,
@@ -467,6 +475,9 @@ pub(crate) fn item_peca_de_linha(r: &rusqlite::Row<'_>) -> rusqlite::Result<Item
         custo_unitario: Preco::interna(r.get::<_, i64>(5)?),
         coberto_garantia: r.get::<_, i64>(6)? != 0,
         aplicada: r.get::<_, i64>(7)? != 0,
+        local: r.get::<_, Option<Vec<u8>>>(8)?.map(id_de),
+        lote: r.get::<_, Option<Vec<u8>>>(9)?.map(id_de),
+        estornada: r.get::<_, i64>(10)? != 0,
     })
 }
 

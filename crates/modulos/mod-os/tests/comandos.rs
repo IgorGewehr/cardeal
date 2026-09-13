@@ -15,16 +15,18 @@ use mod_clientes::{
     CriarPessoa, ModuloClientes, Papel, PessoaCadastrada, TipoDocumento, TipoPessoa,
 };
 use mod_estoque::{
-    CriarGrupoProduto, CriarLocal, CriarProduto, CriarUnidade, GrupoProdutoCriado, LocalCriado,
-    ModuloEstoque, ProdutoCriado, TipoLocal, UnidadeCriada,
+    AparelhoOrigemRegistrado, CriarGrupoProduto, CriarLocal, CriarProduto, CriarUnidade,
+    DetalheDoLotePorCodigo, DetalheLote, EntradaComLoteRegistrada, GrupoProdutoCriado,
+    LocalCriado, ModuloEstoque, OrigemLote, ProdutoCriado, RegistrarAparelhoOrigem,
+    RegistrarEntradaComLote, TipoLocal, UnidadeCriada,
 };
 use mod_os::{
     AbrirOrdemServico, AplicarPeca, AprovarOrcamentoOs, BuscarDetalheOrdem, CancelarOrdemServico,
     ConcluirExecucao, DetalheOrdem, EditarDadosDaOrdem, EnviarParaAprovacao, FaturarOrdemServico,
     HistoricoDoEquipamento, IniciarExecucao, ItemAguardandoEstoque, ItemOrcamentoNovo, ModuloOs,
-    MontarOrcamentoOs, OrdemServicoAberta, OrdemServicoFaturada, OrdensAguardandoAprovacao,
-    OrdensEmAberto, PecaFoiAplicada, PecasAguardandoEstoque, RegistrarLaudo, RemoverItemOrcamento,
-    TipoItemOrcamento,
+    MontarOrcamentoOs, OrdemServicoAberta, OrdemServicoCancelada, OrdemServicoFaturada,
+    OrdensAguardandoAprovacao, OrdensEmAberto, PecaFoiAplicada, PecasAguardandoEstoque,
+    RegistrarLaudo, RemoverItemOrcamento, TipoItemOrcamento,
 };
 use tempfile::TempDir;
 
@@ -84,6 +86,9 @@ fn sessao_completa(empresa: Id) -> Sessao {
         "estoque.produto.criar",
         "estoque.local.criar",
         "estoque.movimento.entrada",
+        "estoque.movimento.entrada_com_lote",
+        "estoque.aparelho_origem.criar",
+        "estoque.lote.ver",
         "os.ordem.criar",
         "os.ordem.editar_dados",
         "os.laudo.registrar",
@@ -359,6 +364,7 @@ fn ciclo_completo_de_os_abre_orca_aprova_executa_e_fatura() {
                 ordem_servico: os.ordem_servico,
                 item_peca,
                 local: local.local,
+                lote: None,
             }),
             &s,
             &amb,
@@ -691,6 +697,593 @@ fn cancelar_ordem_servico_antes_de_concluida_e_recusado_depois() {
     assert_eq!(erro.codigo, CodigoErro::ESTADO_INVALIDO);
 }
 
+/// Monta cliente + produto + local + saldo em estoque — o mesmo início de
+/// `ciclo_completo_de_os_abre_orca_aprova_executa_e_fatura`, fatorado para os testes de
+/// cancelamento/estorno e de rastreabilidade por lote.
+/// Cria um produto + local com saldo de verdade, com nomes/códigos sufixados por `sufixo`
+/// para poder chamar mais de uma vez na mesma empresa sem colidir em `UNIQUE`.
+fn produto_local_com_saldo(
+    d: &Despachante,
+    arm: &Armazenamento,
+    s: &Sessao,
+    amb: &Ambiente,
+    sufixo: &str,
+    quantidade: Quantidade,
+    custo_unitario: Preco,
+) -> (Id, Id) {
+    let grupo: GrupoProdutoCriado = postcard::from_bytes(
+        &d.executar_comando(
+            "estoque.criar_grupo_produto.v1",
+            &carga(&CriarGrupoProduto {
+                codigo: format!("PECAS-{sufixo}"),
+                nome: "Peças".to_string(),
+                pai: None,
+            }),
+            s,
+            amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let unidade: UnidadeCriada = postcard::from_bytes(
+        &d.executar_comando(
+            "estoque.criar_unidade.v1",
+            &carga(&CriarUnidade {
+                sigla: format!("UN-{sufixo}"),
+                nome: "Unidade".to_string(),
+                fracionavel: false,
+            }),
+            s,
+            amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let produto: ProdutoCriado = postcard::from_bytes(
+        &d.executar_comando(
+            "estoque.criar_produto.v1",
+            &carga(&CriarProduto {
+                grupo_produto: grupo.grupo_produto,
+                nome: format!("Tela original {sufixo}"),
+                ncm: "85076000".to_string(),
+                unidade_padrao: unidade.unidade,
+                codigo_barras: None,
+                detalhes_tecnicos: None,
+            }),
+            s,
+            amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let local: LocalCriado = postcard::from_bytes(
+        &d.executar_comando(
+            "estoque.criar_local.v1",
+            &carga(&CriarLocal {
+                nome: format!("Depósito {sufixo}"),
+                tipo: TipoLocal::Deposito,
+            }),
+            s,
+            amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    d.executar_comando(
+        "estoque.registrar_entrada.v1",
+        &carga(&mod_estoque::RegistrarEntrada {
+            produto: produto.produto,
+            local: local.local,
+            quantidade,
+            custo_unitario,
+        }),
+        s,
+        amb,
+        arm.escritor(),
+    )
+    .unwrap();
+
+    (produto.produto, local.local)
+}
+
+/// Como [`produto_local_com_saldo`], mas também cadastra um cliente — o começo comum dos
+/// testes de OS que precisam só de um produto/local.
+fn cliente_produto_local_com_saldo(
+    d: &Despachante,
+    arm: &Armazenamento,
+    s: &Sessao,
+    amb: &Ambiente,
+    quantidade: Quantidade,
+    custo_unitario: Preco,
+) -> (Id, Id, Id) {
+    let cliente: PessoaCadastrada = postcard::from_bytes(
+        &d.executar_comando(
+            "clientes.criar_pessoa.v1",
+            &carga(&CriarPessoa {
+                tipo: TipoPessoa::Fisica,
+                nome: "Cliente Teste".to_string(),
+                nome_fantasia: None,
+                papel_inicial: Papel::Cliente,
+                documento_tipo: Some(TipoDocumento::Cpf),
+                documento_numero: Some("52998224725".to_string()),
+                data_nascimento: None,
+                endereco: None,
+                contato: None,
+            }),
+            s,
+            amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    let (produto, local) =
+        produto_local_com_saldo(d, arm, s, amb, "A", quantidade, custo_unitario);
+    (cliente.pessoa, produto, local)
+}
+
+fn saldo_disponivel(arm: &Armazenamento, produto: Id) -> Quantidade {
+    let saida = arm
+        .leitor()
+        .consultar(|c| {
+            c.query_row(
+                "SELECT COALESCE(SUM(quantidade_disponivel), 0) FROM estoque_saldo_local \
+                 WHERE produto = ?1",
+                [produto.em_bytes().as_slice()],
+                |r| r.get::<_, i64>(0),
+            )
+            .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+        })
+        .unwrap();
+    Quantidade::interna(saida)
+}
+
+#[test]
+fn cancelar_ordem_em_execucao_estorna_peca_aplicada_ao_estoque() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloClientes, &ModuloEstoque, &ModuloOs]).unwrap();
+    let s = sessao_completa(empresa);
+    let amb = ambiente(empresa);
+
+    let (cliente, produto, local) =
+        cliente_produto_local_com_saldo(&d, &arm, &s, &amb, Quantidade::unidades(5), Preco::reais(90));
+    assert_eq!(saldo_disponivel(&arm, produto), Quantidade::unidades(5));
+
+    let os: OrdemServicoAberta = postcard::from_bytes(
+        &d.executar_comando(
+            "os.abrir_ordem_servico.v1",
+            &carga(&AbrirOrdemServico {
+                cliente,
+                equipamento: "Notebook".to_string(),
+                defeito_relatado: "Tela quebrada".to_string(),
+                tecnico_responsavel: Id::novo(),
+                garantia_dias: 90,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    let item_peca: Id = postcard::from_bytes(
+        &d.executar_comando(
+            "os.montar_orcamento.v1",
+            &carga(&MontarOrcamentoOs {
+                ordem_servico: os.ordem_servico,
+                item: ItemOrcamentoNovo::Peca {
+                    produto,
+                    quantidade: Quantidade::unidades(1),
+                    preco_unitario: Preco::reais(160),
+                },
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    d.executar_comando(
+        "os.enviar_para_aprovacao.v1",
+        &carga(&EnviarParaAprovacao {
+            ordem_servico: os.ordem_servico,
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+    d.executar_comando(
+        "os.aprovar_orcamento.v1",
+        &carga(&AprovarOrcamentoOs {
+            ordem_servico: os.ordem_servico,
+            identificacao_aprovador: "Cliente Teste - CPF 529.982.247-25".to_string(),
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+    d.executar_comando(
+        "os.iniciar_execucao.v1",
+        &carga(&IniciarExecucao {
+            ordem_servico: os.ordem_servico,
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+
+    d.executar_comando(
+        "os.aplicar_peca.v1",
+        &carga(&AplicarPeca {
+            ordem_servico: os.ordem_servico,
+            item_peca,
+            local,
+            lote: None,
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+    // A peça saiu do estoque: 5 - 1 = 4.
+    assert_eq!(saldo_disponivel(&arm, produto), Quantidade::unidades(4));
+
+    // Cliente cancela em plena execução (ex.: desistiu do conserto) — a peça já aplicada
+    // precisa voltar ao estoque (docs/modulos/os.md §11 regra 5).
+    let cancelada: OrdemServicoCancelada = postcard::from_bytes(
+        &d.executar_comando(
+            "os.cancelar_ordem_servico.v1",
+            &carga(&CancelarOrdemServico {
+                ordem_servico: os.ordem_servico,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(cancelada.pecas_estornadas, 1);
+    assert_eq!(cancelada.pecas_pendentes_de_estorno_manual, 0);
+
+    // O estoque voltou ao que era.
+    assert_eq!(saldo_disponivel(&arm, produto), Quantidade::unidades(5));
+
+    let detalhe: DetalheOrdem = postcard::from_bytes::<Option<DetalheOrdem>>(
+        &d.executar_consulta(
+            "os.buscar_detalhe_ordem.v1",
+            &carga(&BuscarDetalheOrdem {
+                ordem_servico: os.ordem_servico,
+            }),
+            &s,
+            &amb,
+            arm.leitor(),
+        )
+        .unwrap(),
+    )
+    .unwrap()
+    .unwrap();
+    assert!(detalhe.itens_peca[0].aplicada);
+    assert!(detalhe.itens_peca[0].estornada);
+
+    // Cancelar de novo não estorna outra vez (já é terminal — o comando é recusado antes de
+    // chegar a olhar peça nenhuma).
+    let erro = d
+        .executar_comando(
+            "os.cancelar_ordem_servico.v1",
+            &carga(&CancelarOrdemServico {
+                ordem_servico: os.ordem_servico,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap_err();
+    assert_eq!(erro.codigo, CodigoErro::ESTADO_INVALIDO);
+    assert_eq!(saldo_disponivel(&arm, produto), Quantidade::unidades(5));
+}
+
+#[test]
+fn aplicar_peca_com_lote_rastreia_ate_o_codigo_do_post_it() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloClientes, &ModuloEstoque, &ModuloOs]).unwrap();
+    let s = sessao_completa(empresa);
+    let amb = ambiente(empresa);
+
+    let (cliente, produto, local) =
+        cliente_produto_local_com_saldo(&d, &arm, &s, &amb, Quantidade::unidades(1), Preco::reais(60));
+
+    // Registra o aparelho usado e a peça retirada dele, com o código do post-it.
+    let aparelho: AparelhoOrigemRegistrado = postcard::from_bytes(
+        &d.executar_comando(
+            "estoque.registrar_aparelho_origem.v1",
+            &carga(&RegistrarAparelhoOrigem {
+                descricao: "iPhone 11 - tela quebrada".to_string(),
+                identificador: None,
+                custo_aquisicao: Dinheiro::reais(250),
+                adquirido_em: cardeal_kernel::Data::de_dias(20_000),
+                fornecedor: None,
+                observacoes: None,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let entrada_lote: EntradaComLoteRegistrada = postcard::from_bytes(
+        &d.executar_comando(
+            "estoque.registrar_entrada_com_lote.v1",
+            &carga(&RegistrarEntradaComLote {
+                produto,
+                local,
+                quantidade: Quantidade::unidades(1),
+                custo_unitario: Preco::reais(120),
+                codigo_lote: "TELA-77".to_string(),
+                origem: OrigemLote::AparelhoUsado,
+                fornecedor: None,
+                aparelho_origem: Some(aparelho.aparelho_origem),
+                fabricacao: None,
+                validade: None,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    let os: OrdemServicoAberta = postcard::from_bytes(
+        &d.executar_comando(
+            "os.abrir_ordem_servico.v1",
+            &carga(&AbrirOrdemServico {
+                cliente,
+                equipamento: "iPhone 11".to_string(),
+                defeito_relatado: "Tela trincada".to_string(),
+                tecnico_responsavel: Id::novo(),
+                garantia_dias: 90,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let item_peca: Id = postcard::from_bytes(
+        &d.executar_comando(
+            "os.montar_orcamento.v1",
+            &carga(&MontarOrcamentoOs {
+                ordem_servico: os.ordem_servico,
+                item: ItemOrcamentoNovo::Peca {
+                    produto,
+                    quantidade: Quantidade::unidades(1),
+                    preco_unitario: Preco::reais(300),
+                },
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    d.executar_comando(
+        "os.enviar_para_aprovacao.v1",
+        &carga(&EnviarParaAprovacao {
+            ordem_servico: os.ordem_servico,
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+    d.executar_comando(
+        "os.aprovar_orcamento.v1",
+        &carga(&AprovarOrcamentoOs {
+            ordem_servico: os.ordem_servico,
+            identificacao_aprovador: "Cliente Teste - CPF 529.982.247-25".to_string(),
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+    d.executar_comando(
+        "os.iniciar_execucao.v1",
+        &carga(&IniciarExecucao {
+            ordem_servico: os.ordem_servico,
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+
+    // O técnico digitou o código do post-it: aplica exatamente aquela peça física.
+    let aplicada: PecaFoiAplicada = postcard::from_bytes(
+        &d.executar_comando(
+            "os.aplicar_peca.v1",
+            &carga(&AplicarPeca {
+                ordem_servico: os.ordem_servico,
+                item_peca,
+                local,
+                lote: Some(entrada_lote.lote),
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    // O custo cobrado da OS é o custo médio do produto (90 = média entre 60 e 120 nesta
+    // fatia — a contabilidade continua por custo médio), não o custo específico do lote; o
+    // custo específico da peça (120) só aparece na consulta pelo código.
+    assert_eq!(aplicada.custo_unitario, Preco::reais(90));
+
+    // Digitando o código do post-it, o técnico acha a origem, o custo da peça específica, o
+    // aparelho de origem com o custo dele, e o histórico: entrou, e saiu nesta OS.
+    let detalhe: DetalheLote = postcard::from_bytes::<Option<DetalheLote>>(
+        &d.executar_consulta(
+            "estoque.detalhe_do_lote_por_codigo.v1",
+            &carga(&DetalheDoLotePorCodigo {
+                codigo: "TELA-77".to_string(),
+            }),
+            &s,
+            &amb,
+            arm.leitor(),
+        )
+        .unwrap(),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(detalhe.custo_unitario, Preco::reais(120));
+    assert_eq!(detalhe.quantidade_atual, Quantidade::ZERO);
+    assert_eq!(detalhe.aparelho_origem.unwrap().custo_aquisicao, Dinheiro::reais(250));
+    assert_eq!(detalhe.movimentos.len(), 2); // entrada + a saída desta OS
+    assert!(detalhe
+        .movimentos
+        .iter()
+        .any(|m| m.origem_modulo == "os" && m.origem_id == Some(os.ordem_servico)));
+}
+
+#[test]
+fn aplicar_peca_com_lote_de_outro_produto_e_recusado() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloClientes, &ModuloEstoque, &ModuloOs]).unwrap();
+    let s = sessao_completa(empresa);
+    let amb = ambiente(empresa);
+
+    let (cliente, produto_a, local) =
+        cliente_produto_local_com_saldo(&d, &arm, &s, &amb, Quantidade::unidades(1), Preco::reais(50));
+    // Um segundo produto, com seu próprio lote.
+    let (produto_b, local_b) =
+        produto_local_com_saldo(&d, &arm, &s, &amb, "B", Quantidade::unidades(1), Preco::reais(50));
+
+    let lote_de_b: EntradaComLoteRegistrada = postcard::from_bytes(
+        &d.executar_comando(
+            "estoque.registrar_entrada_com_lote.v1",
+            &carga(&RegistrarEntradaComLote {
+                produto: produto_b,
+                local: local_b,
+                quantidade: Quantidade::unidades(1),
+                custo_unitario: Preco::reais(70),
+                codigo_lote: "OUTRO-PRODUTO".to_string(),
+                origem: OrigemLote::Compra,
+                fornecedor: None,
+                aparelho_origem: None,
+                fabricacao: None,
+                validade: None,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    let os: OrdemServicoAberta = postcard::from_bytes(
+        &d.executar_comando(
+            "os.abrir_ordem_servico.v1",
+            &carga(&AbrirOrdemServico {
+                cliente,
+                equipamento: "Notebook".to_string(),
+                defeito_relatado: "Tela quebrada".to_string(),
+                tecnico_responsavel: Id::novo(),
+                garantia_dias: 90,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let item_peca: Id = postcard::from_bytes(
+        &d.executar_comando(
+            "os.montar_orcamento.v1",
+            &carga(&MontarOrcamentoOs {
+                ordem_servico: os.ordem_servico,
+                item: ItemOrcamentoNovo::Peca {
+                    produto: produto_a,
+                    quantidade: Quantidade::unidades(1),
+                    preco_unitario: Preco::reais(200),
+                },
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    d.executar_comando(
+        "os.enviar_para_aprovacao.v1",
+        &carga(&EnviarParaAprovacao {
+            ordem_servico: os.ordem_servico,
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+    d.executar_comando(
+        "os.aprovar_orcamento.v1",
+        &carga(&AprovarOrcamentoOs {
+            ordem_servico: os.ordem_servico,
+            identificacao_aprovador: "Cliente Teste - CPF 529.982.247-25".to_string(),
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+    d.executar_comando(
+        "os.iniciar_execucao.v1",
+        &carga(&IniciarExecucao {
+            ordem_servico: os.ordem_servico,
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+
+    // O item orçado é do produto A, mas o lote informado é da peça do produto B —
+    // `mod_estoque::registrar_saida_de_lote_comum` recusa.
+    let erro = d
+        .executar_comando(
+            "os.aplicar_peca.v1",
+            &carga(&AplicarPeca {
+                ordem_servico: os.ordem_servico,
+                item_peca,
+                local,
+                lote: Some(lote_de_b.lote),
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap_err();
+    assert_eq!(erro.codigo, CodigoErro::REGRA_VIOLADA);
+}
+
 #[test]
 fn os_de_garantia_com_peca_gratuita_fatura_sem_titulo_mas_com_lancamento_de_custo() {
     let (_dir, arm, empresa) = base();
@@ -872,6 +1465,7 @@ fn os_de_garantia_com_peca_gratuita_fatura_sem_titulo_mas_com_lancamento_de_cust
             ordem_servico: os.ordem_servico,
             item_peca,
             local: local.local,
+            lote: None,
         }),
         &s,
         &amb,

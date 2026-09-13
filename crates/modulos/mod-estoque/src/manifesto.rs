@@ -209,6 +209,18 @@ const PERMISSOES: &[Permissao] = &[
         Risco::Baixo,
         Some("lote"),
     ),
+    perm(
+        "estoque.aparelho_origem.criar",
+        "Registrar aparelho usado de origem (trade-in) para retirada de peças",
+        Risco::Baixo,
+        Some("lote"),
+    ),
+    perm(
+        "estoque.movimento.entrada_com_lote",
+        "Registrar entrada criando um lote/peça rastreável com código de post-it",
+        Risco::Baixo,
+        Some("lote"),
+    ),
     perm("estoque.abc.ver", "Ver curva ABC", Risco::Baixo, None),
     perm(
         "estoque.compra_sugerida.ver",

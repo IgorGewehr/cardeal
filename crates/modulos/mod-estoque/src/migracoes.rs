@@ -114,6 +114,50 @@ ALTER TABLE estoque_produto ADD COLUMN garantia_fornecedor_dias INTEGER;
 ALTER TABLE estoque_produto ADD COLUMN localizacao_fisica TEXT;
 ";
 
+// Migração v4 (2026-09-13): rastreabilidade individual de peça por código curto (post-it) —
+// pedido do dono da assistência técnica. `estoque_aparelho_origem` é o aparelho usado
+// desmontado de onde uma peça pode ter sido retirada, com o custo de aquisição dele;
+// `estoque_lote` finalmente implementa a tabela que já estava só no domínio (`Lote`, nunca
+// persistida) — agora com `codigo` (o texto do post-it, único por empresa, não só por
+// produto — o técnico digita sem saber de antemão o produto), `custo_unitario` próprio (a
+// peça específica pode ter custado diferente da média do produto) e o vínculo opcional com o
+// aparelho de origem. Aditiva: nenhuma tabela existente muda.
+const SQL_LOTE_E_APARELHO_ORIGEM: &str = r"
+CREATE TABLE estoque_aparelho_origem (
+    id                BLOB PRIMARY KEY,
+    empresa           BLOB    NOT NULL REFERENCES nucleo_empresa(id),
+    descricao         TEXT    NOT NULL,
+    identificador     TEXT,
+    custo_aquisicao   INTEGER NOT NULL,
+    adquirido_em      INTEGER NOT NULL,
+    fornecedor        BLOB,
+    observacoes       TEXT
+) STRICT;
+CREATE INDEX estoque_aparelho_origem_empresa ON estoque_aparelho_origem(empresa);
+
+CREATE TABLE estoque_lote (
+    id                  BLOB PRIMARY KEY,
+    empresa             BLOB    NOT NULL REFERENCES nucleo_empresa(id),
+    produto             BLOB    NOT NULL REFERENCES estoque_produto(id),
+    local               BLOB    NOT NULL REFERENCES estoque_local(id),
+    codigo              TEXT    NOT NULL,
+    origem              TEXT    NOT NULL CHECK (origem IN ('Compra','AparelhoUsado')),
+    fornecedor          BLOB,
+    aparelho_origem     BLOB REFERENCES estoque_aparelho_origem(id),
+    fabricacao          INTEGER,
+    validade            INTEGER,
+    quantidade_inicial  INTEGER NOT NULL,
+    custo_unitario      INTEGER NOT NULL,
+    estado              TEXT    NOT NULL CHECK (estado IN ('Ativo','Vencido','Esgotado')),
+    criado_em           INTEGER NOT NULL,
+    UNIQUE (empresa, codigo)
+) STRICT;
+CREATE INDEX estoque_lote_produto ON estoque_lote(produto);
+CREATE INDEX estoque_lote_aparelho_origem ON estoque_lote(aparelho_origem)
+    WHERE aparelho_origem IS NOT NULL;
+CREATE INDEX estoque_lote_validade ON estoque_lote(empresa, validade) WHERE estado = 'Ativo';
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -131,6 +175,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 3,
         nome: "estoque_produto_detalhes_tecnicos",
         sql: SQL_DETALHES_TECNICOS,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 4,
+        nome: "estoque_lote_e_aparelho_origem",
+        sql: SQL_LOTE_E_APARELHO_ORIGEM,
         tipo: TipoMigracao::Esquema,
     },
 ];

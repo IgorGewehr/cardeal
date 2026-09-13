@@ -6,11 +6,14 @@
 //! [`UnidadeDeTrabalho`](cardeal_storage::UnidadeDeTrabalho) do escritor único — mesmo
 //! padrão do `RepositorioFinanceiro`.
 
-use cardeal_kernel::{CodigoErro, Erro, Id, Instante, Preco, Quantidade, Resultado, Versao};
+use cardeal_kernel::{
+    CodigoErro, Data, Dinheiro, Erro, Id, Instante, Preco, Quantidade, Resultado, Versao,
+};
 use cardeal_storage::UnidadeDeTrabalho;
 use rusqlite::{params, Connection, OptionalExtension};
 
-use crate::produto::{Produto, Unidade};
+use crate::aparelho_origem::AparelhoOrigem;
+use crate::produto::{EstadoLote, Lote, OrigemLote, Produto, Unidade};
 use crate::saldo::{Movimento, SaldoLocal, TipoMovimento};
 
 #[allow(clippy::needless_pass_by_value)] // usado como `.map_err(persist)`
@@ -394,6 +397,189 @@ impl<'a, 'b> RepositorioEstoque<'a, 'b> {
             .map_err(persist)?;
         Ok(())
     }
+
+    /// Grava um aparelho de origem (trade-in) recém-cadastrado.
+    ///
+    /// # Errors
+    /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+    pub fn inserir_aparelho_origem(&mut self, a: &AparelhoOrigem) -> Resultado<()> {
+        self.conn()
+            .execute(
+                "INSERT INTO estoque_aparelho_origem
+                   (id, empresa, descricao, identificador, custo_aquisicao, adquirido_em,
+                    fornecedor, observacoes)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+                params![
+                    blob(a.id),
+                    blob(a.empresa),
+                    a.descricao,
+                    a.identificador,
+                    a.custo_aquisicao.em_centavos(),
+                    i64::from(a.adquirido_em.em_dias()),
+                    blob_opt(a.fornecedor),
+                    a.observacoes,
+                ],
+            )
+            .map_err(persist)?;
+        Ok(())
+    }
+
+    /// Busca um aparelho de origem pelo id. `Ok(None)` = não existe.
+    ///
+    /// # Errors
+    /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+    pub fn buscar_aparelho_origem(&self, id: Id) -> Resultado<Option<AparelhoOrigem>> {
+        crate::consultas::buscar_aparelho_origem(self.conn(), id)
+    }
+
+    /// Grava um lote/peça rastreável recém-criado (por uma entrada com código).
+    ///
+    /// # Errors
+    /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite (inclusive código duplicado na empresa).
+    pub fn inserir_lote(&mut self, l: &Lote) -> Resultado<()> {
+        self.conn()
+            .execute(
+                "INSERT INTO estoque_lote
+                   (id, empresa, produto, local, codigo, origem, fornecedor, aparelho_origem,
+                    fabricacao, validade, quantidade_inicial, custo_unitario, estado, criado_em)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+                params![
+                    blob(l.id),
+                    blob(l.empresa),
+                    blob(l.produto),
+                    blob(l.local),
+                    l.codigo,
+                    origem_lote_txt(l.origem),
+                    blob_opt(l.fornecedor),
+                    blob_opt(l.aparelho_origem),
+                    l.fabricacao.map(|d| i64::from(d.em_dias())),
+                    l.validade.map(|d| i64::from(d.em_dias())),
+                    l.quantidade_inicial.unidades_internas(),
+                    l.custo_unitario.unidades_internas(),
+                    estado_lote_txt(l.estado),
+                    l.criado_em.em_micros(),
+                ],
+            )
+            .map_err(persist)?;
+        Ok(())
+    }
+
+    /// Busca um lote pelo id. `Ok(None)` = não existe.
+    ///
+    /// # Errors
+    /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+    pub fn buscar_lote(&self, id: Id) -> Resultado<Option<Lote>> {
+        crate::consultas::buscar_lote(self.conn(), id)
+    }
+
+    /// Busca um lote pelo código digitado — o que sustenta a busca pelo post-it colado na
+    /// peça. Único por empresa (não só por produto): o técnico digita sem saber de antemão a
+    /// qual produto o código pertence.
+    ///
+    /// # Errors
+    /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+    pub fn buscar_lote_por_codigo(&self, empresa: Id, codigo: &str) -> Resultado<Option<Lote>> {
+        crate::consultas::buscar_lote_por_codigo(self.conn(), empresa, codigo)
+    }
+
+    /// A quantidade ainda disponível de um lote específico — a soma das entradas menos as
+    /// saídas registradas com este `lote` em `estoque_movimento` (o log é a própria fonte da
+    /// verdade; não há coluna de saldo redundante no lote).
+    ///
+    /// # Errors
+    /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+    pub fn saldo_do_lote(&self, lote: Id) -> Resultado<Quantidade> {
+        crate::consultas::saldo_do_lote(self.conn(), lote)
+    }
+
+    /// Regrava o estado de um lote (ex.: `Esgotado` depois de um consumo que zerou o saldo).
+    ///
+    /// # Errors
+    /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+    pub fn atualizar_estado_lote(&mut self, id: Id, estado: EstadoLote) -> Resultado<()> {
+        self.conn()
+            .execute(
+                "UPDATE estoque_lote SET estado = ?2 WHERE id = ?1",
+                params![blob(id), estado_lote_txt(estado)],
+            )
+            .map_err(persist)?;
+        Ok(())
+    }
+
+    /// Os movimentos de um lote específico, mais recente primeiro — o histórico técnico
+    /// completo da peça (entrada, e em qual OS/aparelho saiu, quando).
+    ///
+    /// # Errors
+    /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+    pub fn movimentos_do_lote(&self, lote: Id) -> Resultado<Vec<Movimento>> {
+        crate::consultas::movimentos_do_lote(self.conn(), lote)
+    }
+}
+
+pub(crate) fn origem_lote_txt(o: OrigemLote) -> &'static str {
+    match o {
+        OrigemLote::Compra => "Compra",
+        OrigemLote::AparelhoUsado => "AparelhoUsado",
+    }
+}
+
+fn origem_lote_de(s: &str) -> OrigemLote {
+    match s {
+        "AparelhoUsado" => OrigemLote::AparelhoUsado,
+        _ => OrigemLote::Compra,
+    }
+}
+
+pub(crate) fn estado_lote_txt(e: EstadoLote) -> &'static str {
+    match e {
+        EstadoLote::Ativo => "Ativo",
+        EstadoLote::Vencido => "Vencido",
+        EstadoLote::Esgotado => "Esgotado",
+    }
+}
+
+fn estado_lote_de(s: &str) -> EstadoLote {
+    match s {
+        "Vencido" => EstadoLote::Vencido,
+        "Esgotado" => EstadoLote::Esgotado,
+        _ => EstadoLote::Ativo,
+    }
+}
+
+pub(crate) fn aparelho_origem_de_linha(r: &rusqlite::Row<'_>) -> rusqlite::Result<AparelhoOrigem> {
+    Ok(AparelhoOrigem {
+        id: id_de(r.get::<_, Vec<u8>>(0)?),
+        empresa: id_de(r.get::<_, Vec<u8>>(1)?),
+        descricao: r.get(2)?,
+        identificador: r.get::<_, Option<String>>(3)?,
+        custo_aquisicao: Dinheiro::centavos(r.get::<_, i64>(4)?),
+        adquirido_em: Data::de_dias(i32::try_from(r.get::<_, i64>(5)?).unwrap_or(0)),
+        fornecedor: r.get::<_, Option<Vec<u8>>>(6)?.map(id_de),
+        observacoes: r.get::<_, Option<String>>(7)?,
+    })
+}
+
+pub(crate) fn lote_de_linha(r: &rusqlite::Row<'_>) -> rusqlite::Result<Lote> {
+    Ok(Lote {
+        id: id_de(r.get::<_, Vec<u8>>(0)?),
+        empresa: id_de(r.get::<_, Vec<u8>>(1)?),
+        produto: id_de(r.get::<_, Vec<u8>>(2)?),
+        local: id_de(r.get::<_, Vec<u8>>(3)?),
+        codigo: r.get(4)?,
+        origem: origem_lote_de(&r.get::<_, String>(5)?),
+        fornecedor: r.get::<_, Option<Vec<u8>>>(6)?.map(id_de),
+        aparelho_origem: r.get::<_, Option<Vec<u8>>>(7)?.map(id_de),
+        fabricacao: r
+            .get::<_, Option<i64>>(8)?
+            .map(|d| Data::de_dias(i32::try_from(d).unwrap_or(0))),
+        validade: r
+            .get::<_, Option<i64>>(9)?
+            .map(|d| Data::de_dias(i32::try_from(d).unwrap_or(0))),
+        quantidade_inicial: Quantidade::interna(r.get::<_, i64>(10)?),
+        custo_unitario: Preco::interna(r.get::<_, i64>(11)?),
+        estado: estado_lote_de(&r.get::<_, String>(12)?),
+        criado_em: Instante::de_micros(r.get::<_, i64>(13)?),
+    })
 }
 
 pub(crate) fn produto_de_linha(r: &rusqlite::Row<'_>) -> rusqlite::Result<Produto> {

@@ -3,7 +3,7 @@
 //! `docs/modulos/estoque.md` §3, §4 e §11.7. Domínio puro — validação de NCM e de GTIN
 //! (dígito verificador mod-10) sem I/O.
 
-use cardeal_kernel::{texto, Data, Id, Quantidade, Versao};
+use cardeal_kernel::{texto, Data, Id, Instante, Preco, Quantidade, Versao};
 use serde::{Deserialize, Serialize};
 
 use crate::erros::ErroEstoque;
@@ -312,7 +312,23 @@ pub enum EstadoLote {
     Esgotado,
 }
 
-/// Um lote de um produto rastreado.
+/// De onde veio um [`Lote`] — a resposta que o técnico precisa ao ler o código do post-it:
+/// peça comprada nova, ou peça retirada de um aparelho usado desmontado (trade-in).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum OrigemLote {
+    /// Comprada nova de um fornecedor (`Lote::fornecedor`, quando informado).
+    Compra,
+    /// Retirada de um [`crate::aparelho_origem::AparelhoOrigem`] desmontado
+    /// (`Lote::aparelho_origem`, sempre presente neste caso).
+    AparelhoUsado,
+}
+
+/// Um lote/unidade rastreável de um produto — a peça de bancada com o código curto e
+/// digitável que vai no post-it colado nela (`docs/modulos/estoque.md` §3/§11.7, e o pedido
+/// do dono da assistência técnica: "digitando esse código, o técnico precisa achar a origem,
+/// o custo, o aparelho usado de origem e o histórico"). Também serve o caso genérico de lote
+/// de validade (produto com `controla_validade`) — `codigo` faz o papel do antigo
+/// "número do lote".
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Lote {
     /// Identidade.
@@ -321,21 +337,84 @@ pub struct Lote {
     pub empresa: Id,
     /// O produto.
     pub produto: Id,
-    /// Número do lote.
-    pub numero_lote: String,
+    /// O local de estoque onde este lote está fisicamente.
+    pub local: Id,
+    /// Código curto e digitável à mão — o que vai no post-it colado na peça. Único por
+    /// empresa (nunca só dentro do produto: o técnico digita o código sem saber de antemão a
+    /// qual produto ele pertence).
+    pub codigo: String,
+    /// De onde veio.
+    pub origem: OrigemLote,
+    /// Fornecedor de origem, quando `origem = Compra`.
+    pub fornecedor: Option<Id>,
+    /// O aparelho usado do qual esta peça foi retirada, quando `origem = AparelhoUsado`.
+    pub aparelho_origem: Option<Id>,
     /// Data de fabricação.
     pub fabricacao: Option<Data>,
     /// Data de validade (obrigatória se `produto.controla_validade`).
     pub validade: Option<Data>,
-    /// Fornecedor de origem.
-    pub fornecedor: Option<Id>,
     /// Quantidade da entrada que criou o lote.
     pub quantidade_inicial: Quantidade,
+    /// O custo unitário desta remessa/peça especificamente — pode divergir do custo médio
+    /// móvel do produto (`SaldoLocal::custo_medio`), que é uma média entre lotes. É o que
+    /// responde "quanto essa peça específica custou" na consulta pelo código.
+    pub custo_unitario: Preco,
     /// O estado atual.
     pub estado: EstadoLote,
+    /// Quando o lote foi criado (a entrada que o originou).
+    pub criado_em: Instante,
 }
 
 impl Lote {
+    /// Cria um lote novo, validando o código e a coerência da origem.
+    ///
+    /// # Errors
+    /// [`ErroEstoque::CodigoLoteVazio`] se `codigo` vier vazio; [`ErroEstoque::CustoUnitarioAusente`]
+    /// se `custo_unitario` não for positivo; [`ErroEstoque::AparelhoOrigemAusente`] se
+    /// `origem = AparelhoUsado` sem `aparelho_origem`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn novo(
+        empresa: Id,
+        produto: Id,
+        local: Id,
+        codigo: impl Into<String>,
+        origem: OrigemLote,
+        fornecedor: Option<Id>,
+        aparelho_origem: Option<Id>,
+        fabricacao: Option<Data>,
+        validade: Option<Data>,
+        quantidade_inicial: Quantidade,
+        custo_unitario: Preco,
+        agora: Instante,
+    ) -> Result<Self, ErroEstoque> {
+        let codigo = codigo.into().trim().to_string();
+        if codigo.is_empty() {
+            return Err(ErroEstoque::CodigoLoteVazio);
+        }
+        if custo_unitario.unidades_internas() <= 0 {
+            return Err(ErroEstoque::CustoUnitarioAusente);
+        }
+        if matches!(origem, OrigemLote::AparelhoUsado) && aparelho_origem.is_none() {
+            return Err(ErroEstoque::AparelhoOrigemAusente);
+        }
+        Ok(Self {
+            id: Id::novo(),
+            empresa,
+            produto,
+            local,
+            codigo,
+            origem,
+            fornecedor,
+            aparelho_origem,
+            fabricacao,
+            validade,
+            quantidade_inicial,
+            custo_unitario,
+            estado: EstadoLote::Ativo,
+            criado_em: agora,
+        })
+    }
+
     /// Reavalia o estado do lote conforme o saldo e a data (verificação diária).
     pub fn reavaliar(&mut self, saldo: Quantidade, hoje: Data) {
         self.estado = if saldo.unidades_internas() <= 0 {
@@ -450,21 +529,29 @@ mod testes {
         assert_eq!(c.aplicar(Quantidade::unidades(3)), Quantidade::unidades(36));
     }
 
+    fn lote_de_compra(validade: Option<Data>) -> Lote {
+        Lote::novo(
+            Id::novo(),
+            Id::novo(),
+            Id::novo(),
+            "2408A",
+            OrigemLote::Compra,
+            Some(Id::novo()),
+            None,
+            None,
+            validade,
+            Quantidade::unidades(100),
+            Preco::reais(50),
+            Instante::agora(),
+        )
+        .unwrap()
+    }
+
     #[test]
     fn lote_reavalia_estado() {
         use cardeal_kernel::Fuso;
         let hoje = Data::hoje(Fuso::BRASILIA);
-        let mut lote = Lote {
-            id: Id::novo(),
-            empresa: Id::novo(),
-            produto: Id::novo(),
-            numero_lote: "2408A".into(),
-            fabricacao: None,
-            validade: Some(hoje.mais_dias(-1)),
-            fornecedor: None,
-            quantidade_inicial: Quantidade::unidades(100),
-            estado: EstadoLote::Ativo,
-        };
+        let mut lote = lote_de_compra(Some(hoje.mais_dias(-1)));
         lote.reavaliar(Quantidade::unidades(10), hoje);
         assert_eq!(lote.estado, EstadoLote::Vencido);
         lote.reavaliar(Quantidade::ZERO, hoje);
@@ -472,5 +559,88 @@ mod testes {
         lote.validade = Some(hoje.mais_dias(30));
         lote.reavaliar(Quantidade::unidades(5), hoje);
         assert_eq!(lote.estado, EstadoLote::Ativo);
+    }
+
+    #[test]
+    fn lote_codigo_vazio_e_recusado() {
+        assert_eq!(
+            Lote::novo(
+                Id::novo(),
+                Id::novo(),
+                Id::novo(),
+                "   ",
+                OrigemLote::Compra,
+                None,
+                None,
+                None,
+                None,
+                Quantidade::unidades(1),
+                Preco::reais(10),
+                Instante::agora(),
+            )
+            .unwrap_err(),
+            ErroEstoque::CodigoLoteVazio
+        );
+    }
+
+    #[test]
+    fn lote_sem_custo_e_recusado() {
+        assert_eq!(
+            Lote::novo(
+                Id::novo(),
+                Id::novo(),
+                Id::novo(),
+                "ABC1",
+                OrigemLote::Compra,
+                None,
+                None,
+                None,
+                None,
+                Quantidade::unidades(1),
+                Preco::ZERO,
+                Instante::agora(),
+            )
+            .unwrap_err(),
+            ErroEstoque::CustoUnitarioAusente
+        );
+    }
+
+    #[test]
+    fn lote_de_aparelho_usado_exige_aparelho_origem() {
+        assert_eq!(
+            Lote::novo(
+                Id::novo(),
+                Id::novo(),
+                Id::novo(),
+                "ABC1",
+                OrigemLote::AparelhoUsado,
+                None,
+                None,
+                None,
+                None,
+                Quantidade::unidades(1),
+                Preco::reais(10),
+                Instante::agora(),
+            )
+            .unwrap_err(),
+            ErroEstoque::AparelhoOrigemAusente
+        );
+
+        let lote = Lote::novo(
+            Id::novo(),
+            Id::novo(),
+            Id::novo(),
+            "ABC1",
+            OrigemLote::AparelhoUsado,
+            None,
+            Some(Id::novo()),
+            None,
+            None,
+            Quantidade::unidades(1),
+            Preco::reais(10),
+            Instante::agora(),
+        )
+        .unwrap();
+        assert!(lote.aparelho_origem.is_some());
     }
 }
