@@ -1,24 +1,37 @@
 //! Tela de Compras — notas de entrada + dialog (nova / ver / confirmar / vincular).
 //! `docs/modulos/compras.md`.
 //!
-//! Fluxo: lançar nota manual (fornecedor + itens digitados) → a cascata de casamento roda no
-//! comando → itens não casados ganham um seletor de produto (`VincularProdutoManual`) →
-//! quando `Conferida`, confirmar a entrada (baixa no estoque + título a pagar).
+//! Fluxo: lançar nota manual (fornecedor + itens digitados) **ou** importar um XML já em mãos
+//! (`rfd::FileDialog`, leitura local — ver [`importar_xml`]) → a cascata de casamento roda no
+//! comando → itens não casados ganham busca de produto (`SeletorBusca`); sugestão forte ganha
+//! aceite em um clique → quando `Conferida`, confirmar a entrada (baixa no estoque + título a
+//! pagar, opcionalmente já baixado quando a compra foi paga na hora).
+//!
+//! Revisão de 2026-09-13 (mesma rodada de modernização de estoque/clientes/OS/financeiro):
+//! busca + ordenação por coluna na lista, `Etiqueta` colorida por estado (nota e casamento de
+//! item), diálogo de conferência decoupled do índice da lista (guarda a nota aberta por valor,
+//! não por posição — evita apontar pra nota errada se a grade for reordenada com o diálogo
+//! aberto, mesmo padrão que `tela_os.rs` já usa para `Dlg::Detalhe`).
 
 use std::collections::HashMap;
 
 use cardeal_cliente::{MotorLocal, SessaoLocal};
 use cardeal_kernel::{Dinheiro, Id};
 use cardeal_modkit::Icone;
-use cardeal_ui::atoms::{Botao, Rotulo, ValorDinheiro};
-use cardeal_ui::molecules::{Campo, EstadoVazio, Mascara, SeletorOpcao};
-use cardeal_ui::organisms::{notificar, ColunaGrade, Dialogo, Grade, LayoutTela, Notificacao};
-use cardeal_ui::tokens::{Espaco, TemaUi};
+use cardeal_ui::atoms::{Botao, Etiqueta, Rotulo, Tom, ValorDinheiro};
+use cardeal_ui::molecules::{
+    Campo, EstadoVazio, Mascara, OpcaoBusca, SecaoExpansivel, SeletorBusca, SeletorOpcao,
+};
+use cardeal_ui::organisms::{
+    notificar, ColunaGrade, Dialogo, Direcao, Grade, LayoutTela, Notificacao,
+};
+use cardeal_ui::tokens::{Espaco, Raio, TemaUi};
 use eframe::egui;
 use mod_clientes::{Papel, PessoasPorPapel};
 use mod_compras::{
-    ConfirmarEntrada, EstadoCasamento, EstadoNotaEntrada, ItemNota, ItemNotaEntrada,
-    ItemNotaManual, ItensDaNota, LancarNotaManual, NotasRecentes, VincularProdutoManual,
+    ConfirmarEntrada, EstadoCasamento, EstadoNotaEntrada, ImportarNotaDeArquivoXml, ItemNota,
+    ItemNotaEntrada, ItemNotaManual, ItensDaNota, LancarNotaManual, NotasRecentes,
+    VincularProdutoManual,
 };
 use mod_estoque::{ItemLocal, ItemProdutoComSaldo, Locais, ProdutosComSaldo};
 
@@ -26,7 +39,7 @@ use mod_estoque::{ItemLocal, ItemProdutoComSaldo, Locais, ProdutosComSaldo};
 enum Dlg {
     #[default]
     Fechado,
-    Ver(usize),
+    Ver,
     Nova,
 }
 
@@ -50,6 +63,16 @@ struct FormNova {
     itens: Vec<LinhaItem>,
 }
 
+/// Um `FormNova` pronto pra digitar: data de hoje, frete zerado, uma linha de item em branco.
+fn form_nova_padrao() -> FormNova {
+    FormNova {
+        data: cardeal_kernel::Data::hoje(cardeal_kernel::Fuso::BRASILIA).to_string(),
+        frete: "0,00".to_owned(),
+        itens: vec![LinhaItem::default()],
+        ..FormNova::default()
+    }
+}
+
 /// Estado local da tela.
 #[derive(Default)]
 pub struct EstadoTelaCompras {
@@ -58,8 +81,19 @@ pub struct EstadoTelaCompras {
     produtos: Vec<ItemProdutoComSaldo>,
     locais: Vec<ItemLocal>,
     itens_nota: Vec<ItemNotaEntrada>,
+    /// A nota aberta no diálogo `Ver`, guardada por valor — não pelo índice em `notas`, que
+    /// pode mudar de posição a qualquer quadro se o usuário ordenar a grade com o diálogo
+    /// aberto (mesma decisão de `tela_os.rs::EstadoTelaOs::detalhe`).
+    nota_aberta: Option<ItemNota>,
     local_sel: Option<Id>,
-    vinc_produto: HashMap<Id, Option<Id>>, // item_nota -> produto escolhido
+    /// Produto escolhido no `SeletorBusca` de cada item ainda não casado, por `item_nota`.
+    vinc_produto: HashMap<Id, Option<Id>>,
+    /// Texto digitado no `SeletorBusca` de cada item, por `item_nota`.
+    busca_produto: HashMap<Id, String>,
+    /// "Já foi pago" no diálogo de confirmar entrada — item 2 do briefing.
+    pago_no_ato: bool,
+    busca: String,
+    ordenacao: Option<(usize, Direcao)>,
     nova: FormNova,
     erro: Option<String>,
     dlg: Dlg,
@@ -74,6 +108,11 @@ impl EstadoTelaCompras {
                 self.erro = None;
             }
             Err(e) => self.erro = Some(e.mensagem),
+        }
+        // A nota aberta no diálogo (se algum) precisa refletir o estado recém-recarregado —
+        // senão "Confirmar entrada" mostraria o estado antigo até o usuário fechar e reabrir.
+        if let Some(atual) = &self.nota_aberta {
+            self.nota_aberta = self.notas.iter().find(|n| n.nota == atual.nota).cloned();
         }
         if let Ok(f) = motor.consultar(
             sessao,
@@ -93,18 +132,18 @@ impl EstadoTelaCompras {
         }
     }
 
-    fn abrir_nota(&mut self, motor: &MotorLocal, sessao: &SessaoLocal, i: usize) {
-        let Some(n) = self.notas.get(i) else { return };
-        let id = n.nota;
+    fn abrir_nota(&mut self, motor: &MotorLocal, sessao: &SessaoLocal, nota: Id) {
+        let Some(item) = self.notas.iter().find(|n| n.nota == nota).cloned() else {
+            return;
+        };
         self.itens_nota = motor
-            .consultar(
-                sessao,
-                "compras.itens_da_nota.v1",
-                &ItensDaNota { nota: id },
-            )
+            .consultar(sessao, "compras.itens_da_nota.v1", &ItensDaNota { nota })
             .unwrap_or_default();
         self.vinc_produto.clear();
-        self.dlg = Dlg::Ver(i);
+        self.busca_produto.clear();
+        self.pago_no_ato = false;
+        self.nota_aberta = Some(item);
+        self.dlg = Dlg::Ver;
     }
 
     fn recarregar_itens(&mut self, motor: &MotorLocal, sessao: &SessaoLocal, nota: Id) {
@@ -133,16 +172,14 @@ pub fn mostrar(
         estado,
         |ui, estado| {
             if ui
-                .add(Botao::primario("+ Nova nota").atalho("Ctrl+N"))
+                .add(Botao::primario("+ Nota manual").atalho("Ctrl+N"))
                 .clicked()
             {
-                estado.nova = FormNova {
-                    data: cardeal_kernel::Data::hoje(cardeal_kernel::Fuso::BRASILIA).to_string(),
-                    frete: "0,00".to_owned(),
-                    itens: vec![LinhaItem::default()],
-                    ..FormNova::default()
-                };
+                estado.nova = form_nova_padrao();
                 estado.dlg = Dlg::Nova;
+            }
+            if ui.add(Botao::secundario("Importar XML")).clicked() {
+                importar_xml(ui.ctx(), motor, sessao, estado);
             }
         },
         |ui, estado| {
@@ -160,8 +197,56 @@ pub fn mostrar(
 
     match estado.dlg {
         Dlg::Fechado => {}
-        Dlg::Ver(i) => dialogo_ver(ui.ctx(), motor, sessao, estado, i),
+        Dlg::Ver => dialogo_ver(ui.ctx(), motor, sessao, estado),
         Dlg::Nova => dialogo_nova(ui.ctx(), motor, sessao, estado),
+    }
+}
+
+/// Abre o seletor de arquivo do sistema, lê o `.xml` escolhido e importa a nota via
+/// `compras.importar_nota_de_arquivo_xml.v1` (`mod_compras::ImportarNotaDeArquivoXml`) — a
+/// leitura do arquivo em si é responsabilidade desta tela; o comando só recebe o texto já em
+/// UTF-8 e roda a mesma cascata de casamento/rateio que a nota manual usa. Idempotente por
+/// chave de acesso: reimportar o mesmo arquivo não duplica, só reabre a nota existente.
+fn importar_xml(
+    ctx: &egui::Context,
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaCompras,
+) {
+    let Some(caminho) = rfd::FileDialog::new()
+        .add_filter("XML de nota fiscal", &["xml"])
+        .pick_file()
+    else {
+        return;
+    };
+    let xml = match std::fs::read_to_string(&caminho) {
+        Ok(c) => c,
+        Err(e) => {
+            notificar(ctx, Notificacao::erro(format!("Não foi possível ler o arquivo: {e}")));
+            return;
+        }
+    };
+    if xml.trim().is_empty() {
+        notificar(ctx, Notificacao::aviso("O arquivo escolhido está vazio."));
+        return;
+    }
+
+    match motor.executar(
+        sessao,
+        "compras.importar_nota_de_arquivo_xml.v1",
+        &ImportarNotaDeArquivoXml { xml },
+    ) {
+        Ok(relatorio) => {
+            estado.carregar(motor, sessao);
+            estado.abrir_nota(motor, sessao, relatorio.nota_entrada);
+            let msg = if relatorio.itens_nao_casados == 0 {
+                "Nota importada — todos os itens já casaram."
+            } else {
+                "Nota importada — confira o casamento dos itens."
+            };
+            notificar(ctx, Notificacao::sucesso(msg));
+        }
+        Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
     }
 }
 
@@ -177,51 +262,127 @@ fn lista(
                 .acao("Lançar a primeira")
                 .mostrar(ui)
         {
-            estado.nova = FormNova {
-                data: cardeal_kernel::Data::hoje(cardeal_kernel::Fuso::BRASILIA).to_string(),
-                frete: "0,00".to_owned(),
-                itens: vec![LinhaItem::default()],
-                ..FormNova::default()
-            };
+            estado.nova = form_nova_padrao();
             estado.dlg = Dlg::Nova;
         }
         return;
     }
+
+    ui.horizontal(|ui| {
+        ui.set_max_width(360.0);
+        ui.add(Campo::novo("", &mut estado.busca).marcador("Buscar por fornecedor ou número"));
+    });
+    ui.add_space(Espaco::E12);
+
+    let termo = estado.busca.trim().to_lowercase();
+    let indices: Vec<usize> = (0..estado.notas.len())
+        .filter(|&i| {
+            if termo.is_empty() {
+                return true;
+            }
+            let n = &estado.notas[i];
+            estado.nome(n.fornecedor).to_lowercase().contains(&termo)
+                || n.numero.to_lowercase().contains(&termo)
+                || n.serie.to_lowercase().contains(&termo)
+        })
+        .collect();
+    if indices.is_empty() {
+        ui.add(Rotulo::interface("Nenhuma nota para essa busca.").cor(ui.cores().texto_medio));
+        return;
+    }
+
     let colunas = vec![
         ColunaGrade::nova("Fornecedor"),
         ColunaGrade::nova("Nº / série").largura(120.0),
         ColunaGrade::nova("Emissão").largura(120.0),
         ColunaGrade::nova("Itens").largura(70.0).numero(),
         ColunaGrade::nova("Total").largura(130.0).numero(),
-        ColunaGrade::nova("Estado").largura(110.0),
+        ColunaGrade::nova("Estado").largura(140.0),
     ];
-    let resposta =
-        Grade::nova(colunas)
-            .selecionavel(None)
-            .mostrar(ui, estado.notas.len(), |i, row| {
-                let n = &estado.notas[i];
-                row.col(|ui| {
-                    ui.add(Rotulo::interface(estado.nome(n.fornecedor)));
-                });
-                row.col(|ui| {
-                    ui.add(Rotulo::interface(format!("{} / {}", n.numero, n.serie)));
-                });
-                row.col(|ui| {
-                    ui.add(Rotulo::interface(n.data_emissao.to_string()));
-                });
-                row.col(|ui| {
-                    ui.add(Rotulo::interface(n.itens.to_string()));
-                });
-                row.col(|ui| {
-                    ui.add(ValorDinheiro::novo(n.valor_total));
-                });
-                row.col(|ui| {
-                    ui.add(Rotulo::campo(n.estado.rotulo()));
-                });
+    let resposta = Grade::nova(colunas)
+        .selecionavel(None)
+        .ordenacao(estado.ordenacao)
+        .mostrar(ui, indices.len(), |i, row| {
+            let n = &estado.notas[indices[i]];
+            row.col(|ui| {
+                ui.add(Rotulo::interface(estado.nome(n.fornecedor)));
             });
-    if let Some(i) = resposta.linha_clicada {
-        estado.abrir_nota(motor, sessao, i);
+            row.col(|ui| {
+                ui.add(Rotulo::interface(format!("{} / {}", n.numero, n.serie)));
+            });
+            row.col(|ui| {
+                ui.add(Rotulo::interface(n.data_emissao.to_string()));
+            });
+            row.col(|ui| {
+                ui.add(Rotulo::interface(n.itens.to_string()));
+            });
+            row.col(|ui| {
+                ui.add(ValorDinheiro::novo(n.valor_total));
+            });
+            row.col(|ui| {
+                let (rotulo, tom) = estado_nota_etiqueta(n.estado);
+                ui.add(Etiqueta::nova(rotulo, tom));
+            });
+        });
+
+    if let Some(coluna) = resposta.coluna_clicada {
+        let direcao = match estado.ordenacao {
+            Some((atual, direcao)) if atual == coluna => direcao.invertida(),
+            _ => Direcao::Ascendente,
+        };
+        estado.ordenacao = Some((coluna, direcao));
+        ordenar_notas(&mut estado.notas, &estado.fornecedores, coluna, direcao);
     }
+    if let Some(i) = resposta.linha_clicada {
+        let id = estado.notas[indices[i]].nota;
+        estado.abrir_nota(motor, sessao, id);
+    }
+}
+
+/// Rótulo em português + tom da etiqueta de estado da nota, para a `Grade` e o diálogo.
+const fn estado_nota_etiqueta(e: EstadoNotaEntrada) -> (&'static str, Tom) {
+    match e {
+        EstadoNotaEntrada::AConferir => ("A conferir", Tom::Atencao),
+        EstadoNotaEntrada::Conferida => ("Conferida", Tom::Info),
+        EstadoNotaEntrada::Confirmada => ("Confirmada", Tom::Positivo),
+        EstadoNotaEntrada::Devolvida => ("Devolvida", Tom::Negativo),
+    }
+}
+
+/// Rótulo em português + tom da etiqueta de casamento de um item, para o diálogo de
+/// conferência.
+const fn estado_casamento_etiqueta(e: EstadoCasamento) -> (&'static str, Tom) {
+    match e {
+        EstadoCasamento::Casado => ("Casado", Tom::Positivo),
+        EstadoCasamento::SugestaoForte => ("Sugestão", Tom::Atencao),
+        EstadoCasamento::NaoCasado => ("Não casado", Tom::Negativo),
+    }
+}
+
+/// Ordena `notas` pela coluna clicada no cabeçalho da [`Grade`] (Fornecedor, Nº/série,
+/// Emissão, Itens, Total, Estado).
+fn ordenar_notas(
+    notas: &mut [ItemNota],
+    fornecedores: &HashMap<Id, String>,
+    coluna: usize,
+    direcao: Direcao,
+) {
+    let nome = |f: Id| fornecedores.get(&f).map_or("—", String::as_str);
+    notas.sort_by(|a, b| {
+        let ordem = match coluna {
+            0 => nome(a.fornecedor).cmp(nome(b.fornecedor)),
+            1 => (a.numero.as_str(), a.serie.as_str()).cmp(&(b.numero.as_str(), b.serie.as_str())),
+            2 => a.data_emissao.cmp(&b.data_emissao),
+            3 => a.itens.cmp(&b.itens),
+            4 => a.valor_total.cmp(&b.valor_total),
+            5 => estado_nota_etiqueta(a.estado).0.cmp(estado_nota_etiqueta(b.estado).0),
+            _ => std::cmp::Ordering::Equal,
+        };
+        match direcao {
+            Direcao::Ascendente => ordem,
+            Direcao::Descendente => ordem.reverse(),
+        }
+    });
 }
 
 fn dialogo_nova(
@@ -331,6 +492,9 @@ fn lancar(
             codigo_fornecedor: it.codigo.clone(),
             descricao: it.descricao.clone(),
             ncm: it.ncm.clone(),
+            // Sem campo de GTIN na nota digitada à mão ainda — a cascata de casamento cai
+            // pra regra aprendida/NCM (comportamento de antes deste campo existir).
+            codigo_barras: None,
             quantidade,
             valor_unitario,
         });
@@ -369,18 +533,12 @@ fn dialogo_ver(
     motor: &MotorLocal,
     sessao: &SessaoLocal,
     estado: &mut EstadoTelaCompras,
-    i: usize,
 ) {
-    let Some(n) = estado.notas.get(i).cloned() else {
+    let Some(n) = estado.nota_aberta.clone() else {
         estado.dlg = Dlg::Fechado;
         return;
     };
     let nome = estado.nome(n.fornecedor);
-    let ops_prod: Vec<(Id, String)> = estado
-        .produtos
-        .iter()
-        .map(|p| (p.produto, p.nome.clone()))
-        .collect();
     let ops_local: Vec<(Id, String)> = estado
         .locais
         .iter()
@@ -388,7 +546,7 @@ fn dialogo_ver(
         .collect();
 
     let fechar = Dialogo::nova(format!("Nota {} · {nome}", n.numero))
-        .largura(720.0)
+        .largura(760.0)
         .mostrar(
             ctx,
             estado,
@@ -399,43 +557,32 @@ fn dialogo_ver(
                 });
                 ui.columns(2, |c| {
                     kv(&mut c[0], "Total", &n.valor_total.formatar_com_simbolo());
-                    kv(&mut c[1], "Estado", n.estado.rotulo());
+                    kv(&mut c[1], "Estado", estado_nota_etiqueta(n.estado).0);
                 });
 
                 ui.add_space(Espaco::E12);
                 ui.add(Rotulo::titulo_secao("Itens e casamento"));
                 ui.add_space(Espaco::E4);
-                let mut vincular: Option<Id> = None;
+
+                let nomes_produto: HashMap<Id, String> = estado
+                    .produtos
+                    .iter()
+                    .map(|p| (p.produto, p.nome.clone()))
+                    .collect();
+                let mut vincular: Option<(Id, Id)> = None;
                 for it in estado.itens_nota.clone() {
-                    ui.horizontal(|ui| {
-                        ui.add(Rotulo::interface(format!(
-                            "{} × {}",
-                            it.quantidade, it.descricao_fornecedor
-                        )));
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.add(Rotulo::campo(match it.estado_casamento {
-                                EstadoCasamento::Casado => "casado",
-                                EstadoCasamento::SugestaoForte => "sugestão",
-                                EstadoCasamento::NaoCasado => "não casado",
-                            }));
-                        });
-                    });
-                    if !matches!(it.estado_casamento, EstadoCasamento::Casado) {
-                        ui.horizontal(|ui| {
-                            let sel = estado.vinc_produto.entry(it.id).or_default();
-                            SeletorOpcao::novo("", sel)
-                                .opcoes(ops_prod.clone())
-                                .placeholder("casar com produto…")
-                                .mostrar(ui);
-                            if ui.add(Botao::fantasma("vincular")).clicked() {
-                                vincular = Some(it.id);
-                            }
-                        });
+                    let opcoes = opcoes_busca_produtos(&estado.produtos);
+                    let busca = estado.busca_produto.entry(it.id).or_default();
+                    let sel = estado.vinc_produto.entry(it.id).or_default();
+                    if let Some(produto) =
+                        linha_item_casamento(ui, &it, &nomes_produto, opcoes, busca, sel)
+                    {
+                        vincular = Some((it.id, produto));
                     }
-                    ui.add_space(Espaco::E4);
+                    ui.add_space(Espaco::E8);
                 }
-                if let Some(item_nota) = vincular {
-                    vincular_item(ui.ctx(), motor, sessao, estado, n.nota, item_nota);
+                if let Some((item_nota, produto)) = vincular {
+                    vincular_item(ui.ctx(), motor, sessao, estado, n.nota, item_nota, produto);
                 }
 
                 if matches!(n.estado, EstadoNotaEntrada::Conferida) {
@@ -447,6 +594,19 @@ fn dialogo_ver(
                     SeletorOpcao::novo("Local que recebe", &mut estado.local_sel)
                         .opcoes(ops_local.clone())
                         .mostrar(ui);
+                    ui.add_space(Espaco::E8);
+                    // Sem atom de checkbox no design system ainda — o checkbox cru do egui já
+                    // herda a paleta do tema via `instalar_estilo` (`tokens/estilo.rs`).
+                    ui.checkbox(
+                        &mut estado.pago_no_ato,
+                        "Nota já foi paga — baixar o título a pagar automaticamente",
+                    );
+                    if estado.pago_no_ato {
+                        ui.add(
+                            Rotulo::campo("O título nasce quitado em vez de pendente.")
+                                .cor(ui.cores().positivo),
+                        );
+                    }
                     ui.add_space(Espaco::E8);
                     if ui.add(Botao::primario("Confirmar entrada")).clicked() {
                         confirmar(ui.ctx(), motor, sessao, estado, n.nota);
@@ -464,6 +624,115 @@ fn dialogo_ver(
     }
 }
 
+/// As opções de produto para um `SeletorBusca` — reconstruída a cada item porque
+/// `OpcaoBusca` não é `Clone` (o vetor é consumido por `.opcoes()`).
+fn opcoes_busca_produtos(produtos: &[ItemProdutoComSaldo]) -> Vec<OpcaoBusca<Id>> {
+    produtos
+        .iter()
+        .map(|p| OpcaoBusca::nova(p.produto, p.nome.clone()))
+        .collect()
+}
+
+/// Uma linha de item no diálogo de conferência/casamento — item 4 do briefing: item não
+/// casado precisa de destaque claro e ação óbvia (`SeletorBusca`, não um combo cru); sugestão
+/// forte (`EstadoCasamento::SugestaoForte`, casamento ≥ `LIMIAR_SUGESTAO_FORTE` = 82%) precisa
+/// de um jeito rápido de aceitar com um clique.
+///
+/// Devolve o produto a vincular quando alguma ação (aceitar sugestão, ou escolher e vincular)
+/// disparou neste quadro.
+fn linha_item_casamento(
+    ui: &mut egui::Ui,
+    item: &ItemNotaEntrada,
+    nomes_produto: &HashMap<Id, String>,
+    opcoes: Vec<OpcaoBusca<Id>>,
+    busca: &mut String,
+    selecionado: &mut Option<Id>,
+) -> Option<Id> {
+    let cores = ui.cores();
+    let mut vincular = None;
+    let (fundo, borda) = match item.estado_casamento {
+        EstadoCasamento::NaoCasado => (cores.negativo_suave, cores.negativo),
+        EstadoCasamento::SugestaoForte => (cores.atencao_suave, cores.atencao),
+        EstadoCasamento::Casado => (cores.superficie, cores.borda),
+    };
+
+    egui::Frame::none()
+        .fill(fundo)
+        .stroke(egui::Stroke::new(1.0_f32, borda))
+        .rounding(Raio::CARTAO)
+        .inner_margin(Espaco::E12)
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width().max(0.0));
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.add(Rotulo::interface(format!(
+                        "{} × {}",
+                        item.quantidade, item.descricao_fornecedor
+                    )));
+                    if let (EstadoCasamento::SugestaoForte, Some(produto)) =
+                        (item.estado_casamento, item.produto_casado)
+                    {
+                        let nome = nomes_produto
+                            .get(&produto)
+                            .map_or("produto do estoque", String::as_str);
+                        ui.add(Rotulo::campo(format!("Sugestão: {nome}")));
+                    }
+                });
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let (rotulo, tom) = estado_casamento_etiqueta(item.estado_casamento);
+                    ui.add(Etiqueta::nova(rotulo, tom));
+                });
+            });
+
+            match item.estado_casamento {
+                EstadoCasamento::Casado => {}
+                EstadoCasamento::SugestaoForte => {
+                    ui.add_space(Espaco::E8);
+                    if ui
+                        .add(Botao::primario("Aceitar sugestão").pequeno())
+                        .clicked()
+                    {
+                        vincular = item.produto_casado;
+                    }
+                    ui.add_space(Espaco::E4);
+                    SecaoExpansivel::nova("Prefere outro produto?").mostrar(ui, |ui| {
+                        SeletorBusca::novo("Produto", busca, selecionado)
+                            .opcoes(opcoes)
+                            .marcador("Buscar produto por nome…")
+                            .mostrar(ui);
+                        if selecionado.is_some()
+                            && ui
+                                .add(Botao::secundario("Vincular este").pequeno())
+                                .clicked()
+                        {
+                            vincular = *selecionado;
+                        }
+                    });
+                }
+                EstadoCasamento::NaoCasado => {
+                    ui.add_space(Espaco::E8);
+                    ui.add(
+                        Rotulo::campo("Sem produto vinculado — busque abaixo.")
+                            .cor(cores.negativo),
+                    );
+                    ui.add_space(Espaco::E4);
+                    SeletorBusca::novo("Produto", busca, selecionado)
+                        .opcoes(opcoes)
+                        .marcador("Buscar produto por nome…")
+                        .mostrar(ui);
+                    if selecionado.is_some() {
+                        ui.add_space(Espaco::E4);
+                        if ui.add(Botao::primario("Vincular").pequeno()).clicked() {
+                            vincular = *selecionado;
+                        }
+                    }
+                }
+            }
+        });
+
+    vincular
+}
+
 fn vincular_item(
     ctx: &egui::Context,
     motor: &MotorLocal,
@@ -471,17 +740,16 @@ fn vincular_item(
     estado: &mut EstadoTelaCompras,
     nota: Id,
     item_nota: Id,
+    produto: Id,
 ) {
-    let Some(Some(produto)) = estado.vinc_produto.get(&item_nota).copied() else {
-        notificar(ctx, Notificacao::aviso("Escolha o produto para vincular."));
-        return;
-    };
     match motor.executar(
         sessao,
         "compras.vincular_produto_manual.v1",
         &VincularProdutoManual { item_nota, produto },
     ) {
         Ok(_) => {
+            estado.vinc_produto.remove(&item_nota);
+            estado.busca_produto.remove(&item_nota);
             estado.recarregar_itens(motor, sessao, nota);
             estado.carregar(motor, sessao);
             notificar(ctx, Notificacao::sucesso("Produto vinculado"));
@@ -511,12 +779,18 @@ fn confirmar(
             nota_entrada: nota,
             local,
             gerar_titulo_a_pagar: None,
+            pago_no_ato: Some(estado.pago_no_ato),
         },
     ) {
-        Ok(_) => {
+        Ok(saida) => {
             estado.dlg = Dlg::Fechado;
             estado.carregar(motor, sessao);
-            notificar(ctx, Notificacao::sucesso("Entrada confirmada"));
+            let msg = if saida.pago {
+                "Entrada confirmada — título já baixado (pago no ato)"
+            } else {
+                "Entrada confirmada"
+            };
+            notificar(ctx, Notificacao::sucesso(msg));
         }
         Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
     }
