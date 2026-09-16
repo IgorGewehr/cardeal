@@ -45,7 +45,9 @@ impl Comando for EditarOrcamento {
 
     fn executar(self, _ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         let mut orcamento = carregar_orcamento(uow, self.orcamento)?;
-        let validade = orcamento.data_emissao.mais_dias(i32::from(self.validade_dias));
+        let validade = orcamento
+            .data_emissao
+            .mais_dias(i32::from(self.validade_dias));
 
         orcamento
             .editar_cabecalho(Cabecalho {

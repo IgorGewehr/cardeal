@@ -9,10 +9,10 @@ use cardeal_modkit::{Ambiente, Despachante, Modulo, PedidoAtivacao, RegistroModu
 use cardeal_storage::{Armazenamento, ConfigArmazenamento, ContextoEscrita, ErroArmazenamento};
 use mod_clientes::{
     AdicionarContato, AdicionarEndereco, AdicionarPapel, ContatoFoiAdicionado, CriarPessoa,
-    DefinirLimiteCredito, DetalhePessoa, EditarPessoa, EnderecoFoiAdicionado, ItemPessoa,
-    LimiteCreditoDefinido, ModuloClientes, Papel, PapelFoiAdicionado, PessoaCadastrada,
-    PessoaDetalhada, PessoaEditada, PessoasPorPapel, TipoContato, TipoDocumento, TipoEndereco,
-    TipoPessoa, MANIFESTO,
+    DefinirLimiteCredito, DesativarPessoa, DetalhePessoa, EditarPessoa, EnderecoFoiAdicionado,
+    ItemPessoa, LimiteCreditoDefinido, ModuloClientes, Papel, PapelFoiAdicionado, PessoaCadastrada,
+    PessoaDesativada, PessoaDetalhada, PessoaEditada, PessoaReativada, PessoasPorPapel,
+    ReativarPessoa, TipoContato, TipoDocumento, TipoEndereco, TipoPessoa, MANIFESTO,
 };
 use tempfile::TempDir;
 
@@ -237,6 +237,82 @@ fn editar_pessoa_atualiza_o_nome() {
         .unwrap();
     let editada: PessoaEditada = postcard::from_bytes(&saida).unwrap();
     assert_eq!(editada.pessoa, pessoa);
+}
+
+#[test]
+fn desativar_pessoa_some_da_busca_padrao_e_reativar_devolve() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloClientes]).unwrap();
+    let s = sessao(
+        empresa,
+        &[
+            "clientes.pessoa.criar",
+            "clientes.pessoa.editar",
+            "clientes.pessoa.ver",
+        ],
+    );
+    let pessoa = criar_pessoa(&d, &arm, empresa, &s);
+
+    let saida = d
+        .executar_comando(
+            "clientes.desativar_pessoa.v1",
+            &carga(&DesativarPessoa { pessoa }),
+            &s,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+        .unwrap();
+    let desativada: PessoaDesativada = postcard::from_bytes(&saida).unwrap();
+    assert_eq!(desativada.pessoa, pessoa);
+
+    let saida = d
+        .executar_consulta(
+            "clientes.pessoas_por_papel.v1",
+            &carga(&PessoasPorPapel {
+                papel: Papel::Cliente,
+                busca: None,
+            }),
+            &s,
+            &ambiente(empresa),
+            arm.leitor(),
+        )
+        .unwrap();
+    let itens: Vec<ItemPessoa> = postcard::from_bytes(&saida).unwrap();
+    assert!(
+        itens.is_empty(),
+        "pessoa desativada não deveria aparecer na busca padrão"
+    );
+
+    let saida = d
+        .executar_comando(
+            "clientes.reativar_pessoa.v1",
+            &carga(&ReativarPessoa { pessoa }),
+            &s,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+        .unwrap();
+    let reativada: PessoaReativada = postcard::from_bytes(&saida).unwrap();
+    assert_eq!(reativada.pessoa, pessoa);
+
+    let saida = d
+        .executar_consulta(
+            "clientes.pessoas_por_papel.v1",
+            &carga(&PessoasPorPapel {
+                papel: Papel::Cliente,
+                busca: None,
+            }),
+            &s,
+            &ambiente(empresa),
+            arm.leitor(),
+        )
+        .unwrap();
+    let itens: Vec<ItemPessoa> = postcard::from_bytes(&saida).unwrap();
+    assert_eq!(
+        itens.len(),
+        1,
+        "pessoa reativada devia voltar pra busca padrão"
+    );
 }
 
 #[test]

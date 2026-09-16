@@ -85,7 +85,7 @@ impl Dialogo {
                         ui.set_width((largura - Espaco::E24 * 2.0).max(1.0));
 
                         ui.horizontal(|ui| {
-                            ui.add(Rotulo::titulo_secao(self.titulo.clone()));
+                            ui.add(Rotulo::titulo_secao(self.titulo.clone()).cor(cores.rubro));
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {

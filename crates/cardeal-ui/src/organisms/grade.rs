@@ -314,8 +314,7 @@ impl Grade {
                             // quando a grade não é `selecionavel`, e o cabeçalho precisa
                             // clicar mesmo assim.
                             cabecalho.col(|ui| {
-                                if cabecalho_coluna(ui, &cores, coluna, indice, ordenacao)
-                                    .clicked()
+                                if cabecalho_coluna(ui, &cores, coluna, indice, ordenacao).clicked()
                                 {
                                     coluna_clicada = Some(indice);
                                 }

@@ -55,6 +55,10 @@ fn base() -> (TempDir, Armazenamento, Id) {
 fn ambiente(empresa: Id) -> Ambiente {
     let mut rm = RegistroModulos::novo();
     rm.registrar(&mod_clientes::MANIFESTO).unwrap();
+    // `os` declara financeiro/estoque como dependência dura do manifesto — precisam estar
+    // registrados aqui para o fecho transitivo de `resolver` funcionar.
+    rm.registrar(&mod_estoque::MANIFESTO).unwrap();
+    rm.registrar(&mod_financeiro::MANIFESTO).unwrap();
     rm.registrar(&mod_os::MANIFESTO).unwrap();
     rm.registrar(&mod_orcamentos::MANIFESTO).unwrap();
     let efetivo = rm
@@ -182,7 +186,9 @@ fn ciclo_completo_cria_envia_aprova_e_converte_em_os() {
     // Envia.
     d.executar_comando(
         "orcamentos.enviar_orcamento.v1",
-        &carga(&EnviarOrcamento { orcamento: criado.orcamento }),
+        &carga(&EnviarOrcamento {
+            orcamento: criado.orcamento,
+        }),
         &s,
         &amb,
         arm.escritor(),
@@ -213,7 +219,9 @@ fn ciclo_completo_cria_envia_aprova_e_converte_em_os() {
     let detalhe: DetalheOrcamento = postcard::from_bytes::<Option<DetalheOrcamento>>(
         &d.executar_consulta(
             "orcamentos.buscar_orcamento.v1",
-            &carga(&BuscarOrcamento { orcamento: criado.orcamento }),
+            &carga(&BuscarOrcamento {
+                orcamento: criado.orcamento,
+            }),
             &s,
             &amb,
             arm.leitor(),
@@ -290,7 +298,9 @@ fn ciclo_completo_cria_envia_aprova_e_converte_em_os() {
     let detalhe: DetalheOrcamento = postcard::from_bytes::<Option<DetalheOrcamento>>(
         &d.executar_consulta(
             "orcamentos.buscar_orcamento.v1",
-            &carga(&BuscarOrcamento { orcamento: criado.orcamento }),
+            &carga(&BuscarOrcamento {
+                orcamento: criado.orcamento,
+            }),
             &s,
             &amb,
             arm.leitor(),
@@ -344,7 +354,9 @@ fn resumo_conta_abertos_e_conversao() {
     for o in [&a, &b] {
         d.executar_comando(
             "orcamentos.enviar_orcamento.v1",
-            &carga(&EnviarOrcamento { orcamento: o.orcamento }),
+            &carga(&EnviarOrcamento {
+                orcamento: o.orcamento,
+            }),
             &s,
             &amb,
             arm.escritor(),

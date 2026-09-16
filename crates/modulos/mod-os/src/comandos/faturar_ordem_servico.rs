@@ -9,13 +9,15 @@
 //! nível do financeiro (`ConstrutorTitulo`, `RepositorioFinanceiro::inserir_titulo`) para
 //! gravar o título vinculado a esse mesmo lançamento — nunca cria um segundo.
 
-use cardeal_kernel::{Dinheiro, Erro, Id, Resultado};
+use cardeal_kernel::{Data, Dinheiro, Erro, Id, Resultado};
 use cardeal_ledger::{
     Contas, Contraparte as ContraparteRazao, PapelConta, Razao, RepositorioRazao,
 };
 use cardeal_modkit::{Comando, Ctx, Risco};
 use cardeal_storage::UnidadeDeTrabalho;
-use mod_financeiro::{ConstrutorTitulo, EspecieTitulo, RepositorioFinanceiro};
+use mod_financeiro::{
+    baixar_recebimento_comum, ConstrutorTitulo, EspecieTitulo, MeioPagamento, RepositorioFinanceiro,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::comandos::{autoria_de, carregar_ordem};
@@ -24,11 +26,36 @@ use crate::execucao::ItemPeca;
 use crate::receituario::{faturar_ordem_servico, ContasFaturamento};
 use crate::repositorio::RepositorioOs;
 
+/// Se/como a OS já foi paga no ato de faturar — o caso comum no balcão: cliente paga na
+/// retirada, fatura e recebe são o mesmo clique. `None` em `FaturarOrdemServico::pago_no_ato`
+/// = só gera o título a receber, sem baixar (paga depois, pela tela de Financeiro).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct PagamentoNoAto {
+    /// Dinheiro, Pix ou cartão — decide Caixa vs. Bancos (`MeioPagamento::papel`).
+    pub meio_pagamento: MeioPagamento,
+    /// Uma conta bancária específica, por fora do padrão de `meio_pagamento` (quando a
+    /// empresa tem mais de uma). `None` = usa o padrão do meio de pagamento.
+    pub conta_destino: Option<Id>,
+}
+
 /// Fatura a ordem de serviço.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct FaturarOrdemServico {
     /// A ordem de serviço.
     pub ordem_servico: Id,
+    /// Em quantas parcelas dividir o título a receber gerado (1 = à vista). Ignorado quando
+    /// `valor_total` é zero (cortesia/garantia) — nenhum título nasce nesse caso.
+    pub parcelas: u16,
+    /// Vencimento da primeira parcela.
+    pub primeiro_vencimento: Data,
+    /// Dias entre parcelas consecutivas — ignorado quando `parcelas == 1`.
+    pub intervalo_dias: i32,
+    /// Quando `Some`, a baixa é dada na mesma transação, pelo valor cheio da OS — pedido
+    /// explícito do usuário (2026-09-15): "ao faturar ele pede o método de pagamento". Força
+    /// 1 parcela à vista — `parcelas`/`primeiro_vencimento`/`intervalo_dias` são ignorados
+    /// nesse caso (pago agora e parcelado são conceitos incompatíveis). Ignorado (sem baixa)
+    /// quando `valor_total` é zero — nada para baixar.
+    pub pago_no_ato: Option<PagamentoNoAto>,
 }
 
 /// O que o comando devolve.
@@ -41,6 +68,9 @@ pub struct OrdemServicoFaturada {
     pub titulo: Option<Id>,
     /// O total faturado.
     pub valor_total: Dinheiro,
+    /// Verdadeiro se `titulo` já nasceu com baixa completa (`pago_no_ato`). Irrelevante
+    /// (`false`) quando `titulo` é `None`.
+    pub titulo_pago: bool,
 }
 
 impl Comando for FaturarOrdemServico {
@@ -99,25 +129,58 @@ impl Comando for FaturarOrdemServico {
 
         // 4. Persistir: título a receber vinculado a ESTE lançamento, só se houve cobrança
         // (uma OS de garantia/cortesia sem cobrança não gera título nenhum).
-        let titulo = if os.valor_total.e_positivo() {
+        let (titulo, titulo_pago) = if os.valor_total.e_positivo() {
             let lancamento_id = lancamento.expect("valor_total positivo sempre gera um lançamento");
+            // Pago no ato e parcelado são conceitos incompatíveis (recebido tudo agora não
+            // parcela) — quando `pago_no_ato` está presente, força 1 parcela à vista, o
+            // parcelamento pedido (se algum) é ignorado.
+            let (parcelas, primeiro_vencimento, intervalo_dias) = if self.pago_no_ato.is_some() {
+                (1, ctx.hoje(), 0)
+            } else {
+                (self.parcelas, self.primeiro_vencimento, self.intervalo_dias)
+            };
             let mut tcp = ConstrutorTitulo::novo(
                 ctx.empresa,
                 EspecieTitulo::Receber,
-                ContraparteRazao::Cliente(os.cliente),
+                Some(ContraparteRazao::Cliente(os.cliente)),
                 os.valor_total,
                 ctx.hoje(),
             )
             .origem("os", Some(os.id))
-            .parcelas(1, ctx.hoje(), 0)
+            .parcelas(parcelas, primeiro_vencimento, intervalo_dias)
             .observacao(format!("Ordem de serviço #{}", os.numero))
             .construir()
             .map_err(|e| Erro::de_dominio(&e))?;
-            tcp.parcelas[0].lancamento = Some(lancamento_id);
+            // Um único lançamento combinado (receita + CMV) cobre o valor_total inteiro —
+            // toda parcela derivada dele referencia o mesmo lançamento de origem, não um por
+            // parcela (diferente do caminho genérico de `mod_financeiro::lancar_titulo_comum`).
+            for parcela in &mut tcp.parcelas {
+                parcela.lancamento = Some(lancamento_id);
+            }
             RepositorioFinanceiro::novo(uow).inserir_titulo(&tcp)?;
-            Some(tcp.titulo.id)
+
+            let pago = if let Some(pagamento) = self.pago_no_ato {
+                let primeira_parcela = tcp
+                    .parcelas
+                    .first()
+                    .expect("ConstrutorTitulo sempre grava ao menos uma parcela")
+                    .id;
+                baixar_recebimento_comum(
+                    primeira_parcela,
+                    os.valor_total,
+                    ctx.hoje(),
+                    pagamento.meio_pagamento,
+                    pagamento.conta_destino,
+                    ctx,
+                    uow,
+                )?;
+                true
+            } else {
+                false
+            };
+            (Some(tcp.titulo.id), pago)
         } else {
-            None
+            (None, false)
         };
         RepositorioOs::novo(uow).atualizar_ordem(&os)?;
 
@@ -135,6 +198,7 @@ impl Comando for FaturarOrdemServico {
             lancamento,
             titulo,
             valor_total: os.valor_total,
+            titulo_pago,
         })
     }
 }

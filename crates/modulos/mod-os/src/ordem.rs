@@ -66,13 +66,14 @@ pub struct OrdemServico {
     pub numero: u64,
     /// O cliente (papel `Cliente` em `clientes_pessoa`).
     pub cliente: Id,
-    /// Descrição livre do equipamento ("Notebook Dell XPS 13"). **Opcional** — pode ficar
-    /// vazia na abertura (o cliente às vezes não sabe o modelo exato de cabeça) e ser
-    /// completada depois via [`OrdemServico::completar_equipamento`]/`EditarDadosDaOrdem`.
+    /// Descrição livre do aparelho trazido para reparo ("Notebook Dell XPS 13") —
+    /// **obrigatória** na abertura: o balcão relatou confundir o antigo rótulo
+    /// "Equipamento (opcional)" com "equipamento usado no reparo" e abrir OS sem saber de
+    /// qual aparelho se tratava. Ainda pode ser corrigida depois via
+    /// [`OrdemServico::completar_equipamento`]/`EditarDadosDaOrdem`.
     pub equipamento: String,
     /// O que o cliente relatou querer resolver, capturado na recepção — junto do nome do
-    /// cliente, o único texto obrigatório para abrir uma OS (pedido explícito do usuário:
-    /// "ele pode abrir OS somente com nome do cliente e problema relatado"). **Não** é o
+    /// cliente e do aparelho, texto obrigatório para abrir uma OS. **Não** é o
     /// parecer/diagnóstico técnico — isso é [`crate::laudo::LaudoTecnico`], escrito pelo
     /// técnico depois, em outro momento do fluxo.
     pub defeito_relatado: String,
@@ -99,12 +100,12 @@ pub struct OrdemServico {
 }
 
 impl OrdemServico {
-    /// Abre uma ordem de serviço nova. `equipamento` é opcional (vazio = "ainda não
-    /// informado" — completável depois); `defeito_relatado` é o único texto obrigatório além
-    /// do cliente.
+    /// Abre uma ordem de serviço nova. `equipamento` (o aparelho trazido para reparo) e
+    /// `defeito_relatado` são os dois textos obrigatórios além do cliente — o balcão nunca
+    /// deve abrir OS sem saber de qual aparelho se trata.
     ///
     /// # Errors
-    /// [`ErroOs::DefeitoRelatadoVazio`].
+    /// [`ErroOs::DefeitoRelatadoVazio`], [`ErroOs::EquipamentoVazio`].
     pub fn abrir(
         empresa: Id,
         numero: u64,
@@ -117,6 +118,9 @@ impl OrdemServico {
     ) -> Result<Self, ErroOs> {
         let equipamento = equipamento.into().trim().to_string();
         let defeito_relatado = defeito_relatado.into().trim().to_string();
+        if equipamento.is_empty() {
+            return Err(ErroOs::EquipamentoVazio);
+        }
         if defeito_relatado.is_empty() {
             return Err(ErroOs::DefeitoRelatadoVazio);
         }
@@ -157,14 +161,20 @@ impl OrdemServico {
         }
     }
 
-    /// Completa ou corrige a descrição do equipamento — para quando ela não foi informada na
-    /// abertura, ou veio incompleta.
+    /// Corrige ou completa a descrição do equipamento/aparelho depois da abertura (erro de
+    /// digitação, detalhe que faltou).
     ///
     /// # Errors
-    /// [`ErroOs::OrdemFinalizada`] se a OS já estiver `Faturada`/`Cancelada`/`Reprovada`.
+    /// [`ErroOs::OrdemFinalizada`] se a OS já estiver `Faturada`/`Cancelada`/`Reprovada`;
+    /// [`ErroOs::EquipamentoVazio`] se `equipamento` vier vazio — obrigatório desde a
+    /// abertura, uma correção não pode apagá-lo.
     pub fn completar_equipamento(&mut self, equipamento: impl Into<String>) -> Result<(), ErroOs> {
         self.exigir_nao_finalizada()?;
-        self.equipamento = equipamento.into().trim().to_string();
+        let equipamento = equipamento.into().trim().to_string();
+        if equipamento.is_empty() {
+            return Err(ErroOs::EquipamentoVazio);
+        }
+        self.equipamento = equipamento;
         self.versao = self.versao.proxima();
         Ok(())
     }
@@ -348,16 +358,30 @@ impl OrdemServico {
         Ok(())
     }
 
-    /// Fatura: `Concluida` → `Faturada` (terminal).
+    /// Fatura: de **qualquer estado não-terminal** → `Faturada` (terminal), não só
+    /// `Concluida`.
+    ///
+    /// Pedido explícito do usuário (2026-09-15): laudo → orçamento → aprovação → execução →
+    /// conclusão são passos **opcionais** do trâmite técnico, não um portão que bloqueia o
+    /// faturamento — o balcão precisa poder faturar assim que a OS abre, quando o serviço não
+    /// precisa de todo o trâmite formal (um conserto rápido, cobrado na hora). `valor_total`
+    /// já soma no momento em que o item entra no orçamento (`Self::adicionar_ao_orcamento`),
+    /// não quando é `AplicarPeca`-do — então faturar sem nunca passar por `EmExecucao` cobra
+    /// do cliente normalmente, mas **não** deduz peça nenhuma do estoque
+    /// ([`crate::execucao::ItemPeca::total_custo`] só conta custo de peça `aplicada`, então o
+    /// CMV desse item fica zero). Quem pula a execução é responsável por aplicar a peça à
+    /// parte (`AplicarPeca` continua disponível em `EmExecucao`) se quiser o estoque
+    /// correto — o faturamento em si nunca é bloqueado por isso.
     ///
     /// # Errors
-    /// [`ErroOs::OsJaFaturada`], [`ErroOs::OsNaoConcluida`].
+    /// [`ErroOs::OsJaFaturada`] se já `Faturada`; [`ErroOs::OsCanceladaOuReprovada`] se
+    /// `Cancelada`/`Reprovada` — essas nunca faturam.
     pub fn faturar(&mut self) -> Result<(), ErroOs> {
         if self.estado == EstadoOs::Faturada {
             return Err(ErroOs::OsJaFaturada);
         }
-        if self.estado != EstadoOs::Concluida {
-            return Err(ErroOs::OsNaoConcluida);
+        if matches!(self.estado, EstadoOs::Cancelada | EstadoOs::Reprovada) {
+            return Err(ErroOs::OsCanceladaOuReprovada);
         }
         self.transitar(EstadoOs::Faturada);
         Ok(())
@@ -431,10 +455,11 @@ mod testes {
     }
 
     #[test]
-    fn equipamento_vazio_e_aceito_na_abertura() {
-        // Pedido do usuário: só nome do cliente + defeito relatado são obrigatórios —
-        // equipamento pode ficar vazio e ser completado depois.
-        let os = OrdemServico::abrir(
+    fn equipamento_vazio_e_recusado() {
+        // O aparelho trazido para reparo é obrigatório na abertura — o balcão relatou
+        // confundir o antigo campo opcional com "equipamento usado no reparo" e abrir OS
+        // sem registrar de qual aparelho se tratava.
+        let erro = OrdemServico::abrir(
             Id::novo(),
             1,
             Id::novo(),
@@ -444,9 +469,8 @@ mod testes {
             hoje(),
             90,
         )
-        .unwrap();
-        assert_eq!(os.equipamento, "");
-        assert_eq!(os.defeito_relatado, "Não liga");
+        .unwrap_err();
+        assert_eq!(erro, ErroOs::EquipamentoVazio);
     }
 
     #[test]
@@ -530,9 +554,40 @@ mod testes {
     }
 
     #[test]
-    fn faturar_antes_de_concluir_e_recusado() {
+    fn faturar_direto_da_abertura_funciona_sem_passar_pelo_tramite() {
+        // Pedido explícito do usuário (2026-09-15): laudo/orçamento/aprovação/execução são
+        // opcionais — o balcão pode faturar assim que a OS abre.
         let mut os = os_aberta();
-        assert_eq!(os.faturar().unwrap_err(), ErroOs::OsNaoConcluida);
+        os.faturar().unwrap();
+        assert_eq!(os.estado, EstadoOs::Faturada);
+    }
+
+    #[test]
+    fn faturar_cancelada_ou_reprovada_e_recusado() {
+        let mut cancelada = os_aberta();
+        cancelada.cancelar().unwrap();
+        assert_eq!(
+            cancelada.faturar().unwrap_err(),
+            ErroOs::OsCanceladaOuReprovada
+        );
+
+        let mut reprovada = os_aberta();
+        reprovada
+            .adicionar_ao_orcamento(Dinheiro::reais(100))
+            .unwrap();
+        reprovada.enviar_para_aprovacao().unwrap();
+        reprovada.reprovar().unwrap();
+        assert_eq!(
+            reprovada.faturar().unwrap_err(),
+            ErroOs::OsCanceladaOuReprovada
+        );
+    }
+
+    #[test]
+    fn faturar_duas_vezes_e_recusado() {
+        let mut os = os_aberta();
+        os.faturar().unwrap();
+        assert_eq!(os.faturar().unwrap_err(), ErroOs::OsJaFaturada);
     }
 
     #[test]

@@ -1,9 +1,6 @@
-//! Completa/corrige dados gerais de uma ordem já aberta: o equipamento (quando não foi
-//! informado na abertura, ou veio incompleto) e um complemento ao defeito relatado (quando o
-//! cliente lembra de mais detalhe depois). `docs/modulos/os.md` §5 — nasce do pedido do
-//! usuário de que só nome do cliente + defeito relatado sejam obrigatórios na abertura; tudo
-//! o mais (equipamento, documento, contato do cliente etc.) se completa depois, e este
-//! comando é a metade de "depois" que pertence à própria OS.
+//! Corrige dados gerais de uma ordem já aberta: o equipamento/aparelho (erro de digitação,
+//! detalhe que faltou) e um complemento ao defeito relatado (quando o cliente lembra de mais
+//! detalhe depois). `docs/modulos/os.md` §5.
 
 use cardeal_kernel::{Erro, Id, Resultado};
 use cardeal_modkit::{Comando, Ctx, Risco};
@@ -19,8 +16,8 @@ use crate::repositorio::RepositorioOs;
 pub struct EditarDadosDaOrdem {
     /// A ordem de serviço.
     pub ordem_servico: Id,
-    /// O equipamento, quando ainda não informado (ou para corrigir o que foi digitado).
-    /// `None` = não mexer neste campo.
+    /// Correção do equipamento/aparelho (já obrigatório desde a abertura). `None` = não
+    /// mexer neste campo.
     pub equipamento: Option<String>,
     /// Um complemento ao defeito relatado — **acrescentado** ao relato original, nunca o
     /// substitui. `None` = não mexer neste campo.

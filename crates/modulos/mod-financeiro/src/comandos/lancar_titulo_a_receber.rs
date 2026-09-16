@@ -16,8 +16,9 @@ use crate::titulo::EspecieTitulo;
 /// Lança um título a receber com uma ou mais parcelas.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LancarTituloAReceber {
-    /// O cliente devedor.
-    pub cliente: Id,
+    /// O cliente devedor. Opcional — pedido explícito do usuário: lançar um título avulso não
+    /// deve exigir uma pessoa cadastrada (ex.: uma receita genérica sem cliente identificado).
+    pub cliente: Option<Id>,
     /// O valor total (soma das parcelas).
     pub valor_total: Dinheiro,
     /// A data de emissão.
@@ -55,7 +56,7 @@ impl Comando for LancarTituloAReceber {
         let g = lancar_titulo_comum(
             DadosLancamentoTitulo {
                 especie: EspecieTitulo::Receber,
-                contraparte: Contraparte::Cliente(self.cliente),
+                contraparte: self.cliente.map(Contraparte::Cliente),
                 valor_total: self.valor_total,
                 emissao: self.emissao,
                 parcelas: self.parcelas,

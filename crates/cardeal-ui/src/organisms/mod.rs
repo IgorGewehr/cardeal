@@ -4,6 +4,7 @@
 mod agenda_calendario;
 mod agenda_mes;
 mod cartao;
+mod confirmacao;
 mod dialogo;
 mod faixa_kpi;
 mod grade;
@@ -16,6 +17,7 @@ mod sidebar;
 pub use agenda_calendario::{AcaoAgenda, AgendaCalendario, BlocoAgenda, ModoCalendario, TagAgenda};
 pub use agenda_mes::AgendaMes;
 pub use cartao::Cartao;
+pub use confirmacao::{dialogo_confirmacao, RespostaConfirmacao};
 pub use dialogo::Dialogo;
 pub use faixa_kpi::FaixaKpi;
 pub use grade::{ColunaGrade, Direcao, Grade, LinhaGrade, RespostaGrade};

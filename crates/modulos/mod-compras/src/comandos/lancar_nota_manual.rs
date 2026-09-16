@@ -78,7 +78,10 @@ fn valor_produtos_e_pesos(itens: &[ItemNotaManual], rateio_por: RateioPor) -> (D
     let valor_produtos = brutos.iter().copied().sum();
     let pesos = match rateio_por {
         RateioPor::Valor => brutos.iter().map(|d| d.em_centavos()).collect(),
-        RateioPor::Peso => itens.iter().map(|i| i.quantidade.unidades_internas()).collect(),
+        RateioPor::Peso => itens
+            .iter()
+            .map(|i| i.quantidade.unidades_internas())
+            .collect(),
     };
     (valor_produtos, pesos)
 }

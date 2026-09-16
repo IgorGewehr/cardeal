@@ -38,6 +38,10 @@ enum Dlg {
     Fechado,
     Novo,
     Ver(usize),
+    /// Editar os detalhes técnicos de um produto já cadastrado (índice em `estado.produtos`)
+    /// — nome/NCM/código de barras continuam sem edição nesta fatia (`EditarDetalhesTecnicosProduto`
+    /// só cobre os campos técnicos, ver `docs/modulos/estoque.md` §5).
+    Editar(usize),
     /// Repor estoque de um item do radar (índice em `estado.radar`).
     Repor(usize),
 }
@@ -58,6 +62,8 @@ pub struct EstadoTelaEstoque {
     erro: Option<String>,
     dlg: Dlg,
     ordenacao: Option<(usize, Direcao)>,
+    /// `(produto, nome)` aguardando confirmação de exclusão (desativação).
+    confirmar_exclusao: Option<(Id, String)>,
 
     novo_grupo_codigo: String,
     novo_grupo_nome: String,
@@ -192,7 +198,7 @@ pub fn mostrar(
             }
 
             match estado.aba {
-                AbaEstoque::Produtos => lista(ui, estado),
+                AbaEstoque::Produtos => lista(ui, motor, sessao, estado),
                 AbaEstoque::Radar => radar(ui, estado),
             }
         },
@@ -202,11 +208,49 @@ pub fn mostrar(
         Dlg::Fechado => {}
         Dlg::Novo => dialogo_novo(ui.ctx(), motor, sessao, estado),
         Dlg::Ver(i) => dialogo_ver(ui.ctx(), motor, sessao, estado, i),
+        Dlg::Editar(i) => dialogo_editar(ui.ctx(), motor, sessao, estado, i),
         Dlg::Repor(i) => dialogo_repor(ui.ctx(), motor, sessao, estado, i),
+    }
+
+    if let Some((produto, nome)) = estado.confirmar_exclusao.clone() {
+        let resposta = cardeal_ui::organisms::dialogo_confirmacao(
+            ui.ctx(),
+            "Excluir produto",
+            &format!(
+                "Tem certeza que quer excluir \"{nome}\"? Ele sai da busca padrão, mas o \
+                 saldo, os lotes e o histórico continuam intactos — dá pra reativar depois.",
+            ),
+            "Excluir",
+        );
+        if resposta.confirmado {
+            match motor.executar(
+                sessao,
+                "estoque.definir_ativo_produto.v1",
+                &mod_estoque::DefinirAtivoProduto {
+                    produto,
+                    ativo: false,
+                },
+            ) {
+                Ok(()) => {
+                    estado.dlg = Dlg::Fechado;
+                    estado.carregar(motor, sessao);
+                    notificar(ui.ctx(), Notificacao::sucesso("Produto excluído"));
+                }
+                Err(e) => notificar(ui.ctx(), Notificacao::erro(e.mensagem)),
+            }
+        }
+        if resposta.fechar {
+            estado.confirmar_exclusao = None;
+        }
     }
 }
 
-fn lista(ui: &mut egui::Ui, estado: &mut EstadoTelaEstoque) {
+fn lista(
+    ui: &mut egui::Ui,
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaEstoque,
+) {
     if estado.produtos.is_empty() {
         if estado.erro.is_none()
             && EstadoVazio::novo(Icone::Estoque, "Nenhum produto cadastrado ainda.")
@@ -258,10 +302,16 @@ fn lista(ui: &mut egui::Ui, estado: &mut EstadoTelaEstoque) {
         ColunaGrade::nova("Disponível").largura(130.0).numero(),
         ColunaGrade::nova("Reservado").largura(110.0).numero(),
         ColunaGrade::nova("Custo médio").largura(120.0).numero(),
+        ColunaGrade::nova("Ações").largura(190.0),
     ];
+    let mut editar_clicado = None;
+    let mut excluir_clicado = None;
     let resposta = Grade::nova(colunas)
         .selecionavel(None)
         .ordenacao(estado.ordenacao)
+        // Linha mais alta que o padrão (38px) — a coluna "Ações" carrega botões de 34px de
+        // altura mínima, que ficavam praticamente colados nas bordas da linha sem isso.
+        .altura_linha(cardeal_ui::tokens::AlturaLinha::Toque)
         .mostrar(ui, indices.len(), |i, row| {
             let p = &estado.produtos[indices[i]];
             row.col(|ui| {
@@ -284,6 +334,17 @@ fn lista(ui: &mut egui::Ui, estado: &mut EstadoTelaEstoque) {
             row.col(|ui| {
                 ui.add(Rotulo::interface(p.custo_medio.to_string()));
             });
+            row.col(|ui| {
+                let rubro = ui.cores().rubro;
+                ui.horizontal(|ui| {
+                    if ui.add(Botao::fantasma("Editar").pequeno().cor(rubro)).clicked() {
+                        editar_clicado = Some(indices[i]);
+                    }
+                    if ui.add(Botao::destrutivo("Excluir").pequeno()).clicked() {
+                        excluir_clicado = Some((p.produto, p.nome.clone()));
+                    }
+                });
+            });
         });
 
     if let Some(coluna) = resposta.coluna_clicada {
@@ -294,8 +355,46 @@ fn lista(ui: &mut egui::Ui, estado: &mut EstadoTelaEstoque) {
         estado.ordenacao = Some((coluna, direcao));
         ordenar_produtos(&mut estado.produtos, coluna, direcao);
     }
-    if let Some(i) = resposta.linha_clicada {
+    if let Some(indice) = editar_clicado {
+        abrir_editar(motor, sessao, estado, indice);
+    } else if let Some(produto) = excluir_clicado {
+        estado.confirmar_exclusao = Some(produto);
+    } else if let Some(i) = resposta.linha_clicada {
         estado.dlg = Dlg::Ver(indices[i]);
+    }
+}
+
+/// Carrega os detalhes técnicos atuais do produto (`ProdutoPorId`) nos campos do formulário
+/// e abre o dialog de edição — precisa vir do backend, não de `ItemProdutoComSaldo` (que não
+/// carrega esses campos), senão "Salvar" apagaria o que já estava cadastrado
+/// (`EditarDetalhesTecnicosProduto` substitui os detalhes técnicos por completo).
+fn abrir_editar(
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaEstoque,
+    indice: usize,
+) {
+    let produto = estado.produtos[indice].produto;
+    match motor.consultar(
+        sessao,
+        "estoque.produto_por_id.v1",
+        &mod_estoque::ProdutoPorId { produto },
+    ) {
+        Ok(Some(p)) => {
+            let p: mod_estoque::Produto = p;
+            estado.det_fabricante = p.fabricante.unwrap_or_default();
+            estado.det_codigo_fabricante = p.codigo_fabricante.unwrap_or_default();
+            estado.det_categoria_tecnica = p.categoria_tecnica.unwrap_or_default();
+            estado.det_especificacao_tecnica = p.especificacao_tecnica.unwrap_or_default();
+            estado.det_compatibilidade = p.compatibilidade.unwrap_or_default();
+            estado.det_garantia_fornecedor_dias = p
+                .garantia_fornecedor_dias
+                .map_or_else(String::new, |d| d.to_string());
+            estado.det_localizacao_fisica = p.localizacao_fisica.unwrap_or_default();
+            estado.dlg = Dlg::Editar(indice);
+        }
+        Ok(None) => estado.erro = Some("Produto não encontrado.".to_owned()),
+        Err(e) => estado.erro = Some(e.mensagem),
     }
 }
 
@@ -467,6 +566,10 @@ fn dialogo_ver(
             }
         },
         |ui, estado| {
+            if ui.add(Botao::primario("Editar")).clicked() {
+                abrir_editar(motor, sessao, estado, i);
+                estado.movimentos.clear();
+            }
             if ui.add(Botao::secundario("Fechar")).clicked() {
                 estado.dlg = Dlg::Fechado;
                 estado.movimentos.clear();
@@ -476,6 +579,73 @@ fn dialogo_ver(
     if fechar {
         estado.dlg = Dlg::Fechado;
         estado.movimentos.clear();
+    }
+}
+
+/// "Editar detalhes técnicos" — nome/NCM/código de barras ficam só de contexto (sem comando
+/// de edição nesta fatia, `docs/modulos/estoque.md` §5); os campos técnicos reusam o mesmo
+/// bloco do cadastro (`bloco_detalhes_tecnicos`).
+fn dialogo_editar(
+    ctx: &egui::Context,
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaEstoque,
+    i: usize,
+) {
+    let Some(p) = estado.produtos.get(i).cloned() else {
+        estado.dlg = Dlg::Fechado;
+        return;
+    };
+    let enter =
+        ctx.input(|i| i.key_pressed(egui::Key::Enter)) && !ctx.memory(|m| m.any_popup_open());
+
+    let fechar = Dialogo::nova(format!("Editar — {}", p.nome))
+        .largura(680.0)
+        .mostrar(
+            ctx,
+            estado,
+            |ui, estado| {
+                ui.columns(2, |c| {
+                    campo_ver(&mut c[0], "Produto", &p.nome);
+                    campo_ver(&mut c[1], "NCM", &p.ncm);
+                });
+                ui.add_space(Espaco::E8);
+                bloco_detalhes_tecnicos(ui, estado);
+            },
+            |ui, estado| {
+                let clicou = ui.add(Botao::primario("Salvar")).clicked();
+                if clicou || enter {
+                    salvar_detalhes_tecnicos(ui.ctx(), motor, sessao, estado, p.produto);
+                }
+                if ui.add(Botao::secundario("Cancelar")).clicked() {
+                    estado.dlg = Dlg::Fechado;
+                }
+            },
+        );
+    if fechar {
+        estado.dlg = Dlg::Fechado;
+    }
+}
+
+fn salvar_detalhes_tecnicos(
+    ctx: &egui::Context,
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaEstoque,
+    produto: Id,
+) {
+    let detalhes = montar_detalhes_tecnicos(estado).unwrap_or_default();
+    match motor.executar(
+        sessao,
+        "estoque.editar_detalhes_tecnicos_produto.v1",
+        &mod_estoque::EditarDetalhesTecnicosProduto { produto, detalhes },
+    ) {
+        Ok(()) => {
+            estado.dlg = Dlg::Fechado;
+            estado.carregar(motor, sessao);
+            notificar(ctx, Notificacao::sucesso("Detalhes técnicos atualizados"));
+        }
+        Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
     }
 }
 
@@ -735,61 +905,88 @@ fn corpo_novo(
     });
 
     ui.add_space(Espaco::E8);
-    SecaoExpansivel::nova("Detalhes técnicos (opcional)").mostrar(ui, |ui| {
-        // TODO(backend): campo de código curto de rastreabilidade (post-it físico) ainda
-        // não existe em `DetalhesTecnicos`/`estoque_produto` — quando existir, entra aqui
-        // como mais um `Campo` (ex.: "Código de bancada") e já alimenta a busca da lista
-        // e o lookup de peça na abertura de OS (ver `tela_os::adicionar_peca`).
-        ui.columns(2, |c| {
-            c[0].add(
-                Campo::novo("Fabricante", &mut estado.det_fabricante)
-                    .marcador("ex.: Texas Instruments"),
-            );
-            c[1].add(
-                Campo::novo(
-                    "Código do fabricante (MPN)",
-                    &mut estado.det_codigo_fabricante,
-                )
-                .marcador("part number"),
-            );
-        });
-        ui.add_space(Espaco::E8);
-        ui.columns(2, |c| {
-            c[0].add(
-                Campo::novo("Categoria técnica", &mut estado.det_categoria_tecnica)
-                    .marcador("IC, capacitor, tela, bateria…"),
-            );
-            c[1].add(
-                Campo::novo(
-                    "Garantia do fornecedor (dias)",
-                    &mut estado.det_garantia_fornecedor_dias,
-                )
-                .marcador("90"),
-            );
-        });
-        ui.add_space(Espaco::E8);
-        ui.add(
-            Campo::novo(
-                "Especificação / resumo do datasheet",
-                &mut estado.det_especificacao_tecnica,
-            )
-            .marcador("tensão, corrente, pinagem…"),
+    SecaoExpansivel::nova("Detalhes técnicos (opcional)")
+        .mostrar(ui, |ui| bloco_detalhes_tecnicos(ui, estado));
+}
+
+/// Os campos de detalhes técnicos — compartilhado entre "Novo produto" (`corpo_novo`) e
+/// "Editar detalhes técnicos" (`dialogo_editar`), que edita exatamente os mesmos campos de
+/// `DetalhesTecnicos` sobre um produto já cadastrado.
+fn bloco_detalhes_tecnicos(ui: &mut egui::Ui, estado: &mut EstadoTelaEstoque) {
+    // TODO(backend): campo de código curto de rastreabilidade (post-it físico) ainda
+    // não existe em `DetalhesTecnicos`/`estoque_produto` — quando existir, entra aqui
+    // como mais um `Campo` (ex.: "Código de bancada") e já alimenta a busca da lista
+    // e o lookup de peça na abertura de OS (ver `tela_os::adicionar_peca`).
+    ui.columns(2, |c| {
+        c[0].add(
+            Campo::novo("Fabricante", &mut estado.det_fabricante)
+                .marcador("ex.: Texas Instruments"),
         );
-        ui.add_space(Espaco::E8);
-        ui.columns(2, |c| {
-            c[0].add(
-                Campo::novo(
-                    "Compatibilidade / aplicação",
-                    &mut estado.det_compatibilidade,
-                )
-                .marcador("ex.: iPhone 11 / 11 Pro"),
-            );
-            c[1].add(
-                Campo::novo("Localização física", &mut estado.det_localizacao_fisica)
-                    .marcador("ex.: Gaveta 12, prateleira B"),
-            );
-        });
+        c[1].add(
+            Campo::novo(
+                "Código do fabricante (MPN)",
+                &mut estado.det_codigo_fabricante,
+            )
+            .marcador("part number"),
+        );
     });
+    ui.add_space(Espaco::E8);
+    ui.columns(2, |c| {
+        c[0].add(
+            Campo::novo("Categoria técnica", &mut estado.det_categoria_tecnica)
+                .marcador("IC, capacitor, tela, bateria…"),
+        );
+        c[1].add(
+            Campo::novo(
+                "Garantia do fornecedor (dias)",
+                &mut estado.det_garantia_fornecedor_dias,
+            )
+            .marcador("90"),
+        );
+    });
+    ui.add_space(Espaco::E8);
+    ui.add(
+        Campo::novo(
+            "Especificação / resumo do datasheet",
+            &mut estado.det_especificacao_tecnica,
+        )
+        .marcador("tensão, corrente, pinagem…"),
+    );
+    ui.add_space(Espaco::E8);
+    ui.columns(2, |c| {
+        c[0].add(
+            Campo::novo(
+                "Compatibilidade / aplicação",
+                &mut estado.det_compatibilidade,
+            )
+            .marcador("ex.: iPhone 11 / 11 Pro"),
+        );
+        c[1].add(
+            Campo::novo("Localização física", &mut estado.det_localizacao_fisica)
+                .marcador("ex.: Gaveta 12, prateleira B"),
+        );
+    });
+}
+
+/// Monta `DetalhesTecnicos` a partir dos campos de texto do formulário — `None` por campo
+/// vazio, e `None` no conjunto inteiro se nada foi preenchido (mesma regra de `cadastrar`).
+fn montar_detalhes_tecnicos(estado: &EstadoTelaEstoque) -> Option<DetalhesTecnicos> {
+    let d = DetalhesTecnicos {
+        fabricante: (!estado.det_fabricante.trim().is_empty())
+            .then(|| estado.det_fabricante.clone()),
+        codigo_fabricante: (!estado.det_codigo_fabricante.trim().is_empty())
+            .then(|| estado.det_codigo_fabricante.clone()),
+        categoria_tecnica: (!estado.det_categoria_tecnica.trim().is_empty())
+            .then(|| estado.det_categoria_tecnica.clone()),
+        especificacao_tecnica: (!estado.det_especificacao_tecnica.trim().is_empty())
+            .then(|| estado.det_especificacao_tecnica.clone()),
+        compatibilidade: (!estado.det_compatibilidade.trim().is_empty())
+            .then(|| estado.det_compatibilidade.clone()),
+        garantia_fornecedor_dias: estado.det_garantia_fornecedor_dias.trim().parse().ok(),
+        localizacao_fisica: (!estado.det_localizacao_fisica.trim().is_empty())
+            .then(|| estado.det_localizacao_fisica.clone()),
+    };
+    (d != DetalhesTecnicos::default()).then_some(d)
 }
 
 fn bloco_grupo(
@@ -931,23 +1128,7 @@ fn cadastrar(
     sessao: &SessaoLocal,
     estado: &mut EstadoTelaEstoque,
 ) {
-    let detalhes_tecnicos = DetalhesTecnicos {
-        fabricante: (!estado.det_fabricante.trim().is_empty())
-            .then(|| estado.det_fabricante.clone()),
-        codigo_fabricante: (!estado.det_codigo_fabricante.trim().is_empty())
-            .then(|| estado.det_codigo_fabricante.clone()),
-        categoria_tecnica: (!estado.det_categoria_tecnica.trim().is_empty())
-            .then(|| estado.det_categoria_tecnica.clone()),
-        especificacao_tecnica: (!estado.det_especificacao_tecnica.trim().is_empty())
-            .then(|| estado.det_especificacao_tecnica.clone()),
-        compatibilidade: (!estado.det_compatibilidade.trim().is_empty())
-            .then(|| estado.det_compatibilidade.clone()),
-        garantia_fornecedor_dias: estado.det_garantia_fornecedor_dias.trim().parse().ok(),
-        localizacao_fisica: (!estado.det_localizacao_fisica.trim().is_empty())
-            .then(|| estado.det_localizacao_fisica.clone()),
-    };
-    let detalhes_tecnicos =
-        (detalhes_tecnicos != DetalhesTecnicos::default()).then_some(detalhes_tecnicos);
+    let detalhes_tecnicos = montar_detalhes_tecnicos(estado);
 
     let r = motor.executar(
         sessao,

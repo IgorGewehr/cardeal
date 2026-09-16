@@ -25,15 +25,21 @@
 //!   cobrança**: uma OS de garantia/cortesia (`valor_total == 0`) não gera título, e se
 //!   também não houve custo de peça, não gera lançamento nenhum.
 //!
-//! **Pedido explícito do usuário (2026-09-11):** na abertura de OS, só o nome do cliente e o
+//! **Pedido explícito do usuário (2026-09-11):** na abertura de OS, o nome do cliente e o
 //! `defeito_relatado` (o que o cliente relatou querer resolver, capturado na recepção) são
-//! obrigatórios — `equipamento` virou opcional. `LaudoTecnico::descricao_problema` foi
-//! deliberadamente **mantido como está** (não removido/renomeado): a parte técnica
-//! (`docs/modulos/os.md` §14 e adiante) que consome `RegistrarLaudo`/`LaudoTecnico` está fora
-//! do escopo desta sessão, e o campo não causa dano — só deixa de ser a fonte de verdade do
-//! relato do cliente, que agora é `OrdemServico::defeito_relatado`. [`EditarDadosDaOrdem`]
-//! (novo) completa/corrige `equipamento` e complementa `defeito_relatado` depois da abertura,
-//! em qualquer estado não-terminal.
+//! obrigatórios. `LaudoTecnico::descricao_problema` foi deliberadamente **mantido como está**
+//! (não removido/renomeado): a parte técnica (`docs/modulos/os.md` §14 e adiante) que consome
+//! `RegistrarLaudo`/`LaudoTecnico` está fora do escopo desta sessão, e o campo não causa dano
+//! — só deixa de ser a fonte de verdade do relato do cliente, que agora é
+//! `OrdemServico::defeito_relatado`. [`EditarDadosDaOrdem`] corrige/complementa `equipamento`
+//! e `defeito_relatado` depois da abertura, em qualquer estado não-terminal.
+//!
+//! **Revisão (2026-09-14):** `equipamento` (o aparelho trazido para reparo) virou
+//! **obrigatório** de novo — o balcão relatou confundir o rótulo "Equipamento (opcional)" com
+//! "equipamento usado no reparo" e abrir OS sem registrar de qual aparelho se tratava
+//! ([`ErroOs::EquipamentoVazio`](crate::erros::ErroOs::EquipamentoVazio)). A UI de abertura
+//! também renomeou o campo para "Aparelho" para deixar isso claro; continua editável depois
+//! via [`EditarDadosDaOrdem`].
 //!
 //! Auditoria de produção (2026-09-06) encontrou e corrigiu três lacunas reais: um reparo em
 //! garantia (itens a custo zero) não conseguia sair de `AguardandoAprovacao` porque
@@ -76,13 +82,13 @@ pub use comandos::{
     CancelarOrdemServico, ConcluirExecucao, EditarDadosDaOrdem, EncerrarApontamento,
     EnviarParaAprovacao, FaturarOrdemServico, IniciarApontamento, IniciarExecucao,
     ItemOrcamentoNovo, MontarOrcamentoOs, OrdemServicoAberta, OrdemServicoCancelada,
-    OrdemServicoFaturada, PecaFoiAplicada, RegistrarLaudo, RegistrarMaoDeObra,
+    OrdemServicoFaturada, PagamentoNoAto, PecaFoiAplicada, RegistrarLaudo, RegistrarMaoDeObra,
     RemoverItemOrcamento, ReprovarOrcamentoOs, TipoItemOrcamento,
 };
 pub use consultas::{
     ApontamentosDaOrdem, BuscarDetalheOrdem, DetalheOrdem, HistoricoDoEquipamento,
     ItemAguardandoEstoque, OrdensAguardandoAprovacao, OrdensEmAberto, PecasAguardandoEstoque,
-    TempoPorTecnicoNoPeriodo, TempoTotalDaOrdem,
+    TempoPorTecnicoNoPeriodo, TempoTotalDaOrdem, TodasAsOrdens,
 };
 pub use erros::ErroOs;
 pub use execucao::{ItemMaoDeObra, ItemPeca};

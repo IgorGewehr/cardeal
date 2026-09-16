@@ -13,15 +13,19 @@ use cardeal_cliente::{MotorLocal, SessaoLocal};
 use cardeal_kernel::Id;
 use cardeal_modkit::Icone;
 use cardeal_ui::atoms::{Botao, Etiqueta, Rotulo};
-use cardeal_ui::molecules::{Campo, CartaoKpi, EstadoVazio, Mascara, SeletorOpcao};
+use cardeal_ui::molecules::{
+    Campo, CartaoKpi, EstadoVazio, Mascara, SecaoExpansivel, SeletorOpcao,
+};
 use cardeal_ui::organisms::{
     notificar, ColunaGrade, Dialogo, Direcao, FaixaKpi, Grade, LayoutTela, Notificacao,
 };
 use cardeal_ui::tokens::{Espaco, TemaUi};
 use eframe::egui;
 use mod_clientes::{
-    CriarPessoa, DetalhePessoa, EditarPessoa, ItemPessoa, Papel, PessoaCadastrada, PessoaDetalhada,
-    PessoaEditada, PessoasPorPapel, TipoContato, TipoDocumento, TipoPessoa,
+    AdicionarContato, AdicionarEndereco, ContatoInicial, CriarPessoa, DesativarPessoa,
+    DetalhePessoa, EditarPessoa, EnderecoInicial, ItemPessoa, Papel, PessoaCadastrada,
+    PessoaDetalhada, PessoaEditada, PessoasPorPapel, TipoContato, TipoDocumento, TipoEndereco,
+    TipoPessoa,
 };
 
 #[derive(Clone, Copy, PartialEq)]
@@ -45,9 +49,21 @@ struct Form {
     // Só leitura (modo Ver):
     papeis: String,
     limite: String,
+    // Editáveis em Criar e Editar (mostrados também, só leitura, em Ver):
     telefone: String,
     email: String,
-    endereco: String,
+    end_logradouro: String,
+    end_numero: String,
+    end_complemento: String,
+    end_bairro: String,
+    end_cidade: String,
+    end_uf: String,
+    end_cep: String,
+    // Snapshot do que veio do backend, pra `salvar` só gravar um novo contato/endereço
+    // quando o atendente de fato mudou algo (evita empilhar uma linha nova a cada "Salvar").
+    telefone_original: String,
+    email_original: String,
+    endereco_original: String,
 }
 
 impl Form {
@@ -65,7 +81,16 @@ impl Form {
             limite: String::new(),
             telefone: String::new(),
             email: String::new(),
-            endereco: String::new(),
+            end_logradouro: String::new(),
+            end_numero: String::new(),
+            end_complemento: String::new(),
+            end_bairro: String::new(),
+            end_cidade: String::new(),
+            end_uf: String::new(),
+            end_cep: String::new(),
+            telefone_original: String::new(),
+            email_original: String::new(),
+            endereco_original: String::new(),
         }
     }
 
@@ -104,12 +129,23 @@ impl Form {
             .find(|c| c.tipo == TipoContato::Email)
             .map(|c| c.valor.clone())
             .unwrap_or_default();
-        let endereco = d.enderecos.first().map_or_else(String::new, |e| {
-            format!(
-                "{}, {} - {}, {}/{}",
-                e.logradouro, e.numero, e.bairro, e.cidade, e.uf
-            )
-        });
+        let end = d.enderecos.first();
+        let end_logradouro = end.map_or_else(String::new, |e| e.logradouro.clone());
+        let end_numero = end.map_or_else(String::new, |e| e.numero.clone());
+        let end_complemento = end.and_then(|e| e.complemento.clone()).unwrap_or_default();
+        let end_bairro = end.map_or_else(String::new, |e| e.bairro.clone());
+        let end_cidade = end.map_or_else(String::new, |e| e.cidade.clone());
+        let end_uf = end.map_or_else(String::new, |e| e.uf.sigla().to_owned());
+        let end_cep = end.map_or_else(String::new, |e| e.cep.clone());
+        let endereco_original = assinatura_endereco(
+            &end_logradouro,
+            &end_numero,
+            &end_complemento,
+            &end_bairro,
+            &end_cidade,
+            &end_uf,
+            &end_cep,
+        );
         Self {
             modo: Modo::Ver,
             pessoa: Some(p.id),
@@ -129,11 +165,35 @@ impl Form {
                 .as_ref()
                 .map(|l| l.limite.formatar_com_simbolo())
                 .unwrap_or_default(),
-            telefone,
-            email,
-            endereco,
+            telefone: telefone.clone(),
+            email: email.clone(),
+            end_logradouro,
+            end_numero,
+            end_complemento,
+            end_bairro,
+            end_cidade,
+            end_uf,
+            end_cep,
+            telefone_original: telefone,
+            email_original: email,
+            endereco_original,
         }
     }
+}
+
+/// Uma chave de comparação barata pra saber se o endereço do formulário mudou desde que foi
+/// carregado — evita `AdicionarEndereco` gravar uma linha nova a cada "Salvar" quando o
+/// atendente só trocou a observação, por exemplo.
+fn assinatura_endereco(
+    logradouro: &str,
+    numero: &str,
+    complemento: &str,
+    bairro: &str,
+    cidade: &str,
+    uf: &str,
+    cep: &str,
+) -> String {
+    format!("{logradouro}|{numero}|{complemento}|{bairro}|{cidade}|{uf}|{cep}")
 }
 
 const fn rotulo_papel(p: Papel) -> &'static str {
@@ -176,6 +236,10 @@ pub struct EstadoTelaClientes {
     erro: Option<String>,
     form: Option<Form>,
     ordenacao: Option<(usize, Direcao)>,
+    /// `(pessoa, nome)` do cliente aguardando confirmação de exclusão — desenha o dialog de
+    /// confirmação num frame separado do clique no botão "Excluir" (o padrão já usado por
+    /// `tela_os.rs` pra cancelamento).
+    confirmar_exclusao: Option<(Id, String)>,
 }
 
 impl EstadoTelaClientes {
@@ -280,6 +344,24 @@ pub fn mostrar(
     if estado.form.is_some() {
         dialogo(ui.ctx(), motor, sessao, estado);
     }
+
+    if let Some((pessoa, nome)) = estado.confirmar_exclusao.clone() {
+        let resposta = cardeal_ui::organisms::dialogo_confirmacao(
+            ui.ctx(),
+            "Excluir cliente",
+            &format!(
+                "Tem certeza que quer excluir \"{nome}\"? O cadastro sai da busca padrão, mas \
+                 nada é apagado — dá pra reativar depois, se precisar.",
+            ),
+            "Excluir",
+        );
+        if resposta.confirmado {
+            excluir(ui.ctx(), motor, sessao, estado, pessoa);
+        }
+        if resposta.fechar {
+            estado.confirmar_exclusao = None;
+        }
+    }
 }
 
 fn lista(
@@ -306,27 +388,40 @@ fn lista(
 
     let colunas = vec![
         ColunaGrade::nova("Nome"),
-        ColunaGrade::nova("Documento").largura(220.0),
+        ColunaGrade::nova("WhatsApp").largura(220.0),
+        ColunaGrade::nova("Ações").largura(190.0),
     ];
+    let mut editar_clicado = None;
+    let mut excluir_clicado = None;
     let resposta = Grade::nova(colunas)
         .selecionavel(None)
         .ordenacao(estado.ordenacao)
+        // Linha mais alta que o padrão (38px) — a coluna "Ações" carrega botões de 34px de
+        // altura mínima, que ficavam praticamente colados nas bordas da linha sem isso.
+        .altura_linha(cardeal_ui::tokens::AlturaLinha::Toque)
         .mostrar(ui, estado.pessoas.len(), |i, row| {
             let p = &estado.pessoas[i];
             row.col(|ui| {
                 ui.add(Rotulo::interface(p.nome.clone()));
             });
-            row.col(|ui| match &p.documento {
-                Some(doc) => {
-                    ui.add(Rotulo::campo(doc.clone()));
+            row.col(|ui| match &p.telefone {
+                Some(tel) => {
+                    ui.add(Rotulo::campo(formatar_telefone(tel)));
                 }
-                // TODO(backend): `ItemPessoa` (consulta `clientes.pessoas_por_papel.v1`) não
-                // traz telefone — só documento. Um `telefone_principal: Option<String>` ali
-                // deixaria a lista mostrar contato sem abrir o dialog "Ver" a cada linha, o
-                // que ajudaria bastante no balcão (ligar/whatsapp rápido).
                 None => {
-                    ui.add(Etiqueta::atencao("sem documento"));
+                    ui.add(Etiqueta::atencao("sem WhatsApp"));
                 }
+            });
+            row.col(|ui| {
+                let rubro = ui.cores().rubro;
+                ui.horizontal(|ui| {
+                    if ui.add(Botao::fantasma("Editar").pequeno().cor(rubro)).clicked() {
+                        editar_clicado = Some(p.pessoa);
+                    }
+                    if ui.add(Botao::destrutivo("Excluir").pequeno()).clicked() {
+                        excluir_clicado = Some((p.pessoa, p.nome.clone()));
+                    }
+                });
             });
         });
 
@@ -338,18 +433,25 @@ fn lista(
         estado.ordenacao = Some((coluna, direcao));
         ordenar_pessoas(&mut estado.pessoas, coluna, direcao);
     }
-    if let Some(i) = resposta.linha_clicada {
+    if let Some(id) = editar_clicado {
+        estado.abrir_detalhe(motor, sessao, id);
+        if let Some(f) = estado.form.as_mut() {
+            f.modo = Modo::Editar;
+        }
+    } else if let Some(pessoa) = excluir_clicado {
+        estado.confirmar_exclusao = Some(pessoa);
+    } else if let Some(i) = resposta.linha_clicada {
         let id = estado.pessoas[i].pessoa;
         estado.abrir_detalhe(motor, sessao, id);
     }
 }
 
-/// Ordena `pessoas` pela coluna clicada no cabeçalho da [`Grade`] (Nome, Documento).
+/// Ordena `pessoas` pela coluna clicada no cabeçalho da [`Grade`] (Nome, WhatsApp).
 fn ordenar_pessoas(pessoas: &mut [ItemPessoa], coluna: usize, direcao: Direcao) {
     pessoas.sort_by(|a, b| {
         let ordem = match coluna {
             0 => a.nome.cmp(&b.nome),
-            1 => a.documento.cmp(&b.documento),
+            1 => a.telefone.cmp(&b.telefone),
             _ => std::cmp::Ordering::Equal,
         };
         match direcao {
@@ -436,17 +538,53 @@ fn dialogo(
             ui.add(
                 Campo::novo("Observação (opcional)", &mut f.observacao).somente_leitura(leitura),
             );
+            ui.add_space(Espaco::E12);
+
+            ui.columns(2, |c| {
+                c[0].add(
+                    Campo::novo("Telefone/WhatsApp (opcional)", &mut f.telefone)
+                        .somente_leitura(leitura),
+                );
+                c[1].add(Campo::novo("E-mail (opcional)", &mut f.email).somente_leitura(leitura));
+            });
+            ui.add_space(Espaco::E12);
+
+            let tem_endereco = !f.end_logradouro.trim().is_empty();
+            SecaoExpansivel::nova("Endereço (opcional)")
+                .aberta_por_padrao(tem_endereco)
+                .mostrar(ui, |ui| {
+                    ui.columns(2, |c| {
+                        c[0].add(
+                            Campo::novo("Logradouro", &mut f.end_logradouro)
+                                .somente_leitura(leitura),
+                        );
+                        c[1].add(Campo::novo("Número", &mut f.end_numero).somente_leitura(leitura));
+                    });
+                    ui.columns(2, |c| {
+                        c[0].add(
+                            Campo::novo("Complemento (opcional)", &mut f.end_complemento)
+                                .somente_leitura(leitura),
+                        );
+                        c[1].add(Campo::novo("Bairro", &mut f.end_bairro).somente_leitura(leitura));
+                    });
+                    ui.columns(2, |c| {
+                        c[0].add(Campo::novo("Cidade", &mut f.end_cidade).somente_leitura(leitura));
+                        c[1].add(
+                            Campo::novo("UF", &mut f.end_uf)
+                                .somente_leitura(leitura)
+                                .marcador("MG"),
+                        );
+                    });
+                    ui.add(
+                        Campo::novo("CEP", &mut f.end_cep)
+                            .somente_leitura(leitura)
+                            .marcador("00000-000"),
+                    );
+                });
 
             if f.modo == Modo::Ver {
                 ui.add_space(Espaco::E16);
                 ui.separator();
-                ui.add_space(Espaco::E12);
-                ui.columns(2, |c| {
-                    kv(&mut c[0], "Telefone", &f.telefone);
-                    kv(&mut c[1], "E-mail", &f.email);
-                });
-                ui.add_space(Espaco::E12);
-                kv(ui, "Endereço", &f.endereco);
                 ui.add_space(Espaco::E12);
                 ui.columns(2, |c| {
                     kv(&mut c[0], "Papéis", &f.papeis);
@@ -510,6 +648,22 @@ fn kv(ui: &mut egui::Ui, chave: &str, valor: &str) {
     }));
 }
 
+/// Monta o endereço inicial pro formulário, se o logradouro foi preenchido — mesma decisão
+/// de `tela_os.rs` (residencial por padrão; a tela não expõe tipo de endereço, cadastro
+/// rápido de balcão).
+fn montar_endereco_inicial(f: &Form) -> Option<EnderecoInicial> {
+    (!f.end_logradouro.trim().is_empty()).then(|| EnderecoInicial {
+        tipo: TipoEndereco::Residencial,
+        logradouro: f.end_logradouro.clone(),
+        numero: f.end_numero.clone(),
+        complemento: (!f.end_complemento.trim().is_empty()).then(|| f.end_complemento.clone()),
+        bairro: f.end_bairro.clone(),
+        cidade: f.end_cidade.clone(),
+        uf: f.end_uf.clone(),
+        cep: f.end_cep.clone(),
+    })
+}
+
 fn criar(
     ctx: &egui::Context,
     motor: &MotorLocal,
@@ -526,6 +680,24 @@ fn criar(
     let pj = matches!(f.tipo, Some(TipoPessoa::Juridica));
     let doc = f.documento.trim().to_string();
     let tem_doc = !doc.is_empty();
+    let telefone = f.telefone.trim().to_string();
+    let email = f.email.trim().to_string();
+    // `CriarPessoa` só aceita um contato inicial — quando telefone E e-mail vêm preenchidos,
+    // o telefone entra na criação e o e-mail via `AdicionarContato` logo depois (mesmo padrão
+    // já usado pela abertura rápida de cliente em `tela_os.rs`).
+    let contato_inicial = if !telefone.is_empty() {
+        Some(ContatoInicial {
+            tipo: TipoContato::Whatsapp,
+            valor: telefone.clone(),
+        })
+    } else if !email.is_empty() {
+        Some(ContatoInicial {
+            tipo: TipoContato::Email,
+            valor: email.clone(),
+        })
+    } else {
+        None
+    };
     let cmd = CriarPessoa {
         tipo: f.tipo.unwrap_or(TipoPessoa::Fisica),
         nome: f.nome.clone(),
@@ -538,12 +710,30 @@ fn criar(
         }),
         documento_numero: tem_doc.then(|| doc.clone()),
         data_nascimento: None,
-        endereco: None,
-        contato: None,
+        endereco: montar_endereco_inicial(f),
+        contato: contato_inicial,
     };
     match motor.executar(sessao, "clientes.criar_pessoa.v1", &cmd) {
         Ok(r) => {
-            let _: PessoaCadastrada = r;
+            let r: PessoaCadastrada = r;
+            if !telefone.is_empty() && !email.is_empty() {
+                if let Err(e) = motor.executar(
+                    sessao,
+                    "clientes.adicionar_contato.v1",
+                    &AdicionarContato {
+                        pessoa: r.pessoa,
+                        tipo: TipoContato::Email,
+                        valor: email,
+                        principal: true,
+                    },
+                ) {
+                    notificar(
+                        ctx,
+                        Notificacao::aviso("Cliente criado, mas o e-mail não foi salvo")
+                            .detalhe(e.mensagem),
+                    );
+                }
+            }
             estado.form = None;
             estado.carregar(motor, sessao);
             notificar(ctx, Notificacao::sucesso("Cliente cadastrado"));
@@ -576,9 +766,115 @@ fn salvar(
     match motor.executar(sessao, "clientes.editar_pessoa.v1", &cmd) {
         Ok(r) => {
             let _: PessoaEditada = r;
+
+            // Só grava um contato/endereço novo quando o atendente de fato mudou o valor —
+            // `AdicionarContato`/`AdicionarEndereco` são aditivos (nunca sobrescrevem em
+            // linha), então chamar sempre empilharia uma linha idêntica a cada "Salvar".
+            let telefone = f.telefone.trim().to_string();
+            if !telefone.is_empty() && telefone != f.telefone_original.trim() {
+                if let Err(e) = motor.executar(
+                    sessao,
+                    "clientes.adicionar_contato.v1",
+                    &AdicionarContato {
+                        pessoa: id,
+                        tipo: TipoContato::Whatsapp,
+                        valor: telefone,
+                        principal: true,
+                    },
+                ) {
+                    notificar(
+                        ctx,
+                        Notificacao::aviso("Cliente atualizado, mas o telefone não foi salvo")
+                            .detalhe(e.mensagem),
+                    );
+                }
+            }
+            let email = f.email.trim().to_string();
+            if !email.is_empty() && email != f.email_original.trim() {
+                if let Err(e) = motor.executar(
+                    sessao,
+                    "clientes.adicionar_contato.v1",
+                    &AdicionarContato {
+                        pessoa: id,
+                        tipo: TipoContato::Email,
+                        valor: email,
+                        principal: true,
+                    },
+                ) {
+                    notificar(
+                        ctx,
+                        Notificacao::aviso("Cliente atualizado, mas o e-mail não foi salvo")
+                            .detalhe(e.mensagem),
+                    );
+                }
+            }
+            let assinatura_atual = assinatura_endereco(
+                &f.end_logradouro,
+                &f.end_numero,
+                &f.end_complemento,
+                &f.end_bairro,
+                &f.end_cidade,
+                &f.end_uf,
+                &f.end_cep,
+            );
+            if !f.end_logradouro.trim().is_empty() && assinatura_atual != f.endereco_original {
+                if let Some(endereco) = montar_endereco_inicial(f) {
+                    if let Err(e) = motor.executar(
+                        sessao,
+                        "clientes.adicionar_endereco.v1",
+                        &AdicionarEndereco {
+                            pessoa: id,
+                            tipo: endereco.tipo,
+                            logradouro: endereco.logradouro,
+                            numero: endereco.numero,
+                            complemento: endereco.complemento,
+                            bairro: endereco.bairro,
+                            cidade: endereco.cidade,
+                            uf: endereco.uf,
+                            cep: endereco.cep,
+                            principal: true,
+                        },
+                    ) {
+                        notificar(
+                            ctx,
+                            Notificacao::aviso("Cliente atualizado, mas o endereço não foi salvo")
+                                .detalhe(e.mensagem),
+                        );
+                    }
+                }
+            }
+
             estado.abrir_detalhe(motor, sessao, id);
             estado.carregar(motor, sessao);
             notificar(ctx, Notificacao::sucesso("Cliente atualizado"));
+        }
+        Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
+    }
+}
+
+fn excluir(
+    ctx: &egui::Context,
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaClientes,
+    pessoa: Id,
+) {
+    match motor.executar(
+        sessao,
+        "clientes.desativar_pessoa.v1",
+        &DesativarPessoa { pessoa },
+    ) {
+        Ok(r) => {
+            let _: mod_clientes::PessoaDesativada = r;
+            if estado
+                .form
+                .as_ref()
+                .is_some_and(|f| f.pessoa == Some(pessoa))
+            {
+                estado.form = None;
+            }
+            estado.carregar(motor, sessao);
+            notificar(ctx, Notificacao::sucesso("Cliente excluído"));
         }
         Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
     }

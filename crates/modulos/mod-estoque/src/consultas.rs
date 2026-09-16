@@ -125,6 +125,36 @@ impl Consulta for ProdutoPorCodigoBarras {
     }
 }
 
+/// Busca um produto pelo id — o suficiente pra tela de Estoque abrir "Editar" sem precisar
+/// do código de barras em mãos (`ProdutoPorCodigoBarras` já cobria o caso do balcão/PDV, mas
+/// exige saber o GTIN de antemão).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct ProdutoPorId {
+    /// O produto.
+    pub produto: Id,
+}
+
+impl Consulta for ProdutoPorId {
+    type Saida = Option<Produto>;
+    const PERMISSAO: &'static str = "estoque.produto.ver";
+
+    fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        conexao
+            .query_row(
+                "SELECT id, empresa, grupo_produto, nome, ncm, cest, codigo_barras, fabricante,
+                        codigo_fabricante, categoria_tecnica, especificacao_tecnica,
+                        compatibilidade, garantia_fornecedor_dias, localizacao_fisica,
+                        controla_grade, controla_lote, controla_validade, unidade_padrao,
+                        ponto_pedido, estoque_minimo, estoque_maximo, ativo, versao
+                 FROM estoque_produto WHERE empresa = ?1 AND id = ?2",
+                rusqlite::params![blob(ctx.empresa), blob(self.produto)],
+                produto_de_linha,
+            )
+            .optional()
+            .map_err(persist)
+    }
+}
+
 /// Um grupo de produto — o suficiente para popular um seletor.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ItemGrupoProduto {
@@ -369,7 +399,10 @@ pub fn movimentos_do_produto(
         )
         .map_err(persist)?;
     let linhas = stmt
-        .query_map(rusqlite::params![blob(produto), origem_modulo], movimento_de_linha)
+        .query_map(
+            rusqlite::params![blob(produto), origem_modulo],
+            movimento_de_linha,
+        )
         .map_err(persist)?;
     linhas
         .collect::<rusqlite::Result<Vec<_>>>()
@@ -567,10 +600,8 @@ pub fn detalhe_do_lote_por_codigo(
         return Ok(None);
     };
     let produto = produto_de_por_id(conexao, lote.produto)?;
-    let (produto_nome, localizacao_fisica) = produto.map_or_else(
-        || (String::new(), None),
-        |p| (p.nome, p.localizacao_fisica),
-    );
+    let (produto_nome, localizacao_fisica) =
+        produto.map_or_else(|| (String::new(), None), |p| (p.nome, p.localizacao_fisica));
     let local_nome = local_nome_de(conexao, lote.local)?;
     let aparelho_origem = match lote.aparelho_origem {
         Some(id) => buscar_aparelho_origem(conexao, id)?.map(|a| AparelhoOrigemResumo {

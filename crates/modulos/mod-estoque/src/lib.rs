@@ -77,17 +77,18 @@ pub use comandos::{
     registrar_entrada_com_lote_comum, registrar_entrada_comum, registrar_saida_comum,
     registrar_saida_de_lote_comum, AjustarSaldo, AparelhoOrigemRegistrado, CriarGrupoProduto,
     CriarLocal, CriarProduto, CriarUnidade, DadosEntrada, DadosNovoLote, DadosSaida,
-    DefinirPontoPedido, EditarDetalhesTecnicosProduto, EntradaComLoteRegistrada, EntradaGravada,
-    EntradaRegistrada, GrupoProdutoCriado, LocalCriado, ProdutoCriado, RegistrarAparelhoOrigem,
-    RegistrarEntrada, RegistrarEntradaComLote, RegistrarSaida, SaidaGravada, SaidaRegistrada,
-    SaldoAjustado, TipoLocal, UnidadeCriada,
+    DefinirAtivoProduto, DefinirPontoPedido, EditarDetalhesTecnicosProduto,
+    EntradaComLoteRegistrada, EntradaGravada, EntradaRegistrada, GrupoProdutoCriado, LocalCriado,
+    ProdutoCriado, RegistrarAparelhoOrigem, RegistrarEntrada, RegistrarEntradaComLote,
+    RegistrarSaida, SaidaGravada, SaidaRegistrada, SaldoAjustado, TipoLocal, UnidadeCriada,
 };
 pub use consultas::{
     movimentos_do_produto, produtos_abaixo_do_ponto_pedido, saldo_disponivel_do_produto,
     AparelhoOrigemResumo, DetalheDoLotePorCodigo, DetalheLote, GruposProduto,
     ItemAbaixoDoPontoPedido, ItemGrupoProduto, ItemLocal, ItemLoteDisponivel, ItemProdutoComSaldo,
     ItemUnidade, Locais, LotesDisponiveisDoProduto, MovimentosDoProduto, ProdutoPorCodigoBarras,
-    ProdutosAbaixoDoPontoPedido, ProdutosComSaldo, SaldoDisponivelDoProduto, Unidades,
+    ProdutoPorId, ProdutosAbaixoDoPontoPedido, ProdutosComSaldo, SaldoDisponivelDoProduto,
+    Unidades,
 };
 pub use erros::ErroEstoque;
 pub use inventario::{AjusteInventario, ContagemItem, EstadoInventario, Inventario};

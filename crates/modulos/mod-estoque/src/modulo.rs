@@ -6,14 +6,14 @@ use cardeal_modkit::{Manifesto, Modulo, Registro};
 use cardeal_storage::ConjuntoMigracoes;
 
 use crate::comandos::{
-    AjustarSaldo, CriarGrupoProduto, CriarLocal, CriarProduto, CriarUnidade, DefinirPontoPedido,
-    EditarDetalhesTecnicosProduto, RegistrarAparelhoOrigem, RegistrarEntrada,
+    AjustarSaldo, CriarGrupoProduto, CriarLocal, CriarProduto, CriarUnidade, DefinirAtivoProduto,
+    DefinirPontoPedido, EditarDetalhesTecnicosProduto, RegistrarAparelhoOrigem, RegistrarEntrada,
     RegistrarEntradaComLote, RegistrarSaida,
 };
 use crate::consultas::{
     DetalheDoLotePorCodigo, GruposProduto, Locais, LotesDisponiveisDoProduto, MovimentosDoProduto,
-    ProdutoPorCodigoBarras, ProdutosAbaixoDoPontoPedido, ProdutosComSaldo, SaldoDisponivelDoProduto,
-    Unidades,
+    ProdutoPorCodigoBarras, ProdutoPorId, ProdutosAbaixoDoPontoPedido, ProdutosComSaldo,
+    SaldoDisponivelDoProduto, Unidades,
 };
 use crate::manifesto::MANIFESTO;
 use crate::migracoes;
@@ -37,6 +37,7 @@ impl Modulo for ModuloEstoque {
             .comando::<CriarProduto>("estoque.criar_produto.v1")
             .comando::<EditarDetalhesTecnicosProduto>("estoque.editar_detalhes_tecnicos_produto.v1")
             .comando::<DefinirPontoPedido>("estoque.definir_ponto_pedido.v1")
+            .comando::<DefinirAtivoProduto>("estoque.definir_ativo_produto.v1")
             .comando::<CriarLocal>("estoque.criar_local.v1")
             .comando::<RegistrarEntrada>("estoque.registrar_entrada.v1")
             .comando::<RegistrarEntradaComLote>("estoque.registrar_entrada_com_lote.v1")
@@ -45,6 +46,7 @@ impl Modulo for ModuloEstoque {
             .comando::<RegistrarAparelhoOrigem>("estoque.registrar_aparelho_origem.v1")
             .consulta::<ProdutosComSaldo>("estoque.produtos_com_saldo.v1")
             .consulta::<ProdutoPorCodigoBarras>("estoque.produto_por_codigo_barras.v1")
+            .consulta::<ProdutoPorId>("estoque.produto_por_id.v1")
             .consulta::<SaldoDisponivelDoProduto>("estoque.saldo_disponivel_do_produto.v1")
             .consulta::<ProdutosAbaixoDoPontoPedido>("estoque.produtos_abaixo_do_ponto_pedido.v1")
             .consulta::<MovimentosDoProduto>("estoque.movimentos_do_produto.v1")

@@ -181,6 +181,9 @@ pub fn mostrar(
             if ui.add(Botao::secundario("Importar XML")).clicked() {
                 importar_xml(ui.ctx(), motor, sessao, estado);
             }
+            if ui.add(Botao::secundario("Importar pasta")).clicked() {
+                importar_pasta_xml(ui.ctx(), motor, sessao, estado);
+            }
         },
         |ui, estado| {
             if let Some(erro) = &estado.erro {
@@ -202,52 +205,161 @@ pub fn mostrar(
     }
 }
 
-/// Abre o seletor de arquivo do sistema, lê o `.xml` escolhido e importa a nota via
-/// `compras.importar_nota_de_arquivo_xml.v1` (`mod_compras::ImportarNotaDeArquivoXml`) — a
-/// leitura do arquivo em si é responsabilidade desta tela; o comando só recebe o texto já em
-/// UTF-8 e roda a mesma cascata de casamento/rateio que a nota manual usa. Idempotente por
-/// chave de acesso: reimportar o mesmo arquivo não duplica, só reabre a nota existente.
+/// Abre o seletor de arquivo do sistema (multi-seleção) e importa cada `.xml` escolhido —
+/// pedido explícito do usuário (2026-09-15): a entrega de um fornecedor quase sempre traz
+/// mais de uma nota, e repetir "escolher arquivo → conferir → fechar" uma vez por XML era a
+/// burocracia que sobrava na importação. `importar_varios_xml` faz o trabalho de verdade.
 fn importar_xml(
     ctx: &egui::Context,
     motor: &MotorLocal,
     sessao: &SessaoLocal,
     estado: &mut EstadoTelaCompras,
 ) {
-    let Some(caminho) = rfd::FileDialog::new()
+    let caminhos = rfd::FileDialog::new()
         .add_filter("XML de nota fiscal", &["xml"])
-        .pick_file()
-    else {
+        .pick_files()
+        .unwrap_or_default();
+    importar_varios_xml(ctx, motor, sessao, estado, caminhos);
+}
+
+/// Abre o seletor de pasta do sistema e importa todo `.xml` que estiver direto nela (sem
+/// descer em subpastas) — pra quando o fornecedor/contador larga várias notas na mesma pasta
+/// e o balcão só quer apontar pra ela de vez em quando, sem escolher arquivo por arquivo.
+/// Reimportar uma pasta já processada não duplica nada (mesma idempotência por chave de
+/// acesso de sempre) — clicar de novo depois que chegam notas novas é seguro.
+fn importar_pasta_xml(
+    ctx: &egui::Context,
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaCompras,
+) {
+    let Some(pasta) = rfd::FileDialog::new().pick_folder() else {
         return;
     };
-    let xml = match std::fs::read_to_string(&caminho) {
-        Ok(c) => c,
+    let caminhos: Vec<std::path::PathBuf> = match std::fs::read_dir(&pasta) {
+        Ok(entradas) => entradas
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .filter(|p| {
+                p.is_file()
+                    && p.extension()
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("xml"))
+            })
+            .collect(),
         Err(e) => {
-            notificar(ctx, Notificacao::erro(format!("Não foi possível ler o arquivo: {e}")));
+            notificar(
+                ctx,
+                Notificacao::erro(format!("Não foi possível abrir a pasta: {e}")),
+            );
             return;
         }
     };
-    if xml.trim().is_empty() {
-        notificar(ctx, Notificacao::aviso("O arquivo escolhido está vazio."));
+    if caminhos.is_empty() {
+        notificar(
+            ctx,
+            Notificacao::aviso("Nenhum .xml encontrado nessa pasta."),
+        );
+        return;
+    }
+    importar_varios_xml(ctx, motor, sessao, estado, caminhos);
+}
+
+/// O miolo comum de importar N arquivos XML de uma vez: lê cada um, chama
+/// `compras.importar_nota_de_arquivo_xml.v1` (`mod_compras::ImportarNotaDeArquivoXml`) — a
+/// leitura do arquivo em si é responsabilidade desta tela; o comando só recebe o texto já em
+/// UTF-8 e roda a mesma cascata de casamento/rateio que a nota manual usa. Idempotente por
+/// chave de acesso: reimportar o mesmo arquivo não duplica, só reabre a nota existente — por
+/// isso é seguro chamar isto de novo sobre uma seleção/pasta que já tinha sido importada
+/// antes (só as notas novas de fato entram). Com um único arquivo, mantém o comportamento de
+/// antes: abre o dialog "Ver" da nota direto. Com vários, só mostra o resumo — abrir N
+/// diálogos em sequência seria pior que deixar o balcão escolher da lista.
+fn importar_varios_xml(
+    ctx: &egui::Context,
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaCompras,
+    caminhos: Vec<std::path::PathBuf>,
+) {
+    if caminhos.is_empty() {
+        return;
+    }
+    let total = caminhos.len();
+    let mut importadas = 0usize;
+    let mut precisam_revisao = 0usize;
+    let mut erros: Vec<String> = Vec::new();
+    let mut ultima_nota = None;
+
+    for caminho in &caminhos {
+        let nome = caminho.file_name().map_or_else(
+            || caminho.to_string_lossy().into_owned(),
+            |n| n.to_string_lossy().into_owned(),
+        );
+        let xml = match std::fs::read_to_string(caminho) {
+            Ok(c) => c,
+            Err(e) => {
+                erros.push(format!("{nome}: não foi possível ler ({e})"));
+                continue;
+            }
+        };
+        if xml.trim().is_empty() {
+            erros.push(format!("{nome}: arquivo vazio"));
+            continue;
+        }
+        match motor.executar(
+            sessao,
+            "compras.importar_nota_de_arquivo_xml.v1",
+            &ImportarNotaDeArquivoXml { xml },
+        ) {
+            Ok(relatorio) => {
+                importadas += 1;
+                if relatorio.itens_nao_casados > 0 {
+                    precisam_revisao += 1;
+                }
+                ultima_nota = Some(relatorio.nota_entrada);
+            }
+            Err(e) => erros.push(format!("{nome}: {}", e.mensagem)),
+        }
+    }
+
+    estado.carregar(motor, sessao);
+
+    if total == 1 {
+        if let Some(nota) = ultima_nota {
+            estado.abrir_nota(motor, sessao, nota);
+        }
+        if let Some(erro) = erros.first() {
+            notificar(ctx, Notificacao::erro(erro.clone()));
+            return;
+        }
+        let msg = if precisam_revisao == 0 {
+            "Nota importada — todos os itens já casaram."
+        } else {
+            "Nota importada — confira o casamento dos itens."
+        };
+        notificar(ctx, Notificacao::sucesso(msg));
         return;
     }
 
-    match motor.executar(
-        sessao,
-        "compras.importar_nota_de_arquivo_xml.v1",
-        &ImportarNotaDeArquivoXml { xml },
-    ) {
-        Ok(relatorio) => {
-            estado.carregar(motor, sessao);
-            estado.abrir_nota(motor, sessao, relatorio.nota_entrada);
-            let msg = if relatorio.itens_nao_casados == 0 {
-                "Nota importada — todos os itens já casaram."
-            } else {
-                "Nota importada — confira o casamento dos itens."
-            };
-            notificar(ctx, Notificacao::sucesso(msg));
-        }
-        Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
+    let titulo = format!("{importadas} de {total} nota(s) importada(s)");
+    let mut n = if erros.is_empty() {
+        Notificacao::sucesso(titulo)
+    } else {
+        Notificacao::aviso(titulo)
+    };
+    let mut detalhe = Vec::new();
+    if precisam_revisao > 0 {
+        detalhe.push(format!(
+            "{precisam_revisao} precisam de revisão do casamento de item"
+        ));
     }
+    if !erros.is_empty() {
+        detalhe.push(format!("{} com erro:", erros.len()));
+        detalhe.extend(erros);
+    }
+    if !detalhe.is_empty() {
+        n = n.detalhe(detalhe.join("\n"));
+    }
+    notificar(ctx, n);
 }
 
 fn lista(
@@ -375,7 +487,9 @@ fn ordenar_notas(
             2 => a.data_emissao.cmp(&b.data_emissao),
             3 => a.itens.cmp(&b.itens),
             4 => a.valor_total.cmp(&b.valor_total),
-            5 => estado_nota_etiqueta(a.estado).0.cmp(estado_nota_etiqueta(b.estado).0),
+            5 => estado_nota_etiqueta(a.estado)
+                .0
+                .cmp(estado_nota_etiqueta(b.estado).0),
             _ => std::cmp::Ordering::Equal,
         };
         match direcao {
@@ -712,8 +826,7 @@ fn linha_item_casamento(
                 EstadoCasamento::NaoCasado => {
                     ui.add_space(Espaco::E8);
                     ui.add(
-                        Rotulo::campo("Sem produto vinculado — busque abaixo.")
-                            .cor(cores.negativo),
+                        Rotulo::campo("Sem produto vinculado — busque abaixo.").cor(cores.negativo),
                     );
                     ui.add_space(Espaco::E4);
                     SeletorBusca::novo("Produto", busca, selecionado)

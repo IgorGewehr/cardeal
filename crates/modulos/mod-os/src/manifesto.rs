@@ -12,6 +12,18 @@ use cardeal_modkit::{
 /// O id estável do módulo.
 pub const ID: IdModulo = IdModulo::novo("os");
 
+// `os` chama `mod_financeiro`/`mod_estoque`/`mod_clientes` direto (mesma transação — ver
+// `docs/contratos-internos.md` §7 regra 2): `FaturarOrdemServico` grava título via
+// `ConstrutorTitulo`, `AplicarPeca` chama `mod_estoque::registrar_saida_comum`, e a abertura
+// de OS valida o cliente contra `mod_clientes`. Essas três eram dependência dura de Cargo.toml
+// sem serem dependência dura do *manifesto* (achado ao revisar o pedido do usuário por núcleo
+// realmente interligado) — sem isso, ativar "os" para uma empresa sem financeiro/estoque/
+// clientes também ativos não falhava na hora certa (`RegistroModulos::resolver`), só mais
+// tarde, contra uma tabela que nunca foi migrada.
+const FINANCEIRO: IdModulo = IdModulo::novo("financeiro");
+const ESTOQUE: IdModulo = IdModulo::novo("estoque");
+const CLIENTES: IdModulo = IdModulo::novo("clientes");
+
 const fn perm(
     chave: &'static str,
     descricao: &'static str,
@@ -87,7 +99,7 @@ const PERMISSOES: &[Permissao] = &[
     ),
     perm(
         "os.ordem.editar_dados",
-        "Completar/corrigir equipamento e defeito relatado",
+        "Corrigir aparelho e defeito relatado",
         Risco::Baixo,
         None,
     ),
@@ -223,7 +235,7 @@ pub static MANIFESTO: Manifesto = Manifesto {
     versao: (0, 1, 0),
     descricao: "Abertura, laudo, orçamento, execução, garantia e faturamento de OS.",
     icone: Icone::Ferramenta,
-    depende_de: &[],
+    depende_de: &[FINANCEIRO, ESTOQUE, CLIENTES],
     melhora_com: &[],
     conflita_com: &[],
     submodulos: SUBMODULOS,

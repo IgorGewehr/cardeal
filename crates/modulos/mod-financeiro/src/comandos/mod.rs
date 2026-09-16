@@ -77,8 +77,10 @@ fn especie_texto(e: EspecieTitulo) -> &'static str {
 pub struct DadosLancamentoTitulo {
     /// A receber ou a pagar.
     pub especie: EspecieTitulo,
-    /// Com quem — cliente, fornecedor, funcionário ou sócio.
-    pub contraparte: Contraparte,
+    /// Com quem — cliente, fornecedor, funcionário ou sócio. `None` no lançamento avulso sem
+    /// pessoa informada (pedido explícito do usuário) — OS/vendas/compras sempre passam
+    /// `Some`, é a origem do próprio lançamento.
+    pub contraparte: Option<Contraparte>,
     /// O valor total do título (soma das parcelas).
     pub valor_total: Dinheiro,
     /// Data de emissão.

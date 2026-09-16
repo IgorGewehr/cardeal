@@ -90,14 +90,12 @@ pub use categoria::CategoriaFinanceira;
 pub use comandos::{
     baixar_pagamento_comum, baixar_recebimento_comum, lancar_titulo_comum,
     materializar_recorrencias_pendentes, AbrirCaixa, BaixaFoiEstornada, BaixarPagamento,
-    BaixarRecebimento, CadastrarCaixa, CaixaCadastrado,
-    CaixaFoiAberto,
-    CaixaFoiFechado, CategoriaCriada, ContaBancariaCriada, CriarCategoria, CriarContaBancaria,
-    CriarRecorrencia, DadosLancamentoTitulo, EstornarBaixa, FecharCaixa, LancarTituloAPagar,
-    LancarTituloAReceber, PagamentoBaixado, RecebimentoBaixado, RecorrenciaCriada,
-    RegistrarSangria, RegistrarSuprimento, RenegociarTitulo, SangriaFoiRegistrada,
-    SuprimentoFoiRegistrado, TituloAPagarLancado, TituloAReceberLancado, TituloFoiRenegociado,
-    TituloGravado,
+    BaixarRecebimento, CadastrarCaixa, CaixaCadastrado, CaixaFoiAberto, CaixaFoiFechado,
+    CategoriaCriada, ContaBancariaCriada, CriarCategoria, CriarContaBancaria, CriarRecorrencia,
+    DadosLancamentoTitulo, EstornarBaixa, FecharCaixa, LancarTituloAPagar, LancarTituloAReceber,
+    PagamentoBaixado, RecebimentoBaixado, RecorrenciaCriada, RegistrarSangria, RegistrarSuprimento,
+    RenegociarTitulo, SangriaFoiRegistrada, SuprimentoFoiRegistrado, TituloAPagarLancado,
+    TituloAReceberLancado, TituloFoiRenegociado, TituloGravado,
 };
 pub use consultas::{
     BaixasDaParcela, Caixas, Categorias, ContasDeCaixa, ContasDeResultado, ContasDisponiveis,

@@ -100,7 +100,12 @@ impl ItemPeca {
     ///
     /// # Errors
     /// [`ErroOs::PecaJaAplicada`] se já havia sido aplicada.
-    pub fn aplicar(&mut self, custo_unitario: Preco, local: Id, lote: Option<Id>) -> Result<(), ErroOs> {
+    pub fn aplicar(
+        &mut self,
+        custo_unitario: Preco,
+        local: Id,
+        lote: Option<Id>,
+    ) -> Result<(), ErroOs> {
         if self.aplicada {
             return Err(ErroOs::PecaJaAplicada);
         }
@@ -211,7 +216,8 @@ mod testes {
         );
 
         let lote = Id::novo();
-        item.aplicar(Preco::reais(70), Id::novo(), Some(lote)).unwrap();
+        item.aplicar(Preco::reais(70), Id::novo(), Some(lote))
+            .unwrap();
         assert_eq!(item.lote, Some(lote));
         assert_eq!(item.total_custo(), Dinheiro::reais(70));
 

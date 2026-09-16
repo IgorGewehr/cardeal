@@ -165,6 +165,47 @@ CREATE INDEX financeiro_titulo_origem
     ON financeiro_titulo(empresa, origem_modulo, origem_id);
 ";
 
+// Pedido explícito do usuário: lançar um título avulso não deve exigir cliente/fornecedor
+// cadastrado. `contraparte_tipo`/`contraparte_id` eram `NOT NULL` desde a v1 — SQLite não tem
+// `ALTER COLUMN DROP NOT NULL`, então a única forma é reconstruir a tabela (recriar, copiar,
+// trocar o nome) — a mesma receita que a documentação oficial do SQLite recomenda para esse
+// caso. `financeiro_recorrencia` fica de fora de propósito: uma recorrência sempre sabe quem
+// cobrar, não é um lançamento avulso.
+const SQL_CONTRAPARTE_OPCIONAL: &str = r"
+CREATE TABLE financeiro_titulo_novo (
+    id               BLOB PRIMARY KEY,
+    empresa          BLOB    NOT NULL REFERENCES nucleo_empresa(id),
+    especie          TEXT    NOT NULL CHECK (especie IN ('Receber','Pagar')),
+    contraparte_tipo TEXT    CHECK (contraparte_tipo IN ('Cliente','Fornecedor','Funcionario','Socio','Outro')),
+    contraparte_id   BLOB,
+    origem_modulo    TEXT    NOT NULL,
+    origem_id        BLOB,
+    emissao          INTEGER NOT NULL,
+    valor_original   INTEGER NOT NULL,
+    forma_cobranca   TEXT    NOT NULL,
+    centro_custo     BLOB,
+    categoria        BLOB    REFERENCES financeiro_categoria(id),
+    observacao       TEXT,
+    cancelado_em     INTEGER,
+    versao           INTEGER NOT NULL DEFAULT 1,
+    criado_em        INTEGER NOT NULL,
+    criado_por       BLOB    NOT NULL
+) STRICT;
+INSERT INTO financeiro_titulo_novo
+    SELECT id, empresa, especie, contraparte_tipo, contraparte_id, origem_modulo, origem_id,
+           emissao, valor_original, forma_cobranca, centro_custo, categoria, observacao,
+           cancelado_em, versao, criado_em, criado_por
+    FROM financeiro_titulo;
+DROP INDEX financeiro_titulo_contraparte;
+DROP INDEX financeiro_titulo_origem;
+DROP TABLE financeiro_titulo;
+ALTER TABLE financeiro_titulo_novo RENAME TO financeiro_titulo;
+CREATE INDEX financeiro_titulo_contraparte
+    ON financeiro_titulo(empresa, contraparte_tipo, contraparte_id);
+CREATE INDEX financeiro_titulo_origem
+    ON financeiro_titulo(empresa, origem_modulo, origem_id);
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -188,6 +229,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 4,
         nome: "financeiro_indice_origem",
         sql: SQL_INDICE_ORIGEM,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 5,
+        nome: "financeiro_contraparte_opcional",
+        sql: SQL_CONTRAPARTE_OPCIONAL,
         tipo: TipoMigracao::Esquema,
     },
 ];

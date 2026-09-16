@@ -1,11 +1,11 @@
 //! Abre uma ordem de serviço.
 //!
-//! `docs/modulos/os.md` §5. Pedido explícito do usuário: na abertura, só o nome do cliente
-//! e `defeito_relatado` são obrigatórios — `equipamento` é opcional, completável depois via
-//! `EditarDadosDaOrdem`. O cliente precisa já existir em `clientes_pessoa` (verificado aqui
-//! via `mod_clientes::pessoa_por_id`, a mesma transação). O vínculo com
-//! `agenda.CriarCompromisso` fica para quando o módulo `agenda` existir — por ora
-//! `compromisso` não é gravado.
+//! `docs/modulos/os.md` §5. Na abertura, o nome do cliente, `equipamento` (o aparelho
+//! trazido para reparo) e `defeito_relatado` são obrigatórios — `equipamento` ainda pode ser
+//! corrigido depois via `EditarDadosDaOrdem`. O cliente precisa já existir em
+//! `clientes_pessoa` (verificado aqui via `mod_clientes::pessoa_por_id`, a mesma transação).
+//! O vínculo com `agenda.CriarCompromisso` fica para quando o módulo `agenda` existir — por
+//! ora `compromisso` não é gravado.
 
 use cardeal_kernel::{Erro, Id, Resultado};
 use cardeal_modkit::{Comando, Ctx, Risco};
@@ -23,7 +23,7 @@ use crate::repositorio::RepositorioOs;
 pub struct AbrirOrdemServico {
     /// O cliente (papel `Cliente` em `clientes_pessoa`).
     pub cliente: Id,
-    /// Descrição livre do equipamento — **opcional**, pode vir vazia.
+    /// Descrição livre do aparelho trazido para reparo — **obrigatório**.
     pub equipamento: String,
     /// O que o cliente relatou querer resolver — **obrigatório** (junto do cliente, é o
     /// único texto que a abertura exige).

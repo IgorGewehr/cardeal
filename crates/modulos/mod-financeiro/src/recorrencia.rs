@@ -252,7 +252,7 @@ impl Recorrencia {
         let mut c = ConstrutorTitulo::novo(
             self.empresa,
             self.especie,
-            self.contraparte,
+            Some(self.contraparte),
             valor,
             vencimento,
         )

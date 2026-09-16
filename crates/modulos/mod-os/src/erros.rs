@@ -5,10 +5,17 @@ use cardeal_kernel::{CodigoErro, Detalhes, ErroDominio};
 /// Tudo que pode dar errado na ordem de serviço, no orçamento e na execução.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ErroOs {
-    /// O defeito relatado (na abertura) veio vazio — junto do nome do cliente, é o único
-    /// texto obrigatório para abrir uma OS.
+    /// O defeito relatado (na abertura) veio vazio — junto do nome do cliente e do aparelho,
+    /// é texto obrigatório para abrir uma OS.
     #[error("O defeito relatado não pode ser vazio")]
     DefeitoRelatadoVazio,
+
+    /// `equipamento` (na abertura) veio vazio — é o aparelho físico trazido para reparo,
+    /// agora obrigatório: o balcão relatou confundir o rótulo antigo ("Equipamento
+    /// (opcional)") com "equipamento usado no reparo" e abrir OS sem registrar de qual
+    /// aparelho se tratava.
+    #[error("O aparelho não pode ser vazio")]
+    EquipamentoVazio,
 
     /// `AbrirOrdemServico` com um `cliente` que não existe em `clientes_pessoa`.
     #[error("O cliente informado não existe")]
@@ -75,9 +82,11 @@ pub enum ErroOs {
     #[error("Ainda há {0} peça(s) do orçamento pendente(s) de aplicação")]
     PecaPendenteDeAplicacao(usize),
 
-    /// `FaturarOrdemServico` sobre uma OS que não está `Concluida`.
-    #[error("A ordem de serviço ainda não foi concluída")]
-    OsNaoConcluida,
+    /// `FaturarOrdemServico` sobre uma OS `Cancelada`/`Reprovada` — essas nunca faturam
+    /// (2026-09-15: faturar deixou de exigir `Concluida`, mas continua bloqueado nas duas
+    /// terminais que significam "isso não aconteceu").
+    #[error("Uma ordem cancelada ou reprovada não pode ser faturada")]
+    OsCanceladaOuReprovada,
 
     /// `FaturarOrdemServico` sobre uma OS já faturada.
     #[error("Esta ordem de serviço já foi faturada")]
@@ -105,6 +114,7 @@ impl ErroDominio for ErroOs {
     fn codigo(&self) -> CodigoErro {
         match self {
             Self::DefeitoRelatadoVazio
+            | Self::EquipamentoVazio
             | Self::NadaParaAtualizar
             | Self::DescricaoDoProblemaVazia
             | Self::DescricaoDeServicoVazia
@@ -120,7 +130,7 @@ impl ErroDominio for ErroOs {
             | Self::PecaJaAplicada
             | Self::PecaNaoAplicadaOuJaEstornada
             | Self::PecaPendenteDeAplicacao(_)
-            | Self::OsNaoConcluida
+            | Self::OsCanceladaOuReprovada
             | Self::OsJaFaturada
             | Self::TecnicoJaTemApontamentoAberto
             | Self::ApontamentoJaEncerrado

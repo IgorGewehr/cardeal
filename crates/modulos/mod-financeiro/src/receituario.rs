@@ -98,12 +98,12 @@ pub fn lancar_titulo(
         c = match titulo.especie {
             EspecieTitulo::Receber => c
                 .debitar(contas.contraparte, parcela.valor)
-                .contraparte(titulo.contraparte)
+                .contraparte_se(titulo.contraparte)
                 .creditar(contas.resultado, parcela.valor),
             EspecieTitulo::Pagar => c
                 .debitar(contas.resultado, parcela.valor)
                 .creditar(contas.contraparte, parcela.valor)
-                .contraparte(titulo.contraparte),
+                .contraparte_se(titulo.contraparte),
         };
 
         lancamentos.push(c.construir().map_err(|_| ErroFinanceiro::ValorInvalido)?);
@@ -125,7 +125,7 @@ pub fn lancar_titulo(
 /// improvável do construtor como [`ErroFinanceiro::ValorInvalido`].
 pub fn baixar_parcela(
     especie: EspecieTitulo,
-    contraparte: Contraparte,
+    contraparte: Option<Contraparte>,
     parcela: &Parcela,
     plano: &PlanoBaixa,
     contas: ContasBaixa,
@@ -152,11 +152,11 @@ pub fn baixar_parcela(
             .debitar(contas.conta_destino, plano.valor_recebido)
             .debitar_se(contas.desconto, plano.desconto)
             .creditar(contas.contraparte, plano.principal)
-            .contraparte(contraparte)
+            .contraparte_se(contraparte)
             .creditar_se(contas.encargos, encargos),
         EspecieTitulo::Pagar => c
             .debitar(contas.contraparte, plano.principal)
-            .contraparte(contraparte)
+            .contraparte_se(contraparte)
             .debitar_se(contas.encargos, encargos)
             .creditar(contas.conta_destino, plano.valor_recebido)
             .creditar_se(contas.desconto, plano.desconto),
@@ -191,7 +191,7 @@ mod testes {
         let tcp = ConstrutorTitulo::novo(
             Id::novo(),
             EspecieTitulo::Receber,
-            Contraparte::Cliente(Id::novo()),
+            Some(Contraparte::Cliente(Id::novo())),
             Dinheiro::reais(90),
             hoje(),
         )
@@ -219,7 +219,7 @@ mod testes {
         let mut parcela = ConstrutorTitulo::novo(
             Id::novo(),
             EspecieTitulo::Receber,
-            Contraparte::Cliente(Id::novo()),
+            Some(Contraparte::Cliente(Id::novo())),
             Dinheiro::reais(100),
             hoje(),
         )
@@ -242,7 +242,7 @@ mod testes {
         };
         let l = baixar_parcela(
             EspecieTitulo::Receber,
-            Contraparte::Cliente(Id::novo()),
+            Some(Contraparte::Cliente(Id::novo())),
             &parcela,
             &plano,
             contas,
@@ -261,7 +261,7 @@ mod testes {
         let parcela = ConstrutorTitulo::novo(
             Id::novo(),
             EspecieTitulo::Pagar,
-            Contraparte::Fornecedor(Id::novo()),
+            Some(Contraparte::Fornecedor(Id::novo())),
             Dinheiro::reais(500),
             hoje(),
         )
@@ -281,7 +281,7 @@ mod testes {
         };
         let l = baixar_parcela(
             EspecieTitulo::Pagar,
-            Contraparte::Fornecedor(Id::novo()),
+            Some(Contraparte::Fornecedor(Id::novo())),
             &parcela,
             &plano,
             contas,

@@ -186,6 +186,27 @@ pub(crate) fn contraparte_join(tipo: &str, id: Vec<u8>) -> Contraparte {
     }
 }
 
+/// Como [`contraparte_split`], mas para `financeiro_titulo` — a única tabela onde a
+/// contraparte é opcional (lançamento avulso sem pessoa informada; `financeiro_recorrencia`
+/// continua exigindo, sempre usa [`contraparte_split`] direto).
+fn contraparte_split_opt(c: Option<Contraparte>) -> (Option<&'static str>, Option<Vec<u8>>) {
+    match c {
+        Some(c) => {
+            let (t, id) = contraparte_split(c);
+            (Some(t), Some(id))
+        }
+        None => (None, None),
+    }
+}
+
+/// Como [`contraparte_join`], mas para `financeiro_titulo` (ver [`contraparte_split_opt`]).
+pub(crate) fn contraparte_join_opt(
+    tipo: Option<String>,
+    id: Option<Vec<u8>>,
+) -> Option<Contraparte> {
+    Some(contraparte_join(&tipo?, id?))
+}
+
 fn estado_sessao_txt(e: EstadoSessao) -> &'static str {
     match e {
         EstadoSessao::Aberta => "Aberta",
@@ -272,7 +293,7 @@ impl<'a, 'b> RepositorioFinanceiro<'a, 'b> {
     /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
     pub fn inserir_titulo(&mut self, tcp: &TituloComParcelas) -> Resultado<()> {
         let t = &tcp.titulo;
-        let (cp_tipo, cp_id) = contraparte_split(t.contraparte);
+        let (cp_tipo, cp_id) = contraparte_split_opt(t.contraparte);
         self.conn()
             .execute(
                 "INSERT INTO financeiro_titulo
@@ -842,13 +863,13 @@ fn parcela_de_linha(r: &rusqlite::Row<'_>) -> rusqlite::Result<Parcela> {
 }
 
 pub(crate) fn titulo_de_linha(r: &rusqlite::Row<'_>) -> rusqlite::Result<Titulo> {
-    let cp_tipo: String = r.get(3)?;
-    let cp_id: Vec<u8> = r.get(4)?;
+    let cp_tipo: Option<String> = r.get(3)?;
+    let cp_id: Option<Vec<u8>> = r.get(4)?;
     Ok(Titulo {
         id: id_de(r.get::<_, Vec<u8>>(0)?),
         empresa: id_de(r.get::<_, Vec<u8>>(1)?),
         especie: especie_de(&r.get::<_, String>(2)?),
-        contraparte: contraparte_join(&cp_tipo, cp_id),
+        contraparte: contraparte_join_opt(cp_tipo, cp_id),
         origem_modulo: r.get(5)?,
         origem_id: r.get::<_, Option<Vec<u8>>>(6)?.map(id_de),
         emissao: data_de(r.get::<_, i64>(7)?),

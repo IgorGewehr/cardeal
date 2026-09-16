@@ -12,12 +12,12 @@ use mod_financeiro::{
     materializar_recorrencias_pendentes, AbrirCaixa, BaixarPagamento, BaixarRecebimento,
     CadastrarCaixa, CaixaFoiAberto, CaixaFoiFechado, CategoriaCriada, CategoriaFinanceira,
     Categorias, ConstrutorTitulo, CriarCategoria, CriarContaBancaria, CriarRecorrencia,
-    EspecieTitulo, EstornarBaixa, FecharCaixa, ItemTituloEmAberto, ItemTotalPorCategoria,
-    LancarTituloAPagar, LancarTituloAReceber, MeioPagamento, ModuloFinanceiro, PagamentoBaixado,
-    Periodicidade, PoliticaJuros, RecebimentoBaixado, RecorrenciaCriada, RegistrarSangria,
-    RegistrarSuprimento,
-    RenegociarTitulo, RepositorioFinanceiro, SangriaFoiRegistrada, SuprimentoFoiRegistrado,
-    TipoValor, TituloAPagarLancado, TituloAReceberLancado, TituloDaOrigem, TitulosAReceberEmAberto,
+    EspecieTitulo, EstornarBaixa, ExtratoDisponivel, FecharCaixa, ItemTituloEmAberto,
+    ItemTotalPorCategoria, LancarTituloAPagar, LancarTituloAReceber, MeioPagamento,
+    ModuloFinanceiro, PagamentoBaixado, Periodicidade, PoliticaJuros, RecebimentoBaixado,
+    RecorrenciaCriada, RegistrarSangria, RegistrarSuprimento, RenegociarTitulo,
+    RepositorioFinanceiro, SangriaFoiRegistrada, SuprimentoFoiRegistrado, TipoValor,
+    TituloAPagarLancado, TituloAReceberLancado, TituloDaOrigem, TitulosAReceberEmAberto,
     TotalPorCategoriaNoPeriodo, MANIFESTO,
 };
 use serde::Serialize;
@@ -159,7 +159,7 @@ fn lancar(
     parcelas: u16,
 ) -> TituloAReceberLancado {
     let cmd = LancarTituloAReceber {
-        cliente: Id::novo(),
+        cliente: Some(Id::novo()),
         valor_total: valor,
         emissao: hoje(),
         parcelas,
@@ -190,6 +190,66 @@ fn lancar_titulo_cria_parcelas_e_um_lancamento_confirmado_por_parcela() {
     assert_eq!(out.parcelas.len(), 3);
     assert_eq!(out.lancamentos.len(), 3);
     assert_eq!(conta_lancamentos(&arm, empresa), 3);
+}
+
+/// Pedido explícito do usuário: lançar um título avulso não deve exigir cliente/fornecedor
+/// cadastrado — `cliente`/`fornecedor: None` ainda gera título, parcela e lançamento
+/// balanceado normalmente, só sem a partida marcada com uma contraparte.
+#[test]
+fn lancar_titulo_sem_pessoa_informada_funciona_para_receber_e_pagar() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloFinanceiro]).unwrap();
+
+    let s_receber = sessao(empresa, &["financeiro.receber.criar"]);
+    let receber = LancarTituloAReceber {
+        cliente: None,
+        valor_total: Dinheiro::reais(150),
+        emissao: hoje(),
+        parcelas: 1,
+        primeiro_vencimento: hoje(),
+        intervalo_dias: 0,
+        observacao: Some("Receita avulsa sem cliente identificado".to_string()),
+        categoria: None,
+    };
+    let saida: TituloAReceberLancado = postcard::from_bytes(
+        &d.executar_comando(
+            "financeiro.lancar_titulo_a_receber.v1",
+            &carga(&receber),
+            &s_receber,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(saida.parcelas.len(), 1);
+
+    let s_pagar = sessao(empresa, &["financeiro.pagar.criar"]);
+    let pagar = LancarTituloAPagar {
+        fornecedor: None,
+        valor_total: Dinheiro::reais(80),
+        emissao: hoje(),
+        parcelas: 1,
+        primeiro_vencimento: hoje(),
+        intervalo_dias: 0,
+        observacao: Some("Despesa avulsa sem fornecedor identificado".to_string()),
+        categoria: None,
+    };
+    let saida: TituloAPagarLancado = postcard::from_bytes(
+        &d.executar_comando(
+            "financeiro.lancar_titulo_a_pagar.v1",
+            &carga(&pagar),
+            &s_pagar,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(saida.parcelas.len(), 1);
+
+    // Os dois lançamentos (D/C balanceado) foram gravados de verdade, sem contraparte.
+    assert_eq!(conta_lancamentos(&arm, empresa), 2);
 }
 
 #[test]
@@ -225,6 +285,63 @@ fn baixa_em_dia_quita_a_parcela_e_gera_lancamento_realizado() {
     assert_eq!(conta_baixas(&arm, empresa), 1);
     // 1 lançamento Confirmado (título) + 1 Realizado (baixa).
     assert_eq!(conta_lancamentos(&arm, empresa), 2);
+}
+
+/// Pedido explícito do usuário: o fluxo de caixa deve dizer de onde veio o dinheiro, não só
+/// "Baixa da parcela N" — `ExtratoDisponivel` remonta `origem_modulo`/`origem_id` do título por
+/// trás da baixa (aqui, `"avulso"`, o único origem que este teste consegue produzir sem
+/// depender de outro módulo; `"os"`/`"vendas"`/`"compras"` seguem o mesmo caminho de SQL).
+#[test]
+fn extrato_disponivel_remonta_a_origem_do_titulo_por_tras_da_baixa() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloFinanceiro]).unwrap();
+    let s = sessao(
+        empresa,
+        &[
+            "financeiro.receber.criar",
+            "financeiro.receber.baixar",
+            "financeiro.banco.ver",
+        ],
+    );
+
+    let titulo = lancar(&d, &arm, empresa, &s, Dinheiro::reais(100), 1);
+    let cmd = BaixarRecebimento {
+        parcela: titulo.parcelas[0],
+        valor: Dinheiro::reais(100),
+        data: hoje(),
+        meio_pagamento: MeioPagamento::Dinheiro,
+        conta_destino: None,
+    };
+    d.executar_comando(
+        "financeiro.baixar_recebimento.v1",
+        &carga(&cmd),
+        &s,
+        &ambiente(empresa),
+        arm.escritor(),
+    )
+    .unwrap();
+
+    let saida = d
+        .executar_consulta(
+            "financeiro.extrato_disponivel.v1",
+            &carga(&ExtratoDisponivel {
+                periodo: Periodo::novo(hoje().mais_dias(-1), hoje()),
+                conta: None,
+            }),
+            &s,
+            &ambiente(empresa),
+            arm.leitor(),
+        )
+        .unwrap();
+    let extrato: Vec<mod_financeiro::ItemMovimentoDisponivel> =
+        postcard::from_bytes(&saida).unwrap();
+
+    assert_eq!(extrato.len(), 1);
+    // "avulso" nunca tem `origem_id` (não há agregado de outro módulo a apontar) — o
+    // `origem_modulo` sozinho já é o sinal completo aqui; `"os"`/`"vendas"`/`"compras"` são os
+    // casos que também preenchem `origem_id`, testados pelos próprios módulos de origem.
+    assert_eq!(extrato[0].origem_modulo.as_deref(), Some("avulso"));
+    assert_eq!(extrato[0].origem_id, None);
 }
 
 #[test]
@@ -265,7 +382,7 @@ fn sem_a_permissao_de_criar_o_lancamento_e_recusado() {
     let s = sessao(empresa, &["financeiro.receber.ver"]); // não pode criar
 
     let cmd = LancarTituloAReceber {
-        cliente: Id::novo(),
+        cliente: Some(Id::novo()),
         valor_total: Dinheiro::reais(10),
         emissao: hoje(),
         parcelas: 1,
@@ -331,7 +448,7 @@ fn fluxo_a_pagar_espelha_o_a_receber() {
     );
 
     let cmd = LancarTituloAPagar {
-        fornecedor: Id::novo(),
+        fornecedor: Some(Id::novo()),
         valor_total: Dinheiro::reais(500),
         emissao: hoje(),
         parcelas: 2,
@@ -1086,7 +1203,9 @@ fn saldo_papel(arm: &Armazenamento, empresa: Id, papel: PapelConta) -> Dinheiro 
     let ctx = ContextoEscrita::novo(empresa, Id::novo(), Id::novo(), Id::novo());
     arm.escritor()
         .executar(ctx, move |uow| {
-            RepositorioRazao::novo(uow).saldo_realizado(conta).map_err(liga)
+            RepositorioRazao::novo(uow)
+                .saldo_realizado(conta)
+                .map_err(liga)
         })
         .unwrap()
         .valor()
@@ -1265,7 +1384,7 @@ fn total_por_categoria_no_periodo_agrega_o_que_foi_baixado() {
     .unwrap();
 
     let cmd = LancarTituloAReceber {
-        cliente: Id::novo(),
+        cliente: Some(Id::novo()),
         valor_total: Dinheiro::reais(500),
         emissao: hoje(),
         parcelas: 1,
@@ -1340,7 +1459,7 @@ fn titulo_da_origem_encontra_o_titulo_vinculado_a_outro_modulo() {
             let tcp = ConstrutorTitulo::novo(
                 empresa,
                 EspecieTitulo::Receber,
-                Contraparte::Cliente(cliente),
+                Some(Contraparte::Cliente(cliente)),
                 Dinheiro::reais(240),
                 hoje(),
             )

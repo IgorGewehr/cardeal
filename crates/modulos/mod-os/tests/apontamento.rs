@@ -50,6 +50,12 @@ fn base() -> (TempDir, Armazenamento, Id) {
 
 fn ambiente(empresa: Id) -> Ambiente {
     let mut rm = RegistroModulos::novo();
+    // `os` declara financeiro/estoque/clientes como dependência dura do manifesto — precisam
+    // estar *registrados* aqui para o fecho transitivo de `resolver` funcionar, mesmo que
+    // este arquivo (só apontamento de tempo) nunca exercite as tabelas deles.
+    rm.registrar(&mod_clientes::MANIFESTO).unwrap();
+    rm.registrar(&mod_estoque::MANIFESTO).unwrap();
+    rm.registrar(&mod_financeiro::MANIFESTO).unwrap();
     rm.registrar(&mod_os::MANIFESTO).unwrap();
     let efetivo = rm
         .resolver(&PedidoAtivacao::nova().com_modulo("os"))
@@ -101,7 +107,13 @@ fn criar_cliente(arm: &Armazenamento, empresa: Id) -> Id {
     cliente
 }
 
-fn abrir_uma_os(d: &Despachante, s: &Sessao, amb: &Ambiente, arm: &Armazenamento, cliente: Id) -> Id {
+fn abrir_uma_os(
+    d: &Despachante,
+    s: &Sessao,
+    amb: &Ambiente,
+    arm: &Armazenamento,
+    cliente: Id,
+) -> Id {
     let saida = d
         .executar_comando(
             "os.abrir_ordem_servico.v1",

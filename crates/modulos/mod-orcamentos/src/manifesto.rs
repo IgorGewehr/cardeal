@@ -27,16 +27,36 @@ const SUBMODULOS: &[Submodulo] = &[Submodulo {
 }];
 
 const PERMISSOES: &[Permissao] = &[
-    perm("orcamentos.orcamento.ver", "Consultar orçamentos", Risco::Baixo),
-    perm("orcamentos.orcamento.criar", "Criar orçamento", Risco::Baixo),
-    perm("orcamentos.orcamento.editar", "Editar orçamento (cabeçalho e itens)", Risco::Baixo),
-    perm("orcamentos.orcamento.enviar", "Enviar orçamento ao cliente", Risco::Baixo),
+    perm(
+        "orcamentos.orcamento.ver",
+        "Consultar orçamentos",
+        Risco::Baixo,
+    ),
+    perm(
+        "orcamentos.orcamento.criar",
+        "Criar orçamento",
+        Risco::Baixo,
+    ),
+    perm(
+        "orcamentos.orcamento.editar",
+        "Editar orçamento (cabeçalho e itens)",
+        Risco::Baixo,
+    ),
+    perm(
+        "orcamentos.orcamento.enviar",
+        "Enviar orçamento ao cliente",
+        Risco::Baixo,
+    ),
     perm(
         "orcamentos.orcamento.decidir",
         "Registrar aprovação/recusa do cliente",
         Risco::Medio,
     ),
-    perm("orcamentos.orcamento.cancelar", "Cancelar orçamento", Risco::Baixo),
+    perm(
+        "orcamentos.orcamento.cancelar",
+        "Cancelar orçamento",
+        Risco::Baixo,
+    ),
     perm(
         "orcamentos.orcamento.converter",
         "Converter orçamento aprovado em ordem de serviço",
@@ -83,6 +103,8 @@ mod testes {
 
     #[test]
     fn manifesto_e_internamente_consistente() {
-        MANIFESTO.validar().expect("o manifesto de orcamentos deve ser válido");
+        MANIFESTO
+            .validar()
+            .expect("o manifesto de orcamentos deve ser válido");
     }
 }

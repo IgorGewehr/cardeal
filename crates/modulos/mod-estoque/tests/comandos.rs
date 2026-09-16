@@ -10,10 +10,10 @@ use cardeal_modkit::{Ambiente, Despachante, Modulo, PedidoAtivacao, RegistroModu
 use cardeal_storage::{Armazenamento, ConfigArmazenamento, ContextoEscrita, ErroArmazenamento};
 use mod_estoque::{
     AjustarSaldo, AparelhoOrigemRegistrado, CriarGrupoProduto, CriarLocal, CriarProduto,
-    CriarUnidade, DetalheLote, DetalheDoLotePorCodigo, DetalhesTecnicos,
+    CriarUnidade, DefinirAtivoProduto, DetalheDoLotePorCodigo, DetalheLote, DetalhesTecnicos,
     EditarDetalhesTecnicosProduto, EntradaComLoteRegistrada, EntradaRegistrada, GrupoProdutoCriado,
     ItemLoteDisponivel, ItemProdutoComSaldo, LocalCriado, LotesDisponiveisDoProduto, ModuloEstoque,
-    OrigemLote, Produto, ProdutoCriado, ProdutoPorCodigoBarras, ProdutosComSaldo,
+    OrigemLote, Produto, ProdutoCriado, ProdutoPorCodigoBarras, ProdutoPorId, ProdutosComSaldo,
     RegistrarAparelhoOrigem, RegistrarEntrada, RegistrarEntradaComLote, RegistrarSaida,
     SaidaRegistrada, SaldoAjustado, TipoLocal, UnidadeCriada, MANIFESTO,
 };
@@ -142,6 +142,92 @@ fn cadastro_basico(d: &Despachante, arm: &Armazenamento, empresa: Id, s: &Sessao
     let local: LocalCriado = postcard::from_bytes(&local).unwrap();
 
     (produto.produto, local.local, unidade.unidade)
+}
+
+#[test]
+fn definir_ativo_produto_some_da_busca_padrao_e_reativar_devolve() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloEstoque]).unwrap();
+    let s = sessao(
+        empresa,
+        &[
+            "estoque.produto.criar",
+            "estoque.local.criar",
+            "estoque.produto.editar",
+            "estoque.produto.ver",
+        ],
+    );
+    let (produto, _local, _unidade) = cadastro_basico(&d, &arm, empresa, &s);
+
+    let saida = d
+        .executar_comando(
+            "estoque.definir_ativo_produto.v1",
+            &carga(&DefinirAtivoProduto {
+                produto,
+                ativo: false,
+            }),
+            &s,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+        .unwrap();
+    postcard::from_bytes::<()>(&saida).unwrap();
+
+    let saida = d
+        .executar_consulta(
+            "estoque.produtos_com_saldo.v1",
+            &carga(&ProdutosComSaldo),
+            &s,
+            &ambiente(empresa),
+            arm.leitor(),
+        )
+        .unwrap();
+    let itens: Vec<ItemProdutoComSaldo> = postcard::from_bytes(&saida).unwrap();
+    assert!(
+        itens.is_empty(),
+        "produto desativado não deveria aparecer na busca padrão"
+    );
+
+    // Continua consultável por id (a tela de Estoque precisa disso pra abrir "Editar").
+    let saida = d
+        .executar_consulta(
+            "estoque.produto_por_id.v1",
+            &carga(&ProdutoPorId { produto }),
+            &s,
+            &ambiente(empresa),
+            arm.leitor(),
+        )
+        .unwrap();
+    let encontrado: Option<Produto> = postcard::from_bytes(&saida).unwrap();
+    assert_eq!(encontrado.map(|p| p.ativo), Some(false));
+
+    d.executar_comando(
+        "estoque.definir_ativo_produto.v1",
+        &carga(&DefinirAtivoProduto {
+            produto,
+            ativo: true,
+        }),
+        &s,
+        &ambiente(empresa),
+        arm.escritor(),
+    )
+    .unwrap();
+
+    let saida = d
+        .executar_consulta(
+            "estoque.produtos_com_saldo.v1",
+            &carga(&ProdutosComSaldo),
+            &s,
+            &ambiente(empresa),
+            arm.leitor(),
+        )
+        .unwrap();
+    let itens: Vec<ItemProdutoComSaldo> = postcard::from_bytes(&saida).unwrap();
+    assert_eq!(
+        itens.len(),
+        1,
+        "produto reativado devia voltar pra busca padrão"
+    );
 }
 
 #[test]

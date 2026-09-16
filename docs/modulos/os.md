@@ -77,7 +77,7 @@ stateDiagram-v2
 | `AplicarPeca` ✅ | `os.peca.aplicar` | Médio | Chama `mod_estoque::registrar_saida_comum` **direto, na mesma transação** (não via despacho — ver `docs/contratos-internos.md` §7 regra 2); grava `custo_unitario` devolvido e propaga `gerou_divergencia` (2026-09-12 — o sinal de saldo negativo que `registrar_saida_comum` já apurava não era mais repassado; agora vai no retorno `PecaFoiAplicada`, para a tela avisar na hora) | `ItemNaoPertenceAOrdem`, `PecaJaAplicada` |
 | `RegistrarMaoDeObra` ✅ | `os.execucao.registrar_mao_de_obra` | Baixo | | — |
 | `ConcluirExecucao` ✅ | `os.execucao.concluir` | Baixo | | `PecaPendenteDeAplicacao` |
-| `FaturarOrdemServico` ✅ | `os.faturar` | Alto | Monta **um único lançamento combinado** (D Clientes a receber/C Receita de serviços — pulado se `valor_total` for zero — + D Custo de serviço/C Estoque quando há peça aplicada) e grava o título a receber vinculado a ele, **só se houve cobrança**, com `mod_financeiro::ConstrutorTitulo` + `RepositorioFinanceiro::inserir_titulo` — **não** usa `mod_financeiro::lancar_titulo_comum` (que criaria um segundo lançamento e duplicaria a receita; ver `src/comandos/faturar_ordem_servico.rs`) | `OsNaoConcluida`, `OsJaFaturada` |
+| `FaturarOrdemServico` ✅ | `os.faturar` | Alto | Monta **um único lançamento combinado** (D Clientes a receber/C Receita de serviços — pulado se `valor_total` for zero — + D Custo de serviço/C Estoque quando há peça aplicada) e grava o título a receber vinculado a ele, **só se houve cobrança**, com `mod_financeiro::ConstrutorTitulo` + `RepositorioFinanceiro::inserir_titulo` — **não** usa `mod_financeiro::lancar_titulo_comum` (que criaria um segundo lançamento e duplicaria a receita; ver `src/comandos/faturar_ordem_servico.rs`). `parcelas`/`primeiro_vencimento`/`intervalo_dias` (2026-09-14) escolhem como o título se divide — todas as parcelas referenciam o **mesmo** lançamento combinado (não um por parcela, diferente do caminho genérico). `pago_no_ato: Option<PagamentoNoAto>` (2026-09-15, `{ meio_pagamento, conta_destino }`) dá baixa completa na mesma transação, via `mod_financeiro::baixar_recebimento_comum` (novo) — força 1 parcela à vista (ignora `parcelas`/`primeiro_vencimento`/`intervalo_dias` quando presente: pago agora e parcelado são conceitos incompatíveis) | `OsCanceladaOuReprovada`, `OsJaFaturada` |
 | `CancelarOrdemServico` ✅ | `os.ordem.cancelar` | Médio | Só a partir de `Aberta`/`EmDiagnostico`/`AguardandoAprovacao` (§4, §11 regra 5) — terminal, como `Reprovada` | `EstadoInvalido` |
 | `IniciarApontamento` ✅ (novo) | `os.apontamento.iniciar` | Baixo | Abre um `ApontamentoDeTempo` para o técnico na OS informada — recusa se o técnico já tem outro apontamento aberto **em qualquer OS** (ele não trabalha em duas ao mesmo tempo) | `TecnicoJaTemApontamentoAberto` |
 | `EncerrarApontamento` ✅ (novo) | `os.apontamento.encerrar` | Baixo | Fecha o apontamento aberto (`fim = agora`); devolve a duração em segundos | `ApontamentoJaEncerrado`, `FimAntesDoInicio` |
@@ -126,6 +126,36 @@ stateDiagram-v2
 > de peça orçados e ainda não aplicados contra o saldo real do estoque (via a porta pública
 > `mod_estoque::saldo_disponivel_do_produto`, nova) — antes, só dava para descobrir que uma OS
 > estava parada esperando peça abrindo a OS e o produto em telas separadas.
+>
+> **Nota (2026-09-14) — aparelho obrigatório e faturamento revisado:** o balcão relatou
+> confundir o campo "Equipamento (opcional)" com "equipamento usado no reparo" e abrir OS sem
+> registrar de qual aparelho se tratava — `equipamento` (o aparelho trazido para reparo) voltou
+> a ser **obrigatório** na abertura (`ErroOs::EquipamentoVazio`), a UI renomeou o rótulo para
+> "Aparelho" em toda a tela, e a coluna correspondente na listagem para de cair no
+> `defeito_relatado` quando vazio (só ordens legadas sem aparelho registrado caem nisso — mostra
+> um placeholder neutro). Também revisado o fluxo de faturar/mudar status:
+> `FaturarOrdemServico` ganhou `parcelas`/`primeiro_vencimento`/`intervalo_dias` (antes sempre
+> 1x à vista, vencendo hoje) e a UI passou a confirmar em dialog separado antes de
+> Aprovar/Reprovar orçamento, Concluir execução e Faturar — nenhuma dessas transições executa
+> mais no primeiro clique. "Cancelar OS" também ficou disponível direto no dialog de detalhe
+> (antes só pela listagem).
+>
+> **Nota (2026-09-15) — faturar de qualquer estado, e já recebido:** pedido explícito do
+> usuário — "o botão de faturar fica sempre disponível desde a abertura da OS... as fases de
+> mandar pra aprovação, aprovar, iniciar execução etc são secundárias e super opcionais".
+> `OrdemServico::faturar` não exige mais `Concluida` — só `Faturada` (já faturada) e
+> `Cancelada`/`Reprovada` (`ErroOs::OsCanceladaOuReprovada`, renomeado de `OsNaoConcluida`)
+> continuam bloqueadas. `valor_total` já soma no momento em que o item entra no orçamento, não
+> quando é `AplicarPeca`-do, então faturar sem nunca passar por `EmExecucao` cobra do cliente
+> normalmente mas não deduz peça nenhuma do estoque — quem pula a execução é responsável por
+> aplicar a peça à parte se quiser o estoque correto. A UI moveu o botão "Faturar" pro rodapé
+> do dialog de detalhe (ao lado de "Comprovante (PDF)"/"Fechar"), disponível em qualquer
+> estado não-terminal, e ganhou um dialog próprio que pede o meio de pagamento e já baixa na
+> hora (`FaturarOrdemServico::pago_no_ato`, novo, via `mod_financeiro::baixar_recebimento_comum`
+> — também novo, mesmo padrão de `baixar_pagamento_comum` para outro módulo chamar direto na
+> mesma transação). O antigo fluxo (faturar só a partir de `Concluida`, com confirmação
+> separada em modal) foi removido — a própria abertura do dialog de faturamento, com escolha
+> de meio de pagamento, já serve de confirmação deliberada.
 
 ## 6. Consultas
 
@@ -211,6 +241,14 @@ que `FaturarOrdemServico` gerou (via `financeiro.titulo_da_origem.v1`), ou deixa
 "faturada sem cobrança" numa OS de garantia/cortesia — o usuário nunca precisa abrir a tela de
 financeiro só para confirmar que o título nasceu.
 
+**Faturar** (mesmo dialog de detalhe, botão no rodapé ao lado de "Comprovante (PDF)"/"Fechar",
+disponível em qualquer estado não-terminal — 2026-09-15): abre um dialog próprio que pergunta
+o meio de pagamento (Dinheiro/Pix/Cartão) quando há cobrança — Dinheiro não pede mais nada
+(cai no Caixa); Pix/cartão pedem uma conta bancária, com um miniformulário "Nova conta
+bancária" que abre no lugar do seletor quando a empresa ainda não tem nenhuma cadastrada.
+Fatura e recebe são o mesmo clique (`pago_no_ato`) — não existe mais um passo separado de
+"depois ir na tela de Financeiro dar baixa".
+
 **Comprovante em PDF** (`cardeal-pdf::gerar_comprovante_os`, botão "Comprovante (PDF)" no
 rodapé do dialog de detalhe): documento único que cobre as duas pontas do atendimento — cabeçalho
 com a marca da empresa, cliente, equipamento, defeito relatado, diagnóstico, itens de peça/mão
@@ -226,7 +264,12 @@ mesmo código, só o bloco de identificação muda.
    impede consumir estoque de um serviço que o cliente ainda pode recusar.
 2. **Aprovação do cliente é sempre identificada** (nome + documento, ou assinatura), nunca implícita
    por "o técnico disse que ele topou".
-3. **Faturar exige `Concluida`.** Não existe fatura parcial de OS em andamento.
+3. **Faturar não exige mais `Concluida`** (2026-09-15) — qualquer estado não-terminal fatura
+   (`ErroOs::OsCanceladaOuReprovada` só bloqueia `Cancelada`/`Reprovada`). Laudo → orçamento →
+   aprovação → execução → conclusão viraram trâmite opcional, não um portão: o balcão pode
+   faturar assim que a OS abre. Peça orçada e nunca `AplicarPeca`-da (por pular `EmExecucao`)
+   cobra do cliente normalmente, mas não deduz do estoque — ver a nota de
+   `OrdemServico::faturar`.
 4. **Reincidência dentro do prazo de garantia nunca cobra peça/mão de obra cobertas** — a nova OS
    nasce vinculada e o item correspondente já entra com `coberto_garantia = Sim`.
 5. **Cancelamento de OS não fatura, mas peça já aplicada precisa de estorno explícito** (devolução ao

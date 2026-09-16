@@ -222,6 +222,22 @@ impl<'a, 'b> RepositorioEstoque<'a, 'b> {
         Ok(())
     }
 
+    /// Ativa ou desativa um produto — desativado some das consultas padrão (que já filtram
+    /// `ativo = 1`), mas saldo, lotes e histórico continuam intactos; reversível a qualquer
+    /// momento.
+    ///
+    /// # Errors
+    /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+    pub fn atualizar_ativo(&mut self, produto: Id, ativo: bool) -> Resultado<()> {
+        self.conn()
+            .execute(
+                "UPDATE estoque_produto SET ativo = ?2 WHERE id = ?1",
+                params![blob(produto), i64::from(ativo)],
+            )
+            .map_err(persist)?;
+        Ok(())
+    }
+
     /// Busca um produto pelo id. `Ok(None)` = não existe.
     ///
     /// # Errors

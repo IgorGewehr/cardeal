@@ -192,6 +192,11 @@ pub struct EstadoTelaFinanceiro {
     // Fluxo de caixa / bancos.
     fluxo_dias: i64,
     extrato: Vec<ItemMovimentoDisponivel>,
+    /// Rótulo amigável por `origem_id` ("OS #123 — João Silva"), resolvido uma vez ao
+    /// carregar o extrato — pedido explícito do usuário: o fluxo de caixa deve dizer de onde
+    /// veio o dinheiro. Resolvido aqui na UI, nunca no financeiro (`docs/contratos-internos.md`
+    /// §7 regra 2 — o financeiro só sabe `origem_modulo`/`origem_id`, não o que é uma OS).
+    origem_labels: HashMap<Id, String>,
     contas_disp: Vec<ItemContaDisponivel>,
     erro: Option<String>,
     dlg: Dlg,
@@ -347,7 +352,10 @@ impl EstadoTelaFinanceiro {
                 conta: None,
             },
         ) {
-            Ok(v) => self.extrato = v,
+            Ok(v) => {
+                self.extrato = v;
+                self.carregar_origens_do_extrato(motor, sessao);
+            }
             Err(e) => self.erro = Some(e.mensagem),
         }
         match motor.consultar(
@@ -358,6 +366,43 @@ impl EstadoTelaFinanceiro {
             Ok(v) => self.contas_disp = v,
             Err(e) => self.erro = Some(e.mensagem),
         }
+    }
+
+    /// Resolve um rótulo amigável para cada origem distinta do extrato recém-carregado
+    /// (`self.origem_labels`, consumido por [`rotulo_origem`]). Só `"os"` por enquanto — o
+    /// mesmo padrão serve para `"vendas"`/`"compras"` quando a tela ganhar consulta
+    /// equivalente para eles.
+    fn carregar_origens_do_extrato(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
+        let ids: Vec<Id> = self
+            .extrato
+            .iter()
+            .filter(|m| m.origem_modulo.as_deref() == Some("os"))
+            .filter_map(|m| m.origem_id)
+            .filter(|id| !self.origem_labels.contains_key(id))
+            .collect();
+        for id in ids {
+            let resultado: Result<Option<mod_os::DetalheOrdem>, _> = motor.consultar(
+                sessao,
+                "os.buscar_detalhe_ordem.v1",
+                &mod_os::BuscarDetalheOrdem { ordem_servico: id },
+            );
+            if let Ok(Some(d)) = resultado {
+                let cliente = self.nomes.get(&d.ordem.cliente).cloned();
+                let rotulo = match cliente {
+                    Some(nome) => format!("OS #{} — {nome}", d.ordem.numero),
+                    None => format!("OS #{}", d.ordem.numero),
+                };
+                self.origem_labels.insert(id, rotulo);
+            }
+        }
+    }
+
+    /// O rótulo de origem de um movimento do extrato, se resolvido (ver
+    /// [`carregar_origens_do_extrato`]).
+    fn rotulo_origem(&self, m: &ItemMovimentoDisponivel) -> Option<&str> {
+        m.origem_id
+            .and_then(|id| self.origem_labels.get(&id))
+            .map(String::as_str)
     }
 
     fn carregar_analise(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
@@ -434,7 +479,10 @@ impl EstadoTelaFinanceiro {
             .map_or_else(|| "Sem categoria".to_owned(), |c| c.nome.clone())
     }
 
-    fn nome_contraparte(&self, c: &Contraparte) -> String {
+    fn nome_contraparte(&self, c: &Option<Contraparte>) -> String {
+        let Some(c) = c else {
+            return "Sem cliente/fornecedor".to_owned();
+        };
         let id = match c {
             Contraparte::Cliente(i)
             | Contraparte::Fornecedor(i)
@@ -1140,9 +1188,13 @@ fn painel_fluxo(
         .iter()
         .map(|m| {
             acc += m.valor;
+            let hist = match estado.rotulo_origem(m) {
+                Some(origem) => format!("{} — {origem}", m.historico),
+                None => m.historico.clone(),
+            };
             (
                 m.data.formatar_curta(),
-                m.historico.clone(),
+                hist,
                 m.conta_nome.clone(),
                 m.valor,
                 acc,
@@ -1492,12 +1544,15 @@ fn ordenar_parcelas(
     direcao: Direcao,
 ) {
     let nome_de = |p: &ItemTituloEmAberto| -> String {
-        let id = match &p.contraparte {
+        let Some(c) = p.contraparte else {
+            return String::new();
+        };
+        let id = match c {
             Contraparte::Cliente(i)
             | Contraparte::Fornecedor(i)
             | Contraparte::Funcionario(i)
             | Contraparte::Socio(i)
-            | Contraparte::Outro(i) => *i,
+            | Contraparte::Outro(i) => i,
         };
         nomes.get(&id).cloned().unwrap_or_default()
     };
@@ -1556,10 +1611,19 @@ fn dialogo_lancar(
                 return;
             };
             SeletorOpcao::novo(
-                if a_receber { "Cliente" } else { "Fornecedor" },
+                if a_receber {
+                    "Cliente (opcional)"
+                } else {
+                    "Fornecedor (opcional)"
+                },
                 &mut f.contraparte,
             )
             .opcoes(ops.clone())
+            .placeholder(if a_receber {
+                "Sem cliente informado"
+            } else {
+                "Sem fornecedor informado"
+            })
             .mostrar(ui);
             ui.add_space(Espaco::E12);
             ui.columns(2, |c| {
@@ -1604,10 +1668,9 @@ fn lancar(
 ) {
     let a_receber = estado.aba.a_receber();
     let Dlg::Lancar(f) = &estado.dlg else { return };
-    let Some(contraparte) = f.contraparte else {
-        notificar(ctx, Notificacao::aviso("Selecione a contraparte."));
-        return;
-    };
+    // Cliente/fornecedor é opcional (pedido explícito do usuário) — um título avulso não
+    // precisa de uma pessoa cadastrada.
+    let contraparte = f.contraparte;
     let (Ok(valor), Ok(emissao), Ok(parcelas), Ok(prim), Ok(intervalo)) = (
         f.valor.parse::<Dinheiro>(),
         f.emissao.parse::<Data>(),

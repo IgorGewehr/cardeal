@@ -28,7 +28,7 @@ pub use concluir_execucao::ConcluirExecucao;
 pub use editar_dados_da_ordem::EditarDadosDaOrdem;
 pub use encerrar_apontamento::EncerrarApontamento;
 pub use enviar_para_aprovacao::EnviarParaAprovacao;
-pub use faturar_ordem_servico::{FaturarOrdemServico, OrdemServicoFaturada};
+pub use faturar_ordem_servico::{FaturarOrdemServico, OrdemServicoFaturada, PagamentoNoAto};
 pub use iniciar_apontamento::{ApontamentoIniciado, IniciarApontamento};
 pub use iniciar_execucao::IniciarExecucao;
 pub use montar_orcamento_os::{ItemOrcamentoNovo, MontarOrcamentoOs};

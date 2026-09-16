@@ -384,7 +384,7 @@ mod testes {
             let tcp = ConstrutorTitulo::novo(
                 Id::novo(),
                 EspecieTitulo::Receber,
-                Contraparte::Cliente(Id::novo()),
+                Some(Contraparte::Cliente(Id::novo())),
                 total,
                 hoje(),
             )

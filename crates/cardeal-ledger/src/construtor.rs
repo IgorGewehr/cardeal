@@ -228,6 +228,21 @@ impl ConstrutorLancamento {
         self
     }
 
+    /// Como [`Self::contraparte`], mas não faz nada se `c` for `None` — poupa o chamador de
+    /// um `if let` quando a contraparte é opcional (ex.: título avulso sem cliente/fornecedor
+    /// informado).
+    ///
+    /// # Panics
+    /// Se `c` for `Some` e for chamado antes de qualquer `debitar`/`creditar` (mesma regra de
+    /// [`Self::contraparte`]).
+    #[must_use]
+    pub fn contraparte_se(self, c: Option<Contraparte>) -> Self {
+        match c {
+            Some(c) => self.contraparte(c),
+            None => self,
+        }
+    }
+
     /// Associa um centro de custo à última partida adicionada.
     ///
     /// # Panics

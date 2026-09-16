@@ -307,8 +307,10 @@ impl Orcamento {
 
     /// Marca `Rascunho`/`Enviado` vencido como `Expirado`. No-op caso contrário.
     pub fn expirar_se_vencido(&mut self, hoje: Data) -> bool {
-        if matches!(self.estado, EstadoOrcamento::Rascunho | EstadoOrcamento::Enviado)
-            && self.validade < hoje
+        if matches!(
+            self.estado,
+            EstadoOrcamento::Rascunho | EstadoOrcamento::Enviado
+        ) && self.validade < hoje
         {
             self.transitar(EstadoOrcamento::Expirado);
             true
@@ -410,7 +412,15 @@ mod testes {
     }
 
     fn orcamento() -> Orcamento {
-        Orcamento::novo(Id::novo(), 1, cabecalho(), hoje(), Id::novo(), Instante::EPOCA).unwrap()
+        Orcamento::novo(
+            Id::novo(),
+            1,
+            cabecalho(),
+            hoje(),
+            Id::novo(),
+            Instante::EPOCA,
+        )
+        .unwrap()
     }
 
     fn item(o: Id) -> ItemOrcamento {
@@ -458,7 +468,10 @@ mod testes {
     #[test]
     fn enviar_sem_item_e_recusado() {
         let mut o = orcamento();
-        assert_eq!(o.enviar(0, hoje()).unwrap_err(), ErroOrcamentos::OrcamentoVazio);
+        assert_eq!(
+            o.enviar(0, hoje()).unwrap_err(),
+            ErroOrcamentos::OrcamentoVazio
+        );
     }
 
     #[test]
@@ -477,7 +490,8 @@ mod testes {
         o.enviar(1, hoje()).unwrap();
         let depois = o.validade.mais_dias(1);
         assert!(matches!(
-            o.registrar_decisao(true, Some("x".to_owned()), depois).unwrap_err(),
+            o.registrar_decisao(true, Some("x".to_owned()), depois)
+                .unwrap_err(),
             ErroOrcamentos::OrcamentoVencido(_)
         ));
         assert!(o.expirar_se_vencido(depois));

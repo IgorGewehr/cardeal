@@ -68,7 +68,11 @@ impl ItemOrcamento {
     /// O total da linha antes do desconto.
     #[must_use]
     pub fn bruto(&self) -> Dinheiro {
-        Dinheiro::de_total(self.quantidade, self.preco_unitario, Arredondamento::MeioAcima)
+        Dinheiro::de_total(
+            self.quantidade,
+            self.preco_unitario,
+            Arredondamento::MeioAcima,
+        )
     }
 
     /// O valor do desconto da linha.

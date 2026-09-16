@@ -9,8 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::pedido::{EstadoPedido, ItemVenda};
 use crate::preco::{RegraPreco, TabelaPreco};
 use crate::repositorio::{
-    blob, data_de, estado_pedido_de, id_de, item_de_linha, persist, regra_de_linha,
-    tabela_de_linha,
+    blob, data_de, estado_pedido_de, id_de, item_de_linha, persist, regra_de_linha, tabela_de_linha,
 };
 
 /// Um pedido na lista de Vendas — cabeçalho suficiente para a grade, sem carregar itens.
@@ -62,7 +61,9 @@ impl Consulta for PedidosRecentes {
                 })
             })
             .map_err(persist)?;
-        linhas.collect::<rusqlite::Result<Vec<_>>>().map_err(persist)
+        linhas
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(persist)
     }
 }
 
@@ -87,7 +88,9 @@ impl Consulta for TabelasDePreco {
         let linhas = stmt
             .query_map([blob(ctx.empresa)], tabela_de_linha)
             .map_err(persist)?;
-        linhas.collect::<rusqlite::Result<Vec<_>>>().map_err(persist)
+        linhas
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(persist)
     }
 }
 
@@ -115,7 +118,9 @@ impl Consulta for RegrasDaTabela {
         let linhas = stmt
             .query_map([blob(self.tabela)], regra_de_linha)
             .map_err(persist)?;
-        linhas.collect::<rusqlite::Result<Vec<_>>>().map_err(persist)
+        linhas
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(persist)
     }
 }
 
@@ -141,6 +146,8 @@ impl Consulta for ItensDoPedido {
         let linhas = stmt
             .query_map([blob(self.pedido)], item_de_linha)
             .map_err(persist)?;
-        linhas.collect::<rusqlite::Result<Vec<_>>>().map_err(persist)
+        linhas
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(persist)
     }
 }

@@ -17,8 +17,10 @@ use crate::titulo::EspecieTitulo;
 /// Lança um título a pagar com uma ou mais parcelas.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LancarTituloAPagar {
-    /// O fornecedor credor.
-    pub fornecedor: Id,
+    /// O fornecedor credor. Opcional — pedido explícito do usuário: lançar um título avulso
+    /// não deve exigir uma pessoa cadastrada (ex.: uma despesa genérica sem fornecedor
+    /// identificado).
+    pub fornecedor: Option<Id>,
     /// O valor total (soma das parcelas).
     pub valor_total: Dinheiro,
     /// A data de emissão.
@@ -56,7 +58,7 @@ impl Comando for LancarTituloAPagar {
         let g = lancar_titulo_comum(
             DadosLancamentoTitulo {
                 especie: EspecieTitulo::Pagar,
-                contraparte: Contraparte::Fornecedor(self.fornecedor),
+                contraparte: self.fornecedor.map(Contraparte::Fornecedor),
                 valor_total: self.valor_total,
                 emissao: self.emissao,
                 parcelas: self.parcelas,

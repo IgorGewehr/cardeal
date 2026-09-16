@@ -113,10 +113,7 @@ impl Consulta for OrcamentosRecentes {
                     estado,
                     itens: u32::try_from(r.get::<_, i64>(10)?).unwrap_or(0),
                     vencido: validade < hoje
-                        && matches!(
-                            estado,
-                            EstadoOrcamento::Rascunho | EstadoOrcamento::Enviado
-                        ),
+                        && matches!(estado, EstadoOrcamento::Rascunho | EstadoOrcamento::Enviado),
                 })
             })
             .map_err(persist)?
@@ -133,9 +130,7 @@ impl Consulta for OrcamentosRecentes {
 
         Ok(linhas
             .into_iter()
-            .filter(|l| {
-                cliente_alvo.is_none() || itens_cliente.contains(&l.orcamento)
-            })
+            .filter(|l| cliente_alvo.is_none() || itens_cliente.contains(&l.orcamento))
             .filter(|l| {
                 texto.as_ref().is_none_or(|t| {
                     l.assunto.to_lowercase().contains(t)
@@ -150,16 +145,16 @@ impl Consulta for OrcamentosRecentes {
 
 fn clientes_com_orcamento(conexao: &Connection, empresa: Id, cliente: Id) -> Resultado<Vec<Id>> {
     let mut stmt = conexao
-        .prepare(
-            "SELECT id FROM orcamentos_orcamento WHERE empresa = ?1 AND cliente = ?2",
-        )
+        .prepare("SELECT id FROM orcamentos_orcamento WHERE empresa = ?1 AND cliente = ?2")
         .map_err(persist)?;
     let linhas = stmt
         .query_map(rusqlite::params![blob(empresa), blob(cliente)], |r| {
             Ok(crate::repositorio::id_de(r.get::<_, Vec<u8>>(0)?))
         })
         .map_err(persist)?;
-    linhas.collect::<rusqlite::Result<Vec<_>>>().map_err(persist)
+    linhas
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(persist)
 }
 
 /// O detalhe completo de um orçamento — cabeçalho + itens.

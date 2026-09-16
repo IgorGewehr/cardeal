@@ -282,11 +282,21 @@ fn processar_texto(
         [.., "prod", "qCom"] => {
             let q = Quantidade::de_str(texto)
                 .map_err(|_| ErroFiscal::XmlInvalido(format!("qCom inválido: {texto}")))?;
+            if !q.e_positiva() {
+                return Err(ErroFiscal::XmlInvalido(format!(
+                    "qCom deve ser maior que zero: {texto}"
+                )));
+            }
             set_item(item_atual, |i| i.quantidade = Some(q));
         }
         [.., "prod", "vUnCom"] => {
             let p = Preco::de_str(texto)
                 .map_err(|_| ErroFiscal::XmlInvalido(format!("vUnCom inválido: {texto}")))?;
+            if p.unidades_internas() < 0 {
+                return Err(ErroFiscal::XmlInvalido(format!(
+                    "vUnCom não pode ser negativo: {texto}"
+                )));
+            }
             set_item(item_atual, |i| i.valor_unitario = Some(p));
         }
         [.., "prod", "vProd"] => {
@@ -388,6 +398,26 @@ mod testes {
     fn xml_sem_campo_obrigatorio_e_recusado() {
         let erro = interpretar("<nfeProc><NFe><infNFe Id=\"NFe12345678901234567890123456789012345678901234\"></infNFe></NFe></nfeProc>")
             .unwrap_err();
+        assert!(matches!(erro, ErroFiscal::XmlInvalido(_)));
+    }
+
+    #[test]
+    fn quantidade_zero_ou_negativa_e_recusada() {
+        // Endurecimento pra importação em lote (2026-09-15): um XML anômalo não deve entrar
+        // silenciosamente só porque o resto do arquivo é válido.
+        let xml = XML_EXEMPLO.replace("<qCom>120.0000</qCom>", "<qCom>0</qCom>");
+        let erro = interpretar(&xml).unwrap_err();
+        assert!(matches!(erro, ErroFiscal::XmlInvalido(_)));
+
+        let xml = XML_EXEMPLO.replace("<qCom>120.0000</qCom>", "<qCom>-5</qCom>");
+        let erro = interpretar(&xml).unwrap_err();
+        assert!(matches!(erro, ErroFiscal::XmlInvalido(_)));
+    }
+
+    #[test]
+    fn preco_unitario_negativo_e_recusado() {
+        let xml = XML_EXEMPLO.replace("<vUnCom>4.320000</vUnCom>", "<vUnCom>-1</vUnCom>");
+        let erro = interpretar(&xml).unwrap_err();
         assert!(matches!(erro, ErroFiscal::XmlInvalido(_)));
     }
 }

@@ -157,6 +157,42 @@ impl Consulta for OrdensEmAberto {
     }
 }
 
+/// Todas as ordens de serviço da empresa, em **qualquer** estado — inclusive `Faturada`,
+/// `Cancelada` e `Reprovada`, que `OrdensEmAberto` propositalmente esconde (é a fila de
+/// trabalho ativa, não o histórico). Pedido explícito do usuário (2026-09-14): depois de
+/// faturar, a OS "sumia" da tela porque só existia a visão de fila ativa — o balcão precisa
+/// conseguir ver/filtrar/ordenar por qualquer status, inclusive os finalizados.
+///
+/// Mesmo teto de paginação das demais consultas sem cursor real (`docs/09-protocolo-api.md`
+/// §5): 500 linhas, mais que suficiente para o histórico de uma PME combinado com busca.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TodasAsOrdens;
+
+impl Consulta for TodasAsOrdens {
+    type Saida = Vec<OrdemServico>;
+    const PERMISSAO: &'static str = "os.ordem.ver";
+
+    fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        let mut stmt = conexao
+            .prepare(
+                "SELECT id, empresa, numero, cliente, equipamento, defeito_relatado, data_abertura,
+                        tecnico_responsavel, estado, aprovado_por, garantia_dias, valor_total,
+                        itens_orcamento, versao
+                 FROM os_ordem_servico
+                 WHERE empresa = ?1
+                 ORDER BY numero DESC
+                 LIMIT 500",
+            )
+            .map_err(persist)?;
+        let linhas = stmt
+            .query_map([blob(ctx.empresa)], ordem_de_linha)
+            .map_err(persist)?;
+        linhas
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(persist)
+    }
+}
+
 /// Busca o detalhe completo de uma ordem pelo id.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BuscarDetalheOrdem {

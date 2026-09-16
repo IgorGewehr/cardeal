@@ -39,6 +39,7 @@ pub struct Botao {
     preenche_largura: bool,
     pequeno: bool,
     carregando: bool,
+    cor: Option<Color32>,
 }
 
 impl Botao {
@@ -71,7 +72,17 @@ impl Botao {
             preenche_largura: false,
             pequeno: false,
             carregando: false,
+            cor: None,
         }
+    }
+
+    /// Sobrescreve a cor do texto (e do contorno, nas variantes que têm) — pensado pra
+    /// `Fantasma`/`Secundario` ganharem um destaque de marca sem virar `Primario`/
+    /// `Destrutivo` (ex.: "Editar" numa linha de grade, na cor `rubro` em vez do texto
+    /// padrão). Não mexe no preenchimento, então não força a variante a parecer outra coisa.
+    pub const fn cor(mut self, cor: Color32) -> Self {
+        self.cor = Some(cor);
+        self
     }
 
     /// Anota o atalho de teclado ao lado do rótulo (ex.: `F2`) — `docs/12-ui-ux.md` §8.
@@ -252,6 +263,9 @@ impl Widget for Botao {
             } else {
                 self.paleta_inerte(&cores)
             };
+            let fg = self
+                .cor
+                .map_or(fg, |c| if self.habilitado { c } else { fg });
             {
                 let painter = ui.painter();
                 // Anel de foco de teclado: um halo externo suave + o anel nítido, ambos

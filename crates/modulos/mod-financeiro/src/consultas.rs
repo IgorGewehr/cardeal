@@ -14,8 +14,8 @@ use serde::{Deserialize, Serialize};
 use crate::categoria::CategoriaFinanceira;
 use crate::recorrencia::Recorrencia;
 use crate::repositorio::{
-    blob, categoria_de_linha, contraparte_join, data_de, especie_de, especie_txt, estado_de, id_de,
-    persist, recorrencia_de_linha, titulo_de_linha,
+    blob, categoria_de_linha, contraparte_join_opt, data_de, especie_de, especie_txt, estado_de,
+    id_de, persist, recorrencia_de_linha, titulo_de_linha,
 };
 use crate::titulo::{EspecieTitulo, EstadoParcela, Titulo};
 
@@ -31,8 +31,8 @@ pub struct ItemTituloEmAberto {
     pub numero: u16,
     /// A receber ou a pagar.
     pub especie: EspecieTitulo,
-    /// Com quem.
-    pub contraparte: Contraparte,
+    /// Com quem — `None` num título avulso sem pessoa informada.
+    pub contraparte: Option<Contraparte>,
     /// Quando vence.
     pub vencimento: Data,
     /// O valor original da parcela.
@@ -76,7 +76,7 @@ pub fn titulos_em_aberto(
         .map_err(persist)?;
     let linhas = stmt
         .query_map(params![blob(empresa), especie_txt(especie)], |r| {
-            let contraparte = contraparte_join(r.get::<_, String>(3)?.as_str(), r.get(4)?);
+            let contraparte = contraparte_join_opt(r.get(3)?, r.get(4)?);
             Ok(ItemTituloEmAberto {
                 parcela: id_de(r.get(0)?),
                 titulo: id_de(r.get(1)?),
@@ -588,6 +588,17 @@ pub struct ItemMovimentoDisponivel {
     pub conta_nome: String,
     /// O valor com sinal: entrada positiva, saída negativa.
     pub valor: Dinheiro,
+    /// O módulo que originou o título por trás desta baixa (`"os"`, `"vendas"`, `"compras"`,
+    /// `"avulso"`…), quando o movimento veio de uma baixa de título — pedido explícito do
+    /// usuário: o fluxo de caixa deve dizer de onde veio o dinheiro, não só "Baixa da parcela
+    /// N". `None` quando o movimento não é uma baixa de título (suprimento/sangria/venda de
+    /// PDV direto no caixa, sem título nenhum).
+    pub origem_modulo: Option<String>,
+    /// O agregado de origem (a OS, o pedido, a nota…) — junto com [`Self::origem_modulo`], o
+    /// par que a UI usa para resolver um rótulo amigável (`BuscarDetalheOrdem` etc.), sem o
+    /// financeiro precisar conhecer a tabela de nenhum outro módulo
+    /// (`docs/contratos-internos.md` §7 regra 2).
+    pub origem_id: Option<Id>,
 }
 
 /// O extrato realizado (livro-caixa) de todas as contas do Disponível, ou de uma só, num
@@ -605,12 +616,22 @@ impl Consulta for ExtratoDisponivel {
     const PERMISSAO: &'static str = "financeiro.banco.ver";
 
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        // `LEFT JOIN financeiro_baixa`/`financeiro_parcela`/`financeiro_titulo`: quando este
+        // movimento é a baixa de uma parcela, remonta até o título de origem — sem o
+        // financeiro precisar saber o que é uma "OS" ou uma "venda", só repassa o par
+        // `origem_modulo`/`origem_id` que o título já carrega desde que nasceu. Suprimento/
+        // sangria/venda de PDV direto no caixa não batem em nenhuma baixa — ficam `NULL`
+        // (`None`), e é isso mesmo: não têm título nenhum por trás.
         let mut stmt = conexao
             .prepare(
-                "SELECT rl.liquidacao, rl.historico, rc.nome, rp.valor
+                "SELECT rl.liquidacao, rl.historico, rc.nome, rp.valor,
+                        t.origem_modulo, t.origem_id
                  FROM razao_partida rp
                  JOIN razao_lancamento rl ON rl.id = rp.lancamento
                  JOIN razao_conta rc ON rc.id = rp.conta
+                 LEFT JOIN financeiro_baixa fb ON fb.lancamento = rl.id
+                 LEFT JOIN financeiro_parcela fp ON fp.id = fb.parcela
+                 LEFT JOIN financeiro_titulo t ON t.id = fp.titulo
                  WHERE rc.empresa = ?1 AND rc.codigo LIKE '1.1.%'
                        AND rl.estado = 'Realizado' AND rl.liquidacao IS NOT NULL
                        AND rl.liquidacao BETWEEN ?2 AND ?3
@@ -633,6 +654,8 @@ impl Consulta for ExtratoDisponivel {
                         historico: r.get(1)?,
                         conta_nome: r.get(2)?,
                         valor: Dinheiro::centavos(r.get::<_, i64>(3)?),
+                        origem_modulo: r.get(4)?,
+                        origem_id: r.get::<_, Option<Vec<u8>>>(5)?.map(id_de),
                     })
                 },
             )

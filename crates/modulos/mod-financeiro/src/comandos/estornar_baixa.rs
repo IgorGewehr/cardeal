@@ -63,9 +63,9 @@ impl Comando for EstornarBaixa {
             parcela.estado,
             EstadoParcela::Renegociada | EstadoParcela::Cancelada
         ) {
-            return Err(Erro::de_dominio(&ErroFinanceiro::ParcelaEncerradaNaoReverte(
-                parcela.estado,
-            )));
+            return Err(Erro::de_dominio(
+                &ErroFinanceiro::ParcelaEncerradaNaoReverte(parcela.estado),
+            ));
         }
 
         // 3. Lançar: estorna o `Realizado` original.

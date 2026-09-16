@@ -12,7 +12,9 @@ use cardeal_modkit::{Comando, Ctx, Risco};
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
-use crate::cadastro::{Contato, DocumentoPessoa, Endereco, TipoContato, TipoDocumento, TipoEndereco};
+use crate::cadastro::{
+    Contato, DocumentoPessoa, Endereco, TipoContato, TipoDocumento, TipoEndereco,
+};
 use crate::erros::ErroClientes;
 use crate::eventos::PessoaCriada;
 use crate::pessoa::{ConstrutorPessoa, Papel, TipoPessoa};

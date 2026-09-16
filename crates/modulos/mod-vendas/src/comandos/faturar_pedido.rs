@@ -130,7 +130,7 @@ impl Comando for FaturarPedido {
             let mut tcp = ConstrutorTitulo::novo(
                 ctx.empresa,
                 EspecieTitulo::Receber,
-                ContraparteRazao::Cliente(pedido.cliente),
+                Some(ContraparteRazao::Cliente(pedido.cliente)),
                 pedido.total,
                 pedido.data,
             )

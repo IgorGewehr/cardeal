@@ -123,8 +123,12 @@ pub struct Titulo {
     pub empresa: Id,
     /// A receber ou a pagar.
     pub especie: EspecieTitulo,
-    /// Com quem — cliente, fornecedor, funcionário ou sócio (o mesmo tipo do Razão).
-    pub contraparte: Contraparte,
+    /// Com quem — cliente, fornecedor, funcionário ou sócio (o mesmo tipo do Razão). `None`
+    /// num título avulso (`origem_modulo == "avulso"`) sem cliente/fornecedor informado —
+    /// pedido explícito do usuário: lançar um título não deve exigir uma pessoa cadastrada.
+    /// OS/vendas/compras sempre sabem a contraparte (é a origem do próprio lançamento) e
+    /// continuam passando `Some`.
+    pub contraparte: Option<Contraparte>,
     /// O módulo que originou o título (`"vendas"`, `"compras"`, `"avulso"`…).
     pub origem_modulo: String,
     /// O id do agregado de origem, quando houver.
@@ -230,7 +234,7 @@ pub struct TituloComParcelas {
 /// let tcp = ConstrutorTitulo::novo(
 ///     Id::novo(),
 ///     EspecieTitulo::Receber,
-///     Contraparte::Cliente(Id::novo()),
+///     Some(Contraparte::Cliente(Id::novo())),
 ///     Dinheiro::reais(100),
 ///     hoje,
 /// )
@@ -246,7 +250,7 @@ pub struct TituloComParcelas {
 pub struct ConstrutorTitulo {
     empresa: Id,
     especie: EspecieTitulo,
-    contraparte: Contraparte,
+    contraparte: Option<Contraparte>,
     valor_total: Dinheiro,
     emissao: Data,
     origem_modulo: String,
@@ -267,11 +271,12 @@ pub struct ConstrutorTitulo {
 
 impl ConstrutorTitulo {
     /// Começa um título novo. `emissao` também é o vencimento padrão da 1ª parcela até que
-    /// [`Self::parcelas`] diga o contrário.
+    /// [`Self::parcelas`] diga o contrário. `contraparte: None` = título avulso sem
+    /// cliente/fornecedor informado — OS/vendas/compras sempre passam `Some`.
     pub fn novo(
         empresa: Id,
         especie: EspecieTitulo,
-        contraparte: Contraparte,
+        contraparte: Option<Contraparte>,
         valor_total: Dinheiro,
         emissao: Data,
     ) -> Self {
@@ -466,7 +471,7 @@ mod testes {
         ConstrutorTitulo::novo(
             Id::novo(),
             EspecieTitulo::Receber,
-            Contraparte::Cliente(Id::novo()),
+            Some(Contraparte::Cliente(Id::novo())),
             valor,
             hoje(),
         )

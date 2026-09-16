@@ -16,9 +16,9 @@ use mod_clientes::{
 };
 use mod_estoque::{
     AparelhoOrigemRegistrado, CriarGrupoProduto, CriarLocal, CriarProduto, CriarUnidade,
-    DetalheDoLotePorCodigo, DetalheLote, EntradaComLoteRegistrada, GrupoProdutoCriado,
-    LocalCriado, ModuloEstoque, OrigemLote, ProdutoCriado, RegistrarAparelhoOrigem,
-    RegistrarEntradaComLote, TipoLocal, UnidadeCriada,
+    DetalheDoLotePorCodigo, DetalheLote, EntradaComLoteRegistrada, GrupoProdutoCriado, LocalCriado,
+    ModuloEstoque, OrigemLote, ProdutoCriado, RegistrarAparelhoOrigem, RegistrarEntradaComLote,
+    TipoLocal, UnidadeCriada,
 };
 use mod_os::{
     AbrirOrdemServico, AplicarPeca, AprovarOrcamentoOs, BuscarDetalheOrdem, CancelarOrdemServico,
@@ -67,12 +67,17 @@ fn ambiente(empresa: Id) -> Ambiente {
     let mut rm = RegistroModulos::novo();
     rm.registrar(&mod_clientes::MANIFESTO).unwrap();
     rm.registrar(&mod_estoque::MANIFESTO).unwrap();
+    rm.registrar(&mod_financeiro::MANIFESTO).unwrap();
     rm.registrar(&mod_os::MANIFESTO).unwrap();
+    // Só pedir "os" já basta — `os` agora declara financeiro/estoque/clientes como
+    // dependência dura do manifesto (não só do Cargo.toml), então `resolver` os ativa
+    // sozinho pelo fecho transitivo. Pedidos explícitos, mantidos por clareza do teste.
     let efetivo = rm
         .resolver(
             &PedidoAtivacao::nova()
                 .com_modulo("clientes")
                 .com_modulo("estoque")
+                .com_modulo("financeiro")
                 .com_modulo("os"),
         )
         .unwrap();
@@ -391,6 +396,10 @@ fn ciclo_completo_de_os_abre_orca_aprova_executa_e_fatura() {
             "os.faturar_ordem_servico.v1",
             &carga(&FaturarOrdemServico {
                 ordem_servico: os.ordem_servico,
+                parcelas: 1,
+                primeiro_vencimento: cardeal_kernel::Data::de_dias(20_000),
+                intervalo_dias: 0,
+                pago_no_ato: None,
             }),
             &s,
             &amb,
@@ -604,6 +613,100 @@ fn ordens_em_aberto_lista_e_detalhe_traz_laudo_e_itens() {
     assert_eq!(detalhe.laudo.unwrap().descricao_problema, "Não imprime");
     assert!(detalhe.itens_peca.is_empty());
     assert!(detalhe.itens_mao_de_obra.is_empty());
+}
+
+#[test]
+fn todas_as_ordens_inclui_finalizadas_que_ordens_em_aberto_esconde() {
+    // Pedido explícito do usuário: depois de faturar/cancelar, a OS "sumia" da tela porque só
+    // existia a visão de fila ativa (`OrdensEmAberto`) — `TodasAsOrdens` cobre qualquer estado.
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloClientes, &ModuloEstoque, &ModuloOs]).unwrap();
+    let s = sessao_completa(empresa);
+    let amb = ambiente(empresa);
+
+    let cliente: PessoaCadastrada = postcard::from_bytes(
+        &d.executar_comando(
+            "clientes.criar_pessoa.v1",
+            &carga(&CriarPessoa {
+                tipo: TipoPessoa::Fisica,
+                nome: "Rita Alves".to_string(),
+                nome_fantasia: None,
+                papel_inicial: Papel::Cliente,
+                documento_tipo: None,
+                documento_numero: None,
+                data_nascimento: None,
+                endereco: None,
+                contato: None,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    let os: OrdemServicoAberta = postcard::from_bytes(
+        &d.executar_comando(
+            "os.abrir_ordem_servico.v1",
+            &carga(&AbrirOrdemServico {
+                cliente: cliente.pessoa,
+                equipamento: "Liquidificador".to_string(),
+                defeito_relatado: "Não gira".to_string(),
+                tecnico_responsavel: Id::novo(),
+                garantia_dias: 90,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    d.executar_comando(
+        "os.cancelar_ordem_servico.v1",
+        &carga(&CancelarOrdemServico {
+            ordem_servico: os.ordem_servico,
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+
+    let em_aberto: Vec<mod_os::OrdemServico> = postcard::from_bytes(
+        &d.executar_consulta(
+            "os.ordens_em_aberto.v1",
+            &carga(&OrdensEmAberto),
+            &s,
+            &amb,
+            arm.leitor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(
+        em_aberto.iter().all(|o| o.id != os.ordem_servico),
+        "OS cancelada não deveria aparecer na fila ativa"
+    );
+
+    let todas: Vec<mod_os::OrdemServico> = postcard::from_bytes(
+        &d.executar_consulta(
+            "os.todas_as_ordens.v1",
+            &carga(&mod_os::TodasAsOrdens),
+            &s,
+            &amb,
+            arm.leitor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let encontrada = todas
+        .iter()
+        .find(|o| o.id == os.ordem_servico)
+        .expect("OS cancelada devia aparecer em TodasAsOrdens");
+    assert_eq!(encontrada.estado, mod_os::EstadoOs::Cancelada);
 }
 
 #[test]
@@ -823,8 +926,7 @@ fn cliente_produto_local_com_saldo(
     )
     .unwrap();
 
-    let (produto, local) =
-        produto_local_com_saldo(d, arm, s, amb, "A", quantidade, custo_unitario);
+    let (produto, local) = produto_local_com_saldo(d, arm, s, amb, "A", quantidade, custo_unitario);
     (cliente.pessoa, produto, local)
 }
 
@@ -851,8 +953,14 @@ fn cancelar_ordem_em_execucao_estorna_peca_aplicada_ao_estoque() {
     let s = sessao_completa(empresa);
     let amb = ambiente(empresa);
 
-    let (cliente, produto, local) =
-        cliente_produto_local_com_saldo(&d, &arm, &s, &amb, Quantidade::unidades(5), Preco::reais(90));
+    let (cliente, produto, local) = cliente_produto_local_com_saldo(
+        &d,
+        &arm,
+        &s,
+        &amb,
+        Quantidade::unidades(5),
+        Preco::reais(90),
+    );
     assert_eq!(saldo_disponivel(&arm, produto), Quantidade::unidades(5));
 
     let os: OrdemServicoAberta = postcard::from_bytes(
@@ -1002,8 +1110,14 @@ fn aplicar_peca_com_lote_rastreia_ate_o_codigo_do_post_it() {
     let s = sessao_completa(empresa);
     let amb = ambiente(empresa);
 
-    let (cliente, produto, local) =
-        cliente_produto_local_com_saldo(&d, &arm, &s, &amb, Quantidade::unidades(1), Preco::reais(60));
+    let (cliente, produto, local) = cliente_produto_local_com_saldo(
+        &d,
+        &arm,
+        &s,
+        &amb,
+        Quantidade::unidades(1),
+        Preco::reais(60),
+    );
 
     // Registra o aparelho usado e a peça retirada dele, com o código do post-it.
     let aparelho: AparelhoOrigemRegistrado = postcard::from_bytes(
@@ -1154,7 +1268,10 @@ fn aplicar_peca_com_lote_rastreia_ate_o_codigo_do_post_it() {
     .unwrap();
     assert_eq!(detalhe.custo_unitario, Preco::reais(120));
     assert_eq!(detalhe.quantidade_atual, Quantidade::ZERO);
-    assert_eq!(detalhe.aparelho_origem.unwrap().custo_aquisicao, Dinheiro::reais(250));
+    assert_eq!(
+        detalhe.aparelho_origem.unwrap().custo_aquisicao,
+        Dinheiro::reais(250)
+    );
     assert_eq!(detalhe.movimentos.len(), 2); // entrada + a saída desta OS
     assert!(detalhe
         .movimentos
@@ -1169,11 +1286,24 @@ fn aplicar_peca_com_lote_de_outro_produto_e_recusado() {
     let s = sessao_completa(empresa);
     let amb = ambiente(empresa);
 
-    let (cliente, produto_a, local) =
-        cliente_produto_local_com_saldo(&d, &arm, &s, &amb, Quantidade::unidades(1), Preco::reais(50));
+    let (cliente, produto_a, local) = cliente_produto_local_com_saldo(
+        &d,
+        &arm,
+        &s,
+        &amb,
+        Quantidade::unidades(1),
+        Preco::reais(50),
+    );
     // Um segundo produto, com seu próprio lote.
-    let (produto_b, local_b) =
-        produto_local_com_saldo(&d, &arm, &s, &amb, "B", Quantidade::unidades(1), Preco::reais(50));
+    let (produto_b, local_b) = produto_local_com_saldo(
+        &d,
+        &arm,
+        &s,
+        &amb,
+        "B",
+        Quantidade::unidades(1),
+        Preco::reais(50),
+    );
 
     let lote_de_b: EntradaComLoteRegistrada = postcard::from_bytes(
         &d.executar_comando(
@@ -1488,6 +1618,10 @@ fn os_de_garantia_com_peca_gratuita_fatura_sem_titulo_mas_com_lancamento_de_cust
             "os.faturar_ordem_servico.v1",
             &carga(&FaturarOrdemServico {
                 ordem_servico: os.ordem_servico,
+                parcelas: 1,
+                primeiro_vencimento: cardeal_kernel::Data::de_dias(20_000),
+                intervalo_dias: 0,
+                pago_no_ato: None,
             }),
             &s,
             &amb,
@@ -1814,9 +1948,10 @@ fn ordens_aguardando_aprovacao_e_historico_do_equipamento() {
 }
 
 #[test]
-fn abrir_os_so_com_cliente_e_defeito_relatado_funciona_sem_equipamento() {
-    // Pedido explícito do usuário: abrir OS só com nome do cliente + defeito relatado tem
-    // que funcionar — equipamento fica vazio, completável depois.
+fn abrir_os_sem_equipamento_e_recusado() {
+    // O aparelho trazido para reparo é obrigatório na abertura — o balcão relatou confundir
+    // o antigo campo opcional com "equipamento usado no reparo" e abrir OS sem registrar de
+    // qual aparelho se tratava.
     let (_dir, arm, empresa) = base();
     let d = Despachante::construir(&[&ModuloClientes, &ModuloEstoque, &ModuloOs]).unwrap();
     let s = sessao_completa(empresa);
@@ -1844,8 +1979,8 @@ fn abrir_os_so_com_cliente_e_defeito_relatado_funciona_sem_equipamento() {
     )
     .unwrap();
 
-    let os: OrdemServicoAberta = postcard::from_bytes(
-        &d.executar_comando(
+    let erro = d
+        .executar_comando(
             "os.abrir_ordem_servico.v1",
             &carga(&AbrirOrdemServico {
                 cliente: cliente.pessoa,
@@ -1858,12 +1993,83 @@ fn abrir_os_so_com_cliente_e_defeito_relatado_funciona_sem_equipamento() {
             &amb,
             arm.escritor(),
         )
+        .unwrap_err();
+    assert_eq!(erro.codigo, CodigoErro::ENTRADA_INVALIDA);
+}
+
+#[test]
+fn faturar_direto_da_abertura_pula_laudo_orcamento_aprovacao_e_execucao() {
+    // Pedido explícito do usuário (2026-09-15): laudo/orçamento/aprovação/execução são
+    // opcionais — o balcão precisa poder faturar assim que a OS abre.
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloClientes, &ModuloEstoque, &ModuloOs]).unwrap();
+    let s = sessao_completa(empresa);
+    let amb = ambiente(empresa);
+
+    let cliente: PessoaCadastrada = postcard::from_bytes(
+        &d.executar_comando(
+            "clientes.criar_pessoa.v1",
+            &carga(&CriarPessoa {
+                tipo: TipoPessoa::Fisica,
+                nome: "Rogério Neves".to_string(),
+                nome_fantasia: None,
+                papel_inicial: Papel::Cliente,
+                documento_tipo: None,
+                documento_numero: None,
+                data_nascimento: None,
+                endereco: None,
+                contato: None,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
         .unwrap(),
     )
     .unwrap();
 
-    let saida = d
-        .executar_consulta(
+    let os: OrdemServicoAberta = postcard::from_bytes(
+        &d.executar_comando(
+            "os.abrir_ordem_servico.v1",
+            &carga(&AbrirOrdemServico {
+                cliente: cliente.pessoa,
+                equipamento: "Ventilador".to_string(),
+                defeito_relatado: "Não gira".to_string(),
+                tecnico_responsavel: Id::novo(),
+                garantia_dias: 90,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    // Fatura direto da abertura — sem laudo, sem orçamento, sem aprovação, sem execução.
+    let faturada: OrdemServicoFaturada = postcard::from_bytes(
+        &d.executar_comando(
+            "os.faturar_ordem_servico.v1",
+            &carga(&FaturarOrdemServico {
+                ordem_servico: os.ordem_servico,
+                parcelas: 1,
+                primeiro_vencimento: cardeal_kernel::Data::de_dias(20_000),
+                intervalo_dias: 0,
+                pago_no_ato: None,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    // Sem item nenhum no orçamento, valor_total é zero — cortesia, sem título.
+    assert_eq!(faturada.valor_total, Dinheiro::ZERO);
+    assert!(faturada.titulo.is_none());
+
+    let detalhe: DetalheOrdem = postcard::from_bytes::<Option<DetalheOrdem>>(
+        &d.executar_consulta(
             "os.buscar_detalhe_ordem.v1",
             &carga(&BuscarDetalheOrdem {
                 ordem_servico: os.ordem_servico,
@@ -1872,12 +2078,103 @@ fn abrir_os_so_com_cliente_e_defeito_relatado_funciona_sem_equipamento() {
             &amb,
             arm.leitor(),
         )
-        .unwrap();
-    let detalhe: DetalheOrdem = postcard::from_bytes::<Option<DetalheOrdem>>(&saida)
-        .unwrap()
-        .unwrap();
-    assert_eq!(detalhe.ordem.equipamento, "");
-    assert_eq!(detalhe.ordem.defeito_relatado, "Não carrega a bateria");
+        .unwrap(),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(detalhe.ordem.estado, mod_os::EstadoOs::Faturada);
+}
+
+#[test]
+fn faturar_pago_no_ato_da_baixa_completa_na_mesma_transacao() {
+    // Pedido explícito do usuário (2026-09-15): "ao faturar ele pede o método de pagamento" —
+    // fatura e recebe no mesmo clique, sem passar pela tela de Financeiro depois.
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloClientes, &ModuloEstoque, &ModuloOs]).unwrap();
+    let s = sessao_completa(empresa);
+    let amb = ambiente(empresa);
+
+    let cliente: PessoaCadastrada = postcard::from_bytes(
+        &d.executar_comando(
+            "clientes.criar_pessoa.v1",
+            &carga(&CriarPessoa {
+                tipo: TipoPessoa::Fisica,
+                nome: "Felipe Souza".to_string(),
+                nome_fantasia: None,
+                papel_inicial: Papel::Cliente,
+                documento_tipo: None,
+                documento_numero: None,
+                data_nascimento: None,
+                endereco: None,
+                contato: None,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    let os: OrdemServicoAberta = postcard::from_bytes(
+        &d.executar_comando(
+            "os.abrir_ordem_servico.v1",
+            &carga(&AbrirOrdemServico {
+                cliente: cliente.pessoa,
+                equipamento: "Furadeira".to_string(),
+                defeito_relatado: "Não liga".to_string(),
+                tecnico_responsavel: Id::novo(),
+                garantia_dias: 90,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    d.executar_comando(
+        "os.montar_orcamento.v1",
+        &carga(&MontarOrcamentoOs {
+            ordem_servico: os.ordem_servico,
+            item: ItemOrcamentoNovo::MaoDeObra {
+                descricao: "Troca de escova de carvão".to_string(),
+                valor: Dinheiro::reais(60),
+                tecnico: Id::novo(),
+                horas: None,
+            },
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+
+    let faturada: OrdemServicoFaturada = postcard::from_bytes(
+        &d.executar_comando(
+            "os.faturar_ordem_servico.v1",
+            &carga(&FaturarOrdemServico {
+                ordem_servico: os.ordem_servico,
+                parcelas: 1,
+                primeiro_vencimento: cardeal_kernel::Data::de_dias(20_000),
+                intervalo_dias: 0,
+                pago_no_ato: Some(mod_os::PagamentoNoAto {
+                    meio_pagamento: mod_financeiro::MeioPagamento::Dinheiro,
+                    conta_destino: None,
+                }),
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    assert_eq!(faturada.valor_total, Dinheiro::reais(60));
+    assert!(faturada.titulo.is_some());
+    assert!(faturada.titulo_pago);
 }
 
 #[test]
@@ -1961,7 +2258,7 @@ fn editar_dados_da_ordem_completa_equipamento_e_complementa_defeito() {
             "os.abrir_ordem_servico.v1",
             &carga(&AbrirOrdemServico {
                 cliente: cliente.pessoa,
-                equipamento: String::new(),
+                equipamento: "Notebook".to_string(),
                 defeito_relatado: "Não liga".to_string(),
                 tecnico_responsavel: Id::novo(),
                 garantia_dias: 90,
@@ -1974,7 +2271,7 @@ fn editar_dados_da_ordem_completa_equipamento_e_complementa_defeito() {
     )
     .unwrap();
 
-    // Completa o equipamento e complementa o defeito relatado.
+    // Corrige o equipamento (detalhe que faltou) e complementa o defeito relatado.
     d.executar_comando(
         "os.editar_dados_da_ordem.v1",
         &carga(&EditarDadosDaOrdem {

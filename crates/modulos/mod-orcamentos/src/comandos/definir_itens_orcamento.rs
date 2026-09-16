@@ -24,10 +24,11 @@ impl Comando for DefinirItensOrcamento {
 
     fn executar(self, _ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         let mut orcamento = carregar_orcamento(uow, self.orcamento)?;
-        let itens =
-            montar_itens(orcamento.id, self.itens).map_err(|e| Erro::de_dominio(&e))?;
+        let itens = montar_itens(orcamento.id, self.itens).map_err(|e| Erro::de_dominio(&e))?;
 
-        orcamento.itens_alterados().map_err(|e| Erro::de_dominio(&e))?;
+        orcamento
+            .itens_alterados()
+            .map_err(|e| Erro::de_dominio(&e))?;
 
         let mut repo = RepositorioOrcamentos::novo(uow);
         repo.redefinir_itens(orcamento.id, &itens)?;

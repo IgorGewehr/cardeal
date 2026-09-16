@@ -14,6 +14,7 @@ mod criar_grupo_produto;
 mod criar_local;
 mod criar_produto;
 mod criar_unidade;
+mod definir_ativo_produto;
 mod definir_ponto_pedido;
 mod editar_detalhes_tecnicos_produto;
 mod registrar_aparelho_origem;
@@ -26,6 +27,7 @@ pub use criar_grupo_produto::{CriarGrupoProduto, GrupoProdutoCriado};
 pub use criar_local::{CriarLocal, LocalCriado, TipoLocal};
 pub use criar_produto::{CriarProduto, ProdutoCriado};
 pub use criar_unidade::{CriarUnidade, UnidadeCriada};
+pub use definir_ativo_produto::DefinirAtivoProduto;
 pub use definir_ponto_pedido::DefinirPontoPedido;
 pub use editar_detalhes_tecnicos_produto::EditarDetalhesTecnicosProduto;
 pub use registrar_aparelho_origem::{AparelhoOrigemRegistrado, RegistrarAparelhoOrigem};
@@ -271,7 +273,9 @@ fn registrar_saida_interna(
             .buscar_lote(lote_id)?
             .ok_or_else(|| Erro::de_dominio(&crate::erros::ErroEstoque::LoteInexistente))?;
         if lote.produto != dados.produto {
-            return Err(Erro::de_dominio(&crate::erros::ErroEstoque::LoteDeOutroProduto));
+            return Err(Erro::de_dominio(
+                &crate::erros::ErroEstoque::LoteDeOutroProduto,
+            ));
         }
         let disponivel = repo.saldo_do_lote(lote_id)?;
         if disponivel < dados.quantidade {

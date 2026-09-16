@@ -47,9 +47,7 @@ impl Comando for ConfirmarEntrada {
         let gerar_titulo = self
             .gerar_titulo_a_pagar
             .unwrap_or(preferencias.gera_titulo_a_pagar);
-        let pago_no_ato = self
-            .pago_no_ato
-            .unwrap_or(preferencias.pago_no_ato_padrao);
+        let pago_no_ato = self.pago_no_ato.unwrap_or(preferencias.pago_no_ato_padrao);
         let confirmacao = confirmar_entrada_comum(
             self.nota_entrada,
             self.local,

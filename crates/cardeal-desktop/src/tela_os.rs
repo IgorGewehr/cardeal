@@ -6,12 +6,13 @@
 
 use cardeal_analytics::{calcular_margem_de_os, CustoHorario, MargemDeOs};
 use cardeal_cliente::{IdentidadeVisual, MotorLocal, SessaoLocal, UsuarioResumo};
-use cardeal_kernel::{Dinheiro, Id, Instante, Percentual, Preco, Quantidade};
+use cardeal_kernel::{Data, Dinheiro, Fuso, Id, Instante, Percentual, Preco, Quantidade};
 use cardeal_modkit::Icone;
 use cardeal_pdf::{gerar_comprovante_os, ComprovanteOsPdf, IdentidadeEmpresa, ItemPdf};
 use cardeal_ui::atoms::{Botao, Etiqueta, Rotulo, Tom, ValorDinheiro};
 use cardeal_ui::molecules::{
     Abas, Campo, CartaoKpi, EstadoVazio, Mascara, OpcaoBusca, SecaoExpansivel, SeletorBusca,
+    SeletorOpcao,
 };
 use cardeal_ui::organisms::{
     notificar, ColunaGrade, Dialogo, Direcao, FaixaKpi, Grade, LayoutTela, Notificacao,
@@ -24,13 +25,17 @@ use mod_clientes::{
     TipoEndereco, TipoPessoa,
 };
 use mod_estoque::{ItemProdutoComSaldo, ProdutosComSaldo};
-use mod_financeiro::{Titulo, TituloDaOrigem};
+use mod_financeiro::{
+    ContaBancariaCriada, ContasDisponiveis, CriarContaBancaria, ItemContaDisponivel, MeioPagamento,
+    Titulo, TituloDaOrigem,
+};
 use mod_os::{
     AbrirOrdemServico, ApontamentoDeTempo, ApontamentosDaOrdem, AprovarOrcamentoOs,
-    BuscarDetalheOrdem, ConcluirExecucao, DetalheOrdem, EncerrarApontamento, EnviarParaAprovacao,
-    EstadoOs, FaturarOrdemServico, IniciarApontamento, IniciarExecucao, ItemOrcamentoNovo,
-    MontarOrcamentoOs, OrdemServico, OrdemServicoAberta, OrdensEmAberto, RegistrarLaudo,
-    ReprovarOrcamentoOs, TempoTotalDaOrdem,
+    BuscarDetalheOrdem, CancelarOrdemServico, ConcluirExecucao, DetalheOrdem, EditarDadosDaOrdem,
+    EncerrarApontamento, EnviarParaAprovacao, EstadoOs, FaturarOrdemServico, IniciarApontamento,
+    IniciarExecucao, ItemOrcamentoNovo, MontarOrcamentoOs, OrdemServico, OrdemServicoAberta,
+    OrdemServicoCancelada, OrdemServicoFaturada, PagamentoNoAto, RegistrarLaudo,
+    ReprovarOrcamentoOs, TempoTotalDaOrdem, TodasAsOrdens,
 };
 
 /// Qual dialog está aberto.
@@ -58,13 +63,34 @@ enum Dlg {
         end_cidade: String,
         end_uf: String,
         end_cep: String,
-        /// Descrição livre do equipamento — opcional (completável depois na edição da OS).
+        /// Descrição livre do aparelho trazido para reparo — **obrigatório** (ainda
+        /// corrigível depois via "Editar" na lista).
         equipamento: String,
         /// O que o cliente relatou querer resolver — **obrigatório** (junto do nome do
-        /// cliente, o único campo que a abertura exige).
+        /// cliente e do aparelho, os campos que a abertura exige).
         defeito_relatado: String,
     },
     Detalhe,
+    /// "Editar dados da ordem" (`EditarDadosDaOrdem`) — corrigir o aparelho e/ou
+    /// complementar o defeito relatado de uma OS já aberta.
+    EditarDados(Id),
+    /// Faturar a OS aberta em `EstadoTelaOs::detalhe` — disponível desde a abertura, não só
+    /// depois do trâmite completo (pedido explícito do usuário, 2026-09-15: laudo →
+    /// orçamento → aprovação → execução → conclusão são passos opcionais, não um portão pro
+    /// faturamento). Pede o meio de pagamento e já baixa na hora — fatura e recebe no mesmo
+    /// clique é o caso comum no balcão.
+    Faturar {
+        meio_pagamento: Option<MeioPagamento>,
+        /// As contas "1.1.*" que não são o Caixa físico — candidatas a receber um pagamento
+        /// em Pix/cartão. Carregadas uma vez na abertura do dialog.
+        contas: Vec<ItemContaDisponivel>,
+        contas_carregadas: bool,
+        conta_escolhida: Option<Id>,
+        /// `true` = mostra o miniformulário "Nova conta bancária" em vez do seletor — ligado
+        /// sozinho quando `contas` vem vazia (sem conta nenhuma pra escolher).
+        criando_conta: bool,
+        nova_conta_nome: String,
+    },
 }
 
 impl Dlg {
@@ -87,6 +113,27 @@ impl Dlg {
             defeito_relatado: String::new(),
         }
     }
+
+    fn faturar() -> Self {
+        Self::Faturar {
+            meio_pagamento: None,
+            contas: Vec::new(),
+            contas_carregadas: false,
+            conta_escolhida: None,
+            criando_conta: false,
+            nova_conta_nome: String::new(),
+        }
+    }
+}
+
+/// Uma transição de estado simples (sem campo próprio) aguardando confirmação num dialog
+/// separado — disparada pelos botões de `acoes_por_estado`, nunca executada no primeiro
+/// clique.
+#[derive(Debug, Clone, Copy)]
+enum AcaoPendente {
+    AprovarOrcamento(Id),
+    ReprovarOrcamento(Id),
+    ConcluirExecucao(Id),
 }
 
 /// Qual aba da tela de OS está ativa.
@@ -116,10 +163,20 @@ pub struct EstadoTelaOs {
     calculando_margens: bool,
     erro: Option<String>,
     dlg: Dlg,
-    /// Filtro da lista de ordens (nº, equipamento ou nome do cliente) — client-side, mesma
+    /// Filtro da lista de ordens (nº, aparelho ou nome do cliente) — client-side, mesma
     /// decisão de `tela_estoque`/`tela_clientes` (a consulta já traz tudo de uma vez).
     busca: String,
+    /// Filtro por status — `None` = `FiltroStatusOs::Ativas` (o padrão).
+    filtro_status: Option<FiltroStatusOs>,
     ordenacao: Option<(usize, Direcao)>,
+    /// `(ordem_servico, rótulo)` aguardando confirmação de exclusão (cancelamento).
+    confirmar_exclusao: Option<(Id, String)>,
+    /// Transição de estado simples (Aprovar/Reprovar/Concluir execução) aguardando
+    /// confirmação — nenhuma dispara no primeiro clique.
+    confirmar_acao: Option<AcaoPendente>,
+    /// Campos do dialog "Editar dados da ordem" (`EditarDadosDaOrdem`).
+    editar_equipamento: String,
+    editar_complemento_defeito: String,
 
     laudo_problema: String,
     laudo_diagnostico: String,
@@ -136,9 +193,13 @@ pub struct EstadoTelaOs {
 }
 
 impl EstadoTelaOs {
-    /// Recarrega a lista de ordens em aberto e os catálogos de cliente e produto.
+    /// Recarrega a lista de ordens (qualquer estado — `TodasAsOrdens`, o filtro de status na
+    /// tela decide o que aparece) e os catálogos de cliente e produto.
     pub fn carregar(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
-        match motor.consultar(sessao, "os.ordens_em_aberto.v1", &OrdensEmAberto) {
+        if self.filtro_status.is_none() {
+            self.filtro_status = Some(FiltroStatusOs::Ativas);
+        }
+        match motor.consultar(sessao, "os.todas_as_ordens.v1", &TodasAsOrdens) {
             Ok(ordens) => {
                 self.ordens = ordens;
                 self.erro = None;
@@ -180,6 +241,9 @@ impl EstadoTelaOs {
                 self.carregar_apontamentos(motor, sessao, id);
                 self.titulo_gerado = None;
                 if let Some(d) = &self.detalhe {
+                    if d.laudo.is_none() {
+                        self.laudo_problema = d.ordem.defeito_relatado.clone();
+                    }
                     if d.ordem.estado == EstadoOs::Faturada {
                         if let Ok(t) = motor.consultar(
                             sessao,
@@ -309,23 +373,485 @@ pub fn mostrar(
             Dlg::Fechado => {}
             Dlg::Nova { .. } => dialogo_nova(ui.ctx(), motor, sessao, estado),
             Dlg::Detalhe => dialogo_detalhe(ui.ctx(), motor, sessao, estado),
+            Dlg::EditarDados(id) => dialogo_editar_dados(ui.ctx(), motor, sessao, estado, id),
+            Dlg::Faturar { .. } => dialogo_faturar(ui.ctx(), motor, sessao, estado),
         },
         AbaOs::Orcamentos => {
             crate::tela_orcamentos::dialogos(ui.ctx(), motor, sessao, &mut estado.orc);
         }
         AbaOs::Lucratividade => {}
     }
+
+    if let Some((ordem_servico, rotulo)) = estado.confirmar_exclusao.clone() {
+        let resposta = cardeal_ui::organisms::dialogo_confirmacao(
+            ui.ctx(),
+            "Excluir OS",
+            &format!(
+                "Tem certeza que quer excluir a OS \"{rotulo}\"? Ela vai pra Cancelada — \
+                 peças já aplicadas voltam pro estoque automaticamente, quando possível.",
+            ),
+            "Excluir",
+        );
+        if resposta.confirmado {
+            match motor.executar(
+                sessao,
+                "os.cancelar_ordem_servico.v1",
+                &CancelarOrdemServico { ordem_servico },
+            ) {
+                Ok(r) => {
+                    let r: OrdemServicoCancelada = r;
+                    estado.carregar(motor, sessao);
+                    let msg = if r.pecas_pendentes_de_estorno_manual > 0 {
+                        format!(
+                            "OS excluída — {} peça(s) precisam de correção manual de estoque",
+                            r.pecas_pendentes_de_estorno_manual
+                        )
+                    } else {
+                        "OS excluída".to_owned()
+                    };
+                    notificar(ui.ctx(), Notificacao::sucesso(msg));
+                }
+                Err(e) => notificar(ui.ctx(), Notificacao::erro(e.mensagem)),
+            }
+        }
+        if resposta.fechar {
+            estado.confirmar_exclusao = None;
+        }
+    }
+
+    if let Some(acao) = estado.confirmar_acao {
+        let (titulo, mensagem, rotulo_acao) = match acao {
+            AcaoPendente::AprovarOrcamento(_) => (
+                "Aprovar orçamento",
+                "Confirma a aprovação deste orçamento pelo cliente? A OS libera para \
+                 execução."
+                    .to_owned(),
+                "Aprovar",
+            ),
+            AcaoPendente::ReprovarOrcamento(_) => (
+                "Reprovar orçamento",
+                "Confirma a reprovação? A OS encerra sem execução — esta ação não tem volta."
+                    .to_owned(),
+                "Reprovar",
+            ),
+            AcaoPendente::ConcluirExecucao(_) => (
+                "Concluir execução",
+                "Confirma que o reparo terminou? A OS fica pronta para faturar.".to_owned(),
+                "Concluir",
+            ),
+        };
+        let resposta =
+            cardeal_ui::organisms::dialogo_confirmacao(ui.ctx(), titulo, &mensagem, rotulo_acao);
+        if resposta.confirmado {
+            match acao {
+                AcaoPendente::AprovarOrcamento(ordem_servico) => aplicar_e_recarregar(
+                    ui.ctx(),
+                    motor,
+                    sessao,
+                    estado,
+                    ordem_servico,
+                    "os.aprovar_orcamento.v1",
+                    &AprovarOrcamentoOs {
+                        ordem_servico,
+                        identificacao_aprovador: estado.aprovador.clone(),
+                    },
+                    "Orçamento aprovado",
+                ),
+                AcaoPendente::ReprovarOrcamento(ordem_servico) => aplicar_e_recarregar(
+                    ui.ctx(),
+                    motor,
+                    sessao,
+                    estado,
+                    ordem_servico,
+                    "os.reprovar_orcamento.v1",
+                    &ReprovarOrcamentoOs { ordem_servico },
+                    "Orçamento reprovado",
+                ),
+                AcaoPendente::ConcluirExecucao(ordem_servico) => aplicar_e_recarregar(
+                    ui.ctx(),
+                    motor,
+                    sessao,
+                    estado,
+                    ordem_servico,
+                    "os.concluir_execucao.v1",
+                    &ConcluirExecucao { ordem_servico },
+                    "Execução concluída",
+                ),
+            }
+        }
+        if resposta.fechar {
+            estado.confirmar_acao = None;
+        }
+    }
 }
 
-/// Recalcula a margem de cada ordem hoje carregada (`OrdensEmAberto` — ver a limitação
-/// documentada em `lucratividade`) buscando detalhe + apontamentos de cada uma. Sem custo
-/// por hora de técnico cadastrado ainda, a margem líquida vem `None` ("não calculável") em
-/// vez de inventar um número — `cardeal_analytics::calcular_margem_de_os` já trata isso.
+/// Se o comando `CancelarOrdemServico` aceita a OS neste estado — mesma regra de
+/// `OrdemServico::cancelar` (`docs/modulos/os.md` §11 regra 5): qualquer estado anterior a
+/// `Concluida`, exceto os já terminais.
+const fn pode_cancelar(estado: EstadoOs) -> bool {
+    matches!(
+        estado,
+        EstadoOs::Aberta
+            | EstadoOs::EmDiagnostico
+            | EstadoOs::AguardandoAprovacao
+            | EstadoOs::Aprovada
+            | EstadoOs::EmExecucao
+    )
+}
+
+/// Verdadeiro para qualquer estado que não seja terminal — a mesma regra de
+/// `mod_os::ordens_nao_finalizadas` (backend), replicada aqui porque a tela carrega
+/// `TodasAsOrdens` de uma vez e filtra localmente.
+const fn nao_finalizada(estado: EstadoOs) -> bool {
+    !matches!(
+        estado,
+        EstadoOs::Faturada | EstadoOs::Cancelada | EstadoOs::Reprovada
+    )
+}
+
+/// O filtro de status da listagem de OS. Pedido explícito do usuário (2026-09-14): depois de
+/// faturar, a OS "sumia" da lista — precisa dar pra ver qualquer status, não só a fila ativa.
+/// `Ativas` é o padrão (mesmo recorte de antes, quando a tela só sabia mostrar isso).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FiltroStatusOs {
+    Ativas,
+    Todos,
+    Um(EstadoOs),
+}
+
+impl FiltroStatusOs {
+    fn combina(self, estado: EstadoOs) -> bool {
+        match self {
+            Self::Ativas => nao_finalizada(estado),
+            Self::Todos => true,
+            Self::Um(e) => estado == e,
+        }
+    }
+}
+
+fn dialogo_editar_dados(
+    ctx: &egui::Context,
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaOs,
+    ordem_servico: Id,
+) {
+    let enter =
+        ctx.input(|i| i.key_pressed(egui::Key::Enter)) && !ctx.memory(|m| m.any_popup_open());
+
+    let fechar = Dialogo::nova("Editar dados da ordem")
+        .largura(560.0)
+        .mostrar(
+            ctx,
+            estado,
+            |ui, estado| {
+                ui.add(Campo::novo("Aparelho", &mut estado.editar_equipamento));
+                ui.add_space(Espaco::E8);
+                ui.add(
+                    Campo::novo(
+                        "Complementar defeito relatado (opcional)",
+                        &mut estado.editar_complemento_defeito,
+                    )
+                    .marcador("acrescenta ao relato original, não substitui"),
+                );
+            },
+            |ui, estado| {
+                let clicou = ui.add(Botao::primario("Salvar")).clicked();
+                if clicou || enter {
+                    let equipamento = (!estado.editar_equipamento.trim().is_empty())
+                        .then(|| estado.editar_equipamento.clone());
+                    let complemento = (!estado.editar_complemento_defeito.trim().is_empty())
+                        .then(|| estado.editar_complemento_defeito.clone());
+                    match motor.executar(
+                        sessao,
+                        "os.editar_dados_da_ordem.v1",
+                        &EditarDadosDaOrdem {
+                            ordem_servico,
+                            equipamento,
+                            complemento_defeito_relatado: complemento,
+                        },
+                    ) {
+                        Ok(()) => {
+                            estado.dlg = Dlg::Fechado;
+                            estado.carregar(motor, sessao);
+                            notificar(ui.ctx(), Notificacao::sucesso("Ordem atualizada"));
+                        }
+                        Err(e) => notificar(ui.ctx(), Notificacao::erro(e.mensagem)),
+                    }
+                }
+                if ui.add(Botao::secundario("Cancelar")).clicked() {
+                    estado.dlg = Dlg::Fechado;
+                }
+            },
+        );
+    if fechar {
+        estado.dlg = Dlg::Fechado;
+    }
+}
+
+/// Faturar uma OS — disponível desde a abertura (`Dlg::faturar`, botão no rodapé de
+/// `dialogo_detalhe`). Pede o meio de pagamento (Dinheiro/Pix/Cartão) quando há cobrança —
+/// Dinheiro não precisa de mais nada (vai pro Caixa); Pix/cartão pedem uma conta bancária, e
+/// se a empresa ainda não tem nenhuma, o miniformulário "Nova conta bancária" já abre no
+/// lugar do seletor. Fatura e recebe no mesmo clique (`FaturarOrdemServico::pago_no_ato`) —
+/// não existe mais um passo separado de "ir na tela de Financeiro depois pra dar baixa".
+fn dialogo_faturar(
+    ctx: &egui::Context,
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaOs,
+) {
+    let Some(detalhe) = estado.detalhe.clone() else {
+        estado.dlg = Dlg::Fechado;
+        return;
+    };
+    let os = detalhe.ordem.clone();
+
+    if let Dlg::Faturar {
+        contas_carregadas: false,
+        ..
+    } = &estado.dlg
+    {
+        let todas: Vec<ItemContaDisponivel> = motor
+            .consultar(
+                sessao,
+                "financeiro.contas_disponiveis.v1",
+                &ContasDisponiveis,
+            )
+            .unwrap_or_default();
+        let bancos: Vec<ItemContaDisponivel> = todas.into_iter().filter(|c| !c.e_caixa).collect();
+        if let Dlg::Faturar {
+            contas,
+            contas_carregadas,
+            conta_escolhida,
+            criando_conta,
+            ..
+        } = &mut estado.dlg
+        {
+            *contas_carregadas = true;
+            if bancos.is_empty() {
+                *criando_conta = true;
+            } else if bancos.len() == 1 {
+                *conta_escolhida = Some(bancos[0].conta);
+            }
+            *contas = bancos;
+        }
+    }
+
+    let enter =
+        ctx.input(|i| i.key_pressed(egui::Key::Enter)) && !ctx.memory(|m| m.any_popup_open());
+    let titulo = format!("Faturar OS #{} · {}", os.numero, equipamento_label(&os));
+
+    let fechar = Dialogo::nova(titulo).largura(480.0).mostrar(
+        ctx,
+        estado,
+        |ui, estado| {
+            ui.horizontal(|ui| {
+                ui.add(Rotulo::campo("Total a faturar"));
+                ui.add(ValorDinheiro::novo(os.valor_total));
+            });
+
+            if !os.valor_total.e_positivo() {
+                ui.add_space(Espaco::E12);
+                ui.add(
+                    Rotulo::interface(
+                        "Serviço sem cobrança (garantia/cortesia) — faturar só fecha o \
+                         ciclo, sem gerar título.",
+                    )
+                    .quebravel(),
+                );
+                return;
+            }
+
+            let Dlg::Faturar {
+                meio_pagamento,
+                contas,
+                conta_escolhida,
+                criando_conta,
+                nova_conta_nome,
+                ..
+            } = &mut estado.dlg
+            else {
+                return;
+            };
+
+            ui.add_space(Espaco::E12);
+            ui.add(Rotulo::campo("Meio de pagamento"));
+            ui.add_space(Espaco::E4);
+            ui.horizontal(|ui| {
+                for (valor, rotulo) in [
+                    (MeioPagamento::Dinheiro, "Dinheiro"),
+                    (MeioPagamento::Pix, "Pix"),
+                    (MeioPagamento::Cartao, "Cartão"),
+                ] {
+                    let botao = if *meio_pagamento == Some(valor) {
+                        Botao::primario(rotulo)
+                    } else {
+                        Botao::fantasma(rotulo)
+                    };
+                    if ui.add(botao).clicked() {
+                        *meio_pagamento = Some(valor);
+                    }
+                }
+            });
+
+            if !matches!(
+                meio_pagamento,
+                Some(MeioPagamento::Pix) | Some(MeioPagamento::Cartao)
+            ) {
+                return;
+            }
+            ui.add_space(Espaco::E12);
+            if *criando_conta || contas.is_empty() {
+                ui.add(Rotulo::campo(if contas.is_empty() {
+                    "Nenhuma conta bancária cadastrada — crie uma"
+                } else {
+                    "Nova conta bancária"
+                }));
+                ui.add_space(Espaco::E4);
+                ui.horizontal(|ui| {
+                    ui.add(
+                        Campo::novo("", nova_conta_nome).marcador("ex.: Nubank, Banco do Brasil"),
+                    );
+                    if ui.add(Botao::primario("Criar")).clicked() {
+                        if nova_conta_nome.trim().is_empty() {
+                            notificar(ui.ctx(), Notificacao::aviso("Informe o nome da conta."));
+                        } else {
+                            match motor.executar(
+                                sessao,
+                                "financeiro.criar_conta_bancaria.v1",
+                                &CriarContaBancaria {
+                                    nome: nova_conta_nome.clone(),
+                                },
+                            ) {
+                                Ok(c) => {
+                                    let c: ContaBancariaCriada = c;
+                                    contas.push(ItemContaDisponivel {
+                                        conta: c.conta,
+                                        codigo: c.codigo,
+                                        nome: nova_conta_nome.clone(),
+                                        saldo: Dinheiro::ZERO,
+                                        e_caixa: false,
+                                    });
+                                    *conta_escolhida = Some(c.conta);
+                                    *criando_conta = false;
+                                    nova_conta_nome.clear();
+                                    notificar(ui.ctx(), Notificacao::sucesso("Conta criada"));
+                                }
+                                Err(e) => notificar(ui.ctx(), Notificacao::erro(e.mensagem)),
+                            }
+                        }
+                    }
+                });
+                if !contas.is_empty() && ui.add(Botao::fantasma("Usar conta existente")).clicked() {
+                    *criando_conta = false;
+                }
+            } else {
+                SeletorOpcao::novo("Conta bancária", conta_escolhida)
+                    .opcoes(
+                        contas
+                            .iter()
+                            .map(|c| (c.conta, format!("{} ({})", c.nome, c.codigo))),
+                    )
+                    .mostrar(ui);
+                ui.add_space(Espaco::E4);
+                if ui.add(Botao::fantasma("+ Nova conta").pequeno()).clicked() {
+                    *criando_conta = true;
+                }
+            }
+        },
+        |ui, estado| {
+            if ui.add(Botao::primario("Faturar")).clicked() || enter {
+                faturar_os(ui.ctx(), motor, sessao, estado, &os);
+            }
+            if ui.add(Botao::secundario("Cancelar")).clicked() {
+                estado.dlg = Dlg::Detalhe;
+            }
+        },
+    );
+    if fechar {
+        estado.dlg = Dlg::Detalhe;
+    }
+}
+
+/// Executa `FaturarOrdemServico` com o que foi escolhido em `Dlg::Faturar` — meio de
+/// pagamento obrigatório quando há cobrança (`os.valor_total > 0`), sempre 1x à vista e já
+/// baixado (`pago_no_ato`): fatura e recebe são o mesmo clique.
+fn faturar_os(
+    ctx: &egui::Context,
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaOs,
+    os: &OrdemServico,
+) {
+    let pago_no_ato = if os.valor_total.e_positivo() {
+        let Dlg::Faturar {
+            meio_pagamento,
+            conta_escolhida,
+            ..
+        } = &estado.dlg
+        else {
+            return;
+        };
+        let Some(meio_pagamento) = *meio_pagamento else {
+            notificar(ctx, Notificacao::aviso("Escolha o meio de pagamento."));
+            return;
+        };
+        Some(PagamentoNoAto {
+            meio_pagamento,
+            conta_destino: *conta_escolhida,
+        })
+    } else {
+        None
+    };
+
+    match motor.executar(
+        sessao,
+        "os.faturar_ordem_servico.v1",
+        &FaturarOrdemServico {
+            ordem_servico: os.id,
+            parcelas: 1,
+            primeiro_vencimento: Data::hoje(Fuso::BRASILIA),
+            intervalo_dias: 0,
+            pago_no_ato,
+        },
+    ) {
+        Ok(f) => {
+            let f: OrdemServicoFaturada = f;
+            estado.carregar(motor, sessao);
+            estado.abrir_detalhe(motor, sessao, os.id);
+            estado.dlg = Dlg::Detalhe;
+            let msg = if f.titulo_pago {
+                "OS faturada e recebida"
+            } else if f.titulo.is_some() {
+                "OS faturada"
+            } else {
+                "OS faturada (sem cobrança)"
+            };
+            notificar(ctx, Notificacao::sucesso(msg));
+        }
+        Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
+    }
+}
+
+/// Recalcula a margem de cada ordem **ainda ativa** (ver a limitação documentada em
+/// `lucratividade`) buscando detalhe + apontamentos de cada uma. `estado.ordens` desde
+/// 2026-09-14 carrega qualquer status (`TodasAsOrdens`) — filtra aqui pra manter o mesmo
+/// recorte de antes, e não custar uma consulta de detalhe por OS faturada/cancelada do
+/// histórico inteiro. Sem custo por hora de técnico cadastrado ainda, a margem líquida vem
+/// `None` ("não calculável") em vez de inventar um número —
+/// `cardeal_analytics::calcular_margem_de_os` já trata isso.
 fn calcular_margens(motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoTelaOs) {
     estado.calculando_margens = true;
     let custo_horario = CustoHorario::nova();
-    let mut margens = Vec::with_capacity(estado.ordens.len());
-    for os in estado.ordens.clone() {
+    let ativas: Vec<OrdemServico> = estado
+        .ordens
+        .iter()
+        .filter(|os| nao_finalizada(os.estado))
+        .cloned()
+        .collect();
+    let mut margens = Vec::with_capacity(ativas.len());
+    for os in ativas {
         let detalhe: Option<DetalheOrdem> = motor
             .consultar(
                 sessao,
@@ -423,17 +949,22 @@ fn lista(ui: &mut egui::Ui, motor: &MotorLocal, sessao: &SessaoLocal, estado: &m
     // Três agregados que a lista já carrega e antes ficavam perdidos entre as linhas —
     // vira cabeçalho de indicador visual (`docs/12-ui-ux.md` §6): total de OS abertas, valor
     // parado e quantas estão esperando uma decisão do cliente (fila de cobrança/follow-up).
-    let valor_parado = estado
+    // Sempre sobre a fila ativa (`nao_finalizada`), não sobre o filtro de status escolhido —
+    // é saúde do pipeline, não uma contagem do que a grade está mostrando agora.
+    let ativas: Vec<&OrdemServico> = estado
         .ordens
         .iter()
+        .filter(|os| nao_finalizada(os.estado))
+        .collect();
+    let valor_parado = ativas
+        .iter()
         .fold(Dinheiro::ZERO, |acc, os| acc + os.valor_total);
-    let aguardando_cliente = estado
-        .ordens
+    let aguardando_cliente = ativas
         .iter()
         .filter(|os| os.estado == EstadoOs::AguardandoAprovacao)
         .count();
     FaixaKpi::nova(vec![
-        CartaoKpi::contagem("Ordens em aberto", estado.ordens.len()),
+        CartaoKpi::contagem("Ordens em aberto", ativas.len()),
         CartaoKpi::novo("Valor em aberto", valor_parado).variacao("soma do total de cada OS"),
         CartaoKpi::contagem("Aguardando aprovação", aguardando_cliente)
             .variacao("orçamento com o cliente"),
@@ -442,19 +973,40 @@ fn lista(ui: &mut egui::Ui, motor: &MotorLocal, sessao: &SessaoLocal, estado: &m
 
     ui.horizontal(|ui| {
         ui.set_max_width(360.0);
-        ui.add(
-            Campo::novo("", &mut estado.busca).marcador("Buscar por nº, equipamento ou cliente"),
-        );
+        ui.add(Campo::novo("", &mut estado.busca).marcador("Buscar por nº, aparelho ou cliente"));
+        ui.add_space(Espaco::E12);
+        SeletorOpcao::novo("Status", &mut estado.filtro_status)
+            .opcao(FiltroStatusOs::Ativas, "Ativas (padrão)")
+            .opcao(FiltroStatusOs::Todos, "Todas")
+            .opcoes(
+                [
+                    EstadoOs::Aberta,
+                    EstadoOs::EmDiagnostico,
+                    EstadoOs::AguardandoAprovacao,
+                    EstadoOs::Aprovada,
+                    EstadoOs::EmExecucao,
+                    EstadoOs::Concluida,
+                    EstadoOs::Faturada,
+                    EstadoOs::Cancelada,
+                    EstadoOs::Reprovada,
+                ]
+                .map(|e| (FiltroStatusOs::Um(e), estado_etiqueta(e).0)),
+            )
+            .mostrar(ui);
     });
     ui.add_space(Espaco::E12);
 
+    let filtro_status = estado.filtro_status.unwrap_or(FiltroStatusOs::Ativas);
     let termo = estado.busca.trim().to_lowercase();
     let indices: Vec<usize> = (0..estado.ordens.len())
         .filter(|&i| {
+            let os = &estado.ordens[i];
+            if !filtro_status.combina(os.estado) {
+                return false;
+            }
             if termo.is_empty() {
                 return true;
             }
-            let os = &estado.ordens[i];
             os.numero.to_string().contains(&termo)
                 || equipamento_label(os).to_lowercase().contains(&termo)
                 || nome_cliente(&estado.clientes, os.cliente)
@@ -463,20 +1015,29 @@ fn lista(ui: &mut egui::Ui, motor: &MotorLocal, sessao: &SessaoLocal, estado: &m
         })
         .collect();
     if indices.is_empty() {
-        ui.add(Rotulo::interface("Nenhuma ordem para essa busca.").cor(ui.cores().texto_medio));
+        ui.add(
+            Rotulo::interface("Nenhuma ordem para essa busca/filtro de status.")
+                .cor(ui.cores().texto_medio),
+        );
         return;
     }
 
     let colunas = vec![
         ColunaGrade::nova("Nº").largura(56.0).numero(),
-        ColunaGrade::nova("Equipamento"),
+        ColunaGrade::nova("Aparelho"),
         ColunaGrade::nova("Cliente").largura(180.0),
         ColunaGrade::nova("Estado").largura(170.0),
         ColunaGrade::nova("Total").largura(110.0).numero(),
+        ColunaGrade::nova("Ações").largura(190.0),
     ];
+    let mut editar_clicado = None;
+    let mut excluir_clicado = None;
     let resposta = Grade::nova(colunas)
         .selecionavel(None)
         .ordenacao(estado.ordenacao)
+        // Linha mais alta que o padrão (38px) — a coluna "Ações" carrega botões de 34px de
+        // altura mínima, que ficavam praticamente colados nas bordas da linha sem isso.
+        .altura_linha(cardeal_ui::tokens::AlturaLinha::Toque)
         .mostrar(ui, indices.len(), |i, row| {
             let os = &estado.ordens[indices[i]];
             row.col(|ui| {
@@ -498,6 +1059,19 @@ fn lista(ui: &mut egui::Ui, motor: &MotorLocal, sessao: &SessaoLocal, estado: &m
             row.col(|ui| {
                 ui.add(ValorDinheiro::novo(os.valor_total));
             });
+            row.col(|ui| {
+                let rubro = ui.cores().rubro;
+                ui.horizontal(|ui| {
+                    if ui.add(Botao::fantasma("Editar").pequeno().cor(rubro)).clicked() {
+                        editar_clicado = Some((os.id, os.equipamento.clone()));
+                    }
+                    if pode_cancelar(os.estado)
+                        && ui.add(Botao::destrutivo("Excluir").pequeno()).clicked()
+                    {
+                        excluir_clicado = Some((os.id, equipamento_label(os).to_owned()));
+                    }
+                });
+            });
         });
 
     if let Some(coluna) = resposta.coluna_clicada {
@@ -508,18 +1082,25 @@ fn lista(ui: &mut egui::Ui, motor: &MotorLocal, sessao: &SessaoLocal, estado: &m
         estado.ordenacao = Some((coluna, direcao));
         ordenar_ordens(&mut estado.ordens, &estado.clientes, coluna, direcao);
     }
-    if let Some(i) = resposta.linha_clicada {
+    if let Some((id, equipamento)) = editar_clicado {
+        estado.editar_equipamento = equipamento;
+        estado.editar_complemento_defeito.clear();
+        estado.dlg = Dlg::EditarDados(id);
+    } else if let Some(alvo) = excluir_clicado {
+        estado.confirmar_exclusao = Some(alvo);
+    } else if let Some(i) = resposta.linha_clicada {
         let id = estado.ordens[indices[i]].id;
         estado.abrir_detalhe(motor, sessao, id);
     }
 }
 
-/// O texto que a lista mostra na coluna "Equipamento" — cai para o defeito relatado quando o
-/// equipamento ainda não foi preenchido (ele é opcional na abertura), pra linha nunca ficar
-/// em branco.
+/// O texto que a lista mostra na coluna "Aparelho". `equipamento` é obrigatório desde
+/// 2026-09-14 para OS novas, mas ordens abertas antes disso podem ter ficado sem — daí o
+/// placeholder, em vez de cair no defeito relatado (que já confundiu o balcão, que lia o
+/// problema do cliente como se fosse o nome do aparelho).
 fn equipamento_label(os: &OrdemServico) -> &str {
     if os.equipamento.trim().is_empty() {
-        &os.defeito_relatado
+        "sem aparelho registrado"
     } else {
         &os.equipamento
     }
@@ -550,7 +1131,7 @@ const fn estado_etiqueta(e: EstadoOs) -> (&'static str, Tom) {
     }
 }
 
-/// Ordena `ordens` pela coluna clicada no cabeçalho da [`Grade`] (Nº, Equipamento, Cliente,
+/// Ordena `ordens` pela coluna clicada no cabeçalho da [`Grade`] (Nº, Aparelho, Cliente,
 /// Estado, Total).
 fn ordenar_ordens(
     ordens: &mut [OrdemServico],
@@ -696,8 +1277,8 @@ fn dialogo_nova(
                 );
                 ui.add_space(Espaco::E8);
                 ui.add(
-                    Campo::novo("Equipamento (opcional)", equipamento)
-                        .marcador("ex.: Furadeira Bosch GSB 13 — pode completar depois"),
+                    Campo::novo("Aparelho — o que o cliente trouxe para reparo", equipamento)
+                        .marcador("ex.: Furadeira Bosch GSB 13"),
                 );
             },
             |ui, estado| {
@@ -754,6 +1335,13 @@ fn abrir_os(
     let equipamento = equipamento.clone();
     let defeito_relatado = defeito_relatado.clone();
 
+    if equipamento.trim().is_empty() {
+        notificar(
+            ctx,
+            Notificacao::aviso("Informe o aparelho trazido para reparo."),
+        );
+        return;
+    }
     if defeito_relatado.trim().is_empty() {
         notificar(
             ctx,
@@ -906,6 +1494,14 @@ fn dialogo_detalhe(
             // rodapé desenha da direita para a esquerda (`Dialogo::mostrar`), então o botão
             // adicionado primeiro fica mais à direita — a mesma convenção de "ação primária
             // primeiro" já usada no resto da tela.
+            // Faturar disponível desde a abertura, ao lado de Comprovante/Fechar — pedido
+            // explícito do usuário (2026-09-15): laudo/orçamento/aprovação/execução são
+            // trâmite opcional, não um portão pro faturamento. Some só nos estados terminais
+            // onde faturar já não faz sentido (`OrdemServico::faturar` recusaria de qualquer
+            // forma; a UI só evita oferecer uma ação que o backend já vai rejeitar).
+            if pode_faturar(os.estado) && ui.add(Botao::primario("Faturar")).clicked() {
+                estado.dlg = Dlg::faturar();
+            }
             if ui.add(Botao::primario("Comprovante (PDF)")).clicked() {
                 gerar_pdf(ui.ctx(), estado, &detalhe);
             }
@@ -917,6 +1513,15 @@ fn dialogo_detalhe(
     if fechar {
         estado.dlg = Dlg::Fechado;
     }
+}
+
+/// Se `FaturarOrdemServico` aceita a OS neste estado — qualquer um menos os três terminais
+/// (`OrdemServico::faturar`, 2026-09-15).
+const fn pode_faturar(estado: EstadoOs) -> bool {
+    !matches!(
+        estado,
+        EstadoOs::Faturada | EstadoOs::Cancelada | EstadoOs::Reprovada
+    )
 }
 
 fn corpo_detalhe(
@@ -931,6 +1536,10 @@ fn corpo_detalhe(
         ui.add(Rotulo::campo("Estado"));
         let (rotulo, tom) = estado_etiqueta(os.estado);
         ui.add(Etiqueta::nova(rotulo, tom));
+        if pode_cancelar(os.estado) && ui.add(Botao::destrutivo("Cancelar OS").pequeno()).clicked()
+        {
+            estado.confirmar_exclusao = Some((os.id, equipamento_label(os).to_owned()));
+        }
     });
     ui.add_space(Espaco::E16);
 
@@ -1302,33 +1911,17 @@ fn acoes_por_estado(
             ui.add_space(Espaco::E8);
             ui.horizontal(|ui| {
                 if ui.add(Botao::primario("Aprovar")).clicked() {
-                    aplicar_e_recarregar(
-                        ui.ctx(),
-                        motor,
-                        sessao,
-                        estado,
-                        os.id,
-                        "os.aprovar_orcamento.v1",
-                        &AprovarOrcamentoOs {
-                            ordem_servico: os.id,
-                            identificacao_aprovador: estado.aprovador.clone(),
-                        },
-                        "Orçamento aprovado",
-                    );
+                    if estado.aprovador.trim().is_empty() {
+                        notificar(
+                            ui.ctx(),
+                            Notificacao::aviso("Informe quem aprovou (nome e documento)."),
+                        );
+                    } else {
+                        estado.confirmar_acao = Some(AcaoPendente::AprovarOrcamento(os.id));
+                    }
                 }
                 if ui.add(Botao::destrutivo("Reprovar")).clicked() {
-                    aplicar_e_recarregar(
-                        ui.ctx(),
-                        motor,
-                        sessao,
-                        estado,
-                        os.id,
-                        "os.reprovar_orcamento.v1",
-                        &ReprovarOrcamentoOs {
-                            ordem_servico: os.id,
-                        },
-                        "Orçamento reprovado",
-                    );
+                    estado.confirmar_acao = Some(AcaoPendente::ReprovarOrcamento(os.id));
                 }
             });
         }
@@ -1355,41 +1948,15 @@ fn acoes_por_estado(
                         .cor(ui.cores().atencao),
                 );
             } else if ui.add(Botao::primario("Concluir execução")).clicked() {
-                aplicar_e_recarregar(
-                    ui.ctx(),
-                    motor,
-                    sessao,
-                    estado,
-                    os.id,
-                    "os.concluir_execucao.v1",
-                    &ConcluirExecucao {
-                        ordem_servico: os.id,
-                    },
-                    "Execução concluída",
-                );
-            }
-        }
-        EstadoOs::Concluida => {
-            if ui.add(Botao::primario("Faturar")).clicked() {
-                aplicar_e_recarregar(
-                    ui.ctx(),
-                    motor,
-                    sessao,
-                    estado,
-                    os.id,
-                    "os.faturar_ordem_servico.v1",
-                    &FaturarOrdemServico {
-                        ordem_servico: os.id,
-                    },
-                    "OS faturada",
-                );
+                estado.confirmar_acao = Some(AcaoPendente::ConcluirExecucao(os.id));
             }
         }
         EstadoOs::Faturada
         | EstadoOs::Cancelada
         | EstadoOs::Reprovada
         | EstadoOs::Aberta
-        | EstadoOs::EmDiagnostico => {}
+        | EstadoOs::EmDiagnostico
+        | EstadoOs::Concluida => {}
     }
 }
 

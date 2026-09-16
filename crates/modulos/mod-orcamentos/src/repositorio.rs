@@ -2,7 +2,8 @@
 //! colunas explícitas, parâmetros posicionais. Mesmo padrão do `RepositorioOs`.
 
 use cardeal_kernel::{
-    CodigoErro, Data, Dinheiro, Erro, Id, Instante, Percentual, Preco, Quantidade, Resultado, Versao,
+    CodigoErro, Data, Dinheiro, Erro, Id, Instante, Percentual, Preco, Quantidade, Resultado,
+    Versao,
 };
 use cardeal_storage::UnidadeDeTrabalho;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -24,7 +25,9 @@ pub(crate) fn id_de(bytes: Vec<u8>) -> Id {
 }
 
 pub(crate) fn id_opt(bytes: Option<Vec<u8>>) -> Option<Id> {
-    bytes.and_then(|b| <[u8; 16]>::try_from(b).ok()).map(Id::de_bytes)
+    bytes
+        .and_then(|b| <[u8; 16]>::try_from(b).ok())
+        .map(Id::de_bytes)
 }
 
 fn dias(d: Data) -> i64 {
@@ -247,7 +250,9 @@ pub(crate) fn itens_do_orcamento(
     let linhas = stmt
         .query_map([blob(orcamento)], item_de_linha)
         .map_err(persist)?;
-    linhas.collect::<rusqlite::Result<Vec<_>>>().map_err(persist)
+    linhas
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(persist)
 }
 
 pub(crate) fn orcamento_de_linha(r: &rusqlite::Row<'_>) -> rusqlite::Result<Orcamento> {

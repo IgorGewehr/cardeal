@@ -116,6 +116,25 @@ stateDiagram-v2
 > (novo). `Manifesto::depende_de` declara `clientes`/`estoque`/`financeiro` — sem essas três
 > ativas o módulo não sobe (o código chama `pub fn` delas incondicionalmente).
 
+> **Nota (2026-09-15) — importação em lote e validação mais dura:** pedido explícito do
+> usuário — a burocracia que sobrava era repetir "escolher arquivo → conferir → fechar" uma
+> vez por XML quando uma entrega trazia várias notas. `ImportarNotaDeArquivoXml` continua
+> igual (um XML por chamada, idempotente por chave de acesso); o que mudou é só a UI
+> (`crates/cardeal-desktop/src/tela_compras.rs`): "Importar XML" agora usa `pick_files`
+> (multi-seleção) em vez de `pick_file`, e um botão novo "Importar pasta" varre um diretório
+> escolhido (`pick_folder`, sem descer em subpastas) atrás de todo `.xml` nele. Ambos chamam
+> `importar_varios_xml`, que roda o comando um arquivo por vez e junta um resumo (quantas
+> notas entraram, quantas precisam de revisão de casamento, quais falharam e por quê) — com
+> um único arquivo o comportamento de antes se mantém (abre o dialog "Ver" da nota direto);
+> com vários, só o resumo aparece, e o balcão escolhe da lista o que quer conferir. Reimportar
+> uma pasta/seleção que já tinha entrado antes é seguro — a idempotência por chave de acesso
+> garante que só as notas novas de fato entram.
+>
+> Endurecimento em `cardeal_fiscal::interpretar` (`crates/cardeal-fiscal/src/nfe.rs`): `qCom`
+> zero ou negativo e `vUnCom` negativo agora são recusados (`ErroFiscal::XmlInvalido`) em vez
+> de aceitos silenciosamente — a importação em lote reduz a chance de alguém abrir cada nota
+> pra notar um XML anômalo, então o parser passou a barrar isso na entrada.
+
 ## 6. Consultas
 
 | Consulta | Permissão | Uso na UI | Índice que a sustenta |

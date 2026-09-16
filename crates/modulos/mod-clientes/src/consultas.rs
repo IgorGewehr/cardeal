@@ -225,6 +225,9 @@ pub struct ItemPessoa {
     pub nome: String,
     /// O documento principal, se houver mais de um; senão o único cadastrado.
     pub documento: Option<String>,
+    /// O telefone/`WhatsApp` de contato: o principal entre `Whatsapp`/`Celular`/`Telefone`,
+    /// senão o primeiro desses cadastrado — mesmo critério de `Form::de_detalhe` na tela.
+    pub telefone: Option<String>,
 }
 
 /// Lista pessoas ativas com um papel específico, por nome — opcionalmente filtradas por um
@@ -254,7 +257,10 @@ impl Consulta for PessoasPorPapel {
         let mut stmt = conexao
             .prepare(
                 "SELECT p.id, p.nome,
-                        (SELECT d.numero FROM clientes_documento d WHERE d.pessoa = p.id ORDER BY d.rowid LIMIT 1)
+                        (SELECT d.numero FROM clientes_documento d WHERE d.pessoa = p.id ORDER BY d.rowid LIMIT 1),
+                        (SELECT c.valor FROM clientes_contato c
+                          WHERE c.pessoa = p.id AND c.tipo IN ('Whatsapp', 'Celular', 'Telefone')
+                          ORDER BY c.principal DESC, c.rowid LIMIT 1)
                  FROM clientes_pessoa p
                  JOIN clientes_papel cp ON cp.pessoa = p.id
                  WHERE p.empresa = ?1 AND cp.papel = ?2 AND cp.ativo = 1 AND p.estado = 'Ativa'
@@ -272,6 +278,7 @@ impl Consulta for PessoasPorPapel {
                         pessoa: id_de(r.get::<_, Vec<u8>>(0)?),
                         nome: r.get(1)?,
                         documento: r.get(2)?,
+                        telefone: r.get(3)?,
                     })
                 },
             )

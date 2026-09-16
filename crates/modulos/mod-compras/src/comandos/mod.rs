@@ -29,6 +29,7 @@ use mod_clientes::{
 use mod_estoque::{registrar_entrada_comum, DadosEntrada, RepositorioEstoque};
 use mod_financeiro::{
     baixar_pagamento_comum, lancar_titulo_comum, DadosLancamentoTitulo, EspecieTitulo,
+    MeioPagamento,
 };
 use serde::{Deserialize, Serialize};
 
@@ -503,7 +504,7 @@ pub fn confirmar_entrada_comum(
         let gravado = lancar_titulo_comum(
             DadosLancamentoTitulo {
                 especie: EspecieTitulo::Pagar,
-                contraparte: Contraparte::Fornecedor(nota.fornecedor),
+                contraparte: Some(Contraparte::Fornecedor(nota.fornecedor)),
                 valor_total: nota.valor_total,
                 emissao: nota.data_emissao,
                 parcelas: 1,
@@ -526,7 +527,19 @@ pub fn confirmar_entrada_comum(
                 .first()
                 .copied()
                 .expect("lancar_titulo_comum com parcelas: 1 sempre grava uma parcela");
-            baixar_pagamento_comum(parcela, nota.valor_total, ctx.hoje(), None, ctx, uow)?;
+            // Pago no ato a um fornecedor é virtualmente sempre Pix/transferência, nunca
+            // dinheiro do caixa físico do balcão — não há campo de meio de pagamento na UI
+            // de compras hoje, então assume Pix (mesmo papel de conta que um TED/boleto
+            // pago pelo banco: `MeioPagamento::Pix`/`Cartao` são equivalentes aqui).
+            baixar_pagamento_comum(
+                parcela,
+                nota.valor_total,
+                ctx.hoje(),
+                MeioPagamento::Pix,
+                None,
+                ctx,
+                uow,
+            )?;
             true
         } else {
             false

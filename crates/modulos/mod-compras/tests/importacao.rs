@@ -453,7 +453,13 @@ fn lancar_nota_manual_sugere_por_ncm_e_fica_a_conferir_sem_regra_aprendida() {
     assert_eq!(Id::de_bytes(produto_casado.try_into().unwrap()), produto);
 }
 
-fn cadastrar_produto_com_gtin(arm: &Armazenamento, empresa: Id, nome: &str, ncm: &str, gtin: &str) -> Id {
+fn cadastrar_produto_com_gtin(
+    arm: &Armazenamento,
+    empresa: Id,
+    nome: &str,
+    ncm: &str,
+    gtin: &str,
+) -> Id {
     let ctx_escrita = ContextoEscrita::novo(empresa, Id::novo(), Id::novo(), Id::novo());
     arm.escritor()
         .executar(ctx_escrita, {
@@ -499,7 +505,10 @@ fn despachante_e_sessao(empresa: Id) -> (Despachante, Sessao, Ambiente) {
         &ModuloCompras,
     ])
     .unwrap();
-    let s = sessao_com(empresa, &["compras.entrada.importar", "compras.entrada.confirmar"]);
+    let s = sessao_com(
+        empresa,
+        &["compras.entrada.importar", "compras.entrada.confirmar"],
+    );
     let mut rm = RegistroModulos::novo();
     rm.registrar(&mod_clientes::MANIFESTO).unwrap();
     rm.registrar(&mod_estoque::MANIFESTO).unwrap();
@@ -564,7 +573,10 @@ fn importar_nota_de_arquivo_xml_cria_nota_a_conferir_com_itens_corretos() {
         .unwrap();
     assert_eq!(codigo_fornecedor, "REF-8821");
     assert_eq!(ncm, "22021000");
-    assert_eq!(cardeal_kernel::Quantidade::interna(quantidade), cardeal_kernel::Quantidade::unidades(10));
+    assert_eq!(
+        cardeal_kernel::Quantidade::interna(quantidade),
+        cardeal_kernel::Quantidade::unidades(10)
+    );
 }
 
 #[test]
@@ -756,9 +768,15 @@ fn pago_no_ato_da_baixa_completa_no_titulo_na_mesma_transacao() {
                     .map_err(cardeal_storage::ErroArmazenamento::Dominio)?;
 
                 // `pago_no_ato = true`: a compra foi paga à vista, na hora.
-                let confirmacao =
-                    confirmar_entrada_comum(relatorio.nota_entrada, local, true, true, &ctx(empresa), uow)
-                        .map_err(cardeal_storage::ErroArmazenamento::Dominio)?;
+                let confirmacao = confirmar_entrada_comum(
+                    relatorio.nota_entrada,
+                    local,
+                    true,
+                    true,
+                    &ctx(empresa),
+                    uow,
+                )
+                .map_err(cardeal_storage::ErroArmazenamento::Dominio)?;
                 assert!(confirmacao.titulo.is_some());
                 assert!(confirmacao.pago);
                 Ok(relatorio.nota_entrada)
@@ -814,9 +832,15 @@ fn sem_pago_no_ato_titulo_nasce_em_aberto() {
                     .atualizar_item(&item)
                     .map_err(cardeal_storage::ErroArmazenamento::Dominio)?;
 
-                let confirmacao =
-                    confirmar_entrada_comum(relatorio.nota_entrada, local, true, false, &ctx(empresa), uow)
-                        .map_err(cardeal_storage::ErroArmazenamento::Dominio)?;
+                let confirmacao = confirmar_entrada_comum(
+                    relatorio.nota_entrada,
+                    local,
+                    true,
+                    false,
+                    &ctx(empresa),
+                    uow,
+                )
+                .map_err(cardeal_storage::ErroArmazenamento::Dominio)?;
                 assert!(confirmacao.titulo.is_some());
                 assert!(!confirmacao.pago);
                 Ok(relatorio.nota_entrada)
