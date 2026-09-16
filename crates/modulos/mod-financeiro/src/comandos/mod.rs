@@ -26,7 +26,7 @@ mod renegociar_titulo;
 
 pub use abrir_caixa::{AbrirCaixa, CaixaFoiAberto};
 pub use baixar_pagamento::{baixar_pagamento_comum, BaixarPagamento, PagamentoBaixado};
-pub use baixar_recebimento::{BaixarRecebimento, RecebimentoBaixado};
+pub use baixar_recebimento::{baixar_recebimento_comum, BaixarRecebimento, RecebimentoBaixado};
 pub use cadastrar_caixa::{CadastrarCaixa, CaixaCadastrado};
 pub use criar_categoria::{CategoriaCriada, CriarCategoria};
 pub use criar_conta_bancaria::{ContaBancariaCriada, CriarContaBancaria};

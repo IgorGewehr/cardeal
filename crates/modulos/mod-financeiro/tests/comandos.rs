@@ -13,8 +13,9 @@ use mod_financeiro::{
     CadastrarCaixa, CaixaFoiAberto, CaixaFoiFechado, CategoriaCriada, CategoriaFinanceira,
     Categorias, ConstrutorTitulo, CriarCategoria, CriarContaBancaria, CriarRecorrencia,
     EspecieTitulo, EstornarBaixa, FecharCaixa, ItemTituloEmAberto, ItemTotalPorCategoria,
-    LancarTituloAPagar, LancarTituloAReceber, ModuloFinanceiro, PagamentoBaixado, Periodicidade,
-    PoliticaJuros, RecebimentoBaixado, RecorrenciaCriada, RegistrarSangria, RegistrarSuprimento,
+    LancarTituloAPagar, LancarTituloAReceber, MeioPagamento, ModuloFinanceiro, PagamentoBaixado,
+    Periodicidade, PoliticaJuros, RecebimentoBaixado, RecorrenciaCriada, RegistrarSangria,
+    RegistrarSuprimento,
     RenegociarTitulo, RepositorioFinanceiro, SangriaFoiRegistrada, SuprimentoFoiRegistrado,
     TipoValor, TituloAPagarLancado, TituloAReceberLancado, TituloDaOrigem, TitulosAReceberEmAberto,
     TotalPorCategoriaNoPeriodo, MANIFESTO,
@@ -205,6 +206,7 @@ fn baixa_em_dia_quita_a_parcela_e_gera_lancamento_realizado() {
         parcela: titulo.parcelas[0],
         valor: Dinheiro::reais(100),
         data: hoje(),
+        meio_pagamento: MeioPagamento::Dinheiro,
         conta_destino: None,
     };
     let saida = d
@@ -239,6 +241,7 @@ fn baixa_parcial_deixa_saldo_e_nao_quita() {
         parcela: titulo.parcelas[0],
         valor: Dinheiro::reais(40),
         data: hoje(),
+        meio_pagamento: MeioPagamento::Dinheiro,
         conta_destino: None,
     };
     let saida = d
@@ -300,6 +303,7 @@ fn baixa_acima_do_devido_falha_e_desfaz_tudo() {
         parcela: titulo.parcelas[0],
         valor: Dinheiro::reais(150),
         data: hoje(),
+        meio_pagamento: MeioPagamento::Dinheiro,
         conta_destino: None,
     };
     let erro = d
@@ -353,6 +357,7 @@ fn fluxo_a_pagar_espelha_o_a_receber() {
         parcela: titulo.parcelas[0],
         valor: Dinheiro::reais(250),
         data: hoje(),
+        meio_pagamento: MeioPagamento::Pix,
         conta_destino: None,
     };
     let saida = d
@@ -634,6 +639,7 @@ fn baixar_pagamento_recusa_uma_parcela_a_receber() {
         parcela: titulo.parcelas[0],
         valor: Dinheiro::reais(100),
         data: hoje(),
+        meio_pagamento: MeioPagamento::Pix,
         conta_destino: None,
     };
     let erro = d
@@ -668,6 +674,7 @@ fn titulos_a_receber_em_aberto_lista_por_vencimento_e_ignora_quitados() {
         parcela: quitado.parcelas[0],
         valor: Dinheiro::reais(50),
         data: hoje(),
+        meio_pagamento: MeioPagamento::Dinheiro,
         conta_destino: None,
     };
     d.executar_comando(
@@ -734,6 +741,7 @@ fn estornar_baixa_reverte_o_lancamento_e_reabre_a_parcela() {
                 parcela: titulo.parcelas[0],
                 valor: Dinheiro::reais(100),
                 data: hoje(),
+                meio_pagamento: MeioPagamento::Dinheiro,
                 conta_destino: None,
             }),
             &s,
@@ -773,6 +781,7 @@ fn estornar_baixa_reverte_o_lancamento_e_reabre_a_parcela() {
                 parcela: titulo.parcelas[0],
                 valor: Dinheiro::reais(100),
                 data: hoje(),
+                meio_pagamento: MeioPagamento::Dinheiro,
                 conta_destino: None,
             }),
             &s,
@@ -821,6 +830,7 @@ fn renegociar_titulo_consolida_o_saldo_em_aberto_num_titulo_novo() {
             parcela: titulo.parcelas[0],
             valor: Dinheiro::reais(100),
             data: hoje(),
+            meio_pagamento: MeioPagamento::Dinheiro,
             conta_destino: None,
         }),
         &s,
@@ -902,6 +912,7 @@ fn estornar_baixa_de_parcela_ja_renegociada_e_recusado() {
                 parcela: titulo.parcelas[0],
                 valor: Dinheiro::reais(80),
                 data: hoje(),
+                meio_pagamento: MeioPagamento::Dinheiro,
                 conta_destino: None,
             }),
             &s,
@@ -1001,6 +1012,7 @@ fn criar_conta_bancaria_abre_contas_sucessivas_e_recebe_baixa() {
                 parcela: titulo.parcelas[0],
                 valor: Dinheiro::reais(300),
                 data: hoje(),
+                meio_pagamento: MeioPagamento::Dinheiro,
                 conta_destino: Some(primeira.conta),
             }),
             &s,
@@ -1013,12 +1025,68 @@ fn criar_conta_bancaria_abre_contas_sucessivas_e_recebe_baixa() {
     assert!(baixada.parcela_quitada);
 }
 
+#[test]
+fn meio_pagamento_dinheiro_cai_no_caixa_pix_e_cartao_caem_no_banco() {
+    // Pedido explícito do usuário (2026-09-15): "se for dinheiro cai na conta caixa, se não
+    // cai na conta bancária" — sem `conta_destino` explícito, o meio de pagamento decide.
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloFinanceiro]).unwrap();
+    let s = sessao(
+        empresa,
+        &["financeiro.receber.criar", "financeiro.receber.baixar"],
+    );
+
+    let baixar = |valor: Dinheiro, meio: MeioPagamento| {
+        let titulo = lancar(&d, &arm, empresa, &s, valor, 1);
+        d.executar_comando(
+            "financeiro.baixar_recebimento.v1",
+            &carga(&BaixarRecebimento {
+                parcela: titulo.parcelas[0],
+                valor,
+                data: hoje(),
+                meio_pagamento: meio,
+                conta_destino: None,
+            }),
+            &s,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+        .unwrap();
+    };
+
+    baixar(Dinheiro::reais(50), MeioPagamento::Dinheiro);
+    baixar(Dinheiro::reais(70), MeioPagamento::Pix);
+    baixar(Dinheiro::reais(30), MeioPagamento::Cartao);
+
+    assert_eq!(
+        saldo_papel(&arm, empresa, PapelConta::Caixa),
+        Dinheiro::reais(50)
+    );
+    assert_eq!(
+        saldo_papel(&arm, empresa, PapelConta::Bancos),
+        Dinheiro::reais(100)
+    );
+}
+
 fn conta_papel(arm: &Armazenamento, empresa: Id, papel: PapelConta) -> Id {
     let ctx = ContextoEscrita::novo(empresa, Id::novo(), Id::novo(), Id::novo());
     arm.escritor()
         .executar(ctx, move |uow| {
             let repo = RepositorioRazao::novo(uow);
             Contas::nova(&repo, empresa).papel(papel).map_err(liga)
+        })
+        .unwrap()
+        .valor()
+}
+
+/// O saldo `Realizado` de uma conta pelo papel dela — usado pra confirmar em qual conta
+/// (Caixa ou Bancos) uma baixa realmente pousou, conforme o `meio_pagamento`.
+fn saldo_papel(arm: &Armazenamento, empresa: Id, papel: PapelConta) -> Dinheiro {
+    let conta = conta_papel(arm, empresa, papel);
+    let ctx = ContextoEscrita::novo(empresa, Id::novo(), Id::novo(), Id::novo());
+    arm.escritor()
+        .executar(ctx, move |uow| {
+            RepositorioRazao::novo(uow).saldo_realizado(conta).map_err(liga)
         })
         .unwrap()
         .valor()
@@ -1224,6 +1292,7 @@ fn total_por_categoria_no_periodo_agrega_o_que_foi_baixado() {
             parcela: lancado.parcelas[0],
             valor: Dinheiro::reais(500),
             data: hoje(),
+            meio_pagamento: MeioPagamento::Dinheiro,
             conta_destino: None,
         }),
         &s,
@@ -1343,6 +1412,7 @@ fn baixas_da_parcela_lista_o_historico_mais_recente_primeiro_e_marca_estorno() {
                 parcela: titulo.parcelas[0],
                 valor: Dinheiro::reais(50),
                 data: hoje(),
+                meio_pagamento: MeioPagamento::Dinheiro,
                 conta_destino: None,
             }),
             &s,
@@ -1359,6 +1429,7 @@ fn baixas_da_parcela_lista_o_historico_mais_recente_primeiro_e_marca_estorno() {
                 parcela: titulo.parcelas[0],
                 valor: Dinheiro::reais(150),
                 data: hoje().mais_dias(1),
+                meio_pagamento: MeioPagamento::Dinheiro,
                 conta_destino: None,
             }),
             &s,

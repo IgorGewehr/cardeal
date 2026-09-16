@@ -3,7 +3,9 @@
 //!
 //! Receituário (`docs/modulos/financeiro.md` §7): D Fornecedores (principal) +
 //! D Despesa financeira (juros + multa) · C Caixa/Bancos (valor pago) +
-//! C Outras receitas (desconto por antecipação obtido).
+//! C Outras receitas (desconto por antecipação obtido). Qual das duas — Caixa ou Bancos — é
+//! `meio_pagamento` quem decide (`crate::MeioPagamento::papel`), a menos que `conta_destino`
+//! escolha uma conta específica na mão.
 //!
 //! [`BaixarRecebimento`]: super::BaixarRecebimento
 
@@ -14,6 +16,7 @@ use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
 use crate::comandos::{baixar_parcela_comum, DadosBaixa};
+use crate::meio_pagamento::MeioPagamento;
 use crate::titulo::EspecieTitulo;
 
 /// Baixa uma parcela a pagar.
@@ -25,7 +28,10 @@ pub struct BaixarPagamento {
     pub valor: Dinheiro,
     /// A data do pagamento — define juros, multa e disponibilidade de desconto.
     pub data: Data,
-    /// A conta de onde saiu o dinheiro. `None` = a conta de Bancos da empresa.
+    /// Dinheiro, Pix ou cartão — decide a conta de origem padrão (`MeioPagamento::papel`).
+    pub meio_pagamento: MeioPagamento,
+    /// Escolhe uma conta específica, por fora do padrão de `meio_pagamento`. `None` = usa o
+    /// padrão do meio de pagamento.
     pub conta_destino: Option<Id>,
 }
 
@@ -49,7 +55,15 @@ impl Comando for BaixarPagamento {
     const AUDITA: bool = true;
 
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
-        baixar_pagamento_comum(self.parcela, self.valor, self.data, self.conta_destino, ctx, uow)
+        baixar_pagamento_comum(
+            self.parcela,
+            self.valor,
+            self.data,
+            self.meio_pagamento,
+            self.conta_destino,
+            ctx,
+            uow,
+        )
     }
 }
 
@@ -60,7 +74,7 @@ impl Comando for BaixarPagamento {
 /// — `ConfirmarEntrada::pago_no_ato`), mesmo padrão de `lancar_titulo_comum` para outro
 /// módulo chamar direto (`docs/contratos-internos.md` §7 regra 2).
 ///
-/// `conta_destino: None` usa a conta de Bancos da empresa, igual ao comando.
+/// `conta_destino: None` usa a conta do papel de `meio_pagamento` (`MeioPagamento::papel`).
 ///
 /// # Errors
 /// Igual a [`BaixarPagamento`]: erro de domínio (parcela não encontrada, título de espécie
@@ -69,6 +83,7 @@ pub fn baixar_pagamento_comum(
     parcela: Id,
     valor: Dinheiro,
     data: Data,
+    meio_pagamento: MeioPagamento,
     conta_destino: Option<Id>,
     ctx: &Ctx,
     uow: &mut UnidadeDeTrabalho,
@@ -80,7 +95,7 @@ pub fn baixar_pagamento_comum(
             data,
             conta_destino,
             especie: EspecieTitulo::Pagar,
-            papel_destino_padrao: PapelConta::Bancos,
+            papel_destino_padrao: meio_pagamento.papel(),
             papel_encargos: PapelConta::DespesaFinanceira,
             papel_desconto: PapelConta::OutrasReceitas,
         },

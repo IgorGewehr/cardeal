@@ -292,9 +292,31 @@ stateDiagram-v2
 | `FecharCaixa` ✅ | `financeiro.caixa.fechar` | Médio | Congela a sessão, pede `valor_contado` antes de mostrar o esperado, gera lançamento de quebra se houver | `QuebraExigeMotivo` |
 | `LancarTituloAReceber` ✅ | `financeiro.receber.criar` | Baixo | Cria `Titulo` + `Parcela`(s), um lançamento `Confirmado` D Clientes a receber / C Receita por parcela; `categoria` opcional | `ValorInvalido`, `NumeroDeParcelasInvalido` |
 | `LancarTituloAPagar` ✅ | `financeiro.pagar.criar` | Baixo | Espelho a pagar: D Despesa / C Fornecedores; `categoria` opcional | idem |
-| `BaixarRecebimento` ✅ | `financeiro.receber.baixar` | Médio | Calcula juros/multa/desconto na data, cria `Baixa`, lançamento `Realizado` D Caixa/Bancos + D Descontos / C Clientes + C Receita financeira | `ParcelaNaoBaixavel`, `ValorSuperaSaldo` |
-| `BaixarPagamento` ✅ | `financeiro.pagar.baixar` | Médio | Espelho a pagar | idem |
+| `BaixarRecebimento` ✅ | `financeiro.receber.baixar` | Médio | Calcula juros/multa/desconto na data, cria `Baixa`, lançamento `Realizado` D Caixa/Bancos + D Descontos / C Clientes + C Receita financeira. `meio_pagamento` (`Dinheiro`\|`Pix`\|`Cartao`, `MeioPagamento::papel`) decide Caixa vs. Bancos quando `conta_destino` não escolhe uma conta específica (2026-09-15) | `ParcelaNaoBaixavel`, `ValorSuperaSaldo` |
+| `BaixarPagamento` ✅ | `financeiro.pagar.baixar` | Médio | Espelho a pagar — mesmo campo `meio_pagamento` | idem |
 
+> **Nota (2026-09-15) — `meio_pagamento` decide Caixa vs. Bancos:** pedido explícito do
+> usuário — "se for dinheiro cai na conta caixa, se não cai na conta bancária". Antes,
+> `BaixarRecebimento` sempre assumia `PapelConta::Caixa` e `BaixarPagamento` sempre assumia
+> `PapelConta::Bancos` como padrão, **independente de como o dinheiro de fato circulou** — o
+> único jeito de mudar isso era passar `conta_destino` na mão. Agora os dois comandos exigem
+> `meio_pagamento: MeioPagamento` (`Dinheiro`\|`Pix`\|`Cartao`, novo, `mod-financeiro`), e é
+> ele quem decide o papel padrão (`MeioPagamento::papel`) — `Dinheiro` vai para `Caixa`;
+> `Pix`/`Cartao` vão para `Bancos`, tratados igual de propósito (o app não modela "valores em
+> trânsito" nem prazo de compensação da adquirente — a baixa só ocorre quando o dinheiro já
+> está confirmado). `conta_destino` continua existindo como override explícito (ex.: escolher
+> uma das várias contas bancárias de `CriarContaBancaria`). Sem coluna nova em
+> `financeiro_baixa` — a conta de fato movimentada já fica registrada no lançamento que a
+> baixa gera, então `meio_pagamento` é só o critério de roteamento na hora, não um dado a
+> persistir. `mod_compras::confirmar_entrada_comum` (pagamento de fornecedor no ato) assume
+> `MeioPagamento::Pix` — não há seletor de meio de pagamento na UI de compras ainda.
+>
+> **Nota (2026-09-15) — `baixar_recebimento_comum`:** mesmo padrão de `baixar_pagamento_comum`
+> (chamável direto por outro módulo, na mesma transação, sem passar pelo despacho de
+> `Comando`), extraído do corpo de `BaixarRecebimento` — usado por
+> `mod_os::FaturarOrdemServico` quando a OS já foi paga no ato (fatura e recebe no mesmo
+> clique, o caso comum no balcão de assistência técnica).
+>
 > **Nota (2026-09-04) — decisão sobre `CadastrarCaixa`:** não estava no §5 original (a
 > primeira versão deste doc já sinalizava a lacuna). Decisão tomada: o comando **não cria**
 > a conta analítica do caixa — recebe o `Id` de uma conta já existente no plano (Ativo,
@@ -323,7 +345,7 @@ stateDiagram-v2
 | `CriarRecorrencia` ✅ | `financeiro.recorrencia.criar` | Médio | Grava a regra (`categoria` opcional); não gera título imediatamente | `RegraDeRecorrenciaInvalida` |
 | `MaterializarRecorrencia` ✅ | (tarefa agendada, sem permissão de usuário) | Baixo | `materializar_recorrencias_pendentes` — gera `Titulo` real quando falta `antecedencia_geracao_dias`, idempotente por `(origem_id, emissao)` | — |
 | `CriarCategoria` ✅ | `financeiro.categoria.criar` | Baixo | Cria `CategoriaFinanceira` | `NomeDeCategoriaVazio` |
-| `CriarContaBancaria` ✅ | `financeiro.banco.criar` | Baixo | Abre uma conta analítica nova, filha de `1.1` (Disponível) — `1.1.05`, `1.1.06`… (`CodigoConta::proximo_filho`, novo em `cardeal-ledger`). **Decisão**: não mexe em `1.1.02 "Bancos"`, que continua sendo o destino padrão de `BaixarPagamento`/`BaixarRecebimento` sem `conta_destino` explícito; cada conta nova nasce com `papel: None` — só endereçável pelo `Id`, escolhido na tela | — |
+| `CriarContaBancaria` ✅ | `financeiro.banco.criar` | Baixo | Abre uma conta analítica nova, filha de `1.1` (Disponível) — `1.1.05`, `1.1.06`… (`CodigoConta::proximo_filho`, novo em `cardeal-ledger`). **Decisão**: não mexe em `1.1.02 "Bancos"`, que continua sendo o destino de `BaixarPagamento`/`BaixarRecebimento` quando `meio_pagamento` não é `Dinheiro` e `conta_destino` não escolhe uma conta específica; cada conta nova nasce com `papel: None` — só endereçável pelo `Id`, escolhido na tela | — |
 | `ImportarExtrato` | `financeiro.conciliacao.importar` | Baixo | Parseia OFX/CNAB240/Pix, cria `ItemExtrato` em `Pendente`, dispara casamento automático | `FormatoInvalido`, `PeriodoJaImportado` |
 | `ConciliarItem` | `financeiro.conciliacao.confirmar` | Médio | Vincula `ItemExtrato` a um `Lancamento`/`Baixa` existente ou cria um novo | `ItemJaConciliado`, `ValorDivergente` |
 | `CriarCentroCusto` | `financeiro.centro_custo.criar` | Baixo | | `CodigoDuplicado` |

@@ -25,8 +25,8 @@ use mod_financeiro::{
     ContaBancariaCriada, ContasDeResultado, ContasDisponiveis, CriarCategoria, CriarContaBancaria,
     CriarRecorrencia, EspecieTitulo, EstadoParcela, EstornarBaixa, ExtratoDisponivel, ItemBaixa,
     ItemContaDisponivel, ItemContaResultado, ItemMovimentoDisponivel, ItemTituloEmAberto,
-    ItemTotalPorCategoria, LancarTituloAPagar, LancarTituloAReceber, Periodicidade, Recorrencia,
-    Recorrencias, TipoValor, TitulosAPagarEmAberto, TitulosAReceberEmAberto,
+    ItemTotalPorCategoria, LancarTituloAPagar, LancarTituloAReceber, MeioPagamento, Periodicidade,
+    Recorrencia, Recorrencias, TipoValor, TitulosAPagarEmAberto, TitulosAReceberEmAberto,
     TotalPorCategoriaNoPeriodo,
 };
 
@@ -63,6 +63,10 @@ enum Dlg {
         indice: usize,
         valor: String,
         data: String,
+        /// Dinheiro/Pix/Cartão — decide se a baixa cai no Caixa ou na conta bancária
+        /// (`MeioPagamento::papel`). `None` só antes do primeiro quadro; vira `Some` já na
+        /// abertura do diálogo, igual ao `filtro_status` de `tela_os`.
+        meio_pagamento: Option<MeioPagamento>,
         /// O histórico de baixas da parcela — carregado uma vez na abertura do diálogo
         /// (`baixas_carregadas` marca isso, já que uma parcela recém-lançada legitimamente
         /// tem histórico vazio).
@@ -1457,6 +1461,7 @@ fn lista(ui: &mut egui::Ui, estado: &mut EstadoTelaFinanceiro) {
             indice,
             valor: estado.parcelas[indice].saldo().formatar(),
             data: Data::hoje(Fuso::BRASILIA).to_string(),
+            meio_pagamento: Some(MeioPagamento::Pix),
             baixas: Vec::new(),
             baixas_carregadas: false,
             motivo_estorno: String::new(),
@@ -1731,13 +1736,25 @@ fn dialogo_baixar(
                 ui.add_space(Espaco::E12);
                 ui.add(Rotulo::titulo_secao("Dar baixa"));
                 ui.add_space(Espaco::E8);
-                let Dlg::Baixar { valor, data, .. } = &mut estado.dlg else {
+                let Dlg::Baixar {
+                    valor,
+                    data,
+                    meio_pagamento,
+                    ..
+                } = &mut estado.dlg
+                else {
                     return;
                 };
                 ui.columns(2, |c| {
                     c[0].add(Campo::novo("Valor recebido", valor));
                     c[1].add(Campo::novo("Data", data).mascara(Mascara::Data));
                 });
+                ui.add_space(Espaco::E8);
+                SeletorOpcao::novo("Meio de pagamento", meio_pagamento)
+                    .opcao(MeioPagamento::Dinheiro, "Dinheiro — cai no Caixa")
+                    .opcao(MeioPagamento::Pix, "Pix — cai no Banco")
+                    .opcao(MeioPagamento::Cartao, "Cartão — cai no Banco")
+                    .mostrar(ui);
 
                 let Dlg::Baixar { baixas, .. } = &estado.dlg else {
                     return;
@@ -1829,7 +1846,13 @@ fn baixar(
     estado: &mut EstadoTelaFinanceiro,
     p: &ItemTituloEmAberto,
 ) {
-    let Dlg::Baixar { valor, data, .. } = &estado.dlg else {
+    let Dlg::Baixar {
+        valor,
+        data,
+        meio_pagamento,
+        ..
+    } = &estado.dlg
+    else {
         return;
     };
     let (Ok(valor), Ok(data)) = (valor.parse::<Dinheiro>(), data.parse::<Data>()) else {
@@ -1837,6 +1860,10 @@ fn baixar(
             ctx,
             Notificacao::aviso("Valor (0,00) ou data (dd/mm/aaaa) inválidos."),
         );
+        return;
+    };
+    let Some(meio_pagamento) = *meio_pagamento else {
+        notificar(ctx, Notificacao::aviso("Escolha o meio de pagamento."));
         return;
     };
     let r = if estado.aba.a_receber() {
@@ -1848,6 +1875,7 @@ fn baixar(
                     parcela: p.parcela,
                     valor,
                     data,
+                    meio_pagamento,
                     conta_destino: None,
                 },
             )
@@ -1861,6 +1889,7 @@ fn baixar(
                     parcela: p.parcela,
                     valor,
                     data,
+                    meio_pagamento,
                     conta_destino: None,
                 },
             )

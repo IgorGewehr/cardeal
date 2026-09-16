@@ -73,6 +73,7 @@ mod consultas;
 mod erros;
 pub mod eventos;
 mod manifesto;
+mod meio_pagamento;
 pub mod migracoes;
 mod modulo;
 pub mod receituario;
@@ -87,8 +88,9 @@ pub use caixa::{
 };
 pub use categoria::CategoriaFinanceira;
 pub use comandos::{
-    baixar_pagamento_comum, lancar_titulo_comum, materializar_recorrencias_pendentes, AbrirCaixa,
-    BaixaFoiEstornada, BaixarPagamento, BaixarRecebimento, CadastrarCaixa, CaixaCadastrado,
+    baixar_pagamento_comum, baixar_recebimento_comum, lancar_titulo_comum,
+    materializar_recorrencias_pendentes, AbrirCaixa, BaixaFoiEstornada, BaixarPagamento,
+    BaixarRecebimento, CadastrarCaixa, CaixaCadastrado,
     CaixaFoiAberto,
     CaixaFoiFechado, CategoriaCriada, ContaBancariaCriada, CriarCategoria, CriarContaBancaria,
     CriarRecorrencia, DadosLancamentoTitulo, EstornarBaixa, FecharCaixa, LancarTituloAPagar,
@@ -105,6 +107,7 @@ pub use consultas::{
 };
 pub use erros::ErroFinanceiro;
 pub use manifesto::{manifesto, MANIFESTO};
+pub use meio_pagamento::MeioPagamento;
 pub use modulo::ModuloFinanceiro;
 pub use receituario::Autoria;
 pub use recorrencia::{Periodicidade, Recorrencia, TipoValor};
