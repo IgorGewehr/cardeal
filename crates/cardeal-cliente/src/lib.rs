@@ -20,6 +20,9 @@
 #![allow(clippy::module_name_repetitions, clippy::must_use_candidate)]
 #![allow(clippy::result_large_err)] // `Erro`/`ErroArmazenamento` são grandes de propósito (detalhes ao usuário)
 
+/// Verificação/download/aplicação de atualização via GitHub Releases — ver `docs/build/atualizacao.md`.
+pub mod atualizador;
+
 use std::collections::BTreeSet;
 use std::path::Path;
 

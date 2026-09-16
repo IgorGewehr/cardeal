@@ -19,12 +19,13 @@ mod tela_vendas;
 
 use std::path::PathBuf;
 
+use cardeal_cliente::atualizador::{self, ResultadoAplicacao, VersaoDisponivel};
 use cardeal_cliente::{MotorLocal, SessaoLocal};
 use cardeal_modkit::{Icone, Modulo, PedidoAtivacao};
 use cardeal_ui::atoms::{Botao, Rotulo};
 use cardeal_ui::molecules::Campo;
 use cardeal_ui::organisms::{
-    Cartao, ItemComando, ItemSidebar, Notificacoes, PaletaComandos, Sidebar,
+    notificar, Cartao, ItemComando, ItemSidebar, Notificacao, Notificacoes, PaletaComandos, Sidebar,
 };
 use cardeal_ui::tokens::{instalar_estilo, instalar_fontes, Espaco, Rubro, Tema, TemaUi};
 use eframe::egui;
@@ -167,7 +168,7 @@ fn main() -> eframe::Result<()> {
         Box::new(|cc| {
             instalar_fontes(&cc.egui_ctx);
             instalar_estilo(&cc.egui_ctx, Tema::Claro);
-            Ok(Box::new(App::novo()))
+            Ok(Box::new(App::novo(&cc.egui_ctx)))
         }),
     )
 }
@@ -260,6 +261,16 @@ const ITENS_PALETA: &[ItemComando] = &[
     ItemComando {
         id: "tema",
         rotulo: "Alternar tema (claro/escuro)",
+        grupo: "Ação",
+    },
+    ItemComando {
+        id: "verificar-atualizacoes",
+        rotulo: "Verificar atualizações",
+        grupo: "Ação",
+    },
+    ItemComando {
+        id: "instalar-atualizacao",
+        rotulo: "Baixar e instalar atualização",
         grupo: "Ação",
     },
 ];
@@ -396,6 +407,64 @@ enum Acao {
     MudarArea(Area),
     AlternarSidebar,
     TentarNovamente,
+    VerificarAtualizacoes,
+    InstalarAtualizacao,
+}
+
+/// O que a verificação/aplicação de atualização (rodando numa thread à parte — são chamadas
+/// de rede/disco bloqueantes, não podem travar o quadro do egui) manda de volta para a UI.
+/// Ver `cardeal_cliente::atualizador`.
+enum MsgAtualizador {
+    Encontrada(VersaoDisponivel),
+    Nenhuma,
+    Erro(String),
+    Aplicada,
+    RequerPermissao(std::path::PathBuf),
+}
+
+/// Dispara a verificação de atualização numa thread separada — `verificar_atualizacao` é uma
+/// chamada HTTP bloqueante (`docs/build/atualizacao.md`).
+fn verificar_atualizacoes_em_segundo_plano(
+    envia: std::sync::mpsc::Sender<MsgAtualizador>,
+    ctx: egui::Context,
+) {
+    std::thread::spawn(move || {
+        let msg = match atualizador::verificar_atualizacao(env!("CARGO_PKG_VERSION")) {
+            Ok(Some(v)) => MsgAtualizador::Encontrada(v),
+            Ok(None) => MsgAtualizador::Nenhuma,
+            Err(e) => MsgAtualizador::Erro(e.mensagem),
+        };
+        let _ = envia.send(msg);
+        ctx.request_repaint();
+    });
+}
+
+/// Baixa e aplica a atualização já encontrada, numa thread separada.
+fn instalar_atualizacao_em_segundo_plano(
+    disponivel: VersaoDisponivel,
+    envia: std::sync::mpsc::Sender<MsgAtualizador>,
+    ctx: egui::Context,
+) {
+    std::thread::spawn(move || {
+        let msg = (|| -> Result<MsgAtualizador, cardeal_kernel::Erro> {
+            let Some(url) = disponivel.url_binario_linux else {
+                return Ok(MsgAtualizador::Erro(format!(
+                    "a versão {} não anexou um binário Linux — baixe manualmente em {}",
+                    disponivel.versao, disponivel.url_release
+                )));
+            };
+            let bytes = atualizador::baixar_atualizacao(&url)?;
+            match atualizador::aplicar_atualizacao(&bytes)? {
+                ResultadoAplicacao::Aplicada => Ok(MsgAtualizador::Aplicada),
+                ResultadoAplicacao::RequerPermissaoDoSistema { caminho } => {
+                    Ok(MsgAtualizador::RequerPermissao(caminho))
+                }
+            }
+        })()
+        .unwrap_or_else(|e| MsgAtualizador::Erro(e.mensagem));
+        let _ = envia.send(msg);
+        ctx.request_repaint();
+    });
 }
 
 struct App {
@@ -406,6 +475,14 @@ struct App {
     paleta_aberta: bool,
     paleta_busca: String,
     tela: Tela,
+    // Autoatualização (`docs/build/atualizacao.md`) — verificada uma vez ao abrir, e sob
+    // demanda pela paleta de comandos (Ctrl+K).
+    canal_atualizacao: (
+        std::sync::mpsc::Sender<MsgAtualizador>,
+        std::sync::mpsc::Receiver<MsgAtualizador>,
+    ),
+    atualizacao_disponivel: Option<VersaoDisponivel>,
+    verificando_atualizacao: bool,
 }
 
 /// Onde a preferência de tema fica gravada (ao lado da base).
@@ -430,8 +507,10 @@ fn salvar_tema(tema: Tema) {
 }
 
 impl App {
-    fn novo() -> Self {
+    fn novo(ctx: &egui::Context) -> Self {
         let tema = tema_salvo();
+        let canal = std::sync::mpsc::channel();
+        verificar_atualizacoes_em_segundo_plano(canal.0.clone(), ctx.clone());
         Self {
             motor: None,
             tema,
@@ -440,6 +519,9 @@ impl App {
             paleta_aberta: false,
             paleta_busca: String::new(),
             tela: Tela::Carregando,
+            canal_atualizacao: canal,
+            atualizacao_disponivel: None,
+            verificando_atualizacao: true,
         }
     }
 
@@ -537,6 +619,49 @@ impl eframe::App for App {
             }
         }
 
+        // Drena o canal de atualização — a verificação/instalação roda em outra thread
+        // (chamada HTTP bloqueante) e manda o resultado de volta por aqui.
+        while let Ok(msg) = self.canal_atualizacao.1.try_recv() {
+            self.verificando_atualizacao = false;
+            match msg {
+                MsgAtualizador::Encontrada(v) => {
+                    notificar(
+                        ctx,
+                        Notificacao::info(format!("Nova versão {} disponível", v.versao)).detalhe(
+                            "Abra a paleta de comandos (Ctrl+K) e escolha \"Baixar e \
+                                 instalar atualização\".",
+                        ),
+                    );
+                    self.atualizacao_disponivel = Some(v);
+                }
+                MsgAtualizador::Nenhuma => {}
+                MsgAtualizador::Erro(msg) => {
+                    notificar(
+                        ctx,
+                        Notificacao::aviso("Não foi possível verificar atualizações").detalhe(msg),
+                    );
+                }
+                MsgAtualizador::Aplicada => {
+                    notificar(ctx, Notificacao::sucesso("Atualizado — reiniciando..."));
+                    // Sai do processo atual e sobe o binário já substituído; não há como
+                    // "cancelar" isso a essa altura, é o próprio propósito da ação.
+                    let _ = atualizador::reiniciar_no_novo_binario();
+                }
+                MsgAtualizador::RequerPermissao(caminho) => {
+                    notificar(
+                        ctx,
+                        Notificacao::aviso("Esta instalação não pode se autoatualizar").detalhe(
+                            format!(
+                                "{} pertence ao sistema (instalado via pacote) — atualize com \
+                                 `sudo dnf upgrade cardeal` ou baixe o novo pacote no GitHub.",
+                                caminho.display()
+                            ),
+                        ),
+                    );
+                }
+            }
+        }
+
         let mut acao = Acao::Nenhuma;
 
         if matches!(self.tela, Tela::Autenticado(_)) {
@@ -545,10 +670,11 @@ impl eframe::App for App {
                 &mut self.paleta_aberta,
                 &mut self.paleta_busca,
             ) {
-                acao = if id == "tema" {
-                    Acao::AlternarTema
-                } else {
-                    Acao::MudarArea(Area::de_id(id))
+                acao = match id {
+                    "tema" => Acao::AlternarTema,
+                    "verificar-atualizacoes" => Acao::VerificarAtualizacoes,
+                    "instalar-atualizacao" => Acao::InstalarAtualizacao,
+                    _ => Acao::MudarArea(Area::de_id(id)),
                 };
             }
         }
@@ -800,6 +926,33 @@ impl eframe::App for App {
             Acao::AlternarTema => self.tema = self.tema.alternado(),
             Acao::AlternarSidebar => self.sidebar_expandida = !self.sidebar_expandida,
             Acao::TentarNovamente => self.tela = Tela::Carregando,
+            Acao::VerificarAtualizacoes => {
+                if self.verificando_atualizacao {
+                    notificar(ctx, Notificacao::info("Já verificando..."));
+                } else {
+                    self.verificando_atualizacao = true;
+                    notificar(ctx, Notificacao::carregando("Verificando atualizações..."));
+                    verificar_atualizacoes_em_segundo_plano(
+                        self.canal_atualizacao.0.clone(),
+                        ctx.clone(),
+                    );
+                }
+            }
+            Acao::InstalarAtualizacao => match self.atualizacao_disponivel.clone() {
+                Some(v) => {
+                    notificar(ctx, Notificacao::carregando("Baixando atualização..."));
+                    instalar_atualizacao_em_segundo_plano(
+                        v,
+                        self.canal_atualizacao.0.clone(),
+                        ctx.clone(),
+                    );
+                }
+                None => notificar(
+                    ctx,
+                    Notificacao::info("Nenhuma atualização disponível")
+                        .detalhe("Verifique com \"Verificar atualizações\" primeiro."),
+                ),
+            },
             Acao::AdminCriado(login) => {
                 self.tela = Tela::Login {
                     login,

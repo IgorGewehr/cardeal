@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Cardeal
+GenericName=ERP de assistência técnica
+Comment=Gestão de ordens de serviço, estoque, vendas, financeiro e PDV
+Exec=cardeal-desktop
+Icon=cardeal
+Terminal=false
+Categories=Office;Finance;
+StartupWMClass=cardeal-desktop
