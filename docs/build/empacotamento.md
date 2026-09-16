@@ -134,3 +134,34 @@ tem backend Windows próprio via `windows-sys`, também não exercitado. Se ambo
 limpo, um instalador `.msi` simples via `cargo-wix` (gera WiX a partir de metadados do
 `Cargo.toml`, sem exigir escrever XML na mão) é o caminho mais rápido depois disso — mais
 rápido de montar que Inno Setup/NSIS para quem já tem o binário compilando.
+
+## 6. Identificação da janela na barra/dock — `app_id` (Wayland) e ícone do executável (Windows)
+
+Sintoma real relatado pelo usuário: rodando o binário direto (sem instalar o `.rpm`), o GNOME
+Shell (Wayland) mostrava a janela do Cardeal como **"Desconhecido"**, com um ícone genérico —
+nada a ver com a marca. Causa: no Wayland, quem identifica a janela para o shell casar com um
+`.desktop` (nome + ícone na dash/taskbar) é o **`app_id`** do protocolo `xdg-shell`, não o
+`WM_CLASS` do X11 (que é o que a maioria dos tutoriais de `eframe` ainda assume). Sem
+`ViewportBuilder::with_app_id(...)` explícito, o `eframe`/`winit` não define um `app_id`
+estável, e o shell cai no fallback genérico.
+
+**Corrigido**: `main()` agora chama `.with_app_id("cardeal-desktop")` — precisa bater
+exatamente com `StartupWMClass=cardeal-desktop` e com o nome do arquivo
+`packaging/linux/cardeal-desktop.desktop` (renomeado de `cardeal.desktop` — o
+desktop-entry-spec espera `<app_id>.desktop`, e o GNOME Shell tenta esse casamento direto
+antes de cair no fallback por `StartupWMClass`). Rodar de `target/release/` (sem instalar)
+ainda não registra o `.desktop` em lugar nenhum que o shell procure — para o dock reconhecer
+o app de verdade é preciso ou instalar o `.rpm` (que já copia o `.desktop`/ícone para
+`/usr/share/`, ver §3) ou, em desenvolvimento, copiar
+`packaging/linux/cardeal-desktop.desktop` (com o `Exec=` apontando pro binário local) para
+`~/.local/share/applications/` e o ícone para
+`~/.local/share/icons/hicolor/256x256/apps/cardeal.png`, seguido de
+`update-desktop-database ~/.local/share/applications`.
+
+**Windows — pendente, não implementado ainda** (bloqueado pelo mesmo motivo do §5: cross-compile
+não tentado): o ícone que a barra de tarefas do Windows mostra **antes** do app rodar (atalho
+fixado, Explorer) vem de um recurso `.ico` embutido no `.exe`, não do ícone que o `eframe`
+define em runtime (`with_icon`, que já funciona para a barra de título/Alt+Tab depois que o
+processo sobe). Isso exige um `build.rs` com a crate `winres` (ou `embed-resource`) gerando o
+recurso a partir de um `.ico` — não implementado porque não há como testar sem o toolchain
+Windows (ver §5); fica registrado aqui para não esquecer quando o cross-compile for retomado.

@@ -31,7 +31,7 @@ mesmo banco por IP. Ver https://github.com/IgorGewehr/cardeal.
 rm -rf %{buildroot}
 install -Dm755 %{_sourcedir}/cardeal-desktop %{buildroot}%{_bindir}/cardeal-desktop
 install -Dm755 %{_sourcedir}/cardeal-server %{buildroot}%{_bindir}/cardeal-server
-install -Dm644 %{_sourcedir}/cardeal.desktop %{buildroot}%{_datadir}/applications/cardeal.desktop
+install -Dm644 %{_sourcedir}/cardeal-desktop.desktop %{buildroot}%{_datadir}/applications/cardeal-desktop.desktop
 %if 0%{?have_icon}
 install -Dm644 %{_sourcedir}/cardeal.png %{buildroot}%{_datadir}/icons/hicolor/256x256/apps/cardeal.png
 %endif
@@ -39,7 +39,7 @@ install -Dm644 %{_sourcedir}/cardeal.png %{buildroot}%{_datadir}/icons/hicolor/2
 %files
 %{_bindir}/cardeal-desktop
 %{_bindir}/cardeal-server
-%{_datadir}/applications/cardeal.desktop
+%{_datadir}/applications/cardeal-desktop.desktop
 %if 0%{?have_icon}
 %{_datadir}/icons/hicolor/256x256/apps/cardeal.png
 %endif

@@ -154,10 +154,10 @@ fn empacotar_linux_rpm(raiz: &Path, pular_build: bool) -> Result<()> {
     )
     .context("copiando cardeal-server para SOURCES — rode o build release antes")?;
     fs::copy(
-        raiz.join("packaging/linux/cardeal.desktop"),
-        sourcedir.join("cardeal.desktop"),
+        raiz.join("packaging/linux/cardeal-desktop.desktop"),
+        sourcedir.join("cardeal-desktop.desktop"),
     )
-    .context("copiando packaging/linux/cardeal.desktop")?;
+    .context("copiando packaging/linux/cardeal-desktop.desktop")?;
 
     let tem_icone = if let Some(icone) = encontrar_icone(raiz) {
         fs::copy(&icone, sourcedir.join("cardeal.png"))
@@ -232,8 +232,8 @@ fn empacotar_linux_appimage(raiz: &Path, pular_build: bool) -> Result<()> {
     .context("copiando cardeal-server para o AppDir")?;
 
     fs::copy(
-        raiz.join("packaging/linux/cardeal.desktop"),
-        appdir.join("cardeal.desktop"),
+        raiz.join("packaging/linux/cardeal-desktop.desktop"),
+        appdir.join("cardeal-desktop.desktop"),
     )?;
 
     let icon_dest = appdir.join("cardeal.png");

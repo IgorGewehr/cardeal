@@ -157,6 +157,12 @@ fn main() -> eframe::Result<()> {
     let opcoes = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Cardeal")
+            // Wayland identifica a janela pelo `app_id` (não por WM_CLASS, coisa de X11) —
+            // sem isso o GNOME Shell não acha o `.desktop` correspondente e mostra a janela
+            // como "Desconhecido" com um ícone genérico na barra/dash, em vez do nome e ícone
+            // do Cardeal. Precisa bater com `StartupWMClass`/o nome do arquivo em
+            // `packaging/linux/cardeal-desktop.desktop` (ver docs/build/empacotamento.md).
+            .with_app_id("cardeal-desktop")
             .with_inner_size([1200.0, 800.0])
             .with_min_inner_size([920.0, 600.0])
             .with_icon(icone_janela()),
