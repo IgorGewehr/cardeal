@@ -1930,7 +1930,11 @@ fn estornar(
     }
     let motivo = motivo.to_owned();
     match motor
-        .executar(sessao, "financeiro.estornar_baixa.v1", &EstornarBaixa { baixa, motivo })
+        .executar(
+            sessao,
+            "financeiro.estornar_baixa.v1",
+            &EstornarBaixa { baixa, motivo },
+        )
         .map(|_: mod_financeiro::BaixaFoiEstornada| ())
     {
         Ok(()) => {
