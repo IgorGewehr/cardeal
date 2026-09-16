@@ -189,22 +189,28 @@ pub(crate) fn contraparte_join(tipo: &str, id: Vec<u8>) -> Contraparte {
 /// Como [`contraparte_split`], mas para `financeiro_titulo` — a única tabela onde a
 /// contraparte é opcional (lançamento avulso sem pessoa informada; `financeiro_recorrencia`
 /// continua exigindo, sempre usa [`contraparte_split`] direto).
-fn contraparte_split_opt(c: Option<Contraparte>) -> (Option<&'static str>, Option<Vec<u8>>) {
-    match c {
-        Some(c) => {
-            let (t, id) = contraparte_split(c);
-            (Some(t), Some(id))
-        }
-        None => (None, None),
-    }
+///
+/// `contraparte_tipo`/`contraparte_id` são `NOT NULL` desde a v1 — em vez de reconstruir a
+/// tabela (SQLite não tem `ALTER COLUMN DROP NOT NULL`, só o "12-step" de recriar/copiar/
+/// trocar o nome, que exige `PRAGMA foreign_keys=OFF` **fora** de transação; toda migração
+/// aqui roda dentro de uma já aberta pelo chamador — ver `docs/06-modelo-de-dados.md` §4 —
+/// então não dá; tentar isso quebrou a abertura de um banco real com dados, `DROP TABLE`
+/// dispara um "delete implícito" que colide com o `FOREIGN KEY` de `financeiro_parcela`),
+/// `None` é gravado com o sentinela `Contraparte::Outro(Id::NULO)` — mesmo truque de
+/// sentinela que `baixar_parcela_comum` já usa para encargos/desconto que uma baixa não
+/// precisou. `'Outro'` já é um valor válido do `CHECK` existente, então isso não pede
+/// migração nenhuma.
+fn contraparte_split_opt(c: Option<Contraparte>) -> (&'static str, Vec<u8>) {
+    contraparte_split(c.unwrap_or(Contraparte::Outro(Id::NULO)))
 }
 
-/// Como [`contraparte_join`], mas para `financeiro_titulo` (ver [`contraparte_split_opt`]).
-pub(crate) fn contraparte_join_opt(
-    tipo: Option<String>,
-    id: Option<Vec<u8>>,
-) -> Option<Contraparte> {
-    Some(contraparte_join(&tipo?, id?))
+/// Como [`contraparte_join`], mas para `financeiro_titulo` (ver [`contraparte_split_opt`] —
+/// desfaz o sentinela `Outro(Id::NULO)` de volta para `None`).
+pub(crate) fn contraparte_join_opt(tipo: String, id: Vec<u8>) -> Option<Contraparte> {
+    match contraparte_join(&tipo, id) {
+        Contraparte::Outro(i) if i == Id::NULO => None,
+        c => Some(c),
+    }
 }
 
 fn estado_sessao_txt(e: EstadoSessao) -> &'static str {
@@ -863,8 +869,8 @@ fn parcela_de_linha(r: &rusqlite::Row<'_>) -> rusqlite::Result<Parcela> {
 }
 
 pub(crate) fn titulo_de_linha(r: &rusqlite::Row<'_>) -> rusqlite::Result<Titulo> {
-    let cp_tipo: Option<String> = r.get(3)?;
-    let cp_id: Option<Vec<u8>> = r.get(4)?;
+    let cp_tipo: String = r.get(3)?;
+    let cp_id: Vec<u8> = r.get(4)?;
     Ok(Titulo {
         id: id_de(r.get::<_, Vec<u8>>(0)?),
         empresa: id_de(r.get::<_, Vec<u8>>(1)?),
