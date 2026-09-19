@@ -28,6 +28,9 @@ jobs:
       - name: Formatação (cargo fmt)
         run: cargo fmt --all -- --check
 
+      - name: Lints (cargo clippy)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
       - name: UI só compõe o design system (ADR-0015)
         run: cargo run -p xtask -- verificar-ui
 
