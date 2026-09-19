@@ -83,6 +83,8 @@ pub(super) fn aplicar(
                     estado,
                     Dlg::CancelarCupom {
                         motivo: String::new(),
+                        supervisor: String::new(),
+                        senha: String::new(),
                     },
                 );
             } else {
@@ -289,10 +291,13 @@ pub(super) fn cancelar_item(
     }
 }
 
+/// Cancela o cupom em nome de quem o **autorizou** (o supervisor): é a sessão dele que executa
+/// o comando e que fica em `autorizado_por` — um operador de caixa, em geral, não tem a
+/// permissão `pdv.cupom.cancelar`.
 pub(super) fn cancelar_cupom(
     ctx: &egui::Context,
     motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    autorizador: &SessaoLocal,
     estado: &mut EstadoTelaPdv,
     motivo: String,
 ) -> bool {
@@ -300,12 +305,12 @@ pub(super) fn cancelar_cupom(
         return false;
     };
     match motor.executar(
-        sessao,
+        autorizador,
         "pdv.cancelar_cupom.v1",
         &CancelarCupom {
             cupom,
             motivo,
-            autorizado_por: sessao.usuario(),
+            autorizado_por: autorizador.usuario(),
         },
     ) {
         Ok(()) => {

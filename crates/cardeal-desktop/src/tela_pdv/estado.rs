@@ -90,6 +90,9 @@ pub(super) enum Dlg {
     },
     CancelarCupom {
         motivo: String,
+        /// Login do supervisor que autoriza (segunda identidade).
+        supervisor: String,
+        senha: String,
     },
     FecharCaixa {
         contado: String,

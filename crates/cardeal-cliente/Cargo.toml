@@ -35,4 +35,6 @@ mod-financeiro.workspace = true
 mod-clientes.workspace   = true
 mod-estoque.workspace    = true
 mod-os.workspace         = true
+mod-pdv.workspace        = true
+mod-vendas.workspace     = true
 tempfile.workspace       = true

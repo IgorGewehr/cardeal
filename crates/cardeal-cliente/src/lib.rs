@@ -85,6 +85,13 @@ impl SessaoLocal {
     pub const fn usuario(&self) -> Id {
         self.sessao.usuario
     }
+
+    /// Se a sessão concede esta permissão — para conferir um supervisor que se identificou por
+    /// cima do operador (`docs/modulos/pdv.md` §11 regra 3) antes de agir em nome dele.
+    #[must_use]
+    pub fn concede(&self, permissao: &str) -> bool {
+        self.sessao.autorizacoes().concede(permissao)
+    }
 }
 
 impl MotorLocal {

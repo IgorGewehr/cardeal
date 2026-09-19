@@ -375,3 +375,39 @@ fn as_teclas_de_venda_geram_as_acoes_certas() {
     assert!(pediu(&e, |a| matches!(a, Acao::CancelarLinha)));
     assert!(pediu(&e, |a| matches!(a, Acao::PedirCancelarCupom)));
 }
+
+// ── foco em diálogos com vários campos ────────────────────────────────────────
+
+#[test]
+fn focar_primeiro_nao_rouba_o_foco_do_segundo_campo() {
+    // Regressão: "pede foco se este não tem" devolvia o foco ao primeiro campo a cada quadro,
+    // e o usuário nunca conseguia digitar no segundo.
+    let ctx = egui::Context::default();
+    cardeal_ui::tokens::instalar_fontes(&ctx);
+    cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+    let (mut a, mut b) = (String::new(), String::new());
+    let quadro = |eventos: Vec<egui::Event>, a: &mut String, b: &mut String| {
+        let entrada = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(800.0, 600.0),
+            )),
+            events: eventos,
+            ..Default::default()
+        };
+        let _ = ctx.run(entrada, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let r1 = ui.add(cardeal_ui::molecules::Campo::novo("Primeiro", a));
+                super::dialogos::focar_primeiro(ctx, &r1);
+                ui.add(cardeal_ui::molecules::Campo::novo("Segundo", b));
+            });
+        });
+    };
+    quadro(vec![], &mut a, &mut b); // o primeiro ganha o foco
+    quadro(vec![texto("x")], &mut a, &mut b);
+    assert_eq!(a, "x", "o primeiro campo começa focado");
+    quadro(vec![tecla(egui::Key::Tab)], &mut a, &mut b); // vai para o segundo
+    quadro(vec![texto("y")], &mut a, &mut b);
+    assert_eq!(b, "y", "o segundo campo tem que aceitar digitação");
+    assert_eq!(a, "x");
+}

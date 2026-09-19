@@ -234,7 +234,7 @@ código de barras primeiro**. O que funciona hoje, e o que **não**:
 | `F3` | ✅ Devolve o foco ao campo de bipe |
 | `F5` | ✅ Desconto no item selecionado (`pdv.aplicar_desconto_item.v1`; o backend recusa acima do teto do papel) |
 | `F7` | ✅ Cancela o item selecionado |
-| `F8` | ⚠️ Cancela o cupom com **motivo obrigatório**; registra o operador logado. **A segunda identidade do supervisor (§11 regra 3) ainda não é pedida** |
+| `F8` | ✅ Cancela o cupom com **motivo** e **segunda identidade**: o supervisor informa login e senha, o sistema autentica e confere `pdv.cupom.cancelar`. O comando roda **com a sessão do supervisor** (o operador de caixa em geral não tem a permissão) e `autorizado_por` é ele. Num negócio de um usuário só, o próprio dono se autentica de novo |
 | `F9` | ✅ Sangria (`financeiro.registrar_sangria.v1`): valor e motivo obrigatórios |
 | `F12` | ✅ Abre o caixa (quando fechado) ou fecha (quando aberto e **sem venda em andamento**). O fechamento é de **contagem cega**: o esperado só aparece depois; o motivo é exigido pelo backend só se a quebra passar de R$ 5,00, então o campo fica sempre à vista |
 | `F4`, `F6`, `F10` | ❌ Não implementadas (`F4`: substituída pelo prefixo `N*`; `F6` cliente: `AbrirCupom` já recebe `cliente`, falta escolher; `F10` consulta de preço: sem tela) |

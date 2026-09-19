@@ -16,9 +16,21 @@ pub(super) fn dialogos(
         Dlg::AbrirCaixa { .. } => dialogo_abrir(ctx, motor, sessao, estado),
         Dlg::Pagamento(_) => dialogo_pagamento(ctx, estado),
         Dlg::Desconto { .. } => dialogo_desconto(ctx, motor, sessao, estado),
-        Dlg::CancelarCupom { .. } => dialogo_cancelar_cupom(ctx, motor, sessao, estado),
+        Dlg::CancelarCupom { .. } => dialogo_cancelar_cupom(ctx, motor, estado),
         Dlg::FecharCaixa { .. } => dialogo_fechar_caixa(ctx, motor, sessao, estado),
         Dlg::Sangria { .. } => dialogo_sangria(ctx, motor, sessao, estado),
+    }
+}
+
+/// A permissão que o supervisor precisa ter para autorizar o cancelamento de um cupom.
+const PERMISSAO_CANCELAR_CUPOM: &str = "pdv.cupom.cancelar";
+
+/// Foca o primeiro campo de um diálogo **só quando ninguém tem o foco**. Com vários campos, um
+/// "pede foco se este não tem" roubaria o foco de volta a cada quadro e o usuário nunca
+/// conseguiria digitar no segundo campo.
+pub(super) fn focar_primeiro(ctx: &egui::Context, primeiro: &egui::Response) {
+    if ctx.memory(|m| m.focused().is_none()) {
+        primeiro.request_focus();
     }
 }
 
@@ -271,7 +283,6 @@ pub(super) fn dialogo_desconto(
 pub(super) fn dialogo_cancelar_cupom(
     ctx: &egui::Context,
     motor: &MotorLocal,
-    sessao: &SessaoLocal,
     estado: &mut EstadoTelaPdv,
 ) {
     let titulo = format!(
@@ -280,7 +291,12 @@ pub(super) fn dialogo_cancelar_cupom(
         estado.total.formatar_com_simbolo()
     );
     let confirmar = |estado: &mut EstadoTelaPdv| {
-        let Dlg::CancelarCupom { motivo } = &estado.dlg else {
+        let Dlg::CancelarCupom {
+            motivo,
+            supervisor,
+            senha,
+        } = &estado.dlg
+        else {
             return;
         };
         let motivo = motivo.trim().to_owned();
@@ -288,29 +304,65 @@ pub(super) fn dialogo_cancelar_cupom(
             notificar(ctx, Notificacao::aviso("Informe o motivo do cancelamento."));
             return;
         }
-        if cancelar_cupom(ctx, motor, sessao, estado, motivo) {
+        let login = supervisor.trim().to_owned();
+        if login.is_empty() || senha.is_empty() {
+            notificar(
+                ctx,
+                Notificacao::aviso("Cancelar um cupom exige o login e a senha de um supervisor."),
+            );
+            return;
+        }
+        // Segunda identidade: autentica de verdade e confere a permissão de quem autoriza.
+        let autorizador = match motor.autenticar(&login, senha) {
+            Ok(s) => s,
+            Err(e) => {
+                notificar(ctx, Notificacao::erro(e.mensagem));
+                return;
+            }
+        };
+        if !autorizador.concede(PERMISSAO_CANCELAR_CUPOM) {
+            notificar(
+                ctx,
+                Notificacao::aviso(format!(
+                    "{login} não pode autorizar o cancelamento de cupom."
+                )),
+            );
+            return;
+        }
+        if cancelar_cupom(ctx, motor, &autorizador, estado, motivo) {
             estado.dlg = Dlg::Fechado;
         }
     };
 
     let fechar = Dialogo::nova(titulo)
         .descricao(
-            "A venda em andamento é encerrada e o cancelamento fica registrado com o seu usuário.",
+            "Exige a autorização de um supervisor. O cancelamento fica registrado em nome dele.",
         )
         .pequeno()
         .mostrar(
             ctx,
             estado,
             |ui, estado| {
-                let Dlg::CancelarCupom { motivo } = &mut estado.dlg else {
+                let Dlg::CancelarCupom {
+                    motivo,
+                    supervisor,
+                    senha,
+                } = &mut estado.dlg
+                else {
                     return;
                 };
-                let resp =
+                let r1 =
                     ui.add(Campo::novo("Motivo", motivo).marcador("Cliente desistiu da compra"));
-                if !resp.has_focus() {
-                    resp.request_focus();
-                }
-                if resp.lost_focus() && enter_pressionado(ui) {
+                focar_primeiro(ctx, &r1);
+                ui.add_space(Espaco::E12);
+                let (r2, r3) = ui.columns(2, |c| {
+                    (
+                        c[0].add(Campo::novo("Supervisor (login)", supervisor)),
+                        c[1].add(Campo::novo("Senha", senha).senha(true)),
+                    )
+                });
+                if (r1.lost_focus() || r2.lost_focus() || r3.lost_focus()) && enter_pressionado(ui)
+                {
                     confirmar(estado);
                 }
             },
@@ -410,9 +462,7 @@ pub(super) fn dialogo_fechar_caixa(
                     return;
                 };
                 let resp = ui.add(Campo::novo("Valor contado", contado).marcador("0,00"));
-                if !resp.has_focus() && motivo.is_empty() {
-                    resp.request_focus();
-                }
+                focar_primeiro(ctx, &resp);
                 ui.add_space(Espaco::E12);
                 let dica = format!(
                     "Motivo da diferença (obrigatório acima de {})",
@@ -506,9 +556,7 @@ pub(super) fn dialogo_sangria(
                     return;
                 };
                 let resp = ui.add(Campo::novo("Valor", valor).marcador("0,00"));
-                if !resp.has_focus() && motivo.is_empty() {
-                    resp.request_focus();
-                }
+                focar_primeiro(ctx, &resp);
                 ui.add_space(Espaco::E12);
                 let resp_motivo =
                     ui.add(Campo::novo("Motivo", motivo).marcador("Depósito no cofre"));
