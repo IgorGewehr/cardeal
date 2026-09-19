@@ -8,9 +8,9 @@ use cardeal_cliente::{
     EmpresaResumo, IdentidadeVisual, MotorLocal, PapelResumo, SessaoLocal, UsuarioResumo,
 };
 use cardeal_ui::atoms::{Botao, Rotulo};
-use cardeal_ui::molecules::Campo;
-use cardeal_ui::organisms::{notificar, ColunaGrade, Grade, LayoutTela, Notificacao};
-use cardeal_ui::tokens::{Espaco, Raio, Tema, TemaUi};
+use cardeal_ui::molecules::{Abas, Campo};
+use cardeal_ui::organisms::{notificar, ColunaGrade, Grade, LayoutTela, Notificacao, Painel};
+use cardeal_ui::tokens::{Espaco, Tema, TemaUi};
 use eframe::egui;
 
 const REGIMES: [&str; 4] = ["MEI", "SimplesNacional", "LucroPresumido", "LucroReal"];
@@ -108,31 +108,16 @@ pub fn mostrar(
 }
 
 fn abas(ui: &mut egui::Ui, estado: &mut EstadoTelaSettings) {
-    let cores = ui.cores();
-    egui::Frame::none()
-        .fill(cores.superficie_2)
-        .rounding(Raio::ITEM)
-        .inner_margin(3.0)
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 2.0;
-                for (aba, rot) in [
-                    (Aba::Empresa, "Empresa"),
-                    (Aba::Aparencia, "Aparência"),
-                    (Aba::Acesso, "Usuários e acesso"),
-                ] {
-                    let ativa = estado.aba == aba;
-                    let b = if ativa {
-                        Botao::primario(rot).pequeno()
-                    } else {
-                        Botao::fantasma(rot).pequeno()
-                    };
-                    if ui.add(b).clicked() {
-                        estado.aba = aba;
-                    }
-                }
-            });
-        });
+    if let Some(nova) = Abas::nova(&[
+        (Aba::Empresa, "Empresa"),
+        (Aba::Aparencia, "Aparência"),
+        (Aba::Acesso, "Usuários e acesso"),
+    ])
+    .selecionada(estado.aba)
+    .mostrar(ui)
+    {
+        estado.aba = nova;
+    }
 }
 
 fn secao_empresa(
@@ -210,14 +195,12 @@ fn secao_identidade(
         ui.add_space(Espaco::E12);
 
         ui.horizontal(|ui| {
-            let cores = ui.cores();
-            egui::Frame::none()
-                .fill(cores.superficie_2)
-                .stroke(egui::Stroke::new(1.0_f32, cores.borda))
-                .rounding(Raio::ITEM)
-                .inner_margin(Espaco::E8)
-                .show(ui, |ui| {
-                    ui.set_min_size(egui::vec2(180.0, 72.0));
+            Painel::novo()
+                .plano()
+                .compacto()
+                .largura(180.0)
+                .mostrar(ui, |ui| {
+                    ui.set_min_height(72.0);
                     ui.centered_and_justified(|ui| {
                         if let Some(tex) = &estado.logo_tex {
                             let size = tex.size_vec2();
@@ -431,16 +414,7 @@ fn secao_acesso(ui: &mut egui::Ui, estado: &mut EstadoTelaSettings) {
 }
 
 fn cartao(ui: &mut egui::Ui, conteudo: impl FnOnce(&mut egui::Ui)) {
-    let cores = ui.cores();
-    egui::Frame::none()
-        .fill(cores.superficie)
-        .stroke(egui::Stroke::new(1.0_f32, cores.borda))
-        .rounding(Raio::CARTAO)
-        .inner_margin(Espaco::E24)
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width().clamp(1.0, 680.0));
-            conteudo(ui);
-        });
+    Painel::novo().amplo().largura(680.0).mostrar(ui, conteudo);
 }
 
 fn kv(ui: &mut egui::Ui, chave: &str, valor: &str) {

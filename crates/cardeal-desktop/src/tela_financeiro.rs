@@ -9,15 +9,15 @@ use cardeal_cliente::{MotorLocal, SessaoLocal};
 use cardeal_kernel::{Competencia, Data, Dinheiro, Fuso, Id, Periodo};
 use cardeal_ledger::Contraparte;
 use cardeal_modkit::Icone;
-use cardeal_ui::atoms::{Botao, Divisor, Etiqueta, Rotulo, ValorDinheiro, ATALHO_NOVO};
+use cardeal_ui::atoms::{Botao, Divisor, Etiqueta, Rotulo, Tom, ValorDinheiro, ATALHO_NOVO};
 use cardeal_ui::molecules::{
     Abas, Campo, CartaoKpi, EstadoVazio, Mascara, SecaoExpansivel, SeletorOpcao,
 };
 use cardeal_ui::organisms::{
     notificar, ColunaGrade, Dialogo, Direcao, FaixaKpi, Grade, GraficoBarras,
-    GraficoBarrasHorizontais, LayoutTela, Notificacao, SerieBarras,
+    GraficoBarrasHorizontais, LayoutTela, Notificacao, Painel, SerieBarras,
 };
-use cardeal_ui::tokens::{perseguir, sombra_cartao, Espaco, Mov, Raio, Rubro, TemaUi};
+use cardeal_ui::tokens::{Espaco, Rubro, TemaUi};
 use eframe::egui;
 use mod_clientes::{CriarPessoa, ItemPessoa, Papel, PessoaCadastrada, PessoasPorPapel, TipoPessoa};
 use mod_financeiro::{
@@ -1379,54 +1379,14 @@ fn criar_recorrencia(
     }
 }
 
-/// Um cartão de indicador: faixa de acento no topo, rótulo pequeno, **valor que sobe
-/// contando** até o número final, linha de apoio opcional. A contagem só dispara quando o
-/// valor muda de verdade (`perseguir` persegue o alvo a partir do último exibido) — entrar
-/// na tela com os mesmos números não re-anima.
-fn kpi(ui: &mut egui::Ui, rotulo: &str, valor: Dinheiro, cor: egui::Color32, apoio: Option<&str>) {
-    let cores = ui.cores();
-    let id = ui.id().with(("kpi", rotulo));
-    #[allow(clippy::cast_precision_loss)]
-    let alvo = valor.em_centavos() as f32;
-    let mostrado = perseguir(ui, id, alvo, Mov::CONTAGEM);
-    #[allow(clippy::cast_possible_truncation)]
-    let texto = Dinheiro::centavos(mostrado.round() as i64).formatar_com_simbolo();
-
-    let frame = egui::Frame::none()
-        .fill(cores.superficie)
-        .stroke(egui::Stroke::new(1.0_f32, cores.borda))
-        .rounding(Raio::CARTAO)
-        .shadow(sombra_cartao(ui.ctx()))
-        .inner_margin(Espaco::E16)
-        .show(ui, |ui| {
-            // Estica pra ocupar a coluna inteira (`ui.columns` já reservou a largura certa)
-            // — antes era uma largura fixa de 212px, sobrando um vão morto do lado em
-            // qualquer janela mais larga que 3×212px (achado pelo usuário na Visão Geral).
-            ui.set_width(ui.available_width());
-            ui.vertical(|ui| {
-                ui.add(Rotulo::campo(rotulo.to_uppercase()));
-                ui.add_space(Espaco::E4);
-                ui.add(Rotulo::titulo_secao(texto).cor(cor));
-                if let Some(a) = apoio {
-                    ui.add_space(Espaco::E4);
-                    ui.add(Rotulo::campo(a.to_owned()));
-                }
-            });
-        });
-
-    // Faixa de acento colada no topo do cartão, na cor semântica do indicador.
-    let r = frame.response.rect;
-    let faixa = egui::Rect::from_min_max(r.min, egui::pos2(r.max.x, r.min.y + 3.0_f32));
-    ui.painter().rect_filled(
-        faixa,
-        egui::Rounding {
-            nw: Raio::CARTAO,
-            ne: Raio::CARTAO,
-            sw: 0.0_f32,
-            se: 0.0_f32,
-        },
-        cor,
-    );
+/// Um cartão de indicador da Visão Geral: o `CartaoKpi` do design system no tamanho compacto
+/// (a contagem do valor e a faixa de acento vêm dele).
+fn kpi(ui: &mut egui::Ui, rotulo: &str, valor: Dinheiro, tom: Tom, apoio: Option<&str>) {
+    let mut cartao = CartaoKpi::novo(rotulo, valor).compacto().tom(tom);
+    if let Some(a) = apoio {
+        cartao = cartao.variacao(a);
+    }
+    ui.add(cartao);
 }
 
 /// Largura abaixo da qual o gráfico principal e o recorte "por categoria" empilham em vez
@@ -1450,14 +1410,14 @@ fn painel_visao(
             &mut col[0],
             "A receber em aberto",
             estado.dash_receber,
-            cores.positivo,
+            Tom::Positivo,
             None,
         );
         kpi(
             &mut col[1],
             "A pagar em aberto",
             estado.dash_pagar,
-            cores.negativo,
+            Tom::Negativo,
             None,
         );
         let saldo = estado.dash_recebido_mes - estado.dash_pago_mes;
@@ -1466,9 +1426,9 @@ fn painel_visao(
             "Saldo do mês",
             saldo,
             if saldo.e_negativo() {
-                cores.negativo
+                Tom::Negativo
             } else {
-                cores.positivo
+                Tom::Positivo
             },
             Some(&format!(
                 "recebido {} · pago {}",
@@ -1482,15 +1442,10 @@ fn painel_visao(
     // Faixa "vence em 7 dias".
     let (nr, vr) = estado.dash_venc_receber;
     let (np, vp) = estado.dash_venc_pagar;
-    egui::Frame::none()
-        .fill(if np > 0 {
-            cores.atencao_suave
-        } else {
-            cores.superficie_2
-        })
-        .rounding(Raio::ITEM)
-        .inner_margin(egui::Margin::symmetric(Espaco::E12, Espaco::E8))
-        .show(ui, |ui| {
+    Painel::novo()
+        .realce(if np > 0 { Tom::Atencao } else { Tom::Neutro })
+        .compacto()
+        .mostrar(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.add(Rotulo::campo("PRÓXIMOS 7 DIAS"));
                 ui.add_space(Espaco::E16);
@@ -1516,12 +1471,7 @@ fn painel_visao(
     let cartao_grafico = |ui: &mut egui::Ui, titulo: &str, corpo: &dyn Fn(&mut egui::Ui)| {
         ui.add(Rotulo::titulo_secao(titulo));
         ui.add_space(Espaco::E8);
-        egui::Frame::none()
-            .fill(cores.superficie)
-            .stroke(egui::Stroke::new(1.0_f32, cores.borda))
-            .rounding(Raio::CARTAO)
-            .inner_margin(Espaco::E16)
-            .show(ui, corpo);
+        Painel::novo().plano().mostrar(ui, corpo);
     };
 
     let largura = ui.available_width();
@@ -1594,7 +1544,6 @@ fn painel_fluxo(
     sessao: &SessaoLocal,
     estado: &mut EstadoTelaFinanceiro,
 ) {
-    let cores = ui.cores();
     ui.horizontal(|ui| {
         ui.add(Rotulo::campo("PERÍODO"));
         for (d, rot) in [(30_i64, "30 dias"), (90, "90 dias"), (365, "12 meses")] {
@@ -1634,9 +1583,9 @@ fn painel_fluxo(
             "Saldo em caixa",
             saldo_caixa,
             if saldo_caixa.e_negativo() {
-                cores.negativo
+                Tom::Negativo
             } else {
-                cores.texto_forte
+                Tom::Neutro
             },
             Some("confira contra o caixa físico"),
         );
@@ -1645,9 +1594,9 @@ fn painel_fluxo(
             "Saldo em conta bancária",
             saldo_bancos,
             if saldo_bancos.e_negativo() {
-                cores.negativo
+                Tom::Negativo
             } else {
-                cores.texto_forte
+                Tom::Neutro
             },
             None,
         );
@@ -2456,13 +2405,11 @@ fn dialogo_baixar(
 /// Uma linha do histórico de baixas: data, valor, e "Estornar" quando ainda não estornada.
 /// Devolve o id da baixa cujo botão "Estornar" foi clicado neste frame, se algum.
 fn baixa_historico(ui: &mut egui::Ui, b: &ItemBaixa) -> Option<Id> {
-    let cores = ui.cores();
     let mut clicada = None;
-    egui::Frame::none()
-        .fill(cores.superficie_2)
-        .rounding(Raio::ITEM)
-        .inner_margin(egui::Margin::symmetric(Espaco::E12, Espaco::E8))
-        .show(ui, |ui| {
+    Painel::novo()
+        .realce(Tom::Neutro)
+        .compacto()
+        .mostrar(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
                     ui.add(Rotulo::interface(format!(

@@ -10,9 +10,11 @@ use cardeal_kernel::{Data, Dinheiro, Fuso, Id, Instante, Percentual, Preco, Quan
 use cardeal_modkit::Icone;
 use cardeal_pdf::{gerar_orcamento, IdentidadeEmpresa, ItemPdf, OrcamentoPdf};
 use cardeal_ui::atoms::{Botao, Divisor, Etiqueta, Rotulo, Tom, ValorDinheiro};
-use cardeal_ui::molecules::{Campo, EstadoVazio, SeletorOpcao};
-use cardeal_ui::organisms::{notificar, ColunaGrade, Dialogo, Grade, Notificacao};
-use cardeal_ui::tokens::{Espaco, Raio, TemaUi};
+use cardeal_ui::molecules::{Campo, CartaoKpi, EstadoVazio, SeletorOpcao};
+use cardeal_ui::organisms::{
+    notificar, ColunaGrade, Dialogo, FaixaKpi, Grade, Notificacao, Painel,
+};
+use cardeal_ui::tokens::{Espaco, TemaUi};
 use eframe::egui;
 use mod_clientes::{ItemPessoa, Papel as PapelCliente, PessoasPorPapel};
 use mod_orcamentos::{
@@ -342,51 +344,24 @@ pub fn dialogos(
 
 fn kpis(ui: &mut egui::Ui, estado: &EstadoOrcamentos) {
     let Some(r) = &estado.resumo else { return };
-    let cores = ui.cores();
-    ui.horizontal_wrapped(|ui| {
-        kpi(
-            ui,
-            "Em aberto",
-            &format!("{}", r.abertos),
-            cores.texto_forte,
-            Some(&r.valor_aberto.formatar_com_simbolo()),
-        );
-        kpi(
-            ui,
-            "Aprovados (30 dias)",
-            &format!("{}", r.aprovados_periodo),
-            cores.positivo,
-            Some(&r.valor_aprovado_periodo.formatar_com_simbolo()),
-        );
-        kpi(
-            ui,
+    FaixaKpi::nova(vec![
+        CartaoKpi::contagem("Em aberto", r.abertos)
+            .variacao(r.valor_aberto.formatar_com_simbolo())
+            .compacto()
+            .tom(Tom::Neutro),
+        CartaoKpi::contagem("Aprovados (30 dias)", r.aprovados_periodo)
+            .variacao(r.valor_aprovado_periodo.formatar_com_simbolo())
+            .compacto()
+            .tom(Tom::Positivo),
+        CartaoKpi::contagem(
             "Taxa de conversão",
-            &format!("{}%", r.taxa_conversao.formatar(0)),
-            cores.info,
-            Some("aprovados ÷ decididos"),
-        );
-    });
-}
-
-fn kpi(ui: &mut egui::Ui, rotulo: &str, valor: &str, cor: egui::Color32, apoio: Option<&str>) {
-    let cores = ui.cores();
-    egui::Frame::none()
-        .fill(cores.superficie)
-        .stroke(egui::Stroke::new(1.0_f32, cores.borda))
-        .rounding(Raio::CARTAO)
-        .inner_margin(Espaco::E16)
-        .show(ui, |ui| {
-            ui.set_width(196.0);
-            ui.vertical(|ui| {
-                ui.add(Rotulo::campo(rotulo.to_uppercase()));
-                ui.add_space(Espaco::E4);
-                ui.add(Rotulo::titulo_secao(valor.to_owned()).cor(cor));
-                if let Some(a) = apoio {
-                    ui.add_space(Espaco::E4);
-                    ui.add(Rotulo::campo(a.to_owned()));
-                }
-            });
-        });
+            format!("{}%", r.taxa_conversao.formatar(0)),
+        )
+        .variacao("aprovados ÷ decididos")
+        .compacto()
+        .tom(Tom::Info),
+    ])
+    .mostrar(ui);
 }
 
 // ── Filtros ──────────────────────────────────────────────────────────────────
@@ -407,12 +382,10 @@ fn filtros(
     sessao: &SessaoLocal,
     estado: &mut EstadoOrcamentos,
 ) {
-    let cores = ui.cores();
-    egui::Frame::none()
-        .fill(cores.superficie_2)
-        .rounding(Raio::ITEM)
-        .inner_margin(Espaco::E8)
-        .show(ui, |ui| {
+    Painel::novo()
+        .realce(Tom::Neutro)
+        .compacto()
+        .mostrar(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 for (valor, rot) in ESTADOS_FILTRO {
                     let sel = estado.f_estado == valor;

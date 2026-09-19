@@ -23,6 +23,7 @@ pub struct Painel {
     tom: Option<Tom>,
     elevado: bool,
     margem: f32,
+    largura: Option<f32>,
 }
 
 impl Painel {
@@ -33,12 +34,26 @@ impl Painel {
             tom: None,
             elevado: true,
             margem: Espaco::E16,
+            largura: None,
         }
     }
 
     /// Título do cabeçalho (papel `TituloSecao`).
     pub fn titulo(mut self, titulo: impl Into<String>) -> Self {
         self.titulo = Some(titulo.into());
+        self
+    }
+
+    /// Margem interna larga (24px) — formulários e cartões de configuração, com respiro.
+    pub const fn amplo(mut self) -> Self {
+        self.margem = Espaco::E24;
+        self
+    }
+
+    /// Limita a largura do painel a `px` (nunca mais que o espaço disponível). Sem isto o painel
+    /// ocupa a largura toda — o que uma caixa pequena ao lado de outra coisa não quer.
+    pub const fn largura(mut self, px: f32) -> Self {
+        self.largura = Some(px);
         self
     }
 
@@ -92,8 +107,9 @@ impl Painel {
         }
         moldura
             .show(ui, |ui| {
-                // Ocupa a largura toda: painéis lado a lado ficam alinhados.
-                ui.set_width(ui.available_width().max(0.0));
+                // Ocupa a largura toda (painéis lado a lado ficam alinhados), salvo `.largura()`.
+                let disponivel = ui.available_width().max(0.0);
+                ui.set_width(self.largura.map_or(disponivel, |w| w.min(disponivel)));
                 if let Some(titulo) = self.titulo {
                     ui.horizontal(|ui| {
                         ui.add(Rotulo::titulo_secao(titulo));

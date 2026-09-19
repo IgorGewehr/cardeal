@@ -23,9 +23,9 @@ use cardeal_ui::molecules::{
     Campo, EstadoVazio, Mascara, OpcaoBusca, SecaoExpansivel, SeletorBusca, SeletorOpcao,
 };
 use cardeal_ui::organisms::{
-    notificar, ColunaGrade, Dialogo, Direcao, Grade, LayoutTela, Notificacao,
+    notificar, ColunaGrade, Dialogo, Direcao, Grade, LayoutTela, Notificacao, Painel,
 };
-use cardeal_ui::tokens::{Espaco, Raio, TemaUi};
+use cardeal_ui::tokens::{Espaco, TemaUi};
 use eframe::egui;
 use mod_clientes::{Papel, PessoasPorPapel};
 use mod_compras::{
@@ -762,84 +762,79 @@ fn linha_item_casamento(
 ) -> Option<Id> {
     let cores = ui.cores();
     let mut vincular = None;
-    let (fundo, borda) = match item.estado_casamento {
-        EstadoCasamento::NaoCasado => (cores.negativo_suave, cores.negativo),
-        EstadoCasamento::SugestaoForte => (cores.atencao_suave, cores.atencao),
-        EstadoCasamento::Casado => (cores.superficie, cores.borda),
-    };
+    // O estado do casamento define o tom do painel: sem produto = vermelho, sugestão = âmbar,
+    // casado = neutro.
+    let painel = match item.estado_casamento {
+        EstadoCasamento::NaoCasado => Painel::novo().realce(Tom::Negativo),
+        EstadoCasamento::SugestaoForte => Painel::novo().realce(Tom::Atencao),
+        EstadoCasamento::Casado => Painel::novo().plano(),
+    }
+    .compacto();
 
-    egui::Frame::none()
-        .fill(fundo)
-        .stroke(egui::Stroke::new(1.0_f32, borda))
-        .rounding(Raio::CARTAO)
-        .inner_margin(Espaco::E12)
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width().max(0.0));
-            ui.horizontal(|ui| {
-                ui.vertical(|ui| {
-                    ui.add(Rotulo::interface(format!(
-                        "{} × {}",
-                        item.quantidade, item.descricao_fornecedor
-                    )));
-                    if let (EstadoCasamento::SugestaoForte, Some(produto)) =
-                        (item.estado_casamento, item.produto_casado)
-                    {
-                        let nome = nomes_produto
-                            .get(&produto)
-                            .map_or("produto do estoque", String::as_str);
-                        ui.add(Rotulo::campo(format!("Sugestão: {nome}")));
-                    }
-                });
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let (rotulo, tom) = estado_casamento_etiqueta(item.estado_casamento);
-                    ui.add(Etiqueta::nova(rotulo, tom));
-                });
-            });
-
-            match item.estado_casamento {
-                EstadoCasamento::Casado => {}
-                EstadoCasamento::SugestaoForte => {
-                    ui.add_space(Espaco::E8);
-                    if ui
-                        .add(Botao::primario("Aceitar sugestão").pequeno())
-                        .clicked()
-                    {
-                        vincular = item.produto_casado;
-                    }
-                    ui.add_space(Espaco::E4);
-                    SecaoExpansivel::nova("Prefere outro produto?").mostrar(ui, |ui| {
-                        SeletorBusca::novo("Produto", busca, selecionado)
-                            .opcoes(opcoes)
-                            .marcador("Buscar produto por nome…")
-                            .mostrar(ui);
-                        if selecionado.is_some()
-                            && ui
-                                .add(Botao::secundario("Vincular este").pequeno())
-                                .clicked()
-                        {
-                            vincular = *selecionado;
-                        }
-                    });
+    painel.mostrar(ui, |ui| {
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui.add(Rotulo::interface(format!(
+                    "{} × {}",
+                    item.quantidade, item.descricao_fornecedor
+                )));
+                if let (EstadoCasamento::SugestaoForte, Some(produto)) =
+                    (item.estado_casamento, item.produto_casado)
+                {
+                    let nome = nomes_produto
+                        .get(&produto)
+                        .map_or("produto do estoque", String::as_str);
+                    ui.add(Rotulo::campo(format!("Sugestão: {nome}")));
                 }
-                EstadoCasamento::NaoCasado => {
-                    ui.add_space(Espaco::E8);
-                    ui.add(
-                        Rotulo::campo("Sem produto vinculado — busque abaixo.").cor(cores.negativo),
-                    );
-                    ui.add_space(Espaco::E4);
+            });
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let (rotulo, tom) = estado_casamento_etiqueta(item.estado_casamento);
+                ui.add(Etiqueta::nova(rotulo, tom));
+            });
+        });
+
+        match item.estado_casamento {
+            EstadoCasamento::Casado => {}
+            EstadoCasamento::SugestaoForte => {
+                ui.add_space(Espaco::E8);
+                if ui
+                    .add(Botao::primario("Aceitar sugestão").pequeno())
+                    .clicked()
+                {
+                    vincular = item.produto_casado;
+                }
+                ui.add_space(Espaco::E4);
+                SecaoExpansivel::nova("Prefere outro produto?").mostrar(ui, |ui| {
                     SeletorBusca::novo("Produto", busca, selecionado)
                         .opcoes(opcoes)
                         .marcador("Buscar produto por nome…")
                         .mostrar(ui);
-                    if selecionado.is_some() {
-                        ui.add_space(Espaco::E4);
-                        if ui.add(Botao::primario("Vincular").pequeno()).clicked() {
-                            vincular = *selecionado;
-                        }
+                    if selecionado.is_some()
+                        && ui
+                            .add(Botao::secundario("Vincular este").pequeno())
+                            .clicked()
+                    {
+                        vincular = *selecionado;
+                    }
+                });
+            }
+            EstadoCasamento::NaoCasado => {
+                ui.add_space(Espaco::E8);
+                ui.add(Rotulo::campo("Sem produto vinculado — busque abaixo.").cor(cores.negativo));
+                ui.add_space(Espaco::E4);
+                SeletorBusca::novo("Produto", busca, selecionado)
+                    .opcoes(opcoes)
+                    .marcador("Buscar produto por nome…")
+                    .mostrar(ui);
+                if selecionado.is_some() {
+                    ui.add_space(Espaco::E4);
+                    if ui.add(Botao::primario("Vincular").pequeno()).clicked() {
+                        vincular = *selecionado;
                     }
                 }
             }
-        });
+        }
+    });
 
     vincular
 }
