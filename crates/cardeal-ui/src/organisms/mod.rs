@@ -11,6 +11,7 @@ mod grade;
 mod grafico;
 mod layout_tela;
 mod notificacoes;
+mod painel;
 mod paleta_comandos;
 mod sidebar;
 
@@ -24,5 +25,6 @@ pub use grade::{ColunaGrade, Direcao, Grade, LinhaGrade, RespostaGrade};
 pub use grafico::{GraficoBarras, GraficoBarrasHorizontais, ItemBarraHorizontal, SerieBarras};
 pub use layout_tela::LayoutTela;
 pub use notificacoes::{notificar, Notificacao, Notificacoes, Tom};
+pub use painel::Painel;
 pub use paleta_comandos::{ItemComando, PaletaComandos};
 pub use sidebar::{GrupoSidebar, ItemSidebar, Sidebar};

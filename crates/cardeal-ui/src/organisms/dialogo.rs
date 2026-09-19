@@ -9,13 +9,21 @@
 
 use egui::{Align2, Color32, Context, Id, Order, Sense, Ui};
 
-use crate::atoms::{Botao, Rotulo};
+use crate::atoms::{Botao, Divisor, Rotulo};
 use crate::tokens::{Espaco, Raio, TemaUi};
+
+/// Largura de um dialog de confirmação/entrada curta (1–2 campos).
+const LARGURA_PEQUENA: f32 = 460.0;
+/// Largura de um dialog de formulário médio.
+const LARGURA_MEDIA: f32 = 620.0;
+/// Largura padrão — formulário completo, duas colunas.
+const LARGURA_GRANDE: f32 = 780.0;
 
 /// Um dialog modal centrado.
 #[must_use]
 pub struct Dialogo {
     titulo: String,
+    descricao: Option<String>,
     largura: f32,
 }
 
@@ -24,8 +32,28 @@ impl Dialogo {
     pub fn nova(titulo: impl Into<String>) -> Self {
         Self {
             titulo: titulo.into(),
-            largura: 780.0,
+            descricao: None,
+            largura: LARGURA_GRANDE,
         }
+    }
+
+    /// Uma linha de contexto sob o título ("o que isto faz / o que vai acontecer") — quem
+    /// abre um dialog deve saber o que ele pede sem ler os campos.
+    pub fn descricao(mut self, texto: impl Into<String>) -> Self {
+        self.descricao = Some(texto.into());
+        self
+    }
+
+    /// 460px — confirmação e entrada curta (1–2 campos).
+    pub const fn pequeno(mut self) -> Self {
+        self.largura = LARGURA_PEQUENA;
+        self
+    }
+
+    /// 620px — formulário médio.
+    pub const fn medio(mut self) -> Self {
+        self.largura = LARGURA_MEDIA;
+        self
     }
 
     /// Sobrescreve a largura desejada.
@@ -70,49 +98,78 @@ impl Dialogo {
             .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
                 ui.set_max_width(largura);
+                // Moldura sem margem própria: cabeçalho, corpo e rodapé cuidam do respiro,
+                // para o rodapé poder ser uma faixa que vai de borda a borda.
                 egui::Frame::none()
                     .fill(cores.superficie)
                     .stroke(egui::Stroke::new(1.0_f32, cores.borda))
                     .rounding(Raio::MODAL)
-                    .shadow(egui::epaint::Shadow {
-                        offset: egui::vec2(0.0_f32, 12.0_f32),
-                        blur: 40.0_f32,
-                        spread: 0.0_f32,
-                        color: Color32::from_black_alpha(60),
-                    })
-                    .inner_margin(Espaco::E24)
+                    .shadow(crate::tokens::sombra_dropdown(ctx))
+                    .inner_margin(0.0)
                     .show(ui, |ui| {
-                        ui.set_width((largura - Espaco::E24 * 2.0).max(1.0));
+                        ui.set_width(largura);
 
-                        ui.horizontal(|ui| {
-                            ui.add(Rotulo::titulo_secao(self.titulo.clone()).cor(cores.rubro));
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    if ui.add(Botao::fantasma("\u{2715}")).clicked() {
-                                        fechar = true;
-                                    }
-                                },
-                            );
-                        });
-                        ui.add_space(Espaco::E12);
-                        ui.separator();
-                        ui.add_space(Espaco::E16);
-
-                        egui::ScrollArea::vertical()
-                            .max_height(altura_corpo_max)
-                            .auto_shrink([false, true])
+                        // Cabeçalho: título (neutro — o vermelho da marca é ação, não
+                        // decoração), descrição opcional e ✕.
+                        egui::Frame::none()
+                            .inner_margin(egui::Margin::symmetric(Espaco::E24, Espaco::E16))
                             .show(ui, |ui| {
                                 ui.set_width(ui.available_width().max(0.0));
-                                corpo(ui, estado);
+                                ui.horizontal(|ui| {
+                                    ui.vertical(|ui| {
+                                        ui.add(Rotulo::titulo_secao(self.titulo.clone()));
+                                        if let Some(d) = &self.descricao {
+                                            ui.add_space(Espaco::E4);
+                                            ui.add(Rotulo::campo(d.clone()).quebravel());
+                                        }
+                                    });
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Min),
+                                        |ui| {
+                                            if ui
+                                                .add(Botao::fantasma("\u{00D7}").pequeno())
+                                                .clicked()
+                                            {
+                                                fechar = true;
+                                            }
+                                        },
+                                    );
+                                });
+                            });
+                        ui.add(Divisor::novo());
+
+                        // Corpo rolável.
+                        egui::Frame::none()
+                            .inner_margin(egui::Margin::symmetric(Espaco::E24, Espaco::E16))
+                            .show(ui, |ui| {
+                                ui.set_width(ui.available_width().max(0.0));
+                                egui::ScrollArea::vertical()
+                                    .max_height(altura_corpo_max)
+                                    .auto_shrink([false, true])
+                                    .show(ui, |ui| {
+                                        ui.set_width(ui.available_width().max(0.0));
+                                        corpo(ui, estado);
+                                    });
                             });
 
-                        ui.add_space(Espaco::E16);
-                        ui.separator();
-                        ui.add_space(Espaco::E12);
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            rodape(ui, estado)
-                        });
+                        // Rodapé: faixa `superficie_2` de borda a borda, cantos de baixo
+                        // acompanhando o raio do modal.
+                        egui::Frame::none()
+                            .fill(cores.superficie_2)
+                            .rounding(egui::Rounding {
+                                nw: 0.0,
+                                ne: 0.0,
+                                sw: Raio::MODAL,
+                                se: Raio::MODAL,
+                            })
+                            .inner_margin(egui::Margin::symmetric(Espaco::E24, Espaco::E12))
+                            .show(ui, |ui| {
+                                ui.set_width(ui.available_width().max(0.0));
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| rodape(ui, estado),
+                                );
+                            });
                     });
             });
 
