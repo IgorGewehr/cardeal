@@ -9,9 +9,3 @@
 "egui::Frame" = 3
 "egui::Stroke" = 5
 "ui.painter(" = 6
-
-[arquivo."tela_agenda.rs"]
-"Color32" = 1
-"egui::ComboBox" = 1
-"egui::Frame" = 1
-"ui.painter(" = 1

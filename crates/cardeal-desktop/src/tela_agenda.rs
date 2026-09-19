@@ -9,13 +9,13 @@ use std::collections::HashMap;
 
 use cardeal_cliente::{MotorLocal, SessaoLocal};
 use cardeal_kernel::{Data, Fuso, Hora, Id, Instante};
-use cardeal_ui::atoms::{Botao, Divisor, Rotulo, ATALHO_NOVO};
-use cardeal_ui::molecules::{Campo, Mascara, SeletorOpcao};
+use cardeal_ui::atoms::{Botao, Divisor, Etiqueta, Rotulo, Tom, ATALHO_NOVO};
+use cardeal_ui::molecules::{Abas, Campo, Mascara, SeletorOpcao};
 use cardeal_ui::organisms::{
     notificar, AcaoAgenda, AgendaCalendario, AgendaMes, BlocoAgenda, Dialogo, LayoutTela,
     ModoCalendario, Notificacao, TagAgenda,
 };
-use cardeal_ui::tokens::{Espaco, Raio, TemaUi};
+use cardeal_ui::tokens::{Espaco, TemaUi};
 use eframe::egui;
 use mod_agenda::{
     CancelarCompromisso, Compromisso, CompromissosNoPeriodo, ConcluirCompromisso,
@@ -309,31 +309,19 @@ fn barra_controles(
     estado: &mut EstadoTelaAgenda,
 ) {
     let base = estado.base.unwrap_or_else(|| Data::hoje(FUSO));
-    let cores = ui.cores();
     ui.horizontal(|ui| {
         // Controle segmentado Dia / Semana / Mês.
-        egui::Frame::none()
-            .fill(cores.superficie_2)
-            .rounding(Raio::ITEM)
-            .inner_margin(3.0)
-            .show(ui, |ui| {
-                ui.spacing_mut().item_spacing.x = 2.0;
-                for (m, r) in [
-                    (Modo::Dia, "Dia"),
-                    (Modo::Semana, "Semana"),
-                    (Modo::Mes, "Mês"),
-                ] {
-                    let b = if estado.modo == m {
-                        Botao::primario(r).pequeno()
-                    } else {
-                        Botao::fantasma(r).pequeno()
-                    };
-                    if ui.add(b).clicked() {
-                        estado.modo = m;
-                        estado.carregar(motor, sessao);
-                    }
-                }
-            });
+        if let Some(novo) = Abas::nova(&[
+            (Modo::Dia, "Dia"),
+            (Modo::Semana, "Semana"),
+            (Modo::Mes, "Mês"),
+        ])
+        .selecionada(estado.modo)
+        .mostrar(ui)
+        {
+            estado.modo = novo;
+            estado.carregar(motor, sessao);
+        }
 
         ui.add_space(Espaco::E8);
         if ui.add(Botao::fantasma("\u{2039}").pequeno()).clicked() {
@@ -353,29 +341,23 @@ fn barra_controles(
 
         // Direita, na mesma linha: filtro de recurso + resumo do dia.
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let atual = estado
-                .filtro_recurso
-                .and_then(|id| estado.recursos.iter().find(|r| r.id == id))
-                .map_or_else(|| "Todos os recursos".to_owned(), |r| r.nome.clone());
-            let mut novo = estado.filtro_recurso;
-            egui::ComboBox::from_id_salt("agenda-filtro-recurso")
-                .selected_text(atual)
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut novo, None, "Todos os recursos");
-                    for r in &estado.recursos {
-                        ui.selectable_value(&mut novo, Some(r.id), r.nome.clone());
-                    }
-                });
+            // `Option<Option<Id>>`: `Some(None)` = "Todos os recursos" (uma opção de verdade,
+            // não a ausência de seleção).
+            let mut escolhido = Some(estado.filtro_recurso);
+            SeletorOpcao::novo("Recurso", &mut escolhido)
+                .sem_rotulo()
+                .opcao(None, "Todos os recursos")
+                .opcoes(estado.recursos.iter().map(|r| (Some(r.id), r.nome.clone())))
+                .mostrar(ui);
+            let novo = escolhido.flatten();
             if novo != estado.filtro_recurso {
                 estado.filtro_recurso = novo;
                 estado.carregar(motor, sessao);
             }
 
             ui.add_space(Espaco::E16);
-            let (texto, ponto) = resumo_dia_texto(estado, &cores);
-            ui.add(Rotulo::interface(texto).cor(cores.texto_medio));
-            let (rct, _) = ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
-            ui.painter().circle_filled(rct.center(), 4.0, ponto);
+            let (texto, tom) = resumo_dia_texto(estado);
+            ui.add(Etiqueta::nova(texto, tom).com_ponto());
         });
     });
 }
@@ -403,12 +385,9 @@ fn titulo_periodo(base: Data, modo: Modo) -> String {
     }
 }
 
-/// O texto curto de resumo do dia + a cor do ponto (rubro quando há compromisso em aberto
+/// O texto curto de resumo do dia + o tom do ponto (azul quando há compromisso em aberto
 /// ainda hoje). Fica na barra de controles, não numa faixa separada.
-fn resumo_dia_texto(
-    estado: &EstadoTelaAgenda,
-    cores: &cardeal_ui::tokens::Cores,
-) -> (String, egui::Color32) {
+fn resumo_dia_texto(estado: &EstadoTelaAgenda) -> (String, Tom) {
     let hoje = Data::hoje(FUSO);
     let agora = Instante::agora();
     let mut hoje_c: Vec<&Compromisso> = estado
@@ -424,15 +403,15 @@ fn resumo_dia_texto(
         .find(|c| c.fim.em_micros() > agora.em_micros());
 
     match (hoje_c.len(), prox) {
-        (0, _) => ("Nada hoje".to_owned(), cores.texto_fraco),
+        (0, _) => ("Nada hoje".to_owned(), Tom::Neutro),
         (n, Some(p)) => {
             let t: String = p.titulo.chars().take(22).collect();
             (
                 format!("Hoje {n} · {} {}", p.inicio.hora(FUSO).formatar(), t),
-                cores.rubro,
+                Tom::Info,
             )
         }
-        (n, None) => (format!("Hoje {n} · encerrados"), cores.texto_fraco),
+        (n, None) => (format!("Hoje {n} · encerrados"), Tom::Neutro),
     }
 }
 

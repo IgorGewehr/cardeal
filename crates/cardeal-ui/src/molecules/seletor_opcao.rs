@@ -17,6 +17,7 @@ pub struct SeletorOpcao<'a, T> {
     selecionado: &'a mut Option<T>,
     opcoes: Vec<(T, String)>,
     placeholder: String,
+    com_rotulo: bool,
 }
 
 impl<'a, T: PartialEq + Copy> SeletorOpcao<'a, T> {
@@ -27,6 +28,7 @@ impl<'a, T: PartialEq + Copy> SeletorOpcao<'a, T> {
             selecionado,
             opcoes: Vec::new(),
             placeholder: "Selecione...".to_owned(),
+            com_rotulo: true,
         }
     }
 
@@ -47,6 +49,14 @@ impl<'a, T: PartialEq + Copy> SeletorOpcao<'a, T> {
         self
     }
 
+    /// Não desenha o rótulo acima do combo — para barras de ferramentas, onde o valor
+    /// selecionado já diz do que se trata ("Todos os recursos"). O rótulo continua sendo o
+    /// identificador interno do widget, então deve ser único.
+    pub const fn sem_rotulo(mut self) -> Self {
+        self.com_rotulo = false;
+        self
+    }
+
     /// Texto mostrado quando nada está selecionado.
     pub fn placeholder(mut self, s: impl Into<String>) -> Self {
         self.placeholder = s.into();
@@ -60,12 +70,15 @@ impl<'a, T: PartialEq + Copy> SeletorOpcao<'a, T> {
             selecionado,
             opcoes,
             placeholder,
+            com_rotulo,
         } = self;
         let cores = ui.cores();
 
         ui.vertical(|ui| {
-            ui.add(Rotulo::campo(&rotulo));
-            ui.add_space(Espaco::E4);
+            if com_rotulo {
+                ui.add(Rotulo::campo(&rotulo));
+                ui.add_space(Espaco::E4);
+            }
 
             let atual = selecionado
                 .and_then(|s| opcoes.iter().find(|(v, _)| *v == s))
