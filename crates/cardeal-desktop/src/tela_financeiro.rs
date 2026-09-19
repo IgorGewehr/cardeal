@@ -14,12 +14,12 @@ use cardeal_ui::molecules::{
     Abas, Campo, CartaoKpi, EstadoVazio, Mascara, SecaoExpansivel, SeletorOpcao,
 };
 use cardeal_ui::organisms::{
-    notificar, ColunaGrade, Dialogo, Direcao, FaixaKpi, Grade, GraficoBarras, LayoutTela,
-    Notificacao, SerieBarras,
+    notificar, ColunaGrade, Dialogo, Direcao, FaixaKpi, Grade, GraficoBarras,
+    GraficoBarrasHorizontais, LayoutTela, Notificacao, SerieBarras,
 };
-use cardeal_ui::tokens::{perseguir, sombra_cartao, Espaco, Mov, Raio, TemaUi};
+use cardeal_ui::tokens::{perseguir, sombra_cartao, Espaco, Mov, Raio, Rubro, TemaUi};
 use eframe::egui;
-use mod_clientes::{ItemPessoa, Papel, PessoasPorPapel};
+use mod_clientes::{CriarPessoa, ItemPessoa, Papel, PessoaCadastrada, PessoasPorPapel, TipoPessoa};
 use mod_financeiro::{
     BaixarPagamento, BaixarRecebimento, BaixasDaParcela, CategoriaFinanceira, Categorias,
     ContaBancariaCriada, ContasDeResultado, ContasDisponiveis, CriarCategoria, CriarContaBancaria,
@@ -85,6 +85,35 @@ enum Dlg {
     NovaCategoria {
         nome: String,
         /// `None` = serve para as duas espécies.
+        especie: Option<EspecieTitulo>,
+    },
+}
+
+/// Para qual formulário o cadastro rápido ([`DlgRapido`]) devolve o `Id` recém-criado —
+/// `dlg_rapido` é independente do `dlg` principal (um dialog pequeno empilhado por cima),
+/// então precisa saber em qual campo, de qual `Dlg`, escrever o resultado.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AlvoRapido {
+    Lancar,
+    Recorrencia,
+}
+
+/// Cadastro rápido de cliente/fornecedor ou categoria, sem sair do dialog de lançamento —
+/// pedido explícito do usuário: "deve ser prático de criar um cliente por ali rapidinho".
+/// Reaproveita os comandos de cadastro já existentes (`CriarPessoa`, já pensado para um
+/// "cadastro de balcão" só com nome; `CriarCategoria`), só oferecendo um atalho de UI: um
+/// segundo `Dialogo` menor, empilhado por cima do formulário principal (que continua aberto
+/// por trás).
+enum DlgRapido {
+    Pessoa {
+        alvo: AlvoRapido,
+        papel: Papel,
+        tipo: TipoPessoa,
+        nome: String,
+    },
+    Categoria {
+        alvo: AlvoRapido,
+        nome: String,
         especie: Option<EspecieTitulo>,
     },
 }
@@ -200,6 +229,9 @@ pub struct EstadoTelaFinanceiro {
     contas_disp: Vec<ItemContaDisponivel>,
     erro: Option<String>,
     dlg: Dlg,
+    /// Cadastro rápido (cliente/fornecedor/categoria) aberto por cima do `dlg` principal —
+    /// ver [`DlgRapido`].
+    dlg_rapido: Option<DlgRapido>,
 }
 
 impl EstadoTelaFinanceiro {
@@ -333,6 +365,35 @@ impl EstadoTelaFinanceiro {
         self.dash_pago_mes =
             Dinheiro::centavos((serie.last().map_or(0.0, |m| m.custo) * 100.0).round() as i64);
         self.serie = serie;
+
+        // Também alimenta o recorte "por categoria" já visível na Visão Geral (antes só
+        // aparecia depois de clicar em "Ver por categoria") — mesma janela de 6 meses.
+        self.carregar_analise(motor, sessao);
+    }
+
+    /// As 5 categorias de maior movimento (receita − despesa, em módulo) nos últimos
+    /// [`Self::analise_meses`] meses — o recorte "Por categoria" da Visão Geral.
+    fn top_categorias(&self) -> Vec<cardeal_ui::organisms::ItemBarraHorizontal> {
+        let mut por_cat: HashMap<Option<Id>, f64> = HashMap::new();
+        for it in &self.analise {
+            let sinal = match it.especie {
+                EspecieTitulo::Receber => 1.0,
+                EspecieTitulo::Pagar => -1.0,
+            };
+            #[allow(clippy::cast_precision_loss)]
+            let valor = it.total_baixado.em_centavos() as f64 / 100.0 * sinal;
+            *por_cat.entry(it.categoria).or_insert(0.0) += valor;
+        }
+        let mut itens: Vec<cardeal_ui::organisms::ItemBarraHorizontal> = por_cat
+            .into_iter()
+            .map(|(cat, valor)| cardeal_ui::organisms::ItemBarraHorizontal {
+                rotulo: self.nome_categoria(cat),
+                valor,
+            })
+            .collect();
+        itens.sort_by(|a, b| b.valor.abs().total_cmp(&a.valor.abs()));
+        itens.truncate(5);
+        itens
     }
 
     fn carregar_fluxo(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
@@ -561,6 +622,203 @@ pub fn mostrar(
         Dlg::NovaRecorrencia(_) => dialogo_nova_recorrencia(ui.ctx(), motor, sessao, estado),
         Dlg::NovaContaBancaria { .. } => dialogo_conta_bancaria(ui.ctx(), motor, sessao, estado),
         Dlg::NovaCategoria { .. } => dialogo_categoria(ui.ctx(), motor, sessao, estado),
+    }
+    if estado.dlg_rapido.is_some() {
+        dialogo_rapido(ui.ctx(), motor, sessao, estado);
+    }
+}
+
+/// Um botão pequeno e discreto — sem preenchimento nem contorno em repouso, na cor da marca
+/// — para abrir um cadastro rápido ([`DlgRapido`]) logo abaixo do seletor que ele
+/// complementa.
+fn botao_cadastro_rapido(rotulo: &str) -> Botao {
+    Botao::fantasma(rotulo).pequeno().cor(Rubro::R500)
+}
+
+/// O cadastro rápido — um segundo `Dialogo`, menor, empilhado por cima do `dlg` principal
+/// (que continua aberto por trás). Ver [`DlgRapido`].
+fn dialogo_rapido(
+    ctx: &egui::Context,
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaFinanceiro,
+) {
+    let Some(rapido) = &estado.dlg_rapido else {
+        return;
+    };
+    let titulo = match rapido {
+        DlgRapido::Pessoa {
+            papel: Papel::Fornecedor,
+            ..
+        } => "Novo fornecedor",
+        DlgRapido::Pessoa { .. } => "Novo cliente",
+        DlgRapido::Categoria { .. } => "Nova categoria",
+    };
+
+    let fechar = Dialogo::nova(titulo).largura(420.0).mostrar(
+        ctx,
+        estado,
+        |ui, estado| {
+            let Some(rapido) = &mut estado.dlg_rapido else {
+                return;
+            };
+            match rapido {
+                DlgRapido::Pessoa { tipo, nome, .. } => {
+                    ui.horizontal(|ui| {
+                        for (rot, t) in [
+                            ("Pessoa física", TipoPessoa::Fisica),
+                            ("Pessoa jurídica", TipoPessoa::Juridica),
+                        ] {
+                            let sel = *tipo == t;
+                            let b = if sel {
+                                Botao::primario(rot)
+                            } else {
+                                Botao::fantasma(rot)
+                            };
+                            if ui.add(b).clicked() {
+                                *tipo = t;
+                            }
+                        }
+                    });
+                    ui.add_space(Espaco::E12);
+                    ui.add(Campo::novo("Nome", nome).marcador("Nome completo ou razão social"));
+                }
+                DlgRapido::Categoria { nome, especie, .. } => {
+                    ui.add(Campo::novo("Nome", nome).marcador("Aluguel"));
+                    ui.add_space(Espaco::E12);
+                    ui.horizontal(|ui| {
+                        ui.add(Rotulo::campo("Serve para"));
+                        for (rot, valor) in [
+                            ("Ambas", None),
+                            ("Só a receber", Some(EspecieTitulo::Receber)),
+                            ("Só a pagar", Some(EspecieTitulo::Pagar)),
+                        ] {
+                            let sel = *especie == valor;
+                            let b = if sel {
+                                Botao::primario(rot)
+                            } else {
+                                Botao::fantasma(rot)
+                            };
+                            if ui.add(b).clicked() {
+                                *especie = valor;
+                            }
+                        }
+                    });
+                }
+            }
+        },
+        |ui, estado| {
+            if ui.add(Botao::primario("Criar")).clicked() {
+                criar_rapido(ui.ctx(), motor, sessao, estado);
+            }
+            if ui.add(Botao::secundario("Cancelar")).clicked() {
+                estado.dlg_rapido = None;
+            }
+        },
+    );
+    if fechar {
+        estado.dlg_rapido = None;
+    }
+}
+
+/// Cria a pessoa/categoria do cadastro rápido e escreve o `Id` de volta no formulário
+/// principal ([`AlvoRapido`]) que pediu o cadastro.
+fn criar_rapido(
+    ctx: &egui::Context,
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaFinanceiro,
+) {
+    let Some(rapido) = &estado.dlg_rapido else {
+        return;
+    };
+    match rapido {
+        DlgRapido::Pessoa {
+            alvo,
+            papel,
+            tipo,
+            nome,
+        } => {
+            let nome = nome.trim().to_owned();
+            if nome.is_empty() {
+                notificar(ctx, Notificacao::aviso("Informe o nome."));
+                return;
+            }
+            let (alvo, papel, tipo) = (*alvo, *papel, *tipo);
+            let r = motor
+                .executar(
+                    sessao,
+                    "clientes.criar_pessoa.v1",
+                    &CriarPessoa {
+                        tipo,
+                        nome,
+                        nome_fantasia: None,
+                        papel_inicial: papel,
+                        documento_tipo: None,
+                        documento_numero: None,
+                        data_nascimento: None,
+                        endereco: None,
+                        contato: None,
+                    },
+                )
+                .map(|p: PessoaCadastrada| p.pessoa);
+            match r {
+                Ok(id) => {
+                    estado.dlg_rapido = None;
+                    estado.carregar(motor, sessao);
+                    match (alvo, &mut estado.dlg) {
+                        (AlvoRapido::Lancar, Dlg::Lancar(f)) => f.contraparte = Some(id),
+                        (AlvoRapido::Recorrencia, Dlg::NovaRecorrencia(f)) => {
+                            f.contraparte = Some(id);
+                        }
+                        _ => {}
+                    }
+                    notificar(
+                        ctx,
+                        Notificacao::sucesso(if papel == Papel::Fornecedor {
+                            "Fornecedor cadastrado"
+                        } else {
+                            "Cliente cadastrado"
+                        }),
+                    );
+                }
+                Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
+            }
+        }
+        DlgRapido::Categoria {
+            alvo,
+            nome,
+            especie,
+        } => {
+            let nome = nome.trim().to_owned();
+            if nome.is_empty() {
+                notificar(ctx, Notificacao::aviso("Informe o nome da categoria."));
+                return;
+            }
+            let (alvo, especie) = (*alvo, *especie);
+            let r = motor
+                .executar(
+                    sessao,
+                    "financeiro.criar_categoria.v1",
+                    &CriarCategoria { nome, especie },
+                )
+                .map(|c: mod_financeiro::CategoriaCriada| c.categoria);
+            match r {
+                Ok(id) => {
+                    estado.dlg_rapido = None;
+                    estado.carregar_categorias(motor, sessao);
+                    match (alvo, &mut estado.dlg) {
+                        (AlvoRapido::Lancar, Dlg::Lancar(f)) => f.categoria = Some(id),
+                        (AlvoRapido::Recorrencia, Dlg::NovaRecorrencia(f)) => {
+                            f.categoria = Some(id);
+                        }
+                        _ => {}
+                    }
+                    notificar(ctx, Notificacao::sucesso("Categoria criada"));
+                }
+                Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
+            }
+        }
     }
 }
 
@@ -793,11 +1051,39 @@ fn dialogo_nova_recorrencia(
             ui.add(Campo::novo("Descrição", &mut f.descricao).marcador("Aluguel da loja"));
             ui.add_space(Espaco::E12);
             SeletorOpcao::novo(
-                if a_receber { "Cliente" } else { "Fornecedor" },
+                if a_receber {
+                    "Cliente (opcional)"
+                } else {
+                    "Fornecedor (opcional)"
+                },
                 &mut f.contraparte,
             )
             .opcoes(pessoas.clone())
+            .placeholder(if a_receber {
+                "Sem cliente informado"
+            } else {
+                "Sem fornecedor informado"
+            })
             .mostrar(ui);
+            if ui
+                .add(botao_cadastro_rapido(if a_receber {
+                    "+ Cadastrar cliente"
+                } else {
+                    "+ Cadastrar fornecedor"
+                }))
+                .clicked()
+            {
+                estado.dlg_rapido = Some(DlgRapido::Pessoa {
+                    alvo: AlvoRapido::Recorrencia,
+                    papel: if a_receber {
+                        Papel::Cliente
+                    } else {
+                        Papel::Fornecedor
+                    },
+                    tipo: TipoPessoa::Fisica,
+                    nome: String::new(),
+                });
+            }
             ui.add_space(Espaco::E12);
             SeletorOpcao::novo(
                 if a_receber {
@@ -817,6 +1103,16 @@ fn dialogo_nova_recorrencia(
                     .opcoes(cats.clone())
                     .placeholder("Sem categoria")
                     .mostrar(&mut c[1]);
+                if c[1]
+                    .add(botao_cadastro_rapido("+ Nova categoria"))
+                    .clicked()
+                {
+                    estado.dlg_rapido = Some(DlgRapido::Categoria {
+                        alvo: AlvoRapido::Recorrencia,
+                        nome: String::new(),
+                        especie: None,
+                    });
+                }
             });
             ui.add_space(Espaco::E12);
             ui.horizontal(|ui| {
@@ -878,10 +1174,9 @@ fn criar_recorrencia(
         notificar(ctx, Notificacao::aviso("Informe a descrição."));
         return;
     }
-    let Some(contraparte_id) = f.contraparte else {
-        notificar(ctx, Notificacao::aviso("Selecione a contraparte."));
-        return;
-    };
+    // Cliente/fornecedor é opcional (pedido explícito do usuário) — uma recorrência avulsa
+    // não precisa de uma pessoa cadastrada.
+    let contraparte_id = f.contraparte;
     let Some(conta) = f.conta else {
         notificar(ctx, Notificacao::aviso("Selecione a conta do plano."));
         return;
@@ -914,11 +1209,13 @@ fn criar_recorrencia(
     } else {
         EspecieTitulo::Pagar
     };
-    let contraparte = if f.a_receber {
-        Contraparte::Cliente(contraparte_id)
-    } else {
-        Contraparte::Fornecedor(contraparte_id)
-    };
+    let contraparte = contraparte_id.map(|id| {
+        if f.a_receber {
+            Contraparte::Cliente(id)
+        } else {
+            Contraparte::Fornecedor(id)
+        }
+    });
     let cmd = CriarRecorrencia {
         descricao: f.descricao.trim().to_owned(),
         especie,
@@ -998,6 +1295,11 @@ fn kpi(ui: &mut egui::Ui, rotulo: &str, valor: Dinheiro, cor: egui::Color32, apo
     );
 }
 
+/// Largura abaixo da qual o gráfico principal e o recorte "por categoria" empilham em vez
+/// de ficar lado a lado — mesma ideia de `LayoutTela::mostrar_com_detalhe`, só que local a
+/// este painel (não é uma tela mestre-detalhe).
+const LIMIAR_COLUNAS_VISAO: f32 = 760.0;
+
 fn painel_visao(
     ui: &mut egui::Ui,
     motor: &MotorLocal,
@@ -1006,16 +1308,19 @@ fn painel_visao(
 ) {
     let cores = ui.cores();
 
-    ui.horizontal_wrapped(|ui| {
+    // Faixa de KPIs — três cartões esticados pra ocupar a largura toda, em vez de flutuar
+    // colados à esquerda com um vão morto do lado (pedido explícito do usuário: a Visão
+    // Geral estava "horrível", essa era a maior causa numa janela larga).
+    ui.columns(3, |col| {
         kpi(
-            ui,
+            &mut col[0],
             "A receber em aberto",
             estado.dash_receber,
             cores.positivo,
             None,
         );
         kpi(
-            ui,
+            &mut col[1],
             "A pagar em aberto",
             estado.dash_pagar,
             cores.negativo,
@@ -1023,7 +1328,7 @@ fn painel_visao(
         );
         let saldo = estado.dash_recebido_mes - estado.dash_pago_mes;
         kpi(
-            ui,
+            &mut col[2],
             "Saldo do mês",
             saldo,
             if saldo.e_negativo() {
@@ -1068,46 +1373,85 @@ fn painel_visao(
         });
     ui.add_space(Espaco::E24);
 
-    ui.add(Rotulo::titulo_secao("Recebido × pago — últimos 6 meses"));
-    ui.add_space(Espaco::E8);
     let tem_dados = estado
         .serie
         .iter()
         .any(|m| m.receita > 0.0 || m.custo > 0.0);
-    if tem_dados {
-        let eixo: Vec<String> = estado.serie.iter().map(|m| m.rotulo.clone()).collect();
-        let series = [
-            SerieBarras {
-                rotulo: "Recebido".to_owned(),
-                cor: cores.positivo,
-                valores: estado.serie.iter().map(|m| m.receita).collect(),
-            },
-            SerieBarras {
-                rotulo: "Pago".to_owned(),
-                cor: cores.negativo,
-                valores: estado.serie.iter().map(|m| m.custo).collect(),
-            },
-        ];
+    let tem_categorias = !estado.analise.is_empty();
+
+    let cartao_grafico = |ui: &mut egui::Ui, titulo: &str, corpo: &dyn Fn(&mut egui::Ui)| {
+        ui.add(Rotulo::titulo_secao(titulo));
+        ui.add_space(Espaco::E8);
         egui::Frame::none()
             .fill(cores.superficie)
             .stroke(egui::Stroke::new(1.0_f32, cores.borda))
             .rounding(Raio::CARTAO)
             .inner_margin(Espaco::E16)
-            .show(ui, |ui| {
-                GraficoBarras::novo(&eixo, &series)
-                    .altura(260.0)
-                    .mostrar(ui);
+            .show(ui, corpo);
+    };
+
+    let largura = ui.available_width();
+    let lado_a_lado = largura >= LIMIAR_COLUNAS_VISAO && tem_dados && tem_categorias;
+    if lado_a_lado {
+        ui.columns(2, |col| {
+            cartao_grafico(&mut col[0], "Recebido × pago — últimos 6 meses", &|ui| {
+                grafico_fluxo(ui, estado, &cores)
             });
+            cartao_grafico(&mut col[1], "Por categoria — últimos 6 meses", &|ui| {
+                GraficoBarrasHorizontais::novo(&estado.top_categorias()).mostrar(ui);
+            });
+        });
     } else {
-        ui.add(Rotulo::campo(
-            "Sem baixas nos últimos 6 meses — o gráfico aparece conforme você recebe e paga títulos.",
-        ));
+        cartao_grafico(ui, "Recebido × pago — últimos 6 meses", &|ui| {
+            grafico_fluxo(ui, estado, &cores)
+        });
+        if tem_categorias {
+            ui.add_space(Espaco::E16);
+            cartao_grafico(ui, "Por categoria — últimos 6 meses", &|ui| {
+                GraficoBarrasHorizontais::novo(&estado.top_categorias()).mostrar(ui);
+            });
+        }
     }
     ui.add_space(Espaco::E16);
     if ui.add(Botao::secundario("Ver por categoria")).clicked() {
         estado.carregar_analise(motor, sessao);
         estado.dlg = Dlg::Analise;
     }
+}
+
+/// O corpo do cartão "Recebido × pago" — extraído de [`painel_visao`] porque aparece tanto
+/// no layout lado a lado quanto no empilhado.
+fn grafico_fluxo(
+    ui: &mut egui::Ui,
+    estado: &EstadoTelaFinanceiro,
+    cores: &cardeal_ui::tokens::Cores,
+) {
+    let tem_dados = estado
+        .serie
+        .iter()
+        .any(|m| m.receita > 0.0 || m.custo > 0.0);
+    if !tem_dados {
+        ui.add(Rotulo::campo(
+            "Sem baixas nos últimos 6 meses — o gráfico aparece conforme você recebe e paga títulos.",
+        ));
+        return;
+    }
+    let eixo: Vec<String> = estado.serie.iter().map(|m| m.rotulo.clone()).collect();
+    let series = [
+        SerieBarras {
+            rotulo: "Recebido".to_owned(),
+            cor: cores.positivo,
+            valores: estado.serie.iter().map(|m| m.receita).collect(),
+        },
+        SerieBarras {
+            rotulo: "Pago".to_owned(),
+            cor: cores.negativo,
+            valores: estado.serie.iter().map(|m| m.custo).collect(),
+        },
+    ];
+    GraficoBarras::novo(&eixo, &series)
+        .altura(260.0)
+        .mostrar(ui);
 }
 
 fn painel_fluxo(
@@ -1625,6 +1969,25 @@ fn dialogo_lancar(
                 "Sem fornecedor informado"
             })
             .mostrar(ui);
+            if ui
+                .add(botao_cadastro_rapido(if a_receber {
+                    "+ Cadastrar cliente"
+                } else {
+                    "+ Cadastrar fornecedor"
+                }))
+                .clicked()
+            {
+                estado.dlg_rapido = Some(DlgRapido::Pessoa {
+                    alvo: AlvoRapido::Lancar,
+                    papel: if a_receber {
+                        Papel::Cliente
+                    } else {
+                        Papel::Fornecedor
+                    },
+                    tipo: TipoPessoa::Fisica,
+                    nome: String::new(),
+                });
+            }
             ui.add_space(Espaco::E12);
             ui.columns(2, |c| {
                 c[0].add(Campo::novo("Valor total", &mut f.valor).marcador("0,00"));
@@ -1643,6 +2006,13 @@ fn dialogo_lancar(
                 .opcoes(cats.clone())
                 .placeholder("Sem categoria")
                 .mostrar(ui);
+            if ui.add(botao_cadastro_rapido("+ Nova categoria")).clicked() {
+                estado.dlg_rapido = Some(DlgRapido::Categoria {
+                    alvo: AlvoRapido::Lancar,
+                    nome: String::new(),
+                    especie: None,
+                });
+            }
             ui.add_space(Espaco::E12);
             ui.add(Campo::novo("Observação", &mut f.observacao));
         },

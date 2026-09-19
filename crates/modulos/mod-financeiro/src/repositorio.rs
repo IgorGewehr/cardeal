@@ -186,26 +186,26 @@ pub(crate) fn contraparte_join(tipo: &str, id: Vec<u8>) -> Contraparte {
     }
 }
 
-/// Como [`contraparte_split`], mas para `financeiro_titulo` — a única tabela onde a
-/// contraparte é opcional (lançamento avulso sem pessoa informada; `financeiro_recorrencia`
-/// continua exigindo, sempre usa [`contraparte_split`] direto).
+/// Como [`contraparte_split`], mas para as tabelas onde a contraparte é opcional
+/// (`financeiro_titulo`: lançamento avulso sem pessoa informada; `financeiro_recorrencia`:
+/// pedido explícito do usuário — nem toda recorrência tem cliente/fornecedor identificado).
 ///
-/// `contraparte_tipo`/`contraparte_id` são `NOT NULL` desde a v1 — em vez de reconstruir a
-/// tabela (SQLite não tem `ALTER COLUMN DROP NOT NULL`, só o "12-step" de recriar/copiar/
-/// trocar o nome, que exige `PRAGMA foreign_keys=OFF` **fora** de transação; toda migração
-/// aqui roda dentro de uma já aberta pelo chamador — ver `docs/06-modelo-de-dados.md` §4 —
-/// então não dá; tentar isso quebrou a abertura de um banco real com dados, `DROP TABLE`
-/// dispara um "delete implícito" que colide com o `FOREIGN KEY` de `financeiro_parcela`),
-/// `None` é gravado com o sentinela `Contraparte::Outro(Id::NULO)` — mesmo truque de
-/// sentinela que `baixar_parcela_comum` já usa para encargos/desconto que uma baixa não
-/// precisou. `'Outro'` já é um valor válido do `CHECK` existente, então isso não pede
-/// migração nenhuma.
+/// `contraparte_tipo`/`contraparte_id` são `NOT NULL` desde a v1 em ambas — em vez de
+/// reconstruir a tabela (SQLite não tem `ALTER COLUMN DROP NOT NULL`, só o "12-step" de
+/// recriar/copiar/trocar o nome, que exige `PRAGMA foreign_keys=OFF` **fora** de transação;
+/// toda migração aqui roda dentro de uma já aberta pelo chamador — ver
+/// `docs/06-modelo-de-dados.md` §4 — então não dá; tentar isso quebrou a abertura de um banco
+/// real com dados, `DROP TABLE` dispara um "delete implícito" que colide com o `FOREIGN KEY`
+/// de `financeiro_parcela`), `None` é gravado com o sentinela `Contraparte::Outro(Id::NULO)`
+/// — mesmo truque de sentinela que `baixar_parcela_comum` já usa para encargos/desconto que
+/// uma baixa não precisou. `'Outro'` já é um valor válido do `CHECK` existente, então isso
+/// não pede migração nenhuma.
 fn contraparte_split_opt(c: Option<Contraparte>) -> (&'static str, Vec<u8>) {
     contraparte_split(c.unwrap_or(Contraparte::Outro(Id::NULO)))
 }
 
-/// Como [`contraparte_join`], mas para `financeiro_titulo` (ver [`contraparte_split_opt`] —
-/// desfaz o sentinela `Outro(Id::NULO)` de volta para `None`).
+/// Como [`contraparte_join`], mas para as tabelas de [`contraparte_split_opt`] — desfaz o
+/// sentinela `Outro(Id::NULO)` de volta para `None`.
 pub(crate) fn contraparte_join_opt(tipo: String, id: Vec<u8>) -> Option<Contraparte> {
     match contraparte_join(&tipo, id) {
         Contraparte::Outro(i) if i == Id::NULO => None,
@@ -492,6 +492,30 @@ impl<'a, 'b> RepositorioFinanceiro<'a, 'b> {
             .map_err(persist)
     }
 
+    /// As baixas ainda não estornadas de uma parcela — usado por
+    /// `mod_os::DesfaturarOrdemServico` para reverter, uma a uma, qualquer recebimento já
+    /// dado (`pago_no_ato` no faturamento, ou uma baixa manual depois) antes de cancelar o
+    /// título.
+    ///
+    /// # Errors
+    /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+    pub fn baixas_nao_estornadas_da_parcela(&self, parcela: Id) -> Resultado<Vec<Id>> {
+        let mut stmt = self
+            .conn()
+            .prepare(
+                "SELECT id FROM financeiro_baixa
+                 WHERE parcela = ?1 AND estornada_em IS NULL
+                 ORDER BY criado_em",
+            )
+            .map_err(persist)?;
+        let linhas = stmt
+            .query_map([blob(parcela)], |r| Ok(id_de(r.get(0)?)))
+            .map_err(persist)?;
+        linhas
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(persist)
+    }
+
     /// Marca uma baixa como estornada — idempotência: `EstornarBaixa` recusa se já estiver
     /// marcada (ver `ErroFinanceiro::BaixaJaEstornada`).
     ///
@@ -503,6 +527,25 @@ impl<'a, 'b> RepositorioFinanceiro<'a, 'b> {
             .execute(
                 "UPDATE financeiro_baixa SET estornada_em = ?2 WHERE id = ?1",
                 params![blob(id), quando],
+            )
+            .map_err(persist)?;
+        Ok(())
+    }
+
+    /// Regrava um título já cancelado (`Titulo::cancelar`) — nunca apaga a linha
+    /// (`Titulo::esta_cancelado`).
+    ///
+    /// # Errors
+    /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+    pub fn atualizar_titulo_cancelado(&mut self, t: &Titulo) -> Resultado<()> {
+        self.conn()
+            .execute(
+                "UPDATE financeiro_titulo SET cancelado_em = ?2, versao = ?3 WHERE id = ?1",
+                params![
+                    blob(t.id),
+                    t.cancelado_em.map(cardeal_kernel::Instante::em_micros),
+                    versao_i64(t.versao),
+                ],
             )
             .map_err(persist)?;
         Ok(())
@@ -559,7 +602,7 @@ impl<'a, 'b> RepositorioFinanceiro<'a, 'b> {
     /// # Errors
     /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
     pub fn inserir_recorrencia(&mut self, r: &Recorrencia) -> Resultado<()> {
-        let (cp_tipo, cp_id) = contraparte_split(r.contraparte);
+        let (cp_tipo, cp_id) = contraparte_split_opt(r.contraparte);
         self.conn()
             .execute(
                 "INSERT INTO financeiro_recorrencia
@@ -909,7 +952,7 @@ pub(crate) fn recorrencia_de_linha(r: &rusqlite::Row<'_>) -> rusqlite::Result<Re
         empresa: id_de(r.get::<_, Vec<u8>>(1)?),
         descricao: r.get(2)?,
         especie: especie_de(&r.get::<_, String>(3)?),
-        contraparte: contraparte_join(&cp_tipo, cp_id),
+        contraparte: contraparte_join_opt(cp_tipo, cp_id),
         tipo_valor: tipo_valor_de(&r.get::<_, String>(6)?),
         valor_fixo: r.get::<_, Option<i64>>(7)?.map(Dinheiro::centavos),
         indice: r.get::<_, Option<String>>(8)?,

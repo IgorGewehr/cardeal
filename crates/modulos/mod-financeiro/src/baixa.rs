@@ -223,6 +223,14 @@ impl Parcela {
         };
         self.versao = self.versao.proxima();
     }
+
+    /// Cancela a parcela — chamado quando o título dono é cancelado (nunca isoladamente).
+    /// Quem chama garante que qualquer baixa já dada foi revertida antes
+    /// ([`Self::reverter_baixa`]) — cancelar não desfaz baixa nenhuma sozinho.
+    pub fn cancelar(&mut self) {
+        self.estado = EstadoParcela::Cancelada;
+        self.versao = self.versao.proxima();
+    }
 }
 
 #[cfg(test)]

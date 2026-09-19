@@ -48,10 +48,25 @@ impl EstadoOs {
         }
     }
 
-    /// Verdadeiro se o orçamento (peça/mão de obra) ainda pode ser editado.
+    /// Verdadeiro se o orçamento (peça/mão de obra) ainda pode ser editado **antes de
+    /// enviar para aprovação** — não inclui `Concluida`: usado só por
+    /// [`OrdemServico::enviar_para_aprovacao`]. `adicionar_ao_orcamento`/
+    /// `remover_do_orcamento` têm sua própria checagem, mais ampla, que também aceita
+    /// `Concluida` (ver [`OrdemServico::aceita_ajuste_de_itens`]).
     #[must_use]
     pub const fn aceita_edicao_de_orcamento(self) -> bool {
         matches!(self, Self::Aberta | Self::EmDiagnostico)
+    }
+
+    /// Verdadeiro se um item de peça/mão de obra pode ser adicionado ou removido do
+    /// orçamento. Mais amplo que [`Self::aceita_edicao_de_orcamento`]: inclui `Concluida`
+    /// — uma OS concluída (pronta para faturar) mas ainda não faturada, ou desfaturada de
+    /// volta a este estado por [`OrdemServico::desfaturar`], ainda é rascunho de
+    /// valores/serviços, não histórico fechado. Não reabre o trâmite de aprovação por si
+    /// só — só quem chama decide se reenvia para aprovação depois de ajustar.
+    #[must_use]
+    pub const fn aceita_ajuste_de_itens(self) -> bool {
+        matches!(self, Self::Aberta | Self::EmDiagnostico | Self::Concluida)
     }
 }
 
@@ -240,16 +255,17 @@ impl OrdemServico {
     }
 
     /// Acrescenta um item ao orçamento — chamado a cada item novo (fase de montagem,
-    /// `Aberta`/`EmDiagnostico`) ou a cada mão de obra extra registrada durante a execução
-    /// (`EmExecucao`).
+    /// `Aberta`/`EmDiagnostico`), a cada mão de obra extra registrada durante a execução
+    /// (`EmExecucao`), ou por correção depois de concluída (`Concluida`, inclusive uma OS
+    /// desfaturada de volta a este estado — ver [`OrdemServico::desfaturar`]).
     ///
     /// # Errors
     /// [`ErroOs::EstadoInvalido`] se o estado não aceita alterar o orçamento.
     pub fn adicionar_ao_orcamento(&mut self, total_do_item: Dinheiro) -> Result<(), ErroOs> {
-        if !self.estado.aceita_edicao_de_orcamento() && self.estado != EstadoOs::EmExecucao {
+        if !self.estado.aceita_ajuste_de_itens() && self.estado != EstadoOs::EmExecucao {
             return Err(ErroOs::EstadoInvalido {
                 atual: self.estado.rotulo(),
-                esperado: "Aberta, EmDiagnostico ou EmExecucao",
+                esperado: "Aberta, EmDiagnostico, EmExecucao ou Concluida",
             });
         }
         self.valor_total += total_do_item;
@@ -258,18 +274,19 @@ impl OrdemServico {
         Ok(())
     }
 
-    /// Remove um item do orçamento antes de enviar para aprovação — corrige um item
-    /// digitado errado sem precisar cancelar a OS inteira. Só antes da aprovação
-    /// (`Aberta`/`EmDiagnostico`); depois disso a correção é uma nova negociação com o
-    /// cliente, não uma edição silenciosa.
+    /// Remove um item do orçamento — corrige um item digitado errado sem precisar cancelar
+    /// a OS inteira. Aceita `Aberta`/`EmDiagnostico` (antes de enviar para aprovação) e
+    /// também `Concluida` (correção pós-execução, inclusive numa OS desfaturada de volta a
+    /// este estado — ver [`OrdemServico::desfaturar`]); fora disso a correção é uma nova
+    /// negociação com o cliente, não uma edição silenciosa.
     ///
     /// # Errors
     /// [`ErroOs::EstadoInvalido`] se o estado não aceita mais editar o orçamento.
     pub fn remover_do_orcamento(&mut self, total_do_item: Dinheiro) -> Result<(), ErroOs> {
-        if !self.estado.aceita_edicao_de_orcamento() {
+        if !self.estado.aceita_ajuste_de_itens() {
             return Err(ErroOs::EstadoInvalido {
                 atual: self.estado.rotulo(),
-                esperado: "Aberta ou EmDiagnostico",
+                esperado: "Aberta, EmDiagnostico ou Concluida",
             });
         }
         self.valor_total = (self.valor_total - total_do_item).nao_negativo();
@@ -412,6 +429,39 @@ impl OrdemServico {
             });
         }
         self.transitar(EstadoOs::Cancelada);
+        Ok(())
+    }
+
+    /// Desfatura: `Faturada` → `Concluida`. Devolve a OS a um estado que aceita ajuste de
+    /// itens/valores ([`Self::aceita_ajuste_de_itens`]) sem repetir o trâmite técnico
+    /// inteiro (laudo/aprovação/execução) — `faturar` aceita faturar de qualquer estado
+    /// não-terminal, então `Concluida` é o pouso genérico de "pronta para faturar de novo",
+    /// independente de qual estado ela tinha antes de faturar. Quem chama
+    /// (`DesfaturarOrdemServico`) é responsável por reverter o título/lançamento no
+    /// financeiro **antes** de chamar isto — o domínio só valida e muda o próprio estado.
+    ///
+    /// # Errors
+    /// [`ErroOs::OsNaoFaturada`] se o estado não for `Faturada`.
+    pub fn desfaturar(&mut self) -> Result<(), ErroOs> {
+        if self.estado != EstadoOs::Faturada {
+            return Err(ErroOs::OsNaoFaturada);
+        }
+        self.transitar(EstadoOs::Concluida);
+        Ok(())
+    }
+
+    /// Reabre uma ordem cancelada: `Cancelada` → `Aberta`. Uma OS cancelada nunca chegou a
+    /// ser faturada (`cancelar` está bloqueado depois de `Concluida`/`Faturada`), então não
+    /// há financeiro para reverter aqui — laudo/orçamento/itens já gravados continuam
+    /// intactos, só o estado destrava de novo.
+    ///
+    /// # Errors
+    /// [`ErroOs::OsNaoCancelada`] se o estado não for `Cancelada`.
+    pub fn reabrir(&mut self) -> Result<(), ErroOs> {
+        if self.estado != EstadoOs::Cancelada {
+            return Err(ErroOs::OsNaoCancelada);
+        }
+        self.transitar(EstadoOs::Aberta);
         Ok(())
     }
 }
@@ -624,6 +674,44 @@ mod testes {
         assert_eq!(os2.estado, EstadoOs::EmExecucao);
         os2.cancelar().unwrap();
         assert_eq!(os2.estado, EstadoOs::Cancelada);
+    }
+
+    #[test]
+    fn desfaturar_volta_para_concluida_e_aceita_ajuste_de_itens() {
+        let mut os = os_aberta();
+        os.faturar().unwrap();
+        assert_eq!(os.estado, EstadoOs::Faturada);
+
+        os.desfaturar().unwrap();
+        assert_eq!(os.estado, EstadoOs::Concluida);
+        assert!(os.estado.aceita_ajuste_de_itens());
+
+        // Corrige um valor sem precisar repetir laudo/aprovação/execução.
+        os.adicionar_ao_orcamento(Dinheiro::reais(50)).unwrap();
+        os.faturar().unwrap();
+        assert_eq!(os.estado, EstadoOs::Faturada);
+    }
+
+    #[test]
+    fn desfaturar_fora_de_faturada_e_recusado() {
+        let mut os = os_aberta();
+        assert_eq!(os.desfaturar().unwrap_err(), ErroOs::OsNaoFaturada);
+    }
+
+    #[test]
+    fn reabrir_volta_cancelada_para_aberta() {
+        let mut os = os_aberta();
+        os.cancelar().unwrap();
+        assert_eq!(os.estado, EstadoOs::Cancelada);
+
+        os.reabrir().unwrap();
+        assert_eq!(os.estado, EstadoOs::Aberta);
+    }
+
+    #[test]
+    fn reabrir_fora_de_cancelada_e_recusado() {
+        let mut os = os_aberta();
+        assert_eq!(os.reabrir().unwrap_err(), ErroOs::OsNaoCancelada);
     }
 
     #[test]

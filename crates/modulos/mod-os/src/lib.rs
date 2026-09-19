@@ -79,11 +79,12 @@ mod repositorio;
 pub use apontamento::ApontamentoDeTempo;
 pub use comandos::{
     AbrirOrdemServico, AjustarApontamento, AplicarPeca, ApontamentoIniciado, AprovarOrcamentoOs,
-    CancelarOrdemServico, ConcluirExecucao, EditarDadosDaOrdem, EncerrarApontamento,
-    EnviarParaAprovacao, FaturarOrdemServico, IniciarApontamento, IniciarExecucao,
-    ItemOrcamentoNovo, MontarOrcamentoOs, OrdemServicoAberta, OrdemServicoCancelada,
-    OrdemServicoFaturada, PagamentoNoAto, PecaFoiAplicada, RegistrarLaudo, RegistrarMaoDeObra,
-    RemoverItemOrcamento, ReprovarOrcamentoOs, TipoItemOrcamento,
+    CancelarOrdemServico, ConcluirExecucao, DesfaturarOrdemServico, EditarDadosDaOrdem,
+    EncerrarApontamento, EnviarParaAprovacao, FaturarOrdemServico, IniciarApontamento,
+    IniciarExecucao, ItemOrcamentoNovo, MontarOrcamentoOs, OrdemServicoAberta,
+    OrdemServicoCancelada, OrdemServicoDesfaturada, OrdemServicoFaturada, PagamentoNoAto,
+    PecaFoiAplicada, ReabrirOrdemServico, RegistrarLaudo, RegistrarMaoDeObra, RemoverItemOrcamento,
+    ReprovarOrcamentoOs, TipoItemOrcamento,
 };
 pub use consultas::{
     ApontamentosDaOrdem, BuscarDetalheOrdem, DetalheOrdem, HistoricoDoEquipamento,

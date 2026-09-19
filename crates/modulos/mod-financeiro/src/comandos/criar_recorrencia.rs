@@ -21,8 +21,9 @@ pub struct CriarRecorrencia {
     pub descricao: String,
     /// A receber ou a pagar.
     pub especie: EspecieTitulo,
-    /// Com quem — cliente ou fornecedor.
-    pub contraparte: Contraparte,
+    /// Com quem — cliente ou fornecedor. `None` = recorrência avulsa, sem pessoa
+    /// identificada (pedido explícito do usuário).
+    pub contraparte: Option<Contraparte>,
     /// Como o valor é determinado.
     pub tipo_valor: TipoValor,
     /// O valor, quando `tipo_valor` é [`TipoValor::Fixo`].

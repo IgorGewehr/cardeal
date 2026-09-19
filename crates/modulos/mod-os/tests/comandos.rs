@@ -22,11 +22,12 @@ use mod_estoque::{
 };
 use mod_os::{
     AbrirOrdemServico, AplicarPeca, AprovarOrcamentoOs, BuscarDetalheOrdem, CancelarOrdemServico,
-    ConcluirExecucao, DetalheOrdem, EditarDadosDaOrdem, EnviarParaAprovacao, FaturarOrdemServico,
-    HistoricoDoEquipamento, IniciarExecucao, ItemAguardandoEstoque, ItemOrcamentoNovo, ModuloOs,
-    MontarOrcamentoOs, OrdemServicoAberta, OrdemServicoCancelada, OrdemServicoFaturada,
+    ConcluirExecucao, DesfaturarOrdemServico, DetalheOrdem, EditarDadosDaOrdem,
+    EnviarParaAprovacao, FaturarOrdemServico, HistoricoDoEquipamento, IniciarExecucao,
+    ItemAguardandoEstoque, ItemOrcamentoNovo, ModuloOs, MontarOrcamentoOs, OrdemServicoAberta,
+    OrdemServicoCancelada, OrdemServicoDesfaturada, OrdemServicoFaturada,
     OrdensAguardandoAprovacao, OrdensEmAberto, PecaFoiAplicada, PecasAguardandoEstoque,
-    RegistrarLaudo, RemoverItemOrcamento, TipoItemOrcamento,
+    ReabrirOrdemServico, RegistrarLaudo, RemoverItemOrcamento, TipoItemOrcamento,
 };
 use tempfile::TempDir;
 
@@ -105,8 +106,10 @@ fn sessao_completa(empresa: Id) -> Sessao {
         "os.execucao.registrar_mao_de_obra",
         "os.execucao.concluir",
         "os.faturar",
+        "os.desfaturar",
         "os.ordem.ver",
         "os.ordem.cancelar",
+        "os.ordem.reabrir",
     ] {
         papel = papel.com_permissao(p);
     }
@@ -2175,6 +2178,357 @@ fn faturar_pago_no_ato_da_baixa_completa_na_mesma_transacao() {
     assert_eq!(faturada.valor_total, Dinheiro::reais(60));
     assert!(faturada.titulo.is_some());
     assert!(faturada.titulo_pago);
+}
+
+#[test]
+fn desfaturar_reverte_o_titulo_e_permite_corrigir_valor_e_refaturar() {
+    // Pedido explícito do usuário: corrigir uma OS faturada com valor errado sem repetir o
+    // trâmite técnico inteiro — desfatura, ajusta o orçamento, refatura.
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloClientes, &ModuloEstoque, &ModuloOs]).unwrap();
+    let s = sessao_completa(empresa);
+    let amb = ambiente(empresa);
+
+    let cliente: PessoaCadastrada = postcard::from_bytes(
+        &d.executar_comando(
+            "clientes.criar_pessoa.v1",
+            &carga(&CriarPessoa {
+                tipo: TipoPessoa::Fisica,
+                nome: "Marina Alves".to_string(),
+                nome_fantasia: None,
+                papel_inicial: Papel::Cliente,
+                documento_tipo: None,
+                documento_numero: None,
+                data_nascimento: None,
+                endereco: None,
+                contato: None,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    let os: OrdemServicoAberta = postcard::from_bytes(
+        &d.executar_comando(
+            "os.abrir_ordem_servico.v1",
+            &carga(&AbrirOrdemServico {
+                cliente: cliente.pessoa,
+                equipamento: "Liquidificador".to_string(),
+                defeito_relatado: "Não bate".to_string(),
+                tecnico_responsavel: Id::novo(),
+                garantia_dias: 90,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    d.executar_comando(
+        "os.montar_orcamento.v1",
+        &carga(&MontarOrcamentoOs {
+            ordem_servico: os.ordem_servico,
+            item: ItemOrcamentoNovo::MaoDeObra {
+                descricao: "Troca de acoplamento".to_string(),
+                valor: Dinheiro::reais(50),
+                tecnico: Id::novo(),
+                horas: None,
+            },
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+
+    d.executar_comando(
+        "os.faturar_ordem_servico.v1",
+        &carga(&FaturarOrdemServico {
+            ordem_servico: os.ordem_servico,
+            parcelas: 1,
+            primeiro_vencimento: cardeal_kernel::Data::de_dias(20_000),
+            intervalo_dias: 0,
+            pago_no_ato: None,
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+
+    let desfaturada: OrdemServicoDesfaturada = postcard::from_bytes(
+        &d.executar_comando(
+            "os.desfaturar_ordem_servico.v1",
+            &carga(&DesfaturarOrdemServico {
+                ordem_servico: os.ordem_servico,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(desfaturada.titulo.is_some());
+    assert_eq!(desfaturada.baixas_estornadas, 0);
+
+    let detalhe: DetalheOrdem = postcard::from_bytes::<Option<DetalheOrdem>>(
+        &d.executar_consulta(
+            "os.buscar_detalhe_ordem.v1",
+            &carga(&BuscarDetalheOrdem {
+                ordem_servico: os.ordem_servico,
+            }),
+            &s,
+            &amb,
+            arm.leitor(),
+        )
+        .unwrap(),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(detalhe.ordem.estado, mod_os::EstadoOs::Concluida);
+    assert_eq!(detalhe.ordem.valor_total, Dinheiro::reais(50));
+
+    // Corrige o valor sem repetir laudo/orçamento/aprovação/execução — só é possível porque
+    // `Concluida` também aceita ajuste de itens.
+    d.executar_comando(
+        "os.montar_orcamento.v1",
+        &carga(&MontarOrcamentoOs {
+            ordem_servico: os.ordem_servico,
+            item: ItemOrcamentoNovo::MaoDeObra {
+                descricao: "Peça adicional identificada depois".to_string(),
+                valor: Dinheiro::reais(20),
+                tecnico: Id::novo(),
+                horas: None,
+            },
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+
+    let refaturada: OrdemServicoFaturada = postcard::from_bytes(
+        &d.executar_comando(
+            "os.faturar_ordem_servico.v1",
+            &carga(&FaturarOrdemServico {
+                ordem_servico: os.ordem_servico,
+                parcelas: 1,
+                primeiro_vencimento: cardeal_kernel::Data::de_dias(20_000),
+                intervalo_dias: 0,
+                pago_no_ato: None,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(refaturada.valor_total, Dinheiro::reais(70));
+}
+
+#[test]
+fn desfaturar_com_pago_no_ato_estorna_a_baixa_antes_de_cancelar_o_titulo() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloClientes, &ModuloEstoque, &ModuloOs]).unwrap();
+    let s = sessao_completa(empresa);
+    let amb = ambiente(empresa);
+
+    let cliente: PessoaCadastrada = postcard::from_bytes(
+        &d.executar_comando(
+            "clientes.criar_pessoa.v1",
+            &carga(&CriarPessoa {
+                tipo: TipoPessoa::Fisica,
+                nome: "Denis Prado".to_string(),
+                nome_fantasia: None,
+                papel_inicial: Papel::Cliente,
+                documento_tipo: None,
+                documento_numero: None,
+                data_nascimento: None,
+                endereco: None,
+                contato: None,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    let os: OrdemServicoAberta = postcard::from_bytes(
+        &d.executar_comando(
+            "os.abrir_ordem_servico.v1",
+            &carga(&AbrirOrdemServico {
+                cliente: cliente.pessoa,
+                equipamento: "Micro-ondas".to_string(),
+                defeito_relatado: "Não esquenta".to_string(),
+                tecnico_responsavel: Id::novo(),
+                garantia_dias: 90,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    d.executar_comando(
+        "os.montar_orcamento.v1",
+        &carga(&MontarOrcamentoOs {
+            ordem_servico: os.ordem_servico,
+            item: ItemOrcamentoNovo::MaoDeObra {
+                descricao: "Troca de magnetron".to_string(),
+                valor: Dinheiro::reais(120),
+                tecnico: Id::novo(),
+                horas: None,
+            },
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+
+    d.executar_comando(
+        "os.faturar_ordem_servico.v1",
+        &carga(&FaturarOrdemServico {
+            ordem_servico: os.ordem_servico,
+            parcelas: 1,
+            primeiro_vencimento: cardeal_kernel::Data::de_dias(20_000),
+            intervalo_dias: 0,
+            pago_no_ato: Some(mod_os::PagamentoNoAto {
+                meio_pagamento: mod_financeiro::MeioPagamento::Dinheiro,
+                conta_destino: None,
+            }),
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+
+    let desfaturada: OrdemServicoDesfaturada = postcard::from_bytes(
+        &d.executar_comando(
+            "os.desfaturar_ordem_servico.v1",
+            &carga(&DesfaturarOrdemServico {
+                ordem_servico: os.ordem_servico,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(desfaturada.baixas_estornadas, 1);
+}
+
+#[test]
+fn reabrir_ordem_servico_cancelada_permite_editar_de_novo() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloClientes, &ModuloEstoque, &ModuloOs]).unwrap();
+    let s = sessao_completa(empresa);
+    let amb = ambiente(empresa);
+
+    let cliente: PessoaCadastrada = postcard::from_bytes(
+        &d.executar_comando(
+            "clientes.criar_pessoa.v1",
+            &carga(&CriarPessoa {
+                tipo: TipoPessoa::Fisica,
+                nome: "Otávio Lima".to_string(),
+                nome_fantasia: None,
+                papel_inicial: Papel::Cliente,
+                documento_tipo: None,
+                documento_numero: None,
+                data_nascimento: None,
+                endereco: None,
+                contato: None,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    let os: OrdemServicoAberta = postcard::from_bytes(
+        &d.executar_comando(
+            "os.abrir_ordem_servico.v1",
+            &carga(&AbrirOrdemServico {
+                cliente: cliente.pessoa,
+                equipamento: "Aspirador".to_string(),
+                defeito_relatado: "Não suga".to_string(),
+                tecnico_responsavel: Id::novo(),
+                garantia_dias: 90,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    d.executar_comando(
+        "os.cancelar_ordem_servico.v1",
+        &carga(&CancelarOrdemServico {
+            ordem_servico: os.ordem_servico,
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+
+    d.executar_comando(
+        "os.reabrir_ordem_servico.v1",
+        &carga(&ReabrirOrdemServico {
+            ordem_servico: os.ordem_servico,
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+
+    let detalhe: DetalheOrdem = postcard::from_bytes::<Option<DetalheOrdem>>(
+        &d.executar_consulta(
+            "os.buscar_detalhe_ordem.v1",
+            &carga(&BuscarDetalheOrdem {
+                ordem_servico: os.ordem_servico,
+            }),
+            &s,
+            &amb,
+            arm.leitor(),
+        )
+        .unwrap(),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(detalhe.ordem.estado, mod_os::EstadoOs::Aberta);
+
+    // Volta a aceitar edição de dados e orçamento normalmente.
+    d.executar_comando(
+        "os.editar_dados_da_ordem.v1",
+        &carga(&EditarDadosDaOrdem {
+            ordem_servico: os.ordem_servico,
+            equipamento: Some("Aspirador de pó".to_string()),
+            complemento_defeito_relatado: None,
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
 }
 
 #[test]

@@ -256,8 +256,8 @@ impl<'a, 'b> RepositorioOs<'a, 'b> {
         crate::consultas::itens_peca_da_ordem(self.conn(), ordem_servico)
     }
 
-    /// Remove um item de peça do orçamento — só chamado enquanto a OS ainda aceita edição
-    /// (`OrdemServico::aceita_edicao_de_orcamento`), então nunca uma peça já aplicada.
+    /// Remove um item de peça do orçamento — só chamado enquanto a OS ainda aceita ajuste
+    /// de itens (`OrdemServico::aceita_ajuste_de_itens`), então nunca uma peça já aplicada.
     ///
     /// # Errors
     /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.

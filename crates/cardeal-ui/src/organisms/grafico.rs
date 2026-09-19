@@ -11,8 +11,10 @@
     clippy::cast_sign_loss
 )]
 
+use cardeal_kernel::Dinheiro;
 use egui::{Color32, Rect, Sense, Ui};
 
+use crate::atoms::{Rotulo, ValorDinheiro};
 use crate::tokens::{suave, Papel, Raio, TemaUi};
 
 /// Uma série de valores — uma barra por categoria do eixo X.
@@ -197,6 +199,98 @@ impl<'a> GraficoBarras<'a> {
                 );
                 x += 16.0 + largura_txt + 18.0;
             }
+        }
+    }
+}
+
+/// Uma linha de [`GraficoBarrasHorizontais`] — um rótulo (ex.: categoria) e um valor, que
+/// pode ser negativo (a cor segue o sinal: positivo/negativo do tema, mesma leitura que o
+/// resto do app já usa para dinheiro).
+pub struct ItemBarraHorizontal {
+    /// O rótulo da linha (ex.: nome da categoria).
+    pub rotulo: String,
+    /// O valor — negativo pinta a barra na cor negativa do tema.
+    pub valor: f64,
+}
+
+/// Barras horizontais rankeadas — a forma certa para comparar magnitude entre poucas
+/// categorias nomeadas (`docs/12-ui-ux.md`; evita rosca/pizza, ruim para comparar valores).
+/// Sem biblioteca externa, mesmo estilo pintado à mão de [`GraficoBarras`].
+#[must_use]
+pub struct GraficoBarrasHorizontais<'a> {
+    itens: &'a [ItemBarraHorizontal],
+    altura_linha: f32,
+}
+
+impl<'a> GraficoBarrasHorizontais<'a> {
+    /// Um gráfico com as linhas dadas, na ordem recebida (o chamador decide o ranking).
+    pub const fn novo(itens: &'a [ItemBarraHorizontal]) -> Self {
+        Self {
+            itens,
+            altura_linha: 28.0,
+        }
+    }
+
+    /// Desenha o gráfico ocupando toda a largura disponível.
+    pub fn mostrar(self, ui: &mut Ui) {
+        let cores = ui.cores();
+        if self.itens.is_empty() {
+            return;
+        }
+        let crescer = suave(ui.ctx().animate_bool_with_time(
+            ui.id().with("grafico-h-crescer"),
+            true,
+            0.5_f32,
+        ));
+        let teto = self
+            .itens
+            .iter()
+            .map(|i| i.valor.abs())
+            .fold(0.0_f64, f64::max)
+            .max(1.0);
+
+        let largura_rotulo = 132.0_f32;
+        let largura_valor = 96.0_f32;
+        for item in self.itens {
+            ui.horizontal(|ui| {
+                ui.allocate_ui_with_layout(
+                    egui::vec2(largura_rotulo, self.altura_linha),
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| {
+                        ui.add(Rotulo::interface(item.rotulo.clone()).quebravel());
+                    },
+                );
+                let cor = if item.valor < 0.0 {
+                    cores.negativo
+                } else {
+                    cores.positivo
+                };
+                let largura_barra = ui.available_width() - largura_valor - 8.0;
+                let (rect, _) = ui.allocate_exact_size(
+                    egui::vec2(largura_barra.max(1.0), self.altura_linha),
+                    Sense::hover(),
+                );
+                let p = ui.painter_at(rect);
+                p.rect_filled(
+                    Rect::from_min_size(rect.min, egui::vec2(rect.width(), rect.height())),
+                    Raio::ITEM,
+                    mistura_local(cores.borda, cores.superficie, 0.5),
+                );
+                let frac = ((item.valor.abs() / teto) as f32 * crescer).clamp(0.0, 1.0);
+                let preenchido =
+                    Rect::from_min_size(rect.min, egui::vec2(rect.width() * frac, rect.height()));
+                p.rect_filled(preenchido, Raio::ITEM, cor);
+                #[allow(clippy::cast_possible_truncation)]
+                let valor = Dinheiro::centavos((item.valor * 100.0).round() as i64);
+                ui.allocate_ui_with_layout(
+                    egui::vec2(largura_valor, self.altura_linha),
+                    egui::Layout::right_to_left(egui::Align::Center),
+                    |ui| {
+                        ui.add(ValorDinheiro::novo(valor).com_sinal());
+                    },
+                );
+            });
+            ui.add_space(4.0_f32);
         }
     }
 }

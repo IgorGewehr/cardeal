@@ -1298,7 +1298,7 @@ fn criar_recorrencia_nao_lanca_na_hora_e_materializar_e_idempotente() {
             &carga(&CriarRecorrencia {
                 descricao: "Aluguel da loja".to_string(),
                 especie: mod_financeiro::EspecieTitulo::Pagar,
-                contraparte: Contraparte::Fornecedor(fornecedor),
+                contraparte: Some(Contraparte::Fornecedor(fornecedor)),
                 tipo_valor: TipoValor::Fixo,
                 valor_fixo: Some(Dinheiro::reais(2200)),
                 indice: None,
@@ -1348,6 +1348,77 @@ fn criar_recorrencia_nao_lanca_na_hora_e_materializar_e_idempotente() {
         .valor();
     assert!(gerados2.is_empty());
     assert_eq!(conta_lancamentos(&arm, empresa), 1);
+}
+
+#[test]
+fn criar_recorrencia_sem_contraparte_materializa_titulo_avulso() {
+    // Pedido explícito do usuário: cliente/fornecedor não são obrigatórios ao lançar uma
+    // recorrência — um débito automático recorrente sem pessoa identificada continua
+    // funcionando, igual a um título avulso.
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloFinanceiro]).unwrap();
+    let s = sessao(
+        empresa,
+        &["financeiro.recorrencia.criar", "financeiro.receber.ver"],
+    );
+    let amb = ambiente(empresa);
+    let conta_despesa = conta_papel(&arm, empresa, PapelConta::DespesaAdministrativa);
+
+    let criada: RecorrenciaCriada = postcard::from_bytes(
+        &d.executar_comando(
+            "financeiro.criar_recorrencia.v1",
+            &carga(&CriarRecorrencia {
+                descricao: "Tarifa bancária mensal".to_string(),
+                especie: mod_financeiro::EspecieTitulo::Pagar,
+                contraparte: None,
+                tipo_valor: TipoValor::Fixo,
+                valor_fixo: Some(Dinheiro::reais(35)),
+                indice: None,
+                media_ultimos_n: None,
+                periodicidade: Periodicidade::Mensal,
+                dia_referencia: Some(1),
+                expressao_cron: None,
+                inicio: hoje(),
+                fim: None,
+                conta_contrapartida: conta_despesa,
+                centro_custo: None,
+                categoria: None,
+                antecedencia_geracao_dias: 35,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    let ctx = ctx_direto(empresa);
+    let gerados: Vec<Id> = arm
+        .escritor()
+        .executar(
+            ContextoEscrita::novo(empresa, ctx.usuario, ctx.dispositivo, Id::novo()),
+            move |uow| materializar_recorrencias_pendentes(&ctx, uow).map_err(liga_erro),
+        )
+        .unwrap()
+        .valor();
+    assert_eq!(gerados.len(), 1);
+
+    let titulo: Option<mod_financeiro::Titulo> = postcard::from_bytes(
+        &d.executar_consulta(
+            "financeiro.titulo_da_origem.v1",
+            &carga(&TituloDaOrigem {
+                origem_modulo: "financeiro_recorrencia".to_string(),
+                origem_id: criada.recorrencia,
+            }),
+            &s,
+            &amb,
+            arm.leitor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(titulo.unwrap().contraparte.is_none());
 }
 
 fn liga_erro(e: cardeal_kernel::Erro) -> ErroArmazenamento {

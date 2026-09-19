@@ -51,8 +51,10 @@ pub struct Recorrencia {
     pub descricao: String,
     /// A receber ou a pagar.
     pub especie: EspecieTitulo,
-    /// Com quem — cliente ou fornecedor.
-    pub contraparte: Contraparte,
+    /// Com quem — cliente ou fornecedor. `None` numa recorrência avulsa sem pessoa
+    /// identificada (pedido explícito do usuário — menos burocracia para lançar) — o título
+    /// materializado nasce sem contraparte, igual a um título avulso lançado na hora.
+    pub contraparte: Option<Contraparte>,
     /// Como o valor é determinado.
     pub tipo_valor: TipoValor,
     /// O valor, quando `tipo_valor` é [`TipoValor::Fixo`].
@@ -252,7 +254,7 @@ impl Recorrencia {
         let mut c = ConstrutorTitulo::novo(
             self.empresa,
             self.especie,
-            Some(self.contraparte),
+            self.contraparte,
             valor,
             vencimento,
         )
@@ -311,7 +313,7 @@ mod testes {
             empresa: Id::novo(),
             descricao: "Aluguel da loja".to_string(),
             especie: EspecieTitulo::Pagar,
-            contraparte: Contraparte::Fornecedor(Id::novo()),
+            contraparte: Some(Contraparte::Fornecedor(Id::novo())),
             tipo_valor: TipoValor::Fixo,
             valor_fixo: Some(Dinheiro::reais(2200)),
             indice: None,

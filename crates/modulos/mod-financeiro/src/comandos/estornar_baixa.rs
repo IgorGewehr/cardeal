@@ -41,59 +41,78 @@ impl Comando for EstornarBaixa {
     const AUDITA: bool = true;
 
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
-        // 1. Carregar.
-        let baixa = RepositorioFinanceiro::novo(uow)
-            .buscar_baixa(self.baixa)?
-            .ok_or_else(|| Erro::nao_encontrado("baixa"))?;
-        let mut parcela = RepositorioFinanceiro::novo(uow)
-            .buscar_parcela(baixa.parcela)?
-            .ok_or_else(|| Erro::nao_encontrado("parcela"))?;
-
-        // 2. Validar (domínio puro): idempotência do estorno.
-        if baixa.estornada_em.is_some() {
-            return Err(Erro::de_dominio(&ErroFinanceiro::BaixaJaEstornada));
-        }
-        // A parcela pode ter avançado para um estado terminal depois desta baixa (renegociada
-        // absorveu o saldo num título novo; cancelada por estorno do título de origem).
-        // `Parcela::reverter_baixa` não conhece esses estados — ela sempre pousa em `Parcial`
-        // ou `Aberta` — então reverter aqui reabriria uma parcela cujo saldo já vive em outro
-        // lugar, duplicando a dívida. Bloqueia até a raiz (renegociação/cancelamento) ser
-        // desfeita primeiro.
-        if matches!(
-            parcela.estado,
-            EstadoParcela::Renegociada | EstadoParcela::Cancelada
-        ) {
-            return Err(Erro::de_dominio(
-                &ErroFinanceiro::ParcelaEncerradaNaoReverte(parcela.estado),
-            ));
-        }
-
-        // 3. Lançar: estorna o `Realizado` original.
-        let lancamento_estorno = {
-            let mut repo = RepositorioRazao::novo(uow);
-            Razao::estornar(&mut repo, baixa.lancamento, &self.motivo, ctx.hoje())
-                .map_err(|e| Erro::de_dominio(&e))?
-        };
-
-        // 4. Persistir: reabre a parcela, marca a baixa como estornada.
-        parcela.reverter_baixa(baixa.principal);
-        {
-            let mut repo = RepositorioFinanceiro::novo(uow);
-            repo.atualizar_parcela(&parcela)?;
-            repo.marcar_baixa_estornada(baixa.id)?;
-        }
-
-        // 5. Publicar.
-        uow.publicar(BaixaEstornada {
-            baixa: baixa.id,
-            parcela: parcela.id,
-            lancamento_estorno,
-        })
-        .map_err(|e| Erro::de_dominio(&e))?;
-
-        Ok(BaixaFoiEstornada {
-            parcela: parcela.id,
-            lancamento_estorno,
-        })
+        estornar_baixa_comum(self.baixa, &self.motivo, ctx, uow)
     }
+}
+
+/// Estorna uma baixa já aplicada, direto-na-transação — mesmo corpo de [`EstornarBaixa`], só
+/// chamável sem passar pelo despacho de `Comando`. Mesmo padrão de
+/// [`super::baixar_recebimento_comum`] para outro módulo chamar direto na mesma transação
+/// (`docs/contratos-internos.md` §7 regra 2) — usado por `mod_os::DesfaturarOrdemServico`
+/// para reverter um `pago_no_ato` (ou uma baixa manual dada depois) antes de cancelar o
+/// título.
+///
+/// # Errors
+/// Igual a [`EstornarBaixa`]: erro de domínio (baixa/parcela não encontrada, baixa já
+/// estornada, parcela encerrada por renegociação/cancelamento) ou de infraestrutura.
+pub fn estornar_baixa_comum(
+    baixa: Id,
+    motivo: &str,
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<BaixaFoiEstornada> {
+    // 1. Carregar.
+    let baixa = RepositorioFinanceiro::novo(uow)
+        .buscar_baixa(baixa)?
+        .ok_or_else(|| Erro::nao_encontrado("baixa"))?;
+    let mut parcela = RepositorioFinanceiro::novo(uow)
+        .buscar_parcela(baixa.parcela)?
+        .ok_or_else(|| Erro::nao_encontrado("parcela"))?;
+
+    // 2. Validar (domínio puro): idempotência do estorno.
+    if baixa.estornada_em.is_some() {
+        return Err(Erro::de_dominio(&ErroFinanceiro::BaixaJaEstornada));
+    }
+    // A parcela pode ter avançado para um estado terminal depois desta baixa (renegociada
+    // absorveu o saldo num título novo; cancelada por estorno do título de origem).
+    // `Parcela::reverter_baixa` não conhece esses estados — ela sempre pousa em `Parcial`
+    // ou `Aberta` — então reverter aqui reabriria uma parcela cujo saldo já vive em outro
+    // lugar, duplicando a dívida. Bloqueia até a raiz (renegociação/cancelamento) ser
+    // desfeita primeiro.
+    if matches!(
+        parcela.estado,
+        EstadoParcela::Renegociada | EstadoParcela::Cancelada
+    ) {
+        return Err(Erro::de_dominio(
+            &ErroFinanceiro::ParcelaEncerradaNaoReverte(parcela.estado),
+        ));
+    }
+
+    // 3. Lançar: estorna o `Realizado` original.
+    let lancamento_estorno = {
+        let mut repo = RepositorioRazao::novo(uow);
+        Razao::estornar(&mut repo, baixa.lancamento, motivo, ctx.hoje())
+            .map_err(|e| Erro::de_dominio(&e))?
+    };
+
+    // 4. Persistir: reabre a parcela, marca a baixa como estornada.
+    parcela.reverter_baixa(baixa.principal);
+    {
+        let mut repo = RepositorioFinanceiro::novo(uow);
+        repo.atualizar_parcela(&parcela)?;
+        repo.marcar_baixa_estornada(baixa.id)?;
+    }
+
+    // 5. Publicar.
+    uow.publicar(BaixaEstornada {
+        baixa: baixa.id,
+        parcela: parcela.id,
+        lancamento_estorno,
+    })
+    .map_err(|e| Erro::de_dominio(&e))?;
+
+    Ok(BaixaFoiEstornada {
+        parcela: parcela.id,
+        lancamento_estorno,
+    })
 }

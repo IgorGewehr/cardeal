@@ -153,8 +153,20 @@ const PERMISSOES: &[Permissao] = &[
     ),
     perm("os.faturar", "Faturar ordem de serviço", Risco::Alto, None),
     perm(
+        "os.desfaturar",
+        "Desfaturar ordem de serviço (reverte o financeiro)",
+        Risco::Alto,
+        None,
+    ),
+    perm(
         "os.ordem.cancelar",
         "Cancelar ordem de serviço",
+        Risco::Medio,
+        None,
+    ),
+    perm(
+        "os.ordem.reabrir",
+        "Reabrir ordem de serviço cancelada",
         Risco::Medio,
         None,
     ),
@@ -222,7 +234,9 @@ const EVENTOS_PUBLICADOS: &[&str] = &[
     "os.ordem_aberta.v1",
     "os.orcamento_aprovado.v1",
     "os.ordem_faturada.v1",
+    "os.ordem_desfaturada.v1",
     "os.ordem_cancelada.v1",
+    "os.ordem_reaberta.v1",
     "os.garantia_acionada.v1",
 ];
 

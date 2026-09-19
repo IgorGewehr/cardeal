@@ -159,6 +159,14 @@ impl Titulo {
     pub const fn esta_cancelado(&self) -> bool {
         self.cancelado_em.is_some()
     }
+
+    /// Cancela o título — nunca apaga a linha, só marca `cancelado_em`. Quem chama garante
+    /// que toda baixa das parcelas já foi revertida e as próprias parcelas já foram
+    /// canceladas ([`Parcela::cancelar`]) antes disso.
+    pub fn cancelar(&mut self, quando: Instante) {
+        self.cancelado_em = Some(quando);
+        self.versao = self.versao.proxima();
+    }
 }
 
 /// Uma fração do título, com vencimento próprio.

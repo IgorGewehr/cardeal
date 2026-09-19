@@ -14,7 +14,6 @@
 
 use egui::{ScrollArea, Ui};
 
-use crate::atoms::Rotulo;
 use crate::tokens::{Espaco, TemaUi};
 
 /// Largura da janela abaixo da qual lista e detalhe se empilham em vez de ficar lado a lado.
@@ -116,13 +115,17 @@ impl LayoutTela {
     }
 }
 
-fn cabecalho(ui: &mut Ui, titulo: &str, acoes: impl FnOnce(&mut Ui)) {
+/// `_titulo`: a sidebar já indica a seção ativa e a barra de título da janela mostra
+/// "Cardeal" — repetir o nome da tela aqui só comia espaço vertical sem dizer nada de novo
+/// (pedido explícito do usuário). O parâmetro fica para uso futuro (título de janela por
+/// aba, telemetria) — cada tela continua passando `LayoutTela::nova("Financeiro")` etc., só
+/// não aparece mais desenhado.
+fn cabecalho(ui: &mut Ui, _titulo: &str, acoes: impl FnOnce(&mut Ui)) {
     let cores = ui.cores();
     ui.horizontal(|ui| {
-        ui.add(Rotulo::titulo_tela(titulo.to_owned()));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), acoes);
     });
-    ui.add_space(Espaco::E12);
+    ui.add_space(Espaco::E8);
     let linha = ui.available_rect_before_wrap();
     ui.painter().hline(
         linha.x_range(),

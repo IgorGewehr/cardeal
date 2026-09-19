@@ -88,7 +88,7 @@ pub use caixa::{
 };
 pub use categoria::CategoriaFinanceira;
 pub use comandos::{
-    baixar_pagamento_comum, baixar_recebimento_comum, lancar_titulo_comum,
+    baixar_pagamento_comum, baixar_recebimento_comum, estornar_baixa_comum, lancar_titulo_comum,
     materializar_recorrencias_pendentes, AbrirCaixa, BaixaFoiEstornada, BaixarPagamento,
     BaixarRecebimento, CadastrarCaixa, CaixaCadastrado, CaixaFoiAberto, CaixaFoiFechado,
     CategoriaCriada, ContaBancariaCriada, CriarCategoria, CriarContaBancaria, CriarRecorrencia,
@@ -98,10 +98,11 @@ pub use comandos::{
     TituloAReceberLancado, TituloFoiRenegociado, TituloGravado,
 };
 pub use consultas::{
-    BaixasDaParcela, Caixas, Categorias, ContasDeCaixa, ContasDeResultado, ContasDisponiveis,
-    ExtratoDisponivel, ItemBaixa, ItemCaixa, ItemContaDisponivel, ItemContaResultado,
-    ItemMovimentoDisponivel, ItemTituloEmAberto, ItemTotalPorCategoria, Recorrencias,
-    TituloDaOrigem, TitulosAPagarEmAberto, TitulosAReceberEmAberto, TotalPorCategoriaNoPeriodo,
+    titulo_da_origem, BaixasDaParcela, Caixas, Categorias, ContasDeCaixa, ContasDeResultado,
+    ContasDisponiveis, ExtratoDisponivel, ItemBaixa, ItemCaixa, ItemContaDisponivel,
+    ItemContaResultado, ItemMovimentoDisponivel, ItemTituloEmAberto, ItemTotalPorCategoria,
+    Recorrencias, TituloDaOrigem, TitulosAPagarEmAberto, TitulosAReceberEmAberto,
+    TotalPorCategoriaNoPeriodo,
 };
 pub use erros::ErroFinanceiro;
 pub use manifesto::{manifesto, MANIFESTO};

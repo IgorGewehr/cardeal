@@ -7,9 +7,10 @@ use cardeal_storage::ConjuntoMigracoes;
 
 use crate::comandos::{
     AbrirOrdemServico, AjustarApontamento, AplicarPeca, AprovarOrcamentoOs, CancelarOrdemServico,
-    ConcluirExecucao, EditarDadosDaOrdem, EncerrarApontamento, EnviarParaAprovacao,
-    FaturarOrdemServico, IniciarApontamento, IniciarExecucao, MontarOrcamentoOs, RegistrarLaudo,
-    RegistrarMaoDeObra, RemoverItemOrcamento, ReprovarOrcamentoOs,
+    ConcluirExecucao, DesfaturarOrdemServico, EditarDadosDaOrdem, EncerrarApontamento,
+    EnviarParaAprovacao, FaturarOrdemServico, IniciarApontamento, IniciarExecucao,
+    MontarOrcamentoOs, ReabrirOrdemServico, RegistrarLaudo, RegistrarMaoDeObra,
+    RemoverItemOrcamento, ReprovarOrcamentoOs,
 };
 use crate::consultas::{
     ApontamentosDaOrdem, BuscarDetalheOrdem, HistoricoDoEquipamento, OrdensAguardandoAprovacao,
@@ -48,6 +49,8 @@ impl Modulo for ModuloOs {
             .comando::<RegistrarMaoDeObra>("os.registrar_mao_de_obra.v1")
             .comando::<ConcluirExecucao>("os.concluir_execucao.v1")
             .comando::<FaturarOrdemServico>("os.faturar_ordem_servico.v1")
+            .comando::<DesfaturarOrdemServico>("os.desfaturar_ordem_servico.v1")
+            .comando::<ReabrirOrdemServico>("os.reabrir_ordem_servico.v1")
             .comando::<IniciarApontamento>("os.iniciar_apontamento.v1")
             .comando::<EncerrarApontamento>("os.encerrar_apontamento.v1")
             .comando::<AjustarApontamento>("os.ajustar_apontamento.v1")

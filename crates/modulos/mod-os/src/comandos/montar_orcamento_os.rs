@@ -1,7 +1,7 @@
 //! Acrescenta um item (peça ou mão de obra) ao orçamento de uma ordem de serviço.
 //!
 //! `docs/modulos/os.md` §5. Chamado uma vez por item — a tela monta o orçamento linha a
-//! linha. Só aceita enquanto `OrdemServico::aceita_edicao_de_orcamento`.
+//! linha. Só aceita enquanto `OrdemServico::aceita_ajuste_de_itens`.
 
 use cardeal_kernel::{Dinheiro, Erro, Id, Preco, Quantidade, Resultado};
 use cardeal_modkit::{Comando, Ctx, Risco};
@@ -59,11 +59,13 @@ impl Comando for MontarOrcamentoOs {
 
         // 2. Validar (domínio puro): estado aceita edição, antes de qualquer escrita. Peça
         // nova também pode ser orçada em `EmExecucao` — mesma brecha que
-        // `OrdemServico::adicionar_ao_orcamento` já concede a `RegistrarMaoDeObra`.
-        if !os.estado.aceita_edicao_de_orcamento() && os.estado != EstadoOs::EmExecucao {
+        // `OrdemServico::adicionar_ao_orcamento` já concede a `RegistrarMaoDeObra` — e em
+        // `Concluida`, para corrigir uma OS desfaturada sem repetir o trâmite técnico
+        // inteiro (`OrdemServico::desfaturar`).
+        if !os.estado.aceita_ajuste_de_itens() && os.estado != EstadoOs::EmExecucao {
             return Err(Erro::de_dominio(&ErroOs::EstadoInvalido {
                 atual: os.estado.rotulo(),
-                esperado: "Aberta, EmDiagnostico ou EmExecucao",
+                esperado: "Aberta, EmDiagnostico, EmExecucao ou Concluida",
             }));
         }
 

@@ -4,7 +4,6 @@
 //! abrem o mesmo `Dialogo`. OS é workflow (máquina de estados), então o dialog de detalhe
 //! mostra as infos + a ação certa pro estado atual, em vez de um "Editar" genérico.
 
-use cardeal_analytics::{calcular_margem_de_os, CustoHorario, MargemDeOs};
 use cardeal_cliente::{IdentidadeVisual, MotorLocal, SessaoLocal, UsuarioResumo};
 use cardeal_kernel::{Data, Dinheiro, Fuso, Id, Instante, Percentual, Preco, Quantidade};
 use cardeal_modkit::Icone;
@@ -31,11 +30,11 @@ use mod_financeiro::{
 };
 use mod_os::{
     AbrirOrdemServico, ApontamentoDeTempo, ApontamentosDaOrdem, AprovarOrcamentoOs,
-    BuscarDetalheOrdem, CancelarOrdemServico, ConcluirExecucao, DetalheOrdem, EditarDadosDaOrdem,
-    EncerrarApontamento, EnviarParaAprovacao, EstadoOs, FaturarOrdemServico, IniciarApontamento,
-    IniciarExecucao, ItemOrcamentoNovo, MontarOrcamentoOs, OrdemServico, OrdemServicoAberta,
-    OrdemServicoCancelada, OrdemServicoFaturada, PagamentoNoAto, RegistrarLaudo,
-    ReprovarOrcamentoOs, TempoTotalDaOrdem, TodasAsOrdens,
+    BuscarDetalheOrdem, CancelarOrdemServico, ConcluirExecucao, DesfaturarOrdemServico,
+    DetalheOrdem, EditarDadosDaOrdem, EncerrarApontamento, EnviarParaAprovacao, EstadoOs,
+    FaturarOrdemServico, IniciarApontamento, IniciarExecucao, ItemOrcamentoNovo, MontarOrcamentoOs,
+    OrdemServico, OrdemServicoAberta, OrdemServicoCancelada, OrdemServicoFaturada, PagamentoNoAto,
+    ReabrirOrdemServico, RegistrarLaudo, ReprovarOrcamentoOs, TempoTotalDaOrdem, TodasAsOrdens,
 };
 
 /// Qual dialog está aberto.
@@ -134,6 +133,8 @@ enum AcaoPendente {
     AprovarOrcamento(Id),
     ReprovarOrcamento(Id),
     ConcluirExecucao(Id),
+    Desfaturar(Id),
+    Reabrir(Id),
 }
 
 /// Qual aba da tela de OS está ativa.
@@ -142,7 +143,6 @@ enum AbaOs {
     #[default]
     Ordens,
     Orcamentos,
-    Lucratividade,
 }
 
 /// Estado local da tela — sobrevive entre quadros, não entre reinícios.
@@ -159,8 +159,6 @@ pub struct EstadoTelaOs {
     apontamentos: Vec<ApontamentoDeTempo>,
     tempo_total_ordem: i64,
     titulo_gerado: Option<Titulo>,
-    margens: Vec<MargemDeOs>,
-    calculando_margens: bool,
     erro: Option<String>,
     dlg: Dlg,
     /// Filtro da lista de ordens (nº, aparelho ou nome do cliente) — client-side, mesma
@@ -324,22 +322,11 @@ pub fn mostrar(
                     crate::tela_orcamentos::abrir_novo(&mut estado.orc);
                 }
             }
-            AbaOs::Lucratividade => {
-                let rotulo = if estado.calculando_margens {
-                    "Calculando…"
-                } else {
-                    "Calcular lucratividade"
-                };
-                if ui.add(Botao::primario(rotulo)).clicked() && !estado.calculando_margens {
-                    calcular_margens(motor, sessao, estado);
-                }
-            }
         },
         |ui, estado| {
             if let Some(nova) = Abas::nova(&[
                 (AbaOs::Ordens, "Ordens de serviço"),
                 (AbaOs::Orcamentos, "Orçamentos"),
-                (AbaOs::Lucratividade, "Lucratividade"),
             ])
             .selecionada(estado.aba)
             .mostrar(ui)
@@ -363,7 +350,6 @@ pub fn mostrar(
                 AbaOs::Orcamentos => {
                     crate::tela_orcamentos::corpo(ui, motor, sessao, &mut estado.orc);
                 }
-                AbaOs::Lucratividade => lucratividade(ui, estado),
             }
         },
     );
@@ -379,7 +365,6 @@ pub fn mostrar(
         AbaOs::Orcamentos => {
             crate::tela_orcamentos::dialogos(ui.ctx(), motor, sessao, &mut estado.orc);
         }
-        AbaOs::Lucratividade => {}
     }
 
     if let Some((ordem_servico, rotulo)) = estado.confirmar_exclusao.clone() {
@@ -439,6 +424,21 @@ pub fn mostrar(
                 "Confirma que o reparo terminou? A OS fica pronta para faturar.".to_owned(),
                 "Concluir",
             ),
+            AcaoPendente::Desfaturar(_) => (
+                "Desfaturar OS",
+                "Confirma desfaturar esta OS? O título gerado no financeiro é cancelado \
+                 (qualquer recebimento já dado é estornado) e a OS volta a aceitar edição de \
+                 valores e serviços."
+                    .to_owned(),
+                "Desfaturar",
+            ),
+            AcaoPendente::Reabrir(_) => (
+                "Reabrir OS",
+                "Confirma reabrir esta OS cancelada? Ela volta para \"Aberta\" e aceita edição \
+                 normalmente."
+                    .to_owned(),
+                "Reabrir",
+            ),
         };
         let resposta =
             cardeal_ui::organisms::dialogo_confirmacao(ui.ctx(), titulo, &mensagem, rotulo_acao);
@@ -476,6 +476,26 @@ pub fn mostrar(
                     "os.concluir_execucao.v1",
                     &ConcluirExecucao { ordem_servico },
                     "Execução concluída",
+                ),
+                AcaoPendente::Desfaturar(ordem_servico) => aplicar_e_recarregar(
+                    ui.ctx(),
+                    motor,
+                    sessao,
+                    estado,
+                    ordem_servico,
+                    "os.desfaturar_ordem_servico.v1",
+                    &DesfaturarOrdemServico { ordem_servico },
+                    "OS desfaturada — título removido do financeiro",
+                ),
+                AcaoPendente::Reabrir(ordem_servico) => aplicar_e_recarregar(
+                    ui.ctx(),
+                    motor,
+                    sessao,
+                    estado,
+                    ordem_servico,
+                    "os.reabrir_ordem_servico.v1",
+                    &ReabrirOrdemServico { ordem_servico },
+                    "OS reaberta",
                 ),
             }
         }
@@ -832,106 +852,6 @@ fn faturar_os(
         }
         Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
     }
-}
-
-/// Recalcula a margem de cada ordem **ainda ativa** (ver a limitação documentada em
-/// `lucratividade`) buscando detalhe + apontamentos de cada uma. `estado.ordens` desde
-/// 2026-09-14 carrega qualquer status (`TodasAsOrdens`) — filtra aqui pra manter o mesmo
-/// recorte de antes, e não custar uma consulta de detalhe por OS faturada/cancelada do
-/// histórico inteiro. Sem custo por hora de técnico cadastrado ainda, a margem líquida vem
-/// `None` ("não calculável") em vez de inventar um número —
-/// `cardeal_analytics::calcular_margem_de_os` já trata isso.
-fn calcular_margens(motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoTelaOs) {
-    estado.calculando_margens = true;
-    let custo_horario = CustoHorario::nova();
-    let ativas: Vec<OrdemServico> = estado
-        .ordens
-        .iter()
-        .filter(|os| nao_finalizada(os.estado))
-        .cloned()
-        .collect();
-    let mut margens = Vec::with_capacity(ativas.len());
-    for os in ativas {
-        let detalhe: Option<DetalheOrdem> = motor
-            .consultar(
-                sessao,
-                "os.buscar_detalhe_ordem.v1",
-                &BuscarDetalheOrdem {
-                    ordem_servico: os.id,
-                },
-            )
-            .unwrap_or(None);
-        let Some(detalhe) = detalhe else { continue };
-        let apontamentos: Vec<ApontamentoDeTempo> = motor
-            .consultar(
-                sessao,
-                "os.apontamentos_da_ordem.v1",
-                &ApontamentosDaOrdem {
-                    ordem_servico: os.id,
-                },
-            )
-            .unwrap_or_default();
-        margens.push(calcular_margem_de_os(
-            &detalhe,
-            &apontamentos,
-            &custo_horario,
-        ));
-    }
-    estado.margens = margens;
-    estado.calculando_margens = false;
-}
-
-/// A aba "Lucratividade": receita, custo real de peça e margem de cada OS **atualmente em
-/// aberto** (mesma lista da aba "Ordens" — não há hoje uma consulta de OS faturadas por
-/// período; ver `docs/modulos/os.md` §6 e o gap anotado lá). Ainda assim é útil para ver, de
-/// trabalhos em andamento, quais já estão com a peça consumida a um custo maior que o
-/// orçado.
-fn lucratividade(ui: &mut egui::Ui, estado: &mut EstadoTelaOs) {
-    if estado.margens.is_empty() {
-        ui.add(Rotulo::interface(
-            "Clique em \"Calcular lucratividade\" para ver a margem de cada ordem em aberto.",
-        ));
-        return;
-    }
-
-    let colunas = vec![
-        ColunaGrade::nova("Nº").largura(56.0).numero(),
-        ColunaGrade::nova("Receita").largura(110.0).numero(),
-        ColunaGrade::nova("Custo peça").largura(110.0).numero(),
-        ColunaGrade::nova("Margem bruta").largura(120.0).numero(),
-        ColunaGrade::nova("Margem líquida").largura(130.0).numero(),
-        ColunaGrade::nova("Tempo apontado").largura(120.0).numero(),
-    ];
-    Grade::nova(colunas)
-        .selecionavel(None)
-        .mostrar(ui, estado.margens.len(), |i, row| {
-            let m = &estado.margens[i];
-            row.col(|ui| {
-                ui.add(Rotulo::interface(m.numero.to_string()));
-            });
-            row.col(|ui| {
-                ui.add(ValorDinheiro::novo(m.receita_total()));
-            });
-            row.col(|ui| {
-                ui.add(ValorDinheiro::novo(m.custo_pecas));
-            });
-            row.col(|ui| {
-                ui.add(ValorDinheiro::novo(m.margem_bruta));
-            });
-            row.col(|ui| match m.margem_liquida {
-                Some(v) => {
-                    ui.add(ValorDinheiro::novo(v));
-                }
-                None => {
-                    ui.add(Rotulo::interface("não calculável"));
-                }
-            });
-            row.col(|ui| {
-                ui.add(Rotulo::interface(formatar_duracao(
-                    m.tempo_apontado_segundos,
-                )));
-            });
-        });
 }
 
 fn lista(ui: &mut egui::Ui, motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoTelaOs) {
@@ -1539,6 +1459,16 @@ fn corpo_detalhe(
         if pode_cancelar(os.estado) && ui.add(Botao::destrutivo("Cancelar OS").pequeno()).clicked()
         {
             estado.confirmar_exclusao = Some((os.id, equipamento_label(os).to_owned()));
+        }
+        if os.estado == EstadoOs::Faturada
+            && ui.add(Botao::secundario("Desfaturar").pequeno()).clicked()
+        {
+            estado.confirmar_acao = Some(AcaoPendente::Desfaturar(os.id));
+        }
+        if os.estado == EstadoOs::Cancelada
+            && ui.add(Botao::secundario("Reabrir OS").pequeno()).clicked()
+        {
+            estado.confirmar_acao = Some(AcaoPendente::Reabrir(os.id));
         }
     });
     ui.add_space(Espaco::E16);

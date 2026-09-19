@@ -242,7 +242,9 @@ impl Consulta for CompromissosNoPeriodo {
                 compromisso_de_linha,
             )
             .map_err(persist)?;
-        linhas.collect::<rusqlite::Result<Vec<_>>>().map_err(persist)
+        linhas
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(persist)
     }
 }
 
@@ -275,11 +277,15 @@ impl Consulta for Recursos {
                     empresa: id_de(r.get::<_, Vec<u8>>(1)?),
                     nome: r.get(2)?,
                     tipo: tipo_de(&r.get::<_, String>(3)?),
-                    capacidade: r.get::<_, Option<i64>>(4)?.map(|n| u32::try_from(n).unwrap_or(0)),
+                    capacidade: r
+                        .get::<_, Option<i64>>(4)?
+                        .map(|n| u32::try_from(n).unwrap_or(0)),
                     ativo: r.get::<_, i64>(5)? != 0,
                 })
             })
             .map_err(persist)?;
-        linhas.collect::<rusqlite::Result<Vec<_>>>().map_err(persist)
+        linhas
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(persist)
     }
 }

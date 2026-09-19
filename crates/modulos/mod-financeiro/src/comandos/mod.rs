@@ -31,7 +31,7 @@ pub use cadastrar_caixa::{CadastrarCaixa, CaixaCadastrado};
 pub use criar_categoria::{CategoriaCriada, CriarCategoria};
 pub use criar_conta_bancaria::{ContaBancariaCriada, CriarContaBancaria};
 pub use criar_recorrencia::{CriarRecorrencia, RecorrenciaCriada};
-pub use estornar_baixa::{BaixaFoiEstornada, EstornarBaixa};
+pub use estornar_baixa::{estornar_baixa_comum, BaixaFoiEstornada, EstornarBaixa};
 pub use fechar_caixa::{CaixaFoiFechado, FecharCaixa};
 pub use lancar_titulo_a_pagar::{LancarTituloAPagar, TituloAPagarLancado};
 pub use lancar_titulo_a_receber::{LancarTituloAReceber, TituloAReceberLancado};

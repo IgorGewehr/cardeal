@@ -76,3 +76,36 @@ impl EventoDominio for OrdemCancelada {
         Some(self.ordem_servico)
     }
 }
+
+/// Uma ordem de serviço faturada foi desfaturada — o título e o lançamento que a
+/// representavam no financeiro foram revertidos, e ela voltou a `Concluida`.
+#[derive(Debug, Serialize)]
+pub struct OrdemDesfaturada {
+    /// A ordem de serviço.
+    pub ordem_servico: Id,
+    /// O título que foi cancelado, se havia um (OS de cortesia não gera título).
+    pub titulo: Option<Id>,
+}
+
+impl EventoDominio for OrdemDesfaturada {
+    const TIPO: &'static str = "os.ordem_desfaturada.v1";
+
+    fn agregado(&self) -> Option<Id> {
+        Some(self.ordem_servico)
+    }
+}
+
+/// Uma ordem de serviço cancelada foi reaberta.
+#[derive(Debug, Serialize)]
+pub struct OrdemReaberta {
+    /// A ordem de serviço.
+    pub ordem_servico: Id,
+}
+
+impl EventoDominio for OrdemReaberta {
+    const TIPO: &'static str = "os.ordem_reaberta.v1";
+
+    fn agregado(&self) -> Option<Id> {
+        Some(self.ordem_servico)
+    }
+}

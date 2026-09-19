@@ -21,7 +21,7 @@ pub use confirmacao::{dialogo_confirmacao, RespostaConfirmacao};
 pub use dialogo::Dialogo;
 pub use faixa_kpi::FaixaKpi;
 pub use grade::{ColunaGrade, Direcao, Grade, LinhaGrade, RespostaGrade};
-pub use grafico::{GraficoBarras, SerieBarras};
+pub use grafico::{GraficoBarras, GraficoBarrasHorizontais, ItemBarraHorizontal, SerieBarras};
 pub use layout_tela::LayoutTela;
 pub use notificacoes::{notificar, Notificacao, Notificacoes, Tom};
 pub use paleta_comandos::{ItemComando, PaletaComandos};

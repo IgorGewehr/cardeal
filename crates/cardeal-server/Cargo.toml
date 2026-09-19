@@ -24,7 +24,6 @@ cardeal-modkit.workspace    = true
 cardeal-auth.workspace      = true
 cardeal-protocol.workspace  = true
 cardeal-fiscal.workspace    = true
-cardeal-analytics.workspace = true
 
 mod-financeiro.workspace  = true
 mod-clientes.workspace    = true

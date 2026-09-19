@@ -92,6 +92,14 @@ pub enum ErroOs {
     #[error("Esta ordem de serviço já foi faturada")]
     OsJaFaturada,
 
+    /// `DesfaturarOrdemServico` sobre uma OS que não está `Faturada`.
+    #[error("Esta ordem de serviço não está faturada")]
+    OsNaoFaturada,
+
+    /// `ReabrirOrdemServico` sobre uma OS que não está `Cancelada`.
+    #[error("Esta ordem de serviço não está cancelada")]
+    OsNaoCancelada,
+
     /// `IniciarApontamento` quando o técnico já tem outro apontamento aberto — ele não pode
     /// estar "trabalhando" em duas ordens de serviço ao mesmo tempo.
     #[error("Este técnico já tem um apontamento de tempo em aberto (em outra ordem de serviço)")]
@@ -132,6 +140,8 @@ impl ErroDominio for ErroOs {
             | Self::PecaPendenteDeAplicacao(_)
             | Self::OsCanceladaOuReprovada
             | Self::OsJaFaturada
+            | Self::OsNaoFaturada
+            | Self::OsNaoCancelada
             | Self::TecnicoJaTemApontamentoAberto
             | Self::ApontamentoJaEncerrado
             | Self::FimAntesDoInicio => CodigoErro::REGRA_VIOLADA,
