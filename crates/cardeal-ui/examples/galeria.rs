@@ -6,14 +6,16 @@
 use cardeal_kernel::Dinheiro;
 use cardeal_modkit::Icone;
 use cardeal_ui::atoms::{
-    desenhar_icone, superficie_clicavel, Botao, CampoTexto, Divisor, Etiqueta, Rotulo, Spinner,
-    Tecla, Tom, ValorDinheiro,
+    desenhar_icone, superficie_clicavel, Botao, Caixa, CampoTexto, Divisor, Etiqueta, Rotulo,
+    Spinner, Tecla, Tom, ValorDinheiro,
 };
 use cardeal_ui::molecules::{
     Abas, CabecalhoTela, Campo, CampoBusca, CartaoKpi, EstadoVazio, ItemDeLista, LinhaDeAcao,
     SeletorOpcao, Severidade,
 };
-use cardeal_ui::organisms::{notificar, Dialogo, Notificacao, Notificacoes, Painel};
+use cardeal_ui::organisms::{
+    notificar, ColunaGrade, Dialogo, Grade, Notificacao, Notificacoes, Painel,
+};
 use cardeal_ui::tokens::{instalar_estilo, instalar_fontes, Espaco, Rubro, Tema, TemaUi};
 use eframe::egui;
 
@@ -56,6 +58,7 @@ struct Galeria {
     campo_erro: String,
     busca: String,
     motivo: String,
+    marcada: bool,
     item_ativo: usize,
     opcao: Option<u8>,
     aba: u8,
@@ -386,6 +389,34 @@ impl eframe::App for Galeria {
                     .mostrar(ui, |ui| {
                         ui.add(Etiqueta::atencao("sem saldo"));
                     });
+
+                ui.add_space(Espaco::E24);
+                ui.add(Rotulo::titulo_secao("Caixa de seleção"));
+                ui.add(Caixa::nova(&mut self.marcada, "Imprimir o cupom fiscal"));
+                let mut sempre = true;
+                ui.add(Caixa::nova(&mut sempre, "Marcada (só para ver)"));
+
+                ui.add_space(Espaco::E24);
+                ui.add(Rotulo::titulo_secao("Grade: vazia · carregando"));
+                ui.columns(2, |cols| {
+                    // Duas grades com a mesma estrutura no mesmo quadro: cada uma no seu `push_id`.
+                    cols[0].push_id("grade-vazia", |ui| {
+                        Grade::nova(vec![
+                            ColunaGrade::nova("Cliente"),
+                            ColunaGrade::nova("Total").largura(90.0).numero(),
+                        ])
+                        .vazio("Nenhuma conta a receber.")
+                        .mostrar(ui, 0, |_, _| {});
+                    });
+                    cols[1].push_id("grade-carregando", |ui| {
+                        Grade::nova(vec![
+                            ColunaGrade::nova("Cliente"),
+                            ColunaGrade::nova("Total").largura(90.0).numero(),
+                        ])
+                        .carregando(true)
+                        .mostrar(ui, 0, |_, _| {});
+                    });
+                });
 
                 ui.add_space(Espaco::E24);
                 ui.add(Rotulo::titulo_secao("Diálogo (pequeno · médio · grande)"));

@@ -29,6 +29,9 @@ use crate::tokens::{ativar, AlturaLinha, Espaco, Mov, Raio, TemaUi};
 /// pequeno demais para o `RotuloCampo` maior da revisão de 2026-09-11).
 const ALTURA_CABECALHO: f32 = 40.0;
 
+/// Quantas linhas de esqueleto a grade mostra enquanto carrega.
+const LINHAS_ESQUELETO: usize = 6;
+
 /// Largura mínima de uma coluna sem largura fixa (`Column::remainder`), para que ela nunca
 /// colapse a ponto de truncar o próprio cabeçalho num redimensionamento agressivo.
 const LARGURA_MINIMA_FLEXIVEL: f32 = 140.0;
@@ -173,6 +176,8 @@ pub struct RespostaGrade {
 pub struct Grade {
     colunas: Vec<ColunaGrade>,
     altura_linha: AlturaLinha,
+    vazio: String,
+    carregando: bool,
     selecionada: Option<usize>,
     selecionavel: bool,
     ordenacao: Option<(usize, Direcao)>,
@@ -185,6 +190,8 @@ impl Grade {
         Self {
             colunas,
             altura_linha: AlturaLinha::Confortavel,
+            vazio: "Nenhum registro.".to_owned(),
+            carregando: false,
             selecionada: None,
             selecionavel: false,
             ordenacao: None,
@@ -198,6 +205,20 @@ impl Grade {
     /// rótulos, ver [`Self::desenhar`]) já resolve o caso comum sem precisar disto.
     pub const fn id_salt(mut self, s: &'static str) -> Self {
         self.id_salt = Some(s);
+        self
+    }
+
+    /// A mensagem quando não há linhas ("Nenhuma conta a receber."). Sem ela, a grade mostra
+    /// "Nenhum registro." — uma tabela vazia nunca fica em branco, sem dizer por quê.
+    pub fn vazio(mut self, mensagem: impl Into<String>) -> Self {
+        self.vazio = mensagem.into();
+        self
+    }
+
+    /// Mostra linhas de esqueleto no lugar dos dados enquanto eles carregam. Estático (sem
+    /// brilho animado): uma tela parada não pode manter a janela acordada (Pilar I).
+    pub const fn carregando(mut self, v: bool) -> Self {
+        self.carregando = v;
         self
     }
 
@@ -270,26 +291,7 @@ impl Grade {
                 // `TableBuilder` do `egui_extras` não pinta nada atrás do cabeçalho por
                 // conta própria, então antes ele saía com o mesmo peso visual do corpo — a
                 // outra queixa grave das capturas ("cabeçalho quase igual ao corpo").
-                let topo = ui.cursor().left_top();
-                let faixa_cabecalho = egui::Rect::from_min_size(
-                    topo,
-                    egui::vec2(ui.available_width(), ALTURA_CABECALHO),
-                );
-                ui.painter().rect_filled(
-                    faixa_cabecalho,
-                    Rounding {
-                        nw: Raio::CARTAO,
-                        ne: Raio::CARTAO,
-                        sw: 0.0,
-                        se: 0.0,
-                    },
-                    cores.superficie_2,
-                );
-                ui.painter().hline(
-                    faixa_cabecalho.x_range(),
-                    faixa_cabecalho.bottom(),
-                    Stroke::new(1.0_f32, cores.borda),
-                );
+                pintar_faixa_do_cabecalho(ui, &cores);
 
                 // `TableBuilder` usa `Id::new("__table_state")` como padrão — a MESMA
                 // memória persistida (posição da janela e tudo mais sobrevive entre
@@ -303,6 +305,10 @@ impl Grade {
                 // pedir que cada tela escolha um id à mão; `Grade::id_salt` cobre só o caso
                 // raro de duas grades diferentes com os mesmos rótulos.
                 let salto_padrao: String = self.colunas.iter().map(|c| c.rotulo).collect();
+                // O id do clique de ordenação combina **onde** a grade está (o `ui` que a contém:
+                // duas grades em `push_id` diferentes não colidem) e o sal da tabela (duas com
+                // `id_salt` diferentes também não). Derivá-lo do `ui` da célula colidia.
+                let id_tabela = ui.id().with(self.id_salt.unwrap_or(&salto_padrao));
                 let mut builder = TableBuilder::new(ui);
                 builder = match self.id_salt {
                     Some(s) => builder.id_salt(s),
@@ -342,7 +348,14 @@ impl Grade {
                             // quando a grade não é `selecionavel`, e o cabeçalho precisa
                             // clicar mesmo assim.
                             cabecalho.col(|ui| {
-                                if cabecalho_coluna(ui, &cores, coluna, indice, ordenacao).clicked()
+                                if cabecalho_coluna(
+                                    ui,
+                                    &cores,
+                                    coluna,
+                                    (id_tabela, indice),
+                                    ordenacao,
+                                )
+                                .clicked()
                                 {
                                     coluna_clicada = Some(indice);
                                 }
@@ -350,8 +363,17 @@ impl Grade {
                         }
                     })
                     .body(|corpo| {
-                        corpo.rows(self.altura_linha.pixels(), total_linhas, |mut row| {
+                        let n = if self.carregando {
+                            LINHAS_ESQUELETO
+                        } else {
+                            total_linhas
+                        };
+                        corpo.rows(self.altura_linha.pixels(), n, |mut row| {
                             let indice = row.index();
+                            if self.carregando {
+                                linha_de_esqueleto(&mut row, &cores, indice, colunas.len());
+                                return;
+                            }
                             if self.selecionavel {
                                 row.set_selected(selecionada == Some(indice));
                             }
@@ -366,6 +388,10 @@ impl Grade {
                             }
                         });
                     });
+
+                if total_linhas == 0 && !self.carregando {
+                    mensagem_vazia(ui, &cores, &self.vazio);
+                }
 
                 RespostaGrade {
                     linha_clicada: clicada,
@@ -385,11 +411,11 @@ fn cabecalho_coluna(
     ui: &mut Ui,
     cores: &crate::tokens::Cores,
     coluna: &ColunaGrade,
-    indice: usize,
+    (id_tabela, indice): (egui::Id, usize),
     ordenacao: Option<(usize, Direcao)>,
 ) -> Response {
     let rect = ui.max_rect();
-    let id = ui.id().with("ordenar");
+    let id = id_tabela.with(("ordenar", indice));
     let resp = ui.interact(rect, id, Sense::click());
 
     let th = ativar(ui, id.with("hover"), resp.hovered(), Mov::RAPIDO);
@@ -424,4 +450,59 @@ fn cabecalho_coluna(
     }
 
     resp
+}
+
+/// A mensagem de uma grade sem linhas, centralizada sob o cabeçalho.
+fn mensagem_vazia(ui: &mut Ui, cores: &crate::tokens::Cores, texto: &str) {
+    ui.add_space(Espaco::E24);
+    ui.vertical_centered(|ui| {
+        ui.add(Rotulo::interface(texto).cor(cores.texto_fraco));
+    });
+    ui.add_space(Espaco::E24);
+}
+
+/// Uma linha inteira de barras cinza no lugar de dados que ainda não chegaram.
+fn linha_de_esqueleto(
+    row: &mut egui_extras::TableRow<'_, '_>,
+    cores: &crate::tokens::Cores,
+    linha: usize,
+    colunas: usize,
+) {
+    for coluna in 0..colunas {
+        row.col(|ui| {
+            // A largura varia por célula (determinística, sem sorteio) para não parecer uma
+            // parede uniforme.
+            let passo = u8::try_from((linha * 7 + coluna * 13) % 5).unwrap_or(0);
+            let fracao = 0.35_f32 + 0.15_f32 * f32::from(passo);
+            let largura = (ui.available_width() * fracao).clamp(24.0, 220.0);
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(largura, 12.0), Sense::hover());
+            ui.painter()
+                .rect_filled(rect, Raio::PILULA, cores.borda.gamma_multiply(1.4_f32));
+        });
+    }
+}
+
+/// Fundo do cabeçalho + linha divisória, pintados **antes** da tabela (o `TableBuilder` do
+/// `egui_extras` não pinta nada atrás do cabeçalho): sem isto ele saía com o mesmo peso
+/// visual do corpo.
+fn pintar_faixa_do_cabecalho(ui: &Ui, cores: &crate::tokens::Cores) {
+    let faixa = egui::Rect::from_min_size(
+        ui.cursor().left_top(),
+        egui::vec2(ui.available_width(), ALTURA_CABECALHO),
+    );
+    ui.painter().rect_filled(
+        faixa,
+        Rounding {
+            nw: Raio::CARTAO,
+            ne: Raio::CARTAO,
+            sw: 0.0,
+            se: 0.0,
+        },
+        cores.superficie_2,
+    );
+    ui.painter().hline(
+        faixa.x_range(),
+        faixa.bottom(),
+        Stroke::new(1.0_f32, cores.borda),
+    );
 }

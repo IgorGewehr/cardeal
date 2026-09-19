@@ -280,16 +280,19 @@ Todos em `cardeal-ui`, com galeria viva em `cargo run -p cardeal-ui --example ga
 
 | Camada | Componentes |
 |---|---|
-| atoms | `Botao`, `CampoTexto`, `Divisor`, `Etiqueta` (com `.com_ponto()`), `Icone`, `Rotulo`, `Spinner`, `Tecla`, `ValorDinheiro`, `superficie_clicavel` |
+| atoms | `Botao`, `Caixa`, `CampoTexto`, `Divisor`, `Etiqueta` (com `.com_ponto()`), `Icone`, `Rotulo`, `Spinner`, `Tecla`, `ValorDinheiro`, `superficie_clicavel` |
 | molecules | `Abas`, `CabecalhoTela`, `Campo`, `CampoBusca`, `CartaoKpi` (com `.tom()` e `.icone()`), `EstadoVazio`, `ItemDeLista` (com `.atalho()` e `.esmaecido()`), `LinhaDeAcao`, `SecaoExpansivel`, `SeletorBusca`, `SeletorOpcao` |
-| organisms | `AgendaCalendario`, `AgendaMes`, `Cartao`, `Dialogo` (`.descricao()`, `.pequeno()`/`.medio()`), `dialogo_confirmacao`, `FaixaKpi`, `Grade`, `Grafico`, `LayoutTela`, `Notificacoes`, `Painel` (elevado · plano · `.realce(Tom)`), `PaletaComandos`, `Sidebar` |
+| organisms | `AgendaCalendario`, `AgendaMes`, `Cartao`, `Dialogo` (`.descricao()`, `.pequeno()`/`.medio()`), `dialogo_confirmacao`, `FaixaKpi`, `Grade` (com `.vazio()` e `.carregando()`), `Grafico`, `LayoutTela`, `Notificacoes`, `Painel` (elevado · plano · `.realce(Tom)`), `PaletaComandos`, `Sidebar` |
 
 `Tom::cores` é a **única** tabela tom → cor (`Etiqueta`, `Painel` e `CartaoKpi` a compartilham; nunca
 copie o `match`).
 
-**Ainda faltam:** caixa de seleção (`ui.checkbox` cru em `tela_compras`), tile de lista, `Grade` com
-esqueleto de carregamento e estado vazio embutido. Dívida de `egui` cru que sobra nas telas:
-`xtask/ui-baseline.toml`.
+**Ainda faltam:** tile de lista (adiado de propósito: o PDV é teclado-primeiro, e o tile serve ao
+toque). Dívida de `egui` cru que sobra nas telas: `xtask/ui-baseline.toml`.
+
+`Grade` nunca fica em branco: sem linhas mostra "Nenhum registro." (ou a frase de `.vazio()`), e
+`.carregando(true)` mostra linhas de esqueleto estáticas (sem brilho animado: tela parada não pode
+manter a janela acordada, Pilar I). Duas grades no mesmo quadro precisam de `push_id` ou `id_salt`.
 
 **Conferência visual** (sem abrir o app inteiro, sem banco): `cargo run -p cardeal-ui --example galeria`
 mostra todos os componentes; `GALERIA_CAPTURA=/tmp/x.png` salva um PNG e sai (`GALERIA_ROLAR=<px>`,
