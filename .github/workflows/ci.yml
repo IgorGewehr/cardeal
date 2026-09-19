@@ -1,0 +1,35 @@
+# Verificações de todo push e pull request. O toolchain vem de `rust-toolchain.toml`
+# (canal fixo + rustfmt + clippy): o rustup o instala na primeira chamada do cargo.
+#
+# `cargo xtask verificar-ui` impõe o ADR-0015 (telas só compõem `cardeal-ui`, nunca `egui` cru):
+# é uma catraca — violação nova falha, e a dívida antiga só pode descer
+# (`xtask/ui-baseline.toml`).
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  verificacoes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Formatação (cargo fmt)
+        run: cargo fmt --all -- --check
+
+      - name: UI só compõe o design system (ADR-0015)
+        run: cargo run -p xtask -- verificar-ui
+
+      - name: Testes do workspace
+        run: cargo test --workspace
