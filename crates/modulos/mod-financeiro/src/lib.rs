@@ -101,8 +101,9 @@ pub use consultas::{
     titulo_da_origem, BaixasDaParcela, Caixas, Categorias, ContasDeCaixa, ContasDeResultado,
     ContasDisponiveis, ExtratoDisponivel, ItemBaixa, ItemCaixa, ItemContaDisponivel,
     ItemContaResultado, ItemMovimentoDisponivel, ItemTituloEmAberto, ItemTotalPorCategoria,
-    Recorrencias, TituloDaOrigem, TitulosAPagarEmAberto, TitulosAReceberEmAberto,
-    TotalPorCategoriaNoPeriodo,
+    ParcelasAPagarNoPeriodo, ParcelasAReceberNoPeriodo, Recorrencias, TituloDaOrigem,
+    TitulosAPagarEmAberto, TitulosAReceberEmAberto, TotalPagoNoPeriodo, TotalPorCategoriaNoPeriodo,
+    TotalRecebidoNoPeriodo,
 };
 pub use erros::ErroFinanceiro;
 pub use manifesto::{manifesto, MANIFESTO};

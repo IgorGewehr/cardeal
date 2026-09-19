@@ -176,6 +176,7 @@ pub struct Grade {
     selecionada: Option<usize>,
     selecionavel: bool,
     ordenacao: Option<(usize, Direcao)>,
+    id_salt: Option<&'static str>,
 }
 
 impl Grade {
@@ -187,7 +188,17 @@ impl Grade {
             selecionada: None,
             selecionavel: false,
             ordenacao: None,
+            id_salt: None,
         }
+    }
+
+    /// Sobrescreve o id de memória da tabela (largura de coluna redimensionada,
+    /// persistida por `egui_extras`) quando duas grades **diferentes** acontecerem de ter
+    /// exatamente o mesmo conjunto de rótulos de coluna — o padrão (derivado dos próprios
+    /// rótulos, ver [`Self::desenhar`]) já resolve o caso comum sem precisar disto.
+    pub const fn id_salt(mut self, s: &'static str) -> Self {
+        self.id_salt = Some(s);
+        self
     }
 
     /// Sobrescreve a altura de linha padrão (`docs/12-ui-ux.md` §4).
@@ -280,7 +291,24 @@ impl Grade {
                     Stroke::new(1.0_f32, cores.borda),
                 );
 
-                let mut builder = TableBuilder::new(ui)
+                // `TableBuilder` usa `Id::new("__table_state")` como padrão — a MESMA
+                // memória persistida (posição da janela e tudo mais sobrevive entre
+                // execuções, `docs/19-estado-e-processo.md`) pra **qualquer** tabela do
+                // app que não salte explicitamente (`egui_extras` 0.29, `TableBuilder::new`).
+                // Sem isso, redimensionar uma coluna na tela de OS corrompia silenciosamente
+                // a largura das colunas de Contas a Pagar, Estoque etc. — mesmo id, colunas
+                // diferentes (achado pelo usuário: tabela do Fluxo de Caixa cortada na borda
+                // da janela). O salto default vem dos próprios rótulos das colunas — já
+                // distingue qualquer par de grades com conjuntos de coluna diferentes, sem
+                // pedir que cada tela escolha um id à mão; `Grade::id_salt` cobre só o caso
+                // raro de duas grades diferentes com os mesmos rótulos.
+                let salto_padrao: String = self.colunas.iter().map(|c| c.rotulo).collect();
+                let mut builder = TableBuilder::new(ui);
+                builder = match self.id_salt {
+                    Some(s) => builder.id_salt(s),
+                    None => builder.id_salt(salto_padrao),
+                };
+                builder = builder
                     .striped(true)
                     .resizable(true)
                     .sense(if self.selecionavel {

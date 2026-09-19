@@ -14,11 +14,11 @@ use mod_financeiro::{
     Categorias, ConstrutorTitulo, CriarCategoria, CriarContaBancaria, CriarRecorrencia,
     EspecieTitulo, EstornarBaixa, ExtratoDisponivel, FecharCaixa, ItemTituloEmAberto,
     ItemTotalPorCategoria, LancarTituloAPagar, LancarTituloAReceber, MeioPagamento,
-    ModuloFinanceiro, PagamentoBaixado, Periodicidade, PoliticaJuros, RecebimentoBaixado,
-    RecorrenciaCriada, RegistrarSangria, RegistrarSuprimento, RenegociarTitulo,
+    ModuloFinanceiro, PagamentoBaixado, ParcelasAReceberNoPeriodo, Periodicidade, PoliticaJuros,
+    RecebimentoBaixado, RecorrenciaCriada, RegistrarSangria, RegistrarSuprimento, RenegociarTitulo,
     RepositorioFinanceiro, SangriaFoiRegistrada, SuprimentoFoiRegistrado, TipoValor,
     TituloAPagarLancado, TituloAReceberLancado, TituloDaOrigem, TitulosAReceberEmAberto,
-    TotalPorCategoriaNoPeriodo, MANIFESTO,
+    TotalPorCategoriaNoPeriodo, TotalRecebidoNoPeriodo, MANIFESTO,
 };
 use serde::Serialize;
 use tempfile::TempDir;
@@ -817,6 +817,67 @@ fn titulos_a_receber_em_aberto_lista_por_vencimento_e_ignora_quitados() {
     assert_eq!(itens.len(), 1);
     assert_eq!(itens[0].titulo, aberto.titulo);
     assert_eq!(itens[0].saldo(), Dinheiro::reais(100));
+}
+
+#[test]
+fn parcelas_a_receber_no_periodo_inclui_quitadas_e_total_recebido_soma_a_baixa() {
+    // Pedido explícito do usuário: ao contrário de `TitulosAReceberEmAberto`, a listagem de
+    // Contas a Receber precisa mostrar também o que já foi recebido, não só o em aberto.
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloFinanceiro]).unwrap();
+    let s = sessao(
+        empresa,
+        &[
+            "financeiro.receber.criar",
+            "financeiro.receber.baixar",
+            "financeiro.receber.ver",
+        ],
+    );
+
+    let aberto = lancar(&d, &arm, empresa, &s, Dinheiro::reais(100), 1);
+    let quitado = lancar(&d, &arm, empresa, &s, Dinheiro::reais(50), 1);
+    let cmd = BaixarRecebimento {
+        parcela: quitado.parcelas[0],
+        valor: Dinheiro::reais(50),
+        data: hoje(),
+        meio_pagamento: MeioPagamento::Dinheiro,
+        conta_destino: None,
+    };
+    d.executar_comando(
+        "financeiro.baixar_recebimento.v1",
+        &carga(&cmd),
+        &s,
+        &ambiente(empresa),
+        arm.escritor(),
+    )
+    .unwrap();
+
+    let periodo = Periodo::novo(hoje().mais_dias(-1), hoje().mais_dias(1));
+    let saida = d
+        .executar_consulta(
+            "financeiro.parcelas_a_receber_no_periodo.v1",
+            &carga(&ParcelasAReceberNoPeriodo { periodo }),
+            &s,
+            &ambiente(empresa),
+            arm.leitor(),
+        )
+        .unwrap();
+    let itens: Vec<ItemTituloEmAberto> = postcard::from_bytes(&saida).unwrap();
+    assert_eq!(itens.len(), 2);
+    assert!(itens.iter().any(|i| i.titulo == aberto.titulo));
+    assert!(itens.iter().any(|i| i.titulo == quitado.titulo));
+
+    let saida = d
+        .executar_consulta(
+            "financeiro.total_recebido_no_periodo.v1",
+            &carga(&TotalRecebidoNoPeriodo { periodo }),
+            &s,
+            &ambiente(empresa),
+            arm.leitor(),
+        )
+        .unwrap();
+    let total: Dinheiro = postcard::from_bytes(&saida).unwrap();
+    assert_eq!(total, Dinheiro::reais(50));
 }
 
 #[test]

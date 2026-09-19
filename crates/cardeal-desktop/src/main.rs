@@ -978,17 +978,20 @@ impl eframe::App for App {
 
                         ui.add_space(Espaco::E4);
                         ui.horizontal(|ui| {
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if chevron(
-                                    ui,
-                                    self.sidebar_expandida,
-                                    self.tema.cores().texto_medio,
-                                )
-                                .clicked()
-                                {
-                                    acao = Acao::AlternarSidebar;
-                                }
-                            });
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if chevron(
+                                        ui,
+                                        self.sidebar_expandida,
+                                        self.tema.cores().texto_medio,
+                                    )
+                                    .clicked()
+                                    {
+                                        acao = Acao::AlternarSidebar;
+                                    }
+                                },
+                            );
                         });
                         ui.add_space(Espaco::E8);
                         let linha = ui.available_rect_before_wrap();

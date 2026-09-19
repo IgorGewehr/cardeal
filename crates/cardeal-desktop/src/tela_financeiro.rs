@@ -25,9 +25,10 @@ use mod_financeiro::{
     ContaBancariaCriada, ContasDeResultado, ContasDisponiveis, CriarCategoria, CriarContaBancaria,
     CriarRecorrencia, EspecieTitulo, EstadoParcela, EstornarBaixa, ExtratoDisponivel, ItemBaixa,
     ItemContaDisponivel, ItemContaResultado, ItemMovimentoDisponivel, ItemTituloEmAberto,
-    ItemTotalPorCategoria, LancarTituloAPagar, LancarTituloAReceber, MeioPagamento, Periodicidade,
-    Recorrencia, Recorrencias, TipoValor, TitulosAPagarEmAberto, TitulosAReceberEmAberto,
-    TotalPorCategoriaNoPeriodo,
+    ItemTotalPorCategoria, LancarTituloAPagar, LancarTituloAReceber, MeioPagamento,
+    ParcelasAPagarNoPeriodo, ParcelasAReceberNoPeriodo, Periodicidade, Recorrencia, Recorrencias,
+    TipoValor, TitulosAPagarEmAberto, TitulosAReceberEmAberto, TotalPagoNoPeriodo,
+    TotalPorCategoriaNoPeriodo, TotalRecebidoNoPeriodo,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
@@ -135,6 +136,69 @@ impl PeriodoRec {
     }
 }
 
+/// O período pré-definido do filtro de Contas a Receber/Pagar (`FiltroPeriodo`) — pedido
+/// explícito do usuário: dia, semana, mês, trimestre, semestre, ano, ou uma faixa digitada
+/// à mão.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum PresetPeriodo {
+    Dia,
+    Semana,
+    #[default]
+    Mes,
+    Trimestre,
+    Semestre,
+    Ano,
+    Personalizado,
+}
+
+/// O filtro de período das abas "A receber"/"A pagar" — um preset de calendário (o mais
+/// comum) ou uma faixa `De`/`Até` digitada, quando `preset == Personalizado`.
+#[derive(Default)]
+struct FiltroPeriodo {
+    preset: PresetPeriodo,
+    de_personalizado: String,
+    ate_personalizado: String,
+}
+
+impl FiltroPeriodo {
+    /// Resolve o preset (ou a faixa personalizada) num [`Periodo`] concreto, sempre a
+    /// unidade de calendário inteira — não só "até hoje": um preset de "Mês" cobre o mês
+    /// inteiro (passado e futuro), porque a projeção precisa enxergar até o fim dele.
+    fn resolver(&self, hoje: Data) -> Periodo {
+        match self.preset {
+            PresetPeriodo::Dia => Periodo::novo(hoje, hoje),
+            PresetPeriodo::Semana => {
+                let inicio = hoje.mais_dias(-(hoje.dia_da_semana() as i32));
+                Periodo::novo(inicio, inicio.mais_dias(6))
+            }
+            PresetPeriodo::Mes => Periodo::novo(hoje.inicio_do_mes(), hoje.fim_do_mes()),
+            PresetPeriodo::Trimestre => {
+                let mes_inicio = ((hoje.mes() - 1) / 3) * 3 + 1;
+                let inicio = Data::de_ymd(hoje.ano(), mes_inicio, 1)
+                    .unwrap_or(hoje)
+                    .inicio_do_mes();
+                Periodo::novo(inicio, inicio.mais_meses(2).fim_do_mes())
+            }
+            PresetPeriodo::Semestre => {
+                let mes_inicio = if hoje.mes() <= 6 { 1 } else { 7 };
+                let inicio = Data::de_ymd(hoje.ano(), mes_inicio, 1)
+                    .unwrap_or(hoje)
+                    .inicio_do_mes();
+                Periodo::novo(inicio, inicio.mais_meses(5).fim_do_mes())
+            }
+            PresetPeriodo::Ano => {
+                let inicio = hoje.inicio_do_ano();
+                Periodo::novo(inicio, inicio.mais_meses(11).fim_do_mes())
+            }
+            PresetPeriodo::Personalizado => {
+                let de = self.de_personalizado.parse::<Data>().unwrap_or(hoje);
+                let ate = self.ate_personalizado.parse::<Data>().unwrap_or(hoje);
+                Periodo::novo(de.min(ate), de.max(ate))
+            }
+        }
+    }
+}
+
 struct FormRecorrencia {
     a_receber: bool,
     descricao: String,
@@ -198,7 +262,20 @@ impl Default for FormLancar {
 #[derive(Default)]
 pub struct EstadoTelaFinanceiro {
     aba: Aba,
+    /// As parcelas da aba ativa (Receber/Pagar) com vencimento em `periodo` — **qualquer
+    /// estado**, não só em aberto (pedido explícito do usuário: a aba deve mostrar também o
+    /// que já foi pago/recebido, igual ao histórico do fluxo de caixa).
     parcelas: Vec<ItemTituloEmAberto>,
+    /// O filtro de período das abas Receber/Pagar — compartilhado entre as duas (mesmo
+    /// padrão de `parcelas`: um só conjunto de campos, recarregado a cada troca de aba).
+    periodo: FiltroPeriodo,
+    /// Quanto foi efetivamente recebido/pago dentro de `periodo` (soma de baixas, não de
+    /// vencimento) — o card "Recebido/Pago no período".
+    baixado_periodo: Dinheiro,
+    /// Saldo em aberto (qualquer vencimento) que já vence até o fim de `periodo` — o card
+    /// de projeção: "até `periodo.ate` você vai receber/pagar X, baseado no que já está em
+    /// aberto hoje".
+    projecao_periodo: Dinheiro,
     busca: String,
     ordenacao: Option<(usize, Direcao)>,
     nomes: HashMap<Id, String>,
@@ -238,24 +315,8 @@ impl EstadoTelaFinanceiro {
     /// Recarrega a lista da aba ativa, o painel de visão geral e o índice de nomes.
     pub fn carregar(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
         self.erro = None;
-        if !matches!(self.aba, Aba::Visao) {
-            let r = if self.aba.a_receber() {
-                motor.consultar(
-                    sessao,
-                    "financeiro.titulos_a_receber_em_aberto.v1",
-                    &TitulosAReceberEmAberto,
-                )
-            } else {
-                motor.consultar(
-                    sessao,
-                    "financeiro.titulos_a_pagar_em_aberto.v1",
-                    &TitulosAPagarEmAberto,
-                )
-            };
-            match r {
-                Ok(p) => self.parcelas = p,
-                Err(e) => self.erro = Some(e.mensagem),
-            }
+        if matches!(self.aba, Aba::Receber | Aba::Pagar) {
+            self.carregar_parcelas_periodo(motor, sessao);
         }
         self.carregar_dashboard(motor, sessao);
         if matches!(self.aba, Aba::Fluxo | Aba::Bancos) {
@@ -289,6 +350,76 @@ impl EstadoTelaFinanceiro {
             .chain(self.fornecedores.iter())
             .map(|p| (p.pessoa, p.nome.clone()))
             .collect();
+    }
+
+    /// Recarrega a listagem (qualquer estado, dentro do período selecionado) e os dois
+    /// cards da aba ativa (Receber/Pagar): quanto foi baixado no período, e a projeção do
+    /// saldo em aberto que já vence até o fim do período.
+    fn carregar_parcelas_periodo(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
+        let hoje = Data::hoje(Fuso::BRASILIA);
+        let periodo = self.periodo.resolver(hoje);
+        let a_receber = self.aba.a_receber();
+
+        let r = if a_receber {
+            motor.consultar(
+                sessao,
+                "financeiro.parcelas_a_receber_no_periodo.v1",
+                &ParcelasAReceberNoPeriodo { periodo },
+            )
+        } else {
+            motor.consultar(
+                sessao,
+                "financeiro.parcelas_a_pagar_no_periodo.v1",
+                &ParcelasAPagarNoPeriodo { periodo },
+            )
+        };
+        match r {
+            Ok(p) => self.parcelas = p,
+            Err(e) => self.erro = Some(e.mensagem),
+        }
+
+        self.baixado_periodo = if a_receber {
+            motor
+                .consultar(
+                    sessao,
+                    "financeiro.total_recebido_no_periodo.v1",
+                    &TotalRecebidoNoPeriodo { periodo },
+                )
+                .unwrap_or(Dinheiro::ZERO)
+        } else {
+            motor
+                .consultar(
+                    sessao,
+                    "financeiro.total_pago_no_periodo.v1",
+                    &TotalPagoNoPeriodo { periodo },
+                )
+                .unwrap_or(Dinheiro::ZERO)
+        };
+
+        // Projeção: soma do saldo em aberto (qualquer vencimento, inclusive já vencido) que
+        // já vence até o fim do período — usa a consulta "em aberto" de sempre (sem filtro
+        // de período nenhum), só filtrada aqui pela data-fim.
+        let abertos: Vec<ItemTituloEmAberto> = if a_receber {
+            motor
+                .consultar(
+                    sessao,
+                    "financeiro.titulos_a_receber_em_aberto.v1",
+                    &TitulosAReceberEmAberto,
+                )
+                .unwrap_or_default()
+        } else {
+            motor
+                .consultar(
+                    sessao,
+                    "financeiro.titulos_a_pagar_em_aberto.v1",
+                    &TitulosAPagarEmAberto,
+                )
+                .unwrap_or_default()
+        };
+        self.projecao_periodo = abertos
+            .iter()
+            .filter(|p| p.vencimento <= periodo.ate)
+            .fold(Dinheiro::ZERO, |acc, p| acc + p.saldo());
     }
 
     /// Alimenta o painel de visão geral: saldos em aberto, o que vence em 7 dias e a série
@@ -608,7 +739,7 @@ pub fn mostrar(
                 Aba::Visao => painel_visao(ui, motor, sessao, estado),
                 Aba::Fluxo => painel_fluxo(ui, motor, sessao, estado),
                 Aba::Bancos => painel_bancos(ui, estado),
-                _ => lista(ui, estado),
+                _ => lista(ui, motor, sessao, estado),
             }
         },
     );
@@ -1268,7 +1399,10 @@ fn kpi(ui: &mut egui::Ui, rotulo: &str, valor: Dinheiro, cor: egui::Color32, apo
         .shadow(sombra_cartao(ui.ctx()))
         .inner_margin(Espaco::E16)
         .show(ui, |ui| {
-            ui.set_width(212.0_f32);
+            // Estica pra ocupar a coluna inteira (`ui.columns` já reservou a largura certa)
+            // — antes era uma largura fixa de 212px, sobrando um vão morto do lado em
+            // qualquer janela mais larga que 3×212px (achado pelo usuário na Visão Geral).
+            ui.set_width(ui.available_width());
             ui.vertical(|ui| {
                 ui.add(Rotulo::campo(rotulo.to_uppercase()));
                 ui.add_space(Espaco::E4);
@@ -1477,37 +1611,45 @@ fn painel_fluxo(
     });
     ui.add_space(Espaco::E12);
 
-    let entrou: Dinheiro = estado
-        .extrato
-        .iter()
-        .filter(|m| !m.valor.e_negativo())
-        .map(|m| m.valor)
-        .fold(Dinheiro::ZERO, |a, b| a + b);
-    let saiu: Dinheiro = estado
-        .extrato
-        .iter()
-        .filter(|m| m.valor.e_negativo())
-        .map(|m| m.valor.abs())
-        .fold(Dinheiro::ZERO, |a, b| a + b);
-    let saldo_total: Dinheiro = estado
+    // Fluxo de caixa é o local de "bater o caixa": o lojista confere o físico contra o
+    // sistema, então os cards aqui são só saldo em caixa e saldo em bancos — nada de
+    // "entrou/saiu no período" (isso mora nos cards de Contas a Receber/Pagar agora,
+    // pedido explícito do usuário).
+    let saldo_caixa: Dinheiro = estado
         .contas_disp
         .iter()
+        .filter(|c| c.e_caixa)
+        .map(|c| c.saldo)
+        .fold(Dinheiro::ZERO, |a, b| a + b);
+    let saldo_bancos: Dinheiro = estado
+        .contas_disp
+        .iter()
+        .filter(|c| !c.e_caixa)
         .map(|c| c.saldo)
         .fold(Dinheiro::ZERO, |a, b| a + b);
 
-    ui.horizontal_wrapped(|ui| {
-        kpi(ui, "Entrou no período", entrou, cores.positivo, None);
-        kpi(ui, "Saiu no período", saiu, cores.negativo, None);
+    ui.columns(2, |col| {
         kpi(
-            ui,
-            "Saldo em caixa + bancos",
-            saldo_total,
-            if saldo_total.e_negativo() {
+            &mut col[0],
+            "Saldo em caixa",
+            saldo_caixa,
+            if saldo_caixa.e_negativo() {
                 cores.negativo
             } else {
                 cores.texto_forte
             },
-            Some("posição realizada agora"),
+            Some("confira contra o caixa físico"),
+        );
+        kpi(
+            &mut col[1],
+            "Saldo em conta bancária",
+            saldo_bancos,
+            if saldo_bancos.e_negativo() {
+                cores.negativo
+            } else {
+                cores.texto_forte
+            },
+            None,
         );
     });
     ui.add_space(Espaco::E16);
@@ -1763,37 +1905,110 @@ fn abas(
     }
 }
 
-fn lista(ui: &mut egui::Ui, estado: &mut EstadoTelaFinanceiro) {
+/// O seletor de período das abas "A receber"/"A pagar" — presets de calendário + uma faixa
+/// digitada (`PresetPeriodo::Personalizado`). Devolve `true` quando o período mudou e a
+/// tela precisa recarregar.
+fn seletor_periodo(ui: &mut egui::Ui, filtro: &mut FiltroPeriodo) -> bool {
+    let mut mudou = false;
+    ui.horizontal_wrapped(|ui| {
+        ui.add(Rotulo::campo("PERÍODO"));
+        for (preset, rot) in [
+            (PresetPeriodo::Dia, "Dia"),
+            (PresetPeriodo::Semana, "Semana"),
+            (PresetPeriodo::Mes, "Mês"),
+            (PresetPeriodo::Trimestre, "Trimestre"),
+            (PresetPeriodo::Semestre, "Semestre"),
+            (PresetPeriodo::Ano, "Ano"),
+            (PresetPeriodo::Personalizado, "Personalizado"),
+        ] {
+            let sel = filtro.preset == preset;
+            let b = if sel {
+                Botao::primario(rot).pequeno()
+            } else {
+                Botao::fantasma(rot).pequeno()
+            };
+            if ui.add(b).clicked() && !sel {
+                filtro.preset = preset;
+                if preset == PresetPeriodo::Personalizado {
+                    let hoje = Data::hoje(Fuso::BRASILIA).to_string();
+                    if filtro.de_personalizado.is_empty() {
+                        filtro.de_personalizado = hoje.clone();
+                    }
+                    if filtro.ate_personalizado.is_empty() {
+                        filtro.ate_personalizado = hoje;
+                    }
+                } else {
+                    mudou = true;
+                }
+            }
+        }
+    });
+    if filtro.preset == PresetPeriodo::Personalizado {
+        ui.add_space(Espaco::E8);
+        ui.horizontal(|ui| {
+            ui.add(Campo::novo("De", &mut filtro.de_personalizado).mascara(Mascara::Data));
+            ui.add_space(Espaco::E8);
+            ui.add(Campo::novo("Até", &mut filtro.ate_personalizado).mascara(Mascara::Data));
+            ui.add_space(Espaco::E8);
+            if ui.add(Botao::secundario("Aplicar")).clicked() {
+                mudou = true;
+            }
+        });
+    }
+    mudou
+}
+
+fn lista(
+    ui: &mut egui::Ui,
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaFinanceiro,
+) {
+    if seletor_periodo(ui, &mut estado.periodo) {
+        estado.carregar_parcelas_periodo(motor, sessao);
+    }
+    ui.add_space(Espaco::E12);
+
+    let hoje = Data::hoje(Fuso::BRASILIA);
+    let periodo = estado.periodo.resolver(hoje);
+    let a_receber = estado.aba.a_receber();
+
+    // Os dois cards pedidos explicitamente pelo usuário: quanto foi de fato recebido/pago
+    // no período (baixas, não vencimento) e a projeção do que ainda vai vencer — nunca
+    // some da tela mesmo com a lista vazia, pra sempre dar pra ver "nada aconteceu nesse
+    // período" com números, não um vazio mudo.
+    let vencidas = estado
+        .parcelas
+        .iter()
+        .filter(|p| p.estado.aceita_baixa() && p.vencimento < hoje)
+        .count();
+    FaixaKpi::nova(vec![
+        CartaoKpi::novo(
+            if a_receber {
+                "Recebido no período"
+            } else {
+                "Pago no período"
+            },
+            estado.baixado_periodo,
+        ),
+        CartaoKpi::contagem("Vencidas", vencidas),
+        CartaoKpi::novo(
+            format!("Projeção até {}", periodo.ate.formatar_curta()),
+            estado.projecao_periodo,
+        ),
+    ])
+    .mostrar(ui);
+    ui.add_space(Espaco::E16);
+
     if estado.parcelas.is_empty() {
-        let msg = if estado.aba.a_receber() {
-            "Nada a receber em aberto."
+        let msg = if a_receber {
+            "Nada a receber nesse período."
         } else {
-            "Nada a pagar em aberto."
+            "Nada a pagar nesse período."
         };
         EstadoVazio::novo(Icone::Dinheiro, msg).mostrar(ui);
         return;
     }
-    let hoje = Data::hoje(Fuso::BRASILIA);
-
-    // Três agregados que a lista já tem em mãos (soma de saldo, contagem de vencidas) e que
-    // antes só davam pra ver rolando a tabela inteira — viram cabeçalho de indicador
-    // (`docs/12-ui-ux.md` §6), mesmo racional do cabeçalho de KPI aplicado à lista de OS.
-    let valor_em_aberto = estado
-        .parcelas
-        .iter()
-        .fold(Dinheiro::ZERO, |acc, p| acc + p.saldo());
-    let vencidas = estado
-        .parcelas
-        .iter()
-        .filter(|p| p.vencimento < hoje)
-        .count();
-    FaixaKpi::nova(vec![
-        CartaoKpi::contagem("Em aberto", estado.parcelas.len()),
-        CartaoKpi::novo("Valor em aberto", valor_em_aberto),
-        CartaoKpi::contagem("Vencidas", vencidas),
-    ])
-    .mostrar(ui);
-    ui.add_space(Espaco::E12);
 
     ui.horizontal(|ui| {
         ui.set_max_width(360.0);
@@ -1853,21 +2068,26 @@ fn lista(ui: &mut egui::Ui, estado: &mut EstadoTelaFinanceiro) {
     }
     if let Some(i) = resposta.linha_clicada {
         let indice = indices[i];
-        estado.dlg = Dlg::Baixar {
-            indice,
-            valor: estado.parcelas[indice].saldo().formatar(),
-            data: Data::hoje(Fuso::BRASILIA).to_string(),
-            meio_pagamento: Some(MeioPagamento::Pix),
-            baixas: Vec::new(),
-            baixas_carregadas: false,
-            motivo_estorno: String::new(),
-        };
+        if estado.parcelas[indice].estado.aceita_baixa() {
+            estado.dlg = Dlg::Baixar {
+                indice,
+                valor: estado.parcelas[indice].saldo().formatar(),
+                data: Data::hoje(Fuso::BRASILIA).to_string(),
+                meio_pagamento: Some(MeioPagamento::Pix),
+                baixas: Vec::new(),
+                baixas_carregadas: false,
+                motivo_estorno: String::new(),
+            };
+        }
+        // Uma parcela já quitada/cancelada/renegociada não abre "dar baixa" — só está na
+        // lista como histórico (pedido explícito do usuário).
     }
 }
 
-/// Etiqueta colorida para o estado de uma parcela em aberto (só `Aberta`/`Parcial` chegam
-/// aqui — `titulos_em_aberto` já filtra o resto): vencida pesa mais que o estado em si, por
-/// isso entra primeiro na escolha do tom.
+/// Etiqueta colorida para o estado de uma parcela — a lista mostra qualquer estado agora
+/// (`parcelas_no_periodo` não filtra), então além de `Aberta`/`Parcial` também chega
+/// `Quitada`/`Cancelada`/`Renegociada` (rótulo neutro, caso padrão). Vencida pesa mais que
+/// o estado em si, por isso entra primeiro na escolha do tom.
 fn etiqueta_estado_parcela(estado: EstadoParcela, vencida: bool) -> Etiqueta {
     match (estado, vencida) {
         (EstadoParcela::Parcial, true) => Etiqueta::negativa("Parcial · vencida"),

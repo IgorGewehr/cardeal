@@ -121,6 +121,159 @@ impl Consulta for TitulosAPagarEmAberto {
     }
 }
 
+/// As parcelas de uma espécie cujo vencimento cai dentro de `periodo`, **em qualquer
+/// estado** — ao contrário de [`titulos_em_aberto`], não esconde `Quitada`/`Cancelada`/
+/// `Renegociada`. Pedido explícito do usuário: as telas de Contas a Receber/Pagar devem
+/// mostrar o que já foi pago/recebido, não só o que ainda está em aberto — só o Fluxo de
+/// Caixa (`ExtratoDisponivel`) é o livro exclusivamente do que foi realizado.
+///
+/// # Errors
+/// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+pub fn parcelas_no_periodo(
+    conexao: &Connection,
+    empresa: Id,
+    especie: EspecieTitulo,
+    periodo: Periodo,
+) -> Resultado<Vec<ItemTituloEmAberto>> {
+    let mut stmt = conexao
+        .prepare(
+            "SELECT p.id, p.titulo, p.numero, t.contraparte_tipo, t.contraparte_id,
+                    p.vencimento, p.valor, p.valor_baixado, p.estado
+             FROM financeiro_parcela p
+             JOIN financeiro_titulo t ON t.id = p.titulo
+             WHERE t.empresa = ?1 AND t.especie = ?2 AND p.vencimento BETWEEN ?3 AND ?4
+             ORDER BY p.vencimento ASC
+             LIMIT 1000",
+        )
+        .map_err(persist)?;
+    let linhas = stmt
+        .query_map(
+            params![
+                blob(empresa),
+                especie_txt(especie),
+                i64::from(periodo.de.em_dias()),
+                i64::from(periodo.ate.em_dias()),
+            ],
+            |r| {
+                let contraparte = contraparte_join_opt(r.get(3)?, r.get(4)?);
+                Ok(ItemTituloEmAberto {
+                    parcela: id_de(r.get(0)?),
+                    titulo: id_de(r.get(1)?),
+                    numero: u16::try_from(r.get::<_, i64>(2)?).unwrap_or(1),
+                    especie,
+                    contraparte,
+                    vencimento: data_de(r.get(5)?),
+                    valor_original: Dinheiro::centavos(r.get(6)?),
+                    valor_baixado: Dinheiro::centavos(r.get(7)?),
+                    estado: estado_de(&r.get::<_, String>(8)?),
+                })
+            },
+        )
+        .map_err(persist)?;
+    linhas
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(persist)
+}
+
+/// As parcelas a receber (qualquer estado) com vencimento no período — a listagem da aba
+/// "A receber".
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParcelasAReceberNoPeriodo {
+    /// A janela de vencimento.
+    pub periodo: Periodo,
+}
+
+impl Consulta for ParcelasAReceberNoPeriodo {
+    type Saida = Vec<ItemTituloEmAberto>;
+    const PERMISSAO: &'static str = "financeiro.receber.ver";
+
+    fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        parcelas_no_periodo(conexao, ctx.empresa, EspecieTitulo::Receber, self.periodo)
+    }
+}
+
+/// As parcelas a pagar (qualquer estado) com vencimento no período — a listagem da aba "A
+/// pagar".
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParcelasAPagarNoPeriodo {
+    /// A janela de vencimento.
+    pub periodo: Periodo,
+}
+
+impl Consulta for ParcelasAPagarNoPeriodo {
+    type Saida = Vec<ItemTituloEmAberto>;
+    const PERMISSAO: &'static str = "financeiro.pagar.ver";
+
+    fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        parcelas_no_periodo(conexao, ctx.empresa, EspecieTitulo::Pagar, self.periodo)
+    }
+}
+
+/// A soma do que foi efetivamente baixado (recebido/pago) de uma espécie, na janela de
+/// datas de **baixa** (não de vencimento) — o "quanto entrou/saiu no período" das telas de
+/// Contas a Receber/Pagar. Mesma fonte de `TotalPorCategoriaNoPeriodo`, sem o agrupamento
+/// por categoria/mês que aquela consulta faz para o gráfico.
+///
+/// # Errors
+/// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+pub fn total_baixado_no_periodo(
+    conexao: &Connection,
+    empresa: Id,
+    especie: EspecieTitulo,
+    periodo: Periodo,
+) -> Resultado<Dinheiro> {
+    conexao
+        .query_row(
+            "SELECT COALESCE(SUM(b.valor_recebido), 0)
+             FROM financeiro_baixa b
+             JOIN financeiro_parcela p ON p.id = b.parcela
+             JOIN financeiro_titulo t ON t.id = p.titulo
+             WHERE t.empresa = ?1 AND t.especie = ?2 AND b.estornada_em IS NULL
+                   AND b.data BETWEEN ?3 AND ?4",
+            params![
+                blob(empresa),
+                especie_txt(especie),
+                i64::from(periodo.de.em_dias()),
+                i64::from(periodo.ate.em_dias()),
+            ],
+            |r| r.get::<_, i64>(0),
+        )
+        .map(Dinheiro::centavos)
+        .map_err(persist)
+}
+
+/// Quanto foi recebido no período (baixas de parcelas a receber).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TotalRecebidoNoPeriodo {
+    /// A janela de datas de baixa.
+    pub periodo: Periodo,
+}
+
+impl Consulta for TotalRecebidoNoPeriodo {
+    type Saida = Dinheiro;
+    const PERMISSAO: &'static str = "financeiro.receber.ver";
+
+    fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        total_baixado_no_periodo(conexao, ctx.empresa, EspecieTitulo::Receber, self.periodo)
+    }
+}
+
+/// Quanto foi pago no período (baixas de parcelas a pagar).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TotalPagoNoPeriodo {
+    /// A janela de datas de baixa.
+    pub periodo: Periodo,
+}
+
+impl Consulta for TotalPagoNoPeriodo {
+    type Saida = Dinheiro;
+    const PERMISSAO: &'static str = "financeiro.pagar.ver";
+
+    fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        total_baixado_no_periodo(conexao, ctx.empresa, EspecieTitulo::Pagar, self.periodo)
+    }
+}
+
 /// O título mais recente originado por um agregado de outro módulo (`origem_modulo` +
 /// `origem_id`) — o mesmo par de correlação que `Titulo` já carrega desde a origem
 /// (`docs/19-estado-e-processo.md` §1.1). Usado por telas de outro módulo (ex.: o detalhe de
