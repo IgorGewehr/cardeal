@@ -12,7 +12,7 @@
 use cardeal_cliente::{MotorLocal, SessaoLocal};
 use cardeal_kernel::Id;
 use cardeal_modkit::Icone;
-use cardeal_ui::atoms::{Botao, Etiqueta, Rotulo, ATALHO_NOVO};
+use cardeal_ui::atoms::{Botao, Divisor, Etiqueta, Rotulo, ATALHO_NOVO};
 use cardeal_ui::molecules::{
     Campo, CartaoKpi, EstadoVazio, Mascara, SecaoExpansivel, SeletorOpcao,
 };
@@ -584,7 +584,7 @@ fn dialogo(
 
             if f.modo == Modo::Ver {
                 ui.add_space(Espaco::E16);
-                ui.separator();
+                ui.add(Divisor::novo());
                 ui.add_space(Espaco::E12);
                 ui.columns(2, |c| {
                     kv(&mut c[0], "Papéis", &f.papeis);

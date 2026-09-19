@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use cardeal_cliente::{MotorLocal, SessaoLocal};
 use cardeal_kernel::{Id, Percentual};
 use cardeal_modkit::Icone;
-use cardeal_ui::atoms::{Botao, Rotulo, ValorDinheiro, ATALHO_NOVO};
+use cardeal_ui::atoms::{Botao, Divisor, Rotulo, ValorDinheiro, ATALHO_NOVO};
 use cardeal_ui::molecules::{Campo, EstadoVazio, SeletorOpcao};
 use cardeal_ui::organisms::{notificar, ColunaGrade, Dialogo, Grade, LayoutTela, Notificacao};
 use cardeal_ui::tokens::{Espaco, TemaUi};
@@ -431,7 +431,7 @@ fn dialogo_ver(
                 }
 
                 ui.add_space(Espaco::E12);
-                ui.separator();
+                ui.add(Divisor::novo());
                 ui.add_space(Espaco::E12);
                 acoes(ui, motor, sessao, estado, &p);
             },
@@ -614,7 +614,7 @@ fn dialogo_tabelas(
 
             if let Some(tab) = estado.tab_sel {
                 ui.add_space(Espaco::E16);
-                ui.separator();
+                ui.add(Divisor::novo());
                 ui.add_space(Espaco::E12);
                 ui.add(Rotulo::titulo_secao("Regras de preço"));
                 ui.add_space(Espaco::E4);

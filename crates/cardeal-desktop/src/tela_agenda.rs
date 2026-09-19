@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 use cardeal_cliente::{MotorLocal, SessaoLocal};
 use cardeal_kernel::{Data, Fuso, Hora, Id, Instante};
-use cardeal_ui::atoms::{Botao, Rotulo, ATALHO_NOVO};
+use cardeal_ui::atoms::{Botao, Divisor, Rotulo, ATALHO_NOVO};
 use cardeal_ui::molecules::{Campo, Mascara, SeletorOpcao};
 use cardeal_ui::organisms::{
     notificar, AcaoAgenda, AgendaCalendario, AgendaMes, BlocoAgenda, Dialogo, LayoutTela,
@@ -678,7 +678,7 @@ fn dialogo_ver(
                 );
             });
             ui.add_space(Espaco::E12);
-            ui.separator();
+            ui.add(Divisor::novo());
             ui.add_space(Espaco::E12);
             acoes_estado(ui, motor, sessao, _estado, &c);
         },

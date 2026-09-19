@@ -9,7 +9,7 @@ use cardeal_cliente::{MotorLocal, SessaoLocal};
 use cardeal_kernel::{Competencia, Data, Dinheiro, Fuso, Id, Periodo};
 use cardeal_ledger::Contraparte;
 use cardeal_modkit::Icone;
-use cardeal_ui::atoms::{Botao, Etiqueta, Rotulo, ValorDinheiro, ATALHO_NOVO};
+use cardeal_ui::atoms::{Botao, Divisor, Etiqueta, Rotulo, ValorDinheiro, ATALHO_NOVO};
 use cardeal_ui::molecules::{
     Abas, Campo, CartaoKpi, EstadoVazio, Mascara, SecaoExpansivel, SeletorOpcao,
 };
@@ -2385,7 +2385,7 @@ fn dialogo_baixar(
                     kv(&mut c[1], "Saldo", &p.saldo().formatar_com_simbolo());
                 });
                 ui.add_space(Espaco::E16);
-                ui.separator();
+                ui.add(Divisor::novo());
                 ui.add_space(Espaco::E12);
                 ui.add(Rotulo::titulo_secao("Dar baixa"));
                 ui.add_space(Espaco::E8);

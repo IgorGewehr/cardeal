@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use cardeal_cliente::{MotorLocal, SessaoLocal};
 use cardeal_kernel::{Dinheiro, Id};
 use cardeal_modkit::Icone;
-use cardeal_ui::atoms::{Botao, Etiqueta, Rotulo, Tom, ValorDinheiro, ATALHO_NOVO};
+use cardeal_ui::atoms::{Botao, Caixa, Divisor, Etiqueta, Rotulo, Tom, ValorDinheiro, ATALHO_NOVO};
 use cardeal_ui::molecules::{
     Campo, EstadoVazio, Mascara, OpcaoBusca, SecaoExpansivel, SeletorBusca, SeletorOpcao,
 };
@@ -701,7 +701,7 @@ fn dialogo_ver(
 
                 if matches!(n.estado, EstadoNotaEntrada::Conferida) {
                     ui.add_space(Espaco::E12);
-                    ui.separator();
+                    ui.add(Divisor::novo());
                     ui.add_space(Espaco::E12);
                     ui.add(Rotulo::titulo_secao("Confirmar entrada"));
                     ui.add_space(Espaco::E8);
@@ -709,12 +709,10 @@ fn dialogo_ver(
                         .opcoes(ops_local.clone())
                         .mostrar(ui);
                     ui.add_space(Espaco::E8);
-                    // Sem atom de checkbox no design system ainda — o checkbox cru do egui já
-                    // herda a paleta do tema via `instalar_estilo` (`tokens/estilo.rs`).
-                    ui.checkbox(
+                    ui.add(Caixa::nova(
                         &mut estado.pago_no_ato,
                         "Nota já foi paga — baixar o título a pagar automaticamente",
-                    );
+                    ));
                     if estado.pago_no_ato {
                         ui.add(
                             Rotulo::campo("O título nasce quitado em vez de pendente.")

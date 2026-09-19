@@ -9,7 +9,7 @@
 use cardeal_cliente::{MotorLocal, SessaoLocal};
 use cardeal_kernel::{Fuso, Id, Preco, Quantidade};
 use cardeal_modkit::Icone;
-use cardeal_ui::atoms::{Botao, Etiqueta, Rotulo, Tom, ATALHO_NOVO};
+use cardeal_ui::atoms::{Botao, Divisor, Etiqueta, Rotulo, Tom, ATALHO_NOVO};
 use cardeal_ui::molecules::{Abas, Campo, CartaoKpi, EstadoVazio, SecaoExpansivel, SeletorOpcao};
 use cardeal_ui::organisms::{
     notificar, ColunaGrade, Dialogo, Direcao, FaixaKpi, Grade, LayoutTela, Notificacao,
@@ -540,7 +540,7 @@ fn dialogo_ver(
             // aparece aqui de novo quando essa consulta existir); até lá não arriscamos
             // mostrar/editar campos que não temos como ler de volta.
             ui.add_space(Espaco::E16);
-            ui.separator();
+            ui.add(Divisor::novo());
             ui.add_space(Espaco::E12);
             ui.add(Rotulo::titulo_secao("Movimentações recentes"));
             ui.add_space(Espaco::E8);
@@ -693,7 +693,7 @@ fn dialogo_repor(
                 });
 
                 ui.add_space(Espaco::E8);
-                ui.separator();
+                ui.add(Divisor::novo());
                 ui.add_space(Espaco::E12);
                 ui.add(Rotulo::titulo_secao("Registrar entrada"));
                 ui.add_space(Espaco::E8);
@@ -720,7 +720,7 @@ fn dialogo_repor(
                 }
 
                 ui.add_space(Espaco::E16);
-                ui.separator();
+                ui.add(Divisor::novo());
                 ui.add_space(Espaco::E12);
                 ui.add(Rotulo::titulo_secao("Ponto de pedido"));
                 ui.add_space(Espaco::E8);

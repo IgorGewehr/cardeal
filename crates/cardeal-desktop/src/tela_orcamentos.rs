@@ -9,7 +9,7 @@ use cardeal_cliente::{IdentidadeVisual, MotorLocal, SessaoLocal};
 use cardeal_kernel::{Data, Dinheiro, Fuso, Id, Instante, Percentual, Preco, Quantidade};
 use cardeal_modkit::Icone;
 use cardeal_pdf::{gerar_orcamento, IdentidadeEmpresa, ItemPdf, OrcamentoPdf};
-use cardeal_ui::atoms::{Botao, Etiqueta, Rotulo, Tom, ValorDinheiro};
+use cardeal_ui::atoms::{Botao, Divisor, Etiqueta, Rotulo, Tom, ValorDinheiro};
 use cardeal_ui::molecules::{Campo, EstadoVazio, SeletorOpcao};
 use cardeal_ui::organisms::{notificar, ColunaGrade, Dialogo, Grade, Notificacao};
 use cardeal_ui::tokens::{Espaco, Raio, TemaUi};
@@ -426,7 +426,7 @@ fn filtros(
                         estado.carregar(motor, sessao);
                     }
                 }
-                ui.separator();
+                ui.add(Divisor::novo());
                 for (d, rot) in [(0_i64, "Sempre"), (30, "30 d"), (90, "90 d"), (365, "12 m")] {
                     let sel = estado.f_dias == d;
                     let b = if sel {

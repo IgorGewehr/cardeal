@@ -15,39 +15,22 @@
 "egui::ComboBox" = 1
 "egui::Frame" = 1
 "ui.painter(" = 1
-"ui.separator(" = 1
-
-[arquivo."tela_clientes.rs"]
-"ui.separator(" = 1
 
 [arquivo."tela_compras.rs"]
 "egui::Frame" = 1
 "egui::Stroke" = 1
-"ui.checkbox(" = 1
-"ui.separator(" = 1
-
-[arquivo."tela_estoque.rs"]
-"ui.separator(" = 3
 
 [arquivo."tela_financeiro.rs"]
 "Color32" = 1
 "egui::Frame" = 4
 "egui::Stroke" = 2
 "ui.painter(" = 1
-"ui.separator(" = 1
 
 [arquivo."tela_orcamentos.rs"]
 "Color32" = 1
 "egui::Frame" = 2
 "egui::Stroke" = 1
-"ui.separator(" = 1
-
-[arquivo."tela_os.rs"]
-"ui.separator(" = 1
 
 [arquivo."tela_settings.rs"]
 "egui::Frame" = 3
 "egui::Stroke" = 2
-
-[arquivo."tela_vendas.rs"]
-"ui.separator(" = 2

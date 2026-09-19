@@ -8,7 +8,7 @@ use cardeal_cliente::{IdentidadeVisual, MotorLocal, SessaoLocal, UsuarioResumo};
 use cardeal_kernel::{Data, Dinheiro, Fuso, Id, Instante, Percentual, Preco, Quantidade};
 use cardeal_modkit::Icone;
 use cardeal_pdf::{gerar_comprovante_os, ComprovanteOsPdf, IdentidadeEmpresa, ItemPdf};
-use cardeal_ui::atoms::{Botao, Etiqueta, Rotulo, Tom, ValorDinheiro, ATALHO_NOVO};
+use cardeal_ui::atoms::{Botao, Divisor, Etiqueta, Rotulo, Tom, ValorDinheiro, ATALHO_NOVO};
 use cardeal_ui::molecules::{
     Abas, Campo, CartaoKpi, EstadoVazio, Mascara, OpcaoBusca, SecaoExpansivel, SeletorBusca,
     SeletorOpcao,
@@ -1189,7 +1189,7 @@ fn dialogo_nova(
                         .mostrar(ui);
                 }
                 ui.add_space(Espaco::E16);
-                ui.separator();
+                ui.add(Divisor::novo());
                 ui.add_space(Espaco::E12);
                 ui.add(
                     Campo::novo(
