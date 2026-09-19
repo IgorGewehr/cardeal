@@ -221,7 +221,10 @@ pub(super) fn painel_resultados(ui: &mut egui::Ui, estado: &mut EstadoTelaPdv) {
             (
                 p.produto,
                 p.nome.clone(),
-                format!("saldo {}", p.disponivel.formatar(0)),
+                match &p.codigo_barras {
+                    Some(c) => format!("{c} · saldo {}", p.disponivel.formatar(0)),
+                    None => format!("saldo {}", p.disponivel.formatar(0)),
+                },
                 p.disponivel <= Quantidade::ZERO,
             )
         })
@@ -261,6 +264,7 @@ pub(super) fn itens(ui: &mut egui::Ui, estado: &mut EstadoTelaPdv) {
     let fraco = ui.cores().texto_fraco;
     let linhas = &estado.carrinho;
     let resp = Grade::nova(vec![
+        ColunaGrade::nova("Código").largura(150.0),
         ColunaGrade::nova("Produto"),
         ColunaGrade::nova("Qtd").largura(80.0).numero(),
         ColunaGrade::nova("Unit.").largura(110.0).numero(),
@@ -279,6 +283,10 @@ pub(super) fn itens(ui: &mut egui::Ui, estado: &mut EstadoTelaPdv) {
                 r
             }
         };
+        linha.col(|ui| {
+            let codigo = l.codigo.clone().unwrap_or_else(|| "—".to_owned());
+            ui.add(rotulo(Papel::Codigo, codigo));
+        });
         linha.col(|ui| {
             ui.add(rotulo(Papel::Interface, l.nome.clone()));
         });

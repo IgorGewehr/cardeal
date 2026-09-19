@@ -215,11 +215,14 @@ pub(super) fn adicionar(
     let Some(cupom) = garantir_cupom(ctx, motor, sessao, estado) else {
         return false;
     };
-    let nome = estado
+    let (nome, codigo) = estado
         .produtos
         .iter()
         .find(|p| p.produto == produto)
-        .map_or_else(|| "Produto".to_owned(), |p| p.nome.clone());
+        .map_or_else(
+            || ("Produto".to_owned(), None),
+            |p| (p.nome.clone(), p.codigo_barras.clone()),
+        );
 
     match motor.executar(
         sessao,
@@ -240,6 +243,7 @@ pub(super) fn adicionar(
             estado.carrinho.push(Linha {
                 item,
                 nome,
+                codigo,
                 quantidade,
                 preco: preco_unitario,
                 desconto: Percentual::ZERO,

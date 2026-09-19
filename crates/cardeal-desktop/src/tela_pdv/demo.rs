@@ -21,7 +21,7 @@ pub const CENARIOS: [&str; 6] = [
     "fechado",
 ];
 
-fn produto(nome: &str, saldo: i64) -> ItemProdutoComSaldo {
+fn produto(nome: &str, saldo: i64, codigo: &str) -> ItemProdutoComSaldo {
     ItemProdutoComSaldo {
         produto: Id::novo(),
         nome: nome.to_owned(),
@@ -29,15 +29,17 @@ fn produto(nome: &str, saldo: i64) -> ItemProdutoComSaldo {
         disponivel: Quantidade::UM.vezes(saldo),
         reservado: Quantidade::ZERO,
         custo_medio: "1,00".parse().unwrap_or_else(|_| unreachable!()),
+        codigo_barras: Some(codigo.to_owned()),
     }
 }
 
-fn linha(nome: &str, qtd: &str, preco: &str, pct: i64) -> Linha {
+fn linha(nome: &str, codigo: &str, qtd: &str, preco: &str, pct: i64) -> Linha {
     let quantidade: Quantidade = qtd.parse().unwrap_or_else(|_| unreachable!());
     let preco: Preco = preco.parse().unwrap_or_else(|_| unreachable!());
     let mut l = Linha {
         item: Id::novo(),
         nome: nome.to_owned(),
+        codigo: Some(codigo.to_owned()),
         quantidade,
         preco,
         desconto: Percentual::ZERO,
@@ -83,19 +85,19 @@ pub fn estado(cenario: &str) -> Option<EstadoTelaPdv> {
     e.tabela_sel = Some(tabela);
     e.local_sel = Some(local);
     e.produtos = vec![
-        produto("Refrigerante Cola 2L", 48),
-        produto("Refrigerante Guaraná 2L", 0),
-        produto("Refrigerante Cola Lata 350ml", 120),
-        produto("Pão Francês (kg)", 12),
-        produto("Achocolatado 400g", 30),
-        produto("Açúcar Cristal 1kg", 64),
+        produto("Refrigerante Cola 2L", 48, "7894900011517"),
+        produto("Refrigerante Guaraná 2L", 0, "7894900027013"),
+        produto("Refrigerante Cola Lata 350ml", 120, "7894900010015"),
+        produto("Pão Francês (kg)", 12, "2000000000015"),
+        produto("Achocolatado 400g", 30, "7891234567895"),
+        produto("Açúcar Cristal 1kg", 64, "7896065700018"),
     ];
 
     let com_itens = |e: &mut EstadoTelaPdv| {
         e.carrinho = vec![
-            linha("Refrigerante Cola 2L", "2", "6,90", 0),
-            linha("Pão Francês (kg)", "0,450", "18,90", 0),
-            linha("Achocolatado 400g", "1", "9,50", 5),
+            linha("Refrigerante Cola 2L", "7894900011517", "2", "6,90", 0),
+            linha("Pão Francês (kg)", "2000000000015", "0,450", "18,90", 0),
+            linha("Achocolatado 400g", "7891234567895", "1", "9,50", 5),
         ];
         e.linha_sel = Some(1);
         e.cupom = Some(Id::novo());

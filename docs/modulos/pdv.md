@@ -244,9 +244,9 @@ Pagamento: `1..4` escolhem a forma (dinheiro, Pix, débito, crédito), `Enter` c
 não tem foco**; ao digitar um valor, valem como número. Só o dinheiro dá troco, e o troco aparece
 grande depois da venda.
 
-Diferenças em relação ao mockup abaixo: o campo de bipe fica **no topo** da lista (não embaixo da
-tabela), para nunca sair da tela; e falta a coluna **Código**, porque `ProdutosComSaldo` ainda não
-devolve `codigo_barras` (mudança em `mod-estoque`). Testes: `cargo test -p cardeal-desktop` cobre a
+Diferença em relação ao mockup abaixo: o campo de bipe fica **no topo** da lista (não embaixo da
+tabela), para nunca sair da tela. A coluna **Código** vem de `ProdutosComSaldo.codigo_barras`.
+Testes: `cargo test -p cardeal-desktop` cobre a
 interpretação do bipe, a conta do troco e o fluxo de teclas do pagamento com eventos reais do egui.
 
 ### Venda

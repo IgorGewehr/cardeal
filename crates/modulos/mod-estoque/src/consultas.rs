@@ -29,6 +29,8 @@ pub struct ItemProdutoComSaldo {
     pub reservado: Quantidade,
     /// Uma aproximação do custo médio (ver nota do tipo).
     pub custo_medio: Preco,
+    /// O código de barras (GTIN) — o que a tela de PDV mostra na coluna "Código" do cupom.
+    pub codigo_barras: Option<String>,
 }
 
 /// Todos os produtos ativos com saldo agregado, por nome. Sem cursor real ainda, mesma
@@ -46,11 +48,12 @@ pub fn produtos_com_saldo(
             "SELECT p.id, p.nome, p.ncm,
                     COALESCE(SUM(s.quantidade_disponivel), 0),
                     COALESCE(SUM(s.quantidade_reservada), 0),
-                    COALESCE(MAX(s.custo_medio), 0)
+                    COALESCE(MAX(s.custo_medio), 0),
+                    p.codigo_barras
              FROM estoque_produto p
              LEFT JOIN estoque_saldo_local s ON s.produto = p.id
              WHERE p.empresa = ?1 AND p.ativo = 1
-             GROUP BY p.id, p.nome, p.ncm
+             GROUP BY p.id, p.nome, p.ncm, p.codigo_barras
              ORDER BY p.nome ASC
              LIMIT 500",
         )
@@ -64,6 +67,7 @@ pub fn produtos_com_saldo(
                 disponivel: Quantidade::interna(r.get::<_, i64>(3)?),
                 reservado: Quantidade::interna(r.get::<_, i64>(4)?),
                 custo_medio: Preco::interna(r.get::<_, i64>(5)?),
+                codigo_barras: r.get(6)?,
             })
         })
         .map_err(persist)?;

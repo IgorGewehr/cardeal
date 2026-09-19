@@ -7,6 +7,8 @@ use super::*;
 pub(super) struct Linha {
     pub(super) item: Id,
     pub(super) nome: String,
+    /// O código de barras, para a coluna "Código" do cupom.
+    pub(super) codigo: Option<String>,
     pub(super) quantidade: Quantidade,
     pub(super) preco: Preco,
     pub(super) desconto: Percentual,

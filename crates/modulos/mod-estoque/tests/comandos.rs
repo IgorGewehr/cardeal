@@ -520,6 +520,21 @@ fn criar_produto_com_codigo_de_barras_e_encontrado_pelo_bipe() {
     )
     .unwrap();
     assert!(nenhum.is_none());
+
+    // A lista do PDV traz o código de barras (coluna "Código" do cupom).
+    let lista: Vec<ItemProdutoComSaldo> = postcard::from_bytes(
+        &d.executar_consulta(
+            "estoque.produtos_com_saldo.v1",
+            &carga(&ProdutosComSaldo),
+            &s,
+            &ambiente(empresa),
+            arm.leitor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let cola = lista.iter().find(|p| p.produto == produto.produto).unwrap();
+    assert_eq!(cola.codigo_barras.as_deref(), Some("7894900011517"));
 }
 
 #[test]

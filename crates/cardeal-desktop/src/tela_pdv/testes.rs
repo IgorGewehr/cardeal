@@ -13,6 +13,7 @@ fn linha(qtd: &str, preco: &str) -> Linha {
     Linha {
         item: Id::novo(),
         nome: "Produto".to_owned(),
+        codigo: None,
         quantidade,
         preco,
         desconto: Percentual::ZERO,
@@ -276,6 +277,7 @@ fn busca_por_nome_ignora_acento_e_caixa_e_memoriza() {
             disponivel: Quantidade::UM,
             reservado: Quantidade::ZERO,
             custo_medio: "1,00".parse().unwrap(),
+            codigo_barras: None,
         })
         .collect();
     let mut e = EstadoTelaPdv {
