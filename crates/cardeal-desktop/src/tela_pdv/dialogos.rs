@@ -17,6 +17,8 @@ pub(super) fn dialogos(
         Dlg::Pagamento(_) => dialogo_pagamento(ctx, estado),
         Dlg::Desconto { .. } => dialogo_desconto(ctx, motor, sessao, estado),
         Dlg::CancelarCupom { .. } => dialogo_cancelar_cupom(ctx, motor, sessao, estado),
+        Dlg::FecharCaixa { .. } => dialogo_fechar_caixa(ctx, motor, sessao, estado),
+        Dlg::Sangria { .. } => dialogo_sangria(ctx, motor, sessao, estado),
     }
 }
 
@@ -320,6 +322,211 @@ pub(super) fn dialogo_cancelar_cupom(
                     confirmar(estado);
                 }
                 if ui.add(Botao::secundario("Voltar").atalho("Esc")).clicked() {
+                    estado.dlg = Dlg::Fechado;
+                }
+            },
+        );
+    if fechar {
+        estado.dlg = Dlg::Fechado;
+        estado.foco_entrada = true;
+    }
+}
+
+/// `F12` com o caixa aberto. A contagem é **cega**: o esperado só aparece depois de fechar
+/// (`docs/modulos/financeiro.md`), então o operador não ajusta o que conta ao que o sistema
+/// espera. O motivo só é exigido pelo backend se a quebra passar da tolerância — que o
+/// operador não tem como saber antes —, então o campo fica sempre à vista.
+pub(super) fn dialogo_fechar_caixa(
+    ctx: &egui::Context,
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaPdv,
+) {
+    let Some(sessao_caixa) = estado.sessao_aberta() else {
+        estado.dlg = Dlg::Fechado;
+        return;
+    };
+    let confirmar = |estado: &mut EstadoTelaPdv| {
+        let Dlg::FecharCaixa { contado, motivo } = &estado.dlg else {
+            return;
+        };
+        let Ok(valor_contado) = contado.trim().parse::<Dinheiro>() else {
+            notificar(
+                ctx,
+                Notificacao::aviso("Informe o valor contado (ex.: 350,00)."),
+            );
+            return;
+        };
+        let motivo = Some(motivo.trim().to_owned()).filter(|m| !m.is_empty());
+        match motor.executar(
+            sessao,
+            "financeiro.fechar_caixa.v1",
+            &FecharCaixa {
+                sessao: sessao_caixa,
+                valor_contado,
+                motivo,
+            },
+        ) {
+            Ok(CaixaFoiFechado {
+                valor_esperado,
+                quebra,
+                ..
+            }) => {
+                estado.dlg = Dlg::Fechado;
+                estado.carregar(motor, sessao);
+                let detalhe = format!(
+                    "Esperado {} · contado {}",
+                    valor_esperado.formatar_com_simbolo(),
+                    valor_contado.formatar_com_simbolo()
+                );
+                let aviso = if quebra == Dinheiro::ZERO {
+                    Notificacao::sucesso("Caixa fechado — sem diferença")
+                } else if quebra.e_negativo() {
+                    Notificacao::aviso(format!(
+                        "Caixa fechado — faltam {}",
+                        quebra.abs().formatar_com_simbolo()
+                    ))
+                } else {
+                    Notificacao::aviso(format!(
+                        "Caixa fechado — sobram {}",
+                        quebra.formatar_com_simbolo()
+                    ))
+                };
+                notificar(ctx, aviso.detalhe(detalhe));
+            }
+            // Ex.: quebra acima da tolerância sem motivo — o diálogo continua aberto.
+            Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
+        }
+    };
+
+    let fechar = Dialogo::nova("Fechar caixa")
+        .descricao("Conte o dinheiro da gaveta e informe o total. O esperado só aparece depois.")
+        .pequeno()
+        .mostrar(
+            ctx,
+            estado,
+            |ui, estado| {
+                let Dlg::FecharCaixa { contado, motivo } = &mut estado.dlg else {
+                    return;
+                };
+                let resp = ui.add(Campo::novo("Valor contado", contado).marcador("0,00"));
+                if !resp.has_focus() && motivo.is_empty() {
+                    resp.request_focus();
+                }
+                ui.add_space(Espaco::E12);
+                let dica = format!(
+                    "Motivo da diferença (obrigatório acima de {})",
+                    TOLERANCIA_QUEBRA.formatar_com_simbolo()
+                );
+                let resp_motivo = ui.add(Campo::novo(dica, motivo));
+                if (resp.lost_focus() || resp_motivo.lost_focus()) && enter_pressionado(ui) {
+                    confirmar(estado);
+                }
+            },
+            |ui, estado| {
+                if ui
+                    .add(Botao::primario("Fechar caixa").atalho("Enter"))
+                    .clicked()
+                {
+                    confirmar(estado);
+                }
+                if ui.add(Botao::secundario("Voltar").atalho("Esc")).clicked() {
+                    estado.dlg = Dlg::Fechado;
+                }
+            },
+        );
+    if fechar {
+        estado.dlg = Dlg::Fechado;
+        estado.foco_entrada = true;
+    }
+}
+
+/// `F9`: retirada de dinheiro da gaveta (`financeiro.registrar_sangria.v1`).
+pub(super) fn dialogo_sangria(
+    ctx: &egui::Context,
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaPdv,
+) {
+    let Some(sessao_caixa) = estado.sessao_aberta() else {
+        estado.dlg = Dlg::Fechado;
+        return;
+    };
+    let confirmar = |estado: &mut EstadoTelaPdv| {
+        let Dlg::Sangria { valor, motivo } = &estado.dlg else {
+            return;
+        };
+        let valor = match valor.trim().parse::<Dinheiro>() {
+            Ok(v) if v > Dinheiro::ZERO => v,
+            _ => {
+                notificar(
+                    ctx,
+                    Notificacao::aviso("Informe o valor retirado (ex.: 200,00)."),
+                );
+                return;
+            }
+        };
+        let motivo = motivo.trim().to_owned();
+        if motivo.is_empty() {
+            notificar(ctx, Notificacao::aviso("Informe o motivo da sangria."));
+            return;
+        }
+        match motor.executar(
+            sessao,
+            "financeiro.registrar_sangria.v1",
+            &RegistrarSangria {
+                sessao: sessao_caixa,
+                valor,
+                motivo,
+            },
+        ) {
+            Ok(_) => {
+                estado.dlg = Dlg::Fechado;
+                estado.foco_entrada = true;
+                notificar(
+                    ctx,
+                    Notificacao::sucesso(format!(
+                        "Sangria de {} registrada",
+                        valor.formatar_com_simbolo()
+                    )),
+                );
+            }
+            Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
+        }
+    };
+
+    let fechar = Dialogo::nova("Sangria")
+        .descricao("Retirada de dinheiro da gaveta. Fica registrada com o motivo.")
+        .pequeno()
+        .mostrar(
+            ctx,
+            estado,
+            |ui, estado| {
+                let Dlg::Sangria { valor, motivo } = &mut estado.dlg else {
+                    return;
+                };
+                let resp = ui.add(Campo::novo("Valor", valor).marcador("0,00"));
+                if !resp.has_focus() && motivo.is_empty() {
+                    resp.request_focus();
+                }
+                ui.add_space(Espaco::E12);
+                let resp_motivo =
+                    ui.add(Campo::novo("Motivo", motivo).marcador("Depósito no cofre"));
+                if (resp.lost_focus() || resp_motivo.lost_focus()) && enter_pressionado(ui) {
+                    confirmar(estado);
+                }
+            },
+            |ui, estado| {
+                if ui
+                    .add(Botao::primario("Registrar sangria").atalho("Enter"))
+                    .clicked()
+                {
+                    confirmar(estado);
+                }
+                if ui
+                    .add(Botao::secundario("Cancelar").atalho("Esc"))
+                    .clicked()
+                {
                     estado.dlg = Dlg::Fechado;
                 }
             },

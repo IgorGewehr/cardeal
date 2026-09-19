@@ -301,3 +301,77 @@ fn busca_por_nome_ignora_acento_e_caixa_e_memoriza() {
     e.atualizar_resultados();
     assert!(e.resultados.1.is_empty());
 }
+
+// ── teclas da tela de venda ───────────────────────────────────────────────────
+
+/// Roda `atalhos` num quadro com as teclas dadas e devolve o estado resultante.
+fn apertar(mut estado: EstadoTelaPdv, teclas: &[egui::Key]) -> EstadoTelaPdv {
+    let ctx = egui::Context::default();
+    let entrada = egui::RawInput {
+        events: teclas.iter().map(|k| tecla(*k)).collect(),
+        ..Default::default()
+    };
+    let _ = ctx.run(entrada, |ctx| atalhos(ctx, &mut estado));
+    estado
+}
+
+fn caixa_aberto() -> EstadoTelaPdv {
+    let caixa = Id::novo();
+    EstadoTelaPdv {
+        caixas: vec![mod_financeiro::ItemCaixa {
+            caixa,
+            nome: "Caixa 1".to_owned(),
+            conta_razao: Id::novo(),
+            sessao_aberta: Some(Id::novo()),
+        }],
+        caixa_sel: Some(caixa),
+        ..EstadoTelaPdv::default()
+    }
+}
+
+fn pediu(e: &EstadoTelaPdv, f: impl Fn(&Acao) -> bool) -> bool {
+    e.pendentes.iter().any(f)
+}
+
+#[test]
+fn f9_pede_sangria_e_f12_pede_fechamento() {
+    let e = apertar(caixa_aberto(), &[egui::Key::F9]);
+    assert!(pediu(&e, |a| matches!(a, Acao::AbrirSangria)));
+    let e = apertar(caixa_aberto(), &[egui::Key::F12]);
+    assert!(pediu(&e, |a| matches!(a, Acao::AbrirFechamento)));
+}
+
+#[test]
+fn f12_com_o_caixa_fechado_abre_o_caixa() {
+    let mut e = caixa_aberto();
+    e.caixas[0].sessao_aberta = None;
+    let e = apertar(e, &[egui::Key::F12]);
+    assert!(matches!(e.dlg, Dlg::AbrirCaixa { .. }));
+    assert!(!pediu(&e, |a| matches!(a, Acao::AbrirFechamento)));
+}
+
+#[test]
+fn com_dialogo_aberto_as_teclas_da_venda_ficam_mudas() {
+    let mut e = caixa_aberto();
+    e.dlg = Dlg::Sangria {
+        valor: String::new(),
+        motivo: String::new(),
+    };
+    let e = apertar(e, &[egui::Key::F2, egui::Key::F9, egui::Key::F12]);
+    assert!(
+        e.pendentes.is_empty(),
+        "F2/F9/F12 não podem agir por baixo de um diálogo"
+    );
+}
+
+#[test]
+fn as_teclas_de_venda_geram_as_acoes_certas() {
+    let e = apertar(
+        caixa_aberto(),
+        &[egui::Key::F2, egui::Key::F5, egui::Key::F7, egui::Key::F8],
+    );
+    assert!(pediu(&e, |a| matches!(a, Acao::AbrirPagamento)));
+    assert!(pediu(&e, |a| matches!(a, Acao::AbrirDesconto)));
+    assert!(pediu(&e, |a| matches!(a, Acao::CancelarLinha)));
+    assert!(pediu(&e, |a| matches!(a, Acao::PedirCancelarCupom)));
+}

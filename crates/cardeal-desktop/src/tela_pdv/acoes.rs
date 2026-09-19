@@ -51,6 +51,31 @@ pub(super) fn aplicar(
             }
         }
         Acao::Finalizar => pedir_finalizar(ctx, estado),
+        Acao::AbrirSangria => abrir(
+            ctx,
+            estado,
+            Dlg::Sangria {
+                valor: String::new(),
+                motivo: String::new(),
+            },
+        ),
+        Acao::AbrirFechamento => {
+            if estado.cupom.is_some() {
+                notificar(
+                    ctx,
+                    Notificacao::aviso("Finalize ou cancele a venda antes de fechar o caixa."),
+                );
+            } else {
+                abrir(
+                    ctx,
+                    estado,
+                    Dlg::FecharCaixa {
+                        contado: String::new(),
+                        motivo: String::new(),
+                    },
+                );
+            }
+        }
         Acao::PedirCancelarCupom => {
             if estado.cupom.is_some() {
                 abrir(

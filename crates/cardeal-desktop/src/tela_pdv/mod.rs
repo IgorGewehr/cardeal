@@ -29,7 +29,7 @@ use cardeal_cliente::{MotorLocal, SessaoLocal};
 use cardeal_kernel::texto::casa_por_palavras;
 use cardeal_kernel::{Arredondamento, Dinheiro, Id, Percentual, Preco, Quantidade};
 use cardeal_modkit::Icone;
-use cardeal_ui::atoms::{Botao, Etiqueta, Rotulo, Tecla, Tom};
+use cardeal_ui::atoms::{Botao, Divisor, Etiqueta, Rotulo, Tecla, Tom};
 use cardeal_ui::molecules::{Campo, CampoBusca, EstadoVazio, ItemDeLista, SeletorOpcao};
 use cardeal_ui::organisms::{
     notificar, ColunaGrade, Dialogo, Grade, LayoutTela, Notificacao, Painel,
@@ -40,8 +40,8 @@ use mod_estoque::{
     ItemLocal, ItemProdutoComSaldo, Locais, ProdutoPorCodigoBarras, ProdutosComSaldo,
 };
 use mod_financeiro::{
-    AbrirCaixa, CadastrarCaixa, CaixaCadastrado, CaixaFoiAberto, Caixas, ContasDeCaixa, ItemCaixa,
-    ItemContaResultado,
+    AbrirCaixa, CadastrarCaixa, CaixaCadastrado, CaixaFoiAberto, CaixaFoiFechado, Caixas,
+    ContasDeCaixa, FecharCaixa, ItemCaixa, ItemContaResultado, RegistrarSangria, TOLERANCIA_QUEBRA,
 };
 use mod_pdv::{
     AbrirCupom, AdicionarItem, AplicarDescontoItem, CancelarCupom, CupomAberto, FinalizarVenda,
@@ -146,6 +146,12 @@ fn atalhos(ctx: &egui::Context, estado: &mut EstadoTelaPdv) {
     }
     if consumir(ctx, egui::Key::F8) {
         estado.pendentes.push(Acao::PedirCancelarCupom);
+    }
+    if consumir(ctx, egui::Key::F9) {
+        estado.pendentes.push(Acao::AbrirSangria);
+    }
+    if consumir(ctx, egui::Key::F12) {
+        estado.pendentes.push(Acao::AbrirFechamento);
     }
     if consumir(ctx, egui::Key::Escape) {
         estado.entrada.clear();

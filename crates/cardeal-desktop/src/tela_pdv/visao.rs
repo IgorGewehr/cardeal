@@ -393,4 +393,26 @@ pub(super) fn acoes(ui: &mut egui::Ui, estado: &mut EstadoTelaPdv) {
     {
         estado.pendentes.push(Acao::PedirCancelarCupom);
     }
+    ui.add_space(Espaco::E16);
+    ui.add(Divisor::novo());
+    ui.add_space(Espaco::E16);
+    ui.columns(2, |c| {
+        if c[0]
+            .add(Botao::secundario("Sangria").atalho("F9").preenche_largura())
+            .clicked()
+        {
+            estado.pendentes.push(Acao::AbrirSangria);
+        }
+        if c[1]
+            .add(
+                Botao::secundario("Fechar caixa")
+                    .atalho("F12")
+                    .preenche_largura()
+                    .habilitado(!tem_cupom),
+            )
+            .clicked()
+        {
+            estado.pendentes.push(Acao::AbrirFechamento);
+        }
+    });
 }

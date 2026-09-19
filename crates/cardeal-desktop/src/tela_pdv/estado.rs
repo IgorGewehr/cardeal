@@ -91,6 +91,14 @@ pub(super) enum Dlg {
     CancelarCupom {
         motivo: String,
     },
+    FecharCaixa {
+        contado: String,
+        motivo: String,
+    },
+    Sangria {
+        valor: String,
+        motivo: String,
+    },
 }
 
 /// O que a tela quer que aconteça. As visões só empilham isto; [`aplicar`] executa.
@@ -109,6 +117,10 @@ pub(super) enum Acao {
     Finalizar,
     /// `F8`.
     PedirCancelarCupom,
+    /// `F9`.
+    AbrirSangria,
+    /// `F12` com o caixa aberto.
+    AbrirFechamento,
 }
 
 /// Estado local da tela de PDV.

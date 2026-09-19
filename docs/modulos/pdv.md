@@ -235,8 +235,9 @@ código de barras primeiro**. O que funciona hoje, e o que **não**:
 | `F5` | ✅ Desconto no item selecionado (`pdv.aplicar_desconto_item.v1`; o backend recusa acima do teto do papel) |
 | `F7` | ✅ Cancela o item selecionado |
 | `F8` | ⚠️ Cancela o cupom com **motivo obrigatório**; registra o operador logado. **A segunda identidade do supervisor (§11 regra 3) ainda não é pedida** |
-| `F12` | ✅ Abrir caixa (quando fechado). Fechar caixa **não** está na tela |
-| `F4`, `F6`, `F9`, `F10` | ❌ Não implementadas (`F4`: substituída pelo prefixo `N*`; `F6` cliente: `AbrirCupom` já recebe `cliente`, falta escolher; `F9` sangria e `F10` consulta de preço: sem tela) |
+| `F9` | ✅ Sangria (`financeiro.registrar_sangria.v1`): valor e motivo obrigatórios |
+| `F12` | ✅ Abre o caixa (quando fechado) ou fecha (quando aberto e **sem venda em andamento**). O fechamento é de **contagem cega**: o esperado só aparece depois; o motivo é exigido pelo backend só se a quebra passar de R$ 5,00, então o campo fica sempre à vista |
+| `F4`, `F6`, `F10` | ❌ Não implementadas (`F4`: substituída pelo prefixo `N*`; `F6` cliente: `AbrirCupom` já recebe `cliente`, falta escolher; `F10` consulta de preço: sem tela) |
 
 Pagamento: `1..4` escolhem a forma (dinheiro, Pix, débito, crédito), `Enter` confirma o valor (vazio =
 "o que falta"), `F2` finaliza, `Esc` volta. Os dígitos escolhem a forma **só enquanto o campo de valor
