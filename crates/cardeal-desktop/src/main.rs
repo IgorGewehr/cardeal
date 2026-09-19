@@ -22,10 +22,11 @@ use std::path::PathBuf;
 use cardeal_cliente::atualizador::{self, ResultadoAplicacao, VersaoDisponivel};
 use cardeal_cliente::{MotorLocal, SessaoLocal};
 use cardeal_modkit::{Icone, Modulo, PedidoAtivacao};
-use cardeal_ui::atoms::{Botao, Rotulo};
+use cardeal_ui::atoms::{Botao, BotaoChevron, Divisor, Rotulo};
 use cardeal_ui::molecules::Campo;
 use cardeal_ui::organisms::{
-    notificar, Cartao, ItemComando, ItemSidebar, Notificacao, Notificacoes, PaletaComandos, Sidebar,
+    notificar, Cartao, ItemComando, ItemSidebar, Janela, Notificacao, Notificacoes, PaletaComandos,
+    Sidebar,
 };
 use cardeal_ui::tokens::{instalar_estilo, instalar_fontes, Espaco, Tema, TemaUi};
 use eframe::egui;
@@ -122,34 +123,6 @@ fn icone_janela() -> egui::IconData {
     }
 }
 
-/// Um botão-chevron (‹ / ›) desenhado à mão — recolher/expandir a sidebar. `aponta_esquerda`
-/// = a sidebar está expandida (a seta convida a recolher).
-fn chevron(ui: &mut egui::Ui, aponta_esquerda: bool, cor: egui::Color32) -> egui::Response {
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(28.0, 28.0), egui::Sense::click());
-    if ui.is_rect_visible(rect) {
-        if resp.hovered() {
-            ui.painter()
-                .rect_filled(rect, 6.0, ui.style().visuals.widgets.hovered.bg_fill);
-        }
-        let c = rect.center();
-        let (dx, dy) = (3.5_f32, 5.0_f32);
-        let (perto, longe) = if aponta_esquerda {
-            (c.x + dx / 2.0, c.x - dx / 2.0)
-        } else {
-            (c.x - dx / 2.0, c.x + dx / 2.0)
-        };
-        let traco = egui::Stroke::new(2.0_f32, cor);
-        ui.painter()
-            .line_segment([egui::pos2(perto, c.y - dy), egui::pos2(longe, c.y)], traco);
-        ui.painter()
-            .line_segment([egui::pos2(longe, c.y), egui::pos2(perto, c.y + dy)], traco);
-    }
-    if resp.hovered() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-    }
-    resp
-}
-
 fn main() -> eframe::Result<()> {
     tracing_subscriber::fmt::init();
     let opcoes = eframe::NativeOptions {
@@ -189,6 +162,9 @@ const ALTURA_BARRA_TITULO: f32 = 40.0;
 /// Raio dos cantos da janela — aplicado na barra de título (topo) e no rodapé da sidebar/
 /// painel central (ver `update`), já que a janela roda sem decoração nativa.
 const RAIO_JANELA: f32 = 10.0;
+
+/// O shell da janela sem decoração nativa (barra de título e molduras): `cardeal-ui::Janela`.
+const JANELA: Janela = Janela::nova(RAIO_JANELA, ALTURA_BARRA_TITULO);
 /// Faixa nas bordas em que o cursor vira seta de redimensionar e arrastar inicia
 /// `ViewportCommand::BeginResize` — sem decoração nativa, o compositor não oferece isso mais
 /// de graça (`docs/12-ui-ux.md`).
@@ -238,144 +214,6 @@ fn tratar_redimensionar_pela_borda(ctx: &egui::Context) {
     if ctx.input(|i| i.pointer.button_pressed(egui::PointerButton::Primary)) {
         ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(direcao));
     }
-}
-
-/// Um botão de janela (minimizar/maximizar/fechar) desenhado à mão, mesmo estilo de
-/// [`chevron`]. `hover_negativo` = fundo vermelho ao passar o mouse (só o botão fechar).
-fn botao_janela(
-    ui: &mut egui::Ui,
-    hover_negativo: bool,
-    desenhar: impl FnOnce(&egui::Painter, egui::Rect, egui::Color32),
-) -> egui::Response {
-    let (rect, resp) =
-        ui.allocate_exact_size(egui::vec2(44.0, ALTURA_BARRA_TITULO), egui::Sense::click());
-    if ui.is_rect_visible(rect) {
-        if resp.hovered() {
-            let fundo = if hover_negativo {
-                egui::Color32::from_rgb(0xE8, 0x1D, 0x1D)
-            } else {
-                ui.style().visuals.widgets.hovered.bg_fill
-            };
-            ui.painter().rect_filled(rect, 0.0, fundo);
-        }
-        let cor = if resp.hovered() && hover_negativo {
-            egui::Color32::WHITE
-        } else {
-            ui.style().visuals.text_color()
-        };
-        desenhar(ui.painter(), rect, cor);
-    }
-    if resp.hovered() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-    }
-    resp
-}
-
-/// A barra de título desenhada à mão — substitui a decoração nativa (`with_decorations(false)`
-/// no `main`). Arrasta a janela, dá duplo-clique para maximizar/restaurar, e tem os três
-/// botões de sempre. Sempre visível (mesmo antes do login), com os cantos de cima
-/// arredondados — os de baixo ficam por conta de quem desenha o rodapé da sidebar/painel
-/// central em `update`.
-fn barra_titulo(ctx: &egui::Context, tema: Tema) {
-    let cores = tema.cores();
-    egui::TopBottomPanel::top("barra_titulo")
-        .exact_height(ALTURA_BARRA_TITULO)
-        .frame(
-            egui::Frame::none()
-                .fill(cores.superficie_2)
-                .rounding(egui::Rounding {
-                    nw: RAIO_JANELA,
-                    ne: RAIO_JANELA,
-                    sw: 0.0,
-                    se: 0.0,
-                }),
-        )
-        .show(ctx, |ui| {
-            let rect = ui.max_rect();
-            let resp = ui.interact(
-                rect,
-                egui::Id::new("arrastar-janela"),
-                egui::Sense::click_and_drag(),
-            );
-            let maximizada = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
-            if resp.double_clicked() {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximizada));
-            } else if resp.drag_started_by(egui::PointerButton::Primary) {
-                ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
-            }
-
-            ui.allocate_new_ui(egui::UiBuilder::new().max_rect(rect), |ui| {
-                ui.horizontal_centered(|ui| {
-                    ui.add_space(Espaco::E12);
-                    ui.add(
-                        egui::Image::from_bytes("bytes://cardeal-logo.png", LOGO_PNG)
-                            .max_height(20.0)
-                            .fit_to_original_size(1.0),
-                    );
-                    ui.add_space(Espaco::E8);
-                    ui.add(Rotulo::titulo_secao("Cardeal"));
-
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if botao_janela(ui, true, |p, r, c| {
-                            let m = r.center();
-                            let d = 5.0_f32;
-                            let t = egui::Stroke::new(1.3_f32, c);
-                            p.line_segment([m + egui::vec2(-d, -d), m + egui::vec2(d, d)], t);
-                            p.line_segment([m + egui::vec2(-d, d), m + egui::vec2(d, -d)], t);
-                        })
-                        .clicked()
-                        {
-                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                        }
-
-                        let resp_max = botao_janela(ui, false, move |p, r, c| {
-                            let m = r.center();
-                            let t = egui::Stroke::new(1.3_f32, c);
-                            if maximizada {
-                                // Restaurar: dois quadrados sobrepostos.
-                                p.rect_stroke(
-                                    egui::Rect::from_center_size(
-                                        m + egui::vec2(-2.0, 2.0),
-                                        egui::vec2(9.0, 9.0),
-                                    ),
-                                    0.0,
-                                    t,
-                                );
-                                p.rect_stroke(
-                                    egui::Rect::from_center_size(
-                                        m + egui::vec2(2.0, -2.0),
-                                        egui::vec2(9.0, 9.0),
-                                    ),
-                                    0.0,
-                                    t,
-                                );
-                            } else {
-                                p.rect_stroke(
-                                    egui::Rect::from_center_size(m, egui::vec2(11.0, 11.0)),
-                                    0.0,
-                                    t,
-                                );
-                            }
-                        });
-                        if resp_max.clicked() {
-                            ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximizada));
-                        }
-
-                        if botao_janela(ui, false, |p, r, c| {
-                            let m = r.center();
-                            p.line_segment(
-                                [m + egui::vec2(-5.0, 5.0), m + egui::vec2(5.0, 5.0)],
-                                egui::Stroke::new(1.3_f32, c),
-                            );
-                        })
-                        .clicked()
-                        {
-                            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
-                        }
-                    });
-                });
-            });
-        });
 }
 
 /// A área selecionada na sidebar, quando autenticado.
@@ -813,7 +651,12 @@ impl eframe::App for App {
         // nossas. A borda vai primeiro — antes de qualquer painel reivindicar o ponteiro,
         // senão um clique perto da borda dentro da sidebar nunca chegaria aqui.
         tratar_redimensionar_pela_borda(ctx);
-        barra_titulo(ctx, self.tema);
+        JANELA.barra_titulo(
+            ctx,
+            self.tema,
+            ("bytes://cardeal-logo.png", LOGO_PNG),
+            "Cardeal",
+        );
 
         if ctx.input(|i| i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::D)) {
             self.tema = self.tema.alternado();
@@ -923,19 +766,7 @@ impl eframe::App for App {
             egui::SidePanel::left("sidebar")
                 .resizable(false)
                 .exact_width(largura)
-                .frame(
-                    egui::Frame::none()
-                        .fill(self.tema.cores().superficie_2)
-                        .inner_margin(Espaco::E8)
-                        // Sem decoração nativa (`main`): o canto inferior esquerdo da janela
-                        // é o rodapé da sidebar.
-                        .rounding(egui::Rounding {
-                            nw: 0.0,
-                            ne: 0.0,
-                            sw: RAIO_JANELA,
-                            se: 0.0,
-                        }),
-                )
+                .frame(JANELA.moldura_sidebar(self.tema))
                 .show(ctx, |ui| {
                     // A logo já está na barra de título (`barra_titulo`) — repeti-la aqui só
                     // comia espaço vertical sem motivo, mas deixar a sidebar sem cabeçalho
@@ -983,12 +814,7 @@ impl eframe::App for App {
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
-                                    if chevron(
-                                        ui,
-                                        self.sidebar_expandida,
-                                        self.tema.cores().texto_medio,
-                                    )
-                                    .clicked()
+                                    if ui.add(BotaoChevron::novo(self.sidebar_expandida)).clicked()
                                     {
                                         acao = Acao::AlternarSidebar;
                                     }
@@ -996,12 +822,7 @@ impl eframe::App for App {
                             );
                         });
                         ui.add_space(Espaco::E8);
-                        let linha = ui.available_rect_before_wrap();
-                        ui.painter().hline(
-                            linha.x_range(),
-                            linha.bottom(),
-                            egui::Stroke::new(1.0_f32, self.tema.cores().borda),
-                        );
+                        ui.add(Divisor::novo());
                     });
                 });
         }
@@ -1010,17 +831,7 @@ impl eframe::App for App {
         // esquerdo também é, exceto quando a sidebar já o desenhou (telas autenticadas).
         let tem_sidebar = matches!(self.tela, Tela::Autenticado(_));
         egui::CentralPanel::default()
-            .frame(
-                egui::Frame::none()
-                    .fill(self.tema.cores().fundo)
-                    .inner_margin(Espaco::E24)
-                    .rounding(egui::Rounding {
-                        nw: 0.0,
-                        ne: 0.0,
-                        sw: if tem_sidebar { 0.0 } else { RAIO_JANELA },
-                        se: RAIO_JANELA,
-                    }),
-            )
+            .frame(JANELA.moldura_conteudo(self.tema, tem_sidebar))
             .show(ctx, |ui| match &mut self.tela {
                 Tela::Carregando => {
                     ui.centered_and_justified(|ui| {

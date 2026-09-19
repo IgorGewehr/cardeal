@@ -27,10 +27,13 @@ Auditoria de 2026-09-19 em `crates/cardeal-desktop/src` (13 mil linhas de telas)
   *(Versão anterior deste ADR dizia que nenhuma tela o usava: estava errado — o `grep` procurou o
   nome com maiúscula. Corrigido.)*
 
-**Atualização (mesma data):** a tela de PDV foi reescrita sobre o design system e saiu da lista
-(4 `Frame`, 2 `Stroke` e 1 `separator` a menos → 53 ocorrências restantes). Nasceram `Painel`,
-`Divisor`, `Tecla` e `CampoBusca`; `Etiqueta`, `CartaoKpi`, `ItemDeLista` e `Dialogo` ganharam o que
-faltava. A catraca registrou a queda sozinha — é exatamente o uso previsto.
+**Atualização (2026-09-19, ao fim do dia): dívida zerada.** As 60 ocorrências foram todas
+pagas trocando o `egui` cru por componentes — e onde o componente não existia, ele nasceu em
+`cardeal-ui` em vez de a tela contornar: `Painel`, `Divisor`, `Tecla`, `CampoBusca`, `Caixa`,
+`BotaoJanela`, `BotaoChevron` e o organismo `Janela` (o shell da janela sem decoração nativa, que
+estava inteiro no `main.rs`); `Etiqueta`, `CartaoKpi`, `ItemDeLista`, `Grade`, `SeletorOpcao` e
+`Dialogo` ganharam o que faltava. O `xtask/ui-baseline.toml` está vazio: agora a catraca é "zero
+permitido". O PDV foi reescrito de raiz sobre o design system.
 
 O padrão é o esperado quando não há regra: a peça que falta no design system não é criada, é
 contornada, e o contorno vira precedente. Cada `Frame` à mão é uma decisão de aparência (cor, raio,
@@ -80,8 +83,8 @@ registrada (o baseline só desce), e arquivo novo começa com zero permitido.
 ### Positivas
 
 - Mudar a aparência de "cartão", "painel" ou "divisor" é editar **um** lugar.
-- A dívida atual é finita e visível (53 ocorrências hoje, eram 60); cada refatoração de tela a reduz de forma
-  mensurável.
+- A dívida era finita e visível (60 ocorrências) e cada refatoração de tela a reduziu de forma
+  mensurável, até zero.
 - A regra vale igual para pessoas e para IA: falha o comando, não a memória de alguém.
 - Força o design system a cobrir o que as telas precisam (painel, divisor, caixa de seleção).
 
@@ -102,6 +105,8 @@ registrada (o baseline só desce), e arquivo novo começa com zero permitido.
 
 ## Quando revisitar
 
-- **Dívida zerada:** trocar o verificador textual por `clippy::disallowed_types` /
-  `disallowed_methods` (entende tipos), permitindo o `egui` cru apenas dentro de `cardeal-ui`.
+- **Dívida zerada (já é o caso):** o verificador textual pode ser complementado ou trocado por
+  `clippy::disallowed_types` / `disallowed_methods` (entende tipos e pega `use egui::Frame;`
+  seguido de `Frame::none()`, que o textual não vê), permitindo o `egui` cru apenas dentro de
+  `cardeal-ui`. Ainda não foi feito: o textual dá mensagens dizendo qual componente usar.
 - Se `PROIBIDOS` gerar falsos positivos recorrentes, refinar o padrão em vez de abrir exceções.

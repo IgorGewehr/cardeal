@@ -357,8 +357,8 @@ gigante por sessão. Nenhum commit é feito sem os quatro comandos de §3.3 pass
   `Color32`, `ui.painter`, `ui.separator`, `ui.label`, `ui.button` etc. Se o componente não
   existe, **crie-o em `cardeal-ui` primeiro** (camada certa + galeria) e depois use. Antes de criar,
   procure o que já existe (`docs/12-ui-ux.md` §7.1). Rode `cargo xtask verificar-ui` antes de
-  commitar UI. Regra completa: [ADR-0015](adr/0015-atomic-design-obrigatorio-na-ui.md). Dívida
-  atual (53 ocorrências, só pode descer; o PDV já está zerado): `xtask/ui-baseline.toml`.
+  commitar UI. Regra completa: [ADR-0015](adr/0015-atomic-design-obrigatorio-na-ui.md). A dívida
+  antiga foi zerada; a catraca (`xtask/ui-baseline.toml`, vazio) agora é "zero permitido".
 - Não relance subagentes Sonnet "grandes" sem necessidade clara — o histórico desta sessão
   teve quedas por limite de taxa; prefira trabalho direto e incremental.
 - Não escreva código de um crate sem antes checar se `docs/contratos-internos.md` já fixa a

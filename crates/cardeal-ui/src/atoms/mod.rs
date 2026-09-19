@@ -2,6 +2,8 @@
 //! dos tokens da Camada 0. `docs/12-ui-ux.md` §7.
 
 mod botao;
+mod botao_chevron;
+mod botao_janela;
 mod caixa;
 mod campo_texto;
 mod divisor;
@@ -14,6 +16,8 @@ mod tecla;
 mod valor_dinheiro;
 
 pub use botao::{Botao, VarianteBotao, ATALHO_NOVO};
+pub use botao_chevron::BotaoChevron;
+pub use botao_janela::{BotaoJanela, TipoBotaoJanela};
 pub use caixa::Caixa;
 pub use campo_texto::CampoTexto;
 pub(crate) use campo_texto::{moldura_foco_campo, MARGEM_CAMPO};

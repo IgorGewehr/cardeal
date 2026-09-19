@@ -280,9 +280,9 @@ Todos em `cardeal-ui`, com galeria viva em `cargo run -p cardeal-ui --example ga
 
 | Camada | Componentes |
 |---|---|
-| atoms | `Botao`, `Caixa`, `CampoTexto`, `Divisor`, `Etiqueta` (com `.com_ponto()`), `Icone`, `Rotulo`, `Spinner`, `Tecla`, `ValorDinheiro`, `superficie_clicavel` |
-| molecules | `Abas`, `CabecalhoTela`, `Campo`, `CampoBusca`, `CartaoKpi` (com `.tom()` e `.icone()`), `EstadoVazio`, `ItemDeLista` (com `.atalho()` e `.esmaecido()`), `LinhaDeAcao`, `SecaoExpansivel`, `SeletorBusca`, `SeletorOpcao` |
-| organisms | `AgendaCalendario`, `AgendaMes`, `Cartao`, `Dialogo` (`.descricao()`, `.pequeno()`/`.medio()`), `dialogo_confirmacao`, `FaixaKpi`, `Grade` (com `.vazio()` e `.carregando()`), `Grafico`, `LayoutTela`, `Notificacoes`, `Painel` (elevado · plano · `.realce(Tom)`), `PaletaComandos`, `Sidebar` |
+| atoms | `Botao`, `BotaoChevron`, `BotaoJanela`, `Caixa`, `CampoTexto`, `Divisor`, `Etiqueta` (com `.com_ponto()`), `Icone`, `Rotulo`, `Spinner`, `Tecla`, `ValorDinheiro`, `superficie_clicavel` |
+| molecules | `Abas`, `CabecalhoTela`, `Campo`, `CampoBusca`, `CartaoKpi` (com `.tom()` e `.icone()`), `EstadoVazio`, `ItemDeLista` (com `.atalho()` e `.esmaecido()`), `LinhaDeAcao`, `SecaoExpansivel`, `SeletorBusca`, `SeletorOpcao` (`.sem_rotulo()` para barras de ferramentas) |
+| organisms | `AgendaCalendario`, `AgendaMes`, `Cartao`, `Dialogo` (`.descricao()`, `.pequeno()`/`.medio()`), `dialogo_confirmacao`, `FaixaKpi`, `Grade` (com `.vazio()` e `.carregando()`), `Grafico`, `Janela` (shell sem decoração nativa), `LayoutTela`, `Notificacoes`, `Painel` (elevado · plano · `.realce(Tom)`), `PaletaComandos`, `Sidebar` |
 
 `Tom::cores` é a **única** tabela tom → cor (`Etiqueta`, `Painel` e `CartaoKpi` a compartilham; nunca
 copie o `match`).

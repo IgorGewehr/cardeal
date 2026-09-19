@@ -3,9 +3,3 @@
 # NÃO edite à mão. Só desce: `cargo xtask verificar-ui --gerar-baseline` recusa qualquer
 # contagem que suba. Para pagar a dívida, troque o `egui` cru pelo componente de
 # `cardeal-ui` (ou crie o componente lá). Exceção legítima: `// ui-livre: <motivo>`.
-
-[arquivo."main.rs"]
-"Color32" = 4
-"egui::Frame" = 3
-"egui::Stroke" = 5
-"ui.painter(" = 6

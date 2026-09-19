@@ -6,15 +6,15 @@
 use cardeal_kernel::Dinheiro;
 use cardeal_modkit::Icone;
 use cardeal_ui::atoms::{
-    desenhar_icone, superficie_clicavel, Botao, Caixa, CampoTexto, Divisor, Etiqueta, Rotulo,
-    Spinner, Tecla, Tom, ValorDinheiro,
+    desenhar_icone, superficie_clicavel, Botao, BotaoChevron, BotaoJanela, Caixa, CampoTexto,
+    Divisor, Etiqueta, Rotulo, Spinner, Tecla, TipoBotaoJanela, Tom, ValorDinheiro,
 };
 use cardeal_ui::molecules::{
     Abas, CabecalhoTela, Campo, CampoBusca, CartaoKpi, EstadoVazio, ItemDeLista, LinhaDeAcao,
     SeletorOpcao, Severidade,
 };
 use cardeal_ui::organisms::{
-    notificar, ColunaGrade, Dialogo, Grade, Notificacao, Notificacoes, Painel,
+    notificar, ColunaGrade, Dialogo, Grade, Janela, Notificacao, Notificacoes, Painel,
 };
 use cardeal_ui::tokens::{instalar_estilo, instalar_fontes, Espaco, Rubro, Tema, TemaUi};
 use eframe::egui;
@@ -36,11 +36,13 @@ fn main() -> eframe::Result<()> {
             } else {
                 Tema::Claro
             };
+            egui_extras::install_image_loaders(&cc.egui_ctx);
             instalar_fontes(&cc.egui_ctx);
             instalar_estilo(&cc.egui_ctx, tema);
             Ok(Box::new(Galeria {
                 tema,
                 dialogo: std::env::var("GALERIA_DIALOGO").ok(),
+                janela: std::env::var("GALERIA_JANELA").is_ok(),
                 captura: std::env::var("GALERIA_CAPTURA").ok().map(Into::into),
                 rolar: std::env::var("GALERIA_ROLAR")
                     .ok()
@@ -64,6 +66,7 @@ struct Galeria {
     aba: u8,
     dialogo: Option<String>,
     captura: Option<std::path::PathBuf>,
+    janela: bool,
     rolar: Option<f32>,
     quadros: u32,
     pediu_captura: bool,
@@ -131,6 +134,17 @@ impl Galeria {
 
 impl eframe::App for Galeria {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if self.janela {
+            Janela::nova(10.0, 40.0).barra_titulo(
+                ctx,
+                self.tema,
+                (
+                    "bytes://cardeal-logo.png",
+                    include_bytes!("../../../assets/marca/cardeal-icone-256.png"),
+                ),
+                "Cardeal",
+            );
+        }
         egui::CentralPanel::default().show(ctx, |ui| {
             CabecalhoTela::novo("Galeria Rubro").mostrar(ui, |ui| {
                 if ui
@@ -389,6 +403,24 @@ impl eframe::App for Galeria {
                     .mostrar(ui, |ui| {
                         ui.add(Etiqueta::atencao("sem saldo"));
                     });
+
+                ui.add_space(Espaco::E24);
+                ui.add(Rotulo::titulo_secao(
+                    "Janela: botões e chevron (GALERIA_JANELA=1 mostra a barra)",
+                ));
+                ui.horizontal(|ui| {
+                    for tipo in [
+                        TipoBotaoJanela::Minimizar,
+                        TipoBotaoJanela::Maximizar,
+                        TipoBotaoJanela::Restaurar,
+                        TipoBotaoJanela::Fechar,
+                    ] {
+                        ui.add(BotaoJanela::novo(tipo));
+                    }
+                    ui.add_space(Espaco::E24);
+                    ui.add(BotaoChevron::novo(true));
+                    ui.add(BotaoChevron::novo(false));
+                });
 
                 ui.add_space(Espaco::E24);
                 ui.add(Rotulo::titulo_secao("Caixa de seleção"));
