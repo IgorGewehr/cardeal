@@ -11,6 +11,8 @@ use std::process::Command;
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 
+mod verificar_ui;
+
 #[derive(Parser)]
 #[command(name = "xtask", about = "Tarefas de build e empacotamento do Cardeal")]
 struct Cli {
@@ -32,6 +34,13 @@ enum Comando {
         #[arg(long)]
         pular_build: bool,
     },
+    /// Falha se as telas usarem `egui` cru em vez do design system (ADR-0015).
+    VerificarUi {
+        /// Regrava `xtask/ui-baseline.toml` com a dívida atual. Recusa qualquer contagem que
+        /// suba: só serve para registrar dívida paga.
+        #[arg(long)]
+        gerar_baseline: bool,
+    },
 }
 
 #[derive(ValueEnum, Clone, Copy, PartialEq, Eq)]
@@ -51,6 +60,7 @@ fn main() -> Result<()> {
             FormatoLinux::Rpm => empacotar_linux_rpm(&raiz, pular_build),
             FormatoLinux::Appimage => empacotar_linux_appimage(&raiz, pular_build),
         },
+        Comando::VerificarUi { gerar_baseline } => verificar_ui::executar(&raiz, gerar_baseline),
     }
 }
 

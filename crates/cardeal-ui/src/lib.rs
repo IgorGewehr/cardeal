@@ -8,13 +8,16 @@
 //!   [`TemaUi`](tokens::TemaUi)). Nunca string/hex solta; nunca `&Cores` na assinatura de um
 //!   componente — o tema vem do `Ui`.
 //! - [`atoms`] — Camada 1: as menores peças com aparência própria (`Botao`, `Rotulo`,
-//!   `CampoTexto`, `ValorDinheiro`) e [`superficie_clicavel`](atoms::superficie_clicavel),
+//!   `CampoTexto`, `ValorDinheiro`, `Divisor`, `Tecla`, `Etiqueta`) e [`superficie_clicavel`](atoms::superficie_clicavel),
 //!   a linha clicável de largura cheia que sidebar, lista e grade compartilham.
-//! - [`molecules`] — Camada 2: composições de átomos (`Campo`, `CabecalhoTela`, `CartaoKpi`,
-//!   `ItemDeLista`, `LinhaDeAcao`, `EstadoVazio`).
+//! - [`molecules`] — Camada 2: composições de átomos (`Campo`, `CampoBusca`, `CabecalhoTela`,
+//!   `CartaoKpi`, `ItemDeLista`, `LinhaDeAcao`, `EstadoVazio`).
 //! - [`organisms`] — Camada 3: peças de tela inteiras (`LayoutTela` responsivo, `Sidebar`,
-//!   `Grade` com seleção de linha, `Cartao`). Paleta de comandos e gaveta chegam conforme as
-//!   telas as exigirem.
+//!   `Grade` com seleção de linha, `Painel`, `Dialogo`, `Cartao`). Gaveta chega conforme as
+//!   telas a exigirem.
+//!
+//! **Regra (ADR-0015):** as telas só compõem estes componentes — nada de `egui` cru.
+//! `cargo xtask verificar-ui` impõe.
 //!
 //! Galeria visual: `cargo run -p cardeal-ui --example galeria`.
 

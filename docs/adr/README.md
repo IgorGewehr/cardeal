@@ -28,6 +28,7 @@ deliberadamente honestas — um ADR sem trade-off real não está fazendo seu tr
 | [0012](0012-escritor-unico-com-group-commit.md) | Um único escritor com group commit | Aceita | 2026-09-01 |
 | [0013](0013-uuidv7-como-identidade.md) | UUIDv7 como chave primária, número sequencial como identificador do usuário | Aceita | 2026-09-01 |
 | [0014](0014-modularidade-em-runtime-por-manifesto.md) | Modularidade resolvida em runtime por manifesto declarativo | Aceita | 2026-09-01 |
+| [0015](0015-atomic-design-obrigatorio-na-ui.md) | Atomic Design é obrigatório: telas só compõem `cardeal-ui`, nunca `egui` cru | Aceita | 2026-09-19 |
 
 ## Como usar
 

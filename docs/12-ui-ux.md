@@ -238,7 +238,61 @@ Qualquer resposta da tela de Perguntas pode ser fixada no Pulso, virando um cart
 
 ## 7. Componentes do design system
 
+### 7.0 A regra: telas compõem, não constroem (ADR-0015)
+
+> **Nenhuma tela desenha. Toda tela é composta por componentes de `cardeal-ui`.**
+
+O design system é em camadas de Atomic Design, com dependência num só sentido:
+
+```
+tokens  ←  atoms  ←  molecules  ←  organisms  ←  telas (cardeal-desktop)
+cor, espaço  Botao     Campo        Grade         tela_pdv.rs
+raio, fonte  Rotulo    ItemDeLista  Dialogo       tela_os.rs
+             Etiqueta  CartaoKpi    LayoutTela    …
+```
+
+Em uma tela (`tela_*.rs`, `main.rs`):
+
+- **Permitido:** compor componentes e fazer layout (`ui.horizontal`, `ui.columns`, `ui.vertical`,
+  `ui.add_space(Espaco::…)`).
+- **Proibido:** `egui::Frame`, `Stroke`, `Color32`, `ui.painter`, `ui.separator`, `ui.checkbox`,
+  `egui::ComboBox`, `TextEdit`, `RichText`, `Window`, `Grid`, `TableBuilder`, `ui.button`,
+  `ui.label`, `ui.heading`, `ui.add_sized`. Cada item tem o componente substituto listado em
+  `xtask/src/verificar_ui.rs`.
+- **Faltou o componente?** Crie-o em `cardeal-ui` na camada certa, com entrada na galeria, e só
+  então use-o. Nunca "só dessa vez".
+- **Procure antes de criar.** `dialogo_confirmacao`, `LinhaDeAcao`, `SecaoExpansivel`, `EstadoVazio`
+  já existem.
+- **Só tokens:** cor via `ui.cores()`, espaço via `Espaco`, raio via `Raio`, texto via `Rotulo`.
+
+Imposto por `cargo xtask verificar-ui` (catraca sobre `xtask/ui-baseline.toml`): violação nova falha
+o PR. Exceção rara: `// ui-livre: <motivo>`.
+
+### 7.1 Inventário
+
 Todos em `cardeal-ui`, com galeria viva em `cargo run -p cardeal-ui --example galeria`.
+
+**Existem hoje:**
+
+| Camada | Componentes |
+|---|---|
+| atoms | `Botao`, `CampoTexto`, `Divisor`, `Etiqueta` (com `.com_ponto()`), `Icone`, `Rotulo`, `Spinner`, `Tecla`, `ValorDinheiro`, `superficie_clicavel` |
+| molecules | `Abas`, `CabecalhoTela`, `Campo`, `CampoBusca`, `CartaoKpi` (com `.tom()` e `.icone()`), `EstadoVazio`, `ItemDeLista` (com `.atalho()` e `.esmaecido()`), `LinhaDeAcao`, `SecaoExpansivel`, `SeletorBusca`, `SeletorOpcao` |
+| organisms | `AgendaCalendario`, `AgendaMes`, `Cartao`, `Dialogo` (`.descricao()`, `.pequeno()`/`.medio()`), `dialogo_confirmacao`, `FaixaKpi`, `Grade`, `Grafico`, `LayoutTela`, `Notificacoes`, `Painel` (elevado · plano · `.realce(Tom)`), `PaletaComandos`, `Sidebar` |
+
+`Tom::cores` é a **única** tabela tom → cor (`Etiqueta`, `Painel` e `CartaoKpi` a compartilham; nunca
+copie o `match`).
+
+**Ainda faltam:** caixa de seleção (`ui.checkbox` cru em `tela_compras`), tile de lista, `Grade` com
+esqueleto de carregamento e estado vazio embutido. Dívida de `egui` cru que sobra nas telas:
+`xtask/ui-baseline.toml`.
+
+**Conferência visual** (sem abrir o app inteiro, sem banco): `cargo run -p cardeal-ui --example galeria`
+mostra todos os componentes; `GALERIA_CAPTURA=/tmp/x.png` salva um PNG e sai (`GALERIA_ROLAR=<px>`,
+`GALERIA_DIALOGO=pequeno|medio|grande`, `GALERIA_TEMA=escuro`). O PDV tem cenários com dados fictícios:
+`cargo run -p cardeal-desktop --example pdv_demo --features demo -- <cenario> /tmp/pdv.png [escuro]`.
+
+**Desenho-alvo** (a tabela abaixo mistura o que existe e o que está planejado):
 
 | Componente | Notas de comportamento |
 |---|---|

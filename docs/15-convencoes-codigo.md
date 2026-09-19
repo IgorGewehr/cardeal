@@ -212,6 +212,10 @@ concatenação, nunca `SELECT *`, nunca `OFFSET`, sempre `LIMIT`.
 - Docstring `///` em **todo item público**, começando por verbo no infinitivo.
 - Constantes de negócio nomeadas, nunca literais soltos:
   `const TOLERANCIA_QUEBRA_CAIXA: Dinheiro = Dinheiro::centavos(500);`
+- **UI: telas compõem, não constroem** ([ADR-0015](adr/0015-atomic-design-obrigatorio-na-ui.md),
+  [doc 12 §7.0](12-ui-ux.md)). Nada de `egui::Frame`, `Color32`, `ui.painter`, `ui.label` etc. em
+  `tela_*.rs`/`main.rs`. Faltou componente → crie em `cardeal-ui` (com entrada na galeria) e use.
+  Cor só por `ui.cores()`, espaço por `Espaco`, raio por `Raio`.
 
 ## 8. Dinheiro — as regras inegociáveis
 
@@ -240,9 +244,13 @@ concatenação, nunca `SELECT *`, nunca `OFFSET`, sempre `LIMIT`.
 cargo fmt
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
+cargo xtask verificar-ui    # ADR-0015: a UI das telas vem de cardeal-ui, não de egui cru
 cargo xtask arquitetura
 cargo xtask orcamento
 ```
+
+`verificar-ui` já existe e funciona; `arquitetura` e `orcamento` ainda **não** estão implementados
+no `xtask` (hoje só há `empacotar-linux` e `verificar-ui`).
 
 E no corpo do PR: qual seção da documentação isso implementa, e o `EXPLAIN QUERY PLAN` de toda
 consulta nova.
