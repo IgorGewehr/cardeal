@@ -72,6 +72,7 @@ impl Dialogo {
         corpo: impl FnOnce(&mut Ui, &mut T),
         rodape: impl FnOnce(&mut Ui, &mut T),
     ) -> bool {
+        crate::tokens::marcar_modal(ctx);
         let cores = ctx.cores();
         let tela = ctx.screen_rect();
         let mut fechar = ctx.input(|i| i.key_pressed(egui::Key::Escape));

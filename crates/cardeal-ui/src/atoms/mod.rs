@@ -12,7 +12,7 @@ mod superficie;
 mod tecla;
 mod valor_dinheiro;
 
-pub use botao::{Botao, VarianteBotao};
+pub use botao::{Botao, VarianteBotao, ATALHO_NOVO};
 pub use campo_texto::CampoTexto;
 pub(crate) use campo_texto::{moldura_foco_campo, MARGEM_CAMPO};
 pub use divisor::Divisor;

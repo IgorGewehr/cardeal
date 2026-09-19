@@ -12,7 +12,7 @@
 use cardeal_cliente::{MotorLocal, SessaoLocal};
 use cardeal_kernel::Id;
 use cardeal_modkit::Icone;
-use cardeal_ui::atoms::{Botao, Etiqueta, Rotulo};
+use cardeal_ui::atoms::{Botao, Etiqueta, Rotulo, ATALHO_NOVO};
 use cardeal_ui::molecules::{
     Campo, CartaoKpi, EstadoVazio, Mascara, SecaoExpansivel, SeletorOpcao,
 };
@@ -290,7 +290,7 @@ pub fn mostrar(
         estado,
         |ui, estado| {
             if ui
-                .add(Botao::primario("+ Novo cliente").atalho("Ctrl+N"))
+                .add(Botao::primario("+ Novo cliente").tecla(ATALHO_NOVO))
                 .clicked()
             {
                 estado.form = Some(Form::novo());

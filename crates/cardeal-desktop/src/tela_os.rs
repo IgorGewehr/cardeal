@@ -8,7 +8,7 @@ use cardeal_cliente::{IdentidadeVisual, MotorLocal, SessaoLocal, UsuarioResumo};
 use cardeal_kernel::{Data, Dinheiro, Fuso, Id, Instante, Percentual, Preco, Quantidade};
 use cardeal_modkit::Icone;
 use cardeal_pdf::{gerar_comprovante_os, ComprovanteOsPdf, IdentidadeEmpresa, ItemPdf};
-use cardeal_ui::atoms::{Botao, Etiqueta, Rotulo, Tom, ValorDinheiro};
+use cardeal_ui::atoms::{Botao, Etiqueta, Rotulo, Tom, ValorDinheiro, ATALHO_NOVO};
 use cardeal_ui::molecules::{
     Abas, Campo, CartaoKpi, EstadoVazio, Mascara, OpcaoBusca, SecaoExpansivel, SeletorBusca,
     SeletorOpcao,
@@ -308,7 +308,7 @@ pub fn mostrar(
         |ui, estado| match estado.aba {
             AbaOs::Ordens => {
                 if ui
-                    .add(Botao::primario("+ Nova OS").atalho("Ctrl+N"))
+                    .add(Botao::primario("+ Nova OS").tecla(ATALHO_NOVO))
                     .clicked()
                 {
                     estado.dlg = Dlg::nova();
@@ -316,7 +316,7 @@ pub fn mostrar(
             }
             AbaOs::Orcamentos => {
                 if ui
-                    .add(Botao::primario("+ Novo orçamento").atalho("Ctrl+N"))
+                    .add(Botao::primario("+ Novo orçamento").tecla(ATALHO_NOVO))
                     .clicked()
                 {
                     crate::tela_orcamentos::abrir_novo(&mut estado.orc);

@@ -9,7 +9,7 @@ use cardeal_cliente::{MotorLocal, SessaoLocal};
 use cardeal_kernel::{Competencia, Data, Dinheiro, Fuso, Id, Periodo};
 use cardeal_ledger::Contraparte;
 use cardeal_modkit::Icone;
-use cardeal_ui::atoms::{Botao, Etiqueta, Rotulo, ValorDinheiro};
+use cardeal_ui::atoms::{Botao, Etiqueta, Rotulo, ValorDinheiro, ATALHO_NOVO};
 use cardeal_ui::molecules::{
     Abas, Campo, CartaoKpi, EstadoVazio, Mascara, SecaoExpansivel, SeletorOpcao,
 };
@@ -705,7 +705,7 @@ pub fn mostrar(
             } else {
                 "+ Lançar a pagar"
             };
-            if ui.add(Botao::primario(rot).atalho("Ctrl+N")).clicked() {
+            if ui.add(Botao::primario(rot).tecla(ATALHO_NOVO)).clicked() {
                 estado.dlg = Dlg::Lancar(FormLancar::default());
             }
             if ui.add(Botao::secundario("Por categoria")).clicked() {

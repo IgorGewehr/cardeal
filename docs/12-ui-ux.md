@@ -264,6 +264,10 @@ Em uma tela (`tela_*.rs`, `main.rs`):
 - **Procure antes de criar.** `dialogo_confirmacao`, `LinhaDeAcao`, `SecaoExpansivel`, `EstadoVazio`
   já existem.
 - **Só tokens:** cor via `ui.cores()`, espaço via `Espaco`, raio via `Raio`, texto via `Rotulo`.
+- **Atalho anunciado é atalho tratado.** `Botao::tecla(ATALHO_NOVO)` mostra a tecla **e** a trata (não
+  dispara desabilitado nem com diálogo aberto por cima). `Botao::atalho("F2")` é só texto: use-o apenas
+  quando a tela trata a tecla por conta própria (como o PDV). Um rótulo que promete o que não funciona
+  é bug (`Ctrl+N` estava assim em 7 telas).
 
 Imposto por `cargo xtask verificar-ui` (catraca sobre `xtask/ui-baseline.toml`): violação nova falha
 o PR. Exceção rara: `// ui-livre: <motivo>`.

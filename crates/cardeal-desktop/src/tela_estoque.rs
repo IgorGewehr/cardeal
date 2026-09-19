@@ -9,7 +9,7 @@
 use cardeal_cliente::{MotorLocal, SessaoLocal};
 use cardeal_kernel::{Fuso, Id, Preco, Quantidade};
 use cardeal_modkit::Icone;
-use cardeal_ui::atoms::{Botao, Etiqueta, Rotulo, Tom};
+use cardeal_ui::atoms::{Botao, Etiqueta, Rotulo, Tom, ATALHO_NOVO};
 use cardeal_ui::molecules::{Abas, Campo, CartaoKpi, EstadoVazio, SecaoExpansivel, SeletorOpcao};
 use cardeal_ui::organisms::{
     notificar, ColunaGrade, Dialogo, Direcao, FaixaKpi, Grade, LayoutTela, Notificacao,
@@ -169,7 +169,7 @@ pub fn mostrar(
         estado,
         |ui, estado| {
             if ui
-                .add(Botao::primario("+ Novo produto").atalho("Ctrl+N"))
+                .add(Botao::primario("+ Novo produto").tecla(ATALHO_NOVO))
                 .clicked()
             {
                 estado.limpar_novo();

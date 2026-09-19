@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use cardeal_cliente::{MotorLocal, SessaoLocal};
 use cardeal_kernel::{Id, Percentual};
 use cardeal_modkit::Icone;
-use cardeal_ui::atoms::{Botao, Rotulo, ValorDinheiro};
+use cardeal_ui::atoms::{Botao, Rotulo, ValorDinheiro, ATALHO_NOVO};
 use cardeal_ui::molecules::{Campo, EstadoVazio, SeletorOpcao};
 use cardeal_ui::organisms::{notificar, ColunaGrade, Dialogo, Grade, LayoutTela, Notificacao};
 use cardeal_ui::tokens::{Espaco, TemaUi};
@@ -154,7 +154,7 @@ pub fn mostrar(
                 estado.dlg = Dlg::Tabelas;
             }
             if ui
-                .add(Botao::primario("+ Novo pedido").atalho("Ctrl+N"))
+                .add(Botao::primario("+ Novo pedido").tecla(ATALHO_NOVO))
                 .clicked()
             {
                 estado.novo_cliente = None;

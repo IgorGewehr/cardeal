@@ -16,3 +16,5 @@ Leia primeiro `docs/19-estado-e-processo.md` (estado real do projeto e o que nã
 - Só tokens: `ui.cores()`, `Espaco`, `Raio`, `Rotulo`. Nenhuma cor/tamanho literal numa tela.
 - Antes de commitar UI: `cargo xtask verificar-ui` (catraca: `xtask/ui-baseline.toml` só pode
   descer). Exceção rara: `// ui-livre: <motivo>`.
+- Atalho anunciado tem que funcionar: `Botao::tecla(ATALHO_NOVO)` mostra e trata a tecla;
+  `Botao::atalho("F2")` é só texto (use só se a tela trata a tecla por conta própria).

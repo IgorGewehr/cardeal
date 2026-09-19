@@ -7,10 +7,16 @@
 //!
 //! É um `Widget`: `ui.add(Botao::primario("Finalizar venda").atalho("F2"))`.
 
-use egui::{Color32, CursorIcon, Rect, Response, Sense, Stroke, Ui, Vec2, Widget};
+use egui::{
+    Color32, CursorIcon, Key, KeyboardShortcut, Modifiers, Rect, Response, Sense, Stroke, Ui, Vec2,
+    Widget,
+};
 
 use crate::atoms::Spinner;
-use crate::tokens::{ativar, lerp_cor, Mov, Papel, Raio, Rubro, TemaUi};
+use crate::tokens::{ativar, lerp_cor, modal_aberto, Mov, Papel, Raio, Rubro, TemaUi};
+
+/// `Ctrl+N` (`Cmd+N` no macOS) — "novo": o atalho de criar em toda tela de listagem.
+pub const ATALHO_NOVO: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::N);
 
 /// A variante visual do botão — `docs/12-ui-ux.md` §7 e §2.3.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,6 +41,7 @@ pub struct Botao {
     rotulo: String,
     variante: VarianteBotao,
     atalho: Option<String>,
+    tecla: Option<KeyboardShortcut>,
     habilitado: bool,
     preenche_largura: bool,
     pequeno: bool,
@@ -68,6 +75,7 @@ impl Botao {
             rotulo: rotulo.into(),
             variante,
             atalho: None,
+            tecla: None,
             habilitado: true,
             preenche_largura: false,
             pequeno: false,
@@ -88,6 +96,16 @@ impl Botao {
     /// Anota o atalho de teclado ao lado do rótulo (ex.: `F2`) — `docs/12-ui-ux.md` §8.
     pub fn atalho(mut self, tecla: impl Into<String>) -> Self {
         self.atalho = Some(tecla.into());
+        self
+    }
+
+    /// Liga o botão a uma tecla: mostra o atalho ao lado do rótulo **e** o trata — apertar a
+    /// tecla é o mesmo que clicar (`.clicked()` devolve `true`). É o jeito de anotar um atalho
+    /// que a tela não trata em outro lugar: o rótulo nunca promete o que não funciona. A tecla
+    /// não dispara com o botão desabilitado nem com um diálogo aberto por cima (reabriria o
+    /// formulário e apagaria o que o usuário digitava).
+    pub const fn tecla(mut self, atalho: KeyboardShortcut) -> Self {
+        self.tecla = Some(atalho);
         self
     }
 
@@ -197,7 +215,11 @@ impl Widget for Botao {
     fn ui(self, ui: &mut Ui) -> Response {
         let cores = ui.cores();
         let fonte = Papel::Interface.font_id();
-        let texto = match &self.atalho {
+        let dica = self
+            .atalho
+            .clone()
+            .or_else(|| self.tecla.map(|t| ui.ctx().format_shortcut(&t)));
+        let texto = match &dica {
             Some(a) => format!("{}    {a}", self.rotulo),
             None => self.rotulo.clone(),
         };
@@ -223,7 +245,7 @@ impl Widget for Botao {
         } else {
             Sense::hover()
         };
-        let (rect_total, resp) = ui.allocate_exact_size(tamanho, sense);
+        let (rect_total, mut resp) = ui.allocate_exact_size(tamanho, sense);
 
         if ui.is_rect_visible(rect_total) {
             // Transições de estado: o hover acende, o press afunda, o foco cresce — cada um
@@ -303,6 +325,90 @@ impl Widget for Botao {
         if interativo && resp.hovered() {
             ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
         }
+        if let Some(t) = self.tecla {
+            if interativo && !modal_aberto(ui.ctx()) && ui.input_mut(|i| i.consume_shortcut(&t)) {
+                resp.fake_primary_click = true;
+            }
+        }
         resp
+    }
+}
+
+#[cfg(test)]
+mod testes {
+    use super::*;
+
+    fn contexto() -> egui::Context {
+        let ctx = egui::Context::default();
+        crate::tokens::instalar_fontes(&ctx);
+        crate::tokens::instalar_estilo(&ctx, crate::tokens::Tema::Claro);
+        ctx
+    }
+
+    /// Roda um quadro com um botão `tecla(Ctrl+N)` e devolve se ele foi "clicado".
+    fn quadro(
+        ctx: &egui::Context,
+        eventos: Vec<egui::Event>,
+        habilitado: bool,
+        modal: bool,
+    ) -> bool {
+        let entrada = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(800.0, 600.0),
+            )),
+            events: eventos,
+            ..Default::default()
+        };
+        let mut clicado = false;
+        let _ = ctx.run(entrada, |ctx| {
+            if modal {
+                crate::tokens::marcar_modal(ctx);
+            }
+            egui::CentralPanel::default().show(ctx, |ui| {
+                clicado = ui
+                    .add(
+                        Botao::primario("Novo")
+                            .tecla(ATALHO_NOVO)
+                            .habilitado(habilitado),
+                    )
+                    .clicked();
+            });
+        });
+        clicado
+    }
+
+    fn ctrl_n() -> Vec<egui::Event> {
+        vec![egui::Event::Key {
+            key: Key::N,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::COMMAND,
+        }]
+    }
+
+    #[test]
+    fn a_tecla_equivale_ao_clique() {
+        let ctx = contexto();
+        assert!(!quadro(&ctx, vec![], true, false), "sem tecla, sem clique");
+        assert!(quadro(&ctx, ctrl_n(), true, false), "Ctrl+N clica o botão");
+    }
+
+    #[test]
+    fn a_tecla_nao_dispara_com_o_botao_desabilitado() {
+        let ctx = contexto();
+        assert!(!quadro(&ctx, ctrl_n(), false, false));
+    }
+
+    #[test]
+    fn a_tecla_nao_dispara_com_um_modal_aberto() {
+        // Reabrir o formulário por baixo de um diálogo apagaria o que o usuário digita.
+        let ctx = contexto();
+        assert!(!quadro(&ctx, ctrl_n(), true, true));
+        // O modal fechou: no quadro seguinte ao último desenho dele a tecla ainda é
+        // ignorada; um quadro depois, volta a valer.
+        assert!(!quadro(&ctx, ctrl_n(), true, false));
+        assert!(quadro(&ctx, ctrl_n(), true, false));
     }
 }

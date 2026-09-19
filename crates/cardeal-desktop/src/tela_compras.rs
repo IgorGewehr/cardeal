@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use cardeal_cliente::{MotorLocal, SessaoLocal};
 use cardeal_kernel::{Dinheiro, Id};
 use cardeal_modkit::Icone;
-use cardeal_ui::atoms::{Botao, Etiqueta, Rotulo, Tom, ValorDinheiro};
+use cardeal_ui::atoms::{Botao, Etiqueta, Rotulo, Tom, ValorDinheiro, ATALHO_NOVO};
 use cardeal_ui::molecules::{
     Campo, EstadoVazio, Mascara, OpcaoBusca, SecaoExpansivel, SeletorBusca, SeletorOpcao,
 };
@@ -172,7 +172,7 @@ pub fn mostrar(
         estado,
         |ui, estado| {
             if ui
-                .add(Botao::primario("+ Nota manual").atalho("Ctrl+N"))
+                .add(Botao::primario("+ Nota manual").tecla(ATALHO_NOVO))
                 .clicked()
             {
                 estado.nova = form_nova_padrao();

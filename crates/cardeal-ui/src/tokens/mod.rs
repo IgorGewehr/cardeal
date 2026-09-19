@@ -6,10 +6,12 @@ mod animacao;
 mod cores;
 mod espacamento;
 mod estilo;
+mod modal;
 mod tipografia;
 
 pub use animacao::{ativar, lerp_cor, perseguir, suave, Mov};
 pub use cores::{Cores, Rubro, Tema};
 pub use espacamento::{AlturaLinha, Elevacao, Espaco, Raio};
 pub use estilo::{instalar_estilo, sombra_cartao, sombra_dropdown, TemaUi};
+pub use modal::{marcar_modal, modal_aberto};
 pub use tipografia::{instalar_fontes, Papel};

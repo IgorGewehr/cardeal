@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 use cardeal_cliente::{MotorLocal, SessaoLocal};
 use cardeal_kernel::{Data, Fuso, Hora, Id, Instante};
-use cardeal_ui::atoms::{Botao, Rotulo};
+use cardeal_ui::atoms::{Botao, Rotulo, ATALHO_NOVO};
 use cardeal_ui::molecules::{Campo, Mascara, SeletorOpcao};
 use cardeal_ui::organisms::{
     notificar, AcaoAgenda, AgendaCalendario, AgendaMes, BlocoAgenda, Dialogo, LayoutTela,
@@ -183,7 +183,7 @@ pub fn mostrar(
         estado,
         |ui, estado| {
             if ui
-                .add(Botao::primario("+ Novo compromisso").atalho("Ctrl+N"))
+                .add(Botao::primario("+ Novo compromisso").tecla(ATALHO_NOVO))
                 .clicked()
             {
                 estado.dlg = Dlg::Novo(form_em(estado, Data::hoje(FUSO), 9));
