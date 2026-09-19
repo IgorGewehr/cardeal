@@ -85,6 +85,8 @@ pub struct EstadoTelaAgenda {
     filtro_recurso: Option<Id>,
     dlg: Dlg,
     erro: Option<String>,
+    /// O compromisso que o usuário pediu para cancelar e ainda não confirmou.
+    confirmar_cancelar: Option<Id>,
 }
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
@@ -253,6 +255,32 @@ pub fn mostrar(
             }
         },
     );
+
+    // Cancelar é irreversível: confirma antes, sem desenhar o diálogo de baixo (o Esc fecharia
+    // os dois).
+    if let Some(compromisso) = estado.confirmar_cancelar {
+        let r = cardeal_ui::organisms::dialogo_confirmacao(
+            ui.ctx(),
+            "Cancelar compromisso",
+            "Tem certeza que quer cancelar este compromisso? O horário volta a ficar livre.",
+            "Cancelar compromisso",
+        );
+        if r.confirmado {
+            estado.confirmar_cancelar = None;
+            aplicar(
+                ui.ctx(),
+                motor,
+                sessao,
+                estado,
+                "agenda.cancelar_compromisso.v1",
+                &CancelarCompromisso { compromisso },
+                "Compromisso cancelado",
+            );
+        } else if r.fechar {
+            estado.confirmar_cancelar = None;
+        }
+        return;
+    }
 
     match &estado.dlg {
         Dlg::Fechado => {}
@@ -687,15 +715,7 @@ fn acoes_estado(
                 );
             }
             if ui.add(Botao::destrutivo("Cancelar")).clicked() {
-                aplicar(
-                    ui.ctx(),
-                    motor,
-                    sessao,
-                    estado,
-                    "agenda.cancelar_compromisso.v1",
-                    &CancelarCompromisso { compromisso: id },
-                    "Compromisso cancelado",
-                );
+                estado.confirmar_cancelar = Some(id);
             }
         }
         EstadoCompromisso::Confirmado => {

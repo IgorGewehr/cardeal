@@ -46,6 +46,8 @@ pub struct EstadoTelaVendas {
     regras: Vec<RegraPreco>,
     erro: Option<String>,
     dlg: Dlg,
+    /// O pedido que o usuário pediu para cancelar e ainda não confirmou.
+    confirmar_cancelar: Option<Id>,
 
     // rascunhos de formulário
     novo_cliente: Option<Id>,
@@ -175,6 +177,32 @@ pub fn mostrar(
             lista(ui, motor, sessao, estado);
         },
     );
+
+    // Cancelar é irreversível: confirma antes, sem desenhar o diálogo de baixo (o Esc fecharia
+    // os dois).
+    if let Some(pedido) = estado.confirmar_cancelar {
+        let r = cardeal_ui::organisms::dialogo_confirmacao(
+            ui.ctx(),
+            "Cancelar pedido",
+            "Tem certeza que quer cancelar este pedido? Depois de cancelado ele não volta a andar.",
+            "Cancelar pedido",
+        );
+        if r.confirmado {
+            estado.confirmar_cancelar = None;
+            aplicar(
+                ui.ctx(),
+                motor,
+                sessao,
+                estado,
+                "vendas.cancelar_pedido.v1",
+                &CancelarPedido { pedido },
+                "Pedido cancelado",
+            );
+        } else if r.fechar {
+            estado.confirmar_cancelar = None;
+        }
+        return;
+    }
 
     match estado.dlg {
         Dlg::Fechado => {}
@@ -482,15 +510,7 @@ fn acoes(
                     );
                 }
                 if ui.add(Botao::destrutivo("Cancelar pedido")).clicked() {
-                    aplicar(
-                        ui.ctx(),
-                        motor,
-                        sessao,
-                        estado,
-                        "vendas.cancelar_pedido.v1",
-                        &CancelarPedido { pedido: p.pedido },
-                        "Pedido cancelado",
-                    );
+                    estado.confirmar_cancelar = Some(p.pedido);
                 }
             });
         }

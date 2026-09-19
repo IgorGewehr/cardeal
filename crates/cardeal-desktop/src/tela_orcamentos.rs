@@ -152,6 +152,8 @@ pub struct EstadoOrcamentos {
     f_texto: String,
     f_dias: i64,
     dlg: Dlg,
+    /// O orçamento que o usuário pediu para cancelar e ainda não confirmou.
+    confirmar_cancelar: Option<Id>,
 }
 
 impl EstadoOrcamentos {
@@ -300,6 +302,33 @@ pub fn dialogos(
     sessao: &SessaoLocal,
     estado: &mut EstadoOrcamentos,
 ) {
+    // Cancelar é irreversível: confirma antes, sem desenhar o diálogo de baixo (o Esc fecharia
+    // os dois).
+    if let Some(orcamento) = estado.confirmar_cancelar {
+        let r = cardeal_ui::organisms::dialogo_confirmacao(
+            ctx,
+            "Cancelar orçamento",
+            "Tem certeza que quer cancelar este orçamento? Depois de cancelado ele não pode ser enviado nem aprovado.",
+            "Cancelar orçamento",
+        );
+        if r.confirmado {
+            estado.confirmar_cancelar = None;
+            aplicar(
+                ctx,
+                motor,
+                sessao,
+                estado,
+                orcamento,
+                "orcamentos.cancelar_orcamento.v1",
+                &CancelarOrcamento { orcamento },
+                "Orçamento cancelado",
+            );
+        } else if r.fechar {
+            estado.confirmar_cancelar = None;
+        }
+        return;
+    }
+
     match estado.dlg {
         Dlg::Fechado => {}
         Dlg::Form(_) => dialogo_form(ctx, motor, sessao, estado),
@@ -952,16 +981,7 @@ fn acoes_detalhe(
     match estado_atual {
         EstadoOrcamento::Rascunho => {
             if ui.add(Botao::destrutivo("Cancelar orçamento")).clicked() {
-                aplicar(
-                    ui.ctx(),
-                    motor,
-                    sessao,
-                    estado,
-                    id,
-                    "orcamentos.cancelar_orcamento.v1",
-                    &CancelarOrcamento { orcamento: id },
-                    "Orçamento cancelado",
-                );
+                estado.confirmar_cancelar = Some(id);
             }
             if ui.add(Botao::secundario("Editar")).clicked() {
                 estado.dlg = Dlg::Form(Box::new(FormOrcamento::de_detalhe(d)));

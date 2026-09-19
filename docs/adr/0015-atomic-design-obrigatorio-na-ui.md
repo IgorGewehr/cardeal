@@ -21,7 +21,11 @@ Auditoria de 2026-09-19 em `crates/cardeal-desktop/src` (13 mil linhas de telas)
   componente: **60 ocorrências** de `egui` cru em 11 arquivos — 18 × `egui::Frame` (painéis e cartões
   montados à mão; `tela_pdv.rs` repete o mesmo `Frame` 4 vezes), 13 × `egui::Stroke`, 12 ×
   `ui.separator`, 8 × `ui.painter`, 7 × `Color32` literal, 1 × `ui.checkbox`, 1 × `egui::ComboBox`.
-- Componentes que existem ficam sem uso: `dialogo_confirmacao` não é chamado por nenhuma tela.
+- Componentes que existem ficam sem uso em parte das telas: `dialogo_confirmacao` é usado em
+  clientes, estoque e OS, mas **não** em cancelar pedido (vendas), cancelar compromisso (agenda) e
+  cancelar orçamento, que agiam de forma irreversível com um clique.
+  *(Versão anterior deste ADR dizia que nenhuma tela o usava: estava errado — o `grep` procurou o
+  nome com maiúscula. Corrigido.)*
 
 **Atualização (mesma data):** a tela de PDV foi reescrita sobre o design system e saiu da lista
 (4 `Frame`, 2 `Stroke` e 1 `separator` a menos → 53 ocorrências restantes). Nasceram `Painel`,
