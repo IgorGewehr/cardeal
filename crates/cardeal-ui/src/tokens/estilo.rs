@@ -22,18 +22,9 @@ use super::tipografia::Papel;
 
 const CHAVE_TEMA: &str = "cardeal:tema";
 
-/// Instala o [`Tema`] no contexto: guarda-o em `ctx.data` e reescreve o `egui::Style` para
-/// que todo widget — do design system ou cru — saia na identidade Rubro.
-pub fn instalar_estilo(ctx: &Context, tema: Tema) {
-    ctx.data_mut(|d| d.insert_temp(Id::new(CHAVE_TEMA), tema));
-
-    let c = tema.cores();
-    let mut style = (*ctx.style()).clone();
-
-    // ---- tipografia base (os componentes usam `Papel` direto; isto é para o egui cru) ----
-    // Lidos de `Papel`, não repetidos como literal — duas escalas divergindo silenciosamente
-    // era exatamente a causa da "falta de padrão" que a revisão de UI de 2026-09-11 apontou.
-    style.text_styles = [
+/// Os estilos de texto do `egui` cru, lidos de [`Papel`] (nunca repetidos como literal).
+fn estilos_de_texto() -> std::collections::BTreeMap<TextStyle, FontId> {
+    [
         (
             TextStyle::Small,
             FontId::new(Papel::RotuloCampo.tamanho(), FontFamily::Proportional),
@@ -55,7 +46,21 @@ pub fn instalar_estilo(ctx: &Context, tema: Tema) {
             FontId::new(Papel::Codigo.tamanho(), FontFamily::Monospace),
         ),
     ]
-    .into();
+    .into()
+}
+
+/// Instala o [`Tema`] no contexto: guarda-o em `ctx.data` e reescreve o `egui::Style` para
+/// que todo widget — do design system ou cru — saia na identidade Rubro.
+pub fn instalar_estilo(ctx: &Context, tema: Tema) {
+    ctx.data_mut(|d| d.insert_temp(Id::new(CHAVE_TEMA), tema));
+
+    let c = tema.cores();
+    let mut style = (*ctx.style()).clone();
+
+    // ---- tipografia base (os componentes usam `Papel` direto; isto é para o egui cru) ----
+    // Lidos de `Papel`, não repetidos como literal — duas escalas divergindo silenciosamente
+    // era exatamente a causa da "falta de padrão" que a revisão de UI de 2026-09-11 apontou.
+    style.text_styles = estilos_de_texto();
 
     // ---- espaçamento e forma ----
     let sp = &mut style.spacing;

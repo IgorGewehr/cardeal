@@ -65,6 +65,7 @@ impl Percentual {
 
     /// O complemento para 100%. `20%` devolve `80%`. Útil em desconto → fator de preço.
     #[inline]
+    #[must_use]
     pub const fn complemento(self) -> Self {
         Self(Self::CEM.0 - self.0)
     }

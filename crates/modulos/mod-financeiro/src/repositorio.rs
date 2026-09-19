@@ -206,8 +206,8 @@ fn contraparte_split_opt(c: Option<Contraparte>) -> (&'static str, Vec<u8>) {
 
 /// Como [`contraparte_join`], mas para as tabelas de [`contraparte_split_opt`] — desfaz o
 /// sentinela `Outro(Id::NULO)` de volta para `None`.
-pub(crate) fn contraparte_join_opt(tipo: String, id: Vec<u8>) -> Option<Contraparte> {
-    match contraparte_join(&tipo, id) {
+pub(crate) fn contraparte_join_opt(tipo: &str, id: Vec<u8>) -> Option<Contraparte> {
+    match contraparte_join(tipo, id) {
         Contraparte::Outro(i) if i == Id::NULO => None,
         c => Some(c),
     }
@@ -918,7 +918,7 @@ pub(crate) fn titulo_de_linha(r: &rusqlite::Row<'_>) -> rusqlite::Result<Titulo>
         id: id_de(r.get::<_, Vec<u8>>(0)?),
         empresa: id_de(r.get::<_, Vec<u8>>(1)?),
         especie: especie_de(&r.get::<_, String>(2)?),
-        contraparte: contraparte_join_opt(cp_tipo, cp_id),
+        contraparte: contraparte_join_opt(&cp_tipo, cp_id),
         origem_modulo: r.get(5)?,
         origem_id: r.get::<_, Option<Vec<u8>>>(6)?.map(id_de),
         emissao: data_de(r.get::<_, i64>(7)?),
@@ -952,7 +952,7 @@ pub(crate) fn recorrencia_de_linha(r: &rusqlite::Row<'_>) -> rusqlite::Result<Re
         empresa: id_de(r.get::<_, Vec<u8>>(1)?),
         descricao: r.get(2)?,
         especie: especie_de(&r.get::<_, String>(3)?),
-        contraparte: contraparte_join_opt(cp_tipo, cp_id),
+        contraparte: contraparte_join_opt(&cp_tipo, cp_id),
         tipo_valor: tipo_valor_de(&r.get::<_, String>(6)?),
         valor_fixo: r.get::<_, Option<i64>>(7)?.map(Dinheiro::centavos),
         indice: r.get::<_, Option<String>>(8)?,

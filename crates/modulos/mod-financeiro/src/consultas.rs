@@ -76,7 +76,7 @@ pub fn titulos_em_aberto(
         .map_err(persist)?;
     let linhas = stmt
         .query_map(params![blob(empresa), especie_txt(especie)], |r| {
-            let contraparte = contraparte_join_opt(r.get(3)?, r.get(4)?);
+            let contraparte = contraparte_join_opt(&r.get::<_, String>(3)?, r.get(4)?);
             Ok(ItemTituloEmAberto {
                 parcela: id_de(r.get(0)?),
                 titulo: id_de(r.get(1)?),
@@ -155,7 +155,7 @@ pub fn parcelas_no_periodo(
                 i64::from(periodo.ate.em_dias()),
             ],
             |r| {
-                let contraparte = contraparte_join_opt(r.get(3)?, r.get(4)?);
+                let contraparte = contraparte_join_opt(&r.get::<_, String>(3)?, r.get(4)?);
                 Ok(ItemTituloEmAberto {
                     parcela: id_de(r.get(0)?),
                     titulo: id_de(r.get(1)?),

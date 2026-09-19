@@ -8,7 +8,7 @@
 //! 1. **Um terminal offline gera identidade sem falar com o servidor.** É requisito do
 //!    modo autônomo (`docs/03-pilar-resiliencia.md` §3).
 //! 2. **É ordenado no tempo.** O índice B-tree cresce à direita, sem a fragmentação que o
-//!    UUIDv4 causa — diferença de dezenas de por cento em base grande.
+//!    `UUIDv4` causa — diferença de dezenas de por cento em base grande.
 //! 3. **16 bytes fixos**, comparação barata, sem colisão prática.
 //!
 //! O número que o **usuário** vê (`numero` das tabelas) é outra coisa: um sequencial por

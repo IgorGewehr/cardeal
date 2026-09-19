@@ -178,30 +178,38 @@ impl Quantidade {
 
     /// Valor absoluto.
     #[inline]
+    #[must_use]
     pub const fn abs(self) -> Self {
         Self(self.0.abs())
     }
 
     /// O menor entre duas quantidades.
     #[inline]
+    #[must_use]
     pub fn min(self, outra: Self) -> Self {
         Self(self.0.min(outra.0))
     }
 
     /// A maior entre duas quantidades.
     #[inline]
+    #[must_use]
     pub fn max(self, outra: Self) -> Self {
         Self(self.0.max(outra.0))
     }
 
     /// Limita a zero pela esquerda.
     #[inline]
+    #[must_use]
     pub fn nao_negativa(self) -> Self {
         Self(self.0.max(0))
     }
 
     /// Multiplica por um fator inteiro.
+    ///
+    /// # Panics
+    /// Se o produto estourar `i64` (uma quantidade absurda, nunca uma venda real).
     #[inline]
+    #[must_use]
     pub fn vezes(self, fator: i64) -> Self {
         Self(self.0.checked_mul(fator).expect("estouro em quantidade"))
     }

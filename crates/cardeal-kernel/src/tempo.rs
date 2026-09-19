@@ -31,7 +31,11 @@ const SEGUNDOS_POR_DIA: i64 = 86_400;
 const MICROS_POR_DIA: i64 = SEGUNDOS_POR_DIA * MICROS_POR_SEGUNDO;
 
 /// Dias desde 1970-01-01 para uma data civil. Algoritmo de Howard Hinnant.
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss
+)]
 const fn dias_de_civil(ano: i32, mes: u32, dia: u32) -> i32 {
     let a = if mes <= 2 { ano - 1 } else { ano };
     let era = if a >= 0 { a } else { a - 399 } / 400;

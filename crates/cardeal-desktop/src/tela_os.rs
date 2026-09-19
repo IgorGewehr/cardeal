@@ -39,6 +39,9 @@ use mod_os::{
 
 /// Qual dialog está aberto.
 #[derive(Default)]
+// Uma única instância por tela (o diálogo aberto): o tamanho da variante "Nova" não custa nada,
+// e encaixotar os campos só espalharia `Box` pelo formulário.
+#[allow(clippy::large_enum_variant)]
 enum Dlg {
     #[default]
     Fechado,
@@ -1276,7 +1279,7 @@ fn abrir_os(
             return;
         }
         let digitos_doc: String = documento.chars().filter(char::is_ascii_digit).collect();
-        let endereco = (!end_logradouro.trim().is_empty()).then(|| EnderecoInicial {
+        let endereco = (!end_logradouro.trim().is_empty()).then_some(EnderecoInicial {
             tipo: TipoEndereco::Residencial,
             logradouro: end_logradouro,
             numero: end_numero,

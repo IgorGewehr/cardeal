@@ -1,0 +1,5 @@
+# `cardeal_kernel::Erro` carrega código, mensagem e detalhes estruturados (>= 128 bytes) — é a
+# "conversa" do doc 09 §3, não um enum de um byte. O padrão do clippy (128) acusava toda função
+# que devolve `Resultado`; o projeto já convivia com isso via `#![allow(clippy::result_large_err)]`
+# solto em alguns crates. Uma decisão só, aqui: o limite acomoda o `Erro` atual com folga.
+large-error-threshold = 256

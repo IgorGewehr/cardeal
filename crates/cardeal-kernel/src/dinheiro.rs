@@ -83,14 +83,12 @@ fn div_arredondada(numerador: i128, denominador: i128, modo: Arredondamento) -> 
             }
         }
         Arredondamento::MeioPar => {
-            if dobro > denominador {
+            // Acima da metade arredonda para longe; abaixo, para perto; exatamente na metade,
+            // para o quociente par.
+            if dobro > denominador || (dobro == denominador && quociente % 2 != 0) {
                 para_longe
-            } else if dobro < denominador {
-                quociente
-            } else if quociente % 2 == 0 {
-                quociente
             } else {
-                para_longe
+                quociente
             }
         }
     }
@@ -151,12 +149,14 @@ impl Dinheiro {
 
     /// Os centavos, sem sinal, de 0 a 99.
     #[inline]
+    #[allow(clippy::cast_possible_truncation)] // `% 100` cabe em `u8` por construção
     pub const fn parte_centavos(self) -> u8 {
         (self.0 % 100).unsigned_abs() as u8
     }
 
     /// Valor absoluto.
     #[inline]
+    #[must_use]
     pub const fn abs(self) -> Self {
         Self(self.0.abs())
     }
@@ -211,18 +211,21 @@ impl Dinheiro {
 
     /// O menor entre dois valores.
     #[inline]
+    #[must_use]
     pub fn min(self, outro: Self) -> Self {
         Self(self.0.min(outro.0))
     }
 
     /// O maior entre dois valores.
     #[inline]
+    #[must_use]
     pub fn max(self, outro: Self) -> Self {
         Self(self.0.max(outro.0))
     }
 
     /// Limita o valor a zero pela esquerda (nunca negativo).
     #[inline]
+    #[must_use]
     pub fn nao_negativo(self) -> Self {
         Self(self.0.max(0))
     }
@@ -243,6 +246,7 @@ impl Dinheiro {
 
     /// Aplica um percentual sobre o valor. `R$ 100,00` a `18%` dá `R$ 18,00`.
     #[allow(clippy::cast_possible_truncation)]
+    #[must_use]
     pub fn aplicar(self, percentual: Percentual, modo: Arredondamento) -> Self {
         let bruto = i128::from(self.0) * i128::from(percentual.unidades_internas());
         // percentual tem escala 1e-6 de ponto percentual → dividir por 100 * 1e6.
@@ -255,6 +259,7 @@ impl Dinheiro {
     /// # Panics
     /// Se `denominador` for zero.
     #[allow(clippy::cast_possible_truncation)]
+    #[must_use]
     pub fn fracao(self, numerador: i64, denominador: i64, modo: Arredondamento) -> Self {
         assert!(denominador != 0, "denominador não pode ser zero");
         let (num, den) = if denominador < 0 {
@@ -398,6 +403,9 @@ impl Dinheiro {
     ///
     /// # Errors
     /// Devolve [`CodigoErro::VALOR_INVALIDO`] se o texto não representar um valor monetário.
+    ///
+    /// # Panics
+    /// Nunca na prática: o `expect` guarda um separador que a própria função acabou de localizar.
     pub fn de_str(texto: &str) -> Resultado<Self> {
         let bruto = texto.trim();
         let sem_moeda = bruto

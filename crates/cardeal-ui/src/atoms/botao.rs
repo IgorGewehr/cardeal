@@ -202,6 +202,21 @@ impl Botao {
         }
     }
 
+    /// O atalho a mostrar ao lado do rótulo: o texto dado por `.atalho()` ou a tecla de `.tecla()`.
+    fn dica_de_atalho(&self, ui: &Ui) -> Option<String> {
+        self.atalho
+            .clone()
+            .or_else(|| self.tecla.map(|t| ui.ctx().format_shortcut(&t)))
+    }
+
+    /// Se a tecla ligada ao botão foi apertada neste quadro (e vale: botão ativo, sem modal por
+    /// cima). Consome a tecla — nenhum outro widget a vê.
+    fn ativado_por_tecla(&self, ui: &Ui, interativo: bool) -> bool {
+        self.tecla.is_some_and(|t| {
+            interativo && !modal_aberto(ui.ctx()) && ui.input_mut(|i| i.consume_shortcut(&t))
+        })
+    }
+
     /// Verdadeiro para as variantes que "levantam" de leve no hover (só a ação de peso).
     const fn levanta_no_hover(&self) -> bool {
         matches!(
@@ -215,11 +230,7 @@ impl Widget for Botao {
     fn ui(self, ui: &mut Ui) -> Response {
         let cores = ui.cores();
         let fonte = Papel::Interface.font_id();
-        let dica = self
-            .atalho
-            .clone()
-            .or_else(|| self.tecla.map(|t| ui.ctx().format_shortcut(&t)));
-        let texto = match &dica {
+        let texto = match &self.dica_de_atalho(ui) {
             Some(a) => format!("{}    {a}", self.rotulo),
             None => self.rotulo.clone(),
         };
@@ -325,10 +336,8 @@ impl Widget for Botao {
         if interativo && resp.hovered() {
             ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
         }
-        if let Some(t) = self.tecla {
-            if interativo && !modal_aberto(ui.ctx()) && ui.input_mut(|i| i.consume_shortcut(&t)) {
-                resp.fake_primary_click = true;
-            }
+        if self.ativado_por_tecla(ui, interativo) {
+            resp.fake_primary_click = true;
         }
         resp
     }

@@ -2,6 +2,9 @@
 //!
 //! `cargo run -p cardeal-pdf --example amostra`
 
+// Valores em centavos escritos como `reais_centavos` (`180_00` = R$ 180,00): é como se lê.
+#![allow(clippy::inconsistent_digit_grouping)]
+
 use cardeal_kernel::{Data, Dinheiro, Instante, Percentual, Preco, Quantidade};
 use cardeal_pdf::{
     gerar_comprovante_os, gerar_orcamento, ComprovanteOsPdf, IdentidadeEmpresa, ItemPdf,

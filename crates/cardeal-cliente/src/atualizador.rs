@@ -91,10 +91,10 @@ fn cliente_http() -> Resultado<Client> {
         .timeout(Duration::from_secs(30))
         .user_agent("cardeal-desktop")
         .build()
-        .map_err(erro_http)
+        .map_err(|e| erro_http(&e))
 }
 
-fn erro_http(e: reqwest::Error) -> Erro {
+fn erro_http(e: &reqwest::Error) -> Erro {
     let codigo = if e.is_timeout() {
         CodigoErro::TEMPO_ESGOTADO
     } else {
@@ -133,7 +133,7 @@ pub fn verificar_atualizacao(versao_atual: &str) -> Resultado<Option<VersaoDispo
         ))
         .header(reqwest::header::ACCEPT, "application/vnd.github+json")
         .send()
-        .map_err(erro_http)?;
+        .map_err(|e| erro_http(&e))?;
 
     if resp.status() == reqwest::StatusCode::NOT_FOUND {
         // Repositório sem nenhuma release publicada ainda — exatamente o caso que o pedido
@@ -146,7 +146,7 @@ pub fn verificar_atualizacao(versao_atual: &str) -> Resultado<Option<VersaoDispo
         return Ok(None);
     }
 
-    let corpo: RespostaGithub = resp.json().map_err(erro_http)?;
+    let corpo: RespostaGithub = resp.json().map_err(|e| erro_http(&e))?;
     Ok(decidir_se_ha_atualizacao(corpo, versao_atual))
 }
 
@@ -186,14 +186,14 @@ fn decidir_se_ha_atualizacao(
 /// Erro de rede.
 pub fn baixar_atualizacao(url: &str) -> Resultado<Vec<u8>> {
     let cliente = cliente_http()?;
-    let resp = cliente.get(url).send().map_err(erro_http)?;
+    let resp = cliente.get(url).send().map_err(|e| erro_http(&e))?;
     if !resp.status().is_success() {
         return Err(Erro::novo(
             CodigoErro::BANCO_INDISPONIVEL,
             format!("download da atualização falhou: HTTP {}", resp.status()),
         ));
     }
-    resp.bytes().map(|b| b.to_vec()).map_err(erro_http)
+    resp.bytes().map(|b| b.to_vec()).map_err(|e| erro_http(&e))
 }
 
 /// Verdadeiro se o processo atual (dono do arquivo, ou root) consegue escrever em `caminho`

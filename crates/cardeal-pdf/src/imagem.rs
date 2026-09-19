@@ -33,17 +33,18 @@ pub fn decodificar_logo(bytes: &[u8]) -> Result<Imagem, ErroPdf> {
     let rgba = imagem.to_rgba8();
     let mut rgb = Vec::with_capacity((largura * altura * 3) as usize);
     for px in rgba.pixels() {
-        let [r, g, b, a] = px.0;
+        let [vermelho, verde, azul, opacidade] = px.0;
+        // Compõe o canal sobre fundo branco: a saída do PDF é RGB, sem transparência.
         let mistura = |canal: u8| -> u8 {
-            let c = f32::from(canal) / 255.0;
-            let alfa = f32::from(a) / 255.0;
-            ((c * alfa + (1.0 - alfa)) * 255.0)
+            let intensidade = f32::from(canal) / 255.0;
+            let alfa = f32::from(opacidade) / 255.0;
+            ((intensidade * alfa + (1.0 - alfa)) * 255.0)
                 .round()
                 .clamp(0.0, 255.0) as u8
         };
-        rgb.push(mistura(r));
-        rgb.push(mistura(g));
-        rgb.push(mistura(b));
+        rgb.push(mistura(vermelho));
+        rgb.push(mistura(verde));
+        rgb.push(mistura(azul));
     }
     Ok(Imagem::rgb8(largura, altura, rgb))
 }

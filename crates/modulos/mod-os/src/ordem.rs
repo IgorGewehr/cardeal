@@ -121,6 +121,9 @@ impl OrdemServico {
     ///
     /// # Errors
     /// [`ErroOs::DefeitoRelatadoVazio`], [`ErroOs::EquipamentoVazio`].
+    // Construtor de domínio: cada argumento é um dado obrigatório e distinto da abertura de
+    // uma OS; agrupá-los num struct só moveria a mesma lista para outro lugar.
+    #[allow(clippy::too_many_arguments)]
     pub fn abrir(
         empresa: Id,
         numero: u64,
