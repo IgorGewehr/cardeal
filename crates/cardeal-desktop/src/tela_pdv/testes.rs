@@ -159,6 +159,7 @@ impl Bancada {
         let _ = self.ctx.run(entrada, |ctx| match estado.dlg {
             Dlg::Pagamento(_) => dialogo_pagamento(ctx, estado),
             Dlg::ConsultaPreco { .. } => dialogo_consulta_preco(ctx, estado),
+            Dlg::Cliente { .. } => dialogo_cliente(ctx, estado),
             _ => {}
         });
     }
@@ -483,4 +484,74 @@ fn enter_confirma_mesmo_com_focar_primeiro_no_mesmo_quadro() {
         quadro(vec![tecla(egui::Key::Enter)]),
         "Enter tem que confirmar"
     );
+}
+
+fn cliente(nome: &str, documento: &str) -> mod_clientes::ItemPessoa {
+    mod_clientes::ItemPessoa {
+        pessoa: Id::novo(),
+        nome: nome.to_owned(),
+        documento: Some(documento.to_owned()),
+        telefone: None,
+    }
+}
+
+fn bancada_de_clientes() -> Bancada {
+    let mut b = Bancada::nova(0);
+    b.estado.clientes = vec![
+        cliente("Maria Souza", "529.982.247-25"),
+        cliente("Mário Andrade", "111.444.777-35"),
+        cliente("Pedro Lima", "390.533.447-05"),
+    ];
+    b.estado.dlg = Dlg::Cliente {
+        busca: String::new(),
+        sel: 0,
+    };
+    b.quadro(vec![]);
+    b
+}
+
+fn escolhido(b: &Bancada) -> Option<Option<String>> {
+    b.estado.pendentes.iter().find_map(|a| match a {
+        Acao::EscolherCliente(c) => Some(c.as_ref().map(|(_, n)| n.clone())),
+        _ => None,
+    })
+}
+
+#[test]
+fn f6_pede_a_escolha_de_cliente() {
+    let e = apertar(caixa_aberto(), &[egui::Key::F6]);
+    assert!(pediu(&e, |a| matches!(a, Acao::AbrirCliente)));
+}
+
+#[test]
+fn buscar_pelo_nome_e_enter_escolhe_o_primeiro_que_casa() {
+    let mut b = bancada_de_clientes();
+    b.quadro(vec![texto("m"), texto("a")]); // "ma": Maria e Mário
+    b.quadro(vec![tecla(egui::Key::Enter)]);
+    assert_eq!(escolhido(&b), Some(Some("Maria Souza".to_owned())));
+}
+
+#[test]
+fn seta_para_baixo_e_enter_escolhem_o_segundo() {
+    let mut b = bancada_de_clientes();
+    b.quadro(vec![texto("m"), texto("a")]);
+    b.quadro(vec![tecla(egui::Key::ArrowDown)]);
+    b.quadro(vec![tecla(egui::Key::Enter)]);
+    assert_eq!(escolhido(&b), Some(Some("Mário Andrade".to_owned())));
+}
+
+#[test]
+fn buscar_pelo_documento_tambem_acha() {
+    let mut b = bancada_de_clientes();
+    b.quadro(vec![texto("3"), texto("9"), texto("0")]); // parte do CPF do Pedro
+    b.quadro(vec![tecla(egui::Key::Enter)]);
+    assert_eq!(escolhido(&b), Some(Some("Pedro Lima".to_owned())));
+}
+
+#[test]
+fn nenhum_resultado_nao_escolhe_ninguem() {
+    let mut b = bancada_de_clientes();
+    b.quadro(vec![texto("z"), texto("z"), texto("z")]);
+    b.quadro(vec![tecla(egui::Key::Enter)]);
+    assert_eq!(escolhido(&b), None);
 }

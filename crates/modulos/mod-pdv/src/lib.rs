@@ -63,7 +63,7 @@ mod repositorio;
 
 pub use comandos::{
     AbrirCupom, AdicionarItem, AplicarDescontoItem, CancelarCupom, CancelarItem, CupomAberto,
-    FinalizarVenda, ItemFoiAdicionado, PagamentoInformado, VendaFoiFinalizada,
+    FinalizarVenda, IdentificarCliente, ItemFoiAdicionado, PagamentoInformado, VendaFoiFinalizada,
 };
 pub use consultas::{PrecoConsultado, PrecoDoProduto};
 pub use cupom::{

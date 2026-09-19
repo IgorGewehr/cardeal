@@ -104,6 +104,12 @@ pub(super) enum Dlg {
         valor: String,
         motivo: String,
     },
+    /// `F6`: identificar o cliente da venda.
+    Cliente {
+        busca: String,
+        /// A linha destacada na lista.
+        sel: usize,
+    },
     /// `F10`: consulta de preço sem abrir venda.
     ConsultaPreco {
         /// O que o operador digitou/bipou.
@@ -135,6 +141,10 @@ pub(super) enum Acao {
     AbrirFechamento,
     /// `F10`.
     AbrirConsultaPreco,
+    /// `F6`.
+    AbrirCliente,
+    /// Um cliente foi escolhido (`None` = consumidor não identificado).
+    EscolherCliente(Option<(Id, String)>),
     /// `Enter` no diálogo de consulta de preço.
     ConsultarPreco,
 }
@@ -147,6 +157,10 @@ pub struct EstadoTelaPdv {
     pub(super) tabelas: Vec<TabelaPreco>,
     pub(super) locais: Vec<ItemLocal>,
     pub(super) produtos: Vec<ItemProdutoComSaldo>,
+    /// Os clientes cadastrados (até 200, o teto de `PessoasPorPapel` sem busca).
+    pub(super) clientes: Vec<ItemPessoa>,
+    /// O cliente identificado na venda atual, com o nome para mostrar.
+    pub(super) cliente: Option<(Id, String)>,
     pub(super) caixa_sel: Option<Id>,
     pub(super) tabela_sel: Option<Id>,
     pub(super) local_sel: Option<Id>,
@@ -183,6 +197,8 @@ impl Default for EstadoTelaPdv {
             tabelas: Vec::new(),
             locais: Vec::new(),
             produtos: Vec::new(),
+            clientes: Vec::new(),
+            cliente: None,
             caixa_sel: None,
             tabela_sel: None,
             local_sel: None,
@@ -225,6 +241,17 @@ impl EstadoTelaPdv {
             self.produtos = p;
             // Os índices memorizados apontavam para a lista antiga.
             self.resultados = ("\u{0}".to_owned(), Vec::new());
+        }
+
+        if let Ok(c) = motor.consultar(
+            sessao,
+            "clientes.pessoas_por_papel.v1",
+            &PessoasPorPapel {
+                papel: PapelPessoa::Cliente,
+                busca: None,
+            },
+        ) {
+            self.clientes = c;
         }
 
         if self.caixa_sel.is_none() {

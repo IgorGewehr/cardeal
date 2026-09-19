@@ -238,7 +238,8 @@ código de barras primeiro**. O que funciona hoje, e o que **não**:
 | `F9` | ✅ Sangria (`financeiro.registrar_sangria.v1`): valor e motivo obrigatórios |
 | `F12` | ✅ Abre o caixa (quando fechado) ou fecha (quando aberto e **sem venda em andamento**). O fechamento é de **contagem cega**: o esperado só aparece depois; o motivo é exigido pelo backend só se a quebra passar de R$ 5,00, então o campo fica sempre à vista |
 | `F10` | ✅ Consulta de preço sem abrir venda (`pdv.preco_do_produto.v1`, permissão `pdv.preco.consultar`): bipa ou digita, mostra nome, código, preço vigente e saldo; continua aberto para a próxima consulta. O preço vem da **mesma função pura** que `AdicionarItem` usa, então nunca diverge do que a venda cobra |
-| `F4`, `F6` | ❌ Não implementadas (`F4`: substituída pelo prefixo `N*`; `F6` cliente: `AbrirCupom` já recebe `cliente`, falta escolher e um comando para identificar o cliente com o cupom já aberto) |
+| `F6` | ✅ Identifica o cliente (nome ou documento; `↑↓` e `Enter`; "Sem cliente" desfaz). Antes do primeiro item só guarda e vai em `AbrirCupom`; com o cupom aberto usa `pdv.identificar_cliente.v1`, que só age em cupom em andamento. Lista os 200 primeiros clientes (teto de `PessoasPorPapel` sem busca) |
+| `F4` | ➖ Não existe de propósito: a quantidade se digita no próprio campo de bipe com o prefixo `N*` |
 
 Pagamento: `1..4` escolhem a forma (dinheiro, Pix, débito, crédito), `Enter` confirma o valor (vazio =
 "o que falta"), `F2` finaliza, `Esc` volta. Os dígitos escolhem a forma **só enquanto o campo de valor

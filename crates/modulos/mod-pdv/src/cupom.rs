@@ -255,6 +255,17 @@ impl Cupom {
         Ok(())
     }
 
+    /// Identifica (ou remove a identificação de) o cliente da venda. Só em `EmAndamento`: um
+    /// cupom finalizado ou cancelado já foi ao fiscal e ao razão com o cliente que tinha.
+    ///
+    /// # Errors
+    /// [`ErroPdv::CupomEmEstadoInvalido`].
+    pub fn identificar_cliente(&mut self, cliente: Option<Id>) -> Result<(), ErroPdv> {
+        self.exigir(EstadoCupom::EmAndamento)?;
+        self.cliente = cliente;
+        Ok(())
+    }
+
     /// Recalcula `subtotal`/`desconto`/`total` a partir dos itens não cancelados.
     pub fn recalcular(&mut self) {
         let (desconto, total_liquido) = soma_itens(&self.itens);
@@ -443,6 +454,30 @@ mod testes {
         c.adicionar_item(item(1, 10)).unwrap();
         c.finalizar().unwrap();
         assert_eq!(c.cancelar().unwrap_err(), ErroPdv::CupomJaFinalizado);
+    }
+
+    #[test]
+    fn cliente_so_muda_com_o_cupom_em_andamento() {
+        let mut c = Cupom::novo(
+            Id::novo(),
+            Id::novo(),
+            Id::novo(),
+            1,
+            1,
+            None,
+            Id::novo(),
+            cardeal_kernel::Instante::agora(),
+            Id::novo(),
+            Id::novo(),
+        );
+        let cliente = Id::novo();
+        c.identificar_cliente(Some(cliente)).unwrap();
+        assert_eq!(c.cliente, Some(cliente));
+        c.identificar_cliente(None).unwrap();
+        assert_eq!(c.cliente, None);
+
+        c.cancelar().unwrap();
+        assert!(c.identificar_cliente(Some(cliente)).is_err());
     }
 
     #[test]

@@ -324,6 +324,7 @@ pub(super) fn detalhe(ui: &mut egui::Ui, estado: &mut EstadoTelaPdv) {
         .map(|l| l.bruto() - l.total)
         .fold(Dinheiro::ZERO, |a, b| a + b);
     let total = estado.total;
+    let cliente = estado.cliente.as_ref().map(|c| c.1.clone());
     Painel::novo().mostrar(ui, |ui| {
         ui.add(Rotulo::campo("TOTAL"));
         ui.add_space(Espaco::E4);
@@ -342,6 +343,15 @@ pub(super) fn detalhe(ui: &mut egui::Ui, estado: &mut EstadoTelaPdv) {
                     descontos.formatar_com_simbolo()
                 )));
             }
+        });
+        ui.add_space(Espaco::E8);
+        ui.horizontal(|ui| {
+            ui.add(Rotulo::campo("Cliente"));
+            match &cliente {
+                Some(nome) => ui.add(Rotulo::interface(nome.clone())),
+                None => ui.add(Rotulo::campo("— não identificado")),
+            };
+            ui.add(Tecla::nova("F6"));
         });
     });
     ui.add_space(Espaco::E12);

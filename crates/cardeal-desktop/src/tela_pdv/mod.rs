@@ -36,6 +36,7 @@ use cardeal_ui::organisms::{
 };
 use cardeal_ui::tokens::{Espaco, Papel, TemaUi};
 use eframe::egui;
+use mod_clientes::{ItemPessoa, Papel as PapelPessoa, PessoasPorPapel};
 use mod_estoque::{
     ItemLocal, ItemProdutoComSaldo, Locais, ProdutoPorCodigoBarras, ProdutosComSaldo,
 };
@@ -45,7 +46,7 @@ use mod_financeiro::{
 };
 use mod_pdv::{
     AbrirCupom, AdicionarItem, AplicarDescontoItem, CancelarCupom, CupomAberto, FinalizarVenda,
-    ItemFoiAdicionado, PrecoConsultado, PrecoDoProduto, VendaFoiFinalizada,
+    IdentificarCliente, ItemFoiAdicionado, PrecoConsultado, PrecoDoProduto, VendaFoiFinalizada,
 };
 use mod_vendas::{TabelaPreco, TabelasDePreco};
 
@@ -152,6 +153,9 @@ fn atalhos(ctx: &egui::Context, estado: &mut EstadoTelaPdv) {
     }
     if consumir(ctx, egui::Key::F12) {
         estado.pendentes.push(Acao::AbrirFechamento);
+    }
+    if consumir(ctx, egui::Key::F6) {
+        estado.pendentes.push(Acao::AbrirCliente);
     }
     if consumir(ctx, egui::Key::F10) {
         estado.pendentes.push(Acao::AbrirConsultaPreco);

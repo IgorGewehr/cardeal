@@ -9,15 +9,16 @@ use mod_estoque::{ItemLocal, ItemProdutoComSaldo};
 use mod_financeiro::ItemCaixa;
 use mod_vendas::{TabelaPreco, TipoTabela};
 
+use mod_clientes::ItemPessoa;
 use mod_pdv::PrecoConsultado;
 
 use super::{
-    desenhar, dialogo_consulta_preco, dialogo_pagamento, Dlg, EstadoPagamento, EstadoTelaPdv,
-    Linha, UltimaVenda,
+    desenhar, dialogo_cliente, dialogo_consulta_preco, dialogo_pagamento, Dlg, EstadoPagamento,
+    EstadoTelaPdv, Linha, UltimaVenda,
 };
 
 /// Os cenários que o exemplo sabe montar.
-pub const CENARIOS: [&str; 7] = [
+pub const CENARIOS: [&str; 8] = [
     "venda",
     "busca",
     "pagamento-troco",
@@ -25,6 +26,7 @@ pub const CENARIOS: [&str; 7] = [
     "concluida",
     "fechado",
     "consulta-preco",
+    "cliente",
 ];
 
 fn produto(nome: &str, saldo: i64, codigo: &str) -> ItemProdutoComSaldo {
@@ -112,7 +114,10 @@ pub fn estado(cenario: &str) -> Option<EstadoTelaPdv> {
     };
 
     match cenario {
-        "venda" => com_itens(&mut e),
+        "venda" => {
+            com_itens(&mut e);
+            e.cliente = Some((Id::novo(), "Maria Souza".to_owned()));
+        }
         "busca" => {
             com_itens(&mut e);
             e.entrada = "refri".to_owned();
@@ -136,6 +141,26 @@ pub fn estado(cenario: &str) -> Option<EstadoTelaPdv> {
             });
         }
         "fechado" => {}
+        "cliente" => {
+            com_itens(&mut e);
+            e.clientes = [
+                ("Maria Souza", "529.982.247-25", "(48) 99999-1111"),
+                ("Mário Andrade", "111.444.777-35", "(48) 98888-2222"),
+                ("Mercado do Zé Ltda", "11.222.333/0001-81", ""),
+            ]
+            .iter()
+            .map(|(n, d, t)| ItemPessoa {
+                pessoa: Id::novo(),
+                nome: (*n).to_owned(),
+                documento: Some((*d).to_owned()),
+                telefone: Some((*t).to_owned()).filter(|t| !t.is_empty()),
+            })
+            .collect();
+            e.dlg = Dlg::Cliente {
+                busca: "ma".to_owned(),
+                sel: 1,
+            };
+        }
         "consulta-preco" => {
             e.dlg = Dlg::ConsultaPreco {
                 termo: String::new(),
@@ -158,6 +183,7 @@ pub fn desenhar_quadro(ui: &mut eframe::egui::Ui, estado: &mut EstadoTelaPdv) {
     match estado.dlg {
         Dlg::Pagamento(_) => dialogo_pagamento(ui.ctx(), estado),
         Dlg::ConsultaPreco { .. } => dialogo_consulta_preco(ui.ctx(), estado),
+        Dlg::Cliente { .. } => dialogo_cliente(ui.ctx(), estado),
         _ => {}
     }
 }

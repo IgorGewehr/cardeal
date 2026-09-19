@@ -20,6 +20,7 @@ pub(super) fn dialogos(
         Dlg::FecharCaixa { .. } => dialogo_fechar_caixa(ctx, motor, sessao, estado),
         Dlg::Sangria { .. } => dialogo_sangria(ctx, motor, sessao, estado),
         Dlg::ConsultaPreco { .. } => dialogo_consulta_preco(ctx, estado),
+        Dlg::Cliente { .. } => dialogo_cliente(ctx, estado),
     }
 }
 
@@ -658,4 +659,111 @@ fn resultado_preco(ui: &mut egui::Ui, r: &PrecoConsultado) {
             )));
         }
     });
+}
+
+/// Os clientes que casam com o texto (nome ou documento), no máximo [`MAX_CLIENTES`].
+fn clientes_que_casam<'a>(clientes: &'a [ItemPessoa], busca: &str) -> Vec<&'a ItemPessoa> {
+    clientes
+        .iter()
+        .filter(|c| {
+            casa_por_palavras(&c.nome, busca)
+                || c.documento
+                    .as_deref()
+                    .is_some_and(|d| casa_por_palavras(d, busca))
+        })
+        .take(MAX_CLIENTES)
+        .collect()
+}
+
+/// Quantos clientes o diálogo de `F6` mostra de uma vez.
+const MAX_CLIENTES: usize = 8;
+
+/// `F6`. Não fala com o motor: escolher empilha [`Acao::EscolherCliente`]. `↑↓` percorrem, `Enter`
+/// escolhe, `Esc` fecha; "Sem cliente" volta a venda para não identificada.
+pub(super) fn dialogo_cliente(ctx: &egui::Context, estado: &mut EstadoTelaPdv) {
+    let Dlg::Cliente { busca, sel } = &mut estado.dlg else {
+        return;
+    };
+    let quantos = clientes_que_casam(&estado.clientes, busca).len();
+    for (tecla, subir) in [(egui::Key::ArrowUp, true), (egui::Key::ArrowDown, false)] {
+        if consumir(ctx, tecla) {
+            *sel = if subir {
+                sel.saturating_sub(1)
+            } else {
+                (*sel + 1).min(quantos.saturating_sub(1))
+            };
+        }
+    }
+
+    let fechar = Dialogo::nova("Cliente da venda")
+        .descricao("Busque por nome ou documento. A venda pode seguir sem cliente.")
+        .medio()
+        .mostrar(
+            ctx,
+            estado,
+            |ui, estado| {
+                let Dlg::Cliente { busca, sel } = &mut estado.dlg else {
+                    return;
+                };
+                let resp =
+                    ui.add(Campo::novo("Buscar cliente", busca).marcador("Nome ou CPF/CNPJ"));
+                let confirmou = resp.lost_focus() && enter_pressionado(ui);
+                if resp.changed() {
+                    *sel = 0;
+                }
+                focar_primeiro(ctx, &resp);
+                ui.add_space(Espaco::E12);
+
+                let achados: Vec<(Id, String, String)> =
+                    clientes_que_casam(&estado.clientes, busca)
+                        .into_iter()
+                        .map(|c| {
+                            let detalhe = [c.documento.as_deref(), c.telefone.as_deref()]
+                                .into_iter()
+                                .flatten()
+                                .collect::<Vec<_>>()
+                                .join(" · ");
+                            (c.pessoa, c.nome.clone(), detalhe)
+                        })
+                        .collect();
+                if achados.is_empty() {
+                    ui.add(Rotulo::campo(if estado.clientes.is_empty() {
+                        "Nenhum cliente cadastrado."
+                    } else {
+                        "Nenhum cliente encontrado."
+                    }));
+                    return;
+                }
+                let destacado = (*sel).min(achados.len() - 1);
+                for (i, (id, nome, detalhe)) in achados.iter().enumerate() {
+                    let mut item = ItemDeLista::novo(nome.clone()).selecionado(i == destacado);
+                    if !detalhe.is_empty() {
+                        item = item.subtitulo(detalhe.clone());
+                    }
+                    if item.mostrar(ui, |_| {}).clicked() {
+                        estado
+                            .pendentes
+                            .push(Acao::EscolherCliente(Some((*id, nome.clone()))));
+                    }
+                }
+                if confirmou {
+                    let (id, nome, _) = &achados[destacado];
+                    estado
+                        .pendentes
+                        .push(Acao::EscolherCliente(Some((*id, nome.clone()))));
+                }
+            },
+            |ui, estado| {
+                if ui.add(Botao::secundario("Fechar").atalho("Esc")).clicked() {
+                    estado.dlg = Dlg::Fechado;
+                }
+                if ui.add(Botao::secundario("Sem cliente")).clicked() {
+                    estado.pendentes.push(Acao::EscolherCliente(None));
+                }
+            },
+        );
+    if fechar {
+        estado.dlg = Dlg::Fechado;
+        estado.foco_entrada = true;
+    }
 }

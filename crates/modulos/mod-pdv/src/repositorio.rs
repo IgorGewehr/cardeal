@@ -228,6 +228,20 @@ impl<'a, 'b> RepositorioPdv<'a, 'b> {
         Ok(())
     }
 
+    /// Grava só o cliente identificado do cupom.
+    ///
+    /// # Errors
+    /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+    pub fn atualizar_cliente_cupom(&mut self, c: &Cupom) -> Resultado<()> {
+        self.conn()
+            .execute(
+                "UPDATE pdv_cupom SET cliente = ?2 WHERE id = ?1",
+                params![blob(c.id), blob_opt(c.cliente)],
+            )
+            .map_err(persist)?;
+        Ok(())
+    }
+
     /// Busca um cupom (com itens e pagamentos) pelo id. `Ok(None)` = não existe.
     ///
     /// # Errors

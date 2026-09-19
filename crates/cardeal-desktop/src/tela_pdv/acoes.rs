@@ -60,6 +60,17 @@ pub(super) fn aplicar(
             },
         ),
         Acao::ConsultarPreco => consultar_preco(ctx, motor, sessao, estado),
+        Acao::AbrirCliente => abrir(
+            ctx,
+            estado,
+            Dlg::Cliente {
+                busca: String::new(),
+                sel: 0,
+            },
+        ),
+        Acao::EscolherCliente(escolhido) => {
+            identificar_cliente(ctx, motor, sessao, estado, escolhido)
+        }
         Acao::AbrirSangria => abrir(
             ctx,
             estado,
@@ -150,6 +161,38 @@ pub(super) fn bipar(
         estado.entrada.clear();
         estado.sel_resultado = 0;
     }
+}
+
+/// Identifica (ou remove) o cliente da venda. Com o cupom já aberto, o backend registra;
+/// antes do primeiro item, só guarda — `garantir_cupom` o leva no `AbrirCupom`.
+pub(super) fn identificar_cliente(
+    ctx: &egui::Context,
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaPdv,
+    escolhido: Option<(Id, String)>,
+) {
+    if let Some(cupom) = estado.cupom {
+        if let Err(e) = motor.executar(
+            sessao,
+            "pdv.identificar_cliente.v1",
+            &IdentificarCliente {
+                cupom,
+                cliente: escolhido.as_ref().map(|c| c.0),
+            },
+        ) {
+            notificar(ctx, Notificacao::erro(e.mensagem));
+            return;
+        }
+    }
+    let aviso = match &escolhido {
+        Some((_, nome)) => Notificacao::sucesso(format!("Cliente: {nome}")),
+        None => Notificacao::info("Venda sem cliente identificado"),
+    };
+    notificar(ctx, aviso);
+    estado.cliente = escolhido;
+    estado.dlg = Dlg::Fechado;
+    estado.foco_entrada = true;
 }
 
 /// Resolve um código de barras no produto, avisando o operador se não achar.
@@ -263,7 +306,7 @@ pub(super) fn garantir_cupom(
             sessao_caixa,
             terminal: estado.terminal,
             serie_fiscal: SERIE_FISCAL,
-            cliente: None,
+            cliente: estado.cliente.as_ref().map(|c| c.0),
             tabela_preco,
             local_expedicao,
         },
@@ -401,6 +444,7 @@ pub(super) fn cancelar_cupom(
         Ok(()) => {
             estado.cupom = None;
             estado.cupom_numero = None;
+            estado.cliente = None;
             estado.carrinho.clear();
             estado.linha_sel = None;
             estado.total = Dinheiro::ZERO;
@@ -474,6 +518,7 @@ pub(super) fn finalizar(
             });
             estado.cupom = None;
             estado.cupom_numero = None;
+            estado.cliente = None;
             estado.carrinho.clear();
             estado.linha_sel = None;
             estado.total = Dinheiro::ZERO;

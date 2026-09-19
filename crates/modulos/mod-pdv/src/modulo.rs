@@ -7,6 +7,7 @@ use cardeal_storage::ConjuntoMigracoes;
 
 use crate::comandos::{
     AbrirCupom, AdicionarItem, AplicarDescontoItem, CancelarCupom, CancelarItem, FinalizarVenda,
+    IdentificarCliente,
 };
 use crate::consultas::PrecoDoProduto;
 use crate::manifesto::MANIFESTO;
@@ -32,6 +33,7 @@ impl Modulo for ModuloPdv {
             .comando::<CancelarItem>("pdv.cancelar_item.v1")
             .comando::<CancelarCupom>("pdv.cancelar_cupom.v1")
             .comando::<FinalizarVenda>("pdv.finalizar_venda.v1")
+            .comando::<IdentificarCliente>("pdv.identificar_cliente.v1")
             .consulta::<PrecoDoProduto>("pdv.preco_do_produto.v1");
         Ok(())
     }

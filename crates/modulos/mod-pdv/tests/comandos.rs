@@ -26,8 +26,8 @@ use mod_financeiro::{
 };
 use mod_pdv::{
     AbrirCupom, AdicionarItem, AplicarDescontoItem, CancelarCupom, CancelarItem, CupomAberto,
-    FinalizarVenda, ItemFoiAdicionado, ModuloPdv, PagamentoInformado, PrecoConsultado,
-    PrecoDoProduto, VendaFoiFinalizada,
+    FinalizarVenda, IdentificarCliente, ItemFoiAdicionado, ModuloPdv, PagamentoInformado,
+    PrecoConsultado, PrecoDoProduto, VendaFoiFinalizada,
 };
 use mod_vendas::{
     CriarRegraPreco, CriarTabelaPreco, ModuloVendas, RegraPrecoCriada, TabelaPrecoCriada,
@@ -671,4 +671,71 @@ fn consulta_de_preco_devolve_o_mesmo_preco_que_a_venda_cobra() {
 
     // Produto que não existe: erro conversável, não pânico.
     assert!(consulta(Id::novo()).is_err());
+}
+
+fn cliente_do_cupom(arm: &Armazenamento, cupom: Id) -> Option<Vec<u8>> {
+    arm.leitor()
+        .consultar(|c| {
+            c.query_row(
+                "SELECT cliente FROM pdv_cupom WHERE id = ?1",
+                [cupom.em_bytes().as_slice()],
+                |r| r.get(0),
+            )
+            .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+        })
+        .unwrap()
+}
+
+#[test]
+fn identificar_cliente_no_cupom_aberto_e_recusar_depois_de_cancelado() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[
+        &ModuloClientes,
+        &ModuloEstoque,
+        &ModuloFinanceiro,
+        &ModuloVendas,
+        &ModuloPdv,
+    ])
+    .unwrap();
+    let s = sessao_completa(empresa);
+    let amb = ambiente(empresa);
+    let cen = montar_cenario(&d, &s, &amb, &arm, empresa, 25);
+    let cupom = abrir_cupom(&d, &s, &amb, &arm, &cen);
+    let identificar = |cliente: Option<Id>| {
+        d.executar_comando(
+            "pdv.identificar_cliente.v1",
+            &carga(&IdentificarCliente {
+                cupom: cupom.cupom,
+                cliente,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+    };
+
+    // `abrir_cupom` já abre com o cliente do cenário: troca e depois remove.
+    let outro = Id::novo();
+    identificar(Some(outro)).unwrap();
+    assert_eq!(
+        cliente_do_cupom(&arm, cupom.cupom),
+        Some(outro.em_bytes().to_vec())
+    );
+    identificar(None).unwrap();
+    assert_eq!(cliente_do_cupom(&arm, cupom.cupom), None);
+
+    // Depois de cancelado, o cliente não muda mais.
+    d.executar_comando(
+        "pdv.cancelar_cupom.v1",
+        &carga(&CancelarCupom {
+            cupom: cupom.cupom,
+            motivo: "teste".to_string(),
+            autorizado_por: Id::novo(),
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+    assert!(identificar(Some(outro)).is_err());
 }
