@@ -9,16 +9,22 @@ use mod_estoque::{ItemLocal, ItemProdutoComSaldo};
 use mod_financeiro::ItemCaixa;
 use mod_vendas::{TabelaPreco, TipoTabela};
 
-use super::{desenhar, dialogo_pagamento, Dlg, EstadoPagamento, EstadoTelaPdv, Linha, UltimaVenda};
+use mod_pdv::PrecoConsultado;
+
+use super::{
+    desenhar, dialogo_consulta_preco, dialogo_pagamento, Dlg, EstadoPagamento, EstadoTelaPdv,
+    Linha, UltimaVenda,
+};
 
 /// Os cenários que o exemplo sabe montar.
-pub const CENARIOS: [&str; 6] = [
+pub const CENARIOS: [&str; 7] = [
     "venda",
     "busca",
     "pagamento-troco",
     "pagamento-falta",
     "concluida",
     "fechado",
+    "consulta-preco",
 ];
 
 fn produto(nome: &str, saldo: i64, codigo: &str) -> ItemProdutoComSaldo {
@@ -130,6 +136,17 @@ pub fn estado(cenario: &str) -> Option<EstadoTelaPdv> {
             });
         }
         "fechado" => {}
+        "consulta-preco" => {
+            e.dlg = Dlg::ConsultaPreco {
+                termo: String::new(),
+                resultado: Some(PrecoConsultado {
+                    nome: "Refrigerante Cola 2L".to_owned(),
+                    codigo_barras: Some("7894900011517".to_owned()),
+                    preco: "6,90".parse().unwrap_or_else(|_| unreachable!()),
+                    disponivel: Quantidade::UM.vezes(48),
+                }),
+            };
+        }
         _ => return None,
     }
     Some(e)
@@ -138,7 +155,9 @@ pub fn estado(cenario: &str) -> Option<EstadoTelaPdv> {
 /// Desenha um quadro do cenário (tela + diálogo de pagamento, se aberto), sem motor.
 pub fn desenhar_quadro(ui: &mut eframe::egui::Ui, estado: &mut EstadoTelaPdv) {
     desenhar(ui, estado);
-    if matches!(estado.dlg, Dlg::Pagamento(_)) {
-        dialogo_pagamento(ui.ctx(), estado);
+    match estado.dlg {
+        Dlg::Pagamento(_) => dialogo_pagamento(ui.ctx(), estado),
+        Dlg::ConsultaPreco { .. } => dialogo_consulta_preco(ui.ctx(), estado),
+        _ => {}
     }
 }

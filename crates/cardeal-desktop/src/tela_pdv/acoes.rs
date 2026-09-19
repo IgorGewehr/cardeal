@@ -51,6 +51,15 @@ pub(super) fn aplicar(
             }
         }
         Acao::Finalizar => pedir_finalizar(ctx, estado),
+        Acao::AbrirConsultaPreco => abrir(
+            ctx,
+            estado,
+            Dlg::ConsultaPreco {
+                termo: String::new(),
+                resultado: None,
+            },
+        ),
+        Acao::ConsultarPreco => consultar_preco(ctx, motor, sessao, estado),
         Acao::AbrirSangria => abrir(
             ctx,
             estado,
@@ -116,26 +125,12 @@ pub(super) fn bipar(
 
     let produto = match interpretada {
         Entrada::Vazia => return,
-        Entrada::Codigo { gtin, .. } => match motor.consultar(
-            sessao,
-            "estoque.produto_por_codigo_barras.v1",
-            &ProdutoPorCodigoBarras {
-                codigo_barras: gtin.clone(),
-            },
-        ) {
-            Ok(Some(p)) => p.id,
-            Ok(None) => {
-                notificar(
-                    ctx,
-                    Notificacao::aviso(format!("Código {gtin} não cadastrado.")),
-                );
+        Entrada::Codigo { gtin, .. } => {
+            let Some(id) = produto_por_gtin(ctx, motor, sessao, &gtin) else {
                 return;
-            }
-            Err(e) => {
-                notificar(ctx, Notificacao::erro(e.mensagem));
-                return;
-            }
-        },
+            };
+            id
+        }
         Entrada::Busca { .. } => {
             let escolhido = estado
                 .resultados
@@ -154,6 +149,92 @@ pub(super) fn bipar(
     if adicionar(ctx, motor, sessao, estado, produto, quantidade) {
         estado.entrada.clear();
         estado.sel_resultado = 0;
+    }
+}
+
+/// Resolve um código de barras no produto, avisando o operador se não achar.
+pub(super) fn produto_por_gtin(
+    ctx: &egui::Context,
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    gtin: &str,
+) -> Option<Id> {
+    match motor.consultar(
+        sessao,
+        "estoque.produto_por_codigo_barras.v1",
+        &ProdutoPorCodigoBarras {
+            codigo_barras: gtin.to_owned(),
+        },
+    ) {
+        Ok(Some(p)) => Some(p.id),
+        Ok(None) => {
+            notificar(
+                ctx,
+                Notificacao::aviso(format!("Código {gtin} não cadastrado.")),
+            );
+            None
+        }
+        Err(e) => {
+            notificar(ctx, Notificacao::erro(e.mensagem));
+            None
+        }
+    }
+}
+
+/// `Enter` no diálogo de `F10`: acha o produto (código ou nome) e pergunta ao backend o preço
+/// vigente na tabela do terminal. Não mexe no cupom.
+pub(super) fn consultar_preco(
+    ctx: &egui::Context,
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaPdv,
+) {
+    let Dlg::ConsultaPreco { termo, .. } = &estado.dlg else {
+        return;
+    };
+    let interpretada = entrada::interpretar(termo);
+    let quantidade = match interpretada.quantidade().map(str::parse::<Quantidade>) {
+        None => Quantidade::UM,
+        Some(Ok(q)) => q,
+        Some(Err(_)) => {
+            notificar(ctx, Notificacao::aviso("Quantidade inválida."));
+            return;
+        }
+    };
+    let produto = match &interpretada {
+        Entrada::Vazia => return,
+        Entrada::Codigo { gtin, .. } => produto_por_gtin(ctx, motor, sessao, gtin),
+        Entrada::Busca { termo, .. } => {
+            let achado = estado
+                .produtos
+                .iter()
+                .find(|p| casa_por_palavras(&p.nome, termo))
+                .map(|p| p.produto);
+            if achado.is_none() {
+                notificar(ctx, Notificacao::aviso("Nenhum produto encontrado."));
+            }
+            achado
+        }
+    };
+    let (Some(produto), Some(tabela_preco)) = (produto, estado.tabela_sel) else {
+        return;
+    };
+    match motor.consultar(
+        sessao,
+        "pdv.preco_do_produto.v1",
+        &PrecoDoProduto {
+            tabela_preco,
+            produto,
+            quantidade,
+        },
+    ) {
+        Ok(r) => {
+            if let Dlg::ConsultaPreco { termo, resultado } = &mut estado.dlg {
+                termo.clear();
+                *resultado = Some(r);
+            }
+        }
+        Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
     }
 }
 

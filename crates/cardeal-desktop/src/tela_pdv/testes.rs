@@ -115,6 +115,16 @@ struct Bancada {
 }
 
 impl Bancada {
+    fn consulta_de_preco() -> Self {
+        let mut b = Self::nova(0);
+        b.estado.dlg = Dlg::ConsultaPreco {
+            termo: String::new(),
+            resultado: None,
+        };
+        b.quadro(vec![]);
+        b
+    }
+
     fn nova(total: i64) -> Self {
         let ctx = egui::Context::default();
         cardeal_ui::tokens::instalar_fontes(&ctx);
@@ -146,10 +156,10 @@ impl Bancada {
             ..Default::default()
         };
         let estado = &mut self.estado;
-        let _ = self.ctx.run(entrada, |ctx| {
-            if matches!(estado.dlg, Dlg::Pagamento(_)) {
-                dialogo_pagamento(ctx, estado);
-            }
+        let _ = self.ctx.run(entrada, |ctx| match estado.dlg {
+            Dlg::Pagamento(_) => dialogo_pagamento(ctx, estado),
+            Dlg::ConsultaPreco { .. } => dialogo_consulta_preco(ctx, estado),
+            _ => {}
         });
     }
 
@@ -412,4 +422,65 @@ fn focar_primeiro_nao_rouba_o_foco_do_segundo_campo() {
     quadro(vec![texto("y")], &mut a, &mut b);
     assert_eq!(b, "y", "o segundo campo tem que aceitar digitação");
     assert_eq!(a, "x");
+}
+
+#[test]
+fn f10_pede_a_consulta_de_preco() {
+    let e = apertar(caixa_aberto(), &[egui::Key::F10]);
+    assert!(pediu(&e, |a| matches!(a, Acao::AbrirConsultaPreco)));
+}
+
+#[test]
+fn enter_na_consulta_de_preco_pede_a_consulta_e_o_campo_ja_nasce_focado() {
+    let mut b = Bancada::consulta_de_preco();
+    // Sem clicar em nada: o que o leitor "digita" já cai no campo.
+    b.quadro(vec![texto("7"), texto("8")]);
+    match &b.estado.dlg {
+        Dlg::ConsultaPreco { termo, .. } => assert_eq!(termo, "78"),
+        _ => panic!("o diálogo fechou"),
+    }
+    b.quadro(vec![tecla(egui::Key::Enter)]);
+    assert!(pediu(&b.estado, |a| matches!(a, Acao::ConsultarPreco)));
+}
+
+#[test]
+fn enter_confirma_mesmo_com_focar_primeiro_no_mesmo_quadro() {
+    // O padrão de todo diálogo de um campo: desenha, foca o primeiro, pergunta pelo Enter.
+    // Regressão: refocar no quadro em que o Enter soltou o foco fazia `lost_focus()` dar
+    // `false`, e o Enter nunca confirmava nada (só o clique no botão).
+    let ctx = egui::Context::default();
+    cardeal_ui::tokens::instalar_fontes(&ctx);
+    cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+    let mut texto_campo = String::new();
+    let mut confirmou = false;
+    let mut quadro = |eventos: Vec<egui::Event>| {
+        let entrada = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(800.0, 600.0),
+            )),
+            events: eventos,
+            ..Default::default()
+        };
+        confirmou = false;
+        let _ = ctx.run(entrada, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let r = ui.add(cardeal_ui::molecules::Campo::novo(
+                    "Valor",
+                    &mut texto_campo,
+                ));
+                super::dialogos::focar_primeiro(ctx, &r);
+                if r.lost_focus() && super::dialogos::enter_pressionado(ui) {
+                    confirmou = true;
+                }
+            });
+        });
+        confirmou
+    };
+    assert!(!quadro(vec![]));
+    assert!(!quadro(vec![texto("5")]));
+    assert!(
+        quadro(vec![tecla(egui::Key::Enter)]),
+        "Enter tem que confirmar"
+    );
 }

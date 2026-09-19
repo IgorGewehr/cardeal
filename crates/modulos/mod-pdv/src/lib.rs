@@ -51,6 +51,7 @@
 #![allow(clippy::result_large_err)]
 
 mod comandos;
+mod consultas;
 mod cupom;
 mod erros;
 pub mod eventos;
@@ -64,6 +65,7 @@ pub use comandos::{
     AbrirCupom, AdicionarItem, AplicarDescontoItem, CancelarCupom, CancelarItem, CupomAberto,
     FinalizarVenda, ItemFoiAdicionado, PagamentoInformado, VendaFoiFinalizada,
 };
+pub use consultas::{PrecoConsultado, PrecoDoProduto};
 pub use cupom::{
     validar_pagamentos, Cupom, EstadoCupom, FormaPagamentoPdv, ItemCupom, PagamentoCupom,
 };

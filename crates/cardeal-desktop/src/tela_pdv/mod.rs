@@ -45,7 +45,7 @@ use mod_financeiro::{
 };
 use mod_pdv::{
     AbrirCupom, AdicionarItem, AplicarDescontoItem, CancelarCupom, CupomAberto, FinalizarVenda,
-    ItemFoiAdicionado, VendaFoiFinalizada,
+    ItemFoiAdicionado, PrecoConsultado, PrecoDoProduto, VendaFoiFinalizada,
 };
 use mod_vendas::{TabelaPreco, TabelasDePreco};
 
@@ -152,6 +152,9 @@ fn atalhos(ctx: &egui::Context, estado: &mut EstadoTelaPdv) {
     }
     if consumir(ctx, egui::Key::F12) {
         estado.pendentes.push(Acao::AbrirFechamento);
+    }
+    if consumir(ctx, egui::Key::F10) {
+        estado.pendentes.push(Acao::AbrirConsultaPreco);
     }
     if consumir(ctx, egui::Key::Escape) {
         estado.entrada.clear();

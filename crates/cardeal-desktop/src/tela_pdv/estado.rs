@@ -104,6 +104,13 @@ pub(super) enum Dlg {
         valor: String,
         motivo: String,
     },
+    /// `F10`: consulta de preço sem abrir venda.
+    ConsultaPreco {
+        /// O que o operador digitou/bipou.
+        termo: String,
+        /// A resposta da última consulta, até a próxima.
+        resultado: Option<PrecoConsultado>,
+    },
 }
 
 /// O que a tela quer que aconteça. As visões só empilham isto; [`aplicar`] executa.
@@ -126,6 +133,10 @@ pub(super) enum Acao {
     AbrirSangria,
     /// `F12` com o caixa aberto.
     AbrirFechamento,
+    /// `F10`.
+    AbrirConsultaPreco,
+    /// `Enter` no diálogo de consulta de preço.
+    ConsultarPreco,
 }
 
 /// Estado local da tela de PDV.

@@ -423,4 +423,15 @@ pub(super) fn acoes(ui: &mut egui::Ui, estado: &mut EstadoTelaPdv) {
             estado.pendentes.push(Acao::AbrirFechamento);
         }
     });
+    ui.add_space(Espaco::E8);
+    if ui
+        .add(
+            Botao::secundario("Consultar preço")
+                .atalho("F10")
+                .preenche_largura(),
+        )
+        .clicked()
+    {
+        estado.pendentes.push(Acao::AbrirConsultaPreco);
+    }
 }

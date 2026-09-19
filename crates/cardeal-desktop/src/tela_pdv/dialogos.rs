@@ -19,6 +19,7 @@ pub(super) fn dialogos(
         Dlg::CancelarCupom { .. } => dialogo_cancelar_cupom(ctx, motor, estado),
         Dlg::FecharCaixa { .. } => dialogo_fechar_caixa(ctx, motor, sessao, estado),
         Dlg::Sangria { .. } => dialogo_sangria(ctx, motor, sessao, estado),
+        Dlg::ConsultaPreco { .. } => dialogo_consulta_preco(ctx, estado),
     }
 }
 
@@ -27,9 +28,14 @@ const PERMISSAO_CANCELAR_CUPOM: &str = "pdv.cupom.cancelar";
 
 /// Foca o primeiro campo de um diálogo **só quando ninguém tem o foco**. Com vários campos, um
 /// "pede foco se este não tem" roubaria o foco de volta a cada quadro e o usuário nunca
-/// conseguiria digitar no segundo campo.
+/// conseguiria digitar no segundo.
+///
+/// Também não pede foco no quadro em que o campo **acabou de perdê-lo**: é o `Enter` (o
+/// `TextEdit` solta o foco ao confirmar), e refocar ali, antes de a tela perguntar
+/// `lost_focus()`, faria a pergunta dar `false` — o `Enter` nunca confirmaria nada. No quadro
+/// seguinte o campo retoma o foco.
 pub(super) fn focar_primeiro(ctx: &egui::Context, primeiro: &egui::Response) {
-    if ctx.memory(|m| m.focused().is_none()) {
+    if ctx.memory(|m| m.focused().is_none()) && !primeiro.lost_focus() {
         primeiro.request_focus();
     }
 }
@@ -156,9 +162,7 @@ pub(super) fn dialogo_abrir(
                     return;
                 };
                 let resp = ui.add(Campo::novo("Valor de abertura", valor).marcador("0,00"));
-                if !resp.has_focus() {
-                    resp.request_focus();
-                }
+                focar_primeiro(ctx, &resp);
                 if resp.lost_focus() && enter_pressionado(ui) {
                     abrir_caixa(estado);
                 }
@@ -252,9 +256,7 @@ pub(super) fn dialogo_desconto(
                     return;
                 };
                 let resp = ui.add(Campo::novo("Desconto (%)", percentual).marcador("10"));
-                if !resp.has_focus() {
-                    resp.request_focus();
-                }
+                focar_primeiro(ctx, &resp);
                 if resp.lost_focus() && enter_pressionado(ui) {
                     aplicar_desconto(estado);
                 }
@@ -583,4 +585,77 @@ pub(super) fn dialogo_sangria(
         estado.dlg = Dlg::Fechado;
         estado.foco_entrada = true;
     }
+}
+
+/// `F10`. Não fala com o motor: `Enter` empilha [`Acao::ConsultarPreco`] e a resposta volta
+/// para dentro do próprio estado do diálogo. Continua aberto para a próxima consulta — o
+/// operador bipa um produto atrás do outro para o cliente.
+pub(super) fn dialogo_consulta_preco(ctx: &egui::Context, estado: &mut EstadoTelaPdv) {
+    let fechar = Dialogo::nova("Consulta de preço")
+        .descricao("Bipe ou digite o produto. Não altera a venda em andamento.")
+        .medio()
+        .mostrar(
+            ctx,
+            estado,
+            |ui, estado| {
+                let Dlg::ConsultaPreco { termo, resultado } = &mut estado.dlg else {
+                    return;
+                };
+                let resp = ui.add(
+                    Campo::novo("Código de barras ou nome", termo)
+                        .marcador("Bipe o código ou digite o nome"),
+                );
+                focar_primeiro(ctx, &resp);
+                if resp.lost_focus() && enter_pressionado(ui) {
+                    estado.pendentes.push(Acao::ConsultarPreco);
+                    resp.request_focus();
+                }
+                ui.add_space(Espaco::E12);
+                match resultado {
+                    Some(r) => resultado_preco(ui, r),
+                    None => {
+                        ui.add(Rotulo::campo("O preço aparece aqui."));
+                    }
+                }
+            },
+            |ui, estado| {
+                if ui
+                    .add(Botao::primario("Consultar").atalho("Enter"))
+                    .clicked()
+                {
+                    estado.pendentes.push(Acao::ConsultarPreco);
+                }
+                if ui.add(Botao::secundario("Fechar").atalho("Esc")).clicked() {
+                    estado.dlg = Dlg::Fechado;
+                }
+            },
+        );
+    if fechar {
+        estado.dlg = Dlg::Fechado;
+        estado.foco_entrada = true;
+    }
+}
+
+fn resultado_preco(ui: &mut egui::Ui, r: &PrecoConsultado) {
+    let sem_saldo = r.disponivel <= Quantidade::ZERO;
+    Painel::novo().plano().compacto().mostrar(ui, |ui| {
+        ui.add(Rotulo::titulo_secao(r.nome.clone()));
+        if let Some(c) = &r.codigo_barras {
+            ui.add(Rotulo::codigo(c.clone()));
+        }
+        ui.add_space(Espaco::E8);
+        ui.add(Rotulo::novo(
+            Papel::ValorDestaque,
+            r.preco.formatar_com_simbolo(),
+        ));
+        ui.add_space(Espaco::E8);
+        if sem_saldo {
+            ui.add(Etiqueta::atencao("sem saldo"));
+        } else {
+            ui.add(Etiqueta::positiva(format!(
+                "saldo {}",
+                r.disponivel.formatar(0)
+            )));
+        }
+    });
 }

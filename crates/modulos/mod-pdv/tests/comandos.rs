@@ -26,7 +26,8 @@ use mod_financeiro::{
 };
 use mod_pdv::{
     AbrirCupom, AdicionarItem, AplicarDescontoItem, CancelarCupom, CancelarItem, CupomAberto,
-    FinalizarVenda, ItemFoiAdicionado, ModuloPdv, PagamentoInformado, VendaFoiFinalizada,
+    FinalizarVenda, ItemFoiAdicionado, ModuloPdv, PagamentoInformado, PrecoConsultado,
+    PrecoDoProduto, VendaFoiFinalizada,
 };
 use mod_vendas::{
     CriarRegraPreco, CriarTabelaPreco, ModuloVendas, RegraPrecoCriada, TabelaPrecoCriada,
@@ -97,6 +98,7 @@ fn sessao_completa(empresa: Id) -> Sessao {
         "pdv.desconto.aplicar",
         "pdv.item.cancelar",
         "pdv.cupom.cancelar",
+        "pdv.preco.consultar",
     ] {
         papel = papel.com_permissao(p);
     }
@@ -609,4 +611,64 @@ fn cancelar_item_recalcula_total_e_cancelar_cupom_impede_finalizar() {
         .unwrap_err();
     assert_eq!(erro.codigo, CodigoErro::ESTADO_INVALIDO);
     assert_eq!(conta_lancamentos(&arm, empresa), 0);
+}
+
+#[test]
+fn consulta_de_preco_devolve_o_mesmo_preco_que_a_venda_cobra() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[
+        &ModuloClientes,
+        &ModuloEstoque,
+        &ModuloFinanceiro,
+        &ModuloVendas,
+        &ModuloPdv,
+    ])
+    .unwrap();
+    let s = sessao_completa(empresa);
+    let amb = ambiente(empresa);
+    let cen = montar_cenario(&d, &s, &amb, &arm, empresa, 25);
+
+    let consulta = |produto: Id| {
+        d.executar_consulta(
+            "pdv.preco_do_produto.v1",
+            &carga(&PrecoDoProduto {
+                tabela_preco: cen.tabela_preco,
+                produto,
+                quantidade: Quantidade::unidades(1),
+            }),
+            &s,
+            &amb,
+            arm.leitor(),
+        )
+    };
+
+    let achado: PrecoConsultado = postcard::from_bytes(&consulta(cen.produto).unwrap()).unwrap();
+    assert_eq!(achado.preco, Preco::reais(25));
+    assert!(
+        achado.disponivel > Quantidade::ZERO,
+        "traz o saldo do produto"
+    );
+
+    // O mesmo preço que `AdicionarItem` congela no item.
+    let cupom = abrir_cupom(&d, &s, &amb, &arm, &cen);
+    let item: ItemFoiAdicionado = postcard::from_bytes(
+        &d.executar_comando(
+            "pdv.adicionar_item.v1",
+            &carga(&AdicionarItem {
+                cupom: cupom.cupom,
+                produto: cen.produto,
+                variacao: None,
+                quantidade: Quantidade::unidades(1),
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(achado.preco, item.preco_unitario);
+
+    // Produto que não existe: erro conversável, não pânico.
+    assert!(consulta(Id::novo()).is_err());
 }
