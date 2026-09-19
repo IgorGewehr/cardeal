@@ -221,6 +221,33 @@ duplica permissão para uma ação que já pertence a outro módulo.
 
 ## 10. Telas
 
+### Estado da implementação da tela (2026-09-19)
+
+A tela de `cardeal-desktop` (`tela_pdv/`) segue o mapa de teclas abaixo — **teclado e leitor de
+código de barras primeiro**. O que funciona hoje, e o que **não**:
+
+| Tecla | Estado |
+|---|---|
+| `Enter` no campo de bipe | ✅ Código de barras (GTIN 8/12/13/14) → `estoque.produto_por_codigo_barras.v1`; texto → busca por nome (sem acento), `↑↓` escolhem, `Enter` adiciona |
+| `3*789…` / `0,450*pao` | ✅ Prefixo `N*` é a quantidade (no lugar do campo `F4`) |
+| `F2` | ✅ Abre o pagamento; dentro dele, finaliza |
+| `F3` | ✅ Devolve o foco ao campo de bipe |
+| `F5` | ✅ Desconto no item selecionado (`pdv.aplicar_desconto_item.v1`; o backend recusa acima do teto do papel) |
+| `F7` | ✅ Cancela o item selecionado |
+| `F8` | ⚠️ Cancela o cupom com **motivo obrigatório**; registra o operador logado. **A segunda identidade do supervisor (§11 regra 3) ainda não é pedida** |
+| `F12` | ✅ Abrir caixa (quando fechado). Fechar caixa **não** está na tela |
+| `F4`, `F6`, `F9`, `F10` | ❌ Não implementadas (`F4`: substituída pelo prefixo `N*`; `F6` cliente: `AbrirCupom` já recebe `cliente`, falta escolher; `F9` sangria e `F10` consulta de preço: sem tela) |
+
+Pagamento: `1..4` escolhem a forma (dinheiro, Pix, débito, crédito), `Enter` confirma o valor (vazio =
+"o que falta"), `F2` finaliza, `Esc` volta. Os dígitos escolhem a forma **só enquanto o campo de valor
+não tem foco**; ao digitar um valor, valem como número. Só o dinheiro dá troco, e o troco aparece
+grande depois da venda.
+
+Diferenças em relação ao mockup abaixo: o campo de bipe fica **no topo** da lista (não embaixo da
+tabela), para nunca sair da tela; e falta a coluna **Código**, porque `ProdutosComSaldo` ainda não
+devolve `codigo_barras` (mudança em `mod-estoque`). Testes: `cargo test -p cardeal-desktop` cobre a
+interpretação do bipe, a conta do troco e o fluxo de teclas do pagamento com eventos reais do egui.
+
 ### Venda
 
 ```

@@ -12,6 +12,14 @@ repository.workspace   = true
 name = "cardeal-desktop"
 path = "src/main.rs"
 
+# Conferência visual do PDV com dados fictícios (`cargo run --example pdv_demo --features demo`).
+[features]
+demo = []
+
+[[example]]
+name              = "pdv_demo"
+required-features = ["demo"]
+
 [dependencies]
 cardeal-kernel.workspace  = true
 cardeal-ledger.workspace  = true

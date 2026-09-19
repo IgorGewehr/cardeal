@@ -824,8 +824,10 @@ impl eframe::App for App {
         if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::K)) {
             self.paleta_aberta = !self.paleta_aberta;
         }
-        if ctx.input(|i| i.key_pressed(egui::Key::F5)) {
-            if let (Tela::Autenticado(estado), Some(motor)) = (&mut self.tela, &self.motor) {
+        // No PDV `F5` é "desconto no item" (`docs/modulos/pdv.md` §5) — a tela de venda trata
+        // a tecla; recarregar o catálogo por baixo dela no meio de uma venda seria pior que inútil.
+        if let (Tela::Autenticado(estado), Some(motor)) = (&mut self.tela, &self.motor) {
+            if estado.area != Area::Pdv && ctx.input(|i| i.key_pressed(egui::Key::F5)) {
                 estado.recarregar_area(motor);
             }
         }
