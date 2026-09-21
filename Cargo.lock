@@ -726,7 +726,7 @@ dependencies = [
 
 [[package]]
 name = "cardeal-auth"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "argon2",
  "blake3",
@@ -745,7 +745,7 @@ dependencies = [
 
 [[package]]
 name = "cardeal-cliente"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
  "cardeal-auth",
@@ -773,7 +773,7 @@ dependencies = [
 
 [[package]]
 name = "cardeal-desktop"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "cardeal-cliente",
@@ -804,7 +804,7 @@ dependencies = [
 
 [[package]]
 name = "cardeal-fiscal"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cardeal-kernel",
  "cardeal-storage",
@@ -819,7 +819,7 @@ dependencies = [
 
 [[package]]
 name = "cardeal-kernel"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "proptest",
  "serde",
@@ -830,7 +830,7 @@ dependencies = [
 
 [[package]]
 name = "cardeal-ledger"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cardeal-kernel",
  "cardeal-storage",
@@ -845,7 +845,7 @@ dependencies = [
 
 [[package]]
 name = "cardeal-modkit"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ahash",
  "cardeal-auth",
@@ -863,7 +863,7 @@ dependencies = [
 
 [[package]]
 name = "cardeal-pdf"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cardeal-kernel",
  "image",
@@ -873,7 +873,7 @@ dependencies = [
 
 [[package]]
 name = "cardeal-protocol"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cardeal-kernel",
  "postcard",
@@ -884,7 +884,7 @@ dependencies = [
 
 [[package]]
 name = "cardeal-server"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -929,7 +929,7 @@ dependencies = [
 
 [[package]]
 name = "cardeal-storage"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "blake3",
  "cardeal-kernel",
@@ -950,7 +950,7 @@ dependencies = [
 
 [[package]]
 name = "cardeal-testkit"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cardeal-kernel",
  "cardeal-ledger",
@@ -963,7 +963,7 @@ dependencies = [
 
 [[package]]
 name = "cardeal-ui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cardeal-kernel",
  "cardeal-modkit",
@@ -2721,7 +2721,7 @@ dependencies = [
 
 [[package]]
 name = "mod-agenda"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cardeal-auth",
  "cardeal-kernel",
@@ -2744,7 +2744,7 @@ dependencies = [
 
 [[package]]
 name = "mod-alugueis"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cardeal-kernel",
  "cardeal-ledger",
@@ -2763,7 +2763,7 @@ dependencies = [
 
 [[package]]
 name = "mod-clientes"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cardeal-auth",
  "cardeal-kernel",
@@ -2783,7 +2783,7 @@ dependencies = [
 
 [[package]]
 name = "mod-combustivel"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cardeal-kernel",
  "cardeal-ledger",
@@ -2802,7 +2802,7 @@ dependencies = [
 
 [[package]]
 name = "mod-compras"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cardeal-auth",
  "cardeal-fiscal",
@@ -2828,7 +2828,7 @@ dependencies = [
 
 [[package]]
 name = "mod-contabil"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cardeal-kernel",
  "cardeal-ledger",
@@ -2847,7 +2847,7 @@ dependencies = [
 
 [[package]]
 name = "mod-crm"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cardeal-kernel",
  "cardeal-ledger",
@@ -2866,7 +2866,7 @@ dependencies = [
 
 [[package]]
 name = "mod-estoque"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cardeal-auth",
  "cardeal-kernel",
@@ -2887,7 +2887,7 @@ dependencies = [
 
 [[package]]
 name = "mod-financeiro"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cardeal-auth",
  "cardeal-kernel",
@@ -2908,7 +2908,7 @@ dependencies = [
 
 [[package]]
 name = "mod-hotelaria"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cardeal-kernel",
  "cardeal-ledger",
@@ -2927,7 +2927,7 @@ dependencies = [
 
 [[package]]
 name = "mod-industria"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cardeal-kernel",
  "cardeal-ledger",
@@ -2946,7 +2946,7 @@ dependencies = [
 
 [[package]]
 name = "mod-orcamentos"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cardeal-auth",
  "cardeal-kernel",
@@ -2968,7 +2968,7 @@ dependencies = [
 
 [[package]]
 name = "mod-os"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cardeal-auth",
  "cardeal-kernel",
@@ -2993,7 +2993,7 @@ dependencies = [
 
 [[package]]
 name = "mod-pdv"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cardeal-auth",
  "cardeal-kernel",
@@ -3019,7 +3019,7 @@ dependencies = [
 
 [[package]]
 name = "mod-vendas"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cardeal-auth",
  "cardeal-kernel",
@@ -6054,7 +6054,7 @@ checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "clap",
