@@ -798,6 +798,7 @@ dependencies = [
  "open",
  "rfd",
  "serde",
+ "tempfile",
  "tracing",
  "tracing-subscriber",
 ]

@@ -10,11 +10,11 @@ use cardeal_modkit::Icone;
 use cardeal_pdf::{gerar_comprovante_os, ComprovanteOsPdf, IdentidadeEmpresa, ItemPdf};
 use cardeal_ui::atoms::{Botao, Divisor, Etiqueta, Rotulo, Tom, ValorDinheiro, ATALHO_NOVO};
 use cardeal_ui::molecules::{
-    Abas, Campo, CartaoKpi, EstadoVazio, Mascara, OpcaoBusca, SecaoExpansivel, SeletorBusca,
-    SeletorOpcao,
+    Abas, AcaoRegistro, AcoesRegistro, BarraFiltros, Campo, CartaoKpi, EstadoVazio, Mascara,
+    OpcaoBusca, SecaoExpansivel, SeletorBusca, SeletorOpcao,
 };
 use cardeal_ui::organisms::{
-    notificar, ColunaGrade, Dialogo, Direcao, FaixaKpi, Grade, LayoutTela, Notificacao,
+    notificar, ColunaGrade, Dialogo, Direcao, FaixaKpi, Grade, LayoutTela, Notificacao, Ordenacao,
 };
 use cardeal_ui::tokens::{Espaco, TemaUi};
 use eframe::egui;
@@ -23,18 +23,19 @@ use mod_clientes::{
     Papel as PapelCliente, PessoaCadastrada, PessoasPorPapel, TipoContato, TipoDocumento,
     TipoEndereco, TipoPessoa,
 };
-use mod_estoque::{ItemProdutoComSaldo, ProdutosComSaldo};
+use mod_estoque::{ItemLocal, ItemProdutoComSaldo, Locais, ProdutosComSaldo};
 use mod_financeiro::{
     ContaBancariaCriada, ContasDisponiveis, CriarContaBancaria, ItemContaDisponivel, MeioPagamento,
     Titulo, TituloDaOrigem,
 };
 use mod_os::{
-    AbrirOrdemServico, ApontamentoDeTempo, ApontamentosDaOrdem, AprovarOrcamentoOs,
+    AbrirOrdemServico, AplicarPeca, ApontamentoDeTempo, ApontamentosDaOrdem, AprovarOrcamentoOs,
     BuscarDetalheOrdem, CancelarOrdemServico, ConcluirExecucao, DesfaturarOrdemServico,
     DetalheOrdem, EditarDadosDaOrdem, EncerrarApontamento, EnviarParaAprovacao, EstadoOs,
     FaturarOrdemServico, IniciarApontamento, IniciarExecucao, ItemOrcamentoNovo, MontarOrcamentoOs,
     OrdemServico, OrdemServicoAberta, OrdemServicoCancelada, OrdemServicoFaturada, PagamentoNoAto,
-    ReabrirOrdemServico, RegistrarLaudo, ReprovarOrcamentoOs, TempoTotalDaOrdem, TodasAsOrdens,
+    PecaFoiAplicada, ReabrirOrdemServico, RegistrarLaudo, RemoverItemOrcamento,
+    ReprovarOrcamentoOs, TempoTotalDaOrdem, TipoItemOrcamento, TodasAsOrdens,
 };
 
 /// Qual dialog está aberto.
@@ -156,6 +157,10 @@ pub struct EstadoTelaOs {
     ordens: Vec<OrdemServico>,
     clientes: Vec<ItemPessoa>,
     produtos: Vec<ItemProdutoComSaldo>,
+    /// Locais de estoque de onde as peças saem ao serem aplicadas na execução.
+    locais: Vec<ItemLocal>,
+    /// O local escolhido para aplicar peças; começa no primeiro (o comum é haver um só).
+    aplicar_local: Option<Id>,
     usuarios: Vec<UsuarioResumo>,
     identidade: Option<IdentidadeVisual>,
     detalhe: Option<DetalheOrdem>,
@@ -169,7 +174,7 @@ pub struct EstadoTelaOs {
     busca: String,
     /// Filtro por status — `None` = `FiltroStatusOs::Ativas` (o padrão).
     filtro_status: Option<FiltroStatusOs>,
-    ordenacao: Option<(usize, Direcao)>,
+    ordenacao: Ordenacao,
     /// `(ordem_servico, rótulo)` aguardando confirmação de exclusão (cancelamento).
     confirmar_exclusao: Option<(Id, String)>,
     /// Transição de estado simples (Aprovar/Reprovar/Concluir execução) aguardando
@@ -220,6 +225,15 @@ impl EstadoTelaOs {
         if let Ok(p) = motor.consultar(sessao, "estoque.produtos_com_saldo.v1", &ProdutosComSaldo) {
             self.produtos = p;
         }
+        if let Ok(l) = motor.consultar(sessao, "estoque.locais.v1", &Locais) {
+            self.locais = l;
+            let ainda_existe = self
+                .aplicar_local
+                .is_some_and(|id| self.locais.iter().any(|l| l.id == id));
+            if !ainda_existe {
+                self.aplicar_local = self.locais.first().map(|l| l.id);
+            }
+        }
         if let Ok(u) = motor.usuarios() {
             self.usuarios = u;
         }
@@ -242,8 +256,14 @@ impl EstadoTelaOs {
                 self.carregar_apontamentos(motor, sessao, id);
                 self.titulo_gerado = None;
                 if let Some(d) = &self.detalhe {
-                    if d.laudo.is_none() {
-                        self.laudo_problema = d.ordem.defeito_relatado.clone();
+                    // O formulário do laudo abre já preenchido: com o defeito relatado se ainda
+                    // não há laudo, com o laudo atual se houver (para corrigi-lo).
+                    match &d.laudo {
+                        None => self.laudo_problema = d.ordem.defeito_relatado.clone(),
+                        Some(l) => {
+                            self.laudo_problema = l.descricao_problema.clone();
+                            self.laudo_diagnostico = l.diagnostico.clone().unwrap_or_default();
+                        }
                     }
                     if d.ordem.estado == EstadoOs::Faturada {
                         if let Ok(t) = motor.consultar(
@@ -894,30 +914,30 @@ fn lista(ui: &mut egui::Ui, motor: &MotorLocal, sessao: &SessaoLocal, estado: &m
     ])
     .mostrar(ui);
 
-    ui.horizontal(|ui| {
-        ui.set_max_width(360.0);
-        ui.add(Campo::novo("", &mut estado.busca).marcador("Buscar por nº, aparelho ou cliente"));
-        ui.add_space(Espaco::E12);
-        SeletorOpcao::novo("Status", &mut estado.filtro_status)
-            .opcao(FiltroStatusOs::Ativas, "Ativas (padrão)")
-            .opcao(FiltroStatusOs::Todos, "Todas")
-            .opcoes(
-                [
-                    EstadoOs::Aberta,
-                    EstadoOs::EmDiagnostico,
-                    EstadoOs::AguardandoAprovacao,
-                    EstadoOs::Aprovada,
-                    EstadoOs::EmExecucao,
-                    EstadoOs::Concluida,
-                    EstadoOs::Faturada,
-                    EstadoOs::Cancelada,
-                    EstadoOs::Reprovada,
-                ]
-                .map(|e| (FiltroStatusOs::Um(e), estado_etiqueta(e).0)),
-            )
-            .mostrar(ui);
-    });
-    ui.add_space(Espaco::E12);
+    BarraFiltros::nova(&mut estado.busca)
+        .marcador("Buscar por nº, aparelho ou cliente")
+        .filtro(|ui| {
+            SeletorOpcao::novo("Status", &mut estado.filtro_status)
+                .sem_rotulo()
+                .opcao(FiltroStatusOs::Ativas, "Ativas (padrão)")
+                .opcao(FiltroStatusOs::Todos, "Todas")
+                .opcoes(
+                    [
+                        EstadoOs::Aberta,
+                        EstadoOs::EmDiagnostico,
+                        EstadoOs::AguardandoAprovacao,
+                        EstadoOs::Aprovada,
+                        EstadoOs::EmExecucao,
+                        EstadoOs::Concluida,
+                        EstadoOs::Faturada,
+                        EstadoOs::Cancelada,
+                        EstadoOs::Reprovada,
+                    ]
+                    .map(|e| (FiltroStatusOs::Um(e), estado_etiqueta(e).0)),
+                )
+                .mostrar(ui);
+        })
+        .mostrar(ui);
 
     let filtro_status = estado.filtro_status.unwrap_or(FiltroStatusOs::Ativas);
     let termo = estado.busca.trim().to_lowercase();
@@ -937,14 +957,6 @@ fn lista(ui: &mut egui::Ui, motor: &MotorLocal, sessao: &SessaoLocal, estado: &m
                     .contains(&termo)
         })
         .collect();
-    if indices.is_empty() {
-        ui.add(
-            Rotulo::interface("Nenhuma ordem para essa busca/filtro de status.")
-                .cor(ui.cores().texto_medio),
-        );
-        return;
-    }
-
     let colunas = vec![
         ColunaGrade::nova("Nº").largura(56.0).numero(),
         ColunaGrade::nova("Aparelho"),
@@ -953,14 +965,11 @@ fn lista(ui: &mut egui::Ui, motor: &MotorLocal, sessao: &SessaoLocal, estado: &m
         ColunaGrade::nova("Total").largura(110.0).numero(),
         ColunaGrade::nova("Ações").largura(190.0),
     ];
-    let mut editar_clicado = None;
-    let mut excluir_clicado = None;
+    let mut acao_clicada = None;
     let resposta = Grade::nova(colunas)
-        .selecionavel(None)
-        .ordenacao(estado.ordenacao)
-        // Linha mais alta que o padrão (38px) — a coluna "Ações" carrega botões de 34px de
-        // altura mínima, que ficavam praticamente colados nas bordas da linha sem isso.
-        .altura_linha(cardeal_ui::tokens::AlturaLinha::Toque)
+        .com_acoes()
+        .ordenacao(estado.ordenacao.atual())
+        .vazio("Nenhuma ordem para essa busca/filtro de status.")
         .mostrar(ui, indices.len(), |i, row| {
             let os = &estado.ordens[indices[i]];
             row.col(|ui| {
@@ -983,34 +992,32 @@ fn lista(ui: &mut egui::Ui, motor: &MotorLocal, sessao: &SessaoLocal, estado: &m
                 ui.add(ValorDinheiro::novo(os.valor_total));
             });
             row.col(|ui| {
-                let rubro = ui.cores().rubro;
-                ui.horizontal(|ui| {
-                    if ui.add(Botao::fantasma("Editar").pequeno().cor(rubro)).clicked() {
-                        editar_clicado = Some((os.id, os.equipamento.clone()));
-                    }
-                    if pode_cancelar(os.estado)
-                        && ui.add(Botao::destrutivo("Excluir").pequeno()).clicked()
-                    {
-                        excluir_clicado = Some((os.id, equipamento_label(os).to_owned()));
-                    }
-                });
+                acao_clicada = AcoesRegistro::novo()
+                    .excluir(pode_cancelar(os.estado))
+                    .mostrar(ui)
+                    .map(|a| {
+                        (
+                            a,
+                            os.id,
+                            os.equipamento.clone(),
+                            equipamento_label(os).to_owned(),
+                        )
+                    });
             });
         });
 
-    if let Some(coluna) = resposta.coluna_clicada {
-        let direcao = match estado.ordenacao {
-            Some((atual, direcao)) if atual == coluna => direcao.invertida(),
-            _ => Direcao::Ascendente,
-        };
-        estado.ordenacao = Some((coluna, direcao));
+    if let Some((coluna, direcao)) = estado.ordenacao.clicar(&resposta) {
         ordenar_ordens(&mut estado.ordens, &estado.clientes, coluna, direcao);
     }
-    if let Some((id, equipamento)) = editar_clicado {
-        estado.editar_equipamento = equipamento;
-        estado.editar_complemento_defeito.clear();
-        estado.dlg = Dlg::EditarDados(id);
-    } else if let Some(alvo) = excluir_clicado {
-        estado.confirmar_exclusao = Some(alvo);
+    if let Some((acao, id, equipamento, rotulo)) = acao_clicada {
+        match acao {
+            AcaoRegistro::Editar => {
+                estado.editar_equipamento = equipamento;
+                estado.editar_complemento_defeito.clear();
+                estado.dlg = Dlg::EditarDados(id);
+            }
+            AcaoRegistro::Excluir => estado.confirmar_exclusao = Some((id, rotulo)),
+        }
     } else if let Some(i) = resposta.linha_clicada {
         let id = estado.ordens[indices[i]].id;
         estado.abrir_detalhe(motor, sessao, id);
@@ -1479,12 +1486,7 @@ fn corpo_detalhe(
     // ── Laudo ──────────────────────────────────────────────────────────────
     ui.add(Rotulo::titulo_secao("Laudo técnico"));
     ui.add_space(Espaco::E8);
-    if let Some(laudo) = &detalhe.laudo {
-        ui.add(Rotulo::interface(format!("Problema: {}", laudo.descricao_problema)).quebravel());
-        if let Some(dg) = &laudo.diagnostico {
-            ui.add(Rotulo::interface(format!("Diagnóstico: {dg}")).quebravel());
-        }
-    } else if matches!(os.estado, EstadoOs::Aberta) {
+    if matches!(os.estado, EstadoOs::Aberta | EstadoOs::EmDiagnostico) {
         ui.columns(2, |c| {
             c[0].add(Campo::novo("Problema relatado", &mut estado.laudo_problema));
             c[1].add(Campo::novo(
@@ -1493,7 +1495,13 @@ fn corpo_detalhe(
             ));
         });
         ui.add_space(Espaco::E8);
-        if ui.add(Botao::primario("Registrar laudo")).clicked() {
+        let ja_tem_laudo = detalhe.laudo.is_some();
+        let rotulo_laudo = if ja_tem_laudo {
+            "Atualizar laudo"
+        } else {
+            "Registrar laudo"
+        };
+        if ui.add(Botao::primario(rotulo_laudo)).clicked() {
             let diagnostico = (!estado.laudo_diagnostico.trim().is_empty())
                 .then(|| estado.laudo_diagnostico.clone());
             aplicar_e_recarregar(
@@ -1509,8 +1517,17 @@ fn corpo_detalhe(
                     diagnostico,
                     tecnico: sessao.usuario(),
                 },
-                "Laudo registrado",
+                if ja_tem_laudo {
+                    "Laudo atualizado"
+                } else {
+                    "Laudo registrado"
+                },
             );
+        }
+    } else if let Some(laudo) = &detalhe.laudo {
+        ui.add(Rotulo::interface(format!("Problema: {}", laudo.descricao_problema)).quebravel());
+        if let Some(dg) = &laudo.diagnostico {
+            ui.add(Rotulo::interface(format!("Diagnóstico: {dg}")).quebravel());
         }
     } else {
         ui.add(Rotulo::interface("—"));
@@ -1520,10 +1537,19 @@ fn corpo_detalhe(
     // ── Orçamento ──────────────────────────────────────────────────────────
     ui.add(Rotulo::titulo_secao("Orçamento"));
     ui.add_space(Espaco::E8);
+    // Remover/aplicar são decididos aqui e executados depois dos laços (os laços seguram
+    // `estado` emprestado para ler os nomes das peças).
+    let pode_ajustar = os.estado.aceita_ajuste_de_itens();
+    let em_execucao = os.estado == EstadoOs::EmExecucao;
+    let mut remover: Option<(Id, TipoItemOrcamento)> = None;
+    let mut aplicar: Option<Id> = None;
     for item in &detalhe.itens_mao_de_obra {
         ui.horizontal(|ui| {
             ui.add(Rotulo::interface(item.descricao.clone()));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if pode_ajustar && ui.add(Botao::fantasma("Remover").pequeno()).clicked() {
+                    remover = Some((item.id, TipoItemOrcamento::MaoDeObra));
+                }
                 ui.add(ValorDinheiro::novo(item.valor));
             });
         });
@@ -1537,17 +1563,45 @@ fn corpo_detalhe(
         ui.horizontal(|ui| {
             ui.add(Rotulo::interface(format!("{} × {nome}", item.quantidade)));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.add(Rotulo::campo(if item.aplicada {
-                    "aplicada"
-                } else {
-                    "pendente"
-                }));
+                // Uma peça já aplicada não sai do orçamento: o estoque já foi baixado.
+                if !item.aplicada {
+                    if em_execucao && ui.add(Botao::secundario("Aplicar").pequeno()).clicked() {
+                        aplicar = Some(item.id);
+                    }
+                    if pode_ajustar && ui.add(Botao::fantasma("Remover").pequeno()).clicked() {
+                        remover = Some((item.id, TipoItemOrcamento::Peca));
+                    }
+                }
                 ui.add(Rotulo::interface(format!(
                     "{} /un",
                     item.preco_unitario.formatar_com_simbolo()
                 )));
+                ui.add(if item.aplicada {
+                    Etiqueta::positiva("aplicada")
+                } else {
+                    Etiqueta::atencao("pendente")
+                });
             });
         });
+    }
+    if let Some((item, tipo)) = remover {
+        aplicar_e_recarregar(
+            ui.ctx(),
+            motor,
+            sessao,
+            estado,
+            os.id,
+            "os.remover_item_orcamento.v1",
+            &RemoverItemOrcamento {
+                ordem_servico: os.id,
+                item,
+                tipo,
+            },
+            "Item removido do orçamento",
+        );
+    }
+    if let Some(item) = aplicar {
+        aplicar_pecas(ui.ctx(), motor, sessao, estado, os.id, &[item]);
     }
     ui.add_space(Espaco::E4);
     ui.horizontal(|ui| {
@@ -1875,11 +1929,42 @@ fn acoes_por_estado(
             }
         }
         EstadoOs::EmExecucao => {
-            if detalhe.itens_peca.iter().any(|i| !i.aplicada) {
+            let pendentes: Vec<Id> = detalhe
+                .itens_peca
+                .iter()
+                .filter(|i| !i.aplicada)
+                .map(|i| i.id)
+                .collect();
+            if !pendentes.is_empty() {
+                let n = pendentes.len();
                 ui.add(
-                    Rotulo::interface("Há peça do orçamento ainda não aplicada no estoque.")
-                        .cor(ui.cores().atencao),
+                    Rotulo::interface(if n == 1 {
+                        "1 peça do orçamento ainda não saiu do estoque.".to_owned()
+                    } else {
+                        format!("{n} peças do orçamento ainda não saíram do estoque.")
+                    })
+                    .cor(ui.cores().atencao),
                 );
+                ui.add_space(Espaco::E8);
+                if estado.locais.len() > 1 {
+                    let opcoes: Vec<(Id, String)> = estado
+                        .locais
+                        .iter()
+                        .map(|l| (l.id, l.nome.clone()))
+                        .collect();
+                    SeletorOpcao::novo("Sai do local de estoque", &mut estado.aplicar_local)
+                        .opcoes(opcoes)
+                        .mostrar(ui);
+                    ui.add_space(Espaco::E8);
+                }
+                let rotulo = if n == 1 {
+                    "Aplicar peça"
+                } else {
+                    "Aplicar todas as peças"
+                };
+                if ui.add(Botao::primario(rotulo)).clicked() {
+                    aplicar_pecas(ui.ctx(), motor, sessao, estado, os.id, &pendentes);
+                }
             } else if ui.add(Botao::primario("Concluir execução")).clicked() {
                 estado.confirmar_acao = Some(AcaoPendente::ConcluirExecucao(os.id));
             }
@@ -1890,6 +1975,79 @@ fn acoes_por_estado(
         | EstadoOs::Aberta
         | EstadoOs::EmDiagnostico
         | EstadoOs::Concluida => {}
+    }
+}
+
+/// Aplica as peças `itens` da OS em execução, tirando-as do estoque do local escolhido.
+///
+/// Uma a uma, na ordem: se alguma falhar (saldo, permissão), para nela, avisa o motivo e
+/// recarrega o detalhe — as que já saíram continuam aplicadas, e a tela reflete isso. O
+/// aviso de saldo negativo (`gerou_divergencia`) vem do estoque e aparece na hora, sem
+/// precisar abrir o estoque para descobrir.
+fn aplicar_pecas(
+    ctx: &egui::Context,
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaOs,
+    ordem: Id,
+    itens: &[Id],
+) {
+    let Some(local) = estado.aplicar_local else {
+        notificar(
+            ctx,
+            Notificacao::aviso("Nenhum local de estoque cadastrado — cadastre um no Estoque."),
+        );
+        return;
+    };
+    let mut aplicadas = 0_usize;
+    let mut divergencias = 0_usize;
+    let mut erro = None;
+    for &item_peca in itens {
+        let r = motor.executar(
+            sessao,
+            "os.aplicar_peca.v1",
+            &AplicarPeca {
+                ordem_servico: ordem,
+                item_peca,
+                local,
+                lote: None,
+            },
+        );
+        match r {
+            Ok(feita) => {
+                let feita: PecaFoiAplicada = feita;
+                aplicadas += 1;
+                if feita.gerou_divergencia {
+                    divergencias += 1;
+                }
+            }
+            Err(e) => {
+                erro = Some(e.mensagem);
+                break;
+            }
+        }
+    }
+    if aplicadas > 0 {
+        estado.carregar(motor, sessao);
+        estado.abrir_detalhe(motor, sessao, ordem);
+        estado.dlg = Dlg::Detalhe;
+        notificar(
+            ctx,
+            Notificacao::sucesso(if aplicadas == 1 {
+                "Peça aplicada — saiu do estoque".to_owned()
+            } else {
+                format!("{aplicadas} peças aplicadas — saíram do estoque")
+            }),
+        );
+    }
+    if divergencias > 0 {
+        notificar(
+            ctx,
+            Notificacao::aviso("O saldo dessa peça ficou negativo no local — confira o estoque."),
+        );
+    }
+    if let Some(mensagem) = erro {
+        notificar(ctx, Notificacao::erro(mensagem));
     }
 }
 
@@ -2058,5 +2216,316 @@ fn gerar_pdf(ctx: &egui::Context, estado: &EstadoTelaOs, d: &DetalheOrdem) {
             ctx,
             Notificacao::erro(format!("Não foi possível salvar: {e}")),
         ),
+    }
+}
+
+#[cfg(test)]
+mod testes {
+    use super::*;
+    use cardeal_kernel::{Preco, Quantidade};
+    use mod_clientes::{CriarPessoa as CriarCliente, PessoaCadastrada as ClienteCriado};
+    use mod_estoque::{
+        CriarGrupoProduto, CriarLocal, CriarProduto, CriarUnidade, GrupoProdutoCriado, LocalCriado,
+        ProdutoCriado, RegistrarEntrada, TipoLocal, UnidadeCriada,
+    };
+
+    /// Abre um motor real (SQLite em arquivo temporário) com o admin logado, cria cliente,
+    /// produto, local e 5 unidades em estoque, e abre uma OS. Devolve o que os testes usam.
+    struct Cenario {
+        _arquivo: tempfile::NamedTempFile,
+        motor: MotorLocal,
+        sessao: SessaoLocal,
+        ctx: egui::Context,
+        estado: EstadoTelaOs,
+        os: Id,
+        produto: Id,
+    }
+
+    fn cenario() -> Cenario {
+        let arquivo = tempfile::NamedTempFile::new().expect("arquivo temporário");
+        let motor = MotorLocal::abrir(arquivo.path(), &crate::modulos(), &crate::pedido_ativacao())
+            .expect("abrir motor");
+        motor
+            .configurar_inicial(
+                "Assistência Teste",
+                "11.222.333/0001-81",
+                "igor",
+                "Igor",
+                "senha-forte-123",
+            )
+            .expect("configuração inicial");
+        let sessao = motor.autenticar("igor", "senha-forte-123").expect("login");
+
+        let cliente: ClienteCriado = motor
+            .executar(
+                &sessao,
+                "clientes.criar_pessoa.v1",
+                &CriarCliente {
+                    tipo: TipoPessoa::Fisica,
+                    nome: "Cliente Teste".to_owned(),
+                    nome_fantasia: None,
+                    papel_inicial: PapelCliente::Cliente,
+                    documento_tipo: Some(TipoDocumento::Cpf),
+                    documento_numero: Some("52998224725".to_owned()),
+                    data_nascimento: None,
+                    endereco: None,
+                    contato: None,
+                },
+            )
+            .expect("cliente");
+        let grupo: GrupoProdutoCriado = motor
+            .executar(
+                &sessao,
+                "estoque.criar_grupo_produto.v1",
+                &CriarGrupoProduto {
+                    codigo: "PECAS".to_owned(),
+                    nome: "Peças".to_owned(),
+                    pai: None,
+                },
+            )
+            .expect("grupo");
+        let unidade: UnidadeCriada = motor
+            .executar(
+                &sessao,
+                "estoque.criar_unidade.v1",
+                &CriarUnidade {
+                    sigla: "UN".to_owned(),
+                    nome: "Unidade".to_owned(),
+                    fracionavel: false,
+                },
+            )
+            .expect("unidade");
+        let produto: ProdutoCriado = motor
+            .executar(
+                &sessao,
+                "estoque.criar_produto.v1",
+                &CriarProduto {
+                    grupo_produto: grupo.grupo_produto,
+                    nome: "Tela original".to_owned(),
+                    ncm: "85076000".to_owned(),
+                    unidade_padrao: unidade.unidade,
+                    codigo_barras: None,
+                    detalhes_tecnicos: None,
+                },
+            )
+            .expect("produto");
+        let local: LocalCriado = motor
+            .executar(
+                &sessao,
+                "estoque.criar_local.v1",
+                &CriarLocal {
+                    nome: "Depósito".to_owned(),
+                    tipo: TipoLocal::Deposito,
+                },
+            )
+            .expect("local");
+        motor
+            .executar(
+                &sessao,
+                "estoque.registrar_entrada.v1",
+                &RegistrarEntrada {
+                    produto: produto.produto,
+                    local: local.local,
+                    quantidade: Quantidade::unidades(5),
+                    custo_unitario: Preco::reais(90),
+                },
+            )
+            .expect("entrada");
+        let aberta: OrdemServicoAberta = motor
+            .executar(
+                &sessao,
+                "os.abrir_ordem_servico.v1",
+                &AbrirOrdemServico {
+                    cliente: cliente.pessoa,
+                    equipamento: "Notebook".to_owned(),
+                    defeito_relatado: "Tela quebrada".to_owned(),
+                    tecnico_responsavel: sessao.usuario(),
+                    garantia_dias: 90,
+                },
+            )
+            .expect("abrir OS");
+
+        let mut estado = EstadoTelaOs::default();
+        estado.carregar(&motor, &sessao);
+        Cenario {
+            _arquivo: arquivo,
+            motor,
+            sessao,
+            ctx: egui::Context::default(),
+            estado,
+            os: aberta.ordem_servico,
+            produto: produto.produto,
+        }
+    }
+
+    fn disponivel(c: &Cenario) -> Quantidade {
+        c.estado
+            .produtos
+            .iter()
+            .find(|p| p.produto == c.produto)
+            .expect("produto na lista")
+            .disponivel
+    }
+
+    /// Laudo editável também em diagnóstico, e o formulário reabre preenchido com o atual.
+    #[test]
+    fn laudo_e_corrigido_em_diagnostico_e_o_formulario_reabre_preenchido() {
+        let mut c = cenario();
+        for (problema, diagnostico) in [
+            ("Tela quebrada", None),
+            ("Tela e flat quebrados", Some("Trocar")),
+        ] {
+            aplicar_e_recarregar(
+                &c.ctx,
+                &c.motor,
+                &c.sessao,
+                &mut c.estado,
+                c.os,
+                "os.registrar_laudo.v1",
+                &RegistrarLaudo {
+                    ordem_servico: c.os,
+                    descricao_problema: problema.to_owned(),
+                    diagnostico: diagnostico.map(str::to_owned),
+                    tecnico: c.sessao.usuario(),
+                },
+                "ok",
+            );
+        }
+        let d = c.estado.detalhe.as_ref().expect("detalhe");
+        assert_eq!(d.ordem.estado, EstadoOs::EmDiagnostico);
+        assert_eq!(c.estado.laudo_problema, "Tela e flat quebrados");
+        assert_eq!(c.estado.laudo_diagnostico, "Trocar");
+    }
+
+    /// O caminho que antes travava: peça orçada, OS em execução, e a tela sem como aplicar.
+    /// Agora aplicar tira do estoque e libera "Concluir execução".
+    #[test]
+    fn aplicar_peca_pela_tela_baixa_o_estoque_e_destrava_a_conclusao() {
+        let mut c = cenario();
+        assert_eq!(
+            c.estado.aplicar_local,
+            c.estado.locais.first().map(|l| l.id)
+        );
+
+        let item_peca: Id = c
+            .motor
+            .executar(
+                &c.sessao,
+                "os.montar_orcamento.v1",
+                &MontarOrcamentoOs {
+                    ordem_servico: c.os,
+                    item: ItemOrcamentoNovo::Peca {
+                        produto: c.produto,
+                        quantidade: Quantidade::unidades(2),
+                        preco_unitario: Preco::reais(160),
+                    },
+                },
+            )
+            .expect("peça no orçamento");
+        let ordem_servico = c.os;
+        c.motor
+            .executar(
+                &c.sessao,
+                "os.enviar_para_aprovacao.v1",
+                &EnviarParaAprovacao { ordem_servico },
+            )
+            .expect("enviar para aprovação");
+        c.motor
+            .executar(
+                &c.sessao,
+                "os.aprovar_orcamento.v1",
+                &AprovarOrcamentoOs {
+                    ordem_servico,
+                    identificacao_aprovador: "Cliente Teste".to_owned(),
+                },
+            )
+            .expect("aprovar");
+        c.motor
+            .executar(
+                &c.sessao,
+                "os.iniciar_execucao.v1",
+                &IniciarExecucao { ordem_servico },
+            )
+            .expect("iniciar execução");
+        c.estado.abrir_detalhe(&c.motor, &c.sessao, c.os);
+        assert_eq!(disponivel(&c), Quantidade::unidades(5));
+
+        aplicar_pecas(
+            &c.ctx,
+            &c.motor,
+            &c.sessao,
+            &mut c.estado,
+            c.os,
+            &[item_peca],
+        );
+
+        let d = c.estado.detalhe.as_ref().expect("detalhe");
+        assert!(
+            d.itens_peca.iter().all(|i| i.aplicada),
+            "a peça deveria constar aplicada"
+        );
+        assert_eq!(
+            disponivel(&c),
+            Quantidade::unidades(3),
+            "duas unidades saíram do estoque"
+        );
+        c.motor
+            .executar(
+                &c.sessao,
+                "os.concluir_execucao.v1",
+                &ConcluirExecucao {
+                    ordem_servico: c.os,
+                },
+            )
+            .expect("com a peça aplicada, a execução conclui");
+    }
+
+    /// Remover um item errado do orçamento devolve o total.
+    #[test]
+    fn remover_item_pela_tela_desconta_do_total() {
+        let mut c = cenario();
+        let item: Id = c
+            .motor
+            .executar(
+                &c.sessao,
+                "os.montar_orcamento.v1",
+                &MontarOrcamentoOs {
+                    ordem_servico: c.os,
+                    item: ItemOrcamentoNovo::MaoDeObra {
+                        descricao: "Serviço lançado errado".to_owned(),
+                        valor: "80,00".parse().expect("valor"),
+                        tecnico: c.sessao.usuario(),
+                        horas: None,
+                    },
+                },
+            )
+            .expect("mão de obra");
+        c.estado.abrir_detalhe(&c.motor, &c.sessao, c.os);
+        assert!(!c
+            .estado
+            .detalhe
+            .as_ref()
+            .expect("detalhe")
+            .ordem
+            .valor_total
+            .e_zero());
+
+        aplicar_e_recarregar(
+            &c.ctx,
+            &c.motor,
+            &c.sessao,
+            &mut c.estado,
+            c.os,
+            "os.remover_item_orcamento.v1",
+            &RemoverItemOrcamento {
+                ordem_servico: c.os,
+                item,
+                tipo: TipoItemOrcamento::MaoDeObra,
+            },
+            "removido",
+        );
+        let d = c.estado.detalhe.as_ref().expect("detalhe");
+        assert!(d.itens_mao_de_obra.is_empty());
+        assert!(d.ordem.valor_total.e_zero());
     }
 }

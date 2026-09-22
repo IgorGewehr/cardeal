@@ -48,3 +48,6 @@ tracing-subscriber.workspace = true
 image.workspace       = true
 rfd.workspace         = true
 open.workspace        = true
+
+[dev-dependencies]
+tempfile.workspace = true
