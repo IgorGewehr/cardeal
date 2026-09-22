@@ -10,9 +10,12 @@ use cardeal_cliente::{MotorLocal, SessaoLocal};
 use cardeal_kernel::{Fuso, Id, Preco, Quantidade};
 use cardeal_modkit::Icone;
 use cardeal_ui::atoms::{Botao, Divisor, Etiqueta, Rotulo, Tom, ATALHO_NOVO};
-use cardeal_ui::molecules::{Abas, Campo, CartaoKpi, EstadoVazio, SecaoExpansivel, SeletorOpcao};
+use cardeal_ui::molecules::{
+    dado, Abas, AcaoRegistro, AcoesRegistro, BarraFiltros, Campo, CartaoKpi, EstadoVazio,
+    SecaoExpansivel, SeletorOpcao,
+};
 use cardeal_ui::organisms::{
-    notificar, ColunaGrade, Dialogo, Direcao, FaixaKpi, Grade, LayoutTela, Notificacao,
+    notificar, ColunaGrade, Dialogo, Direcao, FaixaKpi, Grade, LayoutTela, Notificacao, Ordenacao,
 };
 use cardeal_ui::tokens::{Espaco, TemaUi};
 use eframe::egui;
@@ -61,7 +64,7 @@ pub struct EstadoTelaEstoque {
     busca: String,
     erro: Option<String>,
     dlg: Dlg,
-    ordenacao: Option<(usize, Direcao)>,
+    ordenacao: Ordenacao,
     /// `(produto, nome)` aguardando confirmação de exclusão (desativação).
     confirmar_exclusao: Option<(Id, String)>,
 
@@ -281,21 +284,14 @@ fn lista(
     ])
     .mostrar(ui);
 
-    ui.horizontal(|ui| {
-        ui.set_max_width(360.0);
-        // TODO(backend): quando o código curto de rastreabilidade existir, o marcador vira
-        // "Buscar por nome, NCM ou código" e `produtos_filtrados` passa a comparar contra
-        // ele também.
-        ui.add(Campo::novo("", &mut estado.busca).marcador("Buscar por nome ou NCM"));
-    });
-    ui.add_space(Espaco::E12);
+    // TODO(backend): quando o código curto de rastreabilidade existir, o marcador vira
+    // "Buscar por nome, NCM ou código" e `produtos_filtrados` passa a comparar contra
+    // ele também.
+    BarraFiltros::nova(&mut estado.busca)
+        .marcador("Buscar por nome ou NCM")
+        .mostrar(ui);
 
     let indices = estado.produtos_filtrados();
-    if indices.is_empty() {
-        ui.add(Rotulo::interface("Nenhum produto para essa busca.").cor(ui.cores().texto_medio));
-        return;
-    }
-
     let colunas = vec![
         ColunaGrade::nova("Produto"),
         ColunaGrade::nova("NCM").largura(110.0),
@@ -304,14 +300,11 @@ fn lista(
         ColunaGrade::nova("Custo médio").largura(120.0).numero(),
         ColunaGrade::nova("Ações").largura(190.0),
     ];
-    let mut editar_clicado = None;
-    let mut excluir_clicado = None;
+    let mut acao_clicada = None;
     let resposta = Grade::nova(colunas)
-        .selecionavel(None)
-        .ordenacao(estado.ordenacao)
-        // Linha mais alta que o padrão (38px) — a coluna "Ações" carrega botões de 34px de
-        // altura mínima, que ficavam praticamente colados nas bordas da linha sem isso.
-        .altura_linha(cardeal_ui::tokens::AlturaLinha::Toque)
+        .com_acoes()
+        .ordenacao(estado.ordenacao.atual())
+        .vazio("Nenhum produto para essa busca.")
         .mostrar(ui, indices.len(), |i, row| {
             let p = &estado.produtos[indices[i]];
             row.col(|ui| {
@@ -335,30 +328,20 @@ fn lista(
                 ui.add(Rotulo::interface(p.custo_medio.to_string()));
             });
             row.col(|ui| {
-                let rubro = ui.cores().rubro;
-                ui.horizontal(|ui| {
-                    if ui.add(Botao::fantasma("Editar").pequeno().cor(rubro)).clicked() {
-                        editar_clicado = Some(indices[i]);
-                    }
-                    if ui.add(Botao::destrutivo("Excluir").pequeno()).clicked() {
-                        excluir_clicado = Some((p.produto, p.nome.clone()));
-                    }
-                });
+                acao_clicada = AcoesRegistro::novo()
+                    .mostrar(ui)
+                    .map(|a| (a, indices[i], p.produto, p.nome.clone()));
             });
         });
 
-    if let Some(coluna) = resposta.coluna_clicada {
-        let direcao = match estado.ordenacao {
-            Some((atual, direcao)) if atual == coluna => direcao.invertida(),
-            _ => Direcao::Ascendente,
-        };
-        estado.ordenacao = Some((coluna, direcao));
+    if let Some((coluna, direcao)) = estado.ordenacao.clicar(&resposta) {
         ordenar_produtos(&mut estado.produtos, coluna, direcao);
     }
-    if let Some(indice) = editar_clicado {
-        abrir_editar(motor, sessao, estado, indice);
-    } else if let Some(produto) = excluir_clicado {
-        estado.confirmar_exclusao = Some(produto);
+    if let Some((acao, indice, produto, nome)) = acao_clicada {
+        match acao {
+            AcaoRegistro::Editar => abrir_editar(motor, sessao, estado, indice),
+            AcaoRegistro::Excluir => estado.confirmar_exclusao = Some((produto, nome)),
+        }
     } else if let Some(i) = resposta.linha_clicada {
         estado.dlg = Dlg::Ver(indices[i]);
     }
@@ -525,12 +508,12 @@ fn dialogo_ver(
         estado,
         |ui, estado| {
             ui.columns(2, |c| {
-                campo_ver(&mut c[0], "NCM", &p.ncm);
-                campo_ver(&mut c[1], "Custo médio", &p.custo_medio.to_string());
+                dado(&mut c[0], "NCM", &p.ncm);
+                dado(&mut c[1], "Custo médio", &p.custo_medio.to_string());
             });
             ui.columns(2, |c| {
-                campo_ver(&mut c[0], "Disponível", &p.disponivel.to_string());
-                campo_ver(&mut c[1], "Reservado", &p.reservado.to_string());
+                dado(&mut c[0], "Disponível", &p.disponivel.to_string());
+                dado(&mut c[1], "Reservado", &p.reservado.to_string());
             });
 
             // TODO(backend): não existe hoje uma consulta "produto por id" que devolva
@@ -606,8 +589,8 @@ fn dialogo_editar(
             estado,
             |ui, estado| {
                 ui.columns(2, |c| {
-                    campo_ver(&mut c[0], "Produto", &p.nome);
-                    campo_ver(&mut c[1], "NCM", &p.ncm);
+                    dado(&mut c[0], "Produto", &p.nome);
+                    dado(&mut c[1], "NCM", &p.ncm);
                 });
                 ui.add_space(Espaco::E8);
                 bloco_detalhes_tecnicos(ui, estado);
@@ -649,16 +632,6 @@ fn salvar_detalhes_tecnicos(
     }
 }
 
-fn campo_ver(ui: &mut egui::Ui, chave: &str, valor: &str) {
-    ui.add(Rotulo::campo(chave));
-    ui.add(Rotulo::interface(if valor.trim().is_empty() {
-        "—"
-    } else {
-        valor
-    }));
-    ui.add_space(Espaco::E12);
-}
-
 /// O dialog "Repor estoque" aberto a partir de uma linha do radar — mostra os números atuais
 /// (já conhecidos, vieram do próprio radar) e permite lançar uma entrada e/ou ajustar o
 /// ponto de pedido sem sair do fluxo.
@@ -681,9 +654,9 @@ fn dialogo_repor(
             estado,
             |ui, estado| {
                 ui.columns(3, |c| {
-                    campo_ver(&mut c[0], "Disponível", &item.disponivel.to_string());
-                    campo_ver(&mut c[1], "Ponto de pedido", &item.ponto_pedido.to_string());
-                    campo_ver(
+                    dado(&mut c[0], "Disponível", &item.disponivel.to_string());
+                    dado(&mut c[1], "Ponto de pedido", &item.ponto_pedido.to_string());
+                    dado(
                         &mut c[2],
                         "Estoque mínimo",
                         &item

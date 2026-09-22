@@ -12,6 +12,9 @@ Leia primeiro `docs/19-estado-e-processo.md` (estado real do projeto e o que nã
   Layout (`ui.horizontal`, `ui.columns`, `Espaco::…`) é permitido.
 - Falta o componente? **Crie em `cardeal-ui` primeiro** (atom → molecule → organism, com entrada em
   `examples/galeria.rs`) e só depois use. Nunca "só dessa vez".
+- **Listagem** (produtos, clientes, OS, notas…): `FaixaKpi` → `BarraFiltros` → `Grade.com_acoes()` +
+  `Ordenacao` + `AcoesRegistro`. Receita e exemplo vivo: `docs/12-ui-ux.md` §7.1 e a galeria. Não
+  copie a lista de outra tela: o padrão já é componente.
 - Procure antes de criar: inventário em `docs/12-ui-ux.md` §7.1 (ex.: `dialogo_confirmacao` já existe).
 - Só tokens: `ui.cores()`, `Espaco`, `Raio`, `Rotulo`. Nenhuma cor/tamanho literal numa tela.
 - Antes de commitar UI: `cargo xtask verificar-ui` (catraca: `xtask/ui-baseline.toml` só pode

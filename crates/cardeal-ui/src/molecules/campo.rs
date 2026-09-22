@@ -121,8 +121,13 @@ impl Widget for Campo<'_> {
         let com_erro = self.erro.is_some();
 
         ui.vertical(|ui| {
-            ui.add(Rotulo::campo(self.rotulo));
-            ui.add_space(Espaco::E4);
+            // Sem rótulo (campo de busca, por exemplo) não reserva a linha do rótulo nem o
+            // respiro embaixo dele — senão o campo fica deslocado para baixo, desalinhado de
+            // qualquer vizinho na mesma linha (o filtro ao lado da busca).
+            if !self.rotulo.is_empty() {
+                ui.add(Rotulo::campo(self.rotulo));
+                ui.add_space(Espaco::E4);
+            }
 
             if self.somente_leitura {
                 let texto = if self.valor.trim().is_empty() {

@@ -74,6 +74,41 @@ impl Direcao {
     }
 }
 
+/// A ordenação ativa de uma listagem — o que a tela guarda no próprio estado e devolve à
+/// [`Grade::ordenacao`] a cada quadro.
+///
+/// Existe para que **o clique no cabeçalho se comporte igual em toda tela**: coluna nova
+/// começa ascendente, clicar de novo na mesma inverte. Cinco telas repetiam esse `match`.
+///
+/// ```ignore
+/// let resposta = Grade::nova(colunas).ordenacao(estado.ordenacao.atual()).mostrar(...);
+/// if let Some((coluna, direcao)) = estado.ordenacao.clicar(&resposta) {
+///     ordenar_produtos(&mut estado.produtos, coluna, direcao);
+/// }
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Ordenacao(Option<(usize, Direcao)>);
+
+impl Ordenacao {
+    /// A coluna e a direção ativas, se o usuário já ordenou por alguma.
+    #[must_use]
+    pub const fn atual(self) -> Option<(usize, Direcao)> {
+        self.0
+    }
+
+    /// Registra o clique de cabeçalho da `resposta` (se houve). Devolve a coluna e a nova
+    /// direção para a tela reordenar os dados; `None` se nenhum cabeçalho foi clicado.
+    pub fn clicar(&mut self, resposta: &RespostaGrade) -> Option<(usize, Direcao)> {
+        let coluna = resposta.coluna_clicada?;
+        let direcao = match self.0 {
+            Some((atual, direcao)) if atual == coluna => direcao.invertida(),
+            _ => Direcao::Ascendente,
+        };
+        self.0 = Some((coluna, direcao));
+        self.0
+    }
+}
+
 /// Uma coluna da grade: rótulo do cabeçalho e largura inicial (`Column::remainder` se
 /// `None` — a coluna reparte o espaço sobrando da tabela).
 pub struct ColunaGrade {
@@ -236,6 +271,14 @@ impl Grade {
         self
     }
 
+    /// Configura a grade para uma listagem de cadastro com a coluna de ações
+    /// ([`AcoesRegistro`](crate::molecules::AcoesRegistro)): linha inteira clicável e linha
+    /// mais alta (`AlturaLinha::Toque`) — os botões pequenos têm 34px de altura mínima e
+    /// ficavam colados nas bordas da linha padrão de 38px.
+    pub const fn com_acoes(self) -> Self {
+        self.selecionavel(None).altura_linha(AlturaLinha::Toque)
+    }
+
     /// Marca qual coluna (índice) e direção está ordenando a tabela agora — desenha a seta
     /// ▲/▼ ao lado do rótulo dela. Componente controlado: a tela guarda esse estado e o
     /// devolve aqui a cada frame, veja [`RespostaGrade`].
@@ -254,7 +297,15 @@ impl Grade {
         total_linhas: usize,
         linha: impl FnMut(usize, &mut LinhaGrade<'_, '_, '_>),
     ) -> RespostaGrade {
-        ui.scope(|ui| self.desenhar(ui, total_linhas, linha)).inner
+        // `push_id` (e não `scope`): o `id_salt` precisa chegar também à área de rolagem da
+        // tabela, senão duas grades no mesmo `ui` colidem mesmo com sais diferentes. O sal
+        // padrão vem dos rótulos das colunas, como no estado da tabela.
+        let sal: String = self.id_salt.map_or_else(
+            || self.colunas.iter().map(|c| c.rotulo).collect(),
+            str::to_owned,
+        );
+        ui.push_id(sal, |ui| self.desenhar(ui, total_linhas, linha))
+            .inner
     }
 
     fn desenhar(
@@ -505,4 +556,48 @@ fn pintar_faixa_do_cabecalho(ui: &Ui, cores: &crate::tokens::Cores) {
         faixa.bottom(),
         Stroke::new(1.0_f32, cores.borda),
     );
+}
+
+#[cfg(test)]
+mod testes {
+    use super::*;
+
+    fn clique(coluna: usize) -> RespostaGrade {
+        RespostaGrade {
+            linha_clicada: None,
+            coluna_clicada: Some(coluna),
+        }
+    }
+
+    #[test]
+    fn coluna_nova_comeca_ascendente() {
+        let mut o = Ordenacao::default();
+        assert_eq!(o.clicar(&clique(2)), Some((2, Direcao::Ascendente)));
+        assert_eq!(o.atual(), Some((2, Direcao::Ascendente)));
+    }
+
+    #[test]
+    fn clicar_de_novo_na_mesma_coluna_inverte() {
+        let mut o = Ordenacao::default();
+        o.clicar(&clique(1));
+        assert_eq!(o.clicar(&clique(1)), Some((1, Direcao::Descendente)));
+        assert_eq!(o.clicar(&clique(1)), Some((1, Direcao::Ascendente)));
+    }
+
+    #[test]
+    fn trocar_de_coluna_volta_a_ascendente() {
+        let mut o = Ordenacao::default();
+        o.clicar(&clique(1));
+        o.clicar(&clique(1));
+        assert_eq!(o.clicar(&clique(3)), Some((3, Direcao::Ascendente)));
+    }
+
+    #[test]
+    fn sem_clique_de_cabecalho_nada_muda() {
+        let mut o = Ordenacao::default();
+        o.clicar(&clique(1));
+        let sem_clique = RespostaGrade::default();
+        assert_eq!(o.clicar(&sem_clique), None);
+        assert_eq!(o.atual(), Some((1, Direcao::Ascendente)));
+    }
 }

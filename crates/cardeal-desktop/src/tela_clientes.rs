@@ -14,10 +14,11 @@ use cardeal_kernel::Id;
 use cardeal_modkit::Icone;
 use cardeal_ui::atoms::{Botao, Divisor, Etiqueta, Rotulo, ATALHO_NOVO};
 use cardeal_ui::molecules::{
-    Campo, CartaoKpi, EstadoVazio, Mascara, SecaoExpansivel, SeletorOpcao,
+    dado, AcaoRegistro, AcoesRegistro, BarraFiltros, Campo, CartaoKpi, EstadoVazio, Mascara,
+    SecaoExpansivel, SeletorOpcao,
 };
 use cardeal_ui::organisms::{
-    notificar, ColunaGrade, Dialogo, Direcao, FaixaKpi, Grade, LayoutTela, Notificacao,
+    notificar, ColunaGrade, Dialogo, Direcao, FaixaKpi, Grade, LayoutTela, Notificacao, Ordenacao,
 };
 use cardeal_ui::tokens::{Espaco, TemaUi};
 use eframe::egui;
@@ -235,7 +236,7 @@ pub struct EstadoTelaClientes {
     busca: String,
     erro: Option<String>,
     form: Option<Form>,
-    ordenacao: Option<(usize, Direcao)>,
+    ordenacao: Ordenacao,
     /// `(pessoa, nome)` do cliente aguardando confirmação de exclusão — desenha o dialog de
     /// confirmação num frame separado do clique no botão "Excluir" (o padrão já usado por
     /// `tela_os.rs` pra cancelamento).
@@ -257,7 +258,7 @@ impl EstadoTelaClientes {
             Ok(p) => {
                 self.pessoas = p;
                 self.erro = None;
-                if let Some((coluna, direcao)) = self.ordenacao {
+                if let Some((coluna, direcao)) = self.ordenacao.atual() {
                     ordenar_pessoas(&mut self.pessoas, coluna, direcao);
                 }
             }
@@ -311,23 +312,12 @@ pub fn mostrar(
                 .mostrar(ui);
             }
 
-            ui.horizontal(|ui| {
-                ui.set_max_width(360.0);
-                if ui
-                    .add(
-                        cardeal_ui::molecules::Campo::novo("", &mut estado.busca)
-                            .marcador("Buscar por nome ou documento"),
-                    )
-                    .changed()
-                {
-                    estado.carregar(motor, sessao);
-                }
-                if !estado.busca.is_empty() && ui.add(Botao::fantasma("✕").pequeno()).clicked() {
-                    estado.busca.clear();
-                    estado.carregar(motor, sessao);
-                }
-            });
-            ui.add_space(Espaco::E12);
+            if BarraFiltros::nova(&mut estado.busca)
+                .marcador("Buscar por nome ou documento")
+                .mostrar(ui)
+            {
+                estado.carregar(motor, sessao);
+            }
 
             if let Some(erro) = &estado.erro {
                 ui.add(
@@ -391,14 +381,10 @@ fn lista(
         ColunaGrade::nova("WhatsApp").largura(220.0),
         ColunaGrade::nova("Ações").largura(190.0),
     ];
-    let mut editar_clicado = None;
-    let mut excluir_clicado = None;
+    let mut acao_clicada = None;
     let resposta = Grade::nova(colunas)
-        .selecionavel(None)
-        .ordenacao(estado.ordenacao)
-        // Linha mais alta que o padrão (38px) — a coluna "Ações" carrega botões de 34px de
-        // altura mínima, que ficavam praticamente colados nas bordas da linha sem isso.
-        .altura_linha(cardeal_ui::tokens::AlturaLinha::Toque)
+        .com_acoes()
+        .ordenacao(estado.ordenacao.atual())
         .mostrar(ui, estado.pessoas.len(), |i, row| {
             let p = &estado.pessoas[i];
             row.col(|ui| {
@@ -413,33 +399,25 @@ fn lista(
                 }
             });
             row.col(|ui| {
-                let rubro = ui.cores().rubro;
-                ui.horizontal(|ui| {
-                    if ui.add(Botao::fantasma("Editar").pequeno().cor(rubro)).clicked() {
-                        editar_clicado = Some(p.pessoa);
-                    }
-                    if ui.add(Botao::destrutivo("Excluir").pequeno()).clicked() {
-                        excluir_clicado = Some((p.pessoa, p.nome.clone()));
-                    }
-                });
+                acao_clicada = AcoesRegistro::novo()
+                    .mostrar(ui)
+                    .map(|a| (a, p.pessoa, p.nome.clone()));
             });
         });
 
-    if let Some(coluna) = resposta.coluna_clicada {
-        let direcao = match estado.ordenacao {
-            Some((atual, direcao)) if atual == coluna => direcao.invertida(),
-            _ => Direcao::Ascendente,
-        };
-        estado.ordenacao = Some((coluna, direcao));
+    if let Some((coluna, direcao)) = estado.ordenacao.clicar(&resposta) {
         ordenar_pessoas(&mut estado.pessoas, coluna, direcao);
     }
-    if let Some(id) = editar_clicado {
-        estado.abrir_detalhe(motor, sessao, id);
-        if let Some(f) = estado.form.as_mut() {
-            f.modo = Modo::Editar;
+    if let Some((acao, id, nome)) = acao_clicada {
+        match acao {
+            AcaoRegistro::Editar => {
+                estado.abrir_detalhe(motor, sessao, id);
+                if let Some(f) = estado.form.as_mut() {
+                    f.modo = Modo::Editar;
+                }
+            }
+            AcaoRegistro::Excluir => estado.confirmar_exclusao = Some((id, nome)),
         }
-    } else if let Some(pessoa) = excluir_clicado {
-        estado.confirmar_exclusao = Some(pessoa);
     } else if let Some(i) = resposta.linha_clicada {
         let id = estado.pessoas[i].pessoa;
         estado.abrir_detalhe(motor, sessao, id);
@@ -587,8 +565,8 @@ fn dialogo(
                 ui.add(Divisor::novo());
                 ui.add_space(Espaco::E12);
                 ui.columns(2, |c| {
-                    kv(&mut c[0], "Papéis", &f.papeis);
-                    kv(&mut c[1], "Limite de crédito", &f.limite);
+                    dado(&mut c[0], "Papéis", &f.papeis);
+                    dado(&mut c[1], "Limite de crédito", &f.limite);
                 });
             }
         },
@@ -637,15 +615,6 @@ fn dialogo(
     if fechar {
         estado.form = None;
     }
-}
-
-fn kv(ui: &mut egui::Ui, chave: &str, valor: &str) {
-    ui.add(Rotulo::campo(chave));
-    ui.add(Rotulo::interface(if valor.trim().is_empty() {
-        "—"
-    } else {
-        valor
-    }));
 }
 
 /// Monta o endereço inicial pro formulário, se o logradouro foi preenchido — mesma decisão

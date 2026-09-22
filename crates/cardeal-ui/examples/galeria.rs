@@ -10,11 +10,11 @@ use cardeal_ui::atoms::{
     Divisor, Etiqueta, Rotulo, Spinner, Tecla, TipoBotaoJanela, Tom, ValorDinheiro,
 };
 use cardeal_ui::molecules::{
-    Abas, CabecalhoTela, Campo, CampoBusca, CartaoKpi, EstadoVazio, ItemDeLista, LinhaDeAcao,
-    SeletorOpcao, Severidade,
+    Abas, AcaoRegistro, AcoesRegistro, BarraFiltros, CabecalhoTela, Campo, CampoBusca, CartaoKpi,
+    EstadoVazio, ItemDeLista, LinhaDeAcao, SeletorOpcao, Severidade,
 };
 use cardeal_ui::organisms::{
-    notificar, ColunaGrade, Dialogo, Grade, Janela, Notificacao, Notificacoes, Painel,
+    notificar, ColunaGrade, Dialogo, Grade, Janela, Notificacao, Notificacoes, Ordenacao, Painel,
 };
 use cardeal_ui::tokens::{instalar_estilo, instalar_fontes, Espaco, Rubro, Tema, TemaUi};
 use eframe::egui;
@@ -59,6 +59,10 @@ struct Galeria {
     campo: String,
     campo_erro: String,
     busca: String,
+    lista_busca: String,
+    lista_filtro: Option<u8>,
+    lista_ordenacao: Ordenacao,
+    lista_ultima_acao: String,
     motivo: String,
     marcada: bool,
     item_ativo: usize,
@@ -72,7 +76,141 @@ struct Galeria {
     pediu_captura: bool,
 }
 
+/// Linhas fictícias da listagem de exemplo: (produto, disponível, situação).
+const PRODUTOS_DEMO: [(&str, i64, &str); 4] = [
+    ("Tela LCD 15.6\" Dell Latitude", 4, "ok"),
+    ("Bateria Notebook Acer AS10D", 0, "sem estoque"),
+    ("Memória DDR4 8GB Kingston", 12, "ok"),
+    ("Cooler Notebook Lenovo G40", 1, "baixo"),
+];
+
 impl Galeria {
+    /// A listagem-padrão de cadastro, do jeito que uma tela deve montá-la: só componentes,
+    /// nenhum `egui` cru. É a referência para estoque, clientes e OS.
+    fn listagem(&mut self, ui: &mut egui::Ui) {
+        BarraFiltros::nova(&mut self.lista_busca)
+            .marcador("Buscar por nome ou NCM")
+            .filtro(|ui| {
+                SeletorOpcao::novo("Situação", &mut self.lista_filtro)
+                    .sem_rotulo()
+                    .placeholder("Todas as situações")
+                    .opcao(0, "Todas as situações")
+                    .opcao(1, "Sem estoque")
+                    .mostrar(ui);
+            })
+            .mostrar(ui);
+
+        let termo = self.lista_busca.trim().to_lowercase();
+        let linhas: Vec<_> = PRODUTOS_DEMO
+            .iter()
+            .filter(|(nome, _, _)| termo.is_empty() || nome.to_lowercase().contains(&termo))
+            .filter(|(_, _, sit)| self.lista_filtro != Some(1) || *sit == "sem estoque")
+            .collect();
+        let mut acao = None;
+        let resposta = Grade::nova(vec![
+            ColunaGrade::nova("Produto"),
+            ColunaGrade::nova("Disponível").largura(130.0).numero(),
+            ColunaGrade::nova("Situação").largura(140.0),
+            ColunaGrade::nova("Ações").largura(190.0),
+        ])
+        .id_salt("galeria-listagem")
+        .com_acoes()
+        .ordenacao(self.lista_ordenacao.atual())
+        .vazio("Nenhum produto para essa busca.")
+        .mostrar(ui, linhas.len(), |i, row| {
+            let (nome, qtd, situacao) = linhas[i];
+            row.col(|ui| {
+                ui.add(Rotulo::interface((*nome).to_owned()));
+            });
+            row.col(|ui| {
+                ui.add(Rotulo::interface(qtd.to_string()));
+            });
+            row.col(|ui| {
+                ui.add(match *situacao {
+                    "sem estoque" => Etiqueta::negativa("Sem estoque"),
+                    "baixo" => Etiqueta::atencao("Abaixo do ponto"),
+                    _ => Etiqueta::positiva("Em dia"),
+                });
+            });
+            row.col(|ui| {
+                acao = AcoesRegistro::novo().mostrar(ui).map(|a| (a, *nome));
+            });
+        });
+        // A tela reordenaria os dados aqui; a galeria só registra o clique (a seta ▲/▼ já
+        // mostra o resultado).
+        self.lista_ordenacao.clicar(&resposta);
+        if let Some((a, nome)) = acao {
+            self.lista_ultima_acao = match a {
+                AcaoRegistro::Editar => format!("Editar: {nome}"),
+                AcaoRegistro::Excluir => format!("Excluir: {nome}"),
+            };
+        }
+        if !self.lista_ultima_acao.is_empty() {
+            ui.add(Rotulo::interface(self.lista_ultima_acao.clone()).cor(ui.cores().texto_medio));
+        }
+    }
+
+    /// A grade de contas a receber: uma parcela quitada mantém o valor real e o quanto entrou;
+    /// o saldo (que só existe em aberto) vira "—". Vencimento em vermelho só para o que está
+    /// em aberto e atrasado.
+    fn parcelas(ui: &mut egui::Ui) {
+        let linhas: [(&str, &str, i64, i64, &str); 3] = [
+            ("Maira", "14/09/2026", 16000, 16000, "quitada"),
+            ("Amanda Martini", "15/09/2026", 8500, 3000, "parcial"),
+            ("Oficina Silva", "30/09/2026", 42000, 0, "aberta"),
+        ];
+        Grade::nova(vec![
+            ColunaGrade::nova("Contraparte"),
+            ColunaGrade::nova("Vencimento").largura(120.0),
+            ColunaGrade::nova("Valor").largura(120.0).numero(),
+            ColunaGrade::nova("Recebido").largura(120.0).numero(),
+            ColunaGrade::nova("Saldo").largura(120.0).numero(),
+            ColunaGrade::nova("Estado").largura(120.0),
+        ])
+        .id_salt("galeria-parcelas")
+        .selecionavel(None)
+        .mostrar(ui, linhas.len(), |i, row| {
+            let (nome, venc, original, baixado, estado) = linhas[i];
+            let saldo = original - baixado;
+            let em_aberto = estado != "quitada";
+            row.col(|ui| {
+                ui.add(Rotulo::interface(nome.to_owned()));
+            });
+            row.col(|ui| {
+                let r = Rotulo::interface(venc.to_owned());
+                ui.add(if em_aberto && i == 1 {
+                    r.cor(ui.cores().negativo)
+                } else {
+                    r
+                });
+            });
+            row.col(|ui| {
+                ui.add(ValorDinheiro::novo(Dinheiro::centavos(original)).neutro());
+            });
+            row.col(|ui| {
+                if baixado == 0 {
+                    ui.add(Rotulo::interface("—").cor(ui.cores().texto_fraco));
+                } else {
+                    ui.add(ValorDinheiro::novo(Dinheiro::centavos(baixado)));
+                }
+            });
+            row.col(|ui| {
+                if em_aberto && saldo != 0 {
+                    ui.add(ValorDinheiro::novo(Dinheiro::centavos(saldo)).neutro());
+                } else {
+                    ui.add(Rotulo::interface("—").cor(ui.cores().texto_fraco));
+                }
+            });
+            row.col(|ui| {
+                ui.add(match estado {
+                    "quitada" => Etiqueta::positiva("Recebida"),
+                    "parcial" => Etiqueta::negativa("Parcial · vencida"),
+                    _ => Etiqueta::neutra("Aberta"),
+                });
+            });
+        });
+    }
+
     /// Salva a captura pedida por `GALERIA_CAPTURA` quando ela chega, e fecha.
     fn tratar_captura(&mut self, ctx: &egui::Context) {
         let Some(destino) = &self.captura else { return };
@@ -449,6 +587,18 @@ impl eframe::App for Galeria {
                         .mostrar(ui, 0, |_, _| {});
                     });
                 });
+
+                ui.add_space(Espaco::E24);
+                ui.add(Rotulo::titulo_secao(
+                    "Listagem de cadastro: BarraFiltros · Grade.com_acoes · AcoesRegistro · Ordenacao",
+                ));
+                self.listagem(ui);
+
+                ui.add_space(Espaco::E24);
+                ui.add(Rotulo::titulo_secao(
+                    "Parcelas: Valor · Recebido · Saldo (quitada não vira R$ 0,00)",
+                ));
+                Self::parcelas(ui);
 
                 ui.add_space(Espaco::E24);
                 ui.add(Rotulo::titulo_secao("Diálogo (pequeno · médio · grande)"));

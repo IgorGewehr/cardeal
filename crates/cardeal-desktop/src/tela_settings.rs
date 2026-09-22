@@ -8,7 +8,7 @@ use cardeal_cliente::{
     EmpresaResumo, IdentidadeVisual, MotorLocal, PapelResumo, SessaoLocal, UsuarioResumo,
 };
 use cardeal_ui::atoms::{Botao, Rotulo};
-use cardeal_ui::molecules::{Abas, Campo};
+use cardeal_ui::molecules::{dado, Abas, Campo};
 use cardeal_ui::organisms::{notificar, ColunaGrade, Grade, LayoutTela, Notificacao, Painel};
 use cardeal_ui::tokens::{Espaco, Tema, TemaUi};
 use eframe::egui;
@@ -138,7 +138,7 @@ fn secao_empresa(
         ui.add_space(Espaco::E12);
         ui.add(Campo::novo("Nome fantasia", &mut estado.fantasia));
         ui.add_space(Espaco::E12);
-        kv(ui, "CNPJ", &cnpj);
+        dado(ui, "CNPJ", &cnpj);
         ui.add_space(Espaco::E12);
 
         ui.add(Rotulo::campo("REGIME TRIBUTÁRIO"));
@@ -415,13 +415,4 @@ fn secao_acesso(ui: &mut egui::Ui, estado: &mut EstadoTelaSettings) {
 
 fn cartao(ui: &mut egui::Ui, conteudo: impl FnOnce(&mut egui::Ui)) {
     Painel::novo().amplo().largura(680.0).mostrar(ui, conteudo);
-}
-
-fn kv(ui: &mut egui::Ui, chave: &str, valor: &str) {
-    ui.add(Rotulo::campo(chave.to_uppercase()));
-    ui.add(Rotulo::interface(if valor.trim().is_empty() {
-        "—"
-    } else {
-        valor
-    }));
 }

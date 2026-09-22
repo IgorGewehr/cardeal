@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use cardeal_cliente::{MotorLocal, SessaoLocal};
 use cardeal_kernel::{Data, Fuso, Hora, Id, Instante};
 use cardeal_ui::atoms::{Botao, Divisor, Etiqueta, Rotulo, Tom, ATALHO_NOVO};
-use cardeal_ui::molecules::{Abas, Campo, Mascara, SeletorOpcao};
+use cardeal_ui::molecules::{dado, Abas, Campo, Mascara, SeletorOpcao};
 use cardeal_ui::organisms::{
     notificar, AcaoAgenda, AgendaCalendario, AgendaMes, BlocoAgenda, Dialogo, LayoutTela,
     ModoCalendario, Notificacao, TagAgenda,
@@ -636,7 +636,7 @@ fn dialogo_ver(
         |ui, _estado| {
             let dia = c.inicio.data(FUSO);
             ui.columns(2, |col| {
-                kv(
+                dado(
                     &mut col[0],
                     "Quando",
                     &format!(
@@ -646,11 +646,11 @@ fn dialogo_ver(
                         c.fim.hora(FUSO).formatar()
                     ),
                 );
-                kv(&mut col[1], "Estado", rotulo_estado(c.estado));
+                dado(&mut col[1], "Estado", rotulo_estado(c.estado));
             });
             ui.columns(2, |col| {
-                kv(&mut col[0], "Cliente", &cliente);
-                kv(
+                dado(&mut col[0], "Cliente", &cliente);
+                dado(
                     &mut col[1],
                     "Origem",
                     if origem.is_empty() { "avulso" } else { &origem },
@@ -761,14 +761,4 @@ fn aplicar<C: cardeal_modkit::Comando + serde::Serialize>(
         }
         Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
     }
-}
-
-fn kv(ui: &mut egui::Ui, chave: &str, valor: &str) {
-    ui.add(Rotulo::campo(chave));
-    ui.add(Rotulo::interface(if valor.trim().is_empty() {
-        "—"
-    } else {
-        valor
-    }));
-    ui.add_space(Espaco::E8);
 }

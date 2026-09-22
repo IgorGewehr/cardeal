@@ -22,7 +22,7 @@ pub use cartao::Cartao;
 pub use confirmacao::{dialogo_confirmacao, RespostaConfirmacao};
 pub use dialogo::Dialogo;
 pub use faixa_kpi::FaixaKpi;
-pub use grade::{ColunaGrade, Direcao, Grade, LinhaGrade, RespostaGrade};
+pub use grade::{ColunaGrade, Direcao, Grade, LinhaGrade, Ordenacao, RespostaGrade};
 pub use grafico::{GraficoBarras, GraficoBarrasHorizontais, ItemBarraHorizontal, SerieBarras};
 pub use janela::Janela;
 pub use layout_tela::LayoutTela;

@@ -107,6 +107,25 @@ pub const PROIBIDOS: &[Proibido] = &[
         padrao: "ui.add_sized(",
         use_em_vez: "o layout do componente (largura é do componente, não da tela)",
     },
+    // Não é `egui` cru, mas é o mesmo mal: montar à mão, na tela, o que o design system já
+    // resolve — e que é o que deixa duas listagens com jeitos diferentes. Cada linha abaixo é
+    // a assinatura de uma listagem copiada.
+    Proibido {
+        padrao: "direcao.invertida()",
+        use_em_vez: "Ordenacao::clicar (o clique de cabeçalho é igual em toda listagem)",
+    },
+    Proibido {
+        padrao: "set_max_width(360.0)",
+        use_em_vez: "BarraFiltros (busca + filtros da listagem)",
+    },
+    Proibido {
+        padrao: "fn kv(",
+        use_em_vez: "Dado / dado() (par rótulo-valor de leitura; já existia copiado em 8 telas)",
+    },
+    Proibido {
+        padrao: "Botao::destrutivo(\"Excluir\")",
+        use_em_vez: "AcoesRegistro (a coluna Ações é igual em toda listagem)",
+    },
 ];
 
 /// Contagem de violações: arquivo → padrão → quantidade.
@@ -345,6 +364,17 @@ mod testes {
         let c = contar("let f = egui::Frame::none();\nui.separator();\nui.separator();\n");
         assert_eq!(c.get("egui::Frame"), Some(&1));
         assert_eq!(c.get("ui.separator("), Some(&2));
+    }
+
+    #[test]
+    fn barra_de_busca_e_ordenacao_copiadas_a_mao_sao_barradas() {
+        let c = contar(
+            "ui.set_max_width(360.0);\nlet d = direcao.invertida();\n\
+             ui.add(Botao::destrutivo(\"Excluir\").pequeno());\n",
+        );
+        assert_eq!(c.get("set_max_width(360.0)"), Some(&1));
+        assert_eq!(c.get("direcao.invertida()"), Some(&1));
+        assert_eq!(c.get("Botao::destrutivo(\"Excluir\")"), Some(&1));
     }
 
     #[test]

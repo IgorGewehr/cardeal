@@ -11,7 +11,7 @@ use cardeal_cliente::{MotorLocal, SessaoLocal};
 use cardeal_kernel::{Id, Percentual};
 use cardeal_modkit::Icone;
 use cardeal_ui::atoms::{Botao, Divisor, Rotulo, ValorDinheiro, ATALHO_NOVO};
-use cardeal_ui::molecules::{Campo, EstadoVazio, SeletorOpcao};
+use cardeal_ui::molecules::{dado, Campo, EstadoVazio, SeletorOpcao};
 use cardeal_ui::organisms::{notificar, ColunaGrade, Dialogo, Grade, LayoutTela, Notificacao};
 use cardeal_ui::tokens::{Espaco, TemaUi};
 use eframe::egui;
@@ -387,8 +387,8 @@ fn dialogo_ver(
             estado,
             |ui, estado| {
                 ui.columns(2, |c| {
-                    kv(&mut c[0], "Data", &p.data.to_string());
-                    kv(&mut c[1], "Estado", p.estado.rotulo());
+                    dado(&mut c[0], "Data", &p.data.to_string());
+                    dado(&mut c[1], "Estado", p.estado.rotulo());
                 });
                 ui.add_space(Espaco::E8);
 
@@ -748,14 +748,4 @@ fn aplicar<C: cardeal_modkit::Comando + serde::Serialize>(
         }
         Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
     }
-}
-
-fn kv(ui: &mut egui::Ui, chave: &str, valor: &str) {
-    ui.add(Rotulo::campo(chave));
-    ui.add(Rotulo::interface(if valor.trim().is_empty() {
-        "—"
-    } else {
-        valor
-    }));
-    ui.add_space(Espaco::E8);
 }

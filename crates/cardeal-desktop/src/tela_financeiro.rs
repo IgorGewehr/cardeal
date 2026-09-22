@@ -11,11 +11,11 @@ use cardeal_ledger::Contraparte;
 use cardeal_modkit::Icone;
 use cardeal_ui::atoms::{Botao, Divisor, Etiqueta, Rotulo, Tom, ValorDinheiro, ATALHO_NOVO};
 use cardeal_ui::molecules::{
-    Abas, Campo, CartaoKpi, EstadoVazio, Mascara, SecaoExpansivel, SeletorOpcao,
+    dado, Abas, BarraFiltros, Campo, CartaoKpi, EstadoVazio, Mascara, SecaoExpansivel, SeletorOpcao,
 };
 use cardeal_ui::organisms::{
     notificar, ColunaGrade, Dialogo, Direcao, FaixaKpi, Grade, GraficoBarras,
-    GraficoBarrasHorizontais, LayoutTela, Notificacao, Painel, SerieBarras,
+    GraficoBarrasHorizontais, LayoutTela, Notificacao, Ordenacao, Painel, SerieBarras,
 };
 use cardeal_ui::tokens::{Espaco, Rubro, TemaUi};
 use eframe::egui;
@@ -277,7 +277,9 @@ pub struct EstadoTelaFinanceiro {
     /// aberto hoje".
     projecao_periodo: Dinheiro,
     busca: String,
-    ordenacao: Option<(usize, Direcao)>,
+    /// Filtro de situação da lista de parcelas; `None` = todas (o padrão).
+    filtro_situacao: Option<FiltroParcelas>,
+    ordenacao: Ordenacao,
     nomes: HashMap<Id, String>,
     clientes: Vec<ItemPessoa>,
     fornecedores: Vec<ItemPessoa>,
@@ -653,15 +655,17 @@ impl EstadoTelaFinanceiro {
     /// Índices de `parcelas` cujo nome de contraparte bate com `busca` — filtro client-side,
     /// mesmo racional de `tela_estoque.rs::produtos_filtrados`: a consulta já trouxe até 500
     /// linhas de uma vez, e o volume de uma assistência cabe folgado nisso.
-    fn parcelas_filtradas(&self) -> Vec<usize> {
+    fn parcelas_filtradas(&self, situacao: FiltroParcelas, hoje: Data) -> Vec<usize> {
         let termo = self.busca.trim().to_lowercase();
         (0..self.parcelas.len())
             .filter(|&i| {
-                termo.is_empty()
-                    || self
-                        .nome_contraparte(&self.parcelas[i].contraparte)
-                        .to_lowercase()
-                        .contains(&termo)
+                let p = &self.parcelas[i];
+                situacao.combina(p, hoje)
+                    && (termo.is_empty()
+                        || self
+                            .nome_contraparte(&p.contraparte)
+                            .to_lowercase()
+                            .contains(&termo))
             })
             .collect()
     }
@@ -1959,28 +1963,42 @@ fn lista(
         return;
     }
 
-    ui.horizontal(|ui| {
-        ui.set_max_width(360.0);
-        ui.add(Campo::novo("", &mut estado.busca).marcador("Buscar por cliente/fornecedor"));
-    });
-    ui.add_space(Espaco::E12);
+    BarraFiltros::nova(&mut estado.busca)
+        .marcador("Buscar por cliente/fornecedor")
+        .filtro(|ui| {
+            SeletorOpcao::novo("Situação", &mut estado.filtro_situacao)
+                .sem_rotulo()
+                .placeholder("Todas as parcelas")
+                .opcao(FiltroParcelas::Todas, "Todas as parcelas")
+                .opcao(FiltroParcelas::EmAberto, "Em aberto")
+                .opcao(FiltroParcelas::Vencidas, "Vencidas")
+                .opcao(
+                    FiltroParcelas::Quitadas,
+                    if a_receber { "Recebidas" } else { "Pagas" },
+                )
+                .mostrar(ui);
+        })
+        .mostrar(ui);
 
-    let indices = estado.parcelas_filtradas();
-    if indices.is_empty() {
-        ui.add(Rotulo::interface("Nenhuma parcela para essa busca.").cor(ui.cores().texto_medio));
-        return;
-    }
-
+    let situacao = estado.filtro_situacao.unwrap_or(FiltroParcelas::Todas);
+    let indices = estado.parcelas_filtradas(situacao, hoje);
+    // "Valor" é o da parcela; o que já entrou/saiu e o que falta ficam em colunas próprias —
+    // antes só existia "Saldo", e uma parcela quitada aparecia como R$ 0,00, apagando o valor
+    // real que ela teve.
+    let rotulo_baixado = if a_receber { "Recebido" } else { "Pago" };
     let colunas = vec![
         ColunaGrade::nova("Contraparte"),
         ColunaGrade::nova("Parc.").largura(60.0).numero(),
         ColunaGrade::nova("Vencimento").largura(120.0),
+        ColunaGrade::nova("Valor").largura(130.0).numero(),
+        ColunaGrade::nova(rotulo_baixado).largura(130.0).numero(),
         ColunaGrade::nova("Saldo").largura(130.0).numero(),
-        ColunaGrade::nova("Estado").largura(110.0),
+        ColunaGrade::nova("Estado").largura(120.0),
     ];
     let resposta = Grade::nova(colunas)
         .selecionavel(None)
-        .ordenacao(estado.ordenacao)
+        .ordenacao(estado.ordenacao.atual())
+        .vazio("Nenhuma parcela para essa busca.")
         .mostrar(ui, indices.len(), |i, row| {
             let p = &estado.parcelas[indices[i]];
             row.col(|ui| {
@@ -1989,35 +2007,52 @@ fn lista(
             row.col(|ui| {
                 ui.add(Rotulo::interface(p.numero.to_string()));
             });
+            // Vermelho só para o que está em aberto e passou do prazo: uma parcela já
+            // recebida com vencimento antigo não é problema nenhum.
+            let vencida = p.estado.aceita_baixa() && p.vencimento < hoje;
             row.col(|ui| {
-                let venceu = p.vencimento < hoje;
                 let r = Rotulo::interface(p.vencimento.to_string());
-                ui.add(if venceu {
+                ui.add(if vencida {
                     r.cor(ui.cores().negativo)
                 } else {
                     r
                 });
             });
             row.col(|ui| {
-                ui.add(ValorDinheiro::novo(p.saldo()));
+                ui.add(ValorDinheiro::novo(p.valor_original).neutro());
             });
             row.col(|ui| {
-                ui.add(etiqueta_estado_parcela(p.estado, p.vencimento < hoje));
+                if p.valor_baixado.e_zero() {
+                    ui.add(Rotulo::interface("—").cor(ui.cores().texto_fraco));
+                } else {
+                    ui.add(ValorDinheiro::novo(p.valor_baixado));
+                }
+            });
+            row.col(|ui| {
+                // O saldo só faz sentido enquanto a parcela está em aberto.
+                if p.estado.aceita_baixa() && !p.saldo().e_zero() {
+                    ui.add(ValorDinheiro::novo(p.saldo()).neutro());
+                } else {
+                    ui.add(Rotulo::interface("—").cor(ui.cores().texto_fraco));
+                }
+            });
+            row.col(|ui| {
+                ui.add(etiqueta_estado_parcela(p.estado, vencida, a_receber));
             });
         });
 
-    if let Some(coluna) = resposta.coluna_clicada {
-        let direcao = match estado.ordenacao {
-            Some((atual, direcao)) if atual == coluna => direcao.invertida(),
-            _ => Direcao::Ascendente,
-        };
-        estado.ordenacao = Some((coluna, direcao));
+    if let Some((coluna, direcao)) = estado.ordenacao.clicar(&resposta) {
         let nomes = estado.nomes.clone();
         ordenar_parcelas(&mut estado.parcelas, &nomes, coluna, direcao);
     }
     if let Some(i) = resposta.linha_clicada {
         let indice = indices[i];
-        if estado.parcelas[indice].estado.aceita_baixa() {
+        // Em aberto abre para dar baixa; quitada abre para consulta (histórico e estorno).
+        // Cancelada/renegociada não têm o que fazer aqui.
+        if matches!(
+            estado.parcelas[indice].estado,
+            EstadoParcela::Aberta | EstadoParcela::Parcial | EstadoParcela::Quitada
+        ) {
             estado.dlg = Dlg::Baixar {
                 indice,
                 valor: estado.parcelas[indice].saldo().formatar(),
@@ -2028,17 +2063,39 @@ fn lista(
                 motivo_estorno: String::new(),
             };
         }
-        // Uma parcela já quitada/cancelada/renegociada não abre "dar baixa" — só está na
-        // lista como histórico (pedido explícito do usuário).
+    }
+}
+
+/// Recorte de situação da lista de parcelas.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FiltroParcelas {
+    Todas,
+    EmAberto,
+    Vencidas,
+    Quitadas,
+}
+
+impl FiltroParcelas {
+    fn combina(self, p: &ItemTituloEmAberto, hoje: Data) -> bool {
+        match self {
+            Self::Todas => true,
+            Self::EmAberto => p.estado.aceita_baixa(),
+            Self::Vencidas => p.estado.aceita_baixa() && p.vencimento < hoje,
+            Self::Quitadas => p.estado == EstadoParcela::Quitada,
+        }
     }
 }
 
 /// Etiqueta colorida para o estado de uma parcela — a lista mostra qualquer estado agora
 /// (`parcelas_no_periodo` não filtra), então além de `Aberta`/`Parcial` também chega
 /// `Quitada`/`Cancelada`/`Renegociada` (rótulo neutro, caso padrão). Vencida pesa mais que
-/// o estado em si, por isso entra primeiro na escolha do tom.
-fn etiqueta_estado_parcela(estado: EstadoParcela, vencida: bool) -> Etiqueta {
+/// o estado em si, por isso entra primeiro na escolha do tom. Quitada é verde e diz "Recebida"
+/// ou "Paga" conforme a aba — o que o usuário quer ler, não o termo do backend.
+fn etiqueta_estado_parcela(estado: EstadoParcela, vencida: bool, a_receber: bool) -> Etiqueta {
     match (estado, vencida) {
+        (EstadoParcela::Quitada, _) => {
+            Etiqueta::positiva(if a_receber { "Recebida" } else { "Paga" })
+        }
         (EstadoParcela::Parcial, true) => Etiqueta::negativa("Parcial · vencida"),
         (EstadoParcela::Parcial, false) => Etiqueta::info("Parcial"),
         (EstadoParcela::Aberta, true) => Etiqueta::negativa("Vencida"),
@@ -2048,7 +2105,7 @@ fn etiqueta_estado_parcela(estado: EstadoParcela, vencida: bool) -> Etiqueta {
 }
 
 /// Ordena `parcelas` pela coluna clicada no cabeçalho da [`Grade`] de `lista` (mesma ordem
-/// das colunas: Contraparte, Parc., Vencimento, Saldo, Estado). `nomes` resolve o nome de
+/// das colunas: Contraparte, Parc., Vencimento, Valor, Recebido/Pago, Saldo, Estado). `nomes` resolve o nome de
 /// exibição da contraparte — a própria coluna 0 ordena por ele, não pelo id.
 fn ordenar_parcelas(
     parcelas: &mut [ItemTituloEmAberto],
@@ -2074,8 +2131,10 @@ fn ordenar_parcelas(
             0 => nome_de(a).cmp(&nome_de(b)),
             1 => a.numero.cmp(&b.numero),
             2 => a.vencimento.cmp(&b.vencimento),
-            3 => a.saldo().cmp(&b.saldo()),
-            4 => a.estado.rotulo().cmp(b.estado.rotulo()),
+            3 => a.valor_original.cmp(&b.valor_original),
+            4 => a.valor_baixado.cmp(&b.valor_baixado),
+            5 => a.saldo().cmp(&b.saldo()),
+            6 => a.estado.rotulo().cmp(b.estado.rotulo()),
             _ => std::cmp::Ordering::Equal,
         };
         match direcao {
@@ -2285,6 +2344,9 @@ fn dialogo_baixar(
         return;
     };
     let nome = estado.nome_contraparte(&p.contraparte);
+    // Parcela em aberto: o diálogo dá baixa. Quitada: é uma consulta — histórico das baixas e
+    // o estorno de uma lançada errada; sem formulário nem "Confirmar baixa".
+    let aceita_baixa = p.estado.aceita_baixa();
 
     // Carrega o histórico de baixas uma vez por abertura do diálogo — não a cada frame
     // (mesmo padrão de `tela_estoque.rs::dialogo_ver` para os movimentos de rastreabilidade).
@@ -2318,45 +2380,58 @@ fn dialogo_baixar(
             estado,
             |ui, estado| {
                 ui.columns(2, |c| {
-                    kv(&mut c[0], "Vencimento", &p.vencimento.to_string());
-                    kv(
+                    dado(&mut c[0], "Vencimento", &p.vencimento.to_string());
+                    dado(
                         &mut c[1],
                         "Valor original",
                         &p.valor_original.formatar_com_simbolo(),
                     );
                 });
                 ui.columns(2, |c| {
-                    kv(
+                    dado(
                         &mut c[0],
                         "Já baixado",
                         &p.valor_baixado.formatar_com_simbolo(),
                     );
-                    kv(&mut c[1], "Saldo", &p.saldo().formatar_com_simbolo());
+                    dado(&mut c[1], "Saldo", &p.saldo().formatar_com_simbolo());
                 });
                 ui.add_space(Espaco::E16);
                 ui.add(Divisor::novo());
                 ui.add_space(Espaco::E12);
-                ui.add(Rotulo::titulo_secao("Dar baixa"));
-                ui.add_space(Espaco::E8);
-                let Dlg::Baixar {
-                    valor,
-                    data,
-                    meio_pagamento,
-                    ..
-                } = &mut estado.dlg
-                else {
-                    return;
-                };
-                ui.columns(2, |c| {
-                    c[0].add(Campo::novo("Valor recebido", valor));
-                    c[1].add(Campo::novo("Data", data).mascara(Mascara::Data));
-                });
-                ui.add_space(Espaco::E8);
-                SeletorOpcao::novo("Meio de pagamento", meio_pagamento)
-                    .opcao(MeioPagamento::Dinheiro, "Dinheiro — cai no Caixa")
-                    .opcao(MeioPagamento::Pix, "Pix — cai no Banco")
-                    .opcao(MeioPagamento::Cartao, "Cartão — cai no Banco")
-                    .mostrar(ui);
+                if aceita_baixa {
+                    ui.add(Rotulo::titulo_secao("Dar baixa"));
+                    ui.add_space(Espaco::E8);
+                    let Dlg::Baixar {
+                        valor,
+                        data,
+                        meio_pagamento,
+                        ..
+                    } = &mut estado.dlg
+                    else {
+                        return;
+                    };
+                    ui.columns(2, |c| {
+                        c[0].add(Campo::novo("Valor recebido", valor));
+                        c[1].add(Campo::novo("Data", data).mascara(Mascara::Data));
+                    });
+                    ui.add_space(Espaco::E8);
+                    SeletorOpcao::novo("Meio de pagamento", meio_pagamento)
+                        .opcao(MeioPagamento::Dinheiro, "Dinheiro — cai no Caixa")
+                        .opcao(MeioPagamento::Pix, "Pix — cai no Banco")
+                        .opcao(MeioPagamento::Cartao, "Cartão — cai no Banco")
+                        .mostrar(ui);
+                } else {
+                    ui.add(Etiqueta::positiva("Quitada"));
+                    ui.add_space(Espaco::E4);
+                    ui.add(
+                        Rotulo::interface(
+                            "Esta parcela já foi quitada. Se uma baixa foi lançada por engano, \
+                             estorne-a no histórico abaixo.",
+                        )
+                        .quebravel()
+                        .cor(ui.cores().texto_medio),
+                    );
+                }
 
                 let Dlg::Baixar { baixas, .. } = &estado.dlg else {
                     return;
@@ -2389,7 +2464,7 @@ fn dialogo_baixar(
                 }
             },
             |ui, estado| {
-                if ui.add(Botao::primario("Confirmar baixa")).clicked() {
+                if aceita_baixa && ui.add(Botao::primario("Confirmar baixa")).clicked() {
                     baixar(ui.ctx(), motor, sessao, estado, &p);
                 }
                 if ui.add(Botao::secundario("Fechar")).clicked() {
@@ -2552,14 +2627,4 @@ fn nome_mes(comp: Competencia) -> String {
     ];
     let i = (comp.mes().clamp(1, 12) - 1) as usize;
     format!("{}/{:02}", M[i], comp.ano() % 100)
-}
-
-fn kv(ui: &mut egui::Ui, chave: &str, valor: &str) {
-    ui.add(Rotulo::campo(chave));
-    ui.add(Rotulo::interface(if valor.trim().is_empty() {
-        "—"
-    } else {
-        valor
-    }));
-    ui.add_space(Espaco::E8);
 }

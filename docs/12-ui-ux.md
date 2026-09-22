@@ -280,12 +280,21 @@ Todos em `cardeal-ui`, com galeria viva em `cargo run -p cardeal-ui --example ga
 
 | Camada | Componentes |
 |---|---|
-| atoms | `Botao`, `BotaoChevron`, `BotaoJanela`, `Caixa`, `CampoTexto`, `Divisor`, `Etiqueta` (com `.com_ponto()`), `Icone`, `Rotulo`, `Spinner`, `Tecla`, `ValorDinheiro`, `superficie_clicavel` |
-| molecules | `Abas`, `CabecalhoTela`, `Campo`, `CampoBusca`, `CartaoKpi` (com `.tom()` e `.icone()`), `EstadoVazio`, `ItemDeLista` (com `.atalho()` e `.esmaecido()`), `LinhaDeAcao`, `SecaoExpansivel`, `SeletorBusca`, `SeletorOpcao` (`.sem_rotulo()` para barras de ferramentas) |
-| organisms | `AgendaCalendario`, `AgendaMes`, `Cartao`, `Dialogo` (`.descricao()`, `.pequeno()`/`.medio()`), `dialogo_confirmacao`, `FaixaKpi`, `Grade` (com `.vazio()` e `.carregando()`), `Grafico`, `Janela` (shell sem decoração nativa), `LayoutTela`, `Notificacoes`, `Painel` (elevado · plano · `.realce(Tom)`), `PaletaComandos`, `Sidebar` |
+| atoms | `Botao`, `BotaoChevron`, `BotaoJanela`, `Caixa`, `CampoTexto`, `Divisor`, `Etiqueta` (com `.com_ponto()`), `Icone`, `Rotulo`, `Spinner`, `Tecla`, `ValorDinheiro` (`.neutro()` para colunas de medida, `.esmaecido()`), `superficie_clicavel` |
+| molecules | `Abas`, `AcoesRegistro` (Editar · Excluir da linha), `BarraFiltros` (busca + filtros da listagem), `CabecalhoTela`, `Campo`, `CampoBusca`, `CartaoKpi` (com `.tom()` e `.icone()`), `Dado` (rótulo/valor de leitura; `dado()` e `dado_em_linha()`), `EstadoVazio`, `ItemDeLista` (com `.atalho()` e `.esmaecido()`), `LinhaDeAcao`, `SecaoExpansivel`, `SeletorBusca`, `SeletorOpcao` (`.sem_rotulo()` para barras de ferramentas) |
+| organisms | `AgendaCalendario`, `AgendaMes`, `Cartao`, `Dialogo` (`.descricao()`, `.pequeno()`/`.medio()`), `dialogo_confirmacao`, `FaixaKpi`, `Grade` (com `.vazio()`, `.carregando()`, `.com_acoes()` e `Ordenacao`), `Grafico`, `Janela` (shell sem decoração nativa), `LayoutTela`, `Notificacoes`, `Painel` (elevado · plano · `.realce(Tom)`), `PaletaComandos`, `Sidebar` |
 
 `Tom::cores` é a **única** tabela tom → cor (`Etiqueta`, `Painel` e `CartaoKpi` a compartilham; nunca
 copie o `match`).
+
+**Listagem de cadastro (produtos, clientes, ordens, notas, parcelas) — a receita única.** Toda tela de
+lista monta o mesmo esqueleto, e só ele: `FaixaKpi` → `BarraFiltros` (busca + `.filtro(...)`) → `Grade`
+(`.com_acoes()` se tiver coluna de ações; `.ordenacao(estado.ordenacao.atual())`; `.vazio("…")`) →
+`estado.ordenacao.clicar(&resposta)` para reordenar → `AcoesRegistro` na última coluna. Nada disso se
+reescreve numa tela: `cargo xtask verificar-ui` barra `direcao.invertida()`, `set_max_width(360.0)` e
+`Botao::destrutivo("Excluir")` (as assinaturas de uma listagem copiada à mão). A referência viva está
+na galeria (seção "Listagem de cadastro"). Se uma listagem precisa de algo que a receita não dá,
+o componente cresce em `cardeal-ui` — a tela não diverge.
 
 **Ainda faltam:** tile de lista (adiado de propósito: o PDV é teclado-primeiro, e o tile serve ao
 toque). Dívida de `egui` cru que sobra nas telas: `xtask/ui-baseline.toml`.

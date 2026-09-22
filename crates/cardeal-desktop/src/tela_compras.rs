@@ -20,10 +20,11 @@ use cardeal_kernel::{Dinheiro, Id};
 use cardeal_modkit::Icone;
 use cardeal_ui::atoms::{Botao, Caixa, Divisor, Etiqueta, Rotulo, Tom, ValorDinheiro, ATALHO_NOVO};
 use cardeal_ui::molecules::{
-    Campo, EstadoVazio, Mascara, OpcaoBusca, SecaoExpansivel, SeletorBusca, SeletorOpcao,
+    dado, BarraFiltros, Campo, EstadoVazio, Mascara, OpcaoBusca, SecaoExpansivel, SeletorBusca,
+    SeletorOpcao,
 };
 use cardeal_ui::organisms::{
-    notificar, ColunaGrade, Dialogo, Direcao, Grade, LayoutTela, Notificacao, Painel,
+    notificar, ColunaGrade, Dialogo, Direcao, Grade, LayoutTela, Notificacao, Ordenacao, Painel,
 };
 use cardeal_ui::tokens::{Espaco, TemaUi};
 use eframe::egui;
@@ -93,7 +94,7 @@ pub struct EstadoTelaCompras {
     /// "Já foi pago" no diálogo de confirmar entrada — item 2 do briefing.
     pago_no_ato: bool,
     busca: String,
-    ordenacao: Option<(usize, Direcao)>,
+    ordenacao: Ordenacao,
     nova: FormNova,
     erro: Option<String>,
     dlg: Dlg,
@@ -380,11 +381,9 @@ fn lista(
         return;
     }
 
-    ui.horizontal(|ui| {
-        ui.set_max_width(360.0);
-        ui.add(Campo::novo("", &mut estado.busca).marcador("Buscar por fornecedor ou número"));
-    });
-    ui.add_space(Espaco::E12);
+    BarraFiltros::nova(&mut estado.busca)
+        .marcador("Buscar por fornecedor ou número")
+        .mostrar(ui);
 
     let termo = estado.busca.trim().to_lowercase();
     let indices: Vec<usize> = (0..estado.notas.len())
@@ -398,11 +397,6 @@ fn lista(
                 || n.serie.to_lowercase().contains(&termo)
         })
         .collect();
-    if indices.is_empty() {
-        ui.add(Rotulo::interface("Nenhuma nota para essa busca.").cor(ui.cores().texto_medio));
-        return;
-    }
-
     let colunas = vec![
         ColunaGrade::nova("Fornecedor"),
         ColunaGrade::nova("Nº / série").largura(120.0),
@@ -413,7 +407,8 @@ fn lista(
     ];
     let resposta = Grade::nova(colunas)
         .selecionavel(None)
-        .ordenacao(estado.ordenacao)
+        .ordenacao(estado.ordenacao.atual())
+        .vazio("Nenhuma nota para essa busca.")
         .mostrar(ui, indices.len(), |i, row| {
             let n = &estado.notas[indices[i]];
             row.col(|ui| {
@@ -437,12 +432,7 @@ fn lista(
             });
         });
 
-    if let Some(coluna) = resposta.coluna_clicada {
-        let direcao = match estado.ordenacao {
-            Some((atual, direcao)) if atual == coluna => direcao.invertida(),
-            _ => Direcao::Ascendente,
-        };
-        estado.ordenacao = Some((coluna, direcao));
+    if let Some((coluna, direcao)) = estado.ordenacao.clicar(&resposta) {
         ordenar_notas(&mut estado.notas, &estado.fornecedores, coluna, direcao);
     }
     if let Some(i) = resposta.linha_clicada {
@@ -666,12 +656,12 @@ fn dialogo_ver(
             estado,
             |ui, estado| {
                 ui.columns(2, |c| {
-                    kv(&mut c[0], "Série", &n.serie);
-                    kv(&mut c[1], "Emissão", &n.data_emissao.to_string());
+                    dado(&mut c[0], "Série", &n.serie);
+                    dado(&mut c[1], "Emissão", &n.data_emissao.to_string());
                 });
                 ui.columns(2, |c| {
-                    kv(&mut c[0], "Total", &n.valor_total.formatar_com_simbolo());
-                    kv(&mut c[1], "Estado", estado_nota_etiqueta(n.estado).0);
+                    dado(&mut c[0], "Total", &n.valor_total.formatar_com_simbolo());
+                    dado(&mut c[1], "Estado", estado_nota_etiqueta(n.estado).0);
                 });
 
                 ui.add_space(Espaco::E12);
@@ -900,14 +890,4 @@ fn confirmar(
         }
         Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
     }
-}
-
-fn kv(ui: &mut egui::Ui, chave: &str, valor: &str) {
-    ui.add(Rotulo::campo(chave));
-    ui.add(Rotulo::interface(if valor.trim().is_empty() {
-        "—"
-    } else {
-        valor
-    }));
-    ui.add_space(Espaco::E8);
 }

@@ -359,6 +359,10 @@ gigante por sessão. Nenhum commit é feito sem os quatro comandos de §3.3 pass
   procure o que já existe (`docs/12-ui-ux.md` §7.1). Rode `cargo xtask verificar-ui` antes de
   commitar UI. Regra completa: [ADR-0015](adr/0015-atomic-design-obrigatorio-na-ui.md). A dívida
   antiga foi zerada; a catraca (`xtask/ui-baseline.toml`, vazio) agora é "zero permitido".
+- **Não monte uma listagem à mão, nem com componentes soltos.** Usar só `Grade` não basta: a barra de
+  busca/filtro, o clique de ordenação e a coluna Editar/Excluir são padrões, e cada um virou
+  componente (`BarraFiltros`, `Ordenacao`, `AcoesRegistro`) exatamente porque cinco telas os
+  copiavam e divergiam (2026-09-21). Receita em `docs/12-ui-ux.md` §7.1; o xtask barra a cópia.
 - Não relance subagentes Sonnet "grandes" sem necessidade clara — o histórico desta sessão
   teve quedas por limite de taxa; prefira trabalho direto e incremental.
 - Não escreva código de um crate sem antes checar se `docs/contratos-internos.md` já fixa a

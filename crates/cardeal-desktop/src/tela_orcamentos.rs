@@ -10,7 +10,7 @@ use cardeal_kernel::{Data, Dinheiro, Fuso, Id, Instante, Percentual, Preco, Quan
 use cardeal_modkit::Icone;
 use cardeal_pdf::{gerar_orcamento, IdentidadeEmpresa, ItemPdf, OrcamentoPdf};
 use cardeal_ui::atoms::{Botao, Divisor, Etiqueta, Rotulo, Tom, ValorDinheiro};
-use cardeal_ui::molecules::{Campo, CartaoKpi, EstadoVazio, SeletorOpcao};
+use cardeal_ui::molecules::{dado_em_linha, Campo, CartaoKpi, EstadoVazio, SeletorOpcao};
 use cardeal_ui::organisms::{
     notificar, ColunaGrade, Dialogo, FaixaKpi, Grade, Notificacao, Painel,
 };
@@ -845,16 +845,16 @@ fn corpo_detalhe(ui: &mut egui::Ui, d: &DetalheOrcamento) {
     });
     ui.add_space(Espaco::E12);
 
-    kv(ui, "Cliente", &o.cliente_nome);
+    dado_em_linha(ui, "Cliente", &o.cliente_nome);
     if let Some(doc) = &o.cliente_documento {
-        kv(ui, "Documento", doc);
+        dado_em_linha(ui, "Documento", doc);
     }
     if let Some(c) = &o.cliente_contato {
-        kv(ui, "Contato", c);
+        dado_em_linha(ui, "Contato", c);
     }
-    kv(ui, "Assunto", &o.assunto);
+    dado_em_linha(ui, "Assunto", &o.assunto);
     if let Some(desc) = &o.descricao {
-        kv(ui, "Descrição", desc);
+        dado_em_linha(ui, "Descrição", desc);
     }
     ui.add_space(Espaco::E12);
 
@@ -906,12 +906,12 @@ fn corpo_detalhe(ui: &mut egui::Ui, d: &DetalheOrcamento) {
     ] {
         if let Some(t) = txt {
             ui.add_space(Espaco::E8);
-            kv(ui, rot, t);
+            dado_em_linha(ui, rot, t);
         }
     }
     if let Some(os) = o.os_gerada {
         ui.add_space(Espaco::E8);
-        kv(ui, "Convertido na OS", &format!("{os}"));
+        dado_em_linha(ui, "Convertido na OS", &format!("{os}"));
     }
 }
 
@@ -1261,11 +1261,4 @@ fn etiqueta_estado(e: EstadoOrcamento, vencido: bool) -> Etiqueta {
         EstadoOrcamento::Cancelado => Etiqueta::nova("Cancelado", Tom::Neutro),
         EstadoOrcamento::Convertido => Etiqueta::nova("Convertido em OS", Tom::Positivo),
     }
-}
-
-fn kv(ui: &mut egui::Ui, chave: &str, valor: &str) {
-    ui.horizontal(|ui| {
-        ui.add(Rotulo::campo(format!("{chave}: ")));
-        ui.add(Rotulo::interface(valor.to_owned()).quebravel());
-    });
 }
