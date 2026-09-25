@@ -39,24 +39,37 @@ impl Comando for AdicionarContato {
     const RISCO: Risco = Risco::Baixo;
 
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
-        // 1. Carregar.
-        let pessoa = RepositorioClientes::novo(uow)
-            .buscar_pessoa(self.pessoa)?
-            .ok_or_else(|| Erro::nao_encontrado("pessoa"))?;
-
-        // 2. Validar (domínio puro): formato do contato e estado editável da pessoa.
-        if !pessoa.editavel() {
-            return Err(Erro::de_dominio(&ErroClientes::PessoaAnonimizada));
-        }
-        let mut contato =
-            Contato::novo(pessoa.id, self.tipo, &self.valor).map_err(|e| Erro::de_dominio(&e))?;
-        contato.principal = self.principal;
-
-        // 4. Persistir.
-        RepositorioClientes::novo(uow).inserir_contato(ctx.empresa, &contato)?;
-
-        Ok(ContatoFoiAdicionado {
-            contato: contato.id,
-        })
+        adicionar_contato_comum(&self, ctx, uow)
     }
+}
+
+/// O corpo de [`AdicionarContato`], chamável direto por outro módulo dentro da mesma
+/// transação (ver [`super::criar_pessoa_comum`]). A permissão fica por conta de quem chama.
+///
+/// # Errors
+/// Os mesmos de [`AdicionarContato`].
+pub fn adicionar_contato_comum(
+    dados: &AdicionarContato,
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<ContatoFoiAdicionado> {
+    // 1. Carregar.
+    let pessoa = RepositorioClientes::novo(uow)
+        .buscar_pessoa(dados.pessoa)?
+        .ok_or_else(|| Erro::nao_encontrado("pessoa"))?;
+
+    // 2. Validar (domínio puro): formato do contato e estado editável da pessoa.
+    if !pessoa.editavel() {
+        return Err(Erro::de_dominio(&ErroClientes::PessoaAnonimizada));
+    }
+    let mut contato =
+        Contato::novo(pessoa.id, dados.tipo, &dados.valor).map_err(|e| Erro::de_dominio(&e))?;
+    contato.principal = dados.principal;
+
+    // 4. Persistir.
+    RepositorioClientes::novo(uow).inserir_contato(ctx.empresa, &contato)?;
+
+    Ok(ContatoFoiAdicionado {
+        contato: contato.id,
+    })
 }

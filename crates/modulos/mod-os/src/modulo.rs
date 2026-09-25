@@ -6,16 +6,16 @@ use cardeal_modkit::{Manifesto, Modulo, Registro};
 use cardeal_storage::ConjuntoMigracoes;
 
 use crate::comandos::{
-    AbrirOrdemServico, AjustarApontamento, AplicarPeca, AprovarOrcamentoOs, CancelarOrdemServico,
-    ConcluirExecucao, DesfaturarOrdemServico, EditarDadosDaOrdem, EncerrarApontamento,
-    EnviarParaAprovacao, FaturarOrdemServico, IniciarApontamento, IniciarExecucao,
-    MontarOrcamentoOs, ReabrirOrdemServico, RegistrarLaudo, RegistrarMaoDeObra,
-    RemoverItemOrcamento, ReprovarOrcamentoOs,
+    AbrirOrdemComClienteNovo, AbrirOrdemServico, AjustarApontamento, AplicarPeca, AplicarPecas,
+    AprovarOrcamentoOs, CancelarOrdemServico, ConcluirExecucao, DesfaturarOrdemServico,
+    EditarDadosDaOrdem, EncerrarApontamento, EnviarParaAprovacao, FaturarOrdemServico,
+    IniciarApontamento, IniciarExecucao, MontarOrcamentoOs, ReabrirOrdemServico, RegistrarLaudo,
+    RegistrarMaoDeObra, RemoverItemOrcamento, ReprovarOrcamentoOs,
 };
 use crate::consultas::{
-    ApontamentosDaOrdem, BuscarDetalheOrdem, HistoricoDoEquipamento, OrdensAguardandoAprovacao,
-    OrdensEmAberto, PecasAguardandoEstoque, TempoPorTecnicoNoPeriodo, TempoTotalDaOrdem,
-    TodasAsOrdens,
+    ApontamentosDaOrdem, BuscarDetalheOrdem, BuscarOrdens, HistoricoDoEquipamento,
+    OrdensAguardandoAprovacao, OrdensEmAberto, PecasAguardandoEstoque, TempoPorTecnicoNoPeriodo,
+    TempoTotalDaOrdem, TodasAsOrdens,
 };
 use crate::manifesto::MANIFESTO;
 use crate::migracoes;
@@ -36,6 +36,7 @@ impl Modulo for ModuloOs {
     fn registrar(&self, registro: &mut Registro) -> Resultado<()> {
         registro
             .comando::<AbrirOrdemServico>("os.abrir_ordem_servico.v1")
+            .comando::<AbrirOrdemComClienteNovo>("os.abrir_ordem_com_cliente_novo.v1")
             .comando::<EditarDadosDaOrdem>("os.editar_dados_da_ordem.v1")
             .comando::<RegistrarLaudo>("os.registrar_laudo.v1")
             .comando::<MontarOrcamentoOs>("os.montar_orcamento.v1")
@@ -46,6 +47,7 @@ impl Modulo for ModuloOs {
             .comando::<CancelarOrdemServico>("os.cancelar_ordem_servico.v1")
             .comando::<IniciarExecucao>("os.iniciar_execucao.v1")
             .comando::<AplicarPeca>("os.aplicar_peca.v1")
+            .comando::<AplicarPecas>("os.aplicar_pecas.v1")
             .comando::<RegistrarMaoDeObra>("os.registrar_mao_de_obra.v1")
             .comando::<ConcluirExecucao>("os.concluir_execucao.v1")
             .comando::<FaturarOrdemServico>("os.faturar_ordem_servico.v1")
@@ -56,6 +58,7 @@ impl Modulo for ModuloOs {
             .comando::<AjustarApontamento>("os.ajustar_apontamento.v1")
             .consulta::<OrdensEmAberto>("os.ordens_em_aberto.v1")
             .consulta::<TodasAsOrdens>("os.todas_as_ordens.v1")
+            .consulta::<BuscarOrdens>("os.buscar_ordens.v1")
             .consulta::<BuscarDetalheOrdem>("os.buscar_detalhe_ordem.v1")
             .consulta::<OrdensAguardandoAprovacao>("os.ordens_aguardando_aprovacao.v1")
             .consulta::<HistoricoDoEquipamento>("os.historico_do_equipamento.v1")

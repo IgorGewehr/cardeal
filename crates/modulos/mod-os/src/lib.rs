@@ -78,18 +78,18 @@ mod repositorio;
 
 pub use apontamento::ApontamentoDeTempo;
 pub use comandos::{
-    AbrirOrdemServico, AjustarApontamento, AplicarPeca, ApontamentoIniciado, AprovarOrcamentoOs,
-    CancelarOrdemServico, ConcluirExecucao, DesfaturarOrdemServico, EditarDadosDaOrdem,
-    EncerrarApontamento, EnviarParaAprovacao, FaturarOrdemServico, IniciarApontamento,
-    IniciarExecucao, ItemOrcamentoNovo, MontarOrcamentoOs, OrdemServicoAberta,
-    OrdemServicoCancelada, OrdemServicoDesfaturada, OrdemServicoFaturada, PagamentoNoAto,
-    PecaFoiAplicada, ReabrirOrdemServico, RegistrarLaudo, RegistrarMaoDeObra, RemoverItemOrcamento,
-    ReprovarOrcamentoOs, TipoItemOrcamento,
+    AbrirOrdemComClienteNovo, AbrirOrdemServico, AjustarApontamento, AplicarPeca, AplicarPecas,
+    ApontamentoIniciado, AprovarOrcamentoOs, CancelarOrdemServico, ConcluirExecucao,
+    DesfaturarOrdemServico, EditarDadosDaOrdem, EncerrarApontamento, EnviarParaAprovacao,
+    FaturarOrdemServico, IniciarApontamento, IniciarExecucao, ItemOrcamentoNovo, MontarOrcamentoOs,
+    OrdemComClienteNovoAberta, OrdemServicoAberta, OrdemServicoCancelada, OrdemServicoDesfaturada,
+    OrdemServicoFaturada, PagamentoNoAto, PecaFoiAplicada, ReabrirOrdemServico, RegistrarLaudo,
+    RegistrarMaoDeObra, RemoverItemOrcamento, ReprovarOrcamentoOs, TipoItemOrcamento,
 };
 pub use consultas::{
-    ApontamentosDaOrdem, BuscarDetalheOrdem, DetalheOrdem, HistoricoDoEquipamento,
-    ItemAguardandoEstoque, OrdensAguardandoAprovacao, OrdensEmAberto, PecasAguardandoEstoque,
-    TempoPorTecnicoNoPeriodo, TempoTotalDaOrdem, TodasAsOrdens,
+    ApontamentosDaOrdem, BuscarDetalheOrdem, BuscarOrdens, DetalheOrdem, FiltroEstadoOs,
+    HistoricoDoEquipamento, ItemAguardandoEstoque, OrdensAguardandoAprovacao, OrdensEmAberto,
+    PecasAguardandoEstoque, TempoPorTecnicoNoPeriodo, TempoTotalDaOrdem, TodasAsOrdens,
 };
 pub use erros::ErroOs;
 pub use execucao::{ItemMaoDeObra, ItemPeca};

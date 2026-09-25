@@ -19,20 +19,21 @@ use cardeal_ui::organisms::{
 use cardeal_ui::tokens::{Espaco, TemaUi};
 use eframe::egui;
 use mod_clientes::{
-    AdicionarContato, ContatoInicial, CriarPessoa, EnderecoInicial, ItemPessoa,
-    Papel as PapelCliente, PessoaCadastrada, PessoasPorPapel, TipoContato, TipoDocumento,
-    TipoEndereco, TipoPessoa,
+    ContatoInicial, CriarPessoa, EnderecoInicial, ItemPessoa, Papel as PapelCliente,
+    PessoasPorPapel, TipoContato, TipoDocumento, TipoEndereco, TipoPessoa,
 };
 use mod_estoque::{ItemLocal, ItemProdutoComSaldo, Locais, ProdutosComSaldo};
 use mod_financeiro::{MeioPagamento, Titulo, TituloDaOrigem};
 use mod_os::{
-    AbrirOrdemServico, AplicarPeca, ApontamentoDeTempo, ApontamentosDaOrdem, AprovarOrcamentoOs,
-    BuscarDetalheOrdem, CancelarOrdemServico, ConcluirExecucao, DesfaturarOrdemServico,
-    DetalheOrdem, EditarDadosDaOrdem, EncerrarApontamento, EnviarParaAprovacao, EstadoOs,
-    FaturarOrdemServico, IniciarApontamento, IniciarExecucao, ItemOrcamentoNovo, MontarOrcamentoOs,
-    OrdemServico, OrdemServicoAberta, OrdemServicoCancelada, OrdemServicoFaturada, PagamentoNoAto,
-    PecaFoiAplicada, ReabrirOrdemServico, RegistrarLaudo, RemoverItemOrcamento,
-    ReprovarOrcamentoOs, TempoTotalDaOrdem, TipoItemOrcamento, TodasAsOrdens,
+    AbrirOrdemComClienteNovo, AbrirOrdemServico, AplicarPecas, ApontamentoDeTempo,
+    ApontamentosDaOrdem, AprovarOrcamentoOs, BuscarDetalheOrdem, BuscarOrdens,
+    CancelarOrdemServico, ConcluirExecucao, DesfaturarOrdemServico, DetalheOrdem,
+    EditarDadosDaOrdem, EncerrarApontamento, EnviarParaAprovacao, EstadoOs, FaturarOrdemServico,
+    FiltroEstadoOs, IniciarApontamento, IniciarExecucao, ItemOrcamentoNovo, MontarOrcamentoOs,
+    OrdemComClienteNovoAberta, OrdemServico, OrdemServicoAberta, OrdemServicoCancelada,
+    OrdemServicoFaturada, OrdensEmAberto, PagamentoNoAto, PecaFoiAplicada, ReabrirOrdemServico,
+    RegistrarLaudo, RemoverItemOrcamento, ReprovarOrcamentoOs, TempoTotalDaOrdem,
+    TipoItemOrcamento,
 };
 
 /// Qual dialog está aberto.
@@ -121,6 +122,10 @@ enum AcaoPendente {
     Reabrir(Id),
 }
 
+/// Quantas OS a lista mostra por vez. A busca acontece no motor, então uma OS antiga é
+/// sempre alcançável digitando o número, o aparelho ou o cliente.
+const LIMITE_LISTA: u32 = 300;
+
 /// Qual aba da tela de OS está ativa.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 enum AbaOs {
@@ -134,7 +139,10 @@ enum AbaOs {
 pub struct EstadoTelaOs {
     aba: AbaOs,
     orc: crate::tela_orcamentos::EstadoOrcamentos,
+    /// O resultado da busca atual (`os.buscar_ordens.v1`, filtrada no motor).
     ordens: Vec<OrdemServico>,
+    /// A fila ativa inteira, para os indicadores do topo — independe da busca/filtro.
+    ativas: Vec<OrdemServico>,
     clientes: Vec<ItemPessoa>,
     produtos: Vec<ItemProdutoComSaldo>,
     /// Locais de estoque de onde as peças saem ao serem aplicadas na execução.
@@ -179,15 +187,15 @@ pub struct EstadoTelaOs {
 }
 
 impl EstadoTelaOs {
-    /// Recarrega a lista de ordens (qualquer estado — `TodasAsOrdens`, o filtro de status na
-    /// tela decide o que aparece) e os catálogos de cliente e produto.
+    /// Recarrega a fila ativa (indicadores), os catálogos de cliente e produto e refaz a
+    /// busca da lista com o filtro atual.
     pub fn carregar(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
         if self.filtro_status.is_none() {
             self.filtro_status = Some(FiltroStatusOs::Ativas);
         }
-        match motor.consultar(sessao, "os.todas_as_ordens.v1", &TodasAsOrdens) {
-            Ok(ordens) => {
-                self.ordens = ordens;
+        match motor.consultar(sessao, "os.ordens_em_aberto.v1", &OrdensEmAberto) {
+            Ok(ativas) => {
+                self.ativas = ativas;
                 self.erro = None;
             }
             Err(e) => self.erro = Some(e.mensagem),
@@ -221,6 +229,54 @@ impl EstadoTelaOs {
             self.identidade = Some(i);
         }
         self.orc.carregar(motor, sessao);
+        // Depois dos clientes: a busca por nome resolve o termo contra esse catálogo.
+        self.buscar_ordens(motor, sessao);
+    }
+
+    /// Refaz a lista com a busca e o filtro de status atuais — no motor, sem teto que
+    /// esconda OS antigas. O nome do cliente é resolvido aqui (catálogo de `mod-clientes`) e
+    /// vai como lista de ids.
+    fn buscar_ordens(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
+        let termo = self.busca.trim();
+        let digitos = cardeal_kernel::texto::somente_digitos(termo);
+        let clientes = if termo.is_empty() {
+            Vec::new()
+        } else {
+            self.clientes
+                .iter()
+                .filter(|c| {
+                    cardeal_kernel::texto::casa_por_palavras(&c.nome, termo)
+                        || (digitos.len() >= 4
+                            && c.documento
+                                .as_deref()
+                                .is_some_and(|d| d.contains(digitos.as_str())))
+                })
+                .map(|c| c.pessoa)
+                .collect()
+        };
+        let filtro = match self.filtro_status.unwrap_or(FiltroStatusOs::Ativas) {
+            FiltroStatusOs::Ativas => FiltroEstadoOs::Ativas,
+            FiltroStatusOs::Todos => FiltroEstadoOs::Todas,
+            FiltroStatusOs::Um(e) => FiltroEstadoOs::Um(e),
+        };
+        match motor.consultar(
+            sessao,
+            "os.buscar_ordens.v1",
+            &BuscarOrdens {
+                filtro,
+                termo: termo.to_owned(),
+                clientes,
+                limite: LIMITE_LISTA,
+            },
+        ) {
+            Ok(ordens) => {
+                self.ordens = ordens;
+                if let Some((coluna, direcao)) = self.ordenacao.atual() {
+                    ordenar_ordens(&mut self.ordens, &self.clientes, coluna, direcao);
+                }
+            }
+            Err(e) => self.erro = Some(e.mensagem),
+        }
     }
 
     fn abrir_detalhe(&mut self, motor: &MotorLocal, sessao: &SessaoLocal, id: Id) {
@@ -522,16 +578,6 @@ const fn pode_cancelar(estado: EstadoOs) -> bool {
     )
 }
 
-/// Verdadeiro para qualquer estado que não seja terminal — a mesma regra de
-/// `mod_os::ordens_nao_finalizadas` (backend), replicada aqui porque a tela carrega
-/// `TodasAsOrdens` de uma vez e filtra localmente.
-const fn nao_finalizada(estado: EstadoOs) -> bool {
-    !matches!(
-        estado,
-        EstadoOs::Faturada | EstadoOs::Cancelada | EstadoOs::Reprovada
-    )
-}
-
 /// O filtro de status da listagem de OS. Pedido explícito do usuário (2026-09-14): depois de
 /// faturar, a OS "sumia" da lista — precisa dar pra ver qualquer status, não só a fila ativa.
 /// `Ativas` é o padrão (mesmo recorte de antes, quando a tela só sabia mostrar isso).
@@ -540,16 +586,6 @@ enum FiltroStatusOs {
     Ativas,
     Todos,
     Um(EstadoOs),
-}
-
-impl FiltroStatusOs {
-    fn combina(self, estado: EstadoOs) -> bool {
-        match self {
-            Self::Ativas => nao_finalizada(estado),
-            Self::Todos => true,
-            Self::Um(e) => estado == e,
-        }
-    }
 }
 
 fn dialogo_editar_dados(
@@ -735,7 +771,9 @@ fn faturar_os(
 }
 
 fn lista(ui: &mut egui::Ui, motor: &MotorLocal, sessao: &SessaoLocal, estado: &mut EstadoTelaOs) {
-    if estado.ordens.is_empty() {
+    let sem_busca = estado.busca.trim().is_empty()
+        && matches!(estado.filtro_status, None | Some(FiltroStatusOs::Ativas));
+    if estado.ativas.is_empty() && estado.ordens.is_empty() && sem_busca {
         if estado.erro.is_none()
             && EstadoVazio::novo(Icone::Ferramenta, "Nenhuma ordem em aberto.")
                 .acao("Abrir a primeira OS")
@@ -746,33 +784,28 @@ fn lista(ui: &mut egui::Ui, motor: &MotorLocal, sessao: &SessaoLocal, estado: &m
         return;
     }
 
-    // Três agregados que a lista já carrega e antes ficavam perdidos entre as linhas —
-    // vira cabeçalho de indicador visual (`docs/12-ui-ux.md` §6): total de OS abertas, valor
-    // parado e quantas estão esperando uma decisão do cliente (fila de cobrança/follow-up).
-    // Sempre sobre a fila ativa (`nao_finalizada`), não sobre o filtro de status escolhido —
-    // é saúde do pipeline, não uma contagem do que a grade está mostrando agora.
-    let ativas: Vec<&OrdemServico> = estado
-        .ordens
-        .iter()
-        .filter(|os| nao_finalizada(os.estado))
-        .collect();
-    let valor_parado = ativas
+    // Saúde do pipeline (`docs/12-ui-ux.md` §6): sempre sobre a fila ativa inteira, não sobre
+    // o que a busca/filtro está mostrando agora.
+    let valor_parado = estado
+        .ativas
         .iter()
         .fold(Dinheiro::ZERO, |acc, os| acc + os.valor_total);
-    let aguardando_cliente = ativas
+    let aguardando_cliente = estado
+        .ativas
         .iter()
         .filter(|os| os.estado == EstadoOs::AguardandoAprovacao)
         .count();
     FaixaKpi::nova(vec![
-        CartaoKpi::contagem("Ordens em aberto", ativas.len()),
+        CartaoKpi::contagem("Ordens em aberto", estado.ativas.len()),
         CartaoKpi::novo("Valor em aberto", valor_parado).variacao("soma do total de cada OS"),
         CartaoKpi::contagem("Aguardando aprovação", aguardando_cliente)
             .variacao("orçamento com o cliente"),
     ])
     .mostrar(ui);
 
-    BarraFiltros::nova(&mut estado.busca)
-        .marcador("Buscar por nº, aparelho ou cliente")
+    let filtro_antes = estado.filtro_status;
+    let busca_mudou = BarraFiltros::nova(&mut estado.busca)
+        .marcador("Buscar por nº, aparelho, defeito ou cliente")
         .filtro(|ui| {
             SeletorOpcao::novo("Status", &mut estado.filtro_status)
                 .sem_rotulo()
@@ -795,25 +828,11 @@ fn lista(ui: &mut egui::Ui, motor: &MotorLocal, sessao: &SessaoLocal, estado: &m
                 .mostrar(ui);
         })
         .mostrar(ui);
+    if busca_mudou || estado.filtro_status != filtro_antes {
+        estado.buscar_ordens(motor, sessao);
+    }
 
-    let filtro_status = estado.filtro_status.unwrap_or(FiltroStatusOs::Ativas);
-    let termo = estado.busca.trim().to_lowercase();
-    let indices: Vec<usize> = (0..estado.ordens.len())
-        .filter(|&i| {
-            let os = &estado.ordens[i];
-            if !filtro_status.combina(os.estado) {
-                return false;
-            }
-            if termo.is_empty() {
-                return true;
-            }
-            os.numero.to_string().contains(&termo)
-                || equipamento_label(os).to_lowercase().contains(&termo)
-                || nome_cliente(&estado.clientes, os.cliente)
-                    .to_lowercase()
-                    .contains(&termo)
-        })
-        .collect();
+    let indices: Vec<usize> = (0..estado.ordens.len()).collect();
     let colunas = vec![
         ColunaGrade::nova("Nº").largura(56.0).numero(),
         ColunaGrade::nova("Aparelho"),
@@ -1137,14 +1156,20 @@ fn abrir_os(
         return;
     }
 
-    let cliente_id = if cliente_novo {
+    let tecnico_responsavel = sessao.usuario();
+    let resultado = if cliente_novo {
         if nome.trim().is_empty() {
             notificar(ctx, Notificacao::aviso("Informe o nome do cliente."));
             return;
         }
         let digitos_doc: String = documento.chars().filter(char::is_ascii_digit).collect();
+        let cnpj = digitos_doc.len() == 14;
         let endereco = (!end_logradouro.trim().is_empty()).then_some(EnderecoInicial {
-            tipo: TipoEndereco::Residencial,
+            tipo: if cnpj {
+                TipoEndereco::Comercial
+            } else {
+                TipoEndereco::Residencial
+            },
             logradouro: end_logradouro,
             numero: end_numero,
             complemento: None,
@@ -1153,75 +1178,75 @@ fn abrir_os(
             uf: end_uf,
             cep: end_cep,
         });
-        // `CriarPessoa` só aceita um contato inicial — quando telefone E e-mail vêm
-        // preenchidos, o telefone entra na criação e o e-mail via `AdicionarContato` logo
-        // depois.
-        let contato_inicial = if !telefone.trim().is_empty() {
-            Some(ContatoInicial {
-                tipo: TipoContato::Whatsapp,
-                valor: telefone.clone(),
-            })
-        } else if !email.trim().is_empty() {
-            Some(ContatoInicial {
-                tipo: TipoContato::Email,
-                valor: email.clone(),
-            })
-        } else {
-            None
-        };
-
-        let r = motor.executar(
-            sessao,
-            "clientes.criar_pessoa.v1",
-            &CriarPessoa {
-                tipo: TipoPessoa::Fisica,
-                nome,
-                nome_fantasia: None,
-                papel_inicial: PapelCliente::Cliente,
-                documento_tipo: (!digitos_doc.is_empty()).then_some(if digitos_doc.len() == 14 {
-                    TipoDocumento::Cnpj
-                } else {
-                    TipoDocumento::Cpf
-                }),
-                documento_numero: (!digitos_doc.is_empty()).then_some(documento),
-                data_nascimento: None,
-                endereco,
-                contato: contato_inicial,
-            },
-        );
-        let pessoa = match r {
-            Ok(c) => {
-                let c: PessoaCadastrada = c;
-                c.pessoa
-            }
-            Err(e) => {
-                notificar(ctx, Notificacao::erro(e.mensagem));
-                return;
-            }
-        };
-
-        if !telefone.trim().is_empty() && !email.trim().is_empty() {
-            if let Err(e) = motor.executar(
-                sessao,
-                "clientes.adicionar_contato.v1",
-                &AdicionarContato {
-                    pessoa,
+        // O WhatsApp é o contato principal; o e-mail, se houver, vai junto como extra.
+        let (contato, contatos_extras) = match (telefone.trim(), email.trim()) {
+            ("", "") => (None, Vec::new()),
+            ("", e) => (
+                Some(ContatoInicial {
                     tipo: TipoContato::Email,
-                    valor: email,
-                    principal: true,
+                    valor: e.to_owned(),
+                }),
+                Vec::new(),
+            ),
+            (t, e) => (
+                Some(ContatoInicial {
+                    tipo: TipoContato::Whatsapp,
+                    valor: t.to_owned(),
+                }),
+                if e.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![ContatoInicial {
+                        tipo: TipoContato::Email,
+                        valor: e.to_owned(),
+                    }]
                 },
-            ) {
-                notificar(
-                    ctx,
-                    Notificacao::aviso("Cliente criado, mas o e-mail não foi salvo")
-                        .detalhe(e.mensagem),
-                );
-            }
-        }
-
-        pessoa
-    } else if let Some(id) = cliente_sel {
-        id
+            ),
+        };
+        motor
+            .executar(
+                sessao,
+                "os.abrir_ordem_com_cliente_novo.v1",
+                &AbrirOrdemComClienteNovo {
+                    cliente: CriarPessoa {
+                        tipo: if cnpj {
+                            TipoPessoa::Juridica
+                        } else {
+                            TipoPessoa::Fisica
+                        },
+                        nome,
+                        nome_fantasia: None,
+                        papel_inicial: PapelCliente::Cliente,
+                        documento_tipo: (!digitos_doc.is_empty()).then_some(if cnpj {
+                            TipoDocumento::Cnpj
+                        } else {
+                            TipoDocumento::Cpf
+                        }),
+                        documento_numero: (!digitos_doc.is_empty()).then_some(documento),
+                        data_nascimento: None,
+                        endereco,
+                        contato,
+                    },
+                    contatos_extras,
+                    equipamento,
+                    defeito_relatado,
+                    tecnico_responsavel,
+                    garantia_dias: 90,
+                },
+            )
+            .map(|r: OrdemComClienteNovoAberta| r.ordem)
+    } else if let Some(cliente) = cliente_sel {
+        motor.executar(
+            sessao,
+            "os.abrir_ordem_servico.v1",
+            &AbrirOrdemServico {
+                cliente,
+                equipamento,
+                defeito_relatado,
+                tecnico_responsavel,
+                garantia_dias: 90,
+            },
+        )
     } else {
         notificar(
             ctx,
@@ -1230,17 +1255,7 @@ fn abrir_os(
         return;
     };
 
-    match motor.executar(
-        sessao,
-        "os.abrir_ordem_servico.v1",
-        &AbrirOrdemServico {
-            cliente: cliente_id,
-            equipamento,
-            defeito_relatado,
-            tecnico_responsavel: sessao.usuario(),
-            garantia_dias: 90,
-        },
-    ) {
+    match resultado {
         Ok(aberta) => {
             let aberta: OrdemServicoAberta = aberta;
             estado.erro = None;
@@ -1860,55 +1875,42 @@ fn aplicar_pecas(
         );
         return;
     };
-    let mut aplicadas = 0_usize;
-    let mut divergencias = 0_usize;
-    let mut erro = None;
-    for &item_peca in itens {
-        let r = motor.executar(
-            sessao,
-            "os.aplicar_peca.v1",
-            &AplicarPeca {
-                ordem_servico: ordem,
-                item_peca,
-                local,
-                lote: None,
-            },
-        );
-        match r {
-            Ok(feita) => {
-                let feita: PecaFoiAplicada = feita;
-                aplicadas += 1;
-                if feita.gerou_divergencia {
-                    divergencias += 1;
-                }
-            }
-            Err(e) => {
-                erro = Some(e.mensagem);
-                break;
+    // Um comando só (`os.aplicar_pecas.v1`): ou todas saem do estoque, ou nenhuma.
+    match motor.executar(
+        sessao,
+        "os.aplicar_pecas.v1",
+        &AplicarPecas {
+            ordem_servico: ordem,
+            itens: itens.to_vec(),
+            local,
+        },
+    ) {
+        Ok(feitas) => {
+            let feitas: Vec<PecaFoiAplicada> = feitas;
+            estado.carregar(motor, sessao);
+            estado.abrir_detalhe(motor, sessao, ordem);
+            estado.dlg = Dlg::Detalhe;
+            notificar(
+                ctx,
+                Notificacao::sucesso(if feitas.len() == 1 {
+                    "Peça aplicada — saiu do estoque".to_owned()
+                } else {
+                    format!("{} peças aplicadas — saíram do estoque", feitas.len())
+                }),
+            );
+            if feitas.iter().any(|f| f.gerou_divergencia) {
+                notificar(
+                    ctx,
+                    Notificacao::aviso(
+                        "O saldo de alguma peça ficou negativo no local — confira o estoque.",
+                    ),
+                );
             }
         }
-    }
-    if aplicadas > 0 {
-        estado.carregar(motor, sessao);
-        estado.abrir_detalhe(motor, sessao, ordem);
-        estado.dlg = Dlg::Detalhe;
-        notificar(
+        Err(e) => notificar(
             ctx,
-            Notificacao::sucesso(if aplicadas == 1 {
-                "Peça aplicada — saiu do estoque".to_owned()
-            } else {
-                format!("{aplicadas} peças aplicadas — saíram do estoque")
-            }),
-        );
-    }
-    if divergencias > 0 {
-        notificar(
-            ctx,
-            Notificacao::aviso("O saldo dessa peça ficou negativo no local — confira o estoque."),
-        );
-    }
-    if let Some(mensagem) = erro {
-        notificar(ctx, Notificacao::erro(mensagem));
+            Notificacao::erro("Nenhuma peça foi aplicada").detalhe(e.mensagem),
+        ),
     }
 }
 
@@ -2475,5 +2477,60 @@ mod testes {
         let saldo = |id: Id| contas.iter().find(|x| x.conta == id).expect("conta").saldo;
         assert_eq!(saldo(inter), "300,00".parse::<Dinheiro>().expect("valor"));
         assert!(saldo(_nubank).e_zero());
+    }
+
+    #[test]
+    fn nova_os_com_cliente_novo_pela_tela_cadastra_e_abre_juntos() {
+        let mut c = cenario();
+        let clientes_antes = c.estado.clientes.len();
+        c.estado.dlg = Dlg::nova();
+        if let Dlg::Nova {
+            cliente_novo,
+            nome,
+            telefone,
+            email,
+            equipamento,
+            defeito_relatado,
+            ..
+        } = &mut c.estado.dlg
+        {
+            *cliente_novo = true;
+            *nome = "Oficina do Zé".to_owned();
+            *telefone = "31999990000".to_owned();
+            *email = "ze@oficina.com".to_owned();
+            *equipamento = "Parafusadeira Makita".to_owned();
+            *defeito_relatado = "Bateria não segura carga".to_owned();
+        }
+        abrir_os(&c.ctx, &c.motor, &c.sessao, &mut c.estado);
+
+        assert_eq!(c.estado.clientes.len(), clientes_antes + 1);
+        let d = c.estado.detalhe.as_ref().expect("detalhe da OS aberta");
+        assert_eq!(d.ordem.equipamento, "Parafusadeira Makita");
+        let novo = c
+            .estado
+            .clientes
+            .iter()
+            .find(|p| p.nome == "Oficina do Zé")
+            .expect("cliente novo");
+        assert_eq!(d.ordem.cliente, novo.pessoa);
+    }
+
+    #[test]
+    fn busca_da_lista_acha_pelo_nome_do_cliente_e_respeita_o_status() {
+        let mut c = cenario();
+        c.estado.busca = "cliente teste".to_owned();
+        c.estado.buscar_ordens(&c.motor, &c.sessao);
+        assert_eq!(c.estado.ordens.len(), 1);
+
+        c.estado.busca = "ninguém com esse nome".to_owned();
+        c.estado.buscar_ordens(&c.motor, &c.sessao);
+        assert!(c.estado.ordens.is_empty());
+
+        c.estado.busca.clear();
+        c.estado.filtro_status = Some(FiltroStatusOs::Um(EstadoOs::Faturada));
+        c.estado.buscar_ordens(&c.motor, &c.sessao);
+        assert!(c.estado.ordens.is_empty());
+        // Os indicadores continuam olhando a fila ativa inteira.
+        assert_eq!(c.estado.ativas.len(), 1);
     }
 }

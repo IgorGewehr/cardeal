@@ -193,6 +193,106 @@ impl Consulta for TodasAsOrdens {
     }
 }
 
+/// Que recorte de estado [`BuscarOrdens`] devolve.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FiltroEstadoOs {
+    /// A fila de trabalho: tudo que não é `Faturada`/`Cancelada`/`Reprovada`.
+    Ativas,
+    /// Qualquer estado.
+    Todas,
+    /// Um estado só.
+    Um(crate::ordem::EstadoOs),
+}
+
+impl FiltroEstadoOs {
+    /// Se uma ordem neste estado entra no recorte.
+    #[must_use]
+    pub fn combina(self, estado: crate::ordem::EstadoOs) -> bool {
+        use crate::ordem::EstadoOs as E;
+        match self {
+            Self::Ativas => !matches!(estado, E::Faturada | E::Cancelada | E::Reprovada),
+            Self::Todas => true,
+            Self::Um(e) => e == estado,
+        }
+    }
+}
+
+/// A lista de OS da tela, filtrada **no motor** — substitui carregar `TodasAsOrdens` (teto
+/// de 500, então a OS nº 37 sumia da busca depois de alguns meses de uso) e filtrar na tela.
+///
+/// O termo casa com o número (prefixo; `#12` = só número), o aparelho e o defeito relatado,
+/// ignorando acento e caixa e por palavras ("tela samsung" acha "Samsung A52 — tela"). O nome do cliente mora
+/// em `mod-clientes`, que esta consulta não lê: quem chama resolve o termo contra o próprio
+/// catálogo de clientes e manda os ids em `clientes`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BuscarOrdens {
+    /// O recorte de estado.
+    pub filtro: FiltroEstadoOs,
+    /// O texto digitado; vazio = sem filtro de texto.
+    pub termo: String,
+    /// Clientes cujo nome casou com `termo` (as OS deles entram mesmo que o texto não case).
+    pub clientes: Vec<Id>,
+    /// Quantas devolver, das mais recentes para as mais antigas.
+    pub limite: u32,
+}
+
+impl Consulta for BuscarOrdens {
+    type Saida = Vec<OrdemServico>;
+    const PERMISSAO: &'static str = "os.ordem.ver";
+
+    fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        let mut stmt = conexao
+            .prepare(
+                "SELECT id, empresa, numero, cliente, equipamento, defeito_relatado, data_abertura,
+                        tecnico_responsavel, estado, aprovado_por, garantia_dias, valor_total,
+                        itens_orcamento, versao
+                 FROM os_ordem_servico
+                 WHERE empresa = ?1
+                 ORDER BY numero DESC",
+            )
+            .map_err(persist)?;
+        let termo = self.termo.trim();
+        // "#12" é inequívoco: só o número. "12" sozinho também pode ser parte do aparelho
+        // ("Galaxy A12"), então casa número (prefixo) **ou** texto.
+        let so_numero = termo.strip_prefix('#').map(str::trim);
+        let numero_digitado = so_numero
+            .unwrap_or(termo)
+            .chars()
+            .all(|c| c.is_ascii_digit())
+            .then(|| so_numero.unwrap_or(termo));
+        let casa = |os: &OrdemServico| {
+            if termo.is_empty() {
+                return true;
+            }
+            let pelo_numero = numero_digitado
+                .is_some_and(|n| !n.is_empty() && os.numero.to_string().starts_with(n));
+            if so_numero.is_some() {
+                return pelo_numero;
+            }
+            pelo_numero
+                || self.clientes.contains(&os.cliente)
+                || cardeal_kernel::texto::casa_por_palavras(
+                    &format!("{} {}", os.equipamento, os.defeito_relatado),
+                    termo,
+                )
+        };
+        let mut saida = Vec::new();
+        let linhas = stmt
+            .query_map([blob(ctx.empresa)], ordem_de_linha)
+            .map_err(persist)?;
+        for linha in linhas {
+            let os = linha.map_err(persist)?;
+            if self.filtro.combina(os.estado) && casa(&os) {
+                saida.push(os);
+                if saida.len() >= self.limite as usize {
+                    break;
+                }
+            }
+        }
+        Ok(saida)
+    }
+}
+
 /// Busca o detalhe completo de uma ordem pelo id.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BuscarDetalheOrdem {

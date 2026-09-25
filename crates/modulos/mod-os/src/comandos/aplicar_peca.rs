@@ -59,42 +59,93 @@ impl Comando for AplicarPeca {
     const AUDITA: bool = true;
 
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
-        // 1. Carregar.
-        let os = carregar_ordem(uow, self.ordem_servico)?;
-        let mut item = RepositorioOs::novo(uow)
-            .buscar_item_peca(self.item_peca)?
-            .ok_or_else(|| Erro::nao_encontrado("item de peça"))?;
-
-        // 2. Validar.
-        os.exigir_em_execucao().map_err(|e| Erro::de_dominio(&e))?;
-        if item.ordem_servico != os.id {
-            return Err(Erro::de_dominio(&ErroOs::ItemNaoPertenceAOrdem));
-        }
-
-        // 3. Consumir o estoque (chamada direta a outro módulo, mesma transação) — do lote
-        // específico quando o técnico identificou a peça física, senão do saldo agregado.
-        let dados_saida = DadosSaida {
-            produto: item.produto,
-            local: self.local,
-            quantidade: item.quantidade,
-            origem_modulo: "os",
-            origem_id: Some(os.id),
-        };
-        let saida = match self.lote {
-            Some(lote) => registrar_saida_de_lote_comum(dados_saida, lote, ctx, uow)?,
-            None => registrar_saida_comum(dados_saida, ctx, uow)?,
-        };
-
-        item.aplicar(saida.aplicada.custo_unitario, self.local, self.lote)
-            .map_err(|e| Erro::de_dominio(&e))?;
-
-        // 4. Persistir.
-        RepositorioOs::novo(uow).atualizar_item_peca(&item)?;
-
-        Ok(PecaFoiAplicada {
-            item_peca: item.id,
-            custo_unitario: item.custo_unitario,
-            gerou_divergencia: saida.aplicada.gerou_divergencia,
-        })
+        aplicar_peca_comum(self, ctx, uow)
     }
+}
+
+/// Aplica várias peças do orçamento de uma vez — "Aplicar todas as peças" da tela. **Tudo
+/// ou nada**: se uma peça falhar (item de outra OS, estado errado), nenhuma sai do estoque.
+/// Antes a tela disparava um `AplicarPeca` por item e uma falha no meio deixava parte
+/// aplicada e parte não.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AplicarPecas {
+    /// A ordem de serviço.
+    pub ordem_servico: Id,
+    /// Os itens de peça a aplicar.
+    pub itens: Vec<Id>,
+    /// O local de estoque de onde todas saem.
+    pub local: Id,
+}
+
+impl Comando for AplicarPecas {
+    type Saida = Vec<PecaFoiAplicada>;
+    const PERMISSAO: &'static str = "os.peca.aplicar";
+    const RISCO: Risco = Risco::Medio;
+    const AUDITA: bool = true;
+
+    fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
+        self.itens
+            .iter()
+            .map(|&item_peca| {
+                aplicar_peca_comum(
+                    AplicarPeca {
+                        ordem_servico: self.ordem_servico,
+                        item_peca,
+                        local: self.local,
+                        lote: None,
+                    },
+                    ctx,
+                    uow,
+                )
+            })
+            .collect()
+    }
+}
+
+/// O corpo de [`AplicarPeca`] — reaproveitado por [`AplicarPecas`] na mesma transação.
+///
+/// # Errors
+/// OS fora de execução, item de outra ordem, item já aplicado, ou erro do estoque.
+fn aplicar_peca_comum(
+    dados: AplicarPeca,
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<PecaFoiAplicada> {
+    // 1. Carregar.
+    let os = carregar_ordem(uow, dados.ordem_servico)?;
+    let mut item = RepositorioOs::novo(uow)
+        .buscar_item_peca(dados.item_peca)?
+        .ok_or_else(|| Erro::nao_encontrado("item de peça"))?;
+
+    // 2. Validar.
+    os.exigir_em_execucao().map_err(|e| Erro::de_dominio(&e))?;
+    if item.ordem_servico != os.id {
+        return Err(Erro::de_dominio(&ErroOs::ItemNaoPertenceAOrdem));
+    }
+
+    // 3. Consumir o estoque (chamada direta a outro módulo, mesma transação) — do lote
+    // específico quando o técnico identificou a peça física, senão do saldo agregado.
+    let dados_saida = DadosSaida {
+        produto: item.produto,
+        local: dados.local,
+        quantidade: item.quantidade,
+        origem_modulo: "os",
+        origem_id: Some(os.id),
+    };
+    let saida = match dados.lote {
+        Some(lote) => registrar_saida_de_lote_comum(dados_saida, lote, ctx, uow)?,
+        None => registrar_saida_comum(dados_saida, ctx, uow)?,
+    };
+
+    item.aplicar(saida.aplicada.custo_unitario, dados.local, dados.lote)
+        .map_err(|e| Erro::de_dominio(&e))?;
+
+    // 4. Persistir.
+    RepositorioOs::novo(uow).atualizar_item_peca(&item)?;
+
+    Ok(PecaFoiAplicada {
+        item_peca: item.id,
+        custo_unitario: item.custo_unitario,
+        gerou_divergencia: saida.aplicada.gerou_divergencia,
+    })
 }

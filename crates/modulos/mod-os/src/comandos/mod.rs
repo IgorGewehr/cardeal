@@ -21,9 +21,11 @@ mod registrar_mao_de_obra;
 mod remover_item_orcamento;
 mod reprovar_orcamento_os;
 
-pub use abrir_ordem_servico::{AbrirOrdemServico, OrdemServicoAberta};
+pub use abrir_ordem_servico::{
+    AbrirOrdemComClienteNovo, AbrirOrdemServico, OrdemComClienteNovoAberta, OrdemServicoAberta,
+};
 pub use ajustar_apontamento::AjustarApontamento;
-pub use aplicar_peca::{AplicarPeca, PecaFoiAplicada};
+pub use aplicar_peca::{AplicarPeca, AplicarPecas, PecaFoiAplicada};
 pub use aprovar_orcamento_os::AprovarOrcamentoOs;
 pub use cancelar_ordem_servico::{CancelarOrdemServico, OrdemServicoCancelada};
 pub use concluir_execucao::ConcluirExecucao;

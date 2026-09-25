@@ -88,99 +88,114 @@ impl Comando for CriarPessoa {
     const RISCO: Risco = Risco::Baixo;
 
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
-        // 1. Validar (domínio puro).
-        let mut construtor = ConstrutorPessoa::nova(
-            ctx.empresa,
-            self.tipo,
-            self.nome,
-            self.papel_inicial,
-            ctx.agora,
-            ctx.hoje(),
-        );
-        if let Some(fantasia) = self.nome_fantasia {
-            construtor = construtor.nome_fantasia(fantasia);
-        }
-        if let Some(d) = self.data_nascimento {
-            construtor = construtor.nascimento_abertura(d);
-        }
-        let pessoa = construtor.construir().map_err(|e| Erro::de_dominio(&e))?;
-
-        // Documento é opcional: só quando tipo E número vierem preenchidos.
-        let documento = match (self.documento_tipo, self.documento_numero) {
-            (Some(tipo), Some(numero)) if !numero.trim().is_empty() => Some(
-                DocumentoPessoa::novo(ctx.empresa, pessoa.id, tipo, &numero)
-                    .map_err(|e| Erro::de_dominio(&e))?,
-            ),
-            _ => None,
-        };
-
-        let endereco = self
-            .endereco
-            .map(|e| {
-                let mut end = Endereco::novo(
-                    pessoa.id,
-                    e.tipo,
-                    e.logradouro,
-                    e.numero,
-                    e.bairro,
-                    e.cidade,
-                    &e.uf,
-                    &e.cep,
-                )
-                .map_err(|err| Erro::de_dominio(&err))?;
-                end.complemento = e.complemento;
-                end.principal = true;
-                Ok::<_, Erro>(end)
-            })
-            .transpose()?;
-
-        let contato = self
-            .contato
-            .map(|c| {
-                let mut ct = Contato::novo(pessoa.id, c.tipo, &c.valor)
-                    .map_err(|err| Erro::de_dominio(&err))?;
-                ct.principal = true;
-                Ok::<_, Erro>(ct)
-            })
-            .transpose()?;
-
-        // 2. Duplicidade por documento — certeza, só quando há documento.
-        if let Some(doc) = &documento {
-            if RepositorioClientes::novo(uow)
-                .buscar_documento(ctx.empresa, doc.tipo, &doc.numero)?
-                .is_some()
-            {
-                return Err(Erro::de_dominio(&ErroClientes::DocumentoDuplicado));
-            }
-        }
-
-        // 3. (não se aplica — este módulo nunca lança no razão.)
-
-        // 4. Persistir.
-        let mut repo = RepositorioClientes::novo(uow);
-        repo.inserir_pessoa(&pessoa)?;
-        if let Some(doc) = &documento {
-            repo.inserir_documento(doc)?;
-        }
-        if let Some(end) = &endereco {
-            repo.inserir_endereco(ctx.empresa, end)?;
-        }
-        if let Some(ct) = &contato {
-            repo.inserir_contato(ctx.empresa, ct)?;
-        }
-
-        // 5. Publicar.
-        uow.publicar(PessoaCriada {
-            pessoa: pessoa.id,
-            tipo: if pessoa.tipo == TipoPessoa::Juridica {
-                "Juridica"
-            } else {
-                "Fisica"
-            },
-            documento_principal: documento.as_ref().map(|d| d.id),
-        })
-        .map_err(|e| Erro::de_dominio(&e))?;
-
-        Ok(PessoaCadastrada { pessoa: pessoa.id })
+        criar_pessoa_comum(self, ctx, uow)
     }
+}
+
+/// O corpo de [`CriarPessoa`], chamável direto por outro módulo **dentro da mesma
+/// transação** — `os.abrir_ordem_com_cliente_novo` cadastra o cliente e abre a OS num só
+/// `COMMIT`, sem deixar cliente órfão se a abertura falhar (mesmo padrão de
+/// `mod_estoque::registrar_saida_comum`). A permissão fica por conta de quem chama.
+///
+/// # Errors
+/// Os mesmos de [`CriarPessoa`]: dado inválido, documento duplicado, infraestrutura.
+pub fn criar_pessoa_comum(
+    dados: CriarPessoa,
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<PessoaCadastrada> {
+    // 1. Validar (domínio puro).
+    let mut construtor = ConstrutorPessoa::nova(
+        ctx.empresa,
+        dados.tipo,
+        dados.nome,
+        dados.papel_inicial,
+        ctx.agora,
+        ctx.hoje(),
+    );
+    if let Some(fantasia) = dados.nome_fantasia {
+        construtor = construtor.nome_fantasia(fantasia);
+    }
+    if let Some(d) = dados.data_nascimento {
+        construtor = construtor.nascimento_abertura(d);
+    }
+    let pessoa = construtor.construir().map_err(|e| Erro::de_dominio(&e))?;
+
+    // Documento é opcional: só quando tipo E número vierem preenchidos.
+    let documento = match (dados.documento_tipo, dados.documento_numero) {
+        (Some(tipo), Some(numero)) if !numero.trim().is_empty() => Some(
+            DocumentoPessoa::novo(ctx.empresa, pessoa.id, tipo, &numero)
+                .map_err(|e| Erro::de_dominio(&e))?,
+        ),
+        _ => None,
+    };
+
+    let endereco = dados
+        .endereco
+        .map(|e| {
+            let mut end = Endereco::novo(
+                pessoa.id,
+                e.tipo,
+                e.logradouro,
+                e.numero,
+                e.bairro,
+                e.cidade,
+                &e.uf,
+                &e.cep,
+            )
+            .map_err(|err| Erro::de_dominio(&err))?;
+            end.complemento = e.complemento;
+            end.principal = true;
+            Ok::<_, Erro>(end)
+        })
+        .transpose()?;
+
+    let contato = dados
+        .contato
+        .map(|c| {
+            let mut ct =
+                Contato::novo(pessoa.id, c.tipo, &c.valor).map_err(|err| Erro::de_dominio(&err))?;
+            ct.principal = true;
+            Ok::<_, Erro>(ct)
+        })
+        .transpose()?;
+
+    // 2. Duplicidade por documento — certeza, só quando há documento.
+    if let Some(doc) = &documento {
+        if RepositorioClientes::novo(uow)
+            .buscar_documento(ctx.empresa, doc.tipo, &doc.numero)?
+            .is_some()
+        {
+            return Err(Erro::de_dominio(&ErroClientes::DocumentoDuplicado));
+        }
+    }
+
+    // 3. (não se aplica — este módulo nunca lança no razão.)
+
+    // 4. Persistir.
+    let mut repo = RepositorioClientes::novo(uow);
+    repo.inserir_pessoa(&pessoa)?;
+    if let Some(doc) = &documento {
+        repo.inserir_documento(doc)?;
+    }
+    if let Some(end) = &endereco {
+        repo.inserir_endereco(ctx.empresa, end)?;
+    }
+    if let Some(ct) = &contato {
+        repo.inserir_contato(ctx.empresa, ct)?;
+    }
+
+    // 5. Publicar.
+    uow.publicar(PessoaCriada {
+        pessoa: pessoa.id,
+        tipo: if pessoa.tipo == TipoPessoa::Juridica {
+            "Juridica"
+        } else {
+            "Fisica"
+        },
+        documento_principal: documento.as_ref().map(|d| d.id),
+    })
+    .map_err(|e| Erro::de_dominio(&e))?;
+
+    Ok(PessoaCadastrada { pessoa: pessoa.id })
 }
