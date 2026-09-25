@@ -14,7 +14,8 @@ use cardeal_ui::molecules::{
     EstadoVazio, ItemDeLista, LinhaDeAcao, SeletorOpcao, Severidade,
 };
 use cardeal_ui::organisms::{
-    notificar, ColunaGrade, Dialogo, Grade, Janela, Notificacao, Notificacoes, Ordenacao, Painel,
+    notificar, ColunaGrade, CondicaoPagamento, Dialogo, Grade, Janela, Notificacao, Notificacoes,
+    Ordenacao, Painel, SeletorPagamento,
 };
 use cardeal_ui::tokens::{instalar_estilo, instalar_fontes, Espaco, Rubro, Tema, TemaUi};
 use eframe::egui;
@@ -67,6 +68,7 @@ struct Galeria {
     marcada: bool,
     item_ativo: usize,
     opcao: Option<u8>,
+    pagamento: CondicaoPagamento<u8, u8>,
     aba: u8,
     dialogo: Option<String>,
     captura: Option<std::path::PathBuf>,
@@ -383,6 +385,19 @@ impl eframe::App for Galeria {
                 SeletorOpcao::novo("Seletor de opção", &mut self.opcao)
                     .opcoes([(1_u8, "Dinheiro"), (2, "Pix"), (3, "Cartão de crédito")])
                     .mostrar(ui);
+
+                ui.add_space(Espaco::E24);
+                ui.add(Rotulo::titulo_secao("Seletor de pagamento (faturar OS, dar baixa)"));
+                let resposta = SeletorPagamento::novo("galeria-pagamento", &mut self.pagamento)
+                    .com_prazo()
+                    .meio(1_u8, "Dinheiro", false)
+                    .meio(2, "Pix", true)
+                    .meio(3, "Cartão", true)
+                    .contas([(1_u8, "Nubank (1.1.2.01)"), (2, "Banco do Brasil (1.1.2.02)")])
+                    .mostrar(ui);
+                if resposta.pediu_nova_conta {
+                    notificar(ui.ctx(), Notificacao::info("A tela abre o cadastro de conta"));
+                }
 
                 ui.add_space(Espaco::E24);
                 ui.add(Rotulo::titulo_secao("Abas (pílula deslizante)"));

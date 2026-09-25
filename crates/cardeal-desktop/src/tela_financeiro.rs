@@ -47,12 +47,18 @@ impl Aba {
     }
 }
 
-/// Um mês da série de receita × custo.
+/// Um mês da série de recebido × pago — em `Dinheiro`; só o gráfico converte para `f64`.
 #[derive(Clone, Default)]
 struct MesFluxo {
     rotulo: String,
-    receita: f64,
-    custo: f64,
+    receita: Dinheiro,
+    custo: Dinheiro,
+}
+
+/// Reais em `f64`, só para alimentar gráfico (nunca para somar ou exibir valor).
+#[allow(clippy::cast_precision_loss)]
+fn reais_para_grafico(d: Dinheiro) -> f64 {
+    d.em_centavos() as f64 / 100.0
 }
 
 #[derive(Default)]
@@ -61,13 +67,14 @@ enum Dlg {
     Fechado,
     Lancar(FormLancar),
     Baixar {
-        indice: usize,
+        /// A parcela pelo `Id` — nunca pela posição no vetor, que muda quando a lista
+        /// recarrega (depois de um estorno) ou é reordenada com o diálogo aberto.
+        parcela: Id,
         valor: String,
         data: String,
-        /// Dinheiro/Pix/Cartão — decide se a baixa cai no Caixa ou na conta bancária
-        /// (`MeioPagamento::papel`). `None` só antes do primeiro quadro; vira `Some` já na
-        /// abertura do diálogo, igual ao `filtro_status` de `tela_os`.
-        meio_pagamento: Option<MeioPagamento>,
+        /// Meio (Dinheiro vai para o Caixa, Pix/cartão para o banco) e a conta bancária de
+        /// destino, quando há mais de uma.
+        pagamento: crate::pagamento::EstadoPagamento,
         /// O histórico de baixas da parcela — carregado uma vez na abertura do diálogo
         /// (`baixas_carregadas` marca isso, já que uma parcela recém-lançada legitimamente
         /// tem histórico vazio).
@@ -296,6 +303,13 @@ pub struct EstadoTelaFinanceiro {
     dash_venc_pagar: (usize, Dinheiro),
     dash_recebido_mes: Dinheiro,
     dash_pago_mes: Dinheiro,
+    /// O "em aberto" de cada espécie, carregado uma vez pelo painel e reaproveitado pela
+    /// projeção das abas A receber/A pagar (antes cada uma consultava de novo).
+    abertos_receber: Vec<ItemTituloEmAberto>,
+    abertos_pagar: Vec<ItemTituloEmAberto>,
+    /// Quantos títulos a geração de recorrências criou ao entrar — vira aviso no próximo
+    /// quadro (o `carregar` não tem `egui::Context` para notificar).
+    recorrencias_geradas: usize,
     serie: Vec<MesFluxo>,
     // Fluxo de caixa / bancos.
     fluxo_dias: i64,
@@ -314,13 +328,51 @@ pub struct EstadoTelaFinanceiro {
 }
 
 impl EstadoTelaFinanceiro {
+    /// Gera os títulos das recorrências vencidas ou dentro da antecedência
+    /// (`financeiro.materializar_recorrencias.v1`, idempotente) e depois recarrega. É o que
+    /// roda ao entrar no sistema e ao abrir a área de Financeiro — até existir agendador, é o
+    /// que faz o aluguel cadastrado como recorrente aparecer em "A pagar".
+    pub fn gerar_recorrencias_e_carregar(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
+        if sessao.concede("financeiro.recorrencia.criar") {
+            match motor.executar(
+                sessao,
+                "financeiro.materializar_recorrencias.v1",
+                &mod_financeiro::MaterializarRecorrencias,
+            ) {
+                Ok(gerados) => {
+                    let gerados: Vec<Id> = gerados;
+                    self.recorrencias_geradas += gerados.len();
+                }
+                Err(e) => {
+                    self.carregar(motor, sessao);
+                    self.erro = Some(format!("Recorrências não geradas: {}", e.mensagem));
+                    return;
+                }
+            }
+        }
+        self.carregar(motor, sessao);
+    }
+
+    /// Guarda o erro de uma consulta para aparecer no topo da tela (em vez de o valor virar
+    /// zero em silêncio) e devolve o valor quando deu certo.
+    fn anotar<T>(&mut self, r: cardeal_kernel::Resultado<T>) -> Option<T> {
+        match r {
+            Ok(v) => Some(v),
+            Err(e) => {
+                self.erro = Some(e.mensagem);
+                None
+            }
+        }
+    }
+
     /// Recarrega a lista da aba ativa, o painel de visão geral e o índice de nomes.
     pub fn carregar(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
         self.erro = None;
+        // O painel primeiro: a projeção das abas de parcelas reaproveita o "em aberto" dele.
+        self.carregar_dashboard(motor, sessao);
         if matches!(self.aba, Aba::Receber | Aba::Pagar) {
             self.carregar_parcelas_periodo(motor, sessao);
         }
-        self.carregar_dashboard(motor, sessao);
         if matches!(self.aba, Aba::Fluxo | Aba::Bancos) {
             self.carregar_fluxo(motor, sessao);
         }
@@ -380,43 +432,29 @@ impl EstadoTelaFinanceiro {
             Err(e) => self.erro = Some(e.mensagem),
         }
 
-        self.baixado_periodo = if a_receber {
-            motor
-                .consultar(
-                    sessao,
-                    "financeiro.total_recebido_no_periodo.v1",
-                    &TotalRecebidoNoPeriodo { periodo },
-                )
-                .unwrap_or(Dinheiro::ZERO)
+        let baixado = if a_receber {
+            motor.consultar(
+                sessao,
+                "financeiro.total_recebido_no_periodo.v1",
+                &TotalRecebidoNoPeriodo { periodo },
+            )
         } else {
-            motor
-                .consultar(
-                    sessao,
-                    "financeiro.total_pago_no_periodo.v1",
-                    &TotalPagoNoPeriodo { periodo },
-                )
-                .unwrap_or(Dinheiro::ZERO)
+            motor.consultar(
+                sessao,
+                "financeiro.total_pago_no_periodo.v1",
+                &TotalPagoNoPeriodo { periodo },
+            )
         };
+        // Um total que falhou não vira "R$ 0,00": o erro aparece no topo da tela.
+        self.baixado_periodo = self.anotar(baixado).unwrap_or(Dinheiro::ZERO);
 
         // Projeção: soma do saldo em aberto (qualquer vencimento, inclusive já vencido) que
-        // já vence até o fim do período — usa a consulta "em aberto" de sempre (sem filtro
-        // de período nenhum), só filtrada aqui pela data-fim.
-        let abertos: Vec<ItemTituloEmAberto> = if a_receber {
-            motor
-                .consultar(
-                    sessao,
-                    "financeiro.titulos_a_receber_em_aberto.v1",
-                    &TitulosAReceberEmAberto,
-                )
-                .unwrap_or_default()
+        // já vence até o fim do período — reaproveita o "em aberto" que o painel já carregou
+        // (`carregar_dashboard` roda antes), só filtrado aqui pela data-fim.
+        let abertos = if a_receber {
+            &self.abertos_receber
         } else {
-            motor
-                .consultar(
-                    sessao,
-                    "financeiro.titulos_a_pagar_em_aberto.v1",
-                    &TitulosAPagarEmAberto,
-                )
-                .unwrap_or_default()
+            &self.abertos_pagar
         };
         self.projecao_periodo = abertos
             .iter()
@@ -430,20 +468,18 @@ impl EstadoTelaFinanceiro {
         let hoje = Data::hoje(Fuso::BRASILIA);
         let em7 = hoje.mais_dias(7);
 
-        let receber = motor
-            .consultar(
-                sessao,
-                "financeiro.titulos_a_receber_em_aberto.v1",
-                &TitulosAReceberEmAberto,
-            )
-            .unwrap_or_default();
-        let pagar = motor
-            .consultar(
-                sessao,
-                "financeiro.titulos_a_pagar_em_aberto.v1",
-                &TitulosAPagarEmAberto,
-            )
-            .unwrap_or_default();
+        let receber = motor.consultar(
+            sessao,
+            "financeiro.titulos_a_receber_em_aberto.v1",
+            &TitulosAReceberEmAberto,
+        );
+        let receber: Vec<ItemTituloEmAberto> = self.anotar(receber).unwrap_or_default();
+        let pagar = motor.consultar(
+            sessao,
+            "financeiro.titulos_a_pagar_em_aberto.v1",
+            &TitulosAPagarEmAberto,
+        );
+        let pagar: Vec<ItemTituloEmAberto> = self.anotar(pagar).unwrap_or_default();
 
         let soma = |v: &[ItemTituloEmAberto]| {
             v.iter()
@@ -463,40 +499,38 @@ impl EstadoTelaFinanceiro {
         self.dash_pagar = soma(&pagar);
         self.dash_venc_receber = venc(&receber);
         self.dash_venc_pagar = venc(&pagar);
+        self.abertos_receber = receber;
+        self.abertos_pagar = pagar;
 
         let periodo = Periodo::novo(hoje.mais_meses(-5).inicio_do_mes(), hoje);
-        let itens = motor
-            .consultar(
-                sessao,
-                "financeiro.total_por_categoria_no_periodo.v1",
-                &TotalPorCategoriaNoPeriodo { periodo },
-            )
-            .unwrap_or_default();
+        let itens = motor.consultar(
+            sessao,
+            "financeiro.total_por_categoria_no_periodo.v1",
+            &TotalPorCategoriaNoPeriodo { periodo },
+        );
+        let itens: Vec<ItemTotalPorCategoria> = self.anotar(itens).unwrap_or_default();
 
         let mut comp = hoje.mais_meses(-5).competencia();
         let mut serie = Vec::with_capacity(6);
         for _ in 0..6 {
-            let centavos = |a_receber: bool| -> i64 {
+            let total = |a_receber: bool| -> Dinheiro {
                 itens
                     .iter()
                     .filter(|it| {
                         it.competencia == comp
                             && matches!(it.especie, EspecieTitulo::Receber) == a_receber
                     })
-                    .map(|it| it.total_baixado.em_centavos())
-                    .sum()
+                    .fold(Dinheiro::ZERO, |acc, it| acc + it.total_baixado)
             };
             serie.push(MesFluxo {
                 rotulo: nome_mes(comp),
-                receita: centavos(true) as f64 / 100.0,
-                custo: centavos(false) as f64 / 100.0,
+                receita: total(true),
+                custo: total(false),
             });
             comp = comp.proxima();
         }
-        self.dash_recebido_mes =
-            Dinheiro::centavos((serie.last().map_or(0.0, |m| m.receita) * 100.0).round() as i64);
-        self.dash_pago_mes =
-            Dinheiro::centavos((serie.last().map_or(0.0, |m| m.custo) * 100.0).round() as i64);
+        self.dash_recebido_mes = serie.last().map_or(Dinheiro::ZERO, |m| m.receita);
+        self.dash_pago_mes = serie.last().map_or(Dinheiro::ZERO, |m| m.custo);
         self.serie = serie;
 
         // Também alimenta o recorte "por categoria" já visível na Visão Geral (antes só
@@ -700,6 +734,18 @@ pub fn mostrar(
     sessao: &SessaoLocal,
     estado: &mut EstadoTelaFinanceiro,
 ) {
+    if estado.recorrencias_geradas > 0 {
+        let n = std::mem::take(&mut estado.recorrencias_geradas);
+        notificar(
+            ui.ctx(),
+            Notificacao::info(if n == 1 {
+                "1 título gerado de recorrência".to_owned()
+            } else {
+                format!("{n} títulos gerados de recorrências")
+            }),
+        );
+    }
+
     LayoutTela::nova("Financeiro").mostrar(
         ui,
         estado,
@@ -1469,7 +1515,7 @@ fn painel_visao(
     let tem_dados = estado
         .serie
         .iter()
-        .any(|m| m.receita > 0.0 || m.custo > 0.0);
+        .any(|m| m.receita.e_positivo() || m.custo.e_positivo());
     let tem_categorias = !estado.analise.is_empty();
 
     let cartao_grafico = |ui: &mut egui::Ui, titulo: &str, corpo: &dyn Fn(&mut egui::Ui)| {
@@ -1517,7 +1563,7 @@ fn grafico_fluxo(
     let tem_dados = estado
         .serie
         .iter()
-        .any(|m| m.receita > 0.0 || m.custo > 0.0);
+        .any(|m| m.receita.e_positivo() || m.custo.e_positivo());
     if !tem_dados {
         ui.add(Rotulo::campo(
             "Sem baixas nos últimos 6 meses — o gráfico aparece conforme você recebe e paga títulos.",
@@ -1529,12 +1575,20 @@ fn grafico_fluxo(
         SerieBarras {
             rotulo: "Recebido".to_owned(),
             cor: cores.positivo,
-            valores: estado.serie.iter().map(|m| m.receita).collect(),
+            valores: estado
+                .serie
+                .iter()
+                .map(|m| reais_para_grafico(m.receita))
+                .collect(),
         },
         SerieBarras {
             rotulo: "Pago".to_owned(),
             cor: cores.negativo,
-            valores: estado.serie.iter().map(|m| m.custo).collect(),
+            valores: estado
+                .serie
+                .iter()
+                .map(|m| reais_para_grafico(m.custo))
+                .collect(),
         },
     ];
     GraficoBarras::novo(&eixo, &series)
@@ -2046,18 +2100,18 @@ fn lista(
         ordenar_parcelas(&mut estado.parcelas, &nomes, coluna, direcao);
     }
     if let Some(i) = resposta.linha_clicada {
-        let indice = indices[i];
+        let p = &estado.parcelas[indices[i]];
         // Em aberto abre para dar baixa; quitada abre para consulta (histórico e estorno).
         // Cancelada/renegociada não têm o que fazer aqui.
         if matches!(
-            estado.parcelas[indice].estado,
+            p.estado,
             EstadoParcela::Aberta | EstadoParcela::Parcial | EstadoParcela::Quitada
         ) {
             estado.dlg = Dlg::Baixar {
-                indice,
-                valor: estado.parcelas[indice].saldo().formatar(),
+                parcela: p.parcela,
+                valor: p.saldo().formatar(),
                 data: Data::hoje(Fuso::BRASILIA).to_string(),
-                meio_pagamento: Some(MeioPagamento::Pix),
+                pagamento: crate::pagamento::EstadoPagamento::novo(MeioPagamento::Pix),
                 baixas: Vec::new(),
                 baixas_carregadas: false,
                 motivo_estorno: String::new(),
@@ -2336,10 +2390,10 @@ fn dialogo_baixar(
     sessao: &SessaoLocal,
     estado: &mut EstadoTelaFinanceiro,
 ) {
-    let Dlg::Baixar { indice, .. } = estado.dlg else {
+    if !matches!(estado.dlg, Dlg::Baixar { .. }) {
         return;
-    };
-    let Some(p) = estado.parcelas.get(indice).cloned() else {
+    }
+    let Some(p) = parcela_do_dialogo(estado) else {
         estado.dlg = Dlg::Fechado;
         return;
     };
@@ -2355,13 +2409,21 @@ fn dialogo_baixar(
         ..
     } = &estado.dlg
     {
-        let historico: Vec<ItemBaixa> = motor
-            .consultar(
-                sessao,
-                "financeiro.baixas_da_parcela.v1",
-                &BaixasDaParcela { parcela: p.parcela },
-            )
-            .unwrap_or_default();
+        let historico: Vec<ItemBaixa> = match motor.consultar(
+            sessao,
+            "financeiro.baixas_da_parcela.v1",
+            &BaixasDaParcela { parcela: p.parcela },
+        ) {
+            Ok(h) => h,
+            Err(e) => {
+                notificar(
+                    ctx,
+                    Notificacao::erro("Não foi possível carregar o histórico de baixas")
+                        .detalhe(e.mensagem),
+                );
+                Vec::new()
+            }
+        };
         if let Dlg::Baixar {
             baixas,
             baixas_carregadas,
@@ -2401,25 +2463,27 @@ fn dialogo_baixar(
                 if aceita_baixa {
                     ui.add(Rotulo::titulo_secao("Dar baixa"));
                     ui.add_space(Espaco::E8);
+                    let a_receber = estado.aba.a_receber();
                     let Dlg::Baixar {
                         valor,
                         data,
-                        meio_pagamento,
+                        pagamento,
                         ..
                     } = &mut estado.dlg
                     else {
                         return;
                     };
+                    let rotulo_valor = if a_receber {
+                        "Valor recebido"
+                    } else {
+                        "Valor pago"
+                    };
                     ui.columns(2, |c| {
-                        c[0].add(Campo::novo("Valor recebido", valor));
+                        c[0].add(Campo::novo(rotulo_valor, valor));
                         c[1].add(Campo::novo("Data", data).mascara(Mascara::Data));
                     });
-                    ui.add_space(Espaco::E8);
-                    SeletorOpcao::novo("Meio de pagamento", meio_pagamento)
-                        .opcao(MeioPagamento::Dinheiro, "Dinheiro — cai no Caixa")
-                        .opcao(MeioPagamento::Pix, "Pix — cai no Banco")
-                        .opcao(MeioPagamento::Cartao, "Cartão — cai no Banco")
-                        .mostrar(ui);
+                    ui.add_space(Espaco::E12);
+                    pagamento.mostrar(ui, motor, sessao, "baixa-parcela", false);
                 } else {
                     ui.add(Etiqueta::positiva("Quitada"));
                     ui.add_space(Espaco::E4);
@@ -2479,6 +2543,18 @@ fn dialogo_baixar(
 
 /// Uma linha do histórico de baixas: data, valor, e "Estornar" quando ainda não estornada.
 /// Devolve o id da baixa cujo botão "Estornar" foi clicado neste frame, se algum.
+/// A parcela que o diálogo de baixa está mostrando, achada pelo `Id` na lista atual.
+fn parcela_do_dialogo(estado: &EstadoTelaFinanceiro) -> Option<ItemTituloEmAberto> {
+    let Dlg::Baixar { parcela, .. } = estado.dlg else {
+        return None;
+    };
+    estado
+        .parcelas
+        .iter()
+        .find(|p| p.parcela == parcela)
+        .cloned()
+}
+
 fn baixa_historico(ui: &mut egui::Ui, b: &ItemBaixa) -> Option<Id> {
     let mut clicada = None;
     Painel::novo()
@@ -2524,7 +2600,7 @@ fn baixar(
     let Dlg::Baixar {
         valor,
         data,
-        meio_pagamento,
+        pagamento,
         ..
     } = &estado.dlg
     else {
@@ -2537,10 +2613,14 @@ fn baixar(
         );
         return;
     };
-    let Some(meio_pagamento) = *meio_pagamento else {
-        notificar(ctx, Notificacao::aviso("Escolha o meio de pagamento."));
-        return;
+    let meio_pagamento = match pagamento.meio_validado() {
+        Ok(m) => m,
+        Err(msg) => {
+            notificar(ctx, Notificacao::aviso(msg));
+            return;
+        }
     };
+    let conta_destino = pagamento.conta_destino();
     let r = if estado.aba.a_receber() {
         motor
             .executar(
@@ -2551,7 +2631,7 @@ fn baixar(
                     valor,
                     data,
                     meio_pagamento,
-                    conta_destino: None,
+                    conta_destino,
                 },
             )
             .map(|_: mod_financeiro::RecebimentoBaixado| ())
@@ -2565,7 +2645,7 @@ fn baixar(
                     valor,
                     data,
                     meio_pagamento,
-                    conta_destino: None,
+                    conta_destino,
                 },
             )
             .map(|_: mod_financeiro::PagamentoBaixado| ())
@@ -2627,4 +2707,86 @@ fn nome_mes(comp: Competencia) -> String {
     ];
     let i = (comp.mes().clamp(1, 12) - 1) as usize;
     format!("{}/{:02}", M[i], comp.ano() % 100)
+}
+
+#[cfg(test)]
+mod testes {
+    use super::*;
+    use crate::testes_comum::motor_de_teste;
+
+    fn lancar_a_receber(motor: &MotorLocal, sessao: &SessaoLocal, reais: i64) -> Id {
+        let hoje = Data::hoje(Fuso::BRASILIA);
+        let r: mod_financeiro::TituloAReceberLancado = motor
+            .executar(
+                sessao,
+                "financeiro.lancar_titulo_a_receber.v1",
+                &LancarTituloAReceber {
+                    cliente: None,
+                    valor_total: Dinheiro::reais(reais),
+                    emissao: hoje,
+                    parcelas: 1,
+                    primeiro_vencimento: hoje,
+                    intervalo_dias: 0,
+                    observacao: None,
+                    categoria: None,
+                },
+            )
+            .expect("título");
+        r.parcelas[0]
+    }
+
+    #[test]
+    fn baixa_vai_para_a_parcela_aberta_mesmo_se_a_lista_mudar_de_ordem() {
+        // O diálogo guardava a *posição* da parcela no vetor; reordenar a grade com ele
+        // aberto fazia a baixa cair na parcela errada.
+        let t = motor_de_teste();
+        let _a = lancar_a_receber(&t.motor, &t.sessao, 100);
+        let b = lancar_a_receber(&t.motor, &t.sessao, 250);
+        let mut estado = EstadoTelaFinanceiro {
+            aba: Aba::Receber,
+            ..Default::default()
+        };
+        estado.carregar(&t.motor, &t.sessao);
+        assert!(estado.erro.is_none(), "{:?}", estado.erro);
+        assert_eq!(estado.parcelas.len(), 2);
+
+        let p = estado
+            .parcelas
+            .iter()
+            .find(|p| p.parcela == b)
+            .cloned()
+            .expect("parcela b");
+        estado.dlg = Dlg::Baixar {
+            parcela: b,
+            valor: p.saldo().formatar(),
+            data: Data::hoje(Fuso::BRASILIA).to_string(),
+            pagamento: crate::pagamento::EstadoPagamento::novo(MeioPagamento::Dinheiro),
+            baixas: Vec::new(),
+            baixas_carregadas: true,
+            motivo_estorno: String::new(),
+        };
+        estado.parcelas.reverse();
+
+        // O diálogo continua na parcela B, e a baixa sai nela.
+        let p = parcela_do_dialogo(&estado).expect("parcela do diálogo");
+        assert_eq!(p.parcela, b);
+        baixar(
+            &egui::Context::default(),
+            &t.motor,
+            &t.sessao,
+            &mut estado,
+            &p,
+        );
+
+        let abertas: Vec<ItemTituloEmAberto> = t
+            .motor
+            .consultar(
+                &t.sessao,
+                "financeiro.titulos_a_receber_em_aberto.v1",
+                &TitulosAReceberEmAberto,
+            )
+            .expect("em aberto");
+        assert_eq!(abertas.len(), 1);
+        assert_eq!(abertas[0].valor_original, Dinheiro::reais(100));
+    }
 }

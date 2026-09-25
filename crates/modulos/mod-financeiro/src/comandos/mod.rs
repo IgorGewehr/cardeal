@@ -35,7 +35,7 @@ pub use estornar_baixa::{estornar_baixa_comum, BaixaFoiEstornada, EstornarBaixa}
 pub use fechar_caixa::{CaixaFoiFechado, FecharCaixa};
 pub use lancar_titulo_a_pagar::{LancarTituloAPagar, TituloAPagarLancado};
 pub use lancar_titulo_a_receber::{LancarTituloAReceber, TituloAReceberLancado};
-pub use materializar_recorrencia::materializar_recorrencias_pendentes;
+pub use materializar_recorrencia::{materializar_recorrencias_pendentes, MaterializarRecorrencias};
 pub use registrar_sangria::{RegistrarSangria, SangriaFoiRegistrada};
 pub use registrar_suprimento::{RegistrarSuprimento, SuprimentoFoiRegistrado};
 pub use renegociar_titulo::{RenegociarTitulo, TituloFoiRenegociado};

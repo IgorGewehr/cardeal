@@ -16,6 +16,10 @@ use crate::titulo::{ConstrutorTitulo, EspecieTitulo, TituloComParcelas};
 /// um período absurdo pedido por engano.
 const MAX_PASSOS: usize = 1_200;
 
+/// Quantos dias para trás [`Recorrencia::pendentes_ate`] recupera ocorrências que passaram
+/// sem virar título. Cobre férias e feriados prolongados com o sistema fechado.
+pub const RECUPERACAO_MAXIMA_DIAS: i32 = 60;
+
 /// Como o valor de cada ocorrência é determinado.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TipoValor {
@@ -241,6 +245,20 @@ impl Recorrencia {
             .next())
     }
 
+    /// Todas as ocorrências que já deveriam existir como título em `hoje`: as que entraram na
+    /// janela de geração **e** as que ela deixou passar porque ninguém rodou a materialização
+    /// naquele dia (o app ficou fechado no fim de semana e o aluguel de dia 5 nunca nasceu).
+    /// A recuperação olha no máximo [`RECUPERACAO_MAXIMA_DIAS`] para trás — uma regra criada
+    /// hoje com início em 2024 não despeja dois anos de títulos vencidos de uma vez.
+    ///
+    /// # Errors
+    /// Propaga [`Self::ocorrencias`].
+    pub fn pendentes_ate(&self, hoje: Data) -> Result<Vec<Data>, ErroFinanceiro> {
+        let ate = hoje.mais_dias(i32::from(self.antecedencia_geracao_dias));
+        let de = hoje.mais_dias(-RECUPERACAO_MAXIMA_DIAS);
+        self.ocorrencias(Periodo::novo(de, ate))
+    }
+
     /// Materializa uma ocorrência num `Titulo` de parcela única com vencimento em
     /// `vencimento`. `valor` já vem resolvido (para `Fixo`, use [`Self::valor_de`]).
     ///
@@ -458,6 +476,39 @@ mod testes {
                 .unwrap(),
             Some(Data::de_ymd(2026, 3, 10).unwrap())
         );
+    }
+
+    #[test]
+    fn pendentes_ate_recupera_a_ocorrencia_que_passou_sem_ser_gerada() {
+        let mut r = base();
+        r.inicio = Data::de_ymd(2026, 1, 1).unwrap();
+        r.antecedencia_geracao_dias = 5;
+        // Ninguém abriu o sistema entre 05/03 e 12/03: o vencimento de 10/03 já passou, mas
+        // continua pendente (o de 10/04 ainda está fora da janela; o de 10/01 passou do limite
+        // de recuperação — já o de 10/02 entra).
+        let hoje = Data::de_ymd(2026, 3, 12).unwrap();
+        assert_eq!(r.proxima_a_materializar(hoje).unwrap(), None);
+        let pendentes = r.pendentes_ate(hoje).unwrap();
+        assert_eq!(
+            pendentes,
+            vec![
+                Data::de_ymd(2026, 2, 10).unwrap(),
+                Data::de_ymd(2026, 3, 10).unwrap(),
+            ]
+        );
+    }
+
+    #[test]
+    fn pendentes_ate_nao_recupera_alem_do_limite() {
+        let mut r = base();
+        r.inicio = Data::de_ymd(2024, 1, 1).unwrap();
+        r.antecedencia_geracao_dias = 0;
+        let hoje = Data::de_ymd(2026, 3, 12).unwrap();
+        let pendentes = r.pendentes_ate(hoje).unwrap();
+        assert!(pendentes
+            .iter()
+            .all(|d| *d >= hoje.mais_dias(-RECUPERACAO_MAXIMA_DIAS)));
+        assert_eq!(pendentes.len(), 2); // 10/01 fica de fora; 10/02 e 10/03 entram.
     }
 
     #[test]

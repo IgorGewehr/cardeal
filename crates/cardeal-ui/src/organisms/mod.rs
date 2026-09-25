@@ -14,6 +14,7 @@ mod layout_tela;
 mod notificacoes;
 mod painel;
 mod paleta_comandos;
+mod seletor_pagamento;
 mod sidebar;
 
 pub use agenda_calendario::{AcaoAgenda, AgendaCalendario, BlocoAgenda, ModoCalendario, TagAgenda};
@@ -29,4 +30,5 @@ pub use layout_tela::LayoutTela;
 pub use notificacoes::{notificar, Notificacao, Notificacoes, Tom};
 pub use painel::Painel;
 pub use paleta_comandos::{ItemComando, PaletaComandos};
+pub use seletor_pagamento::{CondicaoPagamento, RespostaPagamento, SeletorPagamento};
 pub use sidebar::{GrupoSidebar, ItemSidebar, Sidebar};

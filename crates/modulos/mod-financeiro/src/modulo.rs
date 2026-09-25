@@ -8,7 +8,8 @@ use cardeal_storage::ConjuntoMigracoes;
 use crate::comandos::{
     AbrirCaixa, BaixarPagamento, BaixarRecebimento, CadastrarCaixa, CriarCategoria,
     CriarContaBancaria, CriarRecorrencia, EstornarBaixa, FecharCaixa, LancarTituloAPagar,
-    LancarTituloAReceber, RegistrarSangria, RegistrarSuprimento, RenegociarTitulo,
+    LancarTituloAReceber, MaterializarRecorrencias, RegistrarSangria, RegistrarSuprimento,
+    RenegociarTitulo,
 };
 use crate::consultas::{
     BaixasDaParcela, Caixas, Categorias, ContasDeCaixa, ContasDeResultado, ContasDisponiveis,
@@ -47,6 +48,7 @@ impl Modulo for ModuloFinanceiro {
             .comando::<CriarContaBancaria>("financeiro.criar_conta_bancaria.v1")
             .comando::<CriarCategoria>("financeiro.criar_categoria.v1")
             .comando::<CriarRecorrencia>("financeiro.criar_recorrencia.v1")
+            .comando::<MaterializarRecorrencias>("financeiro.materializar_recorrencias.v1")
             .consulta::<TitulosAReceberEmAberto>("financeiro.titulos_a_receber_em_aberto.v1")
             .consulta::<TitulosAPagarEmAberto>("financeiro.titulos_a_pagar_em_aberto.v1")
             .consulta::<ParcelasAReceberNoPeriodo>("financeiro.parcelas_a_receber_no_periodo.v1")

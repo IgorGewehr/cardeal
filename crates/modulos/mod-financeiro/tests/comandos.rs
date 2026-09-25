@@ -1739,3 +1739,61 @@ fn baixas_da_parcela_lista_o_historico_mais_recente_primeiro_e_marca_estorno() {
     let estornada = historico.iter().find(|b| b.baixa == baixa1.baixa).unwrap();
     assert!(estornada.estornada);
 }
+
+#[test]
+fn comando_materializar_recupera_ocorrencias_que_passaram_com_o_sistema_fechado() {
+    // A regra semanal começou há 20 dias e ninguém rodou a geração desde então: as três
+    // ocorrências já vencidas (hoje-20, hoje-13, hoje-6) nascem de uma vez, pelo comando que o
+    // desktop dispara ao entrar — e rodar de novo não duplica.
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloFinanceiro]).unwrap();
+    let s = sessao(empresa, &["financeiro.recorrencia.criar"]);
+    let conta_despesa = conta_papel(&arm, empresa, PapelConta::DespesaAdministrativa);
+
+    let _criada: RecorrenciaCriada = postcard::from_bytes(
+        &d.executar_comando(
+            "financeiro.criar_recorrencia.v1",
+            &carga(&CriarRecorrencia {
+                descricao: "Diarista".to_string(),
+                especie: mod_financeiro::EspecieTitulo::Pagar,
+                contraparte: None,
+                tipo_valor: TipoValor::Fixo,
+                valor_fixo: Some(Dinheiro::reais(150)),
+                indice: None,
+                media_ultimos_n: None,
+                periodicidade: Periodicidade::Semanal,
+                dia_referencia: None,
+                expressao_cron: None,
+                inicio: hoje().mais_dias(-20),
+                fim: None,
+                conta_contrapartida: conta_despesa,
+                centro_custo: None,
+                categoria: None,
+                antecedencia_geracao_dias: 0,
+            }),
+            &s,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    let materializar = || -> Vec<Id> {
+        postcard::from_bytes(
+            &d.executar_comando(
+                "financeiro.materializar_recorrencias.v1",
+                &carga(&mod_financeiro::MaterializarRecorrencias),
+                &s,
+                &ambiente(empresa),
+                arm.escritor(),
+            )
+            .unwrap(),
+        )
+        .unwrap()
+    };
+    assert_eq!(materializar().len(), 3);
+    assert_eq!(conta_lancamentos(&arm, empresa), 3);
+    assert!(materializar().is_empty());
+    assert_eq!(conta_lancamentos(&arm, empresa), 3);
+}

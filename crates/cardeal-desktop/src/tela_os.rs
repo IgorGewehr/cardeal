@@ -24,10 +24,7 @@ use mod_clientes::{
     TipoEndereco, TipoPessoa,
 };
 use mod_estoque::{ItemLocal, ItemProdutoComSaldo, Locais, ProdutosComSaldo};
-use mod_financeiro::{
-    ContaBancariaCriada, ContasDisponiveis, CriarContaBancaria, ItemContaDisponivel, MeioPagamento,
-    Titulo, TituloDaOrigem,
-};
+use mod_financeiro::{MeioPagamento, Titulo, TituloDaOrigem};
 use mod_os::{
     AbrirOrdemServico, AplicarPeca, ApontamentoDeTempo, ApontamentosDaOrdem, AprovarOrcamentoOs,
     BuscarDetalheOrdem, CancelarOrdemServico, ConcluirExecucao, DesfaturarOrdemServico,
@@ -78,22 +75,10 @@ enum Dlg {
     /// complementar o defeito relatado de uma OS já aberta.
     EditarDados(Id),
     /// Faturar a OS aberta em `EstadoTelaOs::detalhe` — disponível desde a abertura, não só
-    /// depois do trâmite completo (pedido explícito do usuário, 2026-09-15: laudo →
-    /// orçamento → aprovação → execução → conclusão são passos opcionais, não um portão pro
-    /// faturamento). Pede o meio de pagamento e já baixa na hora — fatura e recebe no mesmo
-    /// clique é o caso comum no balcão.
-    Faturar {
-        meio_pagamento: Option<MeioPagamento>,
-        /// As contas "1.1.*" que não são o Caixa físico — candidatas a receber um pagamento
-        /// em Pix/cartão. Carregadas uma vez na abertura do dialog.
-        contas: Vec<ItemContaDisponivel>,
-        contas_carregadas: bool,
-        conta_escolhida: Option<Id>,
-        /// `true` = mostra o miniformulário "Nova conta bancária" em vez do seletor — ligado
-        /// sozinho quando `contas` vem vazia (sem conta nenhuma pra escolher).
-        criando_conta: bool,
-        nova_conta_nome: String,
-    },
+    /// depois do trâmite completo (pedido explícito do usuário, 2026-09-15). À vista (fatura e
+    /// recebe no mesmo clique, o caso do balcão) ou a prazo (gera as parcelas em aberto no
+    /// financeiro — cliente empresa, parcelamento).
+    Faturar(crate::pagamento::EstadoPagamento),
 }
 
 impl Dlg {
@@ -118,14 +103,9 @@ impl Dlg {
     }
 
     fn faturar() -> Self {
-        Self::Faturar {
-            meio_pagamento: None,
-            contas: Vec::new(),
-            contas_carregadas: false,
-            conta_escolhida: None,
-            criando_conta: false,
-            nova_conta_nome: String::new(),
-        }
+        Self::Faturar(crate::pagamento::EstadoPagamento::novo(
+            MeioPagamento::Dinheiro,
+        ))
     }
 }
 
@@ -383,7 +363,7 @@ pub fn mostrar(
             Dlg::Nova { .. } => dialogo_nova(ui.ctx(), motor, sessao, estado),
             Dlg::Detalhe => dialogo_detalhe(ui.ctx(), motor, sessao, estado),
             Dlg::EditarDados(id) => dialogo_editar_dados(ui.ctx(), motor, sessao, estado, id),
-            Dlg::Faturar { .. } => dialogo_faturar(ui.ctx(), motor, sessao, estado),
+            Dlg::Faturar(_) => dialogo_faturar(ui.ctx(), motor, sessao, estado),
         },
         AbaOs::Orcamentos => {
             crate::tela_orcamentos::dialogos(ui.ctx(), motor, sessao, &mut estado.orc);
@@ -633,11 +613,9 @@ fn dialogo_editar_dados(
 }
 
 /// Faturar uma OS — disponível desde a abertura (`Dlg::faturar`, botão no rodapé de
-/// `dialogo_detalhe`). Pede o meio de pagamento (Dinheiro/Pix/Cartão) quando há cobrança —
-/// Dinheiro não precisa de mais nada (vai pro Caixa); Pix/cartão pedem uma conta bancária, e
-/// se a empresa ainda não tem nenhuma, o miniformulário "Nova conta bancária" já abre no
-/// lugar do seletor. Fatura e recebe no mesmo clique (`FaturarOrdemServico::pago_no_ato`) —
-/// não existe mais um passo separado de "ir na tela de Financeiro depois pra dar baixa".
+/// `dialogo_detalhe`). Quando há cobrança, pergunta a condição pelo
+/// [`crate::pagamento::EstadoPagamento`]: à vista (meio + conta, já baixado) ou a prazo
+/// (parcelas em aberto no financeiro).
 fn dialogo_faturar(
     ctx: &egui::Context,
     motor: &MotorLocal,
@@ -649,43 +627,11 @@ fn dialogo_faturar(
         return;
     };
     let os = detalhe.ordem.clone();
-
-    if let Dlg::Faturar {
-        contas_carregadas: false,
-        ..
-    } = &estado.dlg
-    {
-        let todas: Vec<ItemContaDisponivel> = motor
-            .consultar(
-                sessao,
-                "financeiro.contas_disponiveis.v1",
-                &ContasDisponiveis,
-            )
-            .unwrap_or_default();
-        let bancos: Vec<ItemContaDisponivel> = todas.into_iter().filter(|c| !c.e_caixa).collect();
-        if let Dlg::Faturar {
-            contas,
-            contas_carregadas,
-            conta_escolhida,
-            criando_conta,
-            ..
-        } = &mut estado.dlg
-        {
-            *contas_carregadas = true;
-            if bancos.is_empty() {
-                *criando_conta = true;
-            } else if bancos.len() == 1 {
-                *conta_escolhida = Some(bancos[0].conta);
-            }
-            *contas = bancos;
-        }
-    }
-
     let enter =
         ctx.input(|i| i.key_pressed(egui::Key::Enter)) && !ctx.memory(|m| m.any_popup_open());
     let titulo = format!("Faturar OS #{} · {}", os.numero, equipamento_label(&os));
 
-    let fechar = Dialogo::nova(titulo).largura(480.0).mostrar(
+    let fechar = Dialogo::nova(titulo).largura(520.0).mostrar(
         ctx,
         estado,
         |ui, estado| {
@@ -693,9 +639,8 @@ fn dialogo_faturar(
                 ui.add(Rotulo::campo("Total a faturar"));
                 ui.add(ValorDinheiro::novo(os.valor_total));
             });
-
+            ui.add_space(Espaco::E12);
             if !os.valor_total.e_positivo() {
-                ui.add_space(Espaco::E12);
                 ui.add(
                     Rotulo::interface(
                         "Serviço sem cobrança (garantia/cortesia) — faturar só fecha o \
@@ -705,102 +650,8 @@ fn dialogo_faturar(
                 );
                 return;
             }
-
-            let Dlg::Faturar {
-                meio_pagamento,
-                contas,
-                conta_escolhida,
-                criando_conta,
-                nova_conta_nome,
-                ..
-            } = &mut estado.dlg
-            else {
-                return;
-            };
-
-            ui.add_space(Espaco::E12);
-            ui.add(Rotulo::campo("Meio de pagamento"));
-            ui.add_space(Espaco::E4);
-            ui.horizontal(|ui| {
-                for (valor, rotulo) in [
-                    (MeioPagamento::Dinheiro, "Dinheiro"),
-                    (MeioPagamento::Pix, "Pix"),
-                    (MeioPagamento::Cartao, "Cartão"),
-                ] {
-                    let botao = if *meio_pagamento == Some(valor) {
-                        Botao::primario(rotulo)
-                    } else {
-                        Botao::fantasma(rotulo)
-                    };
-                    if ui.add(botao).clicked() {
-                        *meio_pagamento = Some(valor);
-                    }
-                }
-            });
-
-            if !matches!(
-                meio_pagamento,
-                Some(MeioPagamento::Pix) | Some(MeioPagamento::Cartao)
-            ) {
-                return;
-            }
-            ui.add_space(Espaco::E12);
-            if *criando_conta || contas.is_empty() {
-                ui.add(Rotulo::campo(if contas.is_empty() {
-                    "Nenhuma conta bancária cadastrada — crie uma"
-                } else {
-                    "Nova conta bancária"
-                }));
-                ui.add_space(Espaco::E4);
-                ui.horizontal(|ui| {
-                    ui.add(
-                        Campo::novo("", nova_conta_nome).marcador("ex.: Nubank, Banco do Brasil"),
-                    );
-                    if ui.add(Botao::primario("Criar")).clicked() {
-                        if nova_conta_nome.trim().is_empty() {
-                            notificar(ui.ctx(), Notificacao::aviso("Informe o nome da conta."));
-                        } else {
-                            match motor.executar(
-                                sessao,
-                                "financeiro.criar_conta_bancaria.v1",
-                                &CriarContaBancaria {
-                                    nome: nova_conta_nome.clone(),
-                                },
-                            ) {
-                                Ok(c) => {
-                                    let c: ContaBancariaCriada = c;
-                                    contas.push(ItemContaDisponivel {
-                                        conta: c.conta,
-                                        codigo: c.codigo,
-                                        nome: nova_conta_nome.clone(),
-                                        saldo: Dinheiro::ZERO,
-                                        e_caixa: false,
-                                    });
-                                    *conta_escolhida = Some(c.conta);
-                                    *criando_conta = false;
-                                    nova_conta_nome.clear();
-                                    notificar(ui.ctx(), Notificacao::sucesso("Conta criada"));
-                                }
-                                Err(e) => notificar(ui.ctx(), Notificacao::erro(e.mensagem)),
-                            }
-                        }
-                    }
-                });
-                if !contas.is_empty() && ui.add(Botao::fantasma("Usar conta existente")).clicked() {
-                    *criando_conta = false;
-                }
-            } else {
-                SeletorOpcao::novo("Conta bancária", conta_escolhida)
-                    .opcoes(
-                        contas
-                            .iter()
-                            .map(|c| (c.conta, format!("{} ({})", c.nome, c.codigo))),
-                    )
-                    .mostrar(ui);
-                ui.add_space(Espaco::E4);
-                if ui.add(Botao::fantasma("+ Nova conta").pequeno()).clicked() {
-                    *criando_conta = true;
-                }
+            if let Dlg::Faturar(pagamento) = &mut estado.dlg {
+                pagamento.mostrar(ui, motor, sessao, "faturar-os", true);
             }
         },
         |ui, estado| {
@@ -817,9 +668,7 @@ fn dialogo_faturar(
     }
 }
 
-/// Executa `FaturarOrdemServico` com o que foi escolhido em `Dlg::Faturar` — meio de
-/// pagamento obrigatório quando há cobrança (`os.valor_total > 0`), sempre 1x à vista e já
-/// baixado (`pago_no_ato`): fatura e recebe são o mesmo clique.
+/// Executa `FaturarOrdemServico` com a condição escolhida em `Dlg::Faturar`.
 fn faturar_os(
     ctx: &egui::Context,
     motor: &MotorLocal,
@@ -827,35 +676,43 @@ fn faturar_os(
     estado: &mut EstadoTelaOs,
     os: &OrdemServico,
 ) {
-    let pago_no_ato = if os.valor_total.e_positivo() {
-        let Dlg::Faturar {
-            meio_pagamento,
-            conta_escolhida,
-            ..
-        } = &estado.dlg
-        else {
-            return;
+    let hoje = Data::hoje(Fuso::BRASILIA);
+    let (parcelas, primeiro_vencimento, intervalo_dias, pago_no_ato) =
+        match (&estado.dlg, os.valor_total.e_positivo()) {
+            (_, false) => (1, hoje, 0, None),
+            (Dlg::Faturar(p), true) if p.condicao.a_prazo => match p.prazo_validado() {
+                Ok((n, venc, intervalo)) => (n, venc, intervalo, None),
+                Err(msg) => {
+                    notificar(ctx, Notificacao::aviso(msg));
+                    return;
+                }
+            },
+            (Dlg::Faturar(p), true) => match p.meio_validado() {
+                Ok(meio_pagamento) => (
+                    1,
+                    hoje,
+                    0,
+                    Some(PagamentoNoAto {
+                        meio_pagamento,
+                        conta_destino: p.conta_destino(),
+                    }),
+                ),
+                Err(msg) => {
+                    notificar(ctx, Notificacao::aviso(msg));
+                    return;
+                }
+            },
+            _ => return,
         };
-        let Some(meio_pagamento) = *meio_pagamento else {
-            notificar(ctx, Notificacao::aviso("Escolha o meio de pagamento."));
-            return;
-        };
-        Some(PagamentoNoAto {
-            meio_pagamento,
-            conta_destino: *conta_escolhida,
-        })
-    } else {
-        None
-    };
 
     match motor.executar(
         sessao,
         "os.faturar_ordem_servico.v1",
         &FaturarOrdemServico {
             ordem_servico: os.id,
-            parcelas: 1,
-            primeiro_vencimento: Data::hoje(Fuso::BRASILIA),
-            intervalo_dias: 0,
+            parcelas,
+            primeiro_vencimento,
+            intervalo_dias,
             pago_no_ato,
         },
     ) {
@@ -865,11 +722,11 @@ fn faturar_os(
             estado.abrir_detalhe(motor, sessao, os.id);
             estado.dlg = Dlg::Detalhe;
             let msg = if f.titulo_pago {
-                "OS faturada e recebida"
+                "OS faturada e recebida".to_owned()
             } else if f.titulo.is_some() {
-                "OS faturada"
+                format!("OS faturada — {parcelas} parcela(s) a receber no Financeiro")
             } else {
-                "OS faturada (sem cobrança)"
+                "OS faturada (sem cobrança)".to_owned()
             };
             notificar(ctx, Notificacao::sucesso(msg));
         }
@@ -1749,6 +1606,10 @@ fn secao_apontamento(
 
     match aberto_do_usuario {
         Some(ap) => {
+            // O total mostrado inclui o cronômetro rodando; sem pedir quadro novo, o egui só
+            // redesenha quando o mouse mexe e o tempo parece congelado.
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_secs(1));
             ui.add(Rotulo::interface(format!(
                 "Cronômetro rodando desde {}",
                 ap.inicio.formatar(cardeal_kernel::Fuso::BRASILIA)
@@ -2242,19 +2103,11 @@ mod testes {
     }
 
     fn cenario() -> Cenario {
-        let arquivo = tempfile::NamedTempFile::new().expect("arquivo temporário");
-        let motor = MotorLocal::abrir(arquivo.path(), &crate::modulos(), &crate::pedido_ativacao())
-            .expect("abrir motor");
-        motor
-            .configurar_inicial(
-                "Assistência Teste",
-                "11.222.333/0001-81",
-                "igor",
-                "Igor",
-                "senha-forte-123",
-            )
-            .expect("configuração inicial");
-        let sessao = motor.autenticar("igor", "senha-forte-123").expect("login");
+        let crate::testes_comum::MotorDeTeste {
+            _arquivo: arquivo,
+            motor,
+            sessao,
+        } = crate::testes_comum::motor_de_teste();
 
         let cliente: ClienteCriado = motor
             .executar(
@@ -2527,5 +2380,100 @@ mod testes {
         let d = c.estado.detalhe.as_ref().expect("detalhe");
         assert!(d.itens_mao_de_obra.is_empty());
         assert!(d.ordem.valor_total.e_zero());
+    }
+
+    /// Lança R$ 300 de mão de obra na OS do cenário e abre o detalhe — ponto de partida dos
+    /// testes de faturamento.
+    fn com_mao_de_obra_de_300(c: &mut Cenario) {
+        let _: Id = c
+            .motor
+            .executar(
+                &c.sessao,
+                "os.montar_orcamento.v1",
+                &MontarOrcamentoOs {
+                    ordem_servico: c.os,
+                    item: ItemOrcamentoNovo::MaoDeObra {
+                        descricao: "Troca de tela".to_owned(),
+                        valor: "300,00".parse().expect("valor"),
+                        tecnico: c.sessao.usuario(),
+                        horas: None,
+                    },
+                },
+            )
+            .expect("mão de obra");
+        c.estado.abrir_detalhe(&c.motor, &c.sessao, c.os);
+    }
+
+    #[test]
+    fn faturar_a_prazo_gera_as_parcelas_em_aberto_no_financeiro() {
+        let mut c = cenario();
+        com_mao_de_obra_de_300(&mut c);
+        let os = c.estado.detalhe.as_ref().expect("detalhe").ordem.clone();
+
+        c.estado.dlg = Dlg::faturar();
+        if let Dlg::Faturar(p) = &mut c.estado.dlg {
+            p.condicao.a_prazo = true;
+            p.condicao.parcelas = "3".to_owned();
+            p.condicao.primeiro_vencimento = Data::hoje(Fuso::BRASILIA).mais_dias(30).to_string();
+            p.condicao.intervalo_dias = "30".to_owned();
+        }
+        faturar_os(&c.ctx, &c.motor, &c.sessao, &mut c.estado, &os);
+
+        let d = c.estado.detalhe.as_ref().expect("detalhe");
+        assert_eq!(d.ordem.estado, EstadoOs::Faturada);
+        let abertas: Vec<mod_financeiro::ItemTituloEmAberto> = c
+            .motor
+            .consultar(
+                &c.sessao,
+                "financeiro.titulos_a_receber_em_aberto.v1",
+                &mod_financeiro::TitulosAReceberEmAberto,
+            )
+            .expect("em aberto");
+        assert_eq!(abertas.len(), 3);
+        let total = abertas
+            .iter()
+            .fold(Dinheiro::ZERO, |acc, p| acc + p.saldo());
+        assert_eq!(total, "300,00".parse::<Dinheiro>().expect("valor"));
+    }
+
+    #[test]
+    fn faturar_a_vista_no_pix_cai_na_conta_bancaria_escolhida() {
+        let mut c = cenario();
+        com_mao_de_obra_de_300(&mut c);
+        let os = c.estado.detalhe.as_ref().expect("detalhe").ordem.clone();
+        let criar = |nome: &str| -> Id {
+            let r: mod_financeiro::ContaBancariaCriada = c
+                .motor
+                .executar(
+                    &c.sessao,
+                    "financeiro.criar_conta_bancaria.v1",
+                    &mod_financeiro::CriarContaBancaria {
+                        nome: nome.to_owned(),
+                    },
+                )
+                .expect("conta");
+            r.conta
+        };
+        let _nubank = criar("Nubank");
+        let inter = criar("Inter");
+
+        c.estado.dlg = Dlg::faturar();
+        if let Dlg::Faturar(p) = &mut c.estado.dlg {
+            p.condicao.meio = Some(MeioPagamento::Pix);
+            p.condicao.conta = Some(inter);
+        }
+        faturar_os(&c.ctx, &c.motor, &c.sessao, &mut c.estado, &os);
+
+        let contas: Vec<mod_financeiro::ItemContaDisponivel> = c
+            .motor
+            .consultar(
+                &c.sessao,
+                "financeiro.contas_disponiveis.v1",
+                &mod_financeiro::ContasDisponiveis,
+            )
+            .expect("contas");
+        let saldo = |id: Id| contas.iter().find(|x| x.conta == id).expect("conta").saldo;
+        assert_eq!(saldo(inter), "300,00".parse::<Dinheiro>().expect("valor"));
+        assert!(saldo(_nubank).e_zero());
     }
 }

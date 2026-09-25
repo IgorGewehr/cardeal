@@ -93,9 +93,10 @@ pub use comandos::{
     BaixarRecebimento, CadastrarCaixa, CaixaCadastrado, CaixaFoiAberto, CaixaFoiFechado,
     CategoriaCriada, ContaBancariaCriada, CriarCategoria, CriarContaBancaria, CriarRecorrencia,
     DadosLancamentoTitulo, EstornarBaixa, FecharCaixa, LancarTituloAPagar, LancarTituloAReceber,
-    PagamentoBaixado, RecebimentoBaixado, RecorrenciaCriada, RegistrarSangria, RegistrarSuprimento,
-    RenegociarTitulo, SangriaFoiRegistrada, SuprimentoFoiRegistrado, TituloAPagarLancado,
-    TituloAReceberLancado, TituloFoiRenegociado, TituloGravado,
+    MaterializarRecorrencias, PagamentoBaixado, RecebimentoBaixado, RecorrenciaCriada,
+    RegistrarSangria, RegistrarSuprimento, RenegociarTitulo, SangriaFoiRegistrada,
+    SuprimentoFoiRegistrado, TituloAPagarLancado, TituloAReceberLancado, TituloFoiRenegociado,
+    TituloGravado,
 };
 pub use consultas::{
     titulo_da_origem, BaixasDaParcela, Caixas, Categorias, ContasDeCaixa, ContasDeResultado,

@@ -6,6 +6,7 @@
 //! inteira; criar/ver um item acontece num `Dialogo` (regra de UI do projeto). Telas com UI:
 //! Ordens de Serviço e Estoque; as demais mostram `tela_em_construcao` (backend já responde).
 
+mod pagamento;
 mod tela_agenda;
 mod tela_clientes;
 mod tela_compras;
@@ -16,6 +17,8 @@ mod tela_os;
 mod tela_pdv;
 mod tela_settings;
 mod tela_vendas;
+#[cfg(test)]
+mod testes_comum;
 
 use std::path::PathBuf;
 
@@ -412,7 +415,7 @@ impl EstadoAutenticado {
             Area::Os => self.os.carregar(motor, s),
             Area::Estoque => self.estoque.carregar(motor, s),
             Area::Clientes => self.clientes.carregar(motor, s),
-            Area::Financeiro => self.financeiro.carregar(motor, s),
+            Area::Financeiro => self.financeiro.gerar_recorrencias_e_carregar(motor, s),
             Area::Vendas => self.vendas.carregar(motor, s),
             Area::Compras => self.compras.carregar(motor, s),
             Area::Agenda => self.agenda.carregar(motor, s),
@@ -606,7 +609,7 @@ impl App {
         os.carregar(motor, &sessao);
         estoque.carregar(motor, &sessao);
         clientes.carregar(motor, &sessao);
-        financeiro.carregar(motor, &sessao);
+        financeiro.gerar_recorrencias_e_carregar(motor, &sessao);
         let mut vendas = tela_vendas::EstadoTelaVendas::default();
         vendas.carregar(motor, &sessao);
         let mut compras = tela_compras::EstadoTelaCompras::default();
