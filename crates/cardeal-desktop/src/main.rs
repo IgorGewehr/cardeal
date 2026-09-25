@@ -19,6 +19,7 @@ mod tela_os;
 mod tela_pdv;
 mod tela_settings;
 mod tela_vendas;
+mod telefone;
 #[cfg(test)]
 mod testes_comum;
 
@@ -412,6 +413,11 @@ impl EstadoAutenticado {
     #[cfg(feature = "demo")]
     fn preparar_demo(&mut self, motor: &MotorLocal, cena: &str) {
         let s = &self.sessao;
+        if cena == "cliente" {
+            self.area = Area::Clientes;
+            self.clientes.preparar_demo(motor, s);
+            return;
+        }
         if cena.starts_with("financeiro") {
             self.area = Area::Financeiro;
             self.financeiro.preparar_demo(motor, s, cena);
@@ -990,6 +996,19 @@ impl eframe::App for App {
                         }
                         Area::Clientes => {
                             tela_clientes::mostrar(ui, motor, &estado.sessao, &mut estado.clientes);
+                            // A ficha do cliente pediu uma OS: troca de área e atende.
+                            if let Some(pedido) = estado.clientes.pedido_os.take() {
+                                estado.area = Area::Os;
+                                estado.os.carregar(motor, &estado.sessao);
+                                match pedido {
+                                    tela_clientes::PedidoParaOs::Nova(cliente) => {
+                                        estado.os.nova_para_cliente(cliente);
+                                    }
+                                    tela_clientes::PedidoParaOs::Abrir(ordem) => {
+                                        estado.os.abrir_ordem(motor, &estado.sessao, ordem);
+                                    }
+                                }
+                            }
                         }
                         Area::Financeiro => {
                             tela_financeiro::mostrar(

@@ -82,10 +82,20 @@ pub(super) fn dialogo_nova(
         .clientes
         .iter()
         .map(|c| {
+            // Telefone e documento no subtítulo: o seletor casa por eles também (inclusive só
+            // pelos dígitos), que é como o balcão pergunta ("qual seu telefone?").
+            let sub: Vec<String> = c
+                .telefone
+                .as_deref()
+                .map(crate::telefone::formatar)
+                .into_iter()
+                .chain(c.documento.clone())
+                .collect();
             let opcao = OpcaoBusca::nova(c.pessoa, c.nome.clone());
-            match &c.documento {
-                Some(doc) => opcao.subtitulo(doc.clone()),
-                None => opcao,
+            if sub.is_empty() {
+                opcao
+            } else {
+                opcao.subtitulo(sub.join(" · "))
             }
         })
         .collect();
@@ -159,6 +169,25 @@ pub(super) fn dialogo_nova(
                         c[0].add(Campo::novo("Telefone/WhatsApp (opcional)", telefone));
                         c[1].add(Campo::novo("E-mail (opcional)", email));
                     });
+                    if let Some(existente) = crate::telefone::quem_tem(&estado.clientes, telefone) {
+                        let (id, nome_existente) = (existente.pessoa, existente.nome.clone());
+                        ui.add_space(Espaco::E4);
+                        ui.horizontal(|ui| {
+                            ui.add(
+                                Rotulo::interface(format!(
+                                    "{nome_existente} já está cadastrado com esse telefone."
+                                ))
+                                .cor(ui.cores().atencao),
+                            );
+                            if ui
+                                .add(Botao::secundario(format!("Usar {nome_existente}")).pequeno())
+                                .clicked()
+                            {
+                                *cliente_novo = false;
+                                *cliente_sel = Some(id);
+                            }
+                        });
+                    }
                     ui.add_space(Espaco::E8);
                     // Endereço é o bloco mais raramente preenchido na recepção (o cliente só
                     // quer deixar o aparelho) — fica recolhido para não competir com nome e
@@ -180,7 +209,7 @@ pub(super) fn dialogo_nova(
                 } else {
                     SeletorBusca::novo("Cliente", cliente_busca, cliente_sel)
                         .opcoes(opcoes_cliente)
-                        .marcador("Buscar por nome ou documento…")
+                        .marcador("Buscar por nome, telefone ou documento…")
                         .mostrar(ui);
                 }
                 ui.add_space(Espaco::E16);

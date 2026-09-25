@@ -577,3 +577,64 @@ fn adicionar_contato_e_endereco_aparecem_na_ficha() {
         .unwrap_err();
     assert_eq!(erro.codigo, CodigoErro::ENTRADA_INVALIDA);
 }
+
+#[test]
+fn busca_acha_pelo_telefone_e_o_catalogo_nao_para_em_200() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloClientes]).unwrap();
+    let s = sessao(empresa, &["clientes.pessoa.criar", "clientes.pessoa.ver"]);
+    let criar = |nome: String, tel: Option<&str>| {
+        let _: PessoaCadastrada = postcard::from_bytes(
+            &d.executar_comando(
+                "clientes.criar_pessoa.v1",
+                &carga(&CriarPessoa {
+                    tipo: TipoPessoa::Fisica,
+                    nome,
+                    nome_fantasia: None,
+                    papel_inicial: Papel::Cliente,
+                    documento_tipo: None,
+                    documento_numero: None,
+                    data_nascimento: None,
+                    endereco: None,
+                    contato: tel.map(|t| mod_clientes::ContatoInicial {
+                        tipo: mod_clientes::TipoContato::Whatsapp,
+                        valor: t.to_owned(),
+                    }),
+                }),
+                &s,
+                &ambiente(empresa),
+                arm.escritor(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    };
+    criar("Maria Souza".to_owned(), Some("(31) 98888-7777"));
+    for i in 0..205 {
+        criar(format!("Cliente {i:03}"), None);
+    }
+    let buscar = |busca: Option<&str>| -> Vec<ItemPessoa> {
+        postcard::from_bytes(
+            &d.executar_consulta(
+                "clientes.pessoas_por_papel.v1",
+                &carga(&PessoasPorPapel {
+                    papel: Papel::Cliente,
+                    busca: busca.map(str::to_owned),
+                }),
+                &s,
+                &ambiente(empresa),
+                arm.leitor(),
+            )
+            .unwrap(),
+        )
+        .unwrap()
+    };
+    // Pelos dígitos do telefone, com ou sem máscara.
+    for termo in ["98888 7777", "988887777", "8888-77"] {
+        let achados = buscar(Some(termo));
+        assert_eq!(achados.len(), 1, "{termo}");
+        assert_eq!(achados[0].nome, "Maria Souza");
+    }
+    // O catálogo inteiro, sem o teto de 200.
+    assert_eq!(buscar(None).len(), 206);
+}

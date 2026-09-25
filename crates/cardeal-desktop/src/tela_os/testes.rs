@@ -656,3 +656,14 @@ fn custo_das_pecas_estima_pelo_custo_medio_ate_a_peca_ser_aplicada() {
         (Dinheiro::reais(180), true)
     );
 }
+
+#[test]
+fn nova_os_a_partir_da_ficha_do_cliente_ja_vem_com_ele() {
+    let mut c = cenario();
+    let cliente = c.estado.ordens[0].cliente;
+    c.estado.nova_para_cliente(cliente);
+    let Dlg::Nova { cliente_sel, .. } = &c.estado.dlg else {
+        panic!("abriu outro diálogo");
+    };
+    assert_eq!(*cliente_sel, Some(cliente));
+}

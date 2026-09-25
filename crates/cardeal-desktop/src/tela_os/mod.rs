@@ -351,7 +351,7 @@ impl EstadoTelaOs {
         }
     }
 
-    fn abrir_detalhe(&mut self, motor: &MotorLocal, sessao: &SessaoLocal, id: Id) {
+    pub(crate) fn abrir_detalhe(&mut self, motor: &MotorLocal, sessao: &SessaoLocal, id: Id) {
         match motor.consultar(
             sessao,
             "os.buscar_detalhe_ordem.v1",
@@ -575,7 +575,7 @@ fn nome_cliente(clientes: &[ItemPessoa], cliente: Id) -> &str {
 
 /// Rótulo em português + tom da etiqueta de status para a `Grade` — mesma ideia de
 /// `situacao_amigavel` (usada no PDF), só que mais curta para caber numa pílula de grade.
-const fn estado_etiqueta(e: EstadoOs) -> (&'static str, Tom) {
+pub(crate) const fn estado_etiqueta(e: EstadoOs) -> (&'static str, Tom) {
     match e {
         EstadoOs::Aberta => ("Aberta", Tom::Info),
         EstadoOs::EmDiagnostico => ("Em diagnóstico", Tom::Info),
@@ -614,6 +614,24 @@ fn aplicar_e_recarregar<C: cardeal_modkit::Comando + serde::Serialize>(
 }
 
 // ── PDF ──────────────────────────────────────────────────────────────────────
+
+impl EstadoTelaOs {
+    /// "Nova OS" já com o cliente escolhido — vindo da ficha do cliente.
+    pub fn nova_para_cliente(&mut self, cliente: Id) {
+        self.aba = AbaOs::Ordens;
+        let mut dlg = Dlg::nova();
+        if let Dlg::Nova { cliente_sel, .. } = &mut dlg {
+            *cliente_sel = Some(cliente);
+        }
+        self.dlg = dlg;
+    }
+
+    /// Abre a gaveta de uma OS — vindo da ficha do cliente.
+    pub fn abrir_ordem(&mut self, motor: &MotorLocal, sessao: &SessaoLocal, ordem: Id) {
+        self.aba = AbaOs::Ordens;
+        self.abrir_detalhe(motor, sessao, ordem);
+    }
+}
 
 #[cfg(feature = "demo")]
 impl EstadoTelaOs {

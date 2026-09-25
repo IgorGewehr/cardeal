@@ -231,11 +231,14 @@ pub struct ItemPessoa {
 }
 
 /// Lista pessoas ativas com um papel específico, por nome — opcionalmente filtradas por um
-/// termo de busca (nome ou documento, `LIKE`). É o que sustenta tanto a tela de Clientes
+/// termo de busca (nome, documento ou telefone, `LIKE`; o telefone casa pelos dígitos,
+/// então "98888 7777" acha "(31) 98888-7777"). É o que sustenta tanto a tela de Clientes
 /// quanto qualquer seletor de cliente/fornecedor em OS, compras e vendas — uma única
-/// consulta reaproveitada por todos. Sem cursor real ainda, mesma decisão do financeiro
-/// (`docs/09-protocolo-api.md` §5): um teto de 200 linhas é suficiente para o cadastro de
-/// uma PME quando combinado com um termo de busca.
+/// consulta reaproveitada por todos.
+///
+/// Com termo, devolve até 200 (é uma busca). Sem termo é o **catálogo** que as telas de OS e
+/// Financeiro carregam para dar nome a cada registro — antes também parava em 200, e do
+/// cliente 201 em diante o nome sumia da lista de OS e a busca por nome não achava.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PessoasPorPapel {
     /// O papel a filtrar (`Cliente`, `Fornecedor`, ...).
@@ -249,11 +252,17 @@ impl Consulta for PessoasPorPapel {
     const PERMISSAO: &'static str = "clientes.pessoa.ver";
 
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
-        let termo = self
+        let bruto = self
             .busca
             .as_deref()
-            .filter(|t| !t.trim().is_empty())
-            .map(|t| format!("%{t}%"));
+            .map(str::trim)
+            .filter(|t| !t.is_empty());
+        let termo = bruto.map(|t| format!("%{t}%"));
+        let digitos = bruto
+            .map(cardeal_kernel::texto::somente_digitos)
+            .filter(|d| d.len() >= 4)
+            .map(|d| format!("%{d}%"));
+        let limite: i64 = if termo.is_some() { 200 } else { 50_000 };
         let mut stmt = conexao
             .prepare(
                 "SELECT p.id, p.nome,
@@ -265,14 +274,22 @@ impl Consulta for PessoasPorPapel {
                  JOIN clientes_papel cp ON cp.pessoa = p.id
                  WHERE p.empresa = ?1 AND cp.papel = ?2 AND cp.ativo = 1 AND p.estado = 'Ativa'
                    AND (?3 IS NULL OR p.nome LIKE ?3 OR EXISTS (
-                        SELECT 1 FROM clientes_documento d WHERE d.pessoa = p.id AND d.numero LIKE ?3))
+                        SELECT 1 FROM clientes_documento d WHERE d.pessoa = p.id AND d.numero LIKE ?3)
+                        OR (?4 IS NOT NULL AND EXISTS (
+                        SELECT 1 FROM clientes_contato c WHERE c.pessoa = p.id AND c.valor LIKE ?4)))
                  ORDER BY p.nome ASC
-                 LIMIT 200",
+                 LIMIT ?5",
             )
             .map_err(persist)?;
         let linhas = stmt
             .query_map(
-                params![blob(ctx.empresa), papel_txt(self.papel), termo],
+                params![
+                    blob(ctx.empresa),
+                    papel_txt(self.papel),
+                    termo,
+                    digitos,
+                    limite
+                ],
                 |r| {
                     Ok(ItemPessoa {
                         pessoa: id_de(r.get::<_, Vec<u8>>(0)?),

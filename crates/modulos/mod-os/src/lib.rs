@@ -87,6 +87,7 @@ pub use comandos::{
     RegistrarMaoDeObra, RemoverItemOrcamento, ReprovarOrcamentoOs, TipoItemOrcamento,
 };
 pub use comandos::{ChegadaRegistrada, EncomendarPeca, PagamentoDaPeca, RegistrarChegadaDaPeca};
+pub use consultas::OrdensDoCliente;
 pub use consultas::{
     ApontamentosDaOrdem, BuscarDetalheOrdem, BuscarOrdens, DetalheOrdem, FiltroEstadoOs,
     HistoricoDoEquipamento, ItemAguardandoEstoque, MargemDasOrdens, MargemDasOrdensNoPeriodo,

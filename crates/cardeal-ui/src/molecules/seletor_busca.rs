@@ -142,6 +142,8 @@ impl<'a, T: PartialEq + Copy> SeletorBusca<'a, T> {
                 let resp = ui.add(CampoTexto::novo(busca).marcador(marcador));
 
                 let termo = busca.trim();
+                // Telefone e documento casam pelos dígitos, com ou sem máscara.
+                let digitos = cardeal_kernel::texto::somente_digitos(termo);
                 if !termo.is_empty() {
                     // Sem acento/caixa e por palavras, em qualquer ordem: "tela a52" acha
                     // "Tela Samsung A52 original".
@@ -153,6 +155,9 @@ impl<'a, T: PartialEq + Copy> SeletorBusca<'a, T> {
                                 None => o.titulo.clone(),
                             };
                             cardeal_kernel::texto::casa_por_palavras(&alvo, termo)
+                                || (digitos.len() >= 4
+                                    && cardeal_kernel::texto::somente_digitos(&alvo)
+                                        .contains(&digitos))
                         })
                         .take(max_resultados)
                         .collect();

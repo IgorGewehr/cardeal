@@ -475,6 +475,39 @@ impl Consulta for MargemDasOrdensNoPeriodo {
     }
 }
 
+/// As OS de um cliente, mais recentes primeiro — a ficha do cliente (quantas vezes veio,
+/// quando foi a última, que aparelhos já trouxe, quanto já gastou).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct OrdensDoCliente {
+    /// O cliente.
+    pub cliente: Id,
+}
+
+impl Consulta for OrdensDoCliente {
+    type Saida = Vec<OrdemServico>;
+    const PERMISSAO: &'static str = "os.ordem.ver";
+
+    fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        let mut stmt = conexao
+            .prepare(
+                "SELECT id, empresa, numero, cliente, equipamento, defeito_relatado, data_abertura,
+                        tecnico_responsavel, estado, aprovado_por, garantia_dias, valor_total,
+                        itens_orcamento, versao, previsao_entrega, numero_serie, acessorios
+                 FROM os_ordem_servico
+                 WHERE empresa = ?1 AND cliente = ?2
+                 ORDER BY numero DESC
+                 LIMIT 500",
+            )
+            .map_err(persist)?;
+        let linhas = stmt
+            .query_map([blob(ctx.empresa), blob(self.cliente)], ordem_de_linha)
+            .map_err(persist)?;
+        linhas
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(persist)
+    }
+}
+
 /// Busca o detalhe completo de uma ordem pelo id.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BuscarDetalheOrdem {

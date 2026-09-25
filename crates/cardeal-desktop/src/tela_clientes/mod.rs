@@ -9,10 +9,12 @@
 //! "sem documento", ordenação por coluna) e o dialog "Ver" precisa trazer telefone/endereço —
 //! já cadastrados no backend (`PessoaDetalhada`), só não apareciam na tela.
 
+mod ficha;
+
 use cardeal_cliente::{MotorLocal, SessaoLocal};
 use cardeal_kernel::Id;
 use cardeal_modkit::Icone;
-use cardeal_ui::atoms::{Botao, Divisor, Etiqueta, Rotulo, ATALHO_NOVO};
+use cardeal_ui::atoms::{Botao, Divisor, Etiqueta, Rotulo, ValorDinheiro, ATALHO_NOVO};
 use cardeal_ui::molecules::{
     dado, AcaoRegistro, AcoesRegistro, BarraFiltros, Campo, CartaoKpi, EstadoVazio, Mascara,
     SecaoExpansivel, SeletorOpcao,
@@ -22,6 +24,8 @@ use cardeal_ui::organisms::{
 };
 use cardeal_ui::tokens::{Espaco, TemaUi};
 use eframe::egui;
+pub use ficha::PedidoParaOs;
+use ficha::{secao_ficha, Ficha};
 use mod_clientes::{
     AdicionarContato, AdicionarEndereco, ContatoInicial, CriarPessoa, DesativarPessoa,
     DetalhePessoa, EditarPessoa, EnderecoInicial, ItemPessoa, Papel, PessoaCadastrada,
@@ -122,7 +126,7 @@ impl Form {
                     )
                 })
             })
-            .map(|c| formatar_telefone(&c.valor))
+            .map(|c| crate::telefone::formatar(&c.valor))
             .unwrap_or_default();
         let email = d
             .contatos
@@ -208,27 +212,6 @@ const fn rotulo_papel(p: Papel) -> &'static str {
     }
 }
 
-/// `(11) 91234-5678` a partir de dígitos crus (10 ou 11 dígitos, com DDD) — o mesmo padrão de
-/// `formatar_documento` em `cardeal_ui::molecules::campo`, só que não existe um `Mascara`
-/// pronto para telefone ainda porque só esta tela precisava até agora.
-fn formatar_telefone(digitos: &str) -> String {
-    match digitos.len() {
-        11 => format!(
-            "({}) {}-{}",
-            &digitos[0..2],
-            &digitos[2..7],
-            &digitos[7..11]
-        ),
-        10 => format!(
-            "({}) {}-{}",
-            &digitos[0..2],
-            &digitos[2..6],
-            &digitos[6..10]
-        ),
-        _ => digitos.to_owned(),
-    }
-}
-
 /// Estado local da tela.
 #[derive(Default)]
 pub struct EstadoTelaClientes {
@@ -241,6 +224,12 @@ pub struct EstadoTelaClientes {
     /// confirmação num frame separado do clique no botão "Excluir" (o padrão já usado por
     /// `tela_os.rs` pra cancelamento).
     confirmar_exclusao: Option<(Id, String)>,
+    /// A ficha (OS, gasto, em aberto) do cliente aberto em "Ver".
+    ficha: Option<Ficha>,
+    /// O que a ficha pediu para a tela de OS (o `main` troca de área e atende).
+    pub pedido_os: Option<PedidoParaOs>,
+    /// Um cliente que a tela quer abrir no próximo quadro (o "já existe com esse telefone").
+    pedido_abrir: Option<Id>,
 }
 
 impl EstadoTelaClientes {
@@ -272,7 +261,10 @@ impl EstadoTelaClientes {
             "clientes.detalhe_pessoa.v1",
             &DetalhePessoa { pessoa: id },
         ) {
-            Ok(Some(d)) => self.form = Some(Form::de_detalhe(&d)),
+            Ok(Some(d)) => {
+                self.form = Some(Form::de_detalhe(&d));
+                self.ficha = Some(Ficha::carregar(motor, sessao, id));
+            }
             Ok(None) => self.erro = Some("Pessoa não encontrada.".to_owned()),
             Err(e) => self.erro = Some(e.mensagem),
         }
@@ -313,7 +305,7 @@ pub fn mostrar(
             }
 
             if BarraFiltros::nova(&mut estado.busca)
-                .marcador("Buscar por nome ou documento")
+                .marcador("Nome, telefone ou documento")
                 .mostrar(ui)
             {
                 estado.carregar(motor, sessao);
@@ -392,7 +384,7 @@ fn lista(
             });
             row.col(|ui| match &p.telefone {
                 Some(tel) => {
-                    ui.add(Rotulo::campo(formatar_telefone(tel)));
+                    ui.add(Rotulo::campo(crate::telefone::formatar(tel)));
                 }
                 None => {
                     ui.add(Etiqueta::atencao("sem WhatsApp"));
@@ -459,7 +451,9 @@ fn dialogo(
         && ctx.input(|i| i.key_pressed(egui::Key::Enter))
         && !ctx.memory(|m| m.any_popup_open());
 
-    let fechar = Dialogo::nova(titulo).largura(640.0).mostrar(
+    // "Ver" traz a ficha (quatro indicadores lado a lado): precisa de mais largura.
+    let largura = if modo == Modo::Ver { 880.0 } else { 640.0 };
+    let fechar = Dialogo::nova(titulo).largura(largura).mostrar(
         ctx,
         estado,
         |ui, estado| {
@@ -468,6 +462,16 @@ fn dialogo(
             };
             let leitura = f.modo == Modo::Ver;
             let pj = matches!(f.tipo, Some(TipoPessoa::Juridica));
+            if leitura {
+                if let Some(ficha) = &estado.ficha {
+                    if let Some(p) = secao_ficha(ui, ficha) {
+                        estado.pedido_os = Some(p);
+                    }
+                }
+            }
+            let Some(f) = estado.form.as_mut() else {
+                return;
+            };
 
             if f.modo == Modo::Criar {
                 SeletorOpcao::novo("Tipo", &mut f.tipo)
@@ -525,6 +529,26 @@ fn dialogo(
                 );
                 c[1].add(Campo::novo("E-mail (opcional)", &mut f.email).somente_leitura(leitura));
             });
+            if f.modo == Modo::Criar {
+                if let Some(existente) = crate::telefone::quem_tem(&estado.pessoas, &f.telefone) {
+                    let (id, nome) = (existente.pessoa, existente.nome.clone());
+                    ui.add_space(Espaco::E4);
+                    ui.horizontal(|ui| {
+                        ui.add(
+                            Rotulo::interface(format!(
+                                "{nome} já está cadastrado com esse telefone."
+                            ))
+                            .cor(ui.cores().atencao),
+                        );
+                        if ui
+                            .add(Botao::secundario(format!("Abrir {nome}")).pequeno())
+                            .clicked()
+                        {
+                            estado.pedido_abrir = Some(id);
+                        }
+                    });
+                }
+            }
             ui.add_space(Espaco::E12);
 
             let tem_endereco = !f.end_logradouro.trim().is_empty();
@@ -586,12 +610,32 @@ fn dialogo(
                     }
                 }
                 Modo::Ver => {
-                    if ui.add(Botao::primario("Editar")).clicked() {
+                    let (cliente, telefone) = estado
+                        .form
+                        .as_ref()
+                        .map_or((None, String::new()), |f| (f.pessoa, f.telefone.clone()));
+                    if let Some(id) = cliente {
+                        if ui.add(Botao::primario("Nova OS")).clicked() {
+                            estado.pedido_os = Some(PedidoParaOs::Nova(id));
+                        }
+                    }
+                    if let Some(link) = crate::telefone::link_whatsapp(&telefone, "") {
+                        if ui.add(Botao::secundario("WhatsApp")).clicked() {
+                            if let Err(e) = open::that_detached(link) {
+                                notificar(
+                                    ui.ctx(),
+                                    Notificacao::erro("Não foi possível abrir o WhatsApp")
+                                        .detalhe(e.to_string()),
+                                );
+                            }
+                        }
+                    }
+                    if ui.add(Botao::secundario("Editar")).clicked() {
                         if let Some(f) = estado.form.as_mut() {
                             f.modo = Modo::Editar;
                         }
                     }
-                    if ui.add(Botao::secundario("Fechar")).clicked() {
+                    if ui.add(Botao::fantasma("Fechar")).clicked() {
                         estado.form = None;
                     }
                 }
@@ -613,6 +657,12 @@ fn dialogo(
         },
     );
     if fechar {
+        estado.form = None;
+    }
+    if let Some(id) = estado.pedido_abrir.take() {
+        estado.abrir_detalhe(motor, sessao, id);
+    }
+    if estado.pedido_os.is_some() {
         estado.form = None;
     }
 }
@@ -846,5 +896,17 @@ fn excluir(
             notificar(ctx, Notificacao::sucesso("Cliente excluído"));
         }
         Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
+    }
+}
+
+#[cfg(feature = "demo")]
+impl EstadoTelaClientes {
+    /// Abre a ficha do primeiro cliente com OS (cena `cliente` da demo).
+    pub fn preparar_demo(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
+        self.carregar(motor, sessao);
+        if let Some(p) = self.pessoas.iter().find(|p| p.nome.starts_with("Maria")) {
+            let id = p.pessoa;
+            self.abrir_detalhe(motor, sessao, id);
+        }
     }
 }
