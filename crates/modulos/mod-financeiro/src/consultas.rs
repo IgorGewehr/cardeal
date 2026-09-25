@@ -41,6 +41,13 @@ pub struct ItemTituloEmAberto {
     pub valor_baixado: Dinheiro,
     /// O estado atual (`Aberta`/`Parcial` — nunca outro, a consulta já filtra).
     pub estado: EstadoParcela,
+    /// A observação do título ("Ordem de serviço #12", "Aluguel da loja"), para a grade
+    /// dizer do que se trata sem abrir nada.
+    pub descricao: Option<String>,
+    /// O módulo que originou o título (`"os"`, `"vendas"`, `"financeiro"`…).
+    pub origem_modulo: String,
+    /// O registro de origem (a OS, a venda…), quando houver.
+    pub origem_id: Option<Id>,
 }
 
 impl ItemTituloEmAberto {
@@ -66,7 +73,8 @@ pub fn titulos_em_aberto(
     let mut stmt = conexao
         .prepare(
             "SELECT p.id, p.titulo, p.numero, t.contraparte_tipo, t.contraparte_id,
-                    p.vencimento, p.valor, p.valor_baixado, p.estado
+                    p.vencimento, p.valor, p.valor_baixado, p.estado,
+                    t.observacao, t.origem_modulo, t.origem_id
              FROM financeiro_parcela p
              JOIN financeiro_titulo t ON t.id = p.titulo
              WHERE t.empresa = ?1 AND t.especie = ?2 AND p.estado IN ('Aberta','Parcial')
@@ -87,6 +95,9 @@ pub fn titulos_em_aberto(
                 valor_original: Dinheiro::centavos(r.get(6)?),
                 valor_baixado: Dinheiro::centavos(r.get(7)?),
                 estado: estado_de(&r.get::<_, String>(8)?),
+                descricao: r.get(9)?,
+                origem_modulo: r.get(10)?,
+                origem_id: r.get::<_, Option<Vec<u8>>>(11)?.map(id_de),
             })
         })
         .map_err(persist)?;
@@ -138,7 +149,8 @@ pub fn parcelas_no_periodo(
     let mut stmt = conexao
         .prepare(
             "SELECT p.id, p.titulo, p.numero, t.contraparte_tipo, t.contraparte_id,
-                    p.vencimento, p.valor, p.valor_baixado, p.estado
+                    p.vencimento, p.valor, p.valor_baixado, p.estado,
+                    t.observacao, t.origem_modulo, t.origem_id
              FROM financeiro_parcela p
              JOIN financeiro_titulo t ON t.id = p.titulo
              WHERE t.empresa = ?1 AND t.especie = ?2 AND p.vencimento BETWEEN ?3 AND ?4
@@ -166,6 +178,9 @@ pub fn parcelas_no_periodo(
                     valor_original: Dinheiro::centavos(r.get(6)?),
                     valor_baixado: Dinheiro::centavos(r.get(7)?),
                     estado: estado_de(&r.get::<_, String>(8)?),
+                    descricao: r.get(9)?,
+                    origem_modulo: r.get(10)?,
+                    origem_id: r.get::<_, Option<Vec<u8>>>(11)?.map(id_de),
                 })
             },
         )
@@ -343,6 +358,54 @@ pub struct ItemBaixa {
     pub desconto: Dinheiro,
     /// Verdadeiro se esta baixa já foi estornada.
     pub estornada: bool,
+}
+
+/// Quanto uma parcela deve numa data: principal em aberto, juros e multa de atraso e o
+/// desconto de antecipação, tudo calculado como a baixa calcularia
+/// ([`crate::Parcela::situacao_em`]). A tela de baixa sugere `total_devido` — antes sugeria
+/// só o principal, e uma parcela vencida "paga inteira" virava parcial.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct SituacaoDaParcela {
+    /// A parcela.
+    pub parcela: Id,
+    /// A data da baixa pretendida.
+    pub data: Data,
+}
+
+/// O que [`SituacaoDaParcela`] devolve.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SituacaoNaData {
+    /// Dias de atraso na data (0 se em dia).
+    pub dias_atraso: i32,
+    /// Principal ainda em aberto.
+    pub principal: Dinheiro,
+    /// Juros de mora.
+    pub juros: Dinheiro,
+    /// Multa por atraso.
+    pub multa: Dinheiro,
+    /// Desconto por antecipação.
+    pub desconto: Dinheiro,
+    /// O que quita a parcela nessa data.
+    pub total_devido: Dinheiro,
+}
+
+impl Consulta for SituacaoDaParcela {
+    type Saida = SituacaoNaData;
+    const PERMISSAO: &'static str = "financeiro.receber.ver";
+
+    fn executar(self, _ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        let parcela = crate::repositorio::parcela_por_id(conexao, self.parcela)?
+            .ok_or_else(|| cardeal_kernel::Erro::nao_encontrado("parcela"))?;
+        let s = parcela.situacao_em(self.data);
+        Ok(SituacaoNaData {
+            dias_atraso: s.dias_atraso,
+            principal: s.saldo_principal,
+            juros: s.juros,
+            multa: s.multa,
+            desconto: s.desconto,
+            total_devido: s.total_devido(),
+        })
+    }
 }
 
 /// O histórico de baixas de uma parcela, mais recente primeiro — alimenta o painel de

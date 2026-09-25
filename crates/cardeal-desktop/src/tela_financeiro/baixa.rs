@@ -53,6 +53,10 @@ pub(super) fn dialogo_baixar(
         }
     }
 
+    if aceita_baixa {
+        atualizar_situacao(motor, sessao, estado, p.parcela);
+    }
+
     let fechar = Dialogo::nova(format!("Parcela {} · {}", p.numero, nome))
         .largura(560.0)
         .mostrar(
@@ -86,6 +90,7 @@ pub(super) fn dialogo_baixar(
                         valor,
                         data,
                         pagamento,
+                        situacao,
                         ..
                     } = &mut estado.dlg
                     else {
@@ -100,6 +105,12 @@ pub(super) fn dialogo_baixar(
                         c[0].add(Campo::novo(rotulo_valor, valor));
                         c[1].add(Campo::novo("Data", data).mascara(Mascara::Data));
                     });
+                    if let Some((_, Some(s))) = situacao {
+                        if let Some(texto) = composicao_do_devido(s) {
+                            ui.add_space(Espaco::E4);
+                            ui.add(Rotulo::campo(texto).cor(ui.cores().atencao));
+                        }
+                    }
                     ui.add_space(Espaco::E12);
                     pagamento.mostrar(ui, motor, sessao, "baixa-parcela", false);
                 } else {
@@ -316,5 +327,202 @@ pub(super) fn estornar(
             notificar(ctx, Notificacao::sucesso("Baixa estornada"));
         }
         Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
+    }
+}
+
+/// Consulta quanto a parcela deve na data digitada (juros/multa de atraso, desconto de
+/// antecipação) e, enquanto o valor não foi editado à mão, sugere esse total — antes a tela
+/// sugeria só o principal, e uma parcela vencida "paga inteira" virava parcial.
+pub(super) fn atualizar_situacao(
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaFinanceiro,
+    parcela: Id,
+) {
+    let Dlg::Baixar {
+        valor,
+        data,
+        situacao,
+        valor_sugerido,
+        ..
+    } = &mut estado.dlg
+    else {
+        return;
+    };
+    if situacao.as_ref().is_some_and(|(d, _)| d == data) {
+        return;
+    }
+    let Ok(na_data) = data.parse::<Data>() else {
+        return;
+    };
+    let consultada: Option<mod_financeiro::SituacaoNaData> = motor
+        .consultar(
+            sessao,
+            "financeiro.situacao_da_parcela.v1",
+            &mod_financeiro::SituacaoDaParcela {
+                parcela,
+                data: na_data,
+            },
+        )
+        .ok();
+    if let Some(s) = &consultada {
+        // Acompanha o total devido enquanto o campo ainda mostra a última sugestão.
+        if valor_sugerido.is_empty() || *valor == *valor_sugerido {
+            *valor = s.total_devido.formatar();
+            *valor_sugerido = valor.clone();
+        }
+    }
+    *situacao = Some((data.clone(), consultada));
+}
+
+/// "R$ 100,00 + multa R$ 2,00 = R$ 102,00 (10 dias de atraso)" — só quando há encargo ou
+/// desconto; parcela em dia sem desconto não precisa de explicação.
+pub(super) fn composicao_do_devido(s: &mod_financeiro::SituacaoNaData) -> Option<String> {
+    if (s.juros + s.multa + s.desconto).e_zero() {
+        return None;
+    }
+    let mut partes = vec![s.principal.formatar_com_simbolo()];
+    if s.juros.e_positivo() {
+        partes.push(format!("juros {}", s.juros.formatar_com_simbolo()));
+    }
+    if s.multa.e_positivo() {
+        partes.push(format!("multa {}", s.multa.formatar_com_simbolo()));
+    }
+    let mut texto = partes.join(" + ");
+    if s.desconto.e_positivo() {
+        texto.push_str(&format!(
+            " − desconto {}",
+            s.desconto.formatar_com_simbolo()
+        ));
+    }
+    texto.push_str(&format!(" = {}", s.total_devido.formatar_com_simbolo()));
+    if s.dias_atraso > 0 {
+        texto.push_str(&format!(" ({} dias de atraso)", s.dias_atraso));
+    }
+    Some(texto)
+}
+
+/// Quitar as parcelas marcadas na grade, cada uma pelo total devido na data, no mesmo meio
+/// e conta — um comando só (`…_em_lote.v1`): ou todas, ou nenhuma.
+pub(super) fn dialogo_baixar_lote(
+    ctx: &egui::Context,
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaFinanceiro,
+) {
+    let selecionadas: Vec<ItemTituloEmAberto> = estado
+        .selecao
+        .as_ref()
+        .map(|ids| {
+            estado
+                .parcelas
+                .iter()
+                .filter(|p| ids.contains(&p.parcela))
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default();
+    let a_receber = estado.aba.a_receber();
+    let principal = selecionadas
+        .iter()
+        .fold(Dinheiro::ZERO, |acc, p| acc + p.saldo());
+    let titulo = format!(
+        "{} {} parcela(s)",
+        if a_receber { "Receber" } else { "Pagar" },
+        selecionadas.len()
+    );
+    let fechar = Dialogo::nova(titulo).largura(520.0).mostrar(
+        ctx,
+        estado,
+        |ui, estado| {
+            ui.horizontal(|ui| {
+                ui.add(Rotulo::campo("Saldo das parcelas"));
+                ui.add(ValorDinheiro::novo(principal));
+            });
+            ui.add(
+                Rotulo::campo("Juros, multa e desconto de cada uma são calculados na data.")
+                    .cor(ui.cores().texto_medio),
+            );
+            ui.add_space(Espaco::E12);
+            let Dlg::BaixarLote { data, pagamento } = &mut estado.dlg else {
+                return;
+            };
+            ui.add(Campo::novo("Data", data).mascara(Mascara::Data));
+            ui.add_space(Espaco::E12);
+            pagamento.mostrar(ui, motor, sessao, "baixa-lote", false);
+        },
+        |ui, estado| {
+            if ui.add(Botao::primario("Confirmar")).clicked() {
+                baixar_lote(ui.ctx(), motor, sessao, estado, &selecionadas);
+            }
+            if ui.add(Botao::secundario("Cancelar")).clicked() {
+                estado.dlg = Dlg::Fechado;
+            }
+        },
+    );
+    if fechar {
+        estado.dlg = Dlg::Fechado;
+    }
+}
+
+pub(super) fn baixar_lote(
+    ctx: &egui::Context,
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaFinanceiro,
+    selecionadas: &[ItemTituloEmAberto],
+) {
+    let Dlg::BaixarLote { data, pagamento } = &estado.dlg else {
+        return;
+    };
+    let Ok(data) = data.parse::<Data>() else {
+        notificar(ctx, Notificacao::aviso("Data inválida (dd/mm/aaaa)."));
+        return;
+    };
+    let meio_pagamento = match pagamento.meio_validado() {
+        Ok(m) => m,
+        Err(msg) => {
+            notificar(ctx, Notificacao::aviso(msg));
+            return;
+        }
+    };
+    let dados = mod_financeiro::DadosBaixaEmLote {
+        parcelas: selecionadas.iter().map(|p| p.parcela).collect(),
+        data,
+        meio_pagamento,
+        conta_destino: pagamento.conta_destino(),
+    };
+    let r: cardeal_kernel::Resultado<mod_financeiro::BaixasEmLoteFeitas> = if estado.aba.a_receber()
+    {
+        motor.executar(
+            sessao,
+            "financeiro.baixar_recebimentos_em_lote.v1",
+            &mod_financeiro::BaixarRecebimentosEmLote(dados),
+        )
+    } else {
+        motor.executar(
+            sessao,
+            "financeiro.baixar_pagamentos_em_lote.v1",
+            &mod_financeiro::BaixarPagamentosEmLote(dados),
+        )
+    };
+    match r {
+        Ok(feitas) => {
+            estado.dlg = Dlg::Fechado;
+            estado.selecao = None;
+            estado.carregar(motor, sessao);
+            notificar(
+                ctx,
+                Notificacao::sucesso(format!(
+                    "{} parcela(s) baixadas — {}",
+                    feitas.quantidade,
+                    feitas.total.formatar_com_simbolo()
+                )),
+            );
+        }
+        Err(e) => notificar(
+            ctx,
+            Notificacao::erro("Nenhuma parcela foi baixada").detalhe(e.mensagem),
+        ),
     }
 }

@@ -53,6 +53,8 @@ fn baixa_vai_para_a_parcela_aberta_mesmo_se_a_lista_mudar_de_ordem() {
         baixas: Vec::new(),
         baixas_carregadas: true,
         motivo_estorno: String::new(),
+        situacao: None,
+        valor_sugerido: String::new(),
     };
     estado.parcelas.reverse();
 
@@ -164,5 +166,122 @@ fn extrato_rotula_o_recebimento_da_os_com_numero_e_cliente() {
         estado.origem_labels.values().any(|r| *r == esperado),
         "rótulos: {:?}",
         estado.origem_labels
+    );
+}
+
+#[test]
+fn selecionar_e_baixar_varias_quita_so_as_marcadas() {
+    let t = motor_de_teste();
+    let a = lancar_a_receber(&t.motor, &t.sessao, 100);
+    let b = lancar_a_receber(&t.motor, &t.sessao, 250);
+    let _c = lancar_a_receber(&t.motor, &t.sessao, 75);
+    let mut estado = EstadoTelaFinanceiro {
+        aba: Aba::Receber,
+        ..Default::default()
+    };
+    estado.carregar(&t.motor, &t.sessao);
+    estado.selecao = Some(vec![a, b]);
+    estado.dlg = Dlg::BaixarLote {
+        data: Data::hoje(Fuso::BRASILIA).to_string(),
+        pagamento: crate::pagamento::EstadoPagamento::novo(MeioPagamento::Dinheiro),
+    };
+    let selecionadas: Vec<ItemTituloEmAberto> = estado
+        .parcelas
+        .iter()
+        .filter(|p| p.parcela == a || p.parcela == b)
+        .cloned()
+        .collect();
+    baixar_lote(
+        &egui::Context::default(),
+        &t.motor,
+        &t.sessao,
+        &mut estado,
+        &selecionadas,
+    );
+
+    assert!(estado.selecao.is_none(), "a seleção fecha depois de baixar");
+    let abertas: Vec<ItemTituloEmAberto> = t
+        .motor
+        .consultar(
+            &t.sessao,
+            "financeiro.titulos_a_receber_em_aberto.v1",
+            &TitulosAReceberEmAberto,
+        )
+        .expect("em aberto");
+    assert_eq!(abertas.len(), 1);
+    assert_eq!(abertas[0].valor_original, Dinheiro::reais(75));
+}
+
+#[test]
+fn baixa_de_parcela_vencida_sugere_o_total_com_multa() {
+    let t = motor_de_teste();
+    let hoje = Data::hoje(Fuso::BRASILIA);
+    let lancado: mod_financeiro::TituloAReceberLancado = t
+        .motor
+        .executar(
+            &t.sessao,
+            "financeiro.lancar_titulo_a_receber.v1",
+            &LancarTituloAReceber {
+                cliente: None,
+                valor_total: Dinheiro::reais(100),
+                emissao: hoje.mais_dias(-30),
+                parcelas: 1,
+                primeiro_vencimento: hoje.mais_dias(-30),
+                intervalo_dias: 0,
+                observacao: None,
+                categoria: None,
+            },
+        )
+        .expect("título");
+    let reneg: mod_financeiro::TituloFoiRenegociado = t
+        .motor
+        .executar(
+            &t.sessao,
+            "financeiro.renegociar_titulo.v1",
+            &mod_financeiro::RenegociarTitulo {
+                titulo: lancado.titulo,
+                numero_parcelas: 1,
+                primeiro_vencimento: hoje.mais_dias(-10),
+                intervalo_dias: 0,
+                politica_juros: mod_financeiro::PoliticaJuros::Nenhum,
+                taxa_juros: None,
+                multa: Some(cardeal_kernel::Percentual::pontos(2)),
+            },
+        )
+        .expect("renegociar");
+    let mut estado = EstadoTelaFinanceiro {
+        aba: Aba::Receber,
+        ..Default::default()
+    };
+    estado.carregar(&t.motor, &t.sessao);
+    let p = estado
+        .parcelas
+        .iter()
+        .find(|p| p.titulo == reneg.titulo_novo)
+        .cloned()
+        .expect("parcela renegociada");
+    estado.dlg = Dlg::Baixar {
+        parcela: p.parcela,
+        valor: p.saldo().formatar(),
+        data: hoje.to_string(),
+        pagamento: crate::pagamento::EstadoPagamento::novo(MeioPagamento::Dinheiro),
+        baixas: Vec::new(),
+        baixas_carregadas: true,
+        motivo_estorno: String::new(),
+        situacao: None,
+        valor_sugerido: String::new(),
+    };
+    atualizar_situacao(&t.motor, &t.sessao, &mut estado, p.parcela);
+    let Dlg::Baixar {
+        valor, situacao, ..
+    } = &estado.dlg
+    else {
+        panic!("diálogo fechou");
+    };
+    assert_eq!(valor, "102,00");
+    let s = situacao.as_ref().and_then(|(_, s)| *s).expect("situação");
+    assert_eq!(
+        composicao_do_devido(&s).as_deref(),
+        Some("R$ 100,00 + multa R$ 2,00 = R$ 102,00 (10 dias de atraso)")
     );
 }

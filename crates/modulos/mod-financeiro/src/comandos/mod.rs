@@ -9,6 +9,7 @@
 //! os papéis de conta e a permissão.
 
 mod abrir_caixa;
+mod baixar_em_lote;
 mod baixar_pagamento;
 mod baixar_recebimento;
 mod cadastrar_caixa;
@@ -25,6 +26,9 @@ mod registrar_suprimento;
 mod renegociar_titulo;
 
 pub use abrir_caixa::{AbrirCaixa, CaixaFoiAberto};
+pub use baixar_em_lote::{
+    BaixarPagamentosEmLote, BaixarRecebimentosEmLote, BaixasEmLoteFeitas, DadosBaixaEmLote,
+};
 pub use baixar_pagamento::{baixar_pagamento_comum, BaixarPagamento, PagamentoBaixado};
 pub use baixar_recebimento::{baixar_recebimento_comum, BaixarRecebimento, RecebimentoBaixado};
 pub use cadastrar_caixa::{CadastrarCaixa, CaixaCadastrado};

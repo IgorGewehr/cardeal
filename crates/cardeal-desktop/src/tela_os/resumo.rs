@@ -15,7 +15,7 @@ pub(super) fn secao_resumo(ui: &mut egui::Ui, estado: &mut EstadoTelaOs, detalhe
             cliente.map_or("Cliente", |c| c.nome.as_str()).to_owned(),
         ));
         if let Some(tel) = cliente.and_then(|c| c.telefone.as_deref()) {
-            ui.add(Rotulo::interface(tel.to_owned()).cor(ui.cores().texto_medio));
+            ui.add(Rotulo::interface(formatar_telefone(tel)).cor(ui.cores().texto_medio));
             if let Some(link) = link_whatsapp(tel, &mensagem_whatsapp(estado, detalhe)) {
                 if ui.add(Botao::secundario("WhatsApp").pequeno()).clicked() {
                     if let Err(e) = open::that_detached(&link) {
@@ -163,6 +163,17 @@ fn capitalizar(s: &str) -> String {
         .unwrap_or_default()
 }
 
+/// "(31) 98888-7777" a partir do que estiver gravado; devolve como veio se não reconhecer.
+pub(super) fn formatar_telefone(telefone: &str) -> String {
+    let d = cardeal_kernel::texto::somente_digitos(telefone);
+    let d = d.strip_prefix("55").filter(|r| r.len() >= 10).unwrap_or(&d);
+    match d.len() {
+        11 => format!("({}) {}-{}", &d[..2], &d[2..7], &d[7..]),
+        10 => format!("({}) {}-{}", &d[..2], &d[2..6], &d[6..]),
+        _ => telefone.to_owned(),
+    }
+}
+
 /// O link `wa.me` para o telefone (com DDI 55 quando vier só DDD + número) já com o texto.
 /// `None` quando o telefone não tem dígitos suficientes para ser um celular.
 pub(super) fn link_whatsapp(telefone: &str, texto: &str) -> Option<String> {
@@ -207,6 +218,13 @@ mod testes_puros {
             Some("https://wa.me/5531999998888?text=x")
         );
         assert!(link_whatsapp("1234", "x").is_none());
+    }
+
+    #[test]
+    fn telefone_formatado_com_ddd() {
+        assert_eq!(formatar_telefone("31988887777"), "(31) 98888-7777");
+        assert_eq!(formatar_telefone("+55 31 3333-4444"), "(31) 3333-4444");
+        assert_eq!(formatar_telefone("ramal 12"), "ramal 12");
     }
 
     #[test]

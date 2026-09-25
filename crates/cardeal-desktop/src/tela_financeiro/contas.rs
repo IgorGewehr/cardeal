@@ -1,6 +1,8 @@
 //! As abas "A receber" / "A pagar": período, indicadores e a grade de parcelas.
 
 use super::*;
+use cardeal_ui::atoms::Caixa;
+use cardeal_ui::organisms::RespostaGrade;
 
 /// O seletor de período das abas "A receber"/"A pagar" — presets de calendário + uma faixa
 /// digitada (`PresetPeriodo::Personalizado`). Devolve `true` quando o período mudou e a
@@ -126,27 +128,53 @@ pub(super) fn lista(
 
     let situacao = estado.filtro_situacao.unwrap_or(FiltroParcelas::Todas);
     let indices = estado.parcelas_filtradas(situacao, hoje);
+    barra_selecao(ui, estado, a_receber);
+    let selecionando = estado.selecao.is_some();
+    // Com a coluna da caixa de seleção na frente, os índices de coluna andam uma casa.
+    let desloc = usize::from(selecionando);
     // "Valor" é o da parcela; o que já entrou/saiu e o que falta ficam em colunas próprias —
     // antes só existia "Saldo", e uma parcela quitada aparecia como R$ 0,00, apagando o valor
     // real que ela teve.
     let rotulo_baixado = if a_receber { "Recebido" } else { "Pago" };
-    let colunas = vec![
-        ColunaGrade::nova("Contraparte"),
+    let mut colunas = Vec::with_capacity(9);
+    if selecionando {
+        colunas.push(ColunaGrade::nova("").largura(40.0));
+    }
+    colunas.extend([
+        ColunaGrade::nova("Contraparte").largura(200.0),
+        ColunaGrade::nova("Descrição"),
         ColunaGrade::nova("Parc.").largura(60.0).numero(),
         ColunaGrade::nova("Vencimento").largura(120.0),
         ColunaGrade::nova("Valor").largura(130.0).numero(),
         ColunaGrade::nova(rotulo_baixado).largura(130.0).numero(),
         ColunaGrade::nova("Saldo").largura(130.0).numero(),
         ColunaGrade::nova("Estado").largura(120.0),
-    ];
+    ]);
+    let mut marcada_na_caixa = None;
     let resposta = Grade::nova(colunas)
         .selecionavel(None)
-        .ordenacao(estado.ordenacao.atual())
+        .ordenacao(estado.ordenacao.atual().map(|(c, d)| (c + desloc, d)))
         .vazio("Nenhuma parcela para essa busca.")
         .mostrar(ui, indices.len(), |i, row| {
             let p = &estado.parcelas[indices[i]];
+            if let Some(ids) = &estado.selecao {
+                row.col(|ui| {
+                    if p.estado.aceita_baixa() {
+                        let mut marcada = ids.contains(&p.parcela);
+                        if ui.add(Caixa::nova(&mut marcada, "")).changed() {
+                            marcada_na_caixa = Some(i);
+                        }
+                    }
+                });
+            }
             row.col(|ui| {
                 ui.add(Rotulo::interface(estado.nome_contraparte(&p.contraparte)));
+            });
+            row.col(|ui| {
+                ui.add(
+                    Rotulo::interface(p.descricao.clone().unwrap_or_default())
+                        .cor(ui.cores().texto_medio),
+                );
             });
             row.col(|ui| {
                 ui.add(Rotulo::interface(p.numero.to_string()));
@@ -185,9 +213,34 @@ pub(super) fn lista(
             });
         });
 
-    if let Some((coluna, direcao)) = estado.ordenacao.clicar(&resposta) {
-        let nomes = estado.nomes.clone();
-        ordenar_parcelas(&mut estado.parcelas, &nomes, coluna, direcao);
+    if let Some(coluna) = resposta.coluna_clicada {
+        if coluna >= desloc {
+            let resposta = RespostaGrade {
+                coluna_clicada: Some(coluna - desloc),
+                ..resposta
+            };
+            if let Some((coluna, direcao)) = estado.ordenacao.clicar(&resposta) {
+                let nomes = estado.nomes.clone();
+                ordenar_parcelas(&mut estado.parcelas, &nomes, coluna, direcao);
+            }
+        }
+    }
+    // Selecionando, o clique na linha (ou na caixa) marca/desmarca em vez de abrir a baixa.
+    if selecionando {
+        if let Some(i) = marcada_na_caixa.or(resposta.linha_clicada) {
+            let p = &estado.parcelas[indices[i]];
+            if p.estado.aceita_baixa() {
+                let id = p.parcela;
+                if let Some(ids) = &mut estado.selecao {
+                    if let Some(pos) = ids.iter().position(|x| *x == id) {
+                        ids.remove(pos);
+                    } else {
+                        ids.push(id);
+                    }
+                }
+            }
+        }
+        return;
     }
     if let Some(i) = resposta.linha_clicada {
         let p = &estado.parcelas[indices[i]];
@@ -205,6 +258,8 @@ pub(super) fn lista(
                 baixas: Vec::new(),
                 baixas_carregadas: false,
                 motivo_estorno: String::new(),
+                situacao: None,
+                valor_sugerido: String::new(),
             };
         }
     }
@@ -257,12 +312,13 @@ pub(super) fn ordenar_parcelas(
     parcelas.sort_by(|a, b| {
         let ordem = match coluna {
             0 => nome_de(a).cmp(&nome_de(b)),
-            1 => a.numero.cmp(&b.numero),
-            2 => a.vencimento.cmp(&b.vencimento),
-            3 => a.valor_original.cmp(&b.valor_original),
-            4 => a.valor_baixado.cmp(&b.valor_baixado),
-            5 => a.saldo().cmp(&b.saldo()),
-            6 => a.estado.rotulo().cmp(b.estado.rotulo()),
+            1 => a.descricao.cmp(&b.descricao),
+            2 => a.numero.cmp(&b.numero),
+            3 => a.vencimento.cmp(&b.vencimento),
+            4 => a.valor_original.cmp(&b.valor_original),
+            5 => a.valor_baixado.cmp(&b.valor_baixado),
+            6 => a.saldo().cmp(&b.saldo()),
+            7 => a.estado.rotulo().cmp(b.estado.rotulo()),
             _ => std::cmp::Ordering::Equal,
         };
         match direcao {
@@ -270,4 +326,55 @@ pub(super) fn ordenar_parcelas(
             Direcao::Descendente => ordem.reverse(),
         }
     });
+}
+
+/// A faixa acima da grade para quitar várias parcelas de uma vez: "Baixar várias" liga o
+/// modo de seleção; com ele ligado, mostra quantas e quanto estão marcadas e o botão que abre
+/// [`Dlg::BaixarLote`].
+fn barra_selecao(ui: &mut egui::Ui, estado: &mut EstadoTelaFinanceiro, a_receber: bool) {
+    ui.horizontal(|ui| match &estado.selecao {
+        None => {
+            let rotulo = if a_receber {
+                "Receber várias"
+            } else {
+                "Pagar várias"
+            };
+            if ui.add(Botao::secundario(rotulo).pequeno()).clicked() {
+                estado.selecao = Some(Vec::new());
+            }
+        }
+        Some(ids) => {
+            let total = estado
+                .parcelas
+                .iter()
+                .filter(|p| ids.contains(&p.parcela))
+                .fold(Dinheiro::ZERO, |acc, p| acc + p.saldo());
+            ui.add(Rotulo::interface(format!(
+                "{} selecionada(s) · {}",
+                ids.len(),
+                total.formatar_com_simbolo()
+            )));
+            let vazio = ids.is_empty();
+            if ui
+                .add(
+                    Botao::primario("Baixar selecionadas")
+                        .pequeno()
+                        .habilitado(!vazio),
+                )
+                .clicked()
+            {
+                estado.dlg = Dlg::BaixarLote {
+                    data: Data::hoje(Fuso::BRASILIA).to_string(),
+                    pagamento: crate::pagamento::EstadoPagamento::novo(MeioPagamento::Pix),
+                };
+            }
+            if ui
+                .add(Botao::fantasma("Cancelar seleção").pequeno())
+                .clicked()
+            {
+                estado.selecao = None;
+            }
+        }
+    });
+    ui.add_space(Espaco::E8);
 }

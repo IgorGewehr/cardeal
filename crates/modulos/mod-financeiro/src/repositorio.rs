@@ -422,17 +422,7 @@ impl<'a, 'b> RepositorioFinanceiro<'a, 'b> {
     /// # Errors
     /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
     pub fn buscar_parcela(&self, id: Id) -> Resultado<Option<Parcela>> {
-        self.conn()
-            .query_row(
-                "SELECT id, empresa, titulo, numero, vencimento, valor, estado, valor_baixado,
-                        lancamento, nosso_numero, politica_juros, taxa_juros, multa,
-                        desconto_ate, desconto_valor, versao
-                 FROM financeiro_parcela WHERE id = ?1",
-                [blob(id)],
-                parcela_de_linha,
-            )
-            .optional()
-            .map_err(persist)
+        parcela_por_id(self.conn(), id)
     }
 
     /// Busca um título pelo id. `Ok(None)` = não existe.
@@ -888,6 +878,24 @@ impl<'a, 'b> RepositorioFinanceiro<'a, 'b> {
             .optional()
             .map_err(persist)
     }
+}
+
+/// Uma parcela pelo id, sobre qualquer conexão (escrita ou leitura).
+///
+/// # Errors
+/// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+pub(crate) fn parcela_por_id(conexao: &Connection, id: Id) -> Resultado<Option<Parcela>> {
+    conexao
+        .query_row(
+            "SELECT id, empresa, titulo, numero, vencimento, valor, estado, valor_baixado,
+                    lancamento, nosso_numero, politica_juros, taxa_juros, multa,
+                    desconto_ate, desconto_valor, versao
+             FROM financeiro_parcela WHERE id = ?1",
+            [blob(id)],
+            parcela_de_linha,
+        )
+        .optional()
+        .map_err(persist)
 }
 
 fn parcela_de_linha(r: &rusqlite::Row<'_>) -> rusqlite::Result<Parcela> {

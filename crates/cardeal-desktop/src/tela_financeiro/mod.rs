@@ -101,6 +101,19 @@ enum Dlg {
         /// O motivo do estorno, digitado antes de clicar em "Estornar" numa baixa do
         /// histórico — `EstornarBaixa` exige um motivo não vazio.
         motivo_estorno: String,
+        /// Quanto a parcela deve na `data` (juros/multa/desconto já calculados) e a data
+        /// para a qual foi calculado — refeito quando a data muda.
+        /// `None` dentro do par = a consulta falhou (sem permissão, por exemplo) e fica o
+        /// principal que já estava no campo.
+        situacao: Option<(String, Option<mod_financeiro::SituacaoNaData>)>,
+        /// O valor que a tela sugeriu por último: enquanto o campo não for editado à mão,
+        /// ele acompanha o total devido quando a data muda.
+        valor_sugerido: String,
+    },
+    /// Quitar várias parcelas selecionadas de uma vez (pelo total devido de cada uma).
+    BaixarLote {
+        data: String,
+        pagamento: crate::pagamento::EstadoPagamento,
     },
     Analise,
     Recorrencias,
@@ -328,6 +341,8 @@ pub struct EstadoTelaFinanceiro {
     /// Quantos títulos a geração de recorrências criou ao entrar — vira aviso no próximo
     /// quadro (o `carregar` não tem `egui::Context` para notificar).
     recorrencias_geradas: usize,
+    /// `Some` = modo "baixar várias": as parcelas marcadas na grade.
+    selecao: Option<Vec<Id>>,
     serie: Vec<MesFluxo>,
     // Fluxo de caixa / bancos.
     fluxo_dias: i64,
@@ -416,6 +431,7 @@ pub fn mostrar(
         Dlg::Fechado => {}
         Dlg::Lancar(_) => dialogo_lancar(ui.ctx(), motor, sessao, estado),
         Dlg::Baixar { .. } => dialogo_baixar(ui.ctx(), motor, sessao, estado),
+        Dlg::BaixarLote { .. } => dialogo_baixar_lote(ui.ctx(), motor, sessao, estado),
         Dlg::Analise => dialogo_analise(ui.ctx(), motor, sessao, estado),
         Dlg::Recorrencias => dialogo_recorrencias(ui.ctx(), motor, sessao, estado),
         Dlg::NovaRecorrencia(_) => dialogo_nova_recorrencia(ui.ctx(), motor, sessao, estado),
@@ -482,9 +498,18 @@ impl EstadoTelaFinanceiro {
     pub fn preparar_demo(&mut self, motor: &MotorLocal, sessao: &SessaoLocal, cena: &str) {
         if cena != "financeiro" {
             self.aba = Aba::Receber;
-            self.periodo.preset = PresetPeriodo::Trimestre;
+            self.periodo.preset = PresetPeriodo::Semestre;
         }
         self.carregar(motor, sessao);
+        if cena == "financeiro-lote" {
+            self.selecao = Some(
+                self.parcelas
+                    .iter()
+                    .filter(|p| p.estado.aceita_baixa())
+                    .map(|p| p.parcela)
+                    .collect(),
+            );
+        }
         if cena == "financeiro-baixa" {
             if let Some(p) = self.parcelas.first() {
                 self.dlg = Dlg::Baixar {
@@ -495,6 +520,8 @@ impl EstadoTelaFinanceiro {
                     baixas: Vec::new(),
                     baixas_carregadas: false,
                     motivo_estorno: String::new(),
+                    situacao: None,
+                    valor_sugerido: String::new(),
                 };
             }
         }

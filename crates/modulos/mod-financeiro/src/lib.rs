@@ -98,6 +98,9 @@ pub use comandos::{
     SuprimentoFoiRegistrado, TituloAPagarLancado, TituloAReceberLancado, TituloFoiRenegociado,
     TituloGravado,
 };
+pub use comandos::{
+    BaixarPagamentosEmLote, BaixarRecebimentosEmLote, BaixasEmLoteFeitas, DadosBaixaEmLote,
+};
 pub use consultas::{
     titulo_da_origem, BaixasDaParcela, Caixas, Categorias, ContasDeCaixa, ContasDeResultado,
     ContasDisponiveis, ExtratoDisponivel, ItemBaixa, ItemCaixa, ItemContaDisponivel,
@@ -106,6 +109,7 @@ pub use consultas::{
     TitulosAPagarEmAberto, TitulosAReceberEmAberto, TotalPagoNoPeriodo, TotalPorCategoriaNoPeriodo,
     TotalRecebidoNoPeriodo,
 };
+pub use consultas::{SituacaoDaParcela, SituacaoNaData};
 pub use erros::ErroFinanceiro;
 pub use manifesto::{manifesto, MANIFESTO};
 pub use meio_pagamento::MeioPagamento;

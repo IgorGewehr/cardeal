@@ -4,6 +4,7 @@
 #![allow(clippy::result_large_err)] // `ErroArmazenamento` carrega detalhes de propósito
 
 use cardeal_auth::{AutorizacoesEfetivas, EmissaoSessao, Escopo, Papel, Sessao};
+use cardeal_kernel::Percentual;
 use cardeal_kernel::{CodigoErro, Data, Dinheiro, Fuso, Id, Instante, Periodo};
 use cardeal_ledger::{semear_plano_padrao, Contas, Contraparte, PapelConta, RepositorioRazao};
 use cardeal_modkit::{Ambiente, Ctx, Despachante, Modulo, PedidoAtivacao, RegistroModulos};
@@ -1796,4 +1797,154 @@ fn comando_materializar_recupera_ocorrencias_que_passaram_com_o_sistema_fechado(
     assert_eq!(conta_lancamentos(&arm, empresa), 3);
     assert!(materializar().is_empty());
     assert_eq!(conta_lancamentos(&arm, empresa), 3);
+}
+
+/// Lança um título a receber de parcela única, vencendo em `venc`.
+fn receber(
+    d: &Despachante,
+    s: &Sessao,
+    arm: &Armazenamento,
+    empresa: Id,
+    reais: i64,
+    venc: Data,
+) -> (Id, Id) {
+    let t: TituloAReceberLancado = postcard::from_bytes(
+        &d.executar_comando(
+            "financeiro.lancar_titulo_a_receber.v1",
+            &carga(&LancarTituloAReceber {
+                cliente: None,
+                valor_total: Dinheiro::reais(reais),
+                emissao: venc.min(hoje()),
+                parcelas: 1,
+                primeiro_vencimento: venc,
+                intervalo_dias: 0,
+                observacao: Some(format!("Serviço de R$ {reais}")),
+                categoria: None,
+            }),
+            s,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    (t.titulo, t.parcelas[0])
+}
+
+fn situacao(
+    d: &Despachante,
+    s: &Sessao,
+    arm: &Armazenamento,
+    empresa: Id,
+    parcela: Id,
+) -> mod_financeiro::SituacaoNaData {
+    postcard::from_bytes(
+        &d.executar_consulta(
+            "financeiro.situacao_da_parcela.v1",
+            &carga(&mod_financeiro::SituacaoDaParcela {
+                parcela,
+                data: hoje(),
+            }),
+            s,
+            &ambiente(empresa),
+            arm.leitor(),
+        )
+        .unwrap(),
+    )
+    .unwrap()
+}
+
+#[test]
+fn baixa_em_lote_quita_pelo_total_devido_com_juros_e_e_tudo_ou_nada() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloFinanceiro]).unwrap();
+    let s = sessao(
+        empresa,
+        &[
+            "financeiro.receber.criar",
+            "financeiro.receber.baixar",
+            "financeiro.receber.ver",
+            "financeiro.receber.renegociar",
+        ],
+    );
+
+    // Uma parcela vencida há 10 dias com multa de 2% (via renegociação, que é quem aceita
+    // política de juros), e duas em dia.
+    let (titulo_velho, _) = receber(&d, &s, &arm, empresa, 100, hoje().mais_dias(-30));
+    let renegociado: mod_financeiro::TituloFoiRenegociado = postcard::from_bytes(
+        &d.executar_comando(
+            "financeiro.renegociar_titulo.v1",
+            &carga(&RenegociarTitulo {
+                titulo: titulo_velho,
+                numero_parcelas: 1,
+                primeiro_vencimento: hoje().mais_dias(-10),
+                intervalo_dias: 0,
+                politica_juros: PoliticaJuros::Nenhum,
+                taxa_juros: None,
+                multa: Some(Percentual::pontos(2)),
+            }),
+            &s,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let abertas: Vec<ItemTituloEmAberto> = postcard::from_bytes(
+        &d.executar_consulta(
+            "financeiro.titulos_a_receber_em_aberto.v1",
+            &carga(&TitulosAReceberEmAberto),
+            &s,
+            &ambiente(empresa),
+            arm.leitor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let vencida = abertas
+        .iter()
+        .find(|p| p.titulo == renegociado.titulo_novo)
+        .unwrap()
+        .parcela;
+    let (_, em_dia_1) = receber(&d, &s, &arm, empresa, 200, hoje().mais_dias(5));
+    let (_, em_dia_2) = receber(&d, &s, &arm, empresa, 300, hoje().mais_dias(5));
+
+    // A situação na data já traz a multa: é isso que a tela sugere para quitar.
+    let sit = situacao(&d, &s, &arm, empresa, vencida);
+    assert_eq!(sit.principal, Dinheiro::reais(100));
+    assert_eq!(sit.multa, Dinheiro::reais(2));
+    assert_eq!(sit.total_devido, Dinheiro::reais(102));
+
+    let lote = |parcelas: Vec<Id>| {
+        d.executar_comando(
+            "financeiro.baixar_recebimentos_em_lote.v1",
+            &carga(&mod_financeiro::BaixarRecebimentosEmLote(
+                mod_financeiro::DadosBaixaEmLote {
+                    parcelas,
+                    data: hoje(),
+                    meio_pagamento: MeioPagamento::Pix,
+                    conta_destino: None,
+                },
+            )),
+            &s,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+    };
+
+    let feitas: mod_financeiro::BaixasEmLoteFeitas =
+        postcard::from_bytes(&lote(vec![vencida, em_dia_1]).unwrap()).unwrap();
+    assert_eq!(feitas.quantidade, 2);
+    assert_eq!(feitas.total, Dinheiro::reais(302));
+    // A vencida quitou de verdade (a multa entrou junto), não virou parcial.
+    assert!(situacao(&d, &s, &arm, empresa, vencida)
+        .total_devido
+        .e_zero());
+
+    // Lote com uma já quitada: recusado inteiro — a outra continua em aberto.
+    lote(vec![em_dia_2, vencida]).unwrap_err();
+    assert_eq!(
+        situacao(&d, &s, &arm, empresa, em_dia_2).total_devido,
+        Dinheiro::reais(300)
+    );
 }

@@ -11,6 +11,8 @@ use crate::comandos::{
     LancarTituloAReceber, MaterializarRecorrencias, RegistrarSangria, RegistrarSuprimento,
     RenegociarTitulo,
 };
+use crate::comandos::{BaixarPagamentosEmLote, BaixarRecebimentosEmLote};
+use crate::consultas::SituacaoDaParcela;
 use crate::consultas::{
     BaixasDaParcela, Caixas, Categorias, ContasDeCaixa, ContasDeResultado, ContasDisponiveis,
     ExtratoDisponivel, ParcelasAPagarNoPeriodo, ParcelasAReceberNoPeriodo, Recorrencias,
@@ -38,6 +40,8 @@ impl Modulo for ModuloFinanceiro {
             .comando::<LancarTituloAPagar>("financeiro.lancar_titulo_a_pagar.v1")
             .comando::<BaixarRecebimento>("financeiro.baixar_recebimento.v1")
             .comando::<BaixarPagamento>("financeiro.baixar_pagamento.v1")
+            .comando::<BaixarRecebimentosEmLote>("financeiro.baixar_recebimentos_em_lote.v1")
+            .comando::<BaixarPagamentosEmLote>("financeiro.baixar_pagamentos_em_lote.v1")
             .comando::<CadastrarCaixa>("financeiro.cadastrar_caixa.v1")
             .comando::<AbrirCaixa>("financeiro.abrir_caixa.v1")
             .comando::<RegistrarSuprimento>("financeiro.registrar_suprimento.v1")
@@ -64,7 +68,8 @@ impl Modulo for ModuloFinanceiro {
             .consulta::<ContasDisponiveis>("financeiro.contas_disponiveis.v1")
             .consulta::<ExtratoDisponivel>("financeiro.extrato_disponivel.v1")
             .consulta::<TituloDaOrigem>("financeiro.titulo_da_origem.v1")
-            .consulta::<BaixasDaParcela>("financeiro.baixas_da_parcela.v1");
+            .consulta::<BaixasDaParcela>("financeiro.baixas_da_parcela.v1")
+            .consulta::<SituacaoDaParcela>("financeiro.situacao_da_parcela.v1");
         Ok(())
     }
 }
