@@ -55,6 +55,7 @@ fn baixa_vai_para_a_parcela_aberta_mesmo_se_a_lista_mudar_de_ordem() {
         motivo_estorno: String::new(),
         situacao: None,
         valor_sugerido: String::new(),
+        renegociar: FormRenegociar::default(),
     };
     estado.parcelas.reverse();
 
@@ -270,6 +271,7 @@ fn baixa_de_parcela_vencida_sugere_o_total_com_multa() {
         motivo_estorno: String::new(),
         situacao: None,
         valor_sugerido: String::new(),
+        renegociar: FormRenegociar::default(),
     };
     atualizar_situacao(&t.motor, &t.sessao, &mut estado, p.parcela);
     let Dlg::Baixar {
@@ -284,4 +286,49 @@ fn baixa_de_parcela_vencida_sugere_o_total_com_multa() {
         composicao_do_devido(&s).as_deref(),
         Some("R$ 100,00 + multa R$ 2,00 = R$ 102,00 (10 dias de atraso)")
     );
+}
+
+#[test]
+fn renegociar_pela_tela_troca_o_saldo_por_parcelas_novas() {
+    let t = motor_de_teste();
+    let parcela = lancar_a_receber(&t.motor, &t.sessao, 300);
+    let mut estado = EstadoTelaFinanceiro {
+        aba: Aba::Receber,
+        ..Default::default()
+    };
+    estado.carregar(&t.motor, &t.sessao);
+    let titulo = estado
+        .parcelas
+        .iter()
+        .find(|p| p.parcela == parcela)
+        .expect("parcela")
+        .titulo;
+
+    let mut form = FormRenegociar {
+        parcelas: "3".to_owned(),
+        primeiro_vencimento: Data::hoje(Fuso::BRASILIA).mais_dias(30).to_string(),
+        intervalo_dias: "30".to_owned(),
+        multa: "2%".to_owned(),
+        confirmar: false,
+    };
+    let comando = form.validado(titulo).expect("formulário válido");
+    assert_eq!(comando.numero_parcelas, 3);
+    assert_eq!(comando.multa, Some(cardeal_kernel::Percentual::pontos(2)));
+    let _: mod_financeiro::TituloFoiRenegociado = t
+        .motor
+        .executar(&t.sessao, "financeiro.renegociar_titulo.v1", &comando)
+        .expect("renegociar");
+    let abertas: Vec<ItemTituloEmAberto> = t
+        .motor
+        .consultar(
+            &t.sessao,
+            "financeiro.titulos_a_receber_em_aberto.v1",
+            &TitulosAReceberEmAberto,
+        )
+        .expect("em aberto");
+    assert_eq!(abertas.len(), 3);
+    assert!(abertas.iter().all(|p| p.titulo != titulo));
+
+    form.parcelas = "0".to_owned();
+    assert!(form.validado(titulo).is_err());
 }

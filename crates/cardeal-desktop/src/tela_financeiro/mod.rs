@@ -10,6 +10,7 @@ mod contas;
 mod fluxo;
 mod lancar;
 mod recorrencias;
+mod renegociar;
 #[cfg(test)]
 mod testes;
 mod visao;
@@ -47,6 +48,7 @@ use mod_financeiro::{
     TotalPorCategoriaNoPeriodo, TotalRecebidoNoPeriodo,
 };
 use recorrencias::*;
+use renegociar::*;
 use visao::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
@@ -80,6 +82,10 @@ fn reais_para_grafico(d: Dinheiro) -> f64 {
 }
 
 #[derive(Default)]
+// Uma única instância por tela (o diálogo aberto): o tamanho da variante "Baixar" não custa
+// nada, e encaixotar os campos só espalharia `Box` pelo formulário — mesma decisão de
+// `tela_os::Dlg`.
+#[allow(clippy::large_enum_variant)]
 enum Dlg {
     #[default]
     Fechado,
@@ -109,6 +115,8 @@ enum Dlg {
         /// O valor que a tela sugeriu por último: enquanto o campo não for editado à mão,
         /// ele acompanha o total devido quando a data muda.
         valor_sugerido: String,
+        /// A renegociação do saldo (seção recolhida no mesmo diálogo).
+        renegociar: FormRenegociar,
     },
     /// Quitar várias parcelas selecionadas de uma vez (pelo total devido de cada uma).
     BaixarLote {
@@ -522,6 +530,7 @@ impl EstadoTelaFinanceiro {
                     motivo_estorno: String::new(),
                     situacao: None,
                     valor_sugerido: String::new(),
+                    renegociar: FormRenegociar::default(),
                 };
             }
         }

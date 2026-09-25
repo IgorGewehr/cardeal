@@ -260,6 +260,7 @@ pub(super) fn lista(
                 motivo_estorno: String::new(),
                 situacao: None,
                 valor_sugerido: String::new(),
+                renegociar: FormRenegociar::default(),
             };
         }
     }
