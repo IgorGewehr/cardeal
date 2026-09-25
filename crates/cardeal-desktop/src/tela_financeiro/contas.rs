@@ -1,0 +1,273 @@
+//! As abas "A receber" / "A pagar": período, indicadores e a grade de parcelas.
+
+use super::*;
+
+/// O seletor de período das abas "A receber"/"A pagar" — presets de calendário + uma faixa
+/// digitada (`PresetPeriodo::Personalizado`). Devolve `true` quando o período mudou e a
+/// tela precisa recarregar.
+pub(super) fn seletor_periodo(ui: &mut egui::Ui, filtro: &mut FiltroPeriodo) -> bool {
+    let mut mudou = false;
+    ui.horizontal_wrapped(|ui| {
+        ui.add(Rotulo::campo("PERÍODO"));
+        for (preset, rot) in [
+            (PresetPeriodo::Dia, "Dia"),
+            (PresetPeriodo::Semana, "Semana"),
+            (PresetPeriodo::Mes, "Mês"),
+            (PresetPeriodo::Trimestre, "Trimestre"),
+            (PresetPeriodo::Semestre, "Semestre"),
+            (PresetPeriodo::Ano, "Ano"),
+            (PresetPeriodo::Personalizado, "Personalizado"),
+        ] {
+            let sel = filtro.preset == preset;
+            let b = if sel {
+                Botao::primario(rot).pequeno()
+            } else {
+                Botao::fantasma(rot).pequeno()
+            };
+            if ui.add(b).clicked() && !sel {
+                filtro.preset = preset;
+                if preset == PresetPeriodo::Personalizado {
+                    let hoje = Data::hoje(Fuso::BRASILIA).to_string();
+                    if filtro.de_personalizado.is_empty() {
+                        filtro.de_personalizado = hoje.clone();
+                    }
+                    if filtro.ate_personalizado.is_empty() {
+                        filtro.ate_personalizado = hoje;
+                    }
+                } else {
+                    mudou = true;
+                }
+            }
+        }
+    });
+    if filtro.preset == PresetPeriodo::Personalizado {
+        ui.add_space(Espaco::E8);
+        ui.horizontal(|ui| {
+            ui.add(Campo::novo("De", &mut filtro.de_personalizado).mascara(Mascara::Data));
+            ui.add_space(Espaco::E8);
+            ui.add(Campo::novo("Até", &mut filtro.ate_personalizado).mascara(Mascara::Data));
+            ui.add_space(Espaco::E8);
+            if ui.add(Botao::secundario("Aplicar")).clicked() {
+                mudou = true;
+            }
+        });
+    }
+    mudou
+}
+
+pub(super) fn lista(
+    ui: &mut egui::Ui,
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaFinanceiro,
+) {
+    if seletor_periodo(ui, &mut estado.periodo) {
+        estado.carregar_parcelas_periodo(motor, sessao);
+    }
+    ui.add_space(Espaco::E12);
+
+    let hoje = Data::hoje(Fuso::BRASILIA);
+    let periodo = estado.periodo.resolver(hoje);
+    let a_receber = estado.aba.a_receber();
+
+    // Os dois cards pedidos explicitamente pelo usuário: quanto foi de fato recebido/pago
+    // no período (baixas, não vencimento) e a projeção do que ainda vai vencer — nunca
+    // some da tela mesmo com a lista vazia, pra sempre dar pra ver "nada aconteceu nesse
+    // período" com números, não um vazio mudo.
+    let vencidas = estado
+        .parcelas
+        .iter()
+        .filter(|p| p.estado.aceita_baixa() && p.vencimento < hoje)
+        .count();
+    FaixaKpi::nova(vec![
+        CartaoKpi::novo(
+            if a_receber {
+                "Recebido no período"
+            } else {
+                "Pago no período"
+            },
+            estado.baixado_periodo,
+        ),
+        CartaoKpi::contagem("Vencidas", vencidas),
+        CartaoKpi::novo(
+            format!("Projeção até {}", periodo.ate.formatar_curta()),
+            estado.projecao_periodo,
+        ),
+    ])
+    .mostrar(ui);
+    ui.add_space(Espaco::E16);
+
+    if estado.parcelas.is_empty() {
+        let msg = if a_receber {
+            "Nada a receber nesse período."
+        } else {
+            "Nada a pagar nesse período."
+        };
+        EstadoVazio::novo(Icone::Dinheiro, msg).mostrar(ui);
+        return;
+    }
+
+    BarraFiltros::nova(&mut estado.busca)
+        .marcador("Buscar por cliente/fornecedor")
+        .filtro(|ui| {
+            SeletorOpcao::novo("Situação", &mut estado.filtro_situacao)
+                .sem_rotulo()
+                .placeholder("Todas as parcelas")
+                .opcao(FiltroParcelas::Todas, "Todas as parcelas")
+                .opcao(FiltroParcelas::EmAberto, "Em aberto")
+                .opcao(FiltroParcelas::Vencidas, "Vencidas")
+                .opcao(
+                    FiltroParcelas::Quitadas,
+                    if a_receber { "Recebidas" } else { "Pagas" },
+                )
+                .mostrar(ui);
+        })
+        .mostrar(ui);
+
+    let situacao = estado.filtro_situacao.unwrap_or(FiltroParcelas::Todas);
+    let indices = estado.parcelas_filtradas(situacao, hoje);
+    // "Valor" é o da parcela; o que já entrou/saiu e o que falta ficam em colunas próprias —
+    // antes só existia "Saldo", e uma parcela quitada aparecia como R$ 0,00, apagando o valor
+    // real que ela teve.
+    let rotulo_baixado = if a_receber { "Recebido" } else { "Pago" };
+    let colunas = vec![
+        ColunaGrade::nova("Contraparte"),
+        ColunaGrade::nova("Parc.").largura(60.0).numero(),
+        ColunaGrade::nova("Vencimento").largura(120.0),
+        ColunaGrade::nova("Valor").largura(130.0).numero(),
+        ColunaGrade::nova(rotulo_baixado).largura(130.0).numero(),
+        ColunaGrade::nova("Saldo").largura(130.0).numero(),
+        ColunaGrade::nova("Estado").largura(120.0),
+    ];
+    let resposta = Grade::nova(colunas)
+        .selecionavel(None)
+        .ordenacao(estado.ordenacao.atual())
+        .vazio("Nenhuma parcela para essa busca.")
+        .mostrar(ui, indices.len(), |i, row| {
+            let p = &estado.parcelas[indices[i]];
+            row.col(|ui| {
+                ui.add(Rotulo::interface(estado.nome_contraparte(&p.contraparte)));
+            });
+            row.col(|ui| {
+                ui.add(Rotulo::interface(p.numero.to_string()));
+            });
+            // Vermelho só para o que está em aberto e passou do prazo: uma parcela já
+            // recebida com vencimento antigo não é problema nenhum.
+            let vencida = p.estado.aceita_baixa() && p.vencimento < hoje;
+            row.col(|ui| {
+                let r = Rotulo::interface(p.vencimento.to_string());
+                ui.add(if vencida {
+                    r.cor(ui.cores().negativo)
+                } else {
+                    r
+                });
+            });
+            row.col(|ui| {
+                ui.add(ValorDinheiro::novo(p.valor_original).neutro());
+            });
+            row.col(|ui| {
+                if p.valor_baixado.e_zero() {
+                    ui.add(Rotulo::interface("—").cor(ui.cores().texto_fraco));
+                } else {
+                    ui.add(ValorDinheiro::novo(p.valor_baixado));
+                }
+            });
+            row.col(|ui| {
+                // O saldo só faz sentido enquanto a parcela está em aberto.
+                if p.estado.aceita_baixa() && !p.saldo().e_zero() {
+                    ui.add(ValorDinheiro::novo(p.saldo()).neutro());
+                } else {
+                    ui.add(Rotulo::interface("—").cor(ui.cores().texto_fraco));
+                }
+            });
+            row.col(|ui| {
+                ui.add(etiqueta_estado_parcela(p.estado, vencida, a_receber));
+            });
+        });
+
+    if let Some((coluna, direcao)) = estado.ordenacao.clicar(&resposta) {
+        let nomes = estado.nomes.clone();
+        ordenar_parcelas(&mut estado.parcelas, &nomes, coluna, direcao);
+    }
+    if let Some(i) = resposta.linha_clicada {
+        let p = &estado.parcelas[indices[i]];
+        // Em aberto abre para dar baixa; quitada abre para consulta (histórico e estorno).
+        // Cancelada/renegociada não têm o que fazer aqui.
+        if matches!(
+            p.estado,
+            EstadoParcela::Aberta | EstadoParcela::Parcial | EstadoParcela::Quitada
+        ) {
+            estado.dlg = Dlg::Baixar {
+                parcela: p.parcela,
+                valor: p.saldo().formatar(),
+                data: Data::hoje(Fuso::BRASILIA).to_string(),
+                pagamento: crate::pagamento::EstadoPagamento::novo(MeioPagamento::Pix),
+                baixas: Vec::new(),
+                baixas_carregadas: false,
+                motivo_estorno: String::new(),
+            };
+        }
+    }
+}
+
+/// Etiqueta colorida para o estado de uma parcela — a lista mostra qualquer estado agora
+/// (`parcelas_no_periodo` não filtra), então além de `Aberta`/`Parcial` também chega
+/// `Quitada`/`Cancelada`/`Renegociada` (rótulo neutro, caso padrão). Vencida pesa mais que
+/// o estado em si, por isso entra primeiro na escolha do tom. Quitada é verde e diz "Recebida"
+/// ou "Paga" conforme a aba — o que o usuário quer ler, não o termo do backend.
+pub(super) fn etiqueta_estado_parcela(
+    estado: EstadoParcela,
+    vencida: bool,
+    a_receber: bool,
+) -> Etiqueta {
+    match (estado, vencida) {
+        (EstadoParcela::Quitada, _) => {
+            Etiqueta::positiva(if a_receber { "Recebida" } else { "Paga" })
+        }
+        (EstadoParcela::Parcial, true) => Etiqueta::negativa("Parcial · vencida"),
+        (EstadoParcela::Parcial, false) => Etiqueta::info("Parcial"),
+        (EstadoParcela::Aberta, true) => Etiqueta::negativa("Vencida"),
+        (EstadoParcela::Aberta, false) => Etiqueta::neutra("Aberta"),
+        (outro, _) => Etiqueta::neutra(outro.rotulo()),
+    }
+}
+
+/// Ordena `parcelas` pela coluna clicada no cabeçalho da [`Grade`] de `lista` (mesma ordem
+/// das colunas: Contraparte, Parc., Vencimento, Valor, Recebido/Pago, Saldo, Estado). `nomes` resolve o nome de
+/// exibição da contraparte — a própria coluna 0 ordena por ele, não pelo id.
+pub(super) fn ordenar_parcelas(
+    parcelas: &mut [ItemTituloEmAberto],
+    nomes: &HashMap<Id, String>,
+    coluna: usize,
+    direcao: Direcao,
+) {
+    let nome_de = |p: &ItemTituloEmAberto| -> String {
+        let Some(c) = p.contraparte else {
+            return String::new();
+        };
+        let id = match c {
+            Contraparte::Cliente(i)
+            | Contraparte::Fornecedor(i)
+            | Contraparte::Funcionario(i)
+            | Contraparte::Socio(i)
+            | Contraparte::Outro(i) => i,
+        };
+        nomes.get(&id).cloned().unwrap_or_default()
+    };
+    parcelas.sort_by(|a, b| {
+        let ordem = match coluna {
+            0 => nome_de(a).cmp(&nome_de(b)),
+            1 => a.numero.cmp(&b.numero),
+            2 => a.vencimento.cmp(&b.vencimento),
+            3 => a.valor_original.cmp(&b.valor_original),
+            4 => a.valor_baixado.cmp(&b.valor_baixado),
+            5 => a.saldo().cmp(&b.saldo()),
+            6 => a.estado.rotulo().cmp(b.estado.rotulo()),
+            _ => std::cmp::Ordering::Equal,
+        };
+        match direcao {
+            Direcao::Ascendente => ordem,
+            Direcao::Descendente => ordem.reverse(),
+        }
+    });
+}
