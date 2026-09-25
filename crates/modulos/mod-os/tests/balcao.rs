@@ -160,6 +160,7 @@ impl Balcao {
                 defeito_relatado: defeito.to_owned(),
                 tecnico_responsavel: Id::novo(),
                 garantia_dias: 90,
+                ficha: mod_os::FichaEntrada::default(),
             },
         )
         .unwrap()
@@ -235,6 +236,7 @@ fn abrir_com_cliente_novo_grava_os_dois_juntos() {
                 defeito_relatado: "Não carrega".to_owned(),
                 tecnico_responsavel: Id::novo(),
                 garantia_dias: 90,
+                ficha: mod_os::FichaEntrada::default(),
             },
         )
         .unwrap();
@@ -257,6 +259,7 @@ fn abrir_com_cliente_novo_que_falha_nao_deixa_cliente_orfao() {
                 defeito_relatado: "   ".to_owned(),
                 tecnico_responsavel: Id::novo(),
                 garantia_dias: 90,
+                ficha: mod_os::FichaEntrada::default(),
             },
         )
         .unwrap_err();
@@ -282,6 +285,7 @@ fn abrir_com_cliente_novo_exige_permissao_de_cadastrar_cliente() {
                 defeito_relatado: "Não carrega".to_owned(),
                 tecnico_responsavel: Id::novo(),
                 garantia_dias: 90,
+                ficha: mod_os::FichaEntrada::default(),
             },
         )
         .unwrap_err();
@@ -475,4 +479,49 @@ fn ordens_por_id_devolve_varias_numa_consulta_e_ignora_ids_desconhecidos() {
     let mut numeros: Vec<u64> = v.iter().map(|o| o.numero).collect();
     numeros.sort_unstable();
     assert_eq!(numeros, vec![a.numero, c.numero]);
+}
+
+#[test]
+fn ficha_de_entrada_e_gravada_na_abertura_e_corrigida_depois() {
+    let b = Balcao::novo(&[TODAS, &["os.ordem.editar_dados"]].concat());
+    let joao = b.cliente("João");
+    let hoje = cardeal_kernel::Data::hoje(cardeal_kernel::Fuso::BRASILIA);
+    let aberta: OrdemServicoAberta = b
+        .cmd(
+            "os.abrir_ordem_servico.v1",
+            &AbrirOrdemServico {
+                cliente: joao,
+                equipamento: "iPhone 12".to_owned(),
+                defeito_relatado: "Tela".to_owned(),
+                tecnico_responsavel: Id::novo(),
+                garantia_dias: 90,
+                ficha: mod_os::FichaEntrada {
+                    previsao_entrega: Some(hoje.mais_dias(3)),
+                    numero_serie: "IMEI 3567".to_owned(),
+                    acessorios: "Capinha azul".to_owned(),
+                },
+            },
+        )
+        .unwrap();
+    let f = b.detalhe(aberta.ordem_servico).ordem.ficha;
+    assert_eq!(f.previsao_entrega, Some(hoje.mais_dias(3)));
+    assert_eq!(f.numero_serie, "IMEI 3567");
+
+    // A peça atrasou: a previsão muda, o resto fica.
+    b.cmd::<()>(
+        "os.editar_dados_da_ordem.v1",
+        &mod_os::EditarDadosDaOrdem {
+            ordem_servico: aberta.ordem_servico,
+            equipamento: None,
+            complemento_defeito_relatado: None,
+            ficha: Some(mod_os::FichaEntrada {
+                previsao_entrega: Some(hoje.mais_dias(10)),
+                ..f
+            }),
+        },
+    )
+    .unwrap();
+    let f = b.detalhe(aberta.ordem_servico).ordem.ficha;
+    assert_eq!(f.previsao_entrega, Some(hoje.mais_dias(10)));
+    assert_eq!(f.acessorios, "Capinha azul");
 }

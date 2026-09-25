@@ -27,6 +27,8 @@ pub(super) fn dialogo_editar_dados(
                     )
                     .marcador("acrescenta ao relato original, não substitui"),
                 );
+                ui.add_space(Espaco::E12);
+                estado.editar_ficha.mostrar(ui);
             },
             |ui, estado| {
                 let clicou = ui.add(Botao::primario("Salvar")).clicked();
@@ -35,6 +37,13 @@ pub(super) fn dialogo_editar_dados(
                         .then(|| estado.editar_equipamento.clone());
                     let complemento = (!estado.editar_complemento_defeito.trim().is_empty())
                         .then(|| estado.editar_complemento_defeito.clone());
+                    let ficha = match estado.editar_ficha.validada() {
+                        Ok(f) => f,
+                        Err(msg) => {
+                            notificar(ui.ctx(), Notificacao::aviso(msg));
+                            return;
+                        }
+                    };
                     match motor.executar(
                         sessao,
                         "os.editar_dados_da_ordem.v1",
@@ -42,6 +51,7 @@ pub(super) fn dialogo_editar_dados(
                             ordem_servico,
                             equipamento,
                             complemento_defeito_relatado: complemento,
+                            ficha: Some(ficha),
                         },
                     ) {
                         Ok(()) => {
@@ -107,6 +117,7 @@ pub(super) fn dialogo_nova(
                     end_cep,
                     equipamento,
                     defeito_relatado,
+                    ficha,
                 } = &mut estado.dlg
                 else {
                     return;
@@ -187,6 +198,8 @@ pub(super) fn dialogo_nova(
                     Campo::novo("Aparelho — o que o cliente trouxe para reparo", equipamento)
                         .marcador("ex.: Furadeira Bosch GSB 13"),
                 );
+                ui.add_space(Espaco::E12);
+                ficha.mostrar(ui);
             },
             |ui, estado| {
                 if ui.add(Botao::primario("Abrir OS")).clicked() || enter {
@@ -224,9 +237,17 @@ pub(super) fn abrir_os(
         end_cep,
         equipamento,
         defeito_relatado,
+        ficha,
     } = &estado.dlg
     else {
         return;
+    };
+    let ficha = match ficha.validada() {
+        Ok(f) => f,
+        Err(msg) => {
+            notificar(ctx, Notificacao::aviso(msg));
+            return;
+        }
     };
     let (cliente_novo, cliente_sel) = (*cliente_novo, *cliente_sel);
     let nome = nome.clone();
@@ -333,6 +354,7 @@ pub(super) fn abrir_os(
                     defeito_relatado,
                     tecnico_responsavel,
                     garantia_dias: 90,
+                    ficha,
                 },
             )
             .map(|r: OrdemComClienteNovoAberta| r.ordem)
@@ -346,6 +368,7 @@ pub(super) fn abrir_os(
                 defeito_relatado,
                 tecnico_responsavel,
                 garantia_dias: 90,
+                ficha,
             },
         )
     } else {

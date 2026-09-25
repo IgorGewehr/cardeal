@@ -8,6 +8,39 @@ use serde::{Deserialize, Serialize};
 
 use crate::erros::ErroOs;
 
+/// O que o balcão anota ao receber o aparelho, além do defeito: quando promete devolver, o
+/// que identifica o aparelho e o que veio junto. Tudo opcional — a abertura continua exigindo
+/// só cliente, aparelho e defeito.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FichaEntrada {
+    /// A data prometida ao cliente. Com ela a lista mostra o que está atrasado.
+    pub previsao_entrega: Option<Data>,
+    /// Número de série, IMEI ou etiqueta do fabricante — separa dois aparelhos iguais do
+    /// mesmo cliente e vale na hora de acionar garantia.
+    pub numero_serie: String,
+    /// Acessórios e condição na entrada ("carregador, sem capinha, tela trincada no canto")
+    /// — evita a discussão "eu deixei o carregador aqui".
+    pub acessorios: String,
+}
+
+impl FichaEntrada {
+    /// A ficha com os textos aparados (espaço em volta não conta como conteúdo).
+    #[must_use]
+    pub fn normalizada(self) -> Self {
+        Self {
+            previsao_entrega: self.previsao_entrega,
+            numero_serie: self.numero_serie.trim().to_owned(),
+            acessorios: self.acessorios.trim().to_owned(),
+        }
+    }
+
+    /// Verdadeiro se a previsão existe e já passou em `hoje`.
+    #[must_use]
+    pub fn atrasada_em(&self, hoje: Data) -> bool {
+        self.previsao_entrega.is_some_and(|p| p < hoje)
+    }
+}
+
 /// O estado de uma [`OrdemServico`] (`docs/modulos/os.md` §4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum EstadoOs {
@@ -110,6 +143,8 @@ pub struct OrdemServico {
     /// seguir para aprovação e faturamento (`ErroOs::OrcamentoVazio` recusa "sem item nenhum",
     /// não "soma zero").
     pub itens_orcamento: u32,
+    /// Previsão de entrega, nº de série e acessórios anotados na recepção.
+    pub ficha: FichaEntrada,
     /// Versão para bloqueio otimista.
     pub versao: Versao,
 }
@@ -156,6 +191,7 @@ impl OrdemServico {
             garantia_dias,
             valor_total: Dinheiro::ZERO,
             itens_orcamento: 0,
+            ficha: FichaEntrada::default(),
             versao: Versao::INICIAL,
         })
     }
@@ -193,6 +229,18 @@ impl OrdemServico {
             return Err(ErroOs::EquipamentoVazio);
         }
         self.equipamento = equipamento;
+        self.versao = self.versao.proxima();
+        Ok(())
+    }
+
+    /// Substitui a ficha de entrada (previsão, nº de série, acessórios) — corrigível enquanto
+    /// a OS não é finalizada (a previsão costuma mudar quando a peça atrasa).
+    ///
+    /// # Errors
+    /// [`ErroOs::OrdemFinalizada`].
+    pub fn atualizar_ficha(&mut self, ficha: FichaEntrada) -> Result<(), ErroOs> {
+        self.exigir_nao_finalizada()?;
+        self.ficha = ficha.normalizada();
         self.versao = self.versao.proxima();
         Ok(())
     }
@@ -524,6 +572,30 @@ mod testes {
         )
         .unwrap_err();
         assert_eq!(erro, ErroOs::EquipamentoVazio);
+    }
+
+    #[test]
+    fn ficha_normaliza_textos_e_sabe_se_esta_atrasada() {
+        let mut os = os_aberta();
+        let hoje = Data::de_ymd(2026, 9, 25).unwrap();
+        os.atualizar_ficha(FichaEntrada {
+            previsao_entrega: Some(hoje.mais_dias(-1)),
+            numero_serie: "  IMEI 356789  ".to_owned(),
+            acessorios: " carregador ".to_owned(),
+        })
+        .unwrap();
+        assert_eq!(os.ficha.numero_serie, "IMEI 356789");
+        assert_eq!(os.ficha.acessorios, "carregador");
+        assert!(os.ficha.atrasada_em(hoje));
+        assert!(!os.ficha.atrasada_em(hoje.mais_dias(-1)));
+        assert!(!FichaEntrada::default().atrasada_em(hoje));
+    }
+
+    #[test]
+    fn ficha_nao_muda_depois_de_finalizada() {
+        let mut os = os_aberta();
+        os.cancelar().unwrap();
+        assert!(os.atualizar_ficha(FichaEntrada::default()).is_err());
     }
 
     #[test]

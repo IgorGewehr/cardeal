@@ -475,3 +475,28 @@ fn nome_mes(comp: Competencia) -> String {
     let i = (comp.mes().clamp(1, 12) - 1) as usize;
     format!("{}/{:02}", M[i], comp.ano() % 100)
 }
+
+#[cfg(feature = "demo")]
+impl EstadoTelaFinanceiro {
+    /// Leva a tela à cena de demonstração (`demo_app`).
+    pub fn preparar_demo(&mut self, motor: &MotorLocal, sessao: &SessaoLocal, cena: &str) {
+        if cena != "financeiro" {
+            self.aba = Aba::Receber;
+            self.periodo.preset = PresetPeriodo::Trimestre;
+        }
+        self.carregar(motor, sessao);
+        if cena == "financeiro-baixa" {
+            if let Some(p) = self.parcelas.first() {
+                self.dlg = Dlg::Baixar {
+                    parcela: p.parcela,
+                    valor: p.saldo().formatar(),
+                    data: Data::hoje(Fuso::BRASILIA).to_string(),
+                    pagamento: crate::pagamento::EstadoPagamento::novo(MeioPagamento::Pix),
+                    baixas: Vec::new(),
+                    baixas_carregadas: false,
+                    motivo_estorno: String::new(),
+                };
+            }
+        }
+    }
+}

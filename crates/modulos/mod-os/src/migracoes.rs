@@ -100,6 +100,15 @@ ALTER TABLE os_item_peca ADD COLUMN lote BLOB;
 ALTER TABLE os_item_peca ADD COLUMN estornada INTEGER NOT NULL DEFAULT 0 CHECK (estornada IN (0,1));
 ";
 
+// Migração v6 (2026-09-25): ficha de entrada — previsão de entrega (para a lista mostrar o
+// que está atrasado), nº de série/IMEI e acessórios/condição na recepção. Aditiva, com
+// DEFAULT: as OS existentes ficam sem previsão e com os textos vazios.
+const SQL_FICHA_ENTRADA: &str = r"
+ALTER TABLE os_ordem_servico ADD COLUMN previsao_entrega INTEGER;
+ALTER TABLE os_ordem_servico ADD COLUMN numero_serie TEXT NOT NULL DEFAULT '';
+ALTER TABLE os_ordem_servico ADD COLUMN acessorios TEXT NOT NULL DEFAULT '';
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -129,6 +138,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 5,
         nome: "os_item_peca_rastreabilidade_e_estorno",
         sql: SQL_RASTREABILIDADE_E_ESTORNO_DE_PECA,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 6,
+        nome: "os_ficha_entrada",
+        sql: SQL_FICHA_ENTRADA,
         tipo: TipoMigracao::Esquema,
     },
 ];

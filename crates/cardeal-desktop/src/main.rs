@@ -6,6 +6,8 @@
 //! inteira; criar/ver um item acontece num `Dialogo` (regra de UI do projeto). Telas com UI:
 //! Ordens de Serviço e Estoque; as demais mostram `tela_em_construcao` (backend já responde).
 
+#[cfg(feature = "demo")]
+mod demo_app;
 mod pagamento;
 mod tela_agenda;
 mod tela_clientes;
@@ -406,6 +408,19 @@ struct EstadoAutenticado {
 }
 
 impl EstadoAutenticado {
+    /// Leva o app à cena pedida pela demo (`demo_app`).
+    #[cfg(feature = "demo")]
+    fn preparar_demo(&mut self, motor: &MotorLocal, cena: &str) {
+        let s = &self.sessao;
+        if cena.starts_with("financeiro") {
+            self.area = Area::Financeiro;
+            self.financeiro.preparar_demo(motor, s, cena);
+        } else {
+            self.area = Area::Os;
+            self.os.preparar_demo(motor, s, cena);
+        }
+    }
+
     /// Recarrega a área ativa — F5, e o ponto único caso outra coisa precise forçar refresh.
     fn recarregar_area(&mut self, motor: &MotorLocal) {
         let s = &self.sessao;
@@ -528,6 +543,9 @@ struct App {
         std::sync::mpsc::Receiver<MsgAtualizador>,
     ),
     atualizacao_disponivel: Option<VersaoDisponivel>,
+    /// Captura de demonstração (`--features demo`, ver `demo_app`).
+    #[cfg(feature = "demo")]
+    demo: Option<demo_app::Captura>,
     verificando_atualizacao: bool,
 }
 
@@ -568,10 +586,25 @@ impl App {
             canal_atualizacao: canal,
             atualizacao_disponivel: None,
             verificando_atualizacao: true,
+            #[cfg(feature = "demo")]
+            demo: demo_app::Captura::do_ambiente(),
         }
     }
 
     fn carregar(&mut self) {
+        #[cfg(feature = "demo")]
+        if let Some(demo) = &self.demo {
+            let motor = MotorLocal::abrir(&demo.base, &modulos(), &pedido_ativacao())
+                .expect("abrir a base da demo");
+            let sessao = demo_app::semear(&motor);
+            let cena = demo.cena.clone();
+            self.motor = Some(motor);
+            self.entrar(sessao);
+            if let (Tela::Autenticado(estado), Some(motor)) = (&mut self.tela, &self.motor) {
+                estado.preparar_demo(motor, &cena);
+            }
+            return;
+        }
         match MotorLocal::abrir(&caminho_da_base(), &modulos(), &pedido_ativacao()) {
             Ok(motor) => {
                 let precisa_config = motor.precisa_de_configuracao_inicial().unwrap_or(true);
@@ -1032,6 +1065,11 @@ impl eframe::App for App {
 
         // Toasts — por último, para ficar acima de tudo (inclusive de qualquer dialog).
         Notificacoes::mostrar(ctx);
+
+        #[cfg(feature = "demo")]
+        if let Some(demo) = &mut self.demo {
+            demo.quadro(ctx);
+        }
     }
 }
 

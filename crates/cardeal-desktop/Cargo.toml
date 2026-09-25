@@ -14,7 +14,7 @@ path = "src/main.rs"
 
 # Conferência visual do PDV com dados fictícios (`cargo run --example pdv_demo --features demo`).
 [features]
-demo = []
+demo = ["dep:tempfile"]
 
 [[example]]
 name              = "pdv_demo"
@@ -48,6 +48,9 @@ tracing-subscriber.workspace = true
 image.workspace       = true
 rfd.workspace         = true
 open.workspace        = true
+
+# Só para `--features demo` (banco temporário da captura do app inteiro).
+tempfile = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile.workspace = true

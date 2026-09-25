@@ -27,16 +27,21 @@ pub(super) fn lista(
         .ativas
         .iter()
         .fold(Dinheiro::ZERO, |acc, os| acc + os.valor_total);
-    let aguardando_cliente = estado
-        .ativas
-        .iter()
-        .filter(|os| os.estado == EstadoOs::AguardandoAprovacao)
-        .count();
+    let hoje = Data::hoje(Fuso::BRASILIA);
+    let contar =
+        |f: &dyn Fn(&OrdemServico) -> bool| estado.ativas.iter().filter(|os| f(os)).count();
+    let atrasadas = contar(&|os| os.ficha.atrasada_em(hoje));
+    let aguardando_cliente = contar(&|os| os.estado == EstadoOs::AguardandoAprovacao);
+    let prontas = contar(&|os| os.estado == EstadoOs::Concluida);
     FaixaKpi::nova(vec![
-        CartaoKpi::contagem("Ordens em aberto", estado.ativas.len()),
-        CartaoKpi::novo("Valor em aberto", valor_parado).variacao("soma do total de cada OS"),
+        CartaoKpi::contagem("Ordens em aberto", estado.ativas.len()).variacao(format!(
+            "{} em serviços",
+            valor_parado.formatar_com_simbolo()
+        )),
+        CartaoKpi::contagem("Atrasadas", atrasadas).variacao("passaram da previsão"),
         CartaoKpi::contagem("Aguardando aprovação", aguardando_cliente)
             .variacao("orçamento com o cliente"),
+        CartaoKpi::contagem("Prontas", prontas).variacao("avisar o cliente e faturar"),
     ])
     .mostrar(ui);
 
@@ -75,6 +80,7 @@ pub(super) fn lista(
         ColunaGrade::nova("Aparelho"),
         ColunaGrade::nova("Cliente").largura(180.0),
         ColunaGrade::nova("Estado").largura(170.0),
+        ColunaGrade::nova("Previsão").largura(150.0),
         ColunaGrade::nova("Total").largura(110.0).numero(),
         ColunaGrade::nova("Ações").largura(190.0),
     ];
@@ -101,6 +107,14 @@ pub(super) fn lista(
                 let (rotulo, tom) = estado_etiqueta(os.estado);
                 ui.add(Etiqueta::nova(rotulo, tom));
             });
+            row.col(|ui| match etiqueta_previsao(os, hoje) {
+                Some(e) => {
+                    ui.add(e);
+                }
+                None => {
+                    ui.add(Rotulo::interface("—").cor(ui.cores().texto_fraco));
+                }
+            });
             row.col(|ui| {
                 ui.add(ValorDinheiro::novo(os.valor_total));
             });
@@ -114,6 +128,7 @@ pub(super) fn lista(
                             os.id,
                             os.equipamento.clone(),
                             equipamento_label(os).to_owned(),
+                            FormFicha::de(&os.ficha),
                         )
                     });
             });
@@ -122,10 +137,11 @@ pub(super) fn lista(
     if let Some((coluna, direcao)) = estado.ordenacao.clicar(&resposta) {
         ordenar_ordens(&mut estado.ordens, &estado.clientes, coluna, direcao);
     }
-    if let Some((acao, id, equipamento, rotulo)) = acao_clicada {
+    if let Some((acao, id, equipamento, rotulo, ficha)) = acao_clicada {
         match acao {
             AcaoRegistro::Editar => {
                 estado.editar_equipamento = equipamento;
+                estado.editar_ficha = ficha;
                 estado.editar_complemento_defeito.clear();
                 estado.dlg = Dlg::EditarDados(id);
             }
@@ -151,7 +167,14 @@ pub(super) fn ordenar_ordens(
             1 => equipamento_label(a).cmp(equipamento_label(b)),
             2 => nome_cliente(clientes, a.cliente).cmp(nome_cliente(clientes, b.cliente)),
             3 => estado_etiqueta(a.estado).0.cmp(estado_etiqueta(b.estado).0),
-            4 => a.valor_total.cmp(&b.valor_total),
+            // Sem previsão vai para o fim na ordem crescente.
+            4 => match (a.ficha.previsao_entrega, b.ficha.previsao_entrega) {
+                (Some(x), Some(y)) => x.cmp(&y),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => std::cmp::Ordering::Equal,
+            },
+            5 => a.valor_total.cmp(&b.valor_total),
             _ => std::cmp::Ordering::Equal,
         };
         match direcao {

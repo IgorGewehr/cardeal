@@ -112,6 +112,7 @@ fn cenario() -> Cenario {
                 defeito_relatado: "Tela quebrada".to_owned(),
                 tecnico_responsavel: sessao.usuario(),
                 garantia_dias: 90,
+                ficha: mod_os::FichaEntrada::default(),
             },
         )
         .expect("abrir OS");
@@ -448,4 +449,74 @@ fn busca_da_lista_acha_pelo_nome_do_cliente_e_respeita_o_status() {
     assert!(c.estado.ordens.is_empty());
     // Os indicadores continuam olhando a fila ativa inteira.
     assert_eq!(c.estado.ativas.len(), 1);
+}
+
+#[test]
+fn peca_escolhida_sugere_quantidade_1_e_o_ultimo_preco_cobrado() {
+    let mut c = cenario();
+    let _: Id = c
+        .motor
+        .executar(
+            &c.sessao,
+            "os.montar_orcamento.v1",
+            &MontarOrcamentoOs {
+                ordem_servico: c.os,
+                item: ItemOrcamentoNovo::Peca {
+                    produto: c.produto,
+                    quantidade: Quantidade::unidades(1),
+                    preco_unitario: Preco::reais(245),
+                },
+            },
+        )
+        .expect("peça");
+    c.estado.limpar_campos();
+    sugerir_preco(&c.motor, &c.sessao, &mut c.estado, c.produto);
+    assert_eq!(c.estado.peca_qtd, "1");
+    assert_eq!(c.estado.peca_preco, "245,00");
+    assert!(c.estado.peca_preco_dica.starts_with("Último preço"));
+}
+
+#[test]
+fn nova_os_grava_a_ficha_e_a_lista_conta_a_atrasada() {
+    let mut c = cenario();
+    c.estado.dlg = Dlg::nova();
+    let cliente = c.estado.ordens[0].cliente;
+    if let Dlg::Nova {
+        cliente_sel,
+        equipamento,
+        defeito_relatado,
+        ficha,
+        ..
+    } = &mut c.estado.dlg
+    {
+        *cliente_sel = Some(cliente);
+        *equipamento = "Tablet".to_owned();
+        *defeito_relatado = "Não carrega".to_owned();
+        ficha.previsao = Data::hoje(Fuso::BRASILIA).mais_dias(-2).to_string();
+        ficha.numero_serie = "SN-778".to_owned();
+    }
+    abrir_os(&c.ctx, &c.motor, &c.sessao, &mut c.estado);
+    let d = c.estado.detalhe.as_ref().expect("detalhe");
+    assert_eq!(d.ordem.ficha.numero_serie, "SN-778");
+    let hoje = Data::hoje(Fuso::BRASILIA);
+    assert_eq!(
+        c.estado
+            .ativas
+            .iter()
+            .filter(|o| o.ficha.atrasada_em(hoje))
+            .count(),
+        1
+    );
+    // O histórico do aparelho da OS nova não inclui ela mesma nem o notebook do cenário.
+    assert!(c.estado.historico.is_empty());
+}
+
+#[test]
+fn mensagem_do_whatsapp_acompanha_o_estado_da_os() {
+    let mut c = cenario();
+    c.estado.abrir_detalhe(&c.motor, &c.sessao, c.os);
+    let d = c.estado.detalhe.clone().expect("detalhe");
+    let msg = mensagem_whatsapp(&c.estado, &d);
+    assert!(msg.starts_with("Olá, Cliente!"), "{msg}");
+    assert!(msg.contains("Recebemos seu Notebook"), "{msg}");
 }

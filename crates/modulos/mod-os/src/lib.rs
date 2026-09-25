@@ -90,12 +90,12 @@ pub use consultas::{
     ApontamentosDaOrdem, BuscarDetalheOrdem, BuscarOrdens, DetalheOrdem, FiltroEstadoOs,
     HistoricoDoEquipamento, ItemAguardandoEstoque, OrdensAguardandoAprovacao, OrdensEmAberto,
     OrdensPorId, PecasAguardandoEstoque, TempoPorTecnicoNoPeriodo, TempoTotalDaOrdem,
-    TodasAsOrdens,
+    TodasAsOrdens, UltimoPrecoDaPeca,
 };
 pub use erros::ErroOs;
 pub use execucao::{ItemMaoDeObra, ItemPeca};
 pub use laudo::LaudoTecnico;
 pub use manifesto::{manifesto, MANIFESTO};
 pub use modulo::ModuloOs;
-pub use ordem::{EstadoOs, OrdemServico};
+pub use ordem::{EstadoOs, FichaEntrada, OrdemServico};
 pub use repositorio::RepositorioOs;

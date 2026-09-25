@@ -14,7 +14,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use crate::apontamento::ApontamentoDeTempo;
 use crate::execucao::{ItemMaoDeObra, ItemPeca};
 use crate::laudo::LaudoTecnico;
-use crate::ordem::{EstadoOs, OrdemServico};
+use crate::ordem::{EstadoOs, FichaEntrada, OrdemServico};
 
 #[allow(clippy::needless_pass_by_value)] // usado como `.map_err(persist)`
 pub(crate) fn persist(e: rusqlite::Error) -> Erro {
@@ -98,8 +98,8 @@ impl<'a, 'b> RepositorioOs<'a, 'b> {
                 "INSERT INTO os_ordem_servico
                    (id, empresa, numero, cliente, equipamento, defeito_relatado, data_abertura,
                     tecnico_responsavel, estado, aprovado_por, garantia_dias, valor_total,
-                    itens_orcamento, versao)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+                    itens_orcamento, versao, previsao_entrega, numero_serie, acessorios)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)",
                 params![
                     blob(os.id),
                     blob(os.empresa),
@@ -115,6 +115,9 @@ impl<'a, 'b> RepositorioOs<'a, 'b> {
                     os.valor_total.em_centavos(),
                     i64::from(os.itens_orcamento),
                     versao_i64(os.versao),
+                    os.ficha.previsao_entrega.map(dias),
+                    os.ficha.numero_serie,
+                    os.ficha.acessorios,
                 ],
             )
             .map_err(persist)?;
@@ -131,7 +134,8 @@ impl<'a, 'b> RepositorioOs<'a, 'b> {
             .execute(
                 "UPDATE os_ordem_servico
                  SET equipamento = ?2, defeito_relatado = ?3, estado = ?4, aprovado_por = ?5,
-                     valor_total = ?6, itens_orcamento = ?7, versao = ?8
+                     valor_total = ?6, itens_orcamento = ?7, versao = ?8,
+                     previsao_entrega = ?9, numero_serie = ?10, acessorios = ?11
                  WHERE id = ?1",
                 params![
                     blob(os.id),
@@ -142,6 +146,9 @@ impl<'a, 'b> RepositorioOs<'a, 'b> {
                     os.valor_total.em_centavos(),
                     i64::from(os.itens_orcamento),
                     versao_i64(os.versao),
+                    os.ficha.previsao_entrega.map(dias),
+                    os.ficha.numero_serie,
+                    os.ficha.acessorios,
                 ],
             )
             .map_err(persist)?;
@@ -451,6 +458,11 @@ pub(crate) fn ordem_de_linha(r: &rusqlite::Row<'_>) -> rusqlite::Result<OrdemSer
         valor_total: Dinheiro::centavos(r.get::<_, i64>(11)?),
         itens_orcamento: u32::try_from(r.get::<_, i64>(12)?).unwrap_or(0),
         versao: versao_de(r.get::<_, i64>(13)?),
+        ficha: FichaEntrada {
+            previsao_entrega: r.get::<_, Option<i64>>(14)?.map(data_de),
+            numero_serie: r.get(15)?,
+            acessorios: r.get(16)?,
+        },
     })
 }
 

@@ -8,10 +8,12 @@ mod apontamento;
 mod confirmacoes;
 mod detalhe;
 mod faturar;
+mod ficha;
 mod lista;
 mod nova;
 mod orcamento;
 mod pdf;
+mod resumo;
 #[cfg(test)]
 mod testes;
 
@@ -33,6 +35,7 @@ use confirmacoes::*;
 use detalhe::*;
 use eframe::egui;
 use faturar::*;
+use ficha::*;
 use lista::*;
 use mod_clientes::{
     ContatoInicial, CriarPessoa, EnderecoInicial, ItemPessoa, Papel as PapelCliente,
@@ -45,15 +48,16 @@ use mod_os::{
     ApontamentosDaOrdem, AprovarOrcamentoOs, BuscarDetalheOrdem, BuscarOrdens,
     CancelarOrdemServico, ConcluirExecucao, DesfaturarOrdemServico, DetalheOrdem,
     EditarDadosDaOrdem, EncerrarApontamento, EnviarParaAprovacao, EstadoOs, FaturarOrdemServico,
-    FiltroEstadoOs, IniciarApontamento, IniciarExecucao, ItemOrcamentoNovo, MontarOrcamentoOs,
-    OrdemComClienteNovoAberta, OrdemServico, OrdemServicoAberta, OrdemServicoCancelada,
-    OrdemServicoFaturada, OrdensEmAberto, PagamentoNoAto, PecaFoiAplicada, ReabrirOrdemServico,
-    RegistrarLaudo, RemoverItemOrcamento, ReprovarOrcamentoOs, TempoTotalDaOrdem,
-    TipoItemOrcamento,
+    FiltroEstadoOs, HistoricoDoEquipamento, IniciarApontamento, IniciarExecucao, ItemOrcamentoNovo,
+    MontarOrcamentoOs, OrdemComClienteNovoAberta, OrdemServico, OrdemServicoAberta,
+    OrdemServicoCancelada, OrdemServicoFaturada, OrdensEmAberto, PagamentoNoAto, PecaFoiAplicada,
+    ReabrirOrdemServico, RegistrarLaudo, RemoverItemOrcamento, ReprovarOrcamentoOs,
+    TempoTotalDaOrdem, TipoItemOrcamento,
 };
 use nova::*;
 use orcamento::*;
 use pdf::*;
+use resumo::*;
 
 /// Qual dialog está aberto.
 #[derive(Default)]
@@ -89,6 +93,8 @@ enum Dlg {
         /// O que o cliente relatou querer resolver — **obrigatório** (junto do nome do
         /// cliente e do aparelho, os campos que a abertura exige).
         defeito_relatado: String,
+        /// Previsão de entrega, nº de série e acessórios (opcionais).
+        ficha: FormFicha,
     },
     Detalhe,
     /// "Editar dados da ordem" (`EditarDadosDaOrdem`) — corrigir o aparelho e/ou
@@ -119,6 +125,7 @@ impl Dlg {
             end_cep: String::new(),
             equipamento: String::new(),
             defeito_relatado: String::new(),
+            ficha: FormFicha::default(),
         }
     }
 
@@ -190,6 +197,14 @@ pub struct EstadoTelaOs {
     /// Campos do dialog "Editar dados da ordem" (`EditarDadosDaOrdem`).
     editar_equipamento: String,
     editar_complemento_defeito: String,
+    editar_ficha: FormFicha,
+    /// Outras OS do mesmo cliente com aparelho parecido (`os.historico_do_equipamento.v1`).
+    historico: Vec<OrdemServico>,
+    /// Uma OS do histórico que o usuário clicou para abrir — aberta no fim do quadro, fora
+    /// do diálogo que está sendo desenhado.
+    pedido_abrir: Option<Id>,
+    /// De onde veio o preço sugerido da peça ("tabela de preço", "último cobrado…").
+    peca_preco_dica: String,
 
     laudo_problema: String,
     laudo_diagnostico: String,
@@ -327,7 +342,19 @@ impl EstadoTelaOs {
                 self.limpar_campos();
                 self.carregar_apontamentos(motor, sessao, id);
                 self.titulo_gerado = None;
+                self.historico.clear();
                 if let Some(d) = &self.detalhe {
+                    if let Ok(h) = motor.consultar(
+                        sessao,
+                        "os.historico_do_equipamento.v1",
+                        &HistoricoDoEquipamento {
+                            cliente: d.ordem.cliente,
+                            equipamento: d.ordem.equipamento.clone(),
+                            excluir: Some(id),
+                        },
+                    ) {
+                        self.historico = h;
+                    }
                     // O formulário do laudo abre já preenchido: com o defeito relatado se ainda
                     // não há laudo, com o laudo atual se houver (para corrigi-lo).
                     match &d.laudo {
@@ -386,6 +413,7 @@ impl EstadoTelaOs {
         self.peca_busca.clear();
         self.peca_qtd.clear();
         self.peca_preco.clear();
+        self.peca_preco_dica.clear();
         self.aprovador.clear();
     }
 }
@@ -453,7 +481,12 @@ pub fn mostrar(
         AbaOs::Ordens => match estado.dlg {
             Dlg::Fechado => {}
             Dlg::Nova { .. } => dialogo_nova(ui.ctx(), motor, sessao, estado),
-            Dlg::Detalhe => dialogo_detalhe(ui.ctx(), motor, sessao, estado),
+            Dlg::Detalhe => {
+                dialogo_detalhe(ui.ctx(), motor, sessao, estado);
+                if let Some(id) = estado.pedido_abrir.take() {
+                    estado.abrir_detalhe(motor, sessao, id);
+                }
+            }
             Dlg::EditarDados(id) => dialogo_editar_dados(ui.ctx(), motor, sessao, estado, id),
             Dlg::Faturar(_) => dialogo_faturar(ui.ctx(), motor, sessao, estado),
         },
@@ -551,3 +584,25 @@ fn aplicar_e_recarregar<C: cardeal_modkit::Comando + serde::Serialize>(
 }
 
 // ── PDF ──────────────────────────────────────────────────────────────────────
+
+#[cfg(feature = "demo")]
+impl EstadoTelaOs {
+    /// Abre o diálogo da cena de demonstração (`demo_app`).
+    pub fn preparar_demo(&mut self, motor: &MotorLocal, sessao: &SessaoLocal, cena: &str) {
+        self.carregar(motor, sessao);
+        let primeira = self
+            .ordens
+            .iter()
+            .find(|o| o.ficha.acessorios.contains("capinha"));
+        let id = primeira.map_or_else(|| self.ordens[0].id, |o| o.id);
+        match cena {
+            "os-detalhe" => self.abrir_detalhe(motor, sessao, id),
+            "os-nova" => self.dlg = Dlg::nova(),
+            "os-faturar" => {
+                self.abrir_detalhe(motor, sessao, id);
+                self.dlg = Dlg::faturar();
+            }
+            _ => {}
+        }
+    }
+}

@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::erros::ErroOs;
 use crate::eventos::OrdemAberta;
-use crate::ordem::OrdemServico;
+use crate::ordem::{FichaEntrada, OrdemServico};
 use crate::repositorio::RepositorioOs;
 
 /// Abre uma ordem de serviço.
@@ -35,6 +35,8 @@ pub struct AbrirOrdemServico {
     pub tecnico_responsavel: Id,
     /// Prazo de garantia em dias sobre as peças aplicadas (padrão sugerido: 90).
     pub garantia_dias: u16,
+    /// Previsão de entrega, nº de série e acessórios — tudo opcional.
+    pub ficha: FichaEntrada,
 }
 
 /// O que o comando devolve.
@@ -75,6 +77,8 @@ pub struct AbrirOrdemComClienteNovo {
     pub tecnico_responsavel: Id,
     /// Prazo de garantia em dias.
     pub garantia_dias: u16,
+    /// Previsão de entrega, nº de série e acessórios — tudo opcional.
+    pub ficha: FichaEntrada,
 }
 
 /// O que [`AbrirOrdemComClienteNovo`] devolve.
@@ -120,6 +124,7 @@ impl Comando for AbrirOrdemComClienteNovo {
                 defeito_relatado: self.defeito_relatado,
                 tecnico_responsavel: self.tecnico_responsavel,
                 garantia_dias: self.garantia_dias,
+                ficha: self.ficha,
             },
             ctx,
             uow,
@@ -145,7 +150,7 @@ fn abrir_ordem_comum(
     }
 
     // 3. Validar (domínio puro).
-    let os = OrdemServico::abrir(
+    let mut os = OrdemServico::abrir(
         ctx.empresa,
         numero,
         dados.cliente,
@@ -156,6 +161,7 @@ fn abrir_ordem_comum(
         dados.garantia_dias,
     )
     .map_err(|e| Erro::de_dominio(&e))?;
+    os.ficha = dados.ficha.normalizada();
 
     // 4. Persistir.
     RepositorioOs::novo(uow).inserir_ordem(&os)?;

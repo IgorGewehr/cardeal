@@ -66,6 +66,7 @@ pub(super) fn corpo_detalhe(
     detalhe: &DetalheOrdem,
 ) {
     let os = &detalhe.ordem;
+    secao_resumo(ui, estado, detalhe);
     ui.horizontal(|ui| {
         ui.add(Rotulo::campo("Estado"));
         let (rotulo, tom) = estado_etiqueta(os.estado);
@@ -242,6 +243,7 @@ pub(super) fn corpo_detalhe(
                     .subtitulo(format!("{} disponível(is)", p.disponivel))
             })
             .collect();
+        let antes = estado.peca_produto;
         SeletorBusca::novo(
             "Peça do estoque",
             &mut estado.peca_busca,
@@ -250,11 +252,17 @@ pub(super) fn corpo_detalhe(
         .opcoes(opcoes_peca)
         .marcador("Buscar peça por nome…")
         .mostrar(ui);
+        if let Some(produto) = estado.peca_produto.filter(|p| Some(*p) != antes) {
+            sugerir_preco(motor, sessao, estado, produto);
+        }
         ui.add_space(Espaco::E4);
         ui.columns(2, |c| {
             c[0].add(Campo::novo("Quantidade", &mut estado.peca_qtd).marcador("1"));
             c[1].add(Campo::novo("Preço unitário", &mut estado.peca_preco).marcador("0,00"));
         });
+        if !estado.peca_preco_dica.is_empty() {
+            ui.add(Rotulo::campo(estado.peca_preco_dica.clone()));
+        }
         ui.add_space(Espaco::E4);
         if ui.add(Botao::secundario("+ Adicionar peça")).clicked() {
             adicionar_peca(ui.ctx(), motor, sessao, estado, os.id);

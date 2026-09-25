@@ -25,7 +25,7 @@ pub fn buscar_ordem(conexao: &Connection, id: Id) -> Resultado<Option<OrdemServi
         .query_row(
             "SELECT id, empresa, numero, cliente, equipamento, defeito_relatado, data_abertura,
                     tecnico_responsavel, estado, aprovado_por, garantia_dias, valor_total,
-                    itens_orcamento, versao
+                    itens_orcamento, versao, previsao_entrega, numero_serie, acessorios
              FROM os_ordem_servico WHERE id = ?1",
             [blob(id)],
             ordem_de_linha,
@@ -115,7 +115,7 @@ pub fn ordens_nao_finalizadas(conexao: &Connection, empresa: Id) -> Resultado<Ve
         .prepare(
             "SELECT id, empresa, numero, cliente, equipamento, defeito_relatado, data_abertura,
                     tecnico_responsavel, estado, aprovado_por, garantia_dias, valor_total,
-                    itens_orcamento, versao
+                    itens_orcamento, versao, previsao_entrega, numero_serie, acessorios
              FROM os_ordem_servico
              WHERE empresa = ?1 AND estado NOT IN ('Faturada','Cancelada','Reprovada')
              ORDER BY numero DESC
@@ -177,7 +177,7 @@ impl Consulta for TodasAsOrdens {
             .prepare(
                 "SELECT id, empresa, numero, cliente, equipamento, defeito_relatado, data_abertura,
                         tecnico_responsavel, estado, aprovado_por, garantia_dias, valor_total,
-                        itens_orcamento, versao
+                        itens_orcamento, versao, previsao_entrega, numero_serie, acessorios
                  FROM os_ordem_servico
                  WHERE empresa = ?1
                  ORDER BY numero DESC
@@ -245,7 +245,7 @@ impl Consulta for BuscarOrdens {
             .prepare(
                 "SELECT id, empresa, numero, cliente, equipamento, defeito_relatado, data_abertura,
                         tecnico_responsavel, estado, aprovado_por, garantia_dias, valor_total,
-                        itens_orcamento, versao
+                        itens_orcamento, versao, previsao_entrega, numero_serie, acessorios
                  FROM os_ordem_servico
                  WHERE empresa = ?1
                  ORDER BY numero DESC",
@@ -314,7 +314,7 @@ impl Consulta for OrdensPorId {
             let sql = format!(
                 "SELECT id, empresa, numero, cliente, equipamento, defeito_relatado, data_abertura,
                         tecnico_responsavel, estado, aprovado_por, garantia_dias, valor_total,
-                        itens_orcamento, versao
+                        itens_orcamento, versao, previsao_entrega, numero_serie, acessorios
                  FROM os_ordem_servico
                  WHERE empresa = ? AND id IN ({marcadores})"
             );
@@ -329,6 +329,37 @@ impl Consulta for OrdensPorId {
             }
         }
         Ok(saida)
+    }
+}
+
+/// O último preço unitário cobrado por um produto numa OS (a mais recente que o orçou) —
+/// a sugestão de preço quando a peça entra num orçamento novo e a empresa não mantém tabela
+/// de preço. `None` se o produto nunca foi orçado.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct UltimoPrecoDaPeca {
+    /// O produto.
+    pub produto: Id,
+}
+
+impl Consulta for UltimoPrecoDaPeca {
+    type Saida = Option<cardeal_kernel::Preco>;
+    const PERMISSAO: &'static str = "os.ordem.ver";
+
+    fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        conexao
+            .query_row(
+                "SELECT i.preco_unitario
+                 FROM os_item_peca i
+                 JOIN os_ordem_servico o ON o.id = i.ordem_servico
+                 WHERE o.empresa = ?1 AND i.produto = ?2
+                 ORDER BY o.numero DESC, i.rowid DESC
+                 LIMIT 1",
+                [blob(ctx.empresa), blob(self.produto)],
+                |r| r.get::<_, i64>(0),
+            )
+            .optional()
+            .map(|v| v.map(cardeal_kernel::Preco::interna))
+            .map_err(persist)
     }
 }
 
@@ -372,7 +403,7 @@ pub fn ordens_aguardando_aprovacao(
         .prepare(
             "SELECT id, empresa, numero, cliente, equipamento, defeito_relatado, data_abertura,
                     tecnico_responsavel, estado, aprovado_por, garantia_dias, valor_total,
-                    itens_orcamento, versao
+                    itens_orcamento, versao, previsao_entrega, numero_serie, acessorios
              FROM os_ordem_servico
              WHERE empresa = ?1 AND estado = 'AguardandoAprovacao'
              ORDER BY numero DESC
@@ -422,7 +453,7 @@ pub fn historico_do_equipamento(
         .prepare(
             "SELECT id, empresa, numero, cliente, equipamento, defeito_relatado, data_abertura,
                     tecnico_responsavel, estado, aprovado_por, garantia_dias, valor_total,
-                    itens_orcamento, versao
+                    itens_orcamento, versao, previsao_entrega, numero_serie, acessorios
              FROM os_ordem_servico WHERE cliente = ?1 ORDER BY numero DESC LIMIT 500",
         )
         .map_err(persist)?;

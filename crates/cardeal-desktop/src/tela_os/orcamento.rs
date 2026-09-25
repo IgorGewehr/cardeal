@@ -151,3 +151,73 @@ pub(super) fn aplicar_pecas(
         ),
     }
 }
+
+/// Preenche quantidade 1 e o preço sugerido ao escolher a peça — antes o balcão digitava os
+/// dois toda vez. Ordem: a tabela de preço (se a empresa mantém uma), senão o último preço
+/// cobrado dessa peça numa OS, senão só mostra o custo como referência.
+pub(super) fn sugerir_preco(
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaOs,
+    produto: Id,
+) {
+    if estado.peca_qtd.trim().is_empty() {
+        estado.peca_qtd = "1".to_owned();
+    }
+    let custo = estado
+        .produtos
+        .iter()
+        .find(|p| p.produto == produto)
+        .map(|p| p.custo_medio);
+    let da_tabela = motor
+        .consultar(
+            sessao,
+            "vendas.tabelas_de_preco.v1",
+            &mod_vendas::TabelasDePreco,
+        )
+        .ok()
+        .and_then(|tabelas: Vec<mod_vendas::TabelaPreco>| tabelas.into_iter().next())
+        .and_then(|tabela| {
+            motor
+                .consultar(
+                    sessao,
+                    "pdv.preco_do_produto.v1",
+                    &mod_pdv::PrecoDoProduto {
+                        tabela_preco: tabela.id,
+                        produto,
+                        quantidade: Quantidade::unidades(1),
+                    },
+                )
+                .ok()
+                .map(|p: mod_pdv::PrecoConsultado| (p.preco, tabela.nome))
+        })
+        .filter(|(p, _)| p.unidades_internas() > 0);
+    let ultimo = || -> Option<Preco> {
+        motor
+            .consultar(
+                sessao,
+                "os.ultimo_preco_da_peca.v1",
+                &mod_os::UltimoPrecoDaPeca { produto },
+            )
+            .ok()
+            .flatten()
+    };
+    let custo_txt = custo
+        .filter(|c| c.unidades_internas() > 0)
+        .map(|c| format!(" · custo {}", c.formatar_com_simbolo()))
+        .unwrap_or_default();
+    if let Some((preco, tabela)) = da_tabela {
+        estado.peca_preco = preco.formatar();
+        estado.peca_preco_dica = format!("Preço da tabela \"{tabela}\"{custo_txt}");
+    } else if let Some(preco) = ultimo() {
+        estado.peca_preco = preco.formatar();
+        estado.peca_preco_dica = format!("Último preço cobrado desta peça{custo_txt}");
+    } else {
+        estado.peca_preco.clear();
+        estado.peca_preco_dica = if custo_txt.is_empty() {
+            "Sem preço anterior — informe o valor".to_owned()
+        } else {
+            format!("Sem preço anterior{custo_txt}")
+        };
+    }
+}

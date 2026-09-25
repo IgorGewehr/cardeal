@@ -115,6 +115,7 @@ fn extrato_rotula_o_recebimento_da_os_com_numero_e_cliente() {
                 defeito_relatado: "Não liga".to_owned(),
                 tecnico_responsavel: t.sessao.usuario(),
                 garantia_dias: 90,
+                ficha: mod_os::FichaEntrada::default(),
             },
         )
         .expect("OS");

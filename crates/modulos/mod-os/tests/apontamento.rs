@@ -123,6 +123,7 @@ fn abrir_uma_os(
                 defeito_relatado: "Não liga".to_string(),
                 tecnico_responsavel: Id::novo(),
                 garantia_dias: 90,
+                ficha: mod_os::FichaEntrada::default(),
             }),
             s,
             amb,

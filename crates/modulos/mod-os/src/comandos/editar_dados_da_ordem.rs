@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::comandos::carregar_ordem;
 use crate::erros::ErroOs;
+use crate::ordem::FichaEntrada;
 use crate::repositorio::RepositorioOs;
 
 /// Completa/corrige o equipamento e/ou complementa o defeito relatado de uma OS já aberta.
@@ -22,6 +23,9 @@ pub struct EditarDadosDaOrdem {
     /// Um complemento ao defeito relatado — **acrescentado** ao relato original, nunca o
     /// substitui. `None` = não mexer neste campo.
     pub complemento_defeito_relatado: Option<String>,
+    /// A ficha de entrada inteira (previsão, nº de série, acessórios), substituindo a atual.
+    /// `None` = não mexer.
+    pub ficha: Option<FichaEntrada>,
 }
 
 impl Comando for EditarDadosDaOrdem {
@@ -30,7 +34,10 @@ impl Comando for EditarDadosDaOrdem {
     const RISCO: Risco = Risco::Baixo;
 
     fn executar(self, _ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
-        if self.equipamento.is_none() && self.complemento_defeito_relatado.is_none() {
+        if self.equipamento.is_none()
+            && self.complemento_defeito_relatado.is_none()
+            && self.ficha.is_none()
+        {
             return Err(Erro::de_dominio(&ErroOs::NadaParaAtualizar));
         }
 
@@ -48,6 +55,11 @@ impl Comando for EditarDadosDaOrdem {
         }
 
         // 4. Persistir.
+        if let Some(ficha) = self.ficha {
+            os.atualizar_ficha(ficha)
+                .map_err(|e| Erro::de_dominio(&e))?;
+        }
+
         RepositorioOs::novo(uow).atualizar_ordem(&os)?;
 
         Ok(())
