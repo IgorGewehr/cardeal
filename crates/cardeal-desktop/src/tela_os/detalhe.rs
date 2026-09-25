@@ -244,6 +244,26 @@ pub(super) fn corpo_detalhe(
     ui.horizontal(|ui| {
         ui.add(Rotulo::campo("Total"));
         ui.add(ValorDinheiro::novo(os.valor_total));
+        if !detalhe.itens_peca.is_empty() {
+            let (custo, estimado) = custo_das_pecas(detalhe, &estado.produtos);
+            let margem = os.valor_total - custo;
+            ui.add_space(Espaco::E16);
+            ui.add(Rotulo::campo(if estimado {
+                "Custo das peças (estimado)"
+            } else {
+                "Custo das peças"
+            }));
+            ui.add(ValorDinheiro::novo(custo).neutro());
+            ui.add_space(Espaco::E16);
+            ui.add(Rotulo::campo("Margem"));
+            ui.add(ValorDinheiro::novo(margem));
+            if os.valor_total.e_positivo() {
+                ui.add(Rotulo::campo(format!(
+                    "{}%",
+                    margem.em_centavos() * 100 / os.valor_total.em_centavos()
+                )));
+            }
+        }
     });
 
     if os.estado.aceita_edicao_de_orcamento() {

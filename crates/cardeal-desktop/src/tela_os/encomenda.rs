@@ -504,3 +504,40 @@ pub(super) fn aba_compras(ui: &mut egui::Ui, estado: &mut EstadoTelaOs) {
         };
     }
 }
+
+/// O custo das peças da OS: o real das aplicadas e, para as que faltam, o combinado na
+/// encomenda ou o custo médio do estoque. `true` = há estimativa na conta.
+pub(super) fn custo_das_pecas(
+    detalhe: &DetalheOrdem,
+    produtos: &[ItemProdutoComSaldo],
+) -> (Dinheiro, bool) {
+    let mut estimado = false;
+    let total =
+        detalhe
+            .itens_peca
+            .iter()
+            .filter(|i| !i.estornada)
+            .fold(Dinheiro::ZERO, |acc, i| {
+                let unitario = if i.aplicada {
+                    i.custo_unitario
+                } else {
+                    estimado = true;
+                    i.encomenda
+                        .as_ref()
+                        .and_then(|e| e.custo_previsto)
+                        .or_else(|| {
+                            produtos
+                                .iter()
+                                .find(|p| p.produto == i.produto)
+                                .map(|p| p.custo_medio)
+                        })
+                        .unwrap_or(Preco::ZERO)
+                };
+                acc + Dinheiro::de_total(
+                    i.quantidade,
+                    unitario,
+                    cardeal_kernel::Arredondamento::MeioAcima,
+                )
+            });
+    (total, estimado)
+}

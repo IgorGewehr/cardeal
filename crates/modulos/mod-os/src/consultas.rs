@@ -402,6 +402,79 @@ impl Consulta for UltimoPrecoDaPeca {
     }
 }
 
+/// Receita, custo das peças e margem das OS faturadas num período — "quanto as OS deram de
+/// verdade no mês". A data é a do faturamento (o passo `Faturada` da linha do tempo); OS
+/// faturadas antes da linha do tempo existir ficam de fora. O custo é o das peças aplicadas e
+/// não estornadas (o mesmo CMV do lançamento de faturamento); mão de obra não tem custo aqui.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct MargemDasOrdensNoPeriodo {
+    /// O período (datas de faturamento).
+    pub periodo: cardeal_kernel::Periodo,
+}
+
+/// O que [`MargemDasOrdensNoPeriodo`] devolve.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct MargemDasOrdens {
+    /// Quantas OS faturadas no período.
+    pub ordens: u32,
+    /// Soma do total faturado.
+    pub receita: cardeal_kernel::Dinheiro,
+    /// Soma do custo das peças aplicadas.
+    pub custo_pecas: cardeal_kernel::Dinheiro,
+}
+
+impl MargemDasOrdens {
+    /// Receita menos custo das peças.
+    #[must_use]
+    pub fn margem(&self) -> cardeal_kernel::Dinheiro {
+        self.receita - self.custo_pecas
+    }
+}
+
+impl Consulta for MargemDasOrdensNoPeriodo {
+    type Saida = MargemDasOrdens;
+    const PERMISSAO: &'static str = "os.ordem.ver";
+
+    fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        // O instante (micros UTC) do começo do primeiro dia e do fim do último, em Brasília.
+        let meia_noite = |d: cardeal_kernel::Data| {
+            cardeal_kernel::Instante::de_data_hora(
+                d,
+                cardeal_kernel::Hora::MEIA_NOITE,
+                cardeal_kernel::Fuso::BRASILIA,
+            )
+            .em_micros()
+        };
+        let de = meia_noite(self.periodo.de);
+        let ate = meia_noite(self.periodo.ate.mais_dias(1));
+        let mut stmt = conexao
+            .prepare(
+                "SELECT o.id, o.valor_total
+                 FROM os_ordem_servico o
+                 WHERE o.empresa = ?1 AND o.estado = 'Faturada'
+                   AND (SELECT MAX(h.momento) FROM os_historico h
+                        WHERE h.ordem_servico = o.id AND h.estado = 'Faturada')
+                       BETWEEN ?2 AND ?3 - 1",
+            )
+            .map_err(persist)?;
+        let linhas = stmt
+            .query_map(rusqlite::params![blob(ctx.empresa), de, ate], |r| {
+                Ok((id_de(r.get::<_, Vec<u8>>(0)?), r.get::<_, i64>(1)?))
+            })
+            .map_err(persist)?;
+        let mut m = MargemDasOrdens::default();
+        for linha in linhas {
+            let (id, total) = linha.map_err(persist)?;
+            m.ordens += 1;
+            m.receita += cardeal_kernel::Dinheiro::centavos(total);
+            for item in itens_peca_da_ordem(conexao, id)? {
+                m.custo_pecas += item.total_custo();
+            }
+        }
+        Ok(m)
+    }
+}
+
 /// Busca o detalhe completo de uma ordem pelo id.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BuscarDetalheOrdem {

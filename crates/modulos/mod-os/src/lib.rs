@@ -89,9 +89,9 @@ pub use comandos::{
 pub use comandos::{ChegadaRegistrada, EncomendarPeca, PagamentoDaPeca, RegistrarChegadaDaPeca};
 pub use consultas::{
     ApontamentosDaOrdem, BuscarDetalheOrdem, BuscarOrdens, DetalheOrdem, FiltroEstadoOs,
-    HistoricoDoEquipamento, ItemAguardandoEstoque, OrdensAguardandoAprovacao, OrdensEmAberto,
-    OrdensPorId, PassoDaOrdem, PecasAguardandoEstoque, TempoPorTecnicoNoPeriodo, TempoTotalDaOrdem,
-    TodasAsOrdens, UltimoPrecoDaPeca,
+    HistoricoDoEquipamento, ItemAguardandoEstoque, MargemDasOrdens, MargemDasOrdensNoPeriodo,
+    OrdensAguardandoAprovacao, OrdensEmAberto, OrdensPorId, PassoDaOrdem, PecasAguardandoEstoque,
+    TempoPorTecnicoNoPeriodo, TempoTotalDaOrdem, TodasAsOrdens, UltimoPrecoDaPeca,
 };
 pub use erros::ErroOs;
 pub use execucao::{Encomenda, ItemMaoDeObra, ItemPeca};

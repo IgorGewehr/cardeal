@@ -112,7 +112,31 @@ pub(super) fn painel_visao(
     // Faixa de KPIs — três cartões esticados pra ocupar a largura toda, em vez de flutuar
     // colados à esquerda com um vão morto do lado (pedido explícito do usuário: a Visão
     // Geral estava "horrível", essa era a maior causa numa janela larga).
-    ui.columns(3, |col| {
+    let colunas = if estado.dash_margem_os.is_some() {
+        4
+    } else {
+        3
+    };
+    ui.columns(colunas, |col| {
+        if let Some(m) = estado.dash_margem_os {
+            let margem = m.margem();
+            kpi(
+                &mut col[3],
+                "Margem das OS no mês",
+                margem,
+                if margem.e_negativo() {
+                    Tom::Negativo
+                } else {
+                    Tom::Positivo
+                },
+                Some(&format!(
+                    "{} OS · receita {} · peças {}",
+                    m.ordens,
+                    m.receita.formatar_com_simbolo(),
+                    m.custo_pecas.formatar_com_simbolo()
+                )),
+            );
+        }
         kpi(
             &mut col[0],
             "A receber em aberto",

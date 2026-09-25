@@ -349,6 +349,9 @@ pub struct EstadoTelaFinanceiro {
     /// Quantos títulos a geração de recorrências criou ao entrar — vira aviso no próximo
     /// quadro (o `carregar` não tem `egui::Context` para notificar).
     recorrencias_geradas: usize,
+    /// Receita, custo das peças e margem das OS faturadas no mês (`os.margem_das_ordens…`);
+    /// `None` sem permissão de ver OS (o cartão some).
+    dash_margem_os: Option<mod_os::MargemDasOrdens>,
     /// `Some` = modo "baixar várias": as parcelas marcadas na grade.
     selecao: Option<Vec<Id>>,
     serie: Vec<MesFluxo>,

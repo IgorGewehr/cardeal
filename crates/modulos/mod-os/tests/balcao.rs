@@ -824,3 +824,54 @@ fn chegada_paga_na_hora_nao_deixa_conta_em_aberto() {
     assert_eq!(erro.codigo, CodigoErro::SEM_PERMISSAO);
     assert!(!sem.detalhe(os2).itens_peca[0].aplicada);
 }
+
+#[test]
+fn margem_do_mes_soma_receita_e_custo_das_os_faturadas() {
+    let b = Balcao::novo(&[TODAS, &["os.faturar"]].concat());
+    let cliente = b.cliente("João");
+    let (produto, _) = produto_com_estoque(&b);
+    let hoje = cardeal_kernel::Data::hoje(cardeal_kernel::Fuso::BRASILIA);
+    let faturar = |os: Id| {
+        let _: mod_os::OrdemServicoFaturada = b
+            .cmd(
+                "os.faturar_ordem_servico.v1",
+                &mod_os::FaturarOrdemServico {
+                    ordem_servico: os,
+                    parcelas: 1,
+                    primeiro_vencimento: hoje,
+                    intervalo_dias: 0,
+                    pago_no_ato: None,
+                },
+            )
+            .unwrap();
+    };
+    // Uma OS com peça (R$ 200 cobrado, R$ 90 de custo) faturada; outra aberta, fora da conta.
+    let com_peca = b.abrir(cliente, "Notebook", "Tela").ordem_servico;
+    orcar_peca(&b, com_peca, produto);
+    faturar(com_peca);
+    let aberta = b.abrir(cliente, "Tablet", "Bateria").ordem_servico;
+    orcar_peca(&b, aberta, produto);
+
+    let m: mod_os::MargemDasOrdens = b.consulta(
+        "os.margem_das_ordens_no_periodo.v1",
+        &mod_os::MargemDasOrdensNoPeriodo {
+            periodo: cardeal_kernel::Periodo::novo(hoje.inicio_do_mes(), hoje.fim_do_mes()),
+        },
+    );
+    assert_eq!(m.ordens, 1);
+    assert_eq!(m.receita, cardeal_kernel::Dinheiro::reais(200));
+    assert_eq!(m.custo_pecas, cardeal_kernel::Dinheiro::reais(90));
+    assert_eq!(m.margem(), cardeal_kernel::Dinheiro::reais(110));
+
+    // Fora do período (mês passado): nada.
+    let m: mod_os::MargemDasOrdens = b.consulta(
+        "os.margem_das_ordens_no_periodo.v1",
+        &mod_os::MargemDasOrdensNoPeriodo {
+            periodo: cardeal_kernel::Periodo::novo(
+                hoje.inicio_do_mes().mais_meses(-1),
+                hoje.inicio_do_mes().mais_dias(-1),
+            ),
+        },
+    );
+    assert_eq!(m.ordens, 0);
+}

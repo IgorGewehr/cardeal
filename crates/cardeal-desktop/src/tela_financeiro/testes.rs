@@ -332,3 +332,13 @@ fn renegociar_pela_tela_troca_o_saldo_por_parcelas_novas() {
     form.parcelas = "0".to_owned();
     assert!(form.validado(titulo).is_err());
 }
+
+#[test]
+fn visao_geral_mostra_a_margem_das_os_faturadas_no_mes() {
+    let t = motor_de_teste();
+    let mut estado = EstadoTelaFinanceiro::default();
+    estado.carregar(&t.motor, &t.sessao);
+    let m = estado.dash_margem_os.expect("admin vê OS");
+    assert_eq!(m.ordens, 0);
+    assert!(m.margem().e_zero());
+}

@@ -629,3 +629,30 @@ fn peca_nova_pelo_orcamento_vai_para_a_lista_de_compras_e_chega_pela_tela() {
     assert_eq!(d.itens_peca[0].custo_unitario, Preco::centavos(2250));
     assert!(c.estado.pecas_a_comprar.is_empty());
 }
+
+#[test]
+fn custo_das_pecas_estima_pelo_custo_medio_ate_a_peca_ser_aplicada() {
+    let mut c = cenario();
+    let _: Id = c
+        .motor
+        .executar(
+            &c.sessao,
+            "os.montar_orcamento.v1",
+            &MontarOrcamentoOs {
+                ordem_servico: c.os,
+                item: ItemOrcamentoNovo::Peca {
+                    produto: c.produto,
+                    quantidade: Quantidade::unidades(2),
+                    preco_unitario: Preco::reais(250),
+                },
+            },
+        )
+        .expect("peça");
+    c.estado.abrir_detalhe(&c.motor, &c.sessao, c.os);
+    let d = c.estado.detalhe.clone().expect("detalhe");
+    // Pendente: custo médio do estoque (R$ 90) × 2, marcado como estimativa.
+    assert_eq!(
+        custo_das_pecas(&d, &c.estado.produtos),
+        (Dinheiro::reais(180), true)
+    );
+}

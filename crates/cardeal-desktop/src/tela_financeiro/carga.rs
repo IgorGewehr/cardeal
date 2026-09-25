@@ -215,6 +215,16 @@ impl EstadoTelaFinanceiro {
         self.dash_pago_mes = serie.last().map_or(Dinheiro::ZERO, |m| m.custo);
         self.serie = serie;
 
+        self.dash_margem_os = motor
+            .consultar(
+                sessao,
+                "os.margem_das_ordens_no_periodo.v1",
+                &mod_os::MargemDasOrdensNoPeriodo {
+                    periodo: Periodo::novo(hoje.inicio_do_mes(), hoje),
+                },
+            )
+            .ok();
+
         // Também alimenta o recorte "por categoria" já visível na Visão Geral (antes só
         // aparecia depois de clicar em "Ver por categoria") — mesma janela de 6 meses.
         self.carregar_analise(motor, sessao);
