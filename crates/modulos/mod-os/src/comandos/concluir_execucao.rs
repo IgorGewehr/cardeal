@@ -1,7 +1,8 @@
 //! Conclui a execução: `EmExecucao` → `Concluida`.
 //!
-//! `docs/modulos/os.md` §5 e §11.5: recusa se ainda houver peça do orçamento pendente de
-//! aplicação — nunca deixa um consumo órfão sem contrapartida.
+//! `docs/modulos/os.md` §5 e §11.5: nunca deixa peça orçada sem consumo. Desde 2026-09-25 a
+//! peça pendente é aplicada aqui mesmo (antes a conclusão era recusada e o técnico tinha de
+//! voltar e clicar "Aplicar").
 
 use cardeal_kernel::{Erro, Id, Resultado};
 use cardeal_modkit::{Comando, Ctx, Risco};
@@ -9,7 +10,6 @@ use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
 use crate::comandos::carregar_ordem;
-use crate::erros::ErroOs;
 use crate::repositorio::RepositorioOs;
 
 /// Conclui a execução.
@@ -24,16 +24,13 @@ impl Comando for ConcluirExecucao {
     const PERMISSAO: &'static str = "os.execucao.concluir";
     const RISCO: Risco = Risco::Baixo;
 
-    fn executar(self, _ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
+    fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         let mut os = carregar_ordem(uow, self.ordem_servico)?;
         os.exigir_em_execucao().map_err(|e| Erro::de_dominio(&e))?;
 
-        let pendentes = RepositorioOs::novo(uow).contar_pecas_nao_aplicadas(os.id)?;
-        if pendentes > 0 {
-            return Err(Erro::de_dominio(&ErroOs::PecaPendenteDeAplicacao(
-                pendentes,
-            )));
-        }
+        // Peça orçada que ninguém aplicou sai do estoque agora — o técnico não precisa de um
+        // passo separado para isso (antes a conclusão era recusada).
+        super::aplicar_peca::aplicar_pendentes_automaticamente(os.id, ctx, uow)?;
 
         os.concluir_execucao().map_err(|e| Erro::de_dominio(&e))?;
         RepositorioOs::novo(uow).atualizar_ordem(&os)?;

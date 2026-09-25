@@ -331,11 +331,17 @@ pub(super) fn acoes_por_estado(
             if n > 0 {
                 ui.add(
                     Rotulo::interface(if n == 1 {
-                        "1 peça do orçamento ainda não saiu do estoque.".to_owned()
+                        "1 peça ainda não saiu do estoque — sai sozinha ao concluir (ou use \
+                         \"Aplicar\" na linha para baixar agora)."
+                            .to_owned()
                     } else {
-                        format!("{n} peças do orçamento ainda não saíram do estoque.")
+                        format!(
+                            "{n} peças ainda não saíram do estoque — saem sozinhas ao concluir \
+                             (ou use \"Aplicar\" na linha para baixar agora)."
+                        )
                     })
-                    .cor(ui.cores().atencao),
+                    .quebravel()
+                    .cor(ui.cores().texto_medio),
                 );
                 if estado.locais.len() > 1 {
                     ui.add_space(Espaco::E8);

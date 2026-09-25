@@ -83,12 +83,12 @@ pub use comandos::{
     RegistrarSaida, SaidaGravada, SaidaRegistrada, SaldoAjustado, TipoLocal, UnidadeCriada,
 };
 pub use consultas::{
-    movimentos_do_produto, produtos_abaixo_do_ponto_pedido, saldo_disponivel_do_produto,
-    AparelhoOrigemResumo, DetalheDoLotePorCodigo, DetalheLote, GruposProduto,
-    ItemAbaixoDoPontoPedido, ItemGrupoProduto, ItemLocal, ItemLoteDisponivel, ItemProdutoComSaldo,
-    ItemUnidade, Locais, LotesDisponiveisDoProduto, MovimentosDoProduto, ProdutoPorCodigoBarras,
-    ProdutoPorId, ProdutosAbaixoDoPontoPedido, ProdutosComSaldo, SaldoDisponivelDoProduto,
-    Unidades,
+    melhor_local_de_saida, movimentos_do_produto, produtos_abaixo_do_ponto_pedido,
+    saldo_disponivel_do_produto, AparelhoOrigemResumo, DetalheDoLotePorCodigo, DetalheLote,
+    GruposProduto, ItemAbaixoDoPontoPedido, ItemGrupoProduto, ItemLocal, ItemLoteDisponivel,
+    ItemProdutoComSaldo, ItemUnidade, Locais, LotesDisponiveisDoProduto, MovimentosDoProduto,
+    ProdutoPorCodigoBarras, ProdutoPorId, ProdutosAbaixoDoPontoPedido, ProdutosComSaldo,
+    SaldoDisponivelDoProduto, Unidades,
 };
 pub use erros::ErroEstoque;
 pub use inventario::{AjusteInventario, ContagemItem, EstadoInventario, Inventario};

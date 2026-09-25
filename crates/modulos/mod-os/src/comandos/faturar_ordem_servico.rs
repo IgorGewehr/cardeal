@@ -82,11 +82,11 @@ impl Comando for FaturarOrdemServico {
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         // 1. Carregar.
         let mut os = carregar_ordem(uow, self.ordem_servico)?;
-        let itens_peca = RepositorioOs::novo(uow).itens_peca_da_ordem(os.id)?;
 
-        // 2. Validar (domínio puro): transiciona Concluida -> Faturada.
+        // 2. Validar (domínio puro): qualquer estado não-terminal -> Faturada.
         os.faturar().map_err(|e| Erro::de_dominio(&e))?;
-        let total_custo_pecas: Dinheiro = itens_peca.iter().map(ItemPeca::total_custo).sum();
+
+        let total_custo_pecas = baixar_pecas_e_somar_custo(os.id, ctx, uow)?;
 
         // 3. Resolver contas e montar o lançamento combinado (receita + CMV).
         let contas = {
@@ -201,4 +201,19 @@ impl Comando for FaturarOrdemServico {
             titulo_pago,
         })
     }
+}
+
+/// Baixa do estoque as peças ainda não aplicadas (faturar direto não pode deixar o custo zerado
+/// e inflar a margem) e devolve o custo total das peças da OS — o CMV do lançamento.
+fn baixar_pecas_e_somar_custo(
+    ordem: Id,
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<Dinheiro> {
+    super::aplicar_peca::aplicar_pendentes_automaticamente(ordem, ctx, uow)?;
+    Ok(RepositorioOs::novo(uow)
+        .itens_peca_da_ordem(ordem)?
+        .iter()
+        .map(ItemPeca::total_custo)
+        .sum())
 }

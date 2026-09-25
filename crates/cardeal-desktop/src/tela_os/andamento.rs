@@ -12,7 +12,6 @@ pub(super) enum ProximoPasso {
     EnviarParaAprovacao,
     Aprovar,
     IniciarExecucao,
-    AplicarPecas(Vec<Id>),
     ConcluirExecucao,
     Faturar,
 }
@@ -23,8 +22,6 @@ impl ProximoPasso {
             Self::EnviarParaAprovacao => "Enviar orçamento".to_owned(),
             Self::Aprovar => "Aprovar orçamento".to_owned(),
             Self::IniciarExecucao => "Iniciar execução".to_owned(),
-            Self::AplicarPecas(p) if p.len() == 1 => "Aplicar peça".to_owned(),
-            Self::AplicarPecas(p) => format!("Aplicar {} peças", p.len()),
             Self::ConcluirExecucao => "Concluir execução".to_owned(),
             Self::Faturar => "Faturar".to_owned(),
         }
@@ -41,19 +38,8 @@ pub(super) fn proximo_passo(detalhe: &DetalheOrdem) -> Option<ProximoPasso> {
         }
         EstadoOs::AguardandoAprovacao => Some(ProximoPasso::Aprovar),
         EstadoOs::Aprovada => Some(ProximoPasso::IniciarExecucao),
-        EstadoOs::EmExecucao => {
-            let pendentes: Vec<Id> = detalhe
-                .itens_peca
-                .iter()
-                .filter(|i| !i.aplicada)
-                .map(|i| i.id)
-                .collect();
-            Some(if pendentes.is_empty() {
-                ProximoPasso::ConcluirExecucao
-            } else {
-                ProximoPasso::AplicarPecas(pendentes)
-            })
-        }
+        // As peças que faltam saem do estoque na própria conclusão.
+        EstadoOs::EmExecucao => Some(ProximoPasso::ConcluirExecucao),
         EstadoOs::Concluida => Some(ProximoPasso::Faturar),
         EstadoOs::Faturada | EstadoOs::Cancelada | EstadoOs::Reprovada => None,
     }
@@ -99,7 +85,6 @@ pub(super) fn executar_proximo(
             &IniciarExecucao { ordem_servico: os },
             "Execução iniciada",
         ),
-        ProximoPasso::AplicarPecas(itens) => aplicar_pecas(ctx, motor, sessao, estado, os, &itens),
         ProximoPasso::ConcluirExecucao => {
             estado.confirmar_acao = Some(AcaoPendente::ConcluirExecucao(os));
         }

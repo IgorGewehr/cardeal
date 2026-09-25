@@ -258,6 +258,35 @@ pub fn saldo_disponivel_do_produto(conexao: &Connection, produto: Id) -> Resulta
     Ok(Quantidade::interna(soma))
 }
 
+/// De onde tirar um produto quando ninguém escolheu o local: o local ativo com mais saldo
+/// disponível dele; sem saldo em lugar nenhum, o primeiro local ativo (por nome) — a saída
+/// então fica negativa e sinalizada, como qualquer saída sem saldo (§11.2). `None` só se a
+/// empresa não tem local nenhum. Porta pública para `mod-os` aplicar peças sozinho ao
+/// concluir/faturar.
+///
+/// # Errors
+/// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+pub fn melhor_local_de_saida(
+    conexao: &Connection,
+    empresa: Id,
+    produto: Id,
+) -> Resultado<Option<Id>> {
+    conexao
+        .query_row(
+            "SELECT l.id
+             FROM estoque_local l
+             LEFT JOIN estoque_saldo_local s ON s.local = l.id AND s.produto = ?2
+             WHERE l.empresa = ?1 AND l.ativo = 1
+             ORDER BY COALESCE(s.quantidade_disponivel, 0) DESC, l.nome ASC
+             LIMIT 1",
+            [blob(empresa), blob(produto)],
+            |r| r.get::<_, Vec<u8>>(0),
+        )
+        .optional()
+        .map(|v| v.map(id_de))
+        .map_err(persist)
+}
+
 /// Consulta o saldo disponível de um produto (somado entre locais).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct SaldoDisponivelDoProduto {

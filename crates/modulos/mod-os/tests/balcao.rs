@@ -218,6 +218,7 @@ const TODAS: &[&str] = &[
     "os.orcamento.aprovar",
     "os.execucao.iniciar",
     "os.peca.aplicar",
+    "estoque.saldo.ver",
 ];
 
 #[test]
@@ -330,10 +331,8 @@ fn os_em_execucao_com_peca(b: &Balcao, cliente: Id, produto: Id) -> (Id, Id) {
     (os, item)
 }
 
-#[test]
-fn aplicar_pecas_e_tudo_ou_nada() {
-    let b = Balcao::novo(TODAS);
-    let cliente = b.cliente("João");
+/// Produto "Tela" com 5 unidades a R$ 90 num local "Depósito"; devolve (produto, local).
+fn produto_com_estoque(b: &Balcao) -> (Id, Id) {
     let grupo: GrupoProdutoCriado = b
         .cmd(
             "estoque.criar_grupo_produto.v1",
@@ -388,8 +387,17 @@ fn aplicar_pecas_e_tudo_ou_nada() {
         )
         .unwrap();
 
-    let (os1, item1) = os_em_execucao_com_peca(&b, cliente, produto.produto);
-    let (_os2, item_de_outra_os) = os_em_execucao_com_peca(&b, cliente, produto.produto);
+    (produto.produto, local.local)
+}
+
+#[test]
+fn aplicar_pecas_e_tudo_ou_nada() {
+    let b = Balcao::novo(TODAS);
+    let cliente = b.cliente("João");
+    let (produto, local) = produto_com_estoque(&b);
+
+    let (os1, item1) = os_em_execucao_com_peca(&b, cliente, produto);
+    let (_os2, item_de_outra_os) = os_em_execucao_com_peca(&b, cliente, produto);
 
     // O segundo item é de outra OS: o lote inteiro é recusado e o primeiro não sai do estoque.
     b.cmd::<Vec<mod_os::PecaFoiAplicada>>(
@@ -397,7 +405,7 @@ fn aplicar_pecas_e_tudo_ou_nada() {
         &AplicarPecas {
             ordem_servico: os1,
             itens: vec![item1, item_de_outra_os],
-            local: local.local,
+            local,
         },
     )
     .unwrap_err();
@@ -409,7 +417,7 @@ fn aplicar_pecas_e_tudo_ou_nada() {
             &AplicarPecas {
                 ordem_servico: os1,
                 itens: vec![item1],
-                local: local.local,
+                local,
             },
         )
         .unwrap();
@@ -574,4 +582,66 @@ fn linha_do_tempo_registra_cada_mudanca_de_estado_uma_vez() {
         passos,
         vec![E::Aberta, E::AguardandoAprovacao, E::Cancelada]
     );
+}
+
+fn orcar_peca(b: &Balcao, os: Id, produto: Id) -> Id {
+    b.cmd(
+        "os.montar_orcamento.v1",
+        &MontarOrcamentoOs {
+            ordem_servico: os,
+            item: ItemOrcamentoNovo::Peca {
+                produto,
+                quantidade: Quantidade::unidades(1),
+                preco_unitario: Preco::reais(200),
+            },
+        },
+    )
+    .unwrap()
+}
+
+#[test]
+fn faturar_direto_baixa_a_peca_com_o_custo_real() {
+    let b = Balcao::novo(&[TODAS, &["os.faturar"]].concat());
+    let cliente = b.cliente("João");
+    let (produto, _local) = produto_com_estoque(&b);
+    let os = b.abrir(cliente, "Notebook", "Tela").ordem_servico;
+    orcar_peca(&b, os, produto);
+
+    // Faturada ainda Aberta, sem passar por execução nem "Aplicar".
+    let _: mod_os::OrdemServicoFaturada = b
+        .cmd(
+            "os.faturar_ordem_servico.v1",
+            &mod_os::FaturarOrdemServico {
+                ordem_servico: os,
+                parcelas: 1,
+                primeiro_vencimento: cardeal_kernel::Data::hoje(cardeal_kernel::Fuso::BRASILIA),
+                intervalo_dias: 0,
+                pago_no_ato: None,
+            },
+        )
+        .unwrap();
+    let d = b.detalhe(os);
+    assert!(d.itens_peca[0].aplicada, "a peça saiu do estoque");
+    assert_eq!(d.itens_peca[0].custo_unitario, Preco::reais(90));
+    let saldo: Quantidade = b.consulta(
+        "estoque.saldo_disponivel_do_produto.v1",
+        &mod_estoque::SaldoDisponivelDoProduto { produto },
+    );
+    assert_eq!(saldo, Quantidade::unidades(4));
+}
+
+#[test]
+fn concluir_aplica_sozinho_a_peca_que_faltava() {
+    let b = Balcao::novo(&[TODAS, &["os.execucao.concluir"]].concat());
+    let cliente = b.cliente("João");
+    let (produto, _local) = produto_com_estoque(&b);
+    let (os, _item) = os_em_execucao_com_peca(&b, cliente, produto);
+    b.cmd::<()>(
+        "os.concluir_execucao.v1",
+        &mod_os::ConcluirExecucao { ordem_servico: os },
+    )
+    .unwrap();
+    let d = b.detalhe(os);
+    assert_eq!(d.ordem.estado, mod_os::EstadoOs::Concluida);
+    assert!(d.itens_peca.iter().all(|i| i.aplicada));
 }

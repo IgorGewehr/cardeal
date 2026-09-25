@@ -123,29 +123,67 @@ fn aplicar_peca_comum(
         return Err(Erro::de_dominio(&ErroOs::ItemNaoPertenceAOrdem));
     }
 
-    // 3. Consumir o estoque (chamada direta a outro módulo, mesma transação) — do lote
-    // específico quando o técnico identificou a peça física, senão do saldo agregado.
+    consumir_e_aplicar(&mut item, os.id, dados.local, dados.lote, ctx, uow)
+}
+
+/// Consome o estoque do item (chamada direta a `mod-estoque`, mesma transação) — do lote
+/// específico quando o técnico identificou a peça física, senão do saldo agregado — e grava o
+/// item como aplicado com o custo real. Sem checagem de estado: quem chama decide quando pode.
+fn consumir_e_aplicar(
+    item: &mut crate::execucao::ItemPeca,
+    ordem: Id,
+    local: Id,
+    lote: Option<Id>,
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<PecaFoiAplicada> {
     let dados_saida = DadosSaida {
         produto: item.produto,
-        local: dados.local,
+        local,
         quantidade: item.quantidade,
         origem_modulo: "os",
-        origem_id: Some(os.id),
+        origem_id: Some(ordem),
     };
-    let saida = match dados.lote {
+    let saida = match lote {
         Some(lote) => registrar_saida_de_lote_comum(dados_saida, lote, ctx, uow)?,
         None => registrar_saida_comum(dados_saida, ctx, uow)?,
     };
 
-    item.aplicar(saida.aplicada.custo_unitario, dados.local, dados.lote)
+    item.aplicar(saida.aplicada.custo_unitario, local, lote)
         .map_err(|e| Erro::de_dominio(&e))?;
-
-    // 4. Persistir.
-    RepositorioOs::novo(uow).atualizar_item_peca(&item)?;
+    RepositorioOs::novo(uow).atualizar_item_peca(item)?;
 
     Ok(PecaFoiAplicada {
         item_peca: item.id,
         custo_unitario: item.custo_unitario,
         gerou_divergencia: saida.aplicada.gerou_divergencia,
     })
+}
+
+/// Aplica, sozinho, toda peça do orçamento que ainda não saiu do estoque — chamado por
+/// `ConcluirExecucao` e `FaturarOrdemServico`. Antes, concluir recusava com peça pendente e
+/// faturar direto (permitido desde a abertura) cobrava a peça sem baixar o estoque e com
+/// custo zero, inflando a margem. Cada peça sai do local com mais saldo dela
+/// (`mod_estoque::melhor_local_de_saida`); sem saldo, sai assim mesmo e fica sinalizada
+/// como divergência, igual ao "Aplicar" manual. Devolve o que foi aplicado.
+///
+/// # Errors
+/// Nenhum local de estoque cadastrado (com peça a aplicar), ou erro do estoque.
+pub(crate) fn aplicar_pendentes_automaticamente(
+    ordem: Id,
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<Vec<PecaFoiAplicada>> {
+    let pendentes: Vec<crate::execucao::ItemPeca> = RepositorioOs::novo(uow)
+        .itens_peca_da_ordem(ordem)?
+        .into_iter()
+        .filter(|i| !i.aplicada && !i.estornada)
+        .collect();
+    let mut feitas = Vec::with_capacity(pendentes.len());
+    for mut item in pendentes {
+        let local = mod_estoque::melhor_local_de_saida(uow.conexao(), ctx.empresa, item.produto)?
+            .ok_or_else(|| Erro::de_dominio(&ErroOs::SemLocalDeEstoque))?;
+        feitas.push(consumir_e_aplicar(&mut item, ordem, local, None, ctx, uow)?);
+    }
+    Ok(feitas)
 }

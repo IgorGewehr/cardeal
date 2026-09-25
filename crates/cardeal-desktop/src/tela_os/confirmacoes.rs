@@ -66,7 +66,9 @@ pub(super) fn confirmacoes(
             ),
             AcaoPendente::ConcluirExecucao(_) => (
                 "Concluir execução",
-                "Confirma que o reparo terminou? A OS fica pronta para faturar.".to_owned(),
+                "Confirma que o reparo terminou? Peças do orçamento que ainda não saíram do \
+                 estoque são baixadas agora, e a OS fica pronta para faturar."
+                    .to_owned(),
                 "Concluir",
             ),
             AcaoPendente::Desfaturar(_) => (

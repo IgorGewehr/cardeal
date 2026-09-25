@@ -78,6 +78,10 @@ pub enum ErroOs {
     #[error("Esta peça não está aplicada, ou seu consumo já foi estornado")]
     PecaNaoAplicadaOuJaEstornada,
 
+    /// Peças a aplicar sozinhas (ao concluir/faturar) e nenhum local de estoque cadastrado.
+    #[error("Cadastre um local de estoque para as peças da OS saírem de algum lugar")]
+    SemLocalDeEstoque,
+
     /// `ConcluirExecucao` com peça do orçamento ainda não aplicada.
     #[error("Ainda há {0} peça(s) do orçamento pendente(s) de aplicação")]
     PecaPendenteDeAplicacao(usize),
@@ -138,6 +142,7 @@ impl ErroDominio for ErroOs {
             | Self::PecaJaAplicada
             | Self::PecaNaoAplicadaOuJaEstornada
             | Self::PecaPendenteDeAplicacao(_)
+            | Self::SemLocalDeEstoque
             | Self::OsCanceladaOuReprovada
             | Self::OsJaFaturada
             | Self::OsNaoFaturada

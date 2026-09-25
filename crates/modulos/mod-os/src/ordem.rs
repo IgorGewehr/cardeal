@@ -433,13 +433,10 @@ impl OrdemServico {
     /// conclusão são passos **opcionais** do trâmite técnico, não um portão que bloqueia o
     /// faturamento — o balcão precisa poder faturar assim que a OS abre, quando o serviço não
     /// precisa de todo o trâmite formal (um conserto rápido, cobrado na hora). `valor_total`
-    /// já soma no momento em que o item entra no orçamento (`Self::adicionar_ao_orcamento`),
-    /// não quando é `AplicarPeca`-do — então faturar sem nunca passar por `EmExecucao` cobra
-    /// do cliente normalmente, mas **não** deduz peça nenhuma do estoque
-    /// ([`crate::execucao::ItemPeca::total_custo`] só conta custo de peça `aplicada`, então o
-    /// CMV desse item fica zero). Quem pula a execução é responsável por aplicar a peça à
-    /// parte (`AplicarPeca` continua disponível em `EmExecucao`) se quiser o estoque
-    /// correto — o faturamento em si nunca é bloqueado por isso.
+    /// já soma no momento em que o item entra no orçamento (`Self::adicionar_ao_orcamento`).
+    /// As peças ainda não aplicadas são baixadas do estoque pelo próprio
+    /// `FaturarOrdemServico` antes do lançamento (desde 2026-09-25 — antes o CMV delas ficava
+    /// zero), e o faturamento continua nunca bloqueado pelo trâmite.
     ///
     /// # Errors
     /// [`ErroOs::OsJaFaturada`] se já `Faturada`; [`ErroOs::OsCanceladaOuReprovada`] se
