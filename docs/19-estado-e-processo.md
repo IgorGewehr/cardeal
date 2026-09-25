@@ -182,6 +182,37 @@ Quem retomar deve rodar, no terminal do usuário, e confirmar com `git log origi
 git push origin master
 ```
 
+### 1.5 Sessão 2026-09-25 — OS e financeiro no dia a dia
+
+A partir de um levantamento de UI/UX + backend pedido pelo usuário ("mais ágil, elegante,
+eficiente"), corrigido em sequência na branch `refactor/ui-listagem-padrao-os-aplicar-peca`,
+um commit por incremento:
+
+- **Furos que afetavam dado real:** recorrência nunca virava título (a materialização não era
+  chamada; agora é o comando `financeiro.materializar_recorrencias.v1`, disparado ao entrar e
+  ao abrir o Financeiro, recuperando até 60 dias de ocorrências perdidas); baixa ignorava a
+  conta bancária; diálogo de baixa guardava a posição da parcela no vetor; KPIs transformavam
+  erro em R$ 0,00; OS só faturava à vista.
+- **Atomicidade:** `os.abrir_ordem_com_cliente_novo.v1` (cliente + OS num COMMIT, via
+  `criar_pessoa_comum`/`adicionar_contato_comum` de `mod-clientes`), `os.aplicar_pecas.v1` e
+  `financeiro.baixar_{recebimentos,pagamentos}_em_lote.v1` são tudo-ou-nada.
+- **Busca e desempenho:** `os.buscar_ordens.v1` filtra no motor (acabou o teto de 500 que
+  escondia OS antigas); cada ação na OS recarrega só a lista (não todos os catálogos); o
+  extrato rotula OS com `os.ordens_por_id.v1` (antes um detalhe completo por linha).
+- **Recursos:** ficha de entrada da OS (previsão de entrega, nº de série, acessórios —
+  migração os v6) com atrasadas na lista; linha do tempo (`os_historico`, migração os v7,
+  gravada pelo `RepositorioOs`); detalhe da OS em `Gaveta` com um único "próximo passo";
+  histórico do aparelho; preço sugerido da peça (tabela → `os.ultimo_preco_da_peca.v1`);
+  WhatsApp com mensagem por estado; `financeiro.situacao_da_parcela.v1` (a baixa sugere o
+  total com juros/multa); renegociação pela tela.
+- **Estrutura:** `tela_os` e `tela_financeiro` viraram diretórios de módulos (como
+  `tela_pdv`); `SeletorPagamento`, `Gaveta` e `LinhaDoTempo` novos em `cardeal-ui`; modo de
+  captura do app (`--features demo`, `CARDEAL_DEMO`).
+
+Deixado de fora de propósito: desconto no faturamento da OS (precisa de coluna nova e mexe na
+margem do `cardeal-analytics`) e entrada + restante (o `ConstrutorTitulo` rateia por igual;
+exige parcela de valor diferente). Testes: 575 → 605.
+
 ## 2. Decisão estratégica registrada: por que Rust, não C#/.NET
 
 Em 2026-09-02 avaliamos um projeto irmão do mesmo autor, **SistemaX** (`../sistemax`), um ERP

@@ -281,8 +281,8 @@ Todos em `cardeal-ui`, com galeria viva em `cargo run -p cardeal-ui --example ga
 | Camada | Componentes |
 |---|---|
 | atoms | `Botao`, `BotaoChevron`, `BotaoJanela`, `Caixa`, `CampoTexto`, `Divisor`, `Etiqueta` (com `.com_ponto()`), `Icone`, `Rotulo`, `Spinner`, `Tecla`, `ValorDinheiro` (`.neutro()` para colunas de medida, `.esmaecido()`), `superficie_clicavel` |
-| molecules | `Abas`, `AcoesRegistro` (Editar · Excluir da linha), `BarraFiltros` (busca + filtros da listagem), `CabecalhoTela`, `Campo`, `CampoBusca`, `CartaoKpi` (com `.tom()` e `.icone()`), `Dado` (rótulo/valor de leitura; `dado()` e `dado_em_linha()`), `EstadoVazio`, `ItemDeLista` (com `.atalho()` e `.esmaecido()`), `LinhaDeAcao`, `SecaoExpansivel`, `SeletorBusca`, `SeletorOpcao` (`.sem_rotulo()` para barras de ferramentas) |
-| organisms | `AgendaCalendario`, `AgendaMes`, `Cartao`, `Dialogo` (`.descricao()`, `.pequeno()`/`.medio()`), `dialogo_confirmacao`, `FaixaKpi`, `Grade` (com `.vazio()`, `.carregando()`, `.com_acoes()` e `Ordenacao`), `Grafico`, `Janela` (shell sem decoração nativa), `LayoutTela`, `Notificacoes`, `Painel` (elevado · plano · `.realce(Tom)`), `PaletaComandos`, `Sidebar` |
+| molecules | `Abas`, `AcoesRegistro` (Editar · Excluir da linha), `BarraFiltros` (busca + filtros da listagem), `CabecalhoTela`, `Campo`, `CampoBusca`, `CartaoKpi` (com `.tom()` e `.icone()`), `Dado` (rótulo/valor de leitura; `dado()` e `dado_em_linha()`), `EstadoVazio`, `ItemDeLista` (com `.atalho()` e `.esmaecido()`), `LinhaDeAcao`, `LinhaDoTempo` (passos feito · atual · pendente — o andamento da OS), `SecaoExpansivel`, `SeletorBusca`, `SeletorOpcao` (`.sem_rotulo()` para barras de ferramentas) |
+| organisms | `AgendaCalendario`, `AgendaMes`, `Cartao`, `Dialogo` (`.descricao()`, `.pequeno()`/`.medio()`), `dialogo_confirmacao`, `FaixaKpi`, `Gaveta` (painel à direita com a lista visível atrás — detalhe de registro que é processo, como a OS; mesmo contrato do `Dialogo`), `Grade` (com `.vazio()`, `.carregando()`, `.com_acoes()` e `Ordenacao`), `Grafico`, `Janela` (shell sem decoração nativa), `LayoutTela`, `Notificacoes`, `Painel` (elevado · plano · `.realce(Tom)`), `PaletaComandos`, `SeletorPagamento` (à vista/a prazo, meio em pílulas, conta bancária — faturar OS e dar baixa usam o mesmo), `Sidebar` |
 
 `Tom::cores` é a **única** tabela tom → cor (`Etiqueta`, `Painel` e `CartaoKpi` a compartilham; nunca
 copie o `match`).
@@ -307,6 +307,10 @@ manter a janela acordada, Pilar I). Duas grades no mesmo quadro precisam de `pus
 mostra todos os componentes; `GALERIA_CAPTURA=/tmp/x.png` salva um PNG e sai (`GALERIA_ROLAR=<px>`,
 `GALERIA_DIALOGO=pequeno|medio|grande`, `GALERIA_TEMA=escuro`). O PDV tem cenários com dados fictícios:
 `cargo run -p cardeal-desktop --example pdv_demo --features demo -- <cenario> /tmp/pdv.png [escuro]`.
+`GALERIA_DIALOGO=gaveta` abre a gaveta de exemplo. Para telas que dependem do motor, o app inteiro
+tem um modo de captura (só com `--features demo`): banco temporário semeado, login automático e PNG —
+`CARDEAL_DEMO=os|os-detalhe|os-nova|os-faturar|financeiro-receber|financeiro-baixa|financeiro-lote
+CARDEAL_DEMO_PNG=/tmp/x.png cargo run -p cardeal-desktop --features demo` (ver `src/demo_app.rs`).
 
 **Desenho-alvo** (a tabela abaixo mistura o que existe e o que está planejado):
 
@@ -319,9 +323,9 @@ mostra todos os componentes; `GALERIA_CAPTURA=/tmp/x.png` salva um PNG e sai (`G
 | `Busca` | Debounce de 180 ms, resultado em até 60 ms, navegação com setas, `Enter` seleciona |
 | `Grade` | Virtualizada, colunas redimensionáveis e reordenáveis, agrupamento, totalizador no rodapé, exportação, largura persistida por usuário |
 | `SeletorConta` | Busca por código ou nome, mostra a hierarquia, favoritos recentes primeiro |
-| `LinhaDoTempo` | O Rio do Caixa e derivados |
+| `LinhaDoTempo` | **Existe** (andamento da OS). Falta: o Rio do Caixa e derivados |
 | `Badge` | Estado de documento, contador de pendência |
-| `Gaveta` | Painel lateral para detalhe sem perder o contexto da lista |
+| `Gaveta` | **Existe** — painel lateral para detalhe sem perder o contexto da lista (usado no detalhe da OS) |
 | `PaletaComandos` | `Ctrl+K` — ir para tela, executar ação, buscar cliente/produto/título |
 | `Assistente` | Fluxos de várias etapas (abertura de caixa, fechamento, inventário) |
 | `DialogoConflito` | Resolução de edição concorrente ([doc 03 §4.1](03-pilar-resiliencia.md)) |
