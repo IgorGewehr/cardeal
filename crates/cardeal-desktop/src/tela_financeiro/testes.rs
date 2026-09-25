@@ -78,3 +78,90 @@ fn baixa_vai_para_a_parcela_aberta_mesmo_se_a_lista_mudar_de_ordem() {
     assert_eq!(abertas.len(), 1);
     assert_eq!(abertas[0].valor_original, Dinheiro::reais(100));
 }
+
+#[test]
+fn extrato_rotula_o_recebimento_da_os_com_numero_e_cliente() {
+    use mod_os::{
+        AbrirOrdemServico, FaturarOrdemServico, ItemOrcamentoNovo, MontarOrcamentoOs,
+        OrdemServicoAberta, OrdemServicoFaturada, PagamentoNoAto,
+    };
+    let t = motor_de_teste();
+    let cliente: mod_clientes::PessoaCadastrada = t
+        .motor
+        .executar(
+            &t.sessao,
+            "clientes.criar_pessoa.v1",
+            &CriarPessoa {
+                tipo: TipoPessoa::Fisica,
+                nome: "Ana Lima".to_owned(),
+                nome_fantasia: None,
+                papel_inicial: Papel::Cliente,
+                documento_tipo: None,
+                documento_numero: None,
+                data_nascimento: None,
+                endereco: None,
+                contato: None,
+            },
+        )
+        .expect("cliente");
+    let os: OrdemServicoAberta = t
+        .motor
+        .executar(
+            &t.sessao,
+            "os.abrir_ordem_servico.v1",
+            &AbrirOrdemServico {
+                cliente: cliente.pessoa,
+                equipamento: "Notebook".to_owned(),
+                defeito_relatado: "Não liga".to_owned(),
+                tecnico_responsavel: t.sessao.usuario(),
+                garantia_dias: 90,
+            },
+        )
+        .expect("OS");
+    let _: Id = t
+        .motor
+        .executar(
+            &t.sessao,
+            "os.montar_orcamento.v1",
+            &MontarOrcamentoOs {
+                ordem_servico: os.ordem_servico,
+                item: ItemOrcamentoNovo::MaoDeObra {
+                    descricao: "Reparo".to_owned(),
+                    valor: Dinheiro::reais(150),
+                    tecnico: t.sessao.usuario(),
+                    horas: None,
+                },
+            },
+        )
+        .expect("mão de obra");
+    let _: OrdemServicoFaturada = t
+        .motor
+        .executar(
+            &t.sessao,
+            "os.faturar_ordem_servico.v1",
+            &FaturarOrdemServico {
+                ordem_servico: os.ordem_servico,
+                parcelas: 1,
+                primeiro_vencimento: Data::hoje(Fuso::BRASILIA),
+                intervalo_dias: 0,
+                pago_no_ato: Some(PagamentoNoAto {
+                    meio_pagamento: MeioPagamento::Dinheiro,
+                    conta_destino: None,
+                }),
+            },
+        )
+        .expect("faturar");
+
+    let mut estado = EstadoTelaFinanceiro {
+        aba: Aba::Fluxo,
+        ..Default::default()
+    };
+    estado.carregar(&t.motor, &t.sessao);
+    assert!(estado.erro.is_none(), "{:?}", estado.erro);
+    let esperado = format!("OS #{} — Ana Lima", os.numero);
+    assert!(
+        estado.origem_labels.values().any(|r| *r == esperado),
+        "rótulos: {:?}",
+        estado.origem_labels
+    );
+}

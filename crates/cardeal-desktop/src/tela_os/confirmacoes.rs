@@ -28,7 +28,9 @@ pub(super) fn confirmacoes(
             ) {
                 Ok(r) => {
                     let r: OrdemServicoCancelada = r;
-                    estado.carregar(motor, sessao);
+                    // Peças aplicadas voltam ao estoque no cancelamento.
+                    estado.recarregar_lista(motor, sessao);
+                    estado.carregar_produtos(motor, sessao);
                     let msg = if r.pecas_pendentes_de_estorno_manual > 0 {
                         format!(
                             "OS excluída — {} peça(s) precisam de correção manual de estoque",

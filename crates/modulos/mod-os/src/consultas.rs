@@ -293,6 +293,45 @@ impl Consulta for BuscarOrdens {
     }
 }
 
+/// Várias ordens pelo id, numa consulta só — para quem só precisa de número/cliente/estado
+/// de muitas OS de uma vez (o extrato do financeiro rotulando "OS #123 — João"), em vez de
+/// um [`BuscarDetalheOrdem`] completo por linha. Ids que não existem são ignorados.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrdensPorId {
+    /// As ordens desejadas.
+    pub ordens: Vec<Id>,
+}
+
+impl Consulta for OrdensPorId {
+    type Saida = Vec<OrdemServico>;
+    const PERMISSAO: &'static str = "os.ordem.ver";
+
+    fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        let mut saida = Vec::with_capacity(self.ordens.len());
+        // Lotes de 500 ficam bem abaixo do limite de parâmetros do SQLite.
+        for lote in self.ordens.chunks(500) {
+            let marcadores = vec!["?"; lote.len()].join(",");
+            let sql = format!(
+                "SELECT id, empresa, numero, cliente, equipamento, defeito_relatado, data_abertura,
+                        tecnico_responsavel, estado, aprovado_por, garantia_dias, valor_total,
+                        itens_orcamento, versao
+                 FROM os_ordem_servico
+                 WHERE empresa = ? AND id IN ({marcadores})"
+            );
+            let mut stmt = conexao.prepare(&sql).map_err(persist)?;
+            let mut parametros = vec![blob(ctx.empresa)];
+            parametros.extend(lote.iter().map(|id| blob(*id)));
+            let linhas = stmt
+                .query_map(rusqlite::params_from_iter(parametros), ordem_de_linha)
+                .map_err(persist)?;
+            for linha in linhas {
+                saida.push(linha.map_err(persist)?);
+            }
+        }
+        Ok(saida)
+    }
+}
+
 /// Busca o detalhe completo de uma ordem pelo id.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BuscarDetalheOrdem {

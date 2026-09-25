@@ -459,3 +459,20 @@ fn buscar_ordens_filtra_no_motor_por_numero_texto_cliente_e_estado() {
         vec![n3]
     );
 }
+
+#[test]
+fn ordens_por_id_devolve_varias_numa_consulta_e_ignora_ids_desconhecidos() {
+    let b = Balcao::novo(TODAS);
+    let joao = b.cliente("João");
+    let a = b.abrir(joao, "Notebook", "Não liga");
+    let c = b.abrir(joao, "Celular", "Tela");
+    let v: Vec<OrdemServico> = b.consulta(
+        "os.ordens_por_id.v1",
+        &mod_os::OrdensPorId {
+            ordens: vec![a.ordem_servico, Id::novo(), c.ordem_servico],
+        },
+    );
+    let mut numeros: Vec<u64> = v.iter().map(|o| o.numero).collect();
+    numeros.sort_unstable();
+    assert_eq!(numeros, vec![a.numero, c.numero]);
+}

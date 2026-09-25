@@ -46,7 +46,7 @@ pub(super) fn dialogo_editar_dados(
                     ) {
                         Ok(()) => {
                             estado.dlg = Dlg::Fechado;
-                            estado.carregar(motor, sessao);
+                            estado.recarregar_lista(motor, sessao);
                             notificar(ui.ctx(), Notificacao::sucesso("Ordem atualizada"));
                         }
                         Err(e) => notificar(ui.ctx(), Notificacao::erro(e.mensagem)),
@@ -360,7 +360,10 @@ pub(super) fn abrir_os(
         Ok(aberta) => {
             let aberta: OrdemServicoAberta = aberta;
             estado.erro = None;
-            estado.carregar(motor, sessao);
+            if cliente_novo {
+                estado.carregar_clientes(motor, sessao);
+            }
+            estado.recarregar_lista(motor, sessao);
             estado.abrir_detalhe(motor, sessao, aberta.ordem_servico);
             notificar(
                 ctx,

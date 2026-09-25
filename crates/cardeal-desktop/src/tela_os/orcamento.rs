@@ -124,7 +124,8 @@ pub(super) fn aplicar_pecas(
     ) {
         Ok(feitas) => {
             let feitas: Vec<PecaFoiAplicada> = feitas;
-            estado.carregar(motor, sessao);
+            estado.recarregar_lista(motor, sessao);
+            estado.carregar_produtos(motor, sessao);
             estado.abrir_detalhe(motor, sessao, ordem);
             estado.dlg = Dlg::Detalhe;
             notificar(

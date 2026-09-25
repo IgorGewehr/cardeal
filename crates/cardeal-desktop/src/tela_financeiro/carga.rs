@@ -44,7 +44,11 @@ impl EstadoTelaFinanceiro {
     /// Recarrega a lista da aba ativa, o painel de visão geral e o índice de nomes.
     pub fn carregar(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
         self.erro = None;
-        // O painel primeiro: a projeção das abas de parcelas reaproveita o "em aberto" dele.
+        // Nomes primeiro: o extrato monta (e guarda) "OS #123 — cliente" com eles; carregar
+        // depois deixava o rótulo sem o nome para sempre.
+        self.carregar_nomes(motor, sessao);
+        self.carregar_categorias(motor, sessao);
+        // O painel antes das parcelas: a projeção reaproveita o "em aberto" dele.
         self.carregar_dashboard(motor, sessao);
         if matches!(self.aba, Aba::Receber | Aba::Pagar) {
             self.carregar_parcelas_periodo(motor, sessao);
@@ -52,7 +56,10 @@ impl EstadoTelaFinanceiro {
         if matches!(self.aba, Aba::Fluxo | Aba::Bancos) {
             self.carregar_fluxo(motor, sessao);
         }
+    }
 
+    /// Clientes e fornecedores (seletores do lançamento e o índice `nomes`).
+    fn carregar_nomes(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
         if let Ok(c) = motor.consultar(
             sessao,
             "clientes.pessoas_por_papel.v1",
@@ -73,7 +80,6 @@ impl EstadoTelaFinanceiro {
         ) {
             self.fornecedores = f;
         }
-        self.carregar_categorias(motor, sessao);
         self.nomes = self
             .clientes
             .iter()
@@ -277,27 +283,35 @@ impl EstadoTelaFinanceiro {
     /// mesmo padrão serve para `"vendas"`/`"compras"` quando a tela ganhar consulta
     /// equivalente para eles.
     pub(super) fn carregar_origens_do_extrato(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
-        let ids: Vec<Id> = self
+        let mut ids: Vec<Id> = self
             .extrato
             .iter()
             .filter(|m| m.origem_modulo.as_deref() == Some("os"))
             .filter_map(|m| m.origem_id)
             .filter(|id| !self.origem_labels.contains_key(id))
             .collect();
-        for id in ids {
-            let resultado: Result<Option<mod_os::DetalheOrdem>, _> = motor.consultar(
-                sessao,
-                "os.buscar_detalhe_ordem.v1",
-                &mod_os::BuscarDetalheOrdem { ordem_servico: id },
-            );
-            if let Ok(Some(d)) = resultado {
-                let cliente = self.nomes.get(&d.ordem.cliente).cloned();
-                let rotulo = match cliente {
-                    Some(nome) => format!("OS #{} — {nome}", d.ordem.numero),
-                    None => format!("OS #{}", d.ordem.numero),
-                };
-                self.origem_labels.insert(id, rotulo);
+        if ids.is_empty() {
+            return;
+        }
+        ids.sort_unstable();
+        ids.dedup();
+        // Uma consulta para todas as OS do extrato (antes era um detalhe completo por linha).
+        match motor.consultar(
+            sessao,
+            "os.ordens_por_id.v1",
+            &mod_os::OrdensPorId { ordens: ids },
+        ) {
+            Ok(ordens) => {
+                let ordens: Vec<mod_os::OrdemServico> = ordens;
+                for os in ordens {
+                    let rotulo = match self.nomes.get(&os.cliente) {
+                        Some(nome) => format!("OS #{} — {nome}", os.numero),
+                        None => format!("OS #{}", os.numero),
+                    };
+                    self.origem_labels.insert(os.id, rotulo);
+                }
             }
+            Err(e) => self.erro = Some(e.mensagem),
         }
     }
 

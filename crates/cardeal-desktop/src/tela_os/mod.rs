@@ -206,32 +206,15 @@ pub struct EstadoTelaOs {
 }
 
 impl EstadoTelaOs {
-    /// Recarrega a fila ativa (indicadores), os catálogos de cliente e produto e refaz a
-    /// busca da lista com o filtro atual.
+    /// Carga completa — ao entrar na tela ou no F5: catálogos (clientes, produtos, locais,
+    /// usuários, identidade), orçamentos e a lista. Depois de uma ação na OS, use as
+    /// recargas parciais abaixo: recarregar tudo a cada clique travava a tela.
     pub fn carregar(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
         if self.filtro_status.is_none() {
             self.filtro_status = Some(FiltroStatusOs::Ativas);
         }
-        match motor.consultar(sessao, "os.ordens_em_aberto.v1", &OrdensEmAberto) {
-            Ok(ativas) => {
-                self.ativas = ativas;
-                self.erro = None;
-            }
-            Err(e) => self.erro = Some(e.mensagem),
-        }
-        if let Ok(c) = motor.consultar(
-            sessao,
-            "clientes.pessoas_por_papel.v1",
-            &PessoasPorPapel {
-                papel: PapelCliente::Cliente,
-                busca: None,
-            },
-        ) {
-            self.clientes = c;
-        }
-        if let Ok(p) = motor.consultar(sessao, "estoque.produtos_com_saldo.v1", &ProdutosComSaldo) {
-            self.produtos = p;
-        }
+        self.carregar_clientes(motor, sessao);
+        self.carregar_produtos(motor, sessao);
         if let Ok(l) = motor.consultar(sessao, "estoque.locais.v1", &Locais) {
             self.locais = l;
             let ainda_existe = self
@@ -249,7 +232,41 @@ impl EstadoTelaOs {
         }
         self.orc.carregar(motor, sessao);
         // Depois dos clientes: a busca por nome resolve o termo contra esse catálogo.
+        self.recarregar_lista(motor, sessao);
+    }
+
+    /// A fila ativa (indicadores) e a lista com a busca atual — o que muda depois de
+    /// qualquer ação numa OS.
+    fn recarregar_lista(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
+        match motor.consultar(sessao, "os.ordens_em_aberto.v1", &OrdensEmAberto) {
+            Ok(ativas) => {
+                self.ativas = ativas;
+                self.erro = None;
+            }
+            Err(e) => self.erro = Some(e.mensagem),
+        }
         self.buscar_ordens(motor, sessao);
+    }
+
+    /// O catálogo de clientes (nome na lista, busca por nome, seletor da nova OS).
+    fn carregar_clientes(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
+        if let Ok(c) = motor.consultar(
+            sessao,
+            "clientes.pessoas_por_papel.v1",
+            &PessoasPorPapel {
+                papel: PapelCliente::Cliente,
+                busca: None,
+            },
+        ) {
+            self.clientes = c;
+        }
+    }
+
+    /// Produtos com saldo — muda quando uma peça é aplicada ou volta ao estoque.
+    fn carregar_produtos(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
+        if let Ok(p) = motor.consultar(sessao, "estoque.produtos_com_saldo.v1", &ProdutosComSaldo) {
+            self.produtos = p;
+        }
     }
 
     /// Refaz a lista com a busca e o filtro de status atuais — no motor, sem teto que
@@ -524,7 +541,7 @@ fn aplicar_e_recarregar<C: cardeal_modkit::Comando + serde::Serialize>(
 {
     match motor.executar(sessao, nome, comando) {
         Ok(_) => {
-            estado.carregar(motor, sessao);
+            estado.recarregar_lista(motor, sessao);
             estado.abrir_detalhe(motor, sessao, ordem);
             estado.dlg = Dlg::Detalhe;
             notificar(ctx, Notificacao::sucesso(sucesso.to_owned()));

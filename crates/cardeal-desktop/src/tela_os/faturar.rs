@@ -108,7 +108,7 @@ pub(super) fn faturar_os(
     ) {
         Ok(f) => {
             let f: OrdemServicoFaturada = f;
-            estado.carregar(motor, sessao);
+            estado.recarregar_lista(motor, sessao);
             estado.abrir_detalhe(motor, sessao, os.id);
             estado.dlg = Dlg::Detalhe;
             let msg = if f.titulo_pago {

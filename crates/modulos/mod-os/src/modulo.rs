@@ -14,8 +14,8 @@ use crate::comandos::{
 };
 use crate::consultas::{
     ApontamentosDaOrdem, BuscarDetalheOrdem, BuscarOrdens, HistoricoDoEquipamento,
-    OrdensAguardandoAprovacao, OrdensEmAberto, PecasAguardandoEstoque, TempoPorTecnicoNoPeriodo,
-    TempoTotalDaOrdem, TodasAsOrdens,
+    OrdensAguardandoAprovacao, OrdensEmAberto, OrdensPorId, PecasAguardandoEstoque,
+    TempoPorTecnicoNoPeriodo, TempoTotalDaOrdem, TodasAsOrdens,
 };
 use crate::manifesto::MANIFESTO;
 use crate::migracoes;
@@ -59,6 +59,7 @@ impl Modulo for ModuloOs {
             .consulta::<OrdensEmAberto>("os.ordens_em_aberto.v1")
             .consulta::<TodasAsOrdens>("os.todas_as_ordens.v1")
             .consulta::<BuscarOrdens>("os.buscar_ordens.v1")
+            .consulta::<OrdensPorId>("os.ordens_por_id.v1")
             .consulta::<BuscarDetalheOrdem>("os.buscar_detalhe_ordem.v1")
             .consulta::<OrdensAguardandoAprovacao>("os.ordens_aguardando_aprovacao.v1")
             .consulta::<HistoricoDoEquipamento>("os.historico_do_equipamento.v1")
