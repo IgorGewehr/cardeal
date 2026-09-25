@@ -84,6 +84,7 @@ pub struct SeletorPagamento<'a, M, C> {
     meios: Vec<(M, String, bool)>,
     contas: Vec<(C, String)>,
     com_prazo: bool,
+    so_vencimento: bool,
 }
 
 impl<'a, M: PartialEq + Copy, C: PartialEq + Copy> SeletorPagamento<'a, M, C> {
@@ -95,6 +96,7 @@ impl<'a, M: PartialEq + Copy, C: PartialEq + Copy> SeletorPagamento<'a, M, C> {
             meios: Vec::new(),
             contas: Vec::new(),
             com_prazo: false,
+            so_vencimento: false,
         }
     }
 
@@ -121,6 +123,14 @@ impl<'a, M: PartialEq + Copy, C: PartialEq + Copy> SeletorPagamento<'a, M, C> {
         self
     }
 
+    /// Como [`Self::com_prazo`], mas a prazo pede só o vencimento — um pagamento único
+    /// (a peça que chegou, uma conta avulsa), sem parcelas nem intervalo.
+    pub const fn com_prazo_unico(mut self) -> Self {
+        self.com_prazo = true;
+        self.so_vencimento = true;
+        self
+    }
+
     /// Desenha o bloco.
     pub fn mostrar(self, ui: &mut Ui) -> RespostaPagamento {
         let Self {
@@ -129,6 +139,7 @@ impl<'a, M: PartialEq + Copy, C: PartialEq + Copy> SeletorPagamento<'a, M, C> {
             meios,
             contas,
             com_prazo,
+            so_vencimento,
         } = self;
         let mut resposta = RespostaPagamento::default();
 
@@ -146,6 +157,13 @@ impl<'a, M: PartialEq + Copy, C: PartialEq + Copy> SeletorPagamento<'a, M, C> {
                 condicao.a_prazo = m == Modo::APrazo;
             }
             ui.add_space(Espaco::E12);
+            if condicao.a_prazo && so_vencimento {
+                ui.add(
+                    Campo::novo("Vencimento", &mut condicao.primeiro_vencimento)
+                        .mascara(Mascara::Data),
+                );
+                return resposta;
+            }
             if condicao.a_prazo {
                 ui.columns(3, |c| {
                     c[0].add(Campo::novo("Parcelas", &mut condicao.parcelas).marcador("1"));

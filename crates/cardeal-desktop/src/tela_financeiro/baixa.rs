@@ -112,7 +112,13 @@ pub(super) fn dialogo_baixar(
                         }
                     }
                     ui.add_space(Espaco::E12);
-                    pagamento.mostrar(ui, motor, sessao, "baixa-parcela", false);
+                    pagamento.mostrar(
+                        ui,
+                        motor,
+                        sessao,
+                        "baixa-parcela",
+                        crate::pagamento::Prazo::Nenhum,
+                    );
                 } else {
                     ui.add(Etiqueta::positiva("Quitada"));
                     ui.add_space(Espaco::E4);
@@ -456,7 +462,13 @@ pub(super) fn dialogo_baixar_lote(
             };
             ui.add(Campo::novo("Data", data).mascara(Mascara::Data));
             ui.add_space(Espaco::E12);
-            pagamento.mostrar(ui, motor, sessao, "baixa-lote", false);
+            pagamento.mostrar(
+                ui,
+                motor,
+                sessao,
+                "baixa-lote",
+                crate::pagamento::Prazo::Nenhum,
+            );
         },
         |ui, estado| {
             if ui.add(Botao::primario("Confirmar")).clicked() {

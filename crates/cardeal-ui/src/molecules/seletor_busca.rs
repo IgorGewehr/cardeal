@@ -141,15 +141,18 @@ impl<'a, T: PartialEq + Copy> SeletorBusca<'a, T> {
             } else {
                 let resp = ui.add(CampoTexto::novo(busca).marcador(marcador));
 
-                let termo = busca.trim().to_lowercase();
+                let termo = busca.trim();
                 if !termo.is_empty() {
+                    // Sem acento/caixa e por palavras, em qualquer ordem: "tela a52" acha
+                    // "Tela Samsung A52 original".
                     let achados: Vec<&OpcaoBusca<T>> = opcoes
                         .iter()
                         .filter(|o| {
-                            o.titulo.to_lowercase().contains(&termo)
-                                || o.subtitulo
-                                    .as_ref()
-                                    .is_some_and(|s| s.to_lowercase().contains(&termo))
+                            let alvo = match &o.subtitulo {
+                                Some(s) => format!("{} {s}", o.titulo),
+                                None => o.titulo.clone(),
+                            };
+                            cardeal_kernel::texto::casa_por_palavras(&alvo, termo)
                         })
                         .take(max_resultados)
                         .collect();

@@ -41,7 +41,13 @@ pub(super) fn dialogo_faturar(
                 return;
             }
             if let Dlg::Faturar(pagamento) = &mut estado.dlg {
-                pagamento.mostrar(ui, motor, sessao, "faturar-os", true);
+                pagamento.mostrar(
+                    ui,
+                    motor,
+                    sessao,
+                    "faturar-os",
+                    crate::pagamento::Prazo::Parcelado,
+                );
             }
         },
         |ui, estado| {

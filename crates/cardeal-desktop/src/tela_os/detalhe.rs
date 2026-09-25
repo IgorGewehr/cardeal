@@ -165,35 +165,61 @@ pub(super) fn corpo_detalhe(
             });
         });
     }
+    let ativa = pode_faturar(os.estado);
+    let mut abrir_dialogo: Option<Dlg> = None;
     for item in &detalhe.itens_peca {
-        let nome = estado
-            .produtos
-            .iter()
-            .find(|p| p.produto == item.produto)
-            .map_or_else(|| "Peça do estoque".to_owned(), |p| p.nome.clone());
+        let nome = nome_do_produto(&estado.produtos, item.produto);
         ui.horizontal(|ui| {
             ui.add(Rotulo::interface(format!("{} × {nome}", item.quantidade)));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 // Uma peça já aplicada não sai do orçamento: o estoque já foi baixado.
                 if !item.aplicada {
-                    if em_execucao && ui.add(Botao::secundario("Aplicar").pequeno()).clicked() {
-                        aplicar = Some(item.id);
-                    }
                     if pode_ajustar && ui.add(Botao::fantasma("Remover").pequeno()).clicked() {
                         remover = Some((item.id, TipoItemOrcamento::Peca));
+                    }
+                    if ativa {
+                        let falta = falta_no_estoque(item, &estado.produtos);
+                        if em_execucao
+                            && !falta
+                            && ui.add(Botao::secundario("Aplicar").pequeno()).clicked()
+                        {
+                            aplicar = Some(item.id);
+                        }
+                        if (falta || item.encomenda.is_some())
+                            && ui.add(Botao::secundario("Chegou").pequeno()).clicked()
+                        {
+                            abrir_dialogo = Some(Dlg::Chegou(Box::new(FormChegada::novo(
+                                os.id,
+                                item.id,
+                                item.encomenda.as_ref(),
+                                nome.clone(),
+                                true,
+                            ))));
+                        }
+                        if falta
+                            && item.encomenda.is_none()
+                            && ui.add(Botao::fantasma("Encomendar").pequeno()).clicked()
+                        {
+                            abrir_dialogo = Some(Dlg::Encomendar(Box::new(FormEncomenda::novo(
+                                os.id,
+                                item.id,
+                                None,
+                                nome.clone(),
+                                true,
+                            ))));
+                        }
                     }
                 }
                 ui.add(Rotulo::interface(format!(
                     "{} /un",
                     item.preco_unitario.formatar_com_simbolo()
                 )));
-                ui.add(if item.aplicada {
-                    Etiqueta::positiva("aplicada")
-                } else {
-                    Etiqueta::atencao("pendente")
-                });
+                ui.add(etiqueta_da_peca(item, &estado.produtos));
             });
         });
+    }
+    if let Some(d) = abrir_dialogo {
+        estado.dlg = d;
     }
     if let Some((item, tipo)) = remover {
         aplicar_e_recarregar(
@@ -256,7 +282,7 @@ pub(super) fn corpo_detalhe(
             &mut estado.peca_produto,
         )
         .opcoes(opcoes_peca)
-        .marcador("Buscar peça por nome…")
+        .marcador("Buscar peça, ou digitar o nome de uma nova…")
         .mostrar(ui);
         if let Some(produto) = estado.peca_produto.filter(|p| Some(*p) != antes) {
             sugerir_preco(motor, sessao, estado, produto);
@@ -268,6 +294,11 @@ pub(super) fn corpo_detalhe(
         });
         if !estado.peca_preco_dica.is_empty() {
             ui.add(Rotulo::campo(estado.peca_preco_dica.clone()));
+        } else if estado.peca_produto.is_none() && !estado.peca_busca.trim().is_empty() {
+            ui.add(Rotulo::campo(format!(
+                "Não está no catálogo: \"{}\" entra como peça nova (NCM fica para depois).",
+                estado.peca_busca.trim()
+            )));
         }
         ui.add_space(Espaco::E4);
         if ui.add(Botao::secundario("+ Adicionar peça")).clicked() {

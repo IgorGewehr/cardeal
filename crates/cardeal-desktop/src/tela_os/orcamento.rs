@@ -50,30 +50,46 @@ pub(super) fn adicionar_peca(
     estado: &mut EstadoTelaOs,
     os: Id,
 ) {
-    let Some(produto) = estado.peca_produto else {
-        notificar(
-            ctx,
-            Notificacao::aviso("Escolha o produto da lista de estoque."),
-        );
-        return;
+    let quantidade_txt = if estado.peca_qtd.trim().is_empty() {
+        "1"
+    } else {
+        estado.peca_qtd.as_str()
     };
     let (Ok(quantidade), Ok(preco_unitario)) = (
-        estado.peca_qtd.parse::<Quantidade>(),
+        quantidade_txt.parse::<Quantidade>(),
         estado.peca_preco.parse::<Preco>(),
     ) else {
         notificar(ctx, Notificacao::aviso("Quantidade ou preço inválidos."));
         return;
     };
+    // Nada escolhido na lista mas algo digitado: é uma peça que ainda não existe no
+    // catálogo — cadastra só pelo nome, junto com o orçamento.
+    let item = match (estado.peca_produto, estado.peca_busca.trim()) {
+        (Some(produto), _) => ItemOrcamentoNovo::Peca {
+            produto,
+            quantidade,
+            preco_unitario,
+        },
+        (None, "") => {
+            notificar(
+                ctx,
+                Notificacao::aviso("Busque a peça na lista ou digite o nome de uma nova."),
+            );
+            return;
+        }
+        (None, nome) => ItemOrcamentoNovo::PecaNova {
+            nome: nome.to_owned(),
+            quantidade,
+            preco_unitario,
+        },
+    };
+    let nova = matches!(item, ItemOrcamentoNovo::PecaNova { .. });
     let r = motor.executar(
         sessao,
         "os.montar_orcamento.v1",
         &MontarOrcamentoOs {
             ordem_servico: os,
-            item: ItemOrcamentoNovo::Peca {
-                produto,
-                quantidade,
-                preco_unitario,
-            },
+            item,
         },
     );
     match r {
@@ -83,9 +99,21 @@ pub(super) fn adicionar_peca(
             estado.peca_busca.clear();
             estado.peca_qtd.clear();
             estado.peca_preco.clear();
+            if nova {
+                // A peça nasceu no catálogo agora: o nome dela vem do catálogo recarregado.
+                estado.carregar_produtos(motor, sessao);
+            }
+            estado.recarregar_lista(motor, sessao);
             estado.abrir_detalhe(motor, sessao, os);
             estado.dlg = Dlg::Detalhe;
-            notificar(ctx, Notificacao::sucesso("Peça adicionada ao orçamento"));
+            notificar(
+                ctx,
+                Notificacao::sucesso(if nova {
+                    "Peça nova cadastrada e adicionada ao orçamento"
+                } else {
+                    "Peça adicionada ao orçamento"
+                }),
+            );
         }
         Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
     }

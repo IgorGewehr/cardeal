@@ -8,6 +8,7 @@ mod andamento;
 mod apontamento;
 mod confirmacoes;
 mod detalhe;
+mod encomenda;
 mod faturar;
 mod ficha;
 mod lista;
@@ -37,6 +38,7 @@ use cardeal_ui::tokens::{Espaco, TemaUi};
 use confirmacoes::*;
 use detalhe::*;
 use eframe::egui;
+use encomenda::*;
 use faturar::*;
 use ficha::*;
 use lista::*;
@@ -108,6 +110,10 @@ enum Dlg {
     /// recebe no mesmo clique, o caso do balcão) ou a prazo (gera as parcelas em aberto no
     /// financeiro — cliente empresa, parcelamento).
     Faturar(crate::pagamento::EstadoPagamento),
+    /// Pedir uma peça ao fornecedor (`os.encomendar_peca.v1`).
+    Encomendar(Box<FormEncomenda>),
+    /// A peça chegou: entrada, pagamento e aplicação (`os.registrar_chegada_da_peca.v1`).
+    Chegou(Box<FormChegada>),
 }
 
 impl Dlg {
@@ -161,6 +167,8 @@ enum AbaOs {
     #[default]
     Ordens,
     Orcamentos,
+    /// A lista de compras: peças sem saldo ou encomendadas, de todas as OS.
+    Compras,
 }
 
 /// Estado local da tela — sobrevive entre quadros, não entre reinícios.
@@ -172,6 +180,9 @@ pub struct EstadoTelaOs {
     ordens: Vec<OrdemServico>,
     /// A fila ativa inteira, para os indicadores do topo — independe da busca/filtro.
     ativas: Vec<OrdemServico>,
+    /// Peças sem saldo ou encomendadas (aba "Peças a comprar").
+    pecas_a_comprar: Vec<mod_os::ItemAguardandoEstoque>,
+    busca_compras: String,
     clientes: Vec<ItemPessoa>,
     produtos: Vec<ItemProdutoComSaldo>,
     /// Locais de estoque de onde as peças saem ao serem aplicadas na execução.
@@ -264,6 +275,13 @@ impl EstadoTelaOs {
             Err(e) => self.erro = Some(e.mensagem),
         }
         self.buscar_ordens(motor, sessao);
+        if let Ok(p) = motor.consultar(
+            sessao,
+            "os.pecas_aguardando_estoque.v1",
+            &mod_os::PecasAguardandoEstoque,
+        ) {
+            self.pecas_a_comprar = p;
+        }
     }
 
     /// O catálogo de clientes (nome na lista, busca por nome, seletor da nova OS).
@@ -448,11 +466,17 @@ pub fn mostrar(
                     crate::tela_orcamentos::abrir_novo(&mut estado.orc);
                 }
             }
+            AbaOs::Compras => {}
         },
         |ui, estado| {
+            let rotulo_compras = match estado.pecas_a_comprar.len() {
+                0 => "Peças a comprar".to_owned(),
+                n => format!("Peças a comprar ({n})"),
+            };
             if let Some(nova) = Abas::nova(&[
                 (AbaOs::Ordens, "Ordens de serviço"),
                 (AbaOs::Orcamentos, "Orçamentos"),
+                (AbaOs::Compras, rotulo_compras.as_str()),
             ])
             .selecionada(estado.aba)
             .mostrar(ui)
@@ -476,12 +500,13 @@ pub fn mostrar(
                 AbaOs::Orcamentos => {
                     crate::tela_orcamentos::corpo(ui, motor, sessao, &mut estado.orc);
                 }
+                AbaOs::Compras => aba_compras(ui, estado),
             }
         },
     );
 
     match estado.aba {
-        AbaOs::Ordens => match estado.dlg {
+        AbaOs::Ordens | AbaOs::Compras => match estado.dlg {
             Dlg::Fechado => {}
             Dlg::Nova { .. } => dialogo_nova(ui.ctx(), motor, sessao, estado),
             Dlg::Detalhe => {
@@ -492,6 +517,8 @@ pub fn mostrar(
             }
             Dlg::EditarDados(id) => dialogo_editar_dados(ui.ctx(), motor, sessao, estado, id),
             Dlg::Faturar(_) => dialogo_faturar(ui.ctx(), motor, sessao, estado),
+            Dlg::Encomendar(_) => dialogo_encomendar(ui.ctx(), motor, sessao, estado),
+            Dlg::Chegou(_) => dialogo_chegada(ui.ctx(), motor, sessao, estado),
         },
         AbaOs::Orcamentos => {
             crate::tela_orcamentos::dialogos(ui.ctx(), motor, sessao, &mut estado.orc);
@@ -601,6 +628,7 @@ impl EstadoTelaOs {
         match cena {
             "os-detalhe" => self.abrir_detalhe(motor, sessao, id),
             "os-nova" => self.dlg = Dlg::nova(),
+            "os-compras" => self.aba = AbaOs::Compras,
             "os-faturar" => {
                 self.abrir_detalhe(motor, sessao, id);
                 self.dlg = Dlg::faturar();

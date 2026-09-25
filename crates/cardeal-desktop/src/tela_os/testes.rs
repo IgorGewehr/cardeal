@@ -591,3 +591,41 @@ fn proximo_passo_e_linha_do_tempo_acompanham_o_fluxo() {
     );
     assert!(c.estado.confirmar_acao.is_none());
 }
+
+#[test]
+fn peca_nova_pelo_orcamento_vai_para_a_lista_de_compras_e_chega_pela_tela() {
+    let mut c = cenario();
+    c.estado.abrir_detalhe(&c.motor, &c.sessao, c.os);
+    // Nada escolhido na lista, só o nome digitado: vira peça nova.
+    c.estado.peca_busca = "Conector de carga USB-C".to_owned();
+    c.estado.peca_preco = "60,00".to_owned();
+    adicionar_peca(&c.ctx, &c.motor, &c.sessao, &mut c.estado, c.os);
+    let d = c.estado.detalhe.clone().expect("detalhe");
+    assert_eq!(d.itens_peca.len(), 1);
+    let item = d.itens_peca[0].clone();
+    assert_eq!(
+        nome_do_produto(&c.estado.produtos, item.produto),
+        "Conector de carga USB-C"
+    );
+    // Sem saldo: está na lista de compras e a etiqueta diz "a comprar".
+    assert!(c
+        .estado
+        .pecas_a_comprar
+        .iter()
+        .any(|p| p.item_peca == item.id));
+    assert!(falta_no_estoque(&item, &c.estado.produtos));
+
+    // Chegou, a prazo, pelo diálogo.
+    let mut f = FormChegada::novo(c.os, item.id, None, "Conector".to_owned(), true);
+    f.custo = "22,50".to_owned();
+    f.fornecedor = "Loja do centro".to_owned();
+    f.pagamento.condicao.a_prazo = true;
+    f.pagamento.condicao.primeiro_vencimento = Data::hoje(Fuso::BRASILIA).mais_dias(10).to_string();
+    c.estado.dlg = Dlg::Chegou(Box::new(f));
+    registrar_chegada(&c.ctx, &c.motor, &c.sessao, &mut c.estado);
+
+    let d = c.estado.detalhe.clone().expect("volta para a OS");
+    assert!(d.itens_peca[0].aplicada);
+    assert_eq!(d.itens_peca[0].custo_unitario, Preco::centavos(2250));
+    assert!(c.estado.pecas_a_comprar.is_empty());
+}

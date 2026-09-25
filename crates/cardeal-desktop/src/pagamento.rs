@@ -13,6 +13,17 @@ use mod_financeiro::{
     ContaBancariaCriada, ContasDisponiveis, CriarContaBancaria, ItemContaDisponivel, MeioPagamento,
 };
 
+/// Se o bloco oferece "A prazo", e como.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Prazo {
+    /// Só à vista (dar baixa numa parcela).
+    Nenhum,
+    /// À vista ou parcelado (faturar OS).
+    Parcelado,
+    /// À vista ou um vencimento só (a peça que chegou).
+    Unico,
+}
+
 /// A condição de pagamento com os tipos do financeiro.
 pub type Condicao = CondicaoPagamento<MeioPagamento, Id>;
 
@@ -65,6 +76,17 @@ impl EstadoPagamento {
         Ok(meio)
     }
 
+    /// O vencimento de uma condição a prazo de pagamento único.
+    ///
+    /// # Errors
+    /// Mensagem para o usuário quando a data não é válida.
+    pub fn vencimento_validado(&self) -> Result<Data, &'static str> {
+        self.condicao
+            .primeiro_vencimento
+            .parse::<Data>()
+            .map_err(|_| "Informe o vencimento (dd/mm/aaaa).")
+    }
+
     /// Parcelas, 1º vencimento e intervalo de uma condição a prazo.
     ///
     /// # Errors
@@ -95,14 +117,14 @@ impl EstadoPagamento {
         Ok((parcelas, vencimento, intervalo))
     }
 
-    /// Desenha o bloco. `com_prazo` liga a escolha "À vista / A prazo".
+    /// Desenha o bloco. `com_prazo` diz se (e como) oferece "A prazo".
     pub fn mostrar(
         &mut self,
         ui: &mut egui::Ui,
         motor: &MotorLocal,
         sessao: &SessaoLocal,
         id: &str,
-        com_prazo: bool,
+        com_prazo: Prazo,
     ) {
         if !self.contas_carregadas {
             self.contas_carregadas = true;
@@ -137,8 +159,10 @@ impl EstadoPagamento {
                     .iter()
                     .map(|c| (c.conta, format!("{} ({})", c.nome, c.codigo))),
             );
-        if com_prazo {
-            seletor = seletor.com_prazo();
+        match com_prazo {
+            Prazo::Nenhum => {}
+            Prazo::Parcelado => seletor = seletor.com_prazo(),
+            Prazo::Unico => seletor = seletor.com_prazo_unico(),
         }
         if seletor.mostrar(ui).pediu_nova_conta {
             self.criando_conta = true;

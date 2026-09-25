@@ -851,7 +851,12 @@ fn corpo_novo(
 
     ui.columns(2, |c| {
         c[0].add(Campo::novo("Nome do produto", &mut estado.produto_nome));
-        c[1].add(Campo::novo("NCM", &mut estado.produto_ncm).marcador("8 dígitos"));
+        // Opcional: só a nota fiscal precisa dele, e a primeira nota de compra casada com
+        // o produto preenche sozinha.
+        c[1].add(
+            Campo::novo("NCM (opcional)", &mut estado.produto_ncm)
+                .marcador("8 dígitos — só para nota fiscal"),
+        );
     });
     ui.add_space(Espaco::E8);
     ui.add(

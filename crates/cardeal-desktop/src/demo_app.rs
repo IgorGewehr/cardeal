@@ -326,7 +326,38 @@ pub fn semear(motor: &MotorLocal) -> SessaoLocal {
     passo("executar", furadeira);
     passo("concluir", furadeira);
 
-    let _ = abrir(joao, "iPhone 11", "Não carrega", ficha(Some(5), "", ""));
+    let iphone = abrir(joao, "iPhone 11", "Não carrega", ficha(Some(5), "", ""));
+    let peca_nova = |os: Id, nome: &str, reais: i64| -> Id {
+        motor
+            .executar(
+                &s,
+                "os.montar_orcamento.v1",
+                &MontarOrcamentoOs {
+                    ordem_servico: os,
+                    item: ItemOrcamentoNovo::PecaNova {
+                        nome: nome.to_owned(),
+                        quantidade: Quantidade::unidades(1),
+                        preco_unitario: Preco::reais(reais),
+                    },
+                },
+            )
+            .expect("peça nova")
+    };
+    let conector = peca_nova(iphone, "Conector de carga Lightning", 90);
+    let (): () = motor
+        .executar(
+            &s,
+            "os.encomendar_peca.v1",
+            &mod_os::EncomendarPeca {
+                ordem_servico: iphone,
+                item_peca: conector,
+                fornecedor: "Distribuidora Centro".to_owned(),
+                custo_previsto: Some(Preco::reais(35)),
+                previsao_chegada: Some(hoje.mais_dias(2)),
+            },
+        )
+        .expect("encomendar");
+    let _ = peca_nova(notebook, "Fonte 65W Dell original", 180);
 
     // Contas a receber a prazo para a aba do financeiro.
     for (reais, dias) in [(480, -3), (1_200, 10), (350, 25)] {
