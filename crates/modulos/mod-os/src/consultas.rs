@@ -142,6 +142,44 @@ pub struct DetalheOrdem {
     pub itens_peca: Vec<ItemPeca>,
     /// Os itens de mão de obra do orçamento.
     pub itens_mao_de_obra: Vec<ItemMaoDeObra>,
+    /// A linha do tempo: cada mudança de estado, mais antiga primeiro.
+    pub historico: Vec<PassoDaOrdem>,
+}
+
+/// Um passo da linha do tempo de uma OS.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PassoDaOrdem {
+    /// Quando.
+    pub momento: cardeal_kernel::Instante,
+    /// Quem.
+    pub usuario: Id,
+    /// O estado em que a OS entrou.
+    pub estado: crate::ordem::EstadoOs,
+}
+
+/// A linha do tempo de uma ordem, mais antiga primeiro.
+///
+/// # Errors
+/// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+pub fn historico_da_ordem(conexao: &Connection, ordem: Id) -> Resultado<Vec<PassoDaOrdem>> {
+    let mut stmt = conexao
+        .prepare(
+            "SELECT momento, usuario, estado FROM os_historico
+             WHERE ordem_servico = ?1 ORDER BY id",
+        )
+        .map_err(persist)?;
+    let linhas = stmt
+        .query_map([blob(ordem)], |r| {
+            Ok(PassoDaOrdem {
+                momento: cardeal_kernel::Instante::de_micros(r.get(0)?),
+                usuario: id_de(r.get::<_, Vec<u8>>(1)?),
+                estado: crate::repositorio::estado_de(&r.get::<_, String>(2)?),
+            })
+        })
+        .map_err(persist)?;
+    linhas
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(persist)
 }
 
 /// Lista as ordens não finalizadas da empresa.
@@ -381,11 +419,13 @@ impl Consulta for BuscarDetalheOrdem {
         let laudo = laudo_mais_recente(conexao, self.ordem_servico)?;
         let itens_peca = itens_peca_da_ordem(conexao, self.ordem_servico)?;
         let itens_mao_de_obra = itens_mao_de_obra_da_ordem(conexao, self.ordem_servico)?;
+        let historico = historico_da_ordem(conexao, self.ordem_servico)?;
         Ok(Some(DetalheOrdem {
             ordem,
             laudo,
             itens_peca,
             itens_mao_de_obra,
+            historico,
         }))
     }
 }

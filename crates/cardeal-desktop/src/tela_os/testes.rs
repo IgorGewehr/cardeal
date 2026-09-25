@@ -520,3 +520,74 @@ fn mensagem_do_whatsapp_acompanha_o_estado_da_os() {
     assert!(msg.starts_with("Olá, Cliente!"), "{msg}");
     assert!(msg.contains("Recebemos seu Notebook"), "{msg}");
 }
+
+#[test]
+fn proximo_passo_e_linha_do_tempo_acompanham_o_fluxo() {
+    let mut c = cenario();
+    c.estado.abrir_detalhe(&c.motor, &c.sessao, c.os);
+    let d = c.estado.detalhe.clone().expect("detalhe");
+    // Aberta e sem orçamento: nada a empurrar ainda.
+    assert_eq!(proximo_passo(&d), None);
+    let passos = passos_da_linha_do_tempo(&d, &c.estado.usuarios);
+    assert_eq!(passos[0].titulo, "Aberta");
+    assert_eq!(
+        passos[0].situacao,
+        cardeal_ui::molecules::SituacaoPasso::Atual
+    );
+    assert!(passos[0].detalhe.contains("Igor"), "{:?}", passos[0]);
+    assert_eq!(
+        passos.last().map(|p| p.titulo.as_str()),
+        Some("Faturada"),
+        "o resto do caminho aparece como pendente"
+    );
+
+    let _: Id = c
+        .motor
+        .executar(
+            &c.sessao,
+            "os.montar_orcamento.v1",
+            &MontarOrcamentoOs {
+                ordem_servico: c.os,
+                item: ItemOrcamentoNovo::MaoDeObra {
+                    descricao: "Reparo".to_owned(),
+                    valor: "90,00".parse().expect("valor"),
+                    tecnico: c.sessao.usuario(),
+                    horas: None,
+                },
+            },
+        )
+        .expect("mão de obra");
+    c.estado.abrir_detalhe(&c.motor, &c.sessao, c.os);
+    let d = c.estado.detalhe.clone().expect("detalhe");
+    assert_eq!(proximo_passo(&d), Some(ProximoPasso::EnviarParaAprovacao));
+
+    executar_proximo(
+        &c.ctx,
+        &c.motor,
+        &c.sessao,
+        &mut c.estado,
+        c.os,
+        ProximoPasso::EnviarParaAprovacao,
+    );
+    let d = c.estado.detalhe.clone().expect("detalhe");
+    assert_eq!(d.ordem.estado, EstadoOs::AguardandoAprovacao);
+    assert_eq!(proximo_passo(&d), Some(ProximoPasso::Aprovar));
+    let passos = passos_da_linha_do_tempo(&d, &c.estado.usuarios);
+    let feitos: Vec<&str> = passos
+        .iter()
+        .filter(|p| p.situacao != cardeal_ui::molecules::SituacaoPasso::Pendente)
+        .map(|p| p.titulo.as_str())
+        .collect();
+    assert_eq!(feitos, vec!["Aberta", "Orçamento enviado"]);
+
+    // Aprovar sem dizer quem aprovou não abre a confirmação.
+    executar_proximo(
+        &c.ctx,
+        &c.motor,
+        &c.sessao,
+        &mut c.estado,
+        c.os,
+        ProximoPasso::Aprovar,
+    );
+    assert!(c.estado.confirmar_acao.is_none());
+}

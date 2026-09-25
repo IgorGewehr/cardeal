@@ -121,6 +121,24 @@ impl<'a, 'b> RepositorioOs<'a, 'b> {
                 ],
             )
             .map_err(persist)?;
+        self.registrar_passo(os.id, os.estado)
+    }
+
+    /// Anota uma mudança de estado na linha do tempo (`os_historico`), com o usuário e o
+    /// instante da unidade de trabalho.
+    fn registrar_passo(&mut self, ordem: Id, estado: EstadoOs) -> Resultado<()> {
+        self.conn()
+            .execute(
+                "INSERT INTO os_historico (ordem_servico, momento, usuario, estado)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    blob(ordem),
+                    self.uow.agora().em_micros(),
+                    blob(self.uow.usuario()),
+                    estado_txt(estado),
+                ],
+            )
+            .map_err(persist)?;
         Ok(())
     }
 
@@ -130,6 +148,16 @@ impl<'a, 'b> RepositorioOs<'a, 'b> {
     /// # Errors
     /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
     pub fn atualizar_ordem(&mut self, os: &OrdemServico) -> Resultado<()> {
+        let anterior: Option<String> = self
+            .conn()
+            .query_row(
+                "SELECT estado FROM os_ordem_servico WHERE id = ?1",
+                [blob(os.id)],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(persist)?;
+        let mudou = anterior.is_some_and(|e| estado_de(&e) != os.estado);
         self.conn()
             .execute(
                 "UPDATE os_ordem_servico
@@ -152,6 +180,9 @@ impl<'a, 'b> RepositorioOs<'a, 'b> {
                 ],
             )
             .map_err(persist)?;
+        if mudou {
+            self.registrar_passo(os.id, os.estado)?;
+        }
         Ok(())
     }
 

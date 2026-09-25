@@ -14,32 +14,37 @@ pub(super) fn dialogo_detalhe(
     };
     let os = detalhe.ordem.clone();
     let titulo = format!("OS #{} · {}", os.numero, equipamento_label(&os));
+    let subtitulo = format!(
+        "{} · {}",
+        nome_cliente(&estado.clientes, os.cliente),
+        situacao_amigavel(os.estado)
+    );
+    let proximo = proximo_passo(&detalhe);
 
-    let fechar = Dialogo::nova(titulo).mostrar(
+    let fechar = Gaveta::nova(titulo).subtitulo(subtitulo).mostrar(
         ctx,
         estado,
         |ui, estado| corpo_detalhe(ui, motor, sessao, estado, &detalhe),
         |ui, estado| {
-            // A ponta final do fluxo do técnico — laudo/orçamento/execução terminam aqui: o
-            // comprovante em PDF pra entregar/mandar ao cliente, disponível em qualquer
-            // estado (`gerar_pdf` já cobre da entrada à quitação). Ação de peso, então
-            // primário — igual à ação de workflow do estado atual, mas em outra zona da tela
-            // (rodapé fixo, sempre visível, em vez de escondida no fim do corpo rolável). O
-            // rodapé desenha da direita para a esquerda (`Dialogo::mostrar`), então o botão
-            // adicionado primeiro fica mais à direita — a mesma convenção de "ação primária
-            // primeiro" já usada no resto da tela.
-            // Faturar disponível desde a abertura, ao lado de Comprovante/Fechar — pedido
-            // explícito do usuário (2026-09-15): laudo/orçamento/aprovação/execução são
-            // trâmite opcional, não um portão pro faturamento. Some só nos estados terminais
-            // onde faturar já não faz sentido (`OrdemServico::faturar` recusaria de qualquer
-            // forma; a UI só evita oferecer uma ação que o backend já vai rejeitar).
-            if pode_faturar(os.estado) && ui.add(Botao::primario("Faturar")).clicked() {
+            // Um botão principal só: o próximo passo do fluxo (o rodapé desenha da direita
+            // para a esquerda, então ele fica no canto). Faturar continua disponível desde a
+            // abertura (pedido do usuário, 2026-09-15), mas como secundário quando não é o
+            // passo natural.
+            if let Some(passo) = &proximo {
+                if ui.add(Botao::primario(passo.rotulo())).clicked() {
+                    executar_proximo(ui.ctx(), motor, sessao, estado, os.id, passo.clone());
+                }
+            }
+            if pode_faturar(os.estado)
+                && proximo != Some(ProximoPasso::Faturar)
+                && ui.add(Botao::secundario("Faturar")).clicked()
+            {
                 estado.dlg = Dlg::faturar();
             }
-            if ui.add(Botao::primario("Comprovante (PDF)")).clicked() {
+            if ui.add(Botao::secundario("Comprovante (PDF)")).clicked() {
                 gerar_pdf(ui.ctx(), estado, &detalhe);
             }
-            if ui.add(Botao::secundario("Fechar")).clicked() {
+            if ui.add(Botao::fantasma("Fechar")).clicked() {
                 estado.dlg = Dlg::Fechado;
             }
         },
@@ -67,6 +72,7 @@ pub(super) fn corpo_detalhe(
 ) {
     let os = &detalhe.ordem;
     secao_resumo(ui, estado, detalhe);
+    secao_andamento(ui, estado, detalhe);
     ui.horizontal(|ui| {
         ui.add(Rotulo::campo("Estado"));
         let (rotulo, tom) = estado_etiqueta(os.estado);
@@ -267,26 +273,6 @@ pub(super) fn corpo_detalhe(
         if ui.add(Botao::secundario("+ Adicionar peça")).clicked() {
             adicionar_peca(ui.ctx(), motor, sessao, estado, os.id);
         }
-
-        ui.add_space(Espaco::E12);
-        ui.horizontal(|ui| {
-            if !os.valor_total.e_zero()
-                && ui.add(Botao::primario("Enviar para aprovação")).clicked()
-            {
-                aplicar_e_recarregar(
-                    ui.ctx(),
-                    motor,
-                    sessao,
-                    estado,
-                    os.id,
-                    "os.enviar_para_aprovacao.v1",
-                    &EnviarParaAprovacao {
-                        ordem_servico: os.id,
-                    },
-                    "Orçamento enviado para aprovação",
-                );
-            }
-        });
     }
 
     ui.add_space(Espaco::E16);
@@ -313,16 +299,16 @@ pub(super) fn corpo_detalhe(
     }
 
     ui.add_space(Espaco::E16);
-    acoes_por_estado(ui, motor, sessao, estado, detalhe);
+    acoes_por_estado(ui, estado, detalhe);
 }
 
 pub(super) fn acoes_por_estado(
     ui: &mut egui::Ui,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
     estado: &mut EstadoTelaOs,
     detalhe: &DetalheOrdem,
 ) {
+    // Só o que o próximo passo do rodapé precisa saber antes (quem aprovou, de que local as
+    // peças saem) e as saídas alternativas (reprovar). A ação principal fica no rodapé.
     let os = &detalhe.ordem;
     match os.estado {
         EstadoOs::AguardandoAprovacao => {
@@ -333,47 +319,16 @@ pub(super) fn acoes_por_estado(
                 &mut estado.aprovador,
             ));
             ui.add_space(Espaco::E8);
-            ui.horizontal(|ui| {
-                if ui.add(Botao::primario("Aprovar")).clicked() {
-                    if estado.aprovador.trim().is_empty() {
-                        notificar(
-                            ui.ctx(),
-                            Notificacao::aviso("Informe quem aprovou (nome e documento)."),
-                        );
-                    } else {
-                        estado.confirmar_acao = Some(AcaoPendente::AprovarOrcamento(os.id));
-                    }
-                }
-                if ui.add(Botao::destrutivo("Reprovar")).clicked() {
-                    estado.confirmar_acao = Some(AcaoPendente::ReprovarOrcamento(os.id));
-                }
-            });
-        }
-        EstadoOs::Aprovada => {
-            if ui.add(Botao::primario("Iniciar execução")).clicked() {
-                aplicar_e_recarregar(
-                    ui.ctx(),
-                    motor,
-                    sessao,
-                    estado,
-                    os.id,
-                    "os.iniciar_execucao.v1",
-                    &IniciarExecucao {
-                        ordem_servico: os.id,
-                    },
-                    "Execução iniciada",
-                );
+            if ui
+                .add(Botao::destrutivo("Cliente reprovou").pequeno())
+                .clicked()
+            {
+                estado.confirmar_acao = Some(AcaoPendente::ReprovarOrcamento(os.id));
             }
         }
         EstadoOs::EmExecucao => {
-            let pendentes: Vec<Id> = detalhe
-                .itens_peca
-                .iter()
-                .filter(|i| !i.aplicada)
-                .map(|i| i.id)
-                .collect();
-            if !pendentes.is_empty() {
-                let n = pendentes.len();
+            let n = detalhe.itens_peca.iter().filter(|i| !i.aplicada).count();
+            if n > 0 {
                 ui.add(
                     Rotulo::interface(if n == 1 {
                         "1 peça do orçamento ainda não saiu do estoque.".to_owned()
@@ -382,8 +337,8 @@ pub(super) fn acoes_por_estado(
                     })
                     .cor(ui.cores().atencao),
                 );
-                ui.add_space(Espaco::E8);
                 if estado.locais.len() > 1 {
+                    ui.add_space(Espaco::E8);
                     let opcoes: Vec<(Id, String)> = estado
                         .locais
                         .iter()
@@ -392,18 +347,7 @@ pub(super) fn acoes_por_estado(
                     SeletorOpcao::novo("Sai do local de estoque", &mut estado.aplicar_local)
                         .opcoes(opcoes)
                         .mostrar(ui);
-                    ui.add_space(Espaco::E8);
                 }
-                let rotulo = if n == 1 {
-                    "Aplicar peça"
-                } else {
-                    "Aplicar todas as peças"
-                };
-                if ui.add(Botao::primario(rotulo)).clicked() {
-                    aplicar_pecas(ui.ctx(), motor, sessao, estado, os.id, &pendentes);
-                }
-            } else if ui.add(Botao::primario("Concluir execução")).clicked() {
-                estado.confirmar_acao = Some(AcaoPendente::ConcluirExecucao(os.id));
             }
         }
         EstadoOs::Faturada
@@ -411,6 +355,7 @@ pub(super) fn acoes_por_estado(
         | EstadoOs::Reprovada
         | EstadoOs::Aberta
         | EstadoOs::EmDiagnostico
+        | EstadoOs::Aprovada
         | EstadoOs::Concluida => {}
     }
 }

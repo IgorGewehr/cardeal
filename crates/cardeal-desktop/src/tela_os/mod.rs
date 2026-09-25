@@ -4,6 +4,7 @@
 //! abrem o mesmo `Dialogo`. OS é workflow (máquina de estados), então o dialog de detalhe
 //! mostra as infos + a ação certa pro estado atual, em vez de um "Editar" genérico.
 
+mod andamento;
 mod apontamento;
 mod confirmacoes;
 mod detalhe;
@@ -17,6 +18,7 @@ mod resumo;
 #[cfg(test)]
 mod testes;
 
+use andamento::*;
 use apontamento::*;
 use cardeal_cliente::{IdentidadeVisual, MotorLocal, SessaoLocal, UsuarioResumo};
 use cardeal_kernel::{Data, Dinheiro, Fuso, Id, Instante, Percentual, Preco, Quantidade};
@@ -28,7 +30,8 @@ use cardeal_ui::molecules::{
     OpcaoBusca, SecaoExpansivel, SeletorBusca, SeletorOpcao,
 };
 use cardeal_ui::organisms::{
-    notificar, ColunaGrade, Dialogo, Direcao, FaixaKpi, Grade, LayoutTela, Notificacao, Ordenacao,
+    notificar, ColunaGrade, Dialogo, Direcao, FaixaKpi, Gaveta, Grade, LayoutTela, Notificacao,
+    Ordenacao,
 };
 use cardeal_ui::tokens::{Espaco, TemaUi};
 use confirmacoes::*;

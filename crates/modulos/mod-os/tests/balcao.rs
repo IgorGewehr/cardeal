@@ -525,3 +525,53 @@ fn ficha_de_entrada_e_gravada_na_abertura_e_corrigida_depois() {
     assert_eq!(f.previsao_entrega, Some(hoje.mais_dias(10)));
     assert_eq!(f.acessorios, "Capinha azul");
 }
+
+#[test]
+fn linha_do_tempo_registra_cada_mudanca_de_estado_uma_vez() {
+    let b = Balcao::novo(&[TODAS, &["os.ordem.editar_dados"]].concat());
+    let joao = b.cliente("João");
+    let os = b.abrir(joao, "Notebook", "Não liga").ordem_servico;
+    let _: Id = b
+        .cmd(
+            "os.montar_orcamento.v1",
+            &MontarOrcamentoOs {
+                ordem_servico: os,
+                item: ItemOrcamentoNovo::MaoDeObra {
+                    descricao: "Reparo".to_owned(),
+                    valor: cardeal_kernel::Dinheiro::reais(100),
+                    tecnico: Id::novo(),
+                    horas: None,
+                },
+            },
+        )
+        .unwrap();
+    // Editar dados não muda o estado: não entra na linha do tempo.
+    b.cmd::<()>(
+        "os.editar_dados_da_ordem.v1",
+        &mod_os::EditarDadosDaOrdem {
+            ordem_servico: os,
+            equipamento: Some("Notebook Dell".to_owned()),
+            complemento_defeito_relatado: None,
+            ficha: None,
+        },
+    )
+    .unwrap();
+    b.cmd::<()>(
+        "os.enviar_para_aprovacao.v1",
+        &EnviarParaAprovacao { ordem_servico: os },
+    )
+    .unwrap();
+    let _: OrdemServicoCancelada = b
+        .cmd(
+            "os.cancelar_ordem_servico.v1",
+            &CancelarOrdemServico { ordem_servico: os },
+        )
+        .unwrap();
+
+    use mod_os::EstadoOs as E;
+    let passos: Vec<E> = b.detalhe(os).historico.iter().map(|p| p.estado).collect();
+    assert_eq!(
+        passos,
+        vec![E::Aberta, E::AguardandoAprovacao, E::Cancelada]
+    );
+}

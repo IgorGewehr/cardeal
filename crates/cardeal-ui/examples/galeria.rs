@@ -11,11 +11,12 @@ use cardeal_ui::atoms::{
 };
 use cardeal_ui::molecules::{
     Abas, AcaoRegistro, AcoesRegistro, BarraFiltros, CabecalhoTela, Campo, CampoBusca, CartaoKpi,
-    EstadoVazio, ItemDeLista, LinhaDeAcao, SeletorOpcao, Severidade,
+    EstadoVazio, ItemDeLista, LinhaDeAcao, LinhaDoTempo, PassoLinhaDoTempo, SeletorOpcao,
+    Severidade, SituacaoPasso,
 };
 use cardeal_ui::organisms::{
-    notificar, ColunaGrade, CondicaoPagamento, Dialogo, Grade, Janela, Notificacao, Notificacoes,
-    Ordenacao, Painel, SeletorPagamento,
+    notificar, ColunaGrade, CondicaoPagamento, Dialogo, Gaveta, Grade, Janela, Notificacao,
+    Notificacoes, Ordenacao, Painel, SeletorPagamento,
 };
 use cardeal_ui::tokens::{instalar_estilo, instalar_fontes, Espaco, Rubro, Tema, TemaUi};
 use eframe::egui;
@@ -248,6 +249,28 @@ impl Galeria {
         let Some(tamanho) = self.dialogo.clone() else {
             return;
         };
+        if tamanho == "gaveta" {
+            let passos = passos_demo();
+            let fechar = Gaveta::nova("OS #2 · Samsung Galaxy A52")
+                .subtitulo("Maria Souza · aguardando aprovação")
+                .mostrar(
+                    ctx,
+                    &mut self.motivo,
+                    |ui, _| {
+                        ui.add(Rotulo::titulo_secao("Linha do tempo"));
+                        ui.add_space(Espaco::E8);
+                        ui.add(LinhaDoTempo::nova(&passos));
+                    },
+                    |ui, _| {
+                        ui.add(Botao::primario("Aprovar orçamento"));
+                        ui.add(Botao::secundario("Fechar"));
+                    },
+                );
+            if fechar {
+                self.dialogo = None;
+            }
+            return;
+        }
         let base = Dialogo::nova("Cancelar cupom nº 4087 — R$ 31,33")
             .descricao("A venda em andamento é encerrada e o cancelamento fica registrado.");
         let base = match tamanho.as_str() {
@@ -616,12 +639,17 @@ impl eframe::App for Galeria {
                 Self::parcelas(ui);
 
                 ui.add_space(Espaco::E24);
+                ui.add(Rotulo::titulo_secao("Linha do tempo (OS, processos)"));
+                ui.add(LinhaDoTempo::nova(&passos_demo()));
+
+                ui.add_space(Espaco::E24);
                 ui.add(Rotulo::titulo_secao("Diálogo (pequeno · médio · grande)"));
                 ui.horizontal(|ui| {
                     for (rotulo, chave) in [
                         ("Pequeno", "pequeno"),
                         ("Médio", "medio"),
                         ("Grande", "grande"),
+                        ("Gaveta lateral", "gaveta"),
                     ] {
                         if ui.add(Botao::secundario(rotulo)).clicked() {
                             self.dialogo = Some(chave.to_owned());
@@ -662,4 +690,24 @@ impl eframe::App for Galeria {
         Notificacoes::mostrar(ctx);
         self.tratar_captura(ctx);
     }
+}
+
+/// Os passos de exemplo da linha do tempo (uma OS no meio do caminho).
+fn passos_demo() -> Vec<PassoLinhaDoTempo> {
+    let p = |titulo: &str, detalhe: &str, situacao| PassoLinhaDoTempo {
+        titulo: titulo.to_owned(),
+        detalhe: detalhe.to_owned(),
+        situacao,
+    };
+    vec![
+        p("Aberta", "24/09 09:12 · Igor", SituacaoPasso::Feito),
+        p(
+            "Orçamento enviado",
+            "24/09 16:40 · Igor",
+            SituacaoPasso::Feito,
+        ),
+        p("Aguardando aprovação", "há 1 dia", SituacaoPasso::Atual),
+        p("Em execução", "", SituacaoPasso::Pendente),
+        p("Pronta para retirada", "", SituacaoPasso::Pendente),
+    ]
 }

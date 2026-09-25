@@ -89,7 +89,7 @@ pub use comandos::{
 pub use consultas::{
     ApontamentosDaOrdem, BuscarDetalheOrdem, BuscarOrdens, DetalheOrdem, FiltroEstadoOs,
     HistoricoDoEquipamento, ItemAguardandoEstoque, OrdensAguardandoAprovacao, OrdensEmAberto,
-    OrdensPorId, PecasAguardandoEstoque, TempoPorTecnicoNoPeriodo, TempoTotalDaOrdem,
+    OrdensPorId, PassoDaOrdem, PecasAguardandoEstoque, TempoPorTecnicoNoPeriodo, TempoTotalDaOrdem,
     TodasAsOrdens, UltimoPrecoDaPeca,
 };
 pub use erros::ErroOs;

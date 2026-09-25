@@ -109,6 +109,21 @@ ALTER TABLE os_ordem_servico ADD COLUMN numero_serie TEXT NOT NULL DEFAULT '';
 ALTER TABLE os_ordem_servico ADD COLUMN acessorios TEXT NOT NULL DEFAULT '';
 ";
 
+// Migração v7 (2026-09-25): linha do tempo da OS — cada mudança de estado com quem e
+// quando, gravada pelo próprio `RepositorioOs` (inserir/atualizar), então nenhum comando
+// precisa lembrar de registrar. OS anteriores a esta migração começam o histórico vazio; a
+// tela usa a data de abertura da própria OS como primeiro passo.
+const SQL_HISTORICO: &str = r"
+CREATE TABLE os_historico (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    ordem_servico BLOB    NOT NULL REFERENCES os_ordem_servico(id),
+    momento       INTEGER NOT NULL,
+    usuario       BLOB    NOT NULL,
+    estado        TEXT    NOT NULL
+) STRICT;
+CREATE INDEX os_historico_ordem ON os_historico(ordem_servico, id);
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -144,6 +159,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 6,
         nome: "os_ficha_entrada",
         sql: SQL_FICHA_ENTRADA,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 7,
+        nome: "os_historico",
+        sql: SQL_HISTORICO,
         tipo: TipoMigracao::Esquema,
     },
 ];
