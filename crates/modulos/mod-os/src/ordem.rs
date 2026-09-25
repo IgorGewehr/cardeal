@@ -207,7 +207,7 @@ impl OrdemServico {
         )
     }
 
-    fn exigir_nao_finalizada(&self) -> Result<(), ErroOs> {
+    pub(crate) fn exigir_nao_finalizada(&self) -> Result<(), ErroOs> {
         if self.aceita_edicao_de_dados() {
             Ok(())
         } else {

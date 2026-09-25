@@ -48,6 +48,8 @@ impl Modulo for ModuloOs {
             .comando::<IniciarExecucao>("os.iniciar_execucao.v1")
             .comando::<AplicarPeca>("os.aplicar_peca.v1")
             .comando::<AplicarPecas>("os.aplicar_pecas.v1")
+            .comando::<crate::comandos::EncomendarPeca>("os.encomendar_peca.v1")
+            .comando::<crate::comandos::RegistrarChegadaDaPeca>("os.registrar_chegada_da_peca.v1")
             .comando::<RegistrarMaoDeObra>("os.registrar_mao_de_obra.v1")
             .comando::<ConcluirExecucao>("os.concluir_execucao.v1")
             .comando::<FaturarOrdemServico>("os.faturar_ordem_servico.v1")

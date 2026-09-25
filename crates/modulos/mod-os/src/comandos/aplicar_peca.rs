@@ -129,7 +129,7 @@ fn aplicar_peca_comum(
 /// Consome o estoque do item (chamada direta a `mod-estoque`, mesma transação) — do lote
 /// específico quando o técnico identificou a peça física, senão do saldo agregado — e grava o
 /// item como aplicado com o custo real. Sem checagem de estado: quem chama decide quando pode.
-fn consumir_e_aplicar(
+pub(crate) fn consumir_e_aplicar(
     item: &mut crate::execucao::ItemPeca,
     ordem: Id,
     local: Id,

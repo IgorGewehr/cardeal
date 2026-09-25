@@ -12,6 +12,7 @@
 mod ajustar_saldo;
 mod criar_grupo_produto;
 mod criar_local;
+mod criar_peca_rapida;
 mod criar_produto;
 mod criar_unidade;
 mod definir_ativo_produto;
@@ -25,6 +26,9 @@ mod registrar_saida;
 pub use ajustar_saldo::{AjustarSaldo, SaldoAjustado};
 pub use criar_grupo_produto::{CriarGrupoProduto, GrupoProdutoCriado};
 pub use criar_local::{CriarLocal, LocalCriado, TipoLocal};
+pub use criar_peca_rapida::{
+    completar_ncm_se_vazio, criar_peca_rapida_comum, CriarPecaRapida, PecaRapidaCriada,
+};
 pub use criar_produto::{CriarProduto, ProdutoCriado};
 pub use criar_unidade::{CriarUnidade, UnidadeCriada};
 pub use definir_ativo_produto::DefinirAtivoProduto;

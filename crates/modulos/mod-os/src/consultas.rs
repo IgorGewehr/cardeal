@@ -42,7 +42,8 @@ pub fn itens_peca_da_ordem(conexao: &Connection, ordem_servico: Id) -> Resultado
     let mut stmt = conexao
         .prepare(
             "SELECT id, ordem_servico, produto, quantidade, preco_unitario, custo_unitario,
-                    coberto_garantia, aplicada, local, lote, estornada
+                    coberto_garantia, aplicada, local, lote, estornada, encomenda_fornecedor,
+                        encomenda_custo, encomenda_previsao, encomendada_em
              FROM os_item_peca WHERE ordem_servico = ?1 ORDER BY rowid",
         )
         .map_err(persist)?;
@@ -669,10 +670,18 @@ pub struct ItemAguardandoEstoque {
     pub quantidade_necessaria: Quantidade,
     /// Quanto há disponível no estoque agora (soma entre locais).
     pub saldo_disponivel: Quantidade,
+    /// O aparelho da OS (para a lista de compras dizer para quê é a peça).
+    pub equipamento: String,
+    /// O cliente da OS.
+    pub cliente: Id,
+    /// A encomenda, se a peça já foi pedida ao fornecedor.
+    pub encomenda: Option<crate::execucao::Encomenda>,
 }
 
 /// Todas as peças orçadas (em ordens não finalizadas) ainda não aplicadas cujo saldo
-/// disponível no estoque é insuficiente para a quantidade pedida.
+/// disponível no estoque é insuficiente para a quantidade pedida — e as já encomendadas que
+/// não chegaram, mesmo que o estoque tenha coberto entretanto (a encomenda continua valendo
+/// até alguém registrar a chegada ou desfazê-la).
 ///
 /// # Errors
 /// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
@@ -683,11 +692,11 @@ pub fn pecas_aguardando_estoque(
     let mut pendentes = Vec::new();
     for os in ordens_nao_finalizadas(conexao, empresa)? {
         for item in itens_peca_da_ordem(conexao, os.id)? {
-            if item.aplicada {
+            if item.aplicada || item.estornada {
                 continue;
             }
             let saldo_disponivel = mod_estoque::saldo_disponivel_do_produto(conexao, item.produto)?;
-            if saldo_disponivel < item.quantidade {
+            if saldo_disponivel < item.quantidade || item.encomenda.is_some() {
                 pendentes.push(ItemAguardandoEstoque {
                     ordem_servico: os.id,
                     numero: os.numero,
@@ -695,6 +704,9 @@ pub fn pecas_aguardando_estoque(
                     produto: item.produto,
                     quantidade_necessaria: item.quantidade,
                     saldo_disponivel,
+                    equipamento: os.equipamento.clone(),
+                    cliente: os.cliente,
+                    encomenda: item.encomenda,
                 });
             }
         }

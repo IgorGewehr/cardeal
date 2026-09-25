@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::erros::ErroOs;
 
 /// Uma peça no orçamento de uma ordem de serviço.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ItemPeca {
     /// Identidade.
     pub id: Id,
@@ -41,6 +41,22 @@ pub struct ItemPeca {
     /// Se o consumo desta peça já foi estornado (devolvido ao estoque) por um cancelamento
     /// de OS depois de aplicada — nunca `true` sem `aplicada` também `true`.
     pub estornada: bool,
+    /// A encomenda ao fornecedor, quando a peça não tinha em estoque e foi pedida.
+    pub encomenda: Option<Encomenda>,
+}
+
+/// Uma peça pedida ao fornecedor para esta OS — o que o balcão precisa lembrar até ela
+/// chegar: de quem, por quanto e quando.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Encomenda {
+    /// Fornecedor, em texto livre (loja, site, representante).
+    pub fornecedor: String,
+    /// Custo combinado por unidade, quando já se sabe.
+    pub custo_previsto: Option<Preco>,
+    /// Quando deve chegar.
+    pub previsao_chegada: Option<cardeal_kernel::Data>,
+    /// Quando foi pedida.
+    pub encomendada_em: cardeal_kernel::Data,
 }
 
 impl ItemPeca {
@@ -64,6 +80,7 @@ impl ItemPeca {
             local: None,
             lote: None,
             estornada: false,
+            encomenda: None,
         }
     }
 

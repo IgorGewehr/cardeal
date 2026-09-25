@@ -77,7 +77,10 @@ pub struct Produto {
 }
 
 impl Produto {
-    /// Cria um produto validando NCM e a coerência lote/validade.
+    /// Cria um produto validando NCM e a coerência lote/validade. O NCM pode ficar vazio
+    /// (pendente): ele só é exigido na emissão fiscal, e uma nota de compra casada com o
+    /// produto o preenche sozinha (`completar_ncm_se_vazio`). Preenchido, precisa de 8
+    /// dígitos.
     ///
     /// # Errors
     /// [`ErroEstoque::NomeVazio`], [`ErroEstoque::NcmInvalido`], [`ErroEstoque::ValidadeSemLote`].
@@ -93,7 +96,7 @@ impl Produto {
             return Err(ErroEstoque::NomeVazio);
         }
         let ncm = texto::somente_digitos(ncm);
-        if ncm.len() != 8 {
+        if !ncm.is_empty() && ncm.len() != 8 {
             return Err(ErroEstoque::NcmInvalido);
         }
         Ok(Self {
@@ -121,6 +124,12 @@ impl Produto {
             ativo: true,
             versao: Versao::INICIAL,
         })
+    }
+
+    /// Verdadeiro enquanto o NCM não foi informado — só atrapalha na emissão fiscal.
+    #[must_use]
+    pub fn ncm_pendente(&self) -> bool {
+        self.ncm.is_empty()
     }
 
     /// Liga os controles de rastreabilidade, recusando validade sem lote.
@@ -449,6 +458,13 @@ mod testes {
             Produto::novo(Id::novo(), Id::novo(), "X", "123", Id::novo()).unwrap_err(),
             ErroEstoque::NcmInvalido
         );
+    }
+
+    #[test]
+    fn ncm_vazio_fica_pendente() {
+        let p = Produto::novo(Id::novo(), Id::novo(), "Tela A52", "", Id::novo()).unwrap();
+        assert!(p.ncm_pendente());
+        assert!(!produto().ncm_pendente());
     }
 
     #[test]

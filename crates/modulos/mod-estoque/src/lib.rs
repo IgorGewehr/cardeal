@@ -74,6 +74,9 @@ mod saldo;
 
 pub use aparelho_origem::AparelhoOrigem;
 pub use comandos::{
+    completar_ncm_se_vazio, criar_peca_rapida_comum, CriarPecaRapida, PecaRapidaCriada,
+};
+pub use comandos::{
     registrar_entrada_com_lote_comum, registrar_entrada_comum, registrar_saida_comum,
     registrar_saida_de_lote_comum, AjustarSaldo, AparelhoOrigemRegistrado, CriarGrupoProduto,
     CriarLocal, CriarProduto, CriarUnidade, DadosEntrada, DadosNovoLote, DadosSaida,

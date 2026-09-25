@@ -289,7 +289,9 @@ impl<'a, 'b> RepositorioEstoque<'a, 'b> {
     /// Produtos ativos da empresa com o NCM informado — `(id, nome)`, usado por
     /// `mod-compras` na etapa de casamento por NCM + similaridade de descrição
     /// (`docs/modulos/compras.md` §5). Consulta pública, não SQL cru de outro módulo
-    /// (`docs/contratos-internos.md` §7 regra 2) — o dono da tabela expõe a leitura.
+    /// (`docs/contratos-internos.md` §7 regra 2) — o dono da tabela expõe a leitura. Inclui os
+    /// produtos com NCM ainda pendente (peça cadastrada às pressas): a descrição decide, e o
+    /// casamento continua só uma sugestão até alguém confirmar.
     ///
     /// # Errors
     /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
@@ -298,7 +300,7 @@ impl<'a, 'b> RepositorioEstoque<'a, 'b> {
             .conn()
             .prepare(
                 "SELECT id, nome FROM estoque_produto
-                 WHERE empresa = ?1 AND ncm = ?2 AND ativo = 1",
+                 WHERE empresa = ?1 AND (ncm = ?2 OR ncm = '') AND ativo = 1",
             )
             .map_err(persist)?;
         let linhas = stmt

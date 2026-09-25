@@ -269,6 +269,31 @@ impl<'a, 'b> RepositorioOs<'a, 'b> {
         Ok(())
     }
 
+    /// Grava (ou apaga, com `None`) a encomenda de um item de peça.
+    ///
+    /// # Errors
+    /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+    pub fn gravar_encomenda(&mut self, item: &ItemPeca) -> Resultado<()> {
+        let e = item.encomenda.as_ref();
+        self.conn()
+            .execute(
+                "UPDATE os_item_peca
+                 SET encomenda_fornecedor = ?2, encomenda_custo = ?3, encomenda_previsao = ?4,
+                     encomendada_em = ?5
+                 WHERE id = ?1",
+                params![
+                    blob(item.id),
+                    e.map(|e| e.fornecedor.clone()),
+                    e.and_then(|e| e.custo_previsto)
+                        .map(Preco::unidades_internas),
+                    e.and_then(|e| e.previsao_chegada).map(dias),
+                    e.map(|e| dias(e.encomendada_em)),
+                ],
+            )
+            .map_err(persist)?;
+        Ok(())
+    }
+
     /// Busca um item de peça pelo id. `Ok(None)` = não existe.
     ///
     /// # Errors
@@ -277,7 +302,8 @@ impl<'a, 'b> RepositorioOs<'a, 'b> {
         self.conn()
             .query_row(
                 "SELECT id, ordem_servico, produto, quantidade, preco_unitario, custo_unitario,
-                        coberto_garantia, aplicada, local, lote, estornada
+                        coberto_garantia, aplicada, local, lote, estornada, encomenda_fornecedor,
+                        encomenda_custo, encomenda_previsao, encomendada_em
                  FROM os_item_peca WHERE id = ?1",
                 [blob(id)],
                 item_peca_de_linha,
@@ -521,6 +547,17 @@ pub(crate) fn item_peca_de_linha(r: &rusqlite::Row<'_>) -> rusqlite::Result<Item
         local: r.get::<_, Option<Vec<u8>>>(8)?.map(id_de),
         lote: r.get::<_, Option<Vec<u8>>>(9)?.map(id_de),
         estornada: r.get::<_, i64>(10)? != 0,
+        encomenda: r
+            .get::<_, Option<i64>>(14)?
+            .map(|em| -> rusqlite::Result<crate::execucao::Encomenda> {
+                Ok(crate::execucao::Encomenda {
+                    fornecedor: r.get::<_, Option<String>>(11)?.unwrap_or_default(),
+                    custo_previsto: r.get::<_, Option<i64>>(12)?.map(Preco::interna),
+                    previsao_chegada: r.get::<_, Option<i64>>(13)?.map(data_de),
+                    encomendada_em: data_de(em),
+                })
+            })
+            .transpose()?,
     })
 }
 

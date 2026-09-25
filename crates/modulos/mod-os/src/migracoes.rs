@@ -124,6 +124,15 @@ CREATE TABLE os_historico (
 CREATE INDEX os_historico_ordem ON os_historico(ordem_servico, id);
 ";
 
+// Migração v8 (2026-09-25): peça sob encomenda — de quem foi pedida, por quanto e quando
+// chega. Aditiva: peças existentes ficam sem encomenda (`encomendada_em` NULL).
+const SQL_ENCOMENDA: &str = r"
+ALTER TABLE os_item_peca ADD COLUMN encomenda_fornecedor TEXT;
+ALTER TABLE os_item_peca ADD COLUMN encomenda_custo INTEGER;
+ALTER TABLE os_item_peca ADD COLUMN encomenda_previsao INTEGER;
+ALTER TABLE os_item_peca ADD COLUMN encomendada_em INTEGER;
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -165,6 +174,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 7,
         nome: "os_historico",
         sql: SQL_HISTORICO,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 8,
+        nome: "os_item_peca_encomenda",
+        sql: SQL_ENCOMENDA,
         tipo: TipoMigracao::Esquema,
     },
 ];

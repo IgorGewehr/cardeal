@@ -26,7 +26,9 @@ use cardeal_storage::UnidadeDeTrabalho;
 use mod_clientes::{
     ConstrutorPessoa, DocumentoPessoa, Papel, RepositorioClientes, TipoDocumento, TipoPessoa,
 };
-use mod_estoque::{registrar_entrada_comum, DadosEntrada, RepositorioEstoque};
+use mod_estoque::{
+    completar_ncm_se_vazio, registrar_entrada_comum, DadosEntrada, RepositorioEstoque,
+};
 use mod_financeiro::{
     baixar_pagamento_comum, lancar_titulo_comum, DadosLancamentoTitulo, EspecieTitulo,
     MeioPagamento,
@@ -498,6 +500,8 @@ pub fn confirmar_entrada_comum(
             ctx,
             uow,
         )?;
+        // A peça cadastrada às pressas (sem NCM) ganha o NCM da nota que a trouxe.
+        completar_ncm_se_vazio(produto, &item.ncm, uow)?;
     }
 
     let (titulo, pago) = if gerar_titulo {

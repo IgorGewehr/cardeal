@@ -37,6 +37,17 @@ pub enum ItemOrcamentoNovo {
         /// Horas trabalhadas, quando registradas.
         horas: Option<Quantidade>,
     },
+    /// Uma peça que ainda não existe no catálogo: cadastrada na hora só pelo nome
+    /// (`mod_estoque::criar_peca_rapida_comum` — grupo e unidade padrão, NCM pendente) e
+    /// orçada na mesma transação. Se já existe produto com esse nome, usa ele.
+    PecaNova {
+        /// O nome da peça, como o balcão chama.
+        nome: String,
+        /// A quantidade orçada.
+        quantidade: Quantidade,
+        /// O preço cobrado do cliente por unidade.
+        preco_unitario: Preco,
+    },
 }
 
 /// Acrescenta um item ao orçamento.
@@ -53,7 +64,7 @@ impl Comando for MontarOrcamentoOs {
     const PERMISSAO: &'static str = "os.orcamento.montar";
     const RISCO: Risco = Risco::Baixo;
 
-    fn executar(self, _ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
+    fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         // 1. Carregar.
         let mut os = carregar_ordem(uow, self.ordem_servico)?;
 
@@ -74,11 +85,22 @@ impl Comando for MontarOrcamentoOs {
                 produto,
                 quantidade,
                 preco_unitario,
+            } => orcar_peca(os.id, produto, quantidade, preco_unitario, uow)?,
+            ItemOrcamentoNovo::PecaNova {
+                nome,
+                quantidade,
+                preco_unitario,
             } => {
-                let item = ItemPeca::novo(os.id, produto, quantidade, preco_unitario);
-                let total = item.total_cobrado();
-                RepositorioOs::novo(uow).inserir_item_peca(&item)?;
-                (item.id, total)
+                // Uma permissão por comando: a de cadastrar produto é conferida aqui, para o
+                // orçamento não virar porta dos fundos do catálogo.
+                if !ctx.concede("estoque.produto.criar") {
+                    return Err(Erro::novo(
+                        cardeal_kernel::CodigoErro::SEM_PERMISSAO,
+                        "sem permissão para cadastrar peça nova",
+                    ));
+                }
+                let produto = mod_estoque::criar_peca_rapida_comum(&nome, ctx, uow)?.produto;
+                orcar_peca(os.id, produto, quantidade, preco_unitario, uow)?
             }
             ItemOrcamentoNovo::MaoDeObra {
                 descricao,
@@ -101,4 +123,18 @@ impl Comando for MontarOrcamentoOs {
 
         Ok(item_id)
     }
+}
+
+/// Grava um item de peça e devolve `(id, total cobrado)`.
+fn orcar_peca(
+    ordem: Id,
+    produto: Id,
+    quantidade: Quantidade,
+    preco_unitario: Preco,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<(Id, Dinheiro)> {
+    let item = ItemPeca::novo(ordem, produto, quantidade, preco_unitario);
+    let total = item.total_cobrado();
+    RepositorioOs::novo(uow).inserir_item_peca(&item)?;
+    Ok((item.id, total))
 }

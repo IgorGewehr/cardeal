@@ -35,6 +35,7 @@ impl Modulo for ModuloEstoque {
             .comando::<CriarGrupoProduto>("estoque.criar_grupo_produto.v1")
             .comando::<CriarUnidade>("estoque.criar_unidade.v1")
             .comando::<CriarProduto>("estoque.criar_produto.v1")
+            .comando::<crate::comandos::CriarPecaRapida>("estoque.criar_peca_rapida.v1")
             .comando::<EditarDetalhesTecnicosProduto>("estoque.editar_detalhes_tecnicos_produto.v1")
             .comando::<DefinirPontoPedido>("estoque.definir_ponto_pedido.v1")
             .comando::<DefinirAtivoProduto>("estoque.definir_ativo_produto.v1")

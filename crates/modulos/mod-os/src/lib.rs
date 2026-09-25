@@ -86,6 +86,7 @@ pub use comandos::{
     OrdemServicoFaturada, PagamentoNoAto, PecaFoiAplicada, ReabrirOrdemServico, RegistrarLaudo,
     RegistrarMaoDeObra, RemoverItemOrcamento, ReprovarOrcamentoOs, TipoItemOrcamento,
 };
+pub use comandos::{ChegadaRegistrada, EncomendarPeca, PagamentoDaPeca, RegistrarChegadaDaPeca};
 pub use consultas::{
     ApontamentosDaOrdem, BuscarDetalheOrdem, BuscarOrdens, DetalheOrdem, FiltroEstadoOs,
     HistoricoDoEquipamento, ItemAguardandoEstoque, OrdensAguardandoAprovacao, OrdensEmAberto,
@@ -93,7 +94,7 @@ pub use consultas::{
     TodasAsOrdens, UltimoPrecoDaPeca,
 };
 pub use erros::ErroOs;
-pub use execucao::{ItemMaoDeObra, ItemPeca};
+pub use execucao::{Encomenda, ItemMaoDeObra, ItemPeca};
 pub use laudo::LaudoTecnico;
 pub use manifesto::{manifesto, MANIFESTO};
 pub use modulo::ModuloOs;

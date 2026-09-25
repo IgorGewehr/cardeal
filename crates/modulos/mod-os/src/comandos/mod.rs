@@ -10,6 +10,7 @@ mod concluir_execucao;
 mod desfaturar_ordem_servico;
 mod editar_dados_da_ordem;
 mod encerrar_apontamento;
+mod encomenda_de_peca;
 mod enviar_para_aprovacao;
 mod faturar_ordem_servico;
 mod iniciar_apontamento;
@@ -32,6 +33,9 @@ pub use concluir_execucao::ConcluirExecucao;
 pub use desfaturar_ordem_servico::{DesfaturarOrdemServico, OrdemServicoDesfaturada};
 pub use editar_dados_da_ordem::EditarDadosDaOrdem;
 pub use encerrar_apontamento::EncerrarApontamento;
+pub use encomenda_de_peca::{
+    ChegadaRegistrada, EncomendarPeca, PagamentoDaPeca, RegistrarChegadaDaPeca,
+};
 pub use enviar_para_aprovacao::EnviarParaAprovacao;
 pub use faturar_ordem_servico::{FaturarOrdemServico, OrdemServicoFaturada, PagamentoNoAto};
 pub use iniciar_apontamento::{ApontamentoIniciado, IniciarApontamento};

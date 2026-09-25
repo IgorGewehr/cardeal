@@ -1009,3 +1009,61 @@ fn lotes_disponiveis_do_produto_esconde_esgotados() {
     .unwrap();
     assert_eq!(disponiveis.len(), 2);
 }
+
+#[test]
+fn peca_rapida_nasce_so_com_nome_nao_duplica_e_ganha_ncm_da_nota() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloEstoque]).unwrap();
+    let s = sessao(empresa, &["estoque.produto.criar", "estoque.produto.ver"]);
+    let criar = |nome: &str| -> mod_estoque::PecaRapidaCriada {
+        postcard::from_bytes(
+            &d.executar_comando(
+                "estoque.criar_peca_rapida.v1",
+                &carga(&mod_estoque::CriarPecaRapida {
+                    nome: nome.to_owned(),
+                }),
+                &s,
+                &ambiente(empresa),
+                arm.escritor(),
+            )
+            .unwrap(),
+        )
+        .unwrap()
+    };
+    let a = criar("Tela Samsung A52 original");
+    assert!(a.nova);
+    // Mesmo nome com outra caixa/acentuação: reaproveita, não duplica.
+    let b = criar("tela samsung a52 ORIGINAL");
+    assert!(!b.nova);
+    assert_eq!(a.produto, b.produto);
+    // Uma segunda peça reaproveita o grupo "Peças" e a unidade "UN" (UNIQUE não estoura).
+    assert!(criar("Bateria iPhone 11").nova);
+
+    let ncm_de = |produto: Id| -> String {
+        arm.leitor()
+            .consultar(move |c| {
+                c.query_row(
+                    "SELECT ncm FROM estoque_produto WHERE id = ?1",
+                    [produto.em_bytes().as_slice()],
+                    |r| r.get(0),
+                )
+                .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+            })
+            .unwrap()
+    };
+    assert_eq!(ncm_de(a.produto), "");
+    let produto = a.produto;
+    arm.escritor()
+        .executar(
+            ContextoEscrita::novo(empresa, Id::novo(), Id::novo(), Id::novo()),
+            move |uow| {
+                mod_estoque::completar_ncm_se_vazio(produto, "8517.70.99", uow)
+                    .map_err(|e| ErroArmazenamento::Sqlite(e.mensagem))?;
+                // Um NCM já informado não é sobrescrito.
+                mod_estoque::completar_ncm_se_vazio(produto, "99999999", uow)
+                    .map_err(|e| ErroArmazenamento::Sqlite(e.mensagem))
+            },
+        )
+        .unwrap();
+    assert_eq!(ncm_de(a.produto), "85177099");
+}

@@ -93,7 +93,13 @@ impl Balcao {
             _dir: dir,
             arm,
             empresa,
-            d: Despachante::construir(&[&ModuloClientes, &ModuloEstoque, &ModuloOs]).unwrap(),
+            d: Despachante::construir(&[
+                &ModuloClientes,
+                &ModuloEstoque,
+                &mod_financeiro::ModuloFinanceiro,
+                &ModuloOs,
+            ])
+            .unwrap(),
             s,
             amb: Ambiente::novo(empresa, efetivo),
         }
@@ -644,4 +650,177 @@ fn concluir_aplica_sozinho_a_peca_que_faltava() {
     let d = b.detalhe(os);
     assert_eq!(d.ordem.estado, mod_os::EstadoOs::Concluida);
     assert!(d.itens_peca.iter().all(|i| i.aplicada));
+}
+
+#[test]
+fn peca_sob_encomenda_do_orcamento_ate_a_chegada() {
+    let b = Balcao::novo(
+        &[
+            TODAS,
+            &[
+                "financeiro.pagar.criar",
+                "financeiro.pagar.baixar",
+                "financeiro.pagar.ver",
+            ],
+        ]
+        .concat(),
+    );
+    let cliente = b.cliente("Maria");
+    // Um local precisa existir; a peça ainda não existe no catálogo.
+    let _: mod_estoque::LocalCriado = b
+        .cmd(
+            "estoque.criar_local.v1",
+            &mod_estoque::CriarLocal {
+                nome: "Bancada".to_owned(),
+                tipo: TipoLocal::Deposito,
+            },
+        )
+        .unwrap();
+    let os = b.abrir(cliente, "Samsung A52", "Tela").ordem_servico;
+
+    // 1. Peça nova direto no orçamento, só pelo nome.
+    let item: Id = b
+        .cmd(
+            "os.montar_orcamento.v1",
+            &MontarOrcamentoOs {
+                ordem_servico: os,
+                item: ItemOrcamentoNovo::PecaNova {
+                    nome: "Tela Samsung A52 original".to_owned(),
+                    quantidade: Quantidade::unidades(1),
+                    preco_unitario: Preco::reais(320),
+                },
+            },
+        )
+        .unwrap();
+
+    // 2. Sem estoque: aparece na lista de compras; depois de encomendada, com o fornecedor.
+    let lista = || -> Vec<mod_os::ItemAguardandoEstoque> {
+        b.consulta(
+            "os.pecas_aguardando_estoque.v1",
+            &mod_os::PecasAguardandoEstoque,
+        )
+    };
+    assert_eq!(lista().len(), 1);
+    assert!(lista()[0].encomenda.is_none());
+    b.cmd::<()>(
+        "os.encomendar_peca.v1",
+        &mod_os::EncomendarPeca {
+            ordem_servico: os,
+            item_peca: item,
+            fornecedor: "Distribuidora Centro".to_owned(),
+            custo_previsto: Some(Preco::reais(180)),
+            previsao_chegada: None,
+        },
+    )
+    .unwrap();
+    let pendente = &lista()[0];
+    assert_eq!(pendente.equipamento, "Samsung A52");
+    assert_eq!(
+        pendente.encomenda.as_ref().unwrap().fornecedor,
+        "Distribuidora Centro"
+    );
+
+    // 3. Chegou, a prazo: aplicada com o custo real, some da lista, vira conta a pagar.
+    let r: mod_os::ChegadaRegistrada = b
+        .cmd(
+            "os.registrar_chegada_da_peca.v1",
+            &mod_os::RegistrarChegadaDaPeca {
+                ordem_servico: os,
+                item_peca: item,
+                custo_unitario: Preco::reais(175),
+                fornecedor: String::new(),
+                pagamento: mod_os::PagamentoDaPeca::APrazo {
+                    vencimento: cardeal_kernel::Data::hoje(cardeal_kernel::Fuso::BRASILIA)
+                        .mais_dias(15),
+                },
+            },
+        )
+        .unwrap();
+    assert_eq!(r.custo_total, cardeal_kernel::Dinheiro::reais(175));
+    assert!(!r.pago);
+    let d = b.detalhe(os);
+    assert!(d.itens_peca[0].aplicada);
+    assert_eq!(d.itens_peca[0].custo_unitario, Preco::reais(175));
+    assert!(lista().is_empty());
+    let a_pagar: Vec<mod_financeiro::ItemTituloEmAberto> = b.consulta(
+        "financeiro.titulos_a_pagar_em_aberto.v1",
+        &mod_financeiro::TitulosAPagarEmAberto,
+    );
+    assert_eq!(a_pagar.len(), 1);
+    assert_eq!(
+        a_pagar[0].descricao.as_deref(),
+        Some("Peça da OS #1 — Distribuidora Centro")
+    );
+
+    // A peça cadastrada às pressas ficou com NCM pendente, sem travar nada.
+    let saldo: Quantidade = b.consulta(
+        "estoque.saldo_disponivel_do_produto.v1",
+        &mod_estoque::SaldoDisponivelDoProduto {
+            produto: d.itens_peca[0].produto,
+        },
+    );
+    assert_eq!(saldo, Quantidade::ZERO, "entrou e saiu na mesma hora");
+}
+
+#[test]
+fn chegada_paga_na_hora_nao_deixa_conta_em_aberto() {
+    let b = Balcao::novo(
+        &[
+            TODAS,
+            &[
+                "financeiro.pagar.criar",
+                "financeiro.pagar.baixar",
+                "financeiro.pagar.ver",
+            ],
+        ]
+        .concat(),
+    );
+    let cliente = b.cliente("João");
+    let (produto, _) = produto_com_estoque(&b);
+    let os = b.abrir(cliente, "Notebook", "Tela").ordem_servico;
+    let item = orcar_peca(&b, os, produto);
+    let r: mod_os::ChegadaRegistrada = b
+        .cmd(
+            "os.registrar_chegada_da_peca.v1",
+            &mod_os::RegistrarChegadaDaPeca {
+                ordem_servico: os,
+                item_peca: item,
+                custo_unitario: Preco::reais(100),
+                fornecedor: "Loja da esquina".to_owned(),
+                pagamento: mod_os::PagamentoDaPeca::PagoAgora {
+                    meio_pagamento: mod_financeiro::MeioPagamento::Dinheiro,
+                    conta_origem: None,
+                },
+            },
+        )
+        .unwrap();
+    assert!(r.pago);
+    let a_pagar: Vec<mod_financeiro::ItemTituloEmAberto> = b.consulta(
+        "financeiro.titulos_a_pagar_em_aberto.v1",
+        &mod_financeiro::TitulosAPagarEmAberto,
+    );
+    assert!(a_pagar.is_empty());
+    // Sem permissão de financeiro, a chegada é recusada inteira.
+    let sem = Balcao::novo(TODAS);
+    let c2 = sem.cliente("Ana");
+    let (p2, _) = produto_com_estoque(&sem);
+    let os2 = sem.abrir(c2, "Tablet", "Bateria").ordem_servico;
+    let item2 = orcar_peca(&sem, os2, p2);
+    let erro = sem
+        .cmd::<mod_os::ChegadaRegistrada>(
+            "os.registrar_chegada_da_peca.v1",
+            &mod_os::RegistrarChegadaDaPeca {
+                ordem_servico: os2,
+                item_peca: item2,
+                custo_unitario: Preco::reais(100),
+                fornecedor: String::new(),
+                pagamento: mod_os::PagamentoDaPeca::PagoAgora {
+                    meio_pagamento: mod_financeiro::MeioPagamento::Dinheiro,
+                    conta_origem: None,
+                },
+            },
+        )
+        .unwrap_err();
+    assert_eq!(erro.codigo, CodigoErro::SEM_PERMISSAO);
+    assert!(!sem.detalhe(os2).itens_peca[0].aplicada);
 }
