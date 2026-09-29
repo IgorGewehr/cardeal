@@ -232,9 +232,8 @@ mostrando de onde vem cada valor.
   rótulo fica "OS", sem erro.
 - Cena de captura nova: `financeiro-lancar`.
 
-Conhecido e não corrigido: `criar_recorrencia_nao_lanca_na_hora…` e
-`criar_recorrencia_sem_contraparte…` (`mod-financeiro/tests/comandos.rs`) dependem da data —
-"dia 1" com 35 dias de antecedência gera duas ocorrências perto do fim do mês.
+Os testes `criar_recorrencia_*` dependiam da data ("dia 1" + 35 dias de antecedência pegava
+duas ocorrências no fim do mês); agora usam o dia de hoje + 20 dias.
 `comandos/conta_a_pagar_avulsa.rs` (trabalho anterior, ainda sem chamador) segue pendente.
 
 ## 2. Decisão estratégica registrada: por que Rust, não C#/.NET
