@@ -9,6 +9,7 @@
 #[cfg(feature = "demo")]
 mod demo_app;
 mod pagamento;
+mod pessoa;
 mod tela_agenda;
 mod tela_clientes;
 mod tela_compras;

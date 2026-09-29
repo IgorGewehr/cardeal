@@ -213,6 +213,30 @@ Deixado de fora de propósito: desconto no faturamento da OS (precisa de coluna 
 margem do `cardeal-analytics`) e entrada + restante (o `ConstrutorTitulo` rateia por igual;
 exige parcela de valor diferente). Testes: 575 → 605.
 
+### 1.6 Sessão 2026-09-29 — Financeiro autônomo
+
+Pedido: operar o dia a dia só pela tela do Financeiro (cadastrar cliente, lançar pagamento),
+mostrando de onde vem cada valor.
+
+- **Lançamento já quitado:** `LancarTituloA{Receber,Pagar}.quitado_agora: Option<QuitadoAgora>`
+  (`comandos/quitado_agora.rs`) grava título + baixa no mesmo COMMIT; exige a permissão de
+  baixa da espécie e parcela única. O diálogo de lançamento usa o `EstadoPagamento`
+  (à vista = quitado agora; a prazo = parcelas), tem "Lançar e continuar" e abre a receber
+  **ou** a pagar de qualquer aba (`FormLancar.a_receber`).
+- **Pessoa na hora:** `crate::pessoa::EstadoPessoa` (desktop) é o bloco "existente (busca por
+  nome/telefone/documento) ou novo (nome, telefone, documento, aviso de duplicado)" — usado
+  pela nova OS, pelo lançamento e pelo cadastro rápido (botão "+ Cliente"/"+ Fornecedor" no
+  cabeçalho). Não copie esse bloco: use o módulo.
+- **Origem:** coluna Origem nas abas A receber/A pagar (`OS #12 — Maria`, Peça de OS, Compra,
+  PDV, Venda, Recorrência, Manual); a busca casa por descrição e origem. Sem permissão de OS o
+  rótulo fica "OS", sem erro.
+- Cena de captura nova: `financeiro-lancar`.
+
+Conhecido e não corrigido: `criar_recorrencia_nao_lanca_na_hora…` e
+`criar_recorrencia_sem_contraparte…` (`mod-financeiro/tests/comandos.rs`) dependem da data —
+"dia 1" com 35 dias de antecedência gera duas ocorrências perto do fim do mês.
+`comandos/conta_a_pagar_avulsa.rs` (trabalho anterior, ainda sem chamador) segue pendente.
+
 ## 2. Decisão estratégica registrada: por que Rust, não C#/.NET
 
 Em 2026-09-02 avaliamos um projeto irmão do mesmo autor, **SistemaX** (`../sistemax`), um ERP

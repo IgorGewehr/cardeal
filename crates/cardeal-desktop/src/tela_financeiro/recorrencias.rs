@@ -176,8 +176,7 @@ pub(super) fn dialogo_nova_recorrencia(
                     } else {
                         Papel::Fornecedor
                     },
-                    tipo: TipoPessoa::Fisica,
-                    nome: String::new(),
+                    pessoa: crate::pessoa::EstadoPessoa::cadastro(),
                 });
             }
             ui.add_space(Espaco::E12);

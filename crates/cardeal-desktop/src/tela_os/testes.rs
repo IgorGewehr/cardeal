@@ -3,6 +3,7 @@
 use super::*;
 use cardeal_kernel::{Preco, Quantidade};
 use mod_clientes::{CriarPessoa as CriarCliente, PessoaCadastrada as ClienteCriado};
+use mod_clientes::{TipoDocumento, TipoPessoa};
 use mod_estoque::{
     CriarGrupoProduto, CriarLocal, CriarProduto, CriarUnidade, GrupoProdutoCriado, LocalCriado,
     ProdutoCriado, RegistrarEntrada, TipoLocal, UnidadeCriada,
@@ -402,19 +403,16 @@ fn nova_os_com_cliente_novo_pela_tela_cadastra_e_abre_juntos() {
     let clientes_antes = c.estado.clientes.len();
     c.estado.dlg = Dlg::nova();
     if let Dlg::Nova {
-        cliente_novo,
-        nome,
-        telefone,
-        email,
+        cliente: pessoa,
         equipamento,
         defeito_relatado,
         ..
     } = &mut c.estado.dlg
     {
-        *cliente_novo = true;
-        *nome = "Oficina do Zé".to_owned();
-        *telefone = "31999990000".to_owned();
-        *email = "ze@oficina.com".to_owned();
+        pessoa.novo = true;
+        pessoa.nome = "Oficina do Zé".to_owned();
+        pessoa.telefone = "31999990000".to_owned();
+        pessoa.email = "ze@oficina.com".to_owned();
         *equipamento = "Parafusadeira Makita".to_owned();
         *defeito_relatado = "Bateria não segura carga".to_owned();
     }
@@ -482,14 +480,14 @@ fn nova_os_grava_a_ficha_e_a_lista_conta_a_atrasada() {
     c.estado.dlg = Dlg::nova();
     let cliente = c.estado.ordens[0].cliente;
     if let Dlg::Nova {
-        cliente_sel,
+        cliente: pessoa,
         equipamento,
         defeito_relatado,
         ficha,
         ..
     } = &mut c.estado.dlg
     {
-        *cliente_sel = Some(cliente);
+        pessoa.selecionada = Some(cliente);
         *equipamento = "Tablet".to_owned();
         *defeito_relatado = "Não carrega".to_owned();
         ficha.previsao = Data::hoje(Fuso::BRASILIA).mais_dias(-2).to_string();
@@ -662,8 +660,11 @@ fn nova_os_a_partir_da_ficha_do_cliente_ja_vem_com_ele() {
     let mut c = cenario();
     let cliente = c.estado.ordens[0].cliente;
     c.estado.nova_para_cliente(cliente);
-    let Dlg::Nova { cliente_sel, .. } = &c.estado.dlg else {
+    let Dlg::Nova {
+        cliente: pessoa, ..
+    } = &c.estado.dlg
+    else {
         panic!("abriu outro diálogo");
     };
-    assert_eq!(*cliente_sel, Some(cliente));
+    assert_eq!(pessoa.selecionada, Some(cliente));
 }

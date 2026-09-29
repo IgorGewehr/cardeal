@@ -87,6 +87,7 @@ pub use caixa::{
     TipoMovimento, TOLERANCIA_QUEBRA,
 };
 pub use categoria::CategoriaFinanceira;
+pub use comandos::QuitadoAgora;
 pub use comandos::{
     baixar_pagamento_comum, baixar_recebimento_comum, estornar_baixa_comum, lancar_titulo_comum,
     materializar_recorrencias_pendentes, AbrirCaixa, BaixaFoiEstornada, BaixarPagamento,

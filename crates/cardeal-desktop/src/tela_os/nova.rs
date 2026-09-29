@@ -78,27 +78,6 @@ pub(super) fn dialogo_nova(
     sessao: &SessaoLocal,
     estado: &mut EstadoTelaOs,
 ) {
-    let opcoes_cliente: Vec<OpcaoBusca<Id>> = estado
-        .clientes
-        .iter()
-        .map(|c| {
-            // Telefone e documento no subtítulo: o seletor casa por eles também (inclusive só
-            // pelos dígitos), que é como o balcão pergunta ("qual seu telefone?").
-            let sub: Vec<String> = c
-                .telefone
-                .as_deref()
-                .map(crate::telefone::formatar)
-                .into_iter()
-                .chain(c.documento.clone())
-                .collect();
-            let opcao = OpcaoBusca::nova(c.pessoa, c.nome.clone());
-            if sub.is_empty() {
-                opcao
-            } else {
-                opcao.subtitulo(sub.join(" · "))
-            }
-        })
-        .collect();
     // Enter confirma "Abrir OS" — o mesmo botão que já valida (`abrir_os` mostra o aviso
     // certo se faltar cliente/defeito). Não dispara dentro de um popup aberto (ex.: o combo
     // de UF do endereço).
@@ -112,13 +91,7 @@ pub(super) fn dialogo_nova(
             estado,
             |ui, estado| {
                 let Dlg::Nova {
-                    cliente_novo,
-                    cliente_sel,
-                    cliente_busca,
-                    nome,
-                    documento,
-                    telefone,
-                    email,
+                    cliente,
                     end_logradouro,
                     end_numero,
                     end_bairro,
@@ -133,61 +106,7 @@ pub(super) fn dialogo_nova(
                     return;
                 };
 
-                ui.horizontal(|ui| {
-                    let sel_existente = if *cliente_novo {
-                        Botao::fantasma("Cliente existente")
-                    } else {
-                        Botao::primario("Cliente existente")
-                    };
-                    if ui.add(sel_existente).clicked() {
-                        *cliente_novo = false;
-                    }
-                    let sel_novo = if *cliente_novo {
-                        Botao::primario("Novo cliente")
-                    } else {
-                        Botao::fantasma("Novo cliente")
-                    };
-                    if ui.add(sel_novo).clicked() {
-                        *cliente_novo = true;
-                    }
-                });
-                ui.add_space(Espaco::E12);
-
-                if *cliente_novo {
-                    // Só o nome é obrigatório — documento, telefone, e-mail e endereço são
-                    // opcionais (pedido do usuário: "de obrigatório só o nome").
-                    ui.columns(2, |c| {
-                        c[0].add(Campo::novo("Nome do cliente", nome));
-                        c[1].add(
-                            Campo::novo("Documento (opcional)", documento)
-                                .mascara(Mascara::Documento)
-                                .marcador("CPF ou CNPJ"),
-                        );
-                    });
-                    ui.add_space(Espaco::E8);
-                    ui.columns(2, |c| {
-                        c[0].add(Campo::novo("Telefone/WhatsApp (opcional)", telefone));
-                        c[1].add(Campo::novo("E-mail (opcional)", email));
-                    });
-                    if let Some(existente) = crate::telefone::quem_tem(&estado.clientes, telefone) {
-                        let (id, nome_existente) = (existente.pessoa, existente.nome.clone());
-                        ui.add_space(Espaco::E4);
-                        ui.horizontal(|ui| {
-                            ui.add(
-                                Rotulo::interface(format!(
-                                    "{nome_existente} já está cadastrado com esse telefone."
-                                ))
-                                .cor(ui.cores().atencao),
-                            );
-                            if ui
-                                .add(Botao::secundario(format!("Usar {nome_existente}")).pequeno())
-                                .clicked()
-                            {
-                                *cliente_novo = false;
-                                *cliente_sel = Some(id);
-                            }
-                        });
-                    }
+                if cliente.mostrar(ui, &estado.clientes, PapelCliente::Cliente, false, true) {
                     ui.add_space(Espaco::E8);
                     // Endereço é o bloco mais raramente preenchido na recepção (o cliente só
                     // quer deixar o aparelho) — fica recolhido para não competir com nome e
@@ -206,11 +125,6 @@ pub(super) fn dialogo_nova(
                             c[1].add(Campo::novo("CEP", end_cep).marcador("00000-000"));
                         });
                     });
-                } else {
-                    SeletorBusca::novo("Cliente", cliente_busca, cliente_sel)
-                        .opcoes(opcoes_cliente)
-                        .marcador("Buscar por nome, telefone ou documento…")
-                        .mostrar(ui);
                 }
                 ui.add_space(Espaco::E16);
                 ui.add(Divisor::novo());
@@ -251,13 +165,7 @@ pub(super) fn abrir_os(
     estado: &mut EstadoTelaOs,
 ) {
     let Dlg::Nova {
-        cliente_novo,
-        cliente_sel,
-        cliente_busca: _,
-        nome,
-        documento,
-        telefone,
-        email,
+        cliente,
         end_logradouro,
         end_numero,
         end_bairro,
@@ -278,11 +186,8 @@ pub(super) fn abrir_os(
             return;
         }
     };
-    let (cliente_novo, cliente_sel) = (*cliente_novo, *cliente_sel);
-    let nome = nome.clone();
-    let documento = documento.clone();
-    let telefone = telefone.clone();
-    let email = email.clone();
+    let cliente = cliente.clone();
+    let (cliente_novo, cliente_sel) = (cliente.novo, cliente.selecionada);
     let end_logradouro = end_logradouro.clone();
     let end_numero = end_numero.clone();
     let end_bairro = end_bairro.clone();
@@ -309,14 +214,8 @@ pub(super) fn abrir_os(
 
     let tecnico_responsavel = sessao.usuario();
     let resultado = if cliente_novo {
-        if nome.trim().is_empty() {
-            notificar(ctx, Notificacao::aviso("Informe o nome do cliente."));
-            return;
-        }
-        let digitos_doc: String = documento.chars().filter(char::is_ascii_digit).collect();
-        let cnpj = digitos_doc.len() == 14;
         let endereco = (!end_logradouro.trim().is_empty()).then_some(EnderecoInicial {
-            tipo: if cnpj {
+            tipo: if cliente.e_juridica() {
                 TipoEndereco::Comercial
             } else {
                 TipoEndereco::Residencial
@@ -329,55 +228,21 @@ pub(super) fn abrir_os(
             uf: end_uf,
             cep: end_cep,
         });
-        // O WhatsApp é o contato principal; o e-mail, se houver, vai junto como extra.
-        let (contato, contatos_extras) = match (telefone.trim(), email.trim()) {
-            ("", "") => (None, Vec::new()),
-            ("", e) => (
-                Some(ContatoInicial {
-                    tipo: TipoContato::Email,
-                    valor: e.to_owned(),
-                }),
-                Vec::new(),
-            ),
-            (t, e) => (
-                Some(ContatoInicial {
-                    tipo: TipoContato::Whatsapp,
-                    valor: t.to_owned(),
-                }),
-                if e.is_empty() {
-                    Vec::new()
-                } else {
-                    vec![ContatoInicial {
-                        tipo: TipoContato::Email,
-                        valor: e.to_owned(),
-                    }]
-                },
-            ),
+        let novo = match cliente.para_criar(PapelCliente::Cliente, endereco) {
+            Ok(c) => c,
+            Err(msg) => {
+                notificar(ctx, Notificacao::aviso(msg));
+                return;
+            }
         };
+        // O WhatsApp é o contato principal; o e-mail, se houver, vai junto como extra.
+        let contatos_extras = cliente.contatos().1;
         motor
             .executar(
                 sessao,
                 "os.abrir_ordem_com_cliente_novo.v1",
                 &AbrirOrdemComClienteNovo {
-                    cliente: CriarPessoa {
-                        tipo: if cnpj {
-                            TipoPessoa::Juridica
-                        } else {
-                            TipoPessoa::Fisica
-                        },
-                        nome,
-                        nome_fantasia: None,
-                        papel_inicial: PapelCliente::Cliente,
-                        documento_tipo: (!digitos_doc.is_empty()).then_some(if cnpj {
-                            TipoDocumento::Cnpj
-                        } else {
-                            TipoDocumento::Cpf
-                        }),
-                        documento_numero: (!digitos_doc.is_empty()).then_some(documento),
-                        data_nascimento: None,
-                        endereco,
-                        contato,
-                    },
+                    cliente: novo,
                     contatos_extras,
                     equipamento,
                     defeito_relatado,

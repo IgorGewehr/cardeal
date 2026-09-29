@@ -10,6 +10,7 @@ use cardeal_modkit::{Comando, Ctx, Risco};
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+use crate::comandos::quitado_agora::{self, QuitadoAgora};
 use crate::comandos::{lancar_titulo_comum, DadosLancamentoTitulo};
 use crate::titulo::EspecieTitulo;
 
@@ -34,6 +35,9 @@ pub struct LancarTituloAReceber {
     /// Categoria de relatório, opcional — "Assinatura `SaaS` — Cliente X" (não afeta a
     /// contabilização, só alimenta gráficos de receita por categoria/mês).
     pub categoria: Option<Id>,
+    /// `Some` = já foi recebido agora (uma parcela só, baixada na emissão, no mesmo COMMIT);
+    /// `None` = fica em aberto até a baixa.
+    pub quitado_agora: Option<QuitadoAgora>,
 }
 
 /// O que o comando devolve.
@@ -53,6 +57,9 @@ impl Comando for LancarTituloAReceber {
     const RISCO: Risco = Risco::Baixo;
 
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
+        if self.quitado_agora.is_some() {
+            quitado_agora::validar(EspecieTitulo::Receber, self.parcelas, ctx)?;
+        }
         let g = lancar_titulo_comum(
             DadosLancamentoTitulo {
                 especie: EspecieTitulo::Receber,
@@ -72,6 +79,17 @@ impl Comando for LancarTituloAReceber {
             ctx,
             uow,
         )?;
+        if let Some(q) = self.quitado_agora {
+            quitado_agora::quitar(
+                EspecieTitulo::Receber,
+                g.parcelas.first().copied(),
+                self.valor_total,
+                self.emissao,
+                q,
+                ctx,
+                uow,
+            )?;
+        }
         Ok(TituloAReceberLancado {
             titulo: g.titulo,
             parcelas: g.parcelas,

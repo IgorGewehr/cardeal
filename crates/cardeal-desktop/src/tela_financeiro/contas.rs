@@ -110,7 +110,7 @@ pub(super) fn lista(
     }
 
     BarraFiltros::nova(&mut estado.busca)
-        .marcador("Buscar por cliente/fornecedor")
+        .marcador("Buscar por nome, descrição ou origem (OS #12, compra…)")
         .filtro(|ui| {
             SeletorOpcao::novo("Situação", &mut estado.filtro_situacao)
                 .sem_rotulo()
@@ -141,7 +141,8 @@ pub(super) fn lista(
         colunas.push(ColunaGrade::nova("").largura(40.0));
     }
     colunas.extend([
-        ColunaGrade::nova("Contraparte").largura(200.0),
+        ColunaGrade::nova("Contraparte").largura(180.0),
+        ColunaGrade::nova("Origem").largura(190.0),
         ColunaGrade::nova("Descrição"),
         ColunaGrade::nova("Parc.").largura(60.0).numero(),
         ColunaGrade::nova("Vencimento").largura(120.0),
@@ -169,6 +170,9 @@ pub(super) fn lista(
             }
             row.col(|ui| {
                 ui.add(Rotulo::interface(estado.nome_contraparte(&p.contraparte)));
+            });
+            row.col(|ui| {
+                ui.add(estado.etiqueta_origem(p));
             });
             row.col(|ui| {
                 ui.add(
@@ -289,7 +293,7 @@ pub(super) fn etiqueta_estado_parcela(
 }
 
 /// Ordena `parcelas` pela coluna clicada no cabeçalho da [`Grade`] de `lista` (mesma ordem
-/// das colunas: Contraparte, Parc., Vencimento, Valor, Recebido/Pago, Saldo, Estado). `nomes` resolve o nome de
+/// das colunas: Contraparte, Origem, Descrição, Parc., Vencimento, Valor, Recebido/Pago, Saldo, Estado). `nomes` resolve o nome de
 /// exibição da contraparte — a própria coluna 0 ordena por ele, não pelo id.
 pub(super) fn ordenar_parcelas(
     parcelas: &mut [ItemTituloEmAberto],
@@ -313,13 +317,14 @@ pub(super) fn ordenar_parcelas(
     parcelas.sort_by(|a, b| {
         let ordem = match coluna {
             0 => nome_de(a).cmp(&nome_de(b)),
-            1 => a.descricao.cmp(&b.descricao),
-            2 => a.numero.cmp(&b.numero),
-            3 => a.vencimento.cmp(&b.vencimento),
-            4 => a.valor_original.cmp(&b.valor_original),
-            5 => a.valor_baixado.cmp(&b.valor_baixado),
-            6 => a.saldo().cmp(&b.saldo()),
-            7 => a.estado.rotulo().cmp(b.estado.rotulo()),
+            1 => a.origem_modulo.cmp(&b.origem_modulo),
+            2 => a.descricao.cmp(&b.descricao),
+            3 => a.numero.cmp(&b.numero),
+            4 => a.vencimento.cmp(&b.vencimento),
+            5 => a.valor_original.cmp(&b.valor_original),
+            6 => a.valor_baixado.cmp(&b.valor_baixado),
+            7 => a.saldo().cmp(&b.saldo()),
+            8 => a.estado.rotulo().cmp(b.estado.rotulo()),
             _ => std::cmp::Ordering::Equal,
         };
         match direcao {
@@ -378,4 +383,31 @@ fn barra_selecao(ui: &mut egui::Ui, estado: &mut EstadoTelaFinanceiro, a_receber
         }
     });
     ui.add_space(Espaco::E8);
+}
+
+impl EstadoTelaFinanceiro {
+    /// De onde veio a parcela, para a coluna Origem: a OS com o cliente, a compra, o PDV, a
+    /// recorrência ou o lançamento manual — o que separa receita de serviço, custo de peça e
+    /// despesa fixa sem abrir nada.
+    pub(super) fn origem_da_parcela(&self, p: &ItemTituloEmAberto) -> (String, Tom) {
+        let (texto, tom) = match p.origem_modulo.as_str() {
+            "os" => {
+                let os = p.origem_id.and_then(|id| self.origem_labels.get(&id));
+                return (os.cloned().unwrap_or_else(|| "OS".to_owned()), Tom::Info);
+            }
+            "os_peca" => ("Peça de OS", Tom::Atencao),
+            "compras" => ("Compra", Tom::Atencao),
+            "pdv" => ("PDV", Tom::Positivo),
+            "vendas" => ("Venda", Tom::Positivo),
+            "estoque" => ("Estoque", Tom::Neutro),
+            "financeiro_recorrencia" => ("Recorrência", Tom::Neutro),
+            _ => ("Manual", Tom::Neutro),
+        };
+        (texto.to_owned(), tom)
+    }
+
+    pub(super) fn etiqueta_origem(&self, p: &ItemTituloEmAberto) -> Etiqueta {
+        let (texto, tom) = self.origem_da_parcela(p);
+        Etiqueta::nova(texto, tom)
+    }
 }

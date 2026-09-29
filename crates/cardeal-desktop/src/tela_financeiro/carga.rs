@@ -59,7 +59,7 @@ impl EstadoTelaFinanceiro {
     }
 
     /// Clientes e fornecedores (seletores do lançamento e o índice `nomes`).
-    fn carregar_nomes(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
+    pub(super) fn carregar_nomes(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
         if let Ok(c) = motor.consultar(
             sessao,
             "clientes.pessoas_por_papel.v1",
@@ -113,6 +113,7 @@ impl EstadoTelaFinanceiro {
             Ok(p) => self.parcelas = p,
             Err(e) => self.erro = Some(e.mensagem),
         }
+        self.carregar_origens(motor, sessao);
 
         let baixado = if a_receber {
             motor.consultar(
@@ -274,7 +275,7 @@ impl EstadoTelaFinanceiro {
         ) {
             Ok(v) => {
                 self.extrato = v;
-                self.carregar_origens_do_extrato(motor, sessao);
+                self.carregar_origens(motor, sessao);
             }
             Err(e) => self.erro = Some(e.mensagem),
         }
@@ -288,16 +289,22 @@ impl EstadoTelaFinanceiro {
         }
     }
 
-    /// Resolve um rótulo amigável para cada origem distinta do extrato recém-carregado
-    /// (`self.origem_labels`, consumido por [`rotulo_origem`]). Só `"os"` por enquanto — o
-    /// mesmo padrão serve para `"vendas"`/`"compras"` quando a tela ganhar consulta
-    /// equivalente para eles.
-    pub(super) fn carregar_origens_do_extrato(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
-        let mut ids: Vec<Id> = self
+    /// Resolve "OS #123 — cliente" para cada OS por trás do extrato e das parcelas da aba
+    /// (`self.origem_labels`, consumido por [`rotulo_origem`] e pela coluna Origem). Só `"os"`
+    /// precisa de consulta — as outras origens se rotulam pelo módulo.
+    pub(super) fn carregar_origens(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
+        let do_extrato = self
             .extrato
             .iter()
             .filter(|m| m.origem_modulo.as_deref() == Some("os"))
-            .filter_map(|m| m.origem_id)
+            .filter_map(|m| m.origem_id);
+        let das_parcelas = self
+            .parcelas
+            .iter()
+            .filter(|p| p.origem_modulo == "os")
+            .filter_map(|p| p.origem_id);
+        let mut ids: Vec<Id> = do_extrato
+            .chain(das_parcelas)
             .filter(|id| !self.origem_labels.contains_key(id))
             .collect();
         if ids.is_empty() {
@@ -305,28 +312,24 @@ impl EstadoTelaFinanceiro {
         }
         ids.sort_unstable();
         ids.dedup();
-        // Uma consulta para todas as OS do extrato (antes era um detalhe completo por linha).
-        match motor.consultar(
+        // Uma consulta para todas as OS (antes era um detalhe completo por linha). Sem
+        // permissão de ver OS, fica o rótulo genérico "OS", sem erro na tela.
+        let ordens: Result<Vec<mod_os::OrdemServico>, _> = motor.consultar(
             sessao,
             "os.ordens_por_id.v1",
             &mod_os::OrdensPorId { ordens: ids },
-        ) {
-            Ok(ordens) => {
-                let ordens: Vec<mod_os::OrdemServico> = ordens;
-                for os in ordens {
-                    let rotulo = match self.nomes.get(&os.cliente) {
-                        Some(nome) => format!("OS #{} — {nome}", os.numero),
-                        None => format!("OS #{}", os.numero),
-                    };
-                    self.origem_labels.insert(os.id, rotulo);
-                }
-            }
-            Err(e) => self.erro = Some(e.mensagem),
+        );
+        for os in ordens.unwrap_or_default() {
+            let rotulo = match self.nomes.get(&os.cliente) {
+                Some(nome) => format!("OS #{} — {nome}", os.numero),
+                None => format!("OS #{}", os.numero),
+            };
+            self.origem_labels.insert(os.id, rotulo);
         }
     }
 
     /// O rótulo de origem de um movimento do extrato, se resolvido (ver
-    /// [`carregar_origens_do_extrato`]).
+    /// [`carregar_origens`]).
     pub(super) fn rotulo_origem(&self, m: &ItemMovimentoDisponivel) -> Option<&str> {
         m.origem_id
             .and_then(|id| self.origem_labels.get(&id))
@@ -400,13 +403,21 @@ impl EstadoTelaFinanceiro {
             .filter(|&i| {
                 let p = &self.parcelas[i];
                 situacao.combina(p, hoje)
-                    && (termo.is_empty()
-                        || self
-                            .nome_contraparte(&p.contraparte)
-                            .to_lowercase()
-                            .contains(&termo))
+                    && (termo.is_empty() || self.texto_busca(p).contains(&termo))
             })
             .collect()
+    }
+
+    /// O que a busca da lista compara: contraparte, descrição e origem ("OS #12 — Maria",
+    /// "Compra"…), em minúsculas.
+    fn texto_busca(&self, p: &ItemTituloEmAberto) -> String {
+        format!(
+            "{} {} {}",
+            self.nome_contraparte(&p.contraparte),
+            p.descricao.as_deref().unwrap_or_default(),
+            self.origem_da_parcela(p).0
+        )
+        .to_lowercase()
     }
 
     pub(super) fn nome_categoria(&self, id: Option<Id>) -> String {

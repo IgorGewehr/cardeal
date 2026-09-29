@@ -11,6 +11,7 @@ use cardeal_modkit::{Comando, Ctx, Risco};
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+use crate::comandos::quitado_agora::{self, QuitadoAgora};
 use crate::comandos::{lancar_titulo_comum, DadosLancamentoTitulo};
 use crate::titulo::EspecieTitulo;
 
@@ -36,6 +37,9 @@ pub struct LancarTituloAPagar {
     /// Categoria de relatório, opcional — "Aluguel", "Internet" (não afeta a contabilização,
     /// só alimenta gráficos de custo por categoria/mês).
     pub categoria: Option<Id>,
+    /// `Some` = já foi pago agora (uma parcela só, baixada na emissão, no mesmo COMMIT);
+    /// `None` = fica em aberto até a baixa.
+    pub quitado_agora: Option<QuitadoAgora>,
 }
 
 /// O que o comando devolve.
@@ -55,6 +59,9 @@ impl Comando for LancarTituloAPagar {
     const RISCO: Risco = Risco::Baixo;
 
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
+        if self.quitado_agora.is_some() {
+            quitado_agora::validar(EspecieTitulo::Pagar, self.parcelas, ctx)?;
+        }
         let g = lancar_titulo_comum(
             DadosLancamentoTitulo {
                 especie: EspecieTitulo::Pagar,
@@ -74,6 +81,17 @@ impl Comando for LancarTituloAPagar {
             ctx,
             uow,
         )?;
+        if let Some(q) = self.quitado_agora {
+            quitado_agora::quitar(
+                EspecieTitulo::Pagar,
+                g.parcelas.first().copied(),
+                self.valor_total,
+                self.emissao,
+                q,
+                ctx,
+                uow,
+            )?;
+        }
         Ok(TituloAPagarLancado {
             titulo: g.titulo,
             parcelas: g.parcelas,

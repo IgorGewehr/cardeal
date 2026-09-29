@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::testes_comum::motor_de_teste;
+use mod_clientes::{CriarPessoa, TipoPessoa};
 
 fn lancar_a_receber(motor: &MotorLocal, sessao: &SessaoLocal, reais: i64) -> Id {
     let hoje = Data::hoje(Fuso::BRASILIA);
@@ -18,6 +19,7 @@ fn lancar_a_receber(motor: &MotorLocal, sessao: &SessaoLocal, reais: i64) -> Id 
                 intervalo_dias: 0,
                 observacao: None,
                 categoria: None,
+                quitado_agora: None,
             },
         )
         .expect("título");
@@ -168,6 +170,108 @@ fn extrato_rotula_o_recebimento_da_os_com_numero_e_cliente() {
         "rótulos: {:?}",
         estado.origem_labels
     );
+
+    // A mesma origem na coluna das parcelas a receber, e a busca acha pelo número da OS.
+    estado.aba = Aba::Receber;
+    estado.carregar(&t.motor, &t.sessao);
+    let p = estado
+        .parcelas
+        .iter()
+        .find(|p| p.origem_modulo == "os")
+        .expect("parcela da OS");
+    assert_eq!(estado.origem_da_parcela(p).0, esperado);
+    estado.busca = format!("os #{}", os.numero);
+    let hoje = Data::hoje(Fuso::BRASILIA);
+    assert_eq!(
+        estado.parcelas_filtradas(FiltroParcelas::Todas, hoje).len(),
+        1
+    );
+}
+
+#[test]
+fn lancar_pago_agora_com_fornecedor_novo_cadastra_quita_e_limpa_para_o_proximo() {
+    let t = motor_de_teste();
+    let mut estado = EstadoTelaFinanceiro {
+        aba: Aba::Pagar,
+        ..Default::default()
+    };
+    estado.carregar(&t.motor, &t.sessao);
+    let fornecedores_antes = estado.fornecedores.len();
+
+    let mut f = FormLancar::novo(false);
+    f.pessoa.novo = true;
+    f.pessoa.nome = "Distribuidora Peças BH".to_owned();
+    f.pessoa.telefone = "31 3333-4444".to_owned();
+    f.descricao = "Tela de reposição".to_owned();
+    f.valor = "180,00".to_owned();
+    f.pagamento = crate::pagamento::EstadoPagamento::novo(MeioPagamento::Dinheiro);
+    estado.dlg = Dlg::Lancar(f);
+    lancar(
+        &egui::Context::default(),
+        &t.motor,
+        &t.sessao,
+        &mut estado,
+        true,
+    );
+
+    assert_eq!(estado.fornecedores.len(), fornecedores_antes + 1);
+    let p = estado
+        .parcelas
+        .iter()
+        .find(|p| p.descricao.as_deref() == Some("Tela de reposição"))
+        .expect("parcela lançada");
+    assert_eq!(p.estado, EstadoParcela::Quitada);
+    assert_eq!(
+        p.valor_baixado,
+        "180,00".parse::<Dinheiro>().expect("valor")
+    );
+    assert_eq!(estado.origem_da_parcela(p).0, "Manual");
+    assert_eq!(
+        estado.nome_contraparte(&p.contraparte),
+        "Distribuidora Peças BH"
+    );
+    // "Lançar e continuar": formulário limpo, ainda a pagar e com o mesmo meio.
+    let Dlg::Lancar(f) = &estado.dlg else {
+        panic!("o diálogo devia continuar aberto");
+    };
+    assert!(!f.a_receber);
+    assert!(f.valor.is_empty() && f.descricao.is_empty() && !f.pessoa.novo);
+    assert_eq!(f.pagamento.condicao.meio, Some(MeioPagamento::Dinheiro));
+}
+
+#[test]
+fn lancar_a_prazo_fica_em_aberto_nas_parcelas_pedidas() {
+    let t = motor_de_teste();
+    let mut estado = EstadoTelaFinanceiro {
+        aba: Aba::Receber,
+        ..Default::default()
+    };
+    estado.periodo.preset = PresetPeriodo::Ano;
+    estado.carregar(&t.motor, &t.sessao);
+    let mut f = FormLancar::novo(true);
+    f.descricao = "Conserto parcelado".to_owned();
+    f.valor = "300,00".to_owned();
+    f.pagamento.condicao.a_prazo = true;
+    f.pagamento.condicao.parcelas = "3".to_owned();
+    f.pagamento.condicao.primeiro_vencimento = Data::hoje(Fuso::BRASILIA).to_string();
+    f.pagamento.condicao.intervalo_dias = "1".to_owned();
+    estado.dlg = Dlg::Lancar(f);
+    lancar(
+        &egui::Context::default(),
+        &t.motor,
+        &t.sessao,
+        &mut estado,
+        false,
+    );
+
+    assert!(matches!(estado.dlg, Dlg::Fechado));
+    let lancadas: Vec<_> = estado
+        .parcelas
+        .iter()
+        .filter(|p| p.descricao.as_deref() == Some("Conserto parcelado"))
+        .collect();
+    assert_eq!(lancadas.len(), 3);
+    assert!(lancadas.iter().all(|p| p.estado == EstadoParcela::Aberta));
 }
 
 #[test]
@@ -231,6 +335,7 @@ fn baixa_de_parcela_vencida_sugere_o_total_com_multa() {
                 intervalo_dias: 0,
                 observacao: None,
                 categoria: None,
+                quitado_agora: None,
             },
         )
         .expect("título");

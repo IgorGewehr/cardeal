@@ -16,9 +16,9 @@ use mod_financeiro::{
     EspecieTitulo, EstornarBaixa, ExtratoDisponivel, FecharCaixa, ItemTituloEmAberto,
     ItemTotalPorCategoria, LancarTituloAPagar, LancarTituloAReceber, MeioPagamento,
     ModuloFinanceiro, PagamentoBaixado, ParcelasAReceberNoPeriodo, Periodicidade, PoliticaJuros,
-    RecebimentoBaixado, RecorrenciaCriada, RegistrarSangria, RegistrarSuprimento, RenegociarTitulo,
-    RepositorioFinanceiro, SangriaFoiRegistrada, SuprimentoFoiRegistrado, TipoValor,
-    TituloAPagarLancado, TituloAReceberLancado, TituloDaOrigem, TitulosAReceberEmAberto,
+    QuitadoAgora, RecebimentoBaixado, RecorrenciaCriada, RegistrarSangria, RegistrarSuprimento,
+    RenegociarTitulo, RepositorioFinanceiro, SangriaFoiRegistrada, SuprimentoFoiRegistrado,
+    TipoValor, TituloAPagarLancado, TituloAReceberLancado, TituloDaOrigem, TitulosAReceberEmAberto,
     TotalPorCategoriaNoPeriodo, TotalRecebidoNoPeriodo, MANIFESTO,
 };
 use serde::Serialize;
@@ -168,6 +168,7 @@ fn lancar(
         intervalo_dias: 30,
         observacao: None,
         categoria: None,
+        quitado_agora: None,
     };
     let saida = d
         .executar_comando(
@@ -211,6 +212,7 @@ fn lancar_titulo_sem_pessoa_informada_funciona_para_receber_e_pagar() {
         intervalo_dias: 0,
         observacao: Some("Receita avulsa sem cliente identificado".to_string()),
         categoria: None,
+        quitado_agora: None,
     };
     let saida: TituloAReceberLancado = postcard::from_bytes(
         &d.executar_comando(
@@ -235,6 +237,7 @@ fn lancar_titulo_sem_pessoa_informada_funciona_para_receber_e_pagar() {
         intervalo_dias: 0,
         observacao: Some("Despesa avulsa sem fornecedor identificado".to_string()),
         categoria: None,
+        quitado_agora: None,
     };
     let saida: TituloAPagarLancado = postcard::from_bytes(
         &d.executar_comando(
@@ -391,6 +394,7 @@ fn sem_a_permissao_de_criar_o_lancamento_e_recusado() {
         intervalo_dias: 30,
         observacao: None,
         categoria: None,
+        quitado_agora: None,
     };
     let erro = d
         .executar_comando(
@@ -457,6 +461,7 @@ fn fluxo_a_pagar_espelha_o_a_receber() {
         intervalo_dias: 30,
         observacao: Some("conta de luz".into()),
         categoria: None,
+        quitado_agora: None,
     };
     let saida = d
         .executar_comando(
@@ -1525,6 +1530,7 @@ fn total_por_categoria_no_periodo_agrega_o_que_foi_baixado() {
         intervalo_dias: 30,
         observacao: None,
         categoria: Some(categoria.categoria),
+        quitado_agora: None,
     };
     let lancado: TituloAReceberLancado = postcard::from_bytes(
         &d.executar_comando(
@@ -1820,6 +1826,7 @@ fn receber(
                 intervalo_dias: 0,
                 observacao: Some(format!("Serviço de R$ {reais}")),
                 categoria: None,
+                quitado_agora: None,
             }),
             s,
             &ambiente(empresa),
@@ -1947,4 +1954,95 @@ fn baixa_em_lote_quita_pelo_total_devido_com_juros_e_e_tudo_ou_nada() {
         situacao(&d, &s, &arm, empresa, em_dia_2).total_devido,
         Dinheiro::reais(300)
     );
+}
+
+/// "Já foi pago": a conta paga agora nasce quitada — título, parcela e baixa num COMMIT só,
+/// sem sobrar nada em aberto para dar baixa depois.
+#[test]
+fn lancar_ja_quitado_grava_titulo_e_baixa_juntos() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloFinanceiro]).unwrap();
+    let s = sessao(
+        empresa,
+        &["financeiro.pagar.criar", "financeiro.pagar.baixar"],
+    );
+
+    let cmd = LancarTituloAPagar {
+        fornecedor: None,
+        valor_total: Dinheiro::reais(80),
+        emissao: hoje(),
+        parcelas: 1,
+        primeiro_vencimento: hoje(),
+        intervalo_dias: 0,
+        observacao: Some("Conta de luz".to_string()),
+        categoria: None,
+        quitado_agora: Some(QuitadoAgora {
+            meio_pagamento: MeioPagamento::Dinheiro,
+            conta: None,
+        }),
+    };
+    d.executar_comando(
+        "financeiro.lancar_titulo_a_pagar.v1",
+        &carga(&cmd),
+        &s,
+        &ambiente(empresa),
+        arm.escritor(),
+    )
+    .unwrap();
+
+    assert_eq!(conta_baixas(&arm, empresa), 1);
+    // 1 Confirmado (título) + 1 Realizado (baixa).
+    assert_eq!(conta_lancamentos(&arm, empresa), 2);
+}
+
+/// Sem permissão de baixar, o "já recebido" é recusado inteiro — nem o título fica gravado.
+#[test]
+fn lancar_ja_quitado_sem_permissao_de_baixa_nao_grava_nada() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloFinanceiro]).unwrap();
+    let s = sessao(empresa, &["financeiro.receber.criar"]);
+
+    let mut cmd = LancarTituloAReceber {
+        cliente: None,
+        valor_total: Dinheiro::reais(50),
+        emissao: hoje(),
+        parcelas: 1,
+        primeiro_vencimento: hoje(),
+        intervalo_dias: 0,
+        observacao: None,
+        categoria: None,
+        quitado_agora: Some(QuitadoAgora {
+            meio_pagamento: MeioPagamento::Pix,
+            conta: None,
+        }),
+    };
+    let erro = d
+        .executar_comando(
+            "financeiro.lancar_titulo_a_receber.v1",
+            &carga(&cmd),
+            &s,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+        .unwrap_err();
+    assert_eq!(erro.codigo, CodigoErro::SEM_PERMISSAO);
+
+    // Com permissão, mas parcelado: quitado agora é pagamento único.
+    let s = sessao(
+        empresa,
+        &["financeiro.receber.criar", "financeiro.receber.baixar"],
+    );
+    cmd.parcelas = 2;
+    cmd.intervalo_dias = 30;
+    let erro = d
+        .executar_comando(
+            "financeiro.lancar_titulo_a_receber.v1",
+            &carga(&cmd),
+            &s,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+        .unwrap_err();
+    assert_eq!(erro.codigo, CodigoErro::REGRA_VIOLADA);
+    assert_eq!(conta_lancamentos(&arm, empresa), 0);
 }

@@ -7,7 +7,7 @@
 //! ```
 //!
 //! Cenas: `os`, `os-detalhe`, `os-nova`, `os-faturar`, `financeiro`, `financeiro-receber`,
-//! `financeiro-baixa`. Sem `CARDEAL_DEMO_PNG` a janela fica aberta para mexer.
+//! `financeiro-baixa`, `financeiro-lancar`. Sem `CARDEAL_DEMO_PNG` a janela fica aberta para mexer.
 
 use cardeal_cliente::{MotorLocal, SessaoLocal};
 use cardeal_kernel::{Data, Dinheiro, Fuso, Id, Preco, Quantidade};
@@ -374,6 +374,7 @@ pub fn semear(motor: &MotorLocal) -> SessaoLocal {
                     intervalo_dias: 0,
                     observacao: None,
                     categoria: None,
+                    quitado_agora: None,
                 },
             )
             .expect("título");

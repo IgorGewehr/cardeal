@@ -36,7 +36,7 @@ use contas::*;
 use eframe::egui;
 use fluxo::*;
 use lancar::*;
-use mod_clientes::{CriarPessoa, ItemPessoa, Papel, PessoaCadastrada, PessoasPorPapel, TipoPessoa};
+use mod_clientes::{ItemPessoa, Papel, PessoaCadastrada, PessoasPorPapel};
 use mod_financeiro::{
     BaixarPagamento, BaixarRecebimento, BaixasDaParcela, CategoriaFinanceira, Categorias,
     ContaBancariaCriada, ContasDeResultado, ContasDisponiveis, CriarCategoria, CriarContaBancaria,
@@ -143,6 +143,8 @@ enum Dlg {
 enum AlvoRapido {
     Lancar,
     Recorrencia,
+    /// Cadastro avulso, pelo botão do cabeçalho — não devolve a ninguém.
+    Nenhum,
 }
 
 /// Cadastro rápido de cliente/fornecedor ou categoria, sem sair do dialog de lançamento —
@@ -155,8 +157,7 @@ enum DlgRapido {
     Pessoa {
         alvo: AlvoRapido,
         papel: Papel,
-        tipo: TipoPessoa,
-        nome: String,
+        pessoa: crate::pessoa::EstadoPessoa,
     },
     Categoria {
         alvo: AlvoRapido,
@@ -277,29 +278,42 @@ impl Default for FormRecorrencia {
     }
 }
 
+/// O lançamento: quem, o quê, quanto e como — "à vista" já nasce pago/recebido (título e
+/// baixa num COMMIT, `quitado_agora`), "a prazo" fica em aberto em parcelas.
 struct FormLancar {
-    contraparte: Option<Id>,
+    /// A receber ou a pagar — escolhido pelo botão, não pela aba (dá para lançar os dois de
+    /// qualquer aba).
+    a_receber: bool,
+    /// Cliente/fornecedor do catálogo ou cadastrado ali mesmo (opcional).
+    pessoa: crate::pessoa::EstadoPessoa,
+    /// O que é ("Conta de luz", "Conserto do notebook") — vira a descrição na grade.
+    descricao: String,
     valor: String,
-    emissao: String,
-    parcelas: String,
-    primeiro_vencimento: String,
-    intervalo: String,
-    observacao: String,
+    /// Data do lançamento (emissão; também a da baixa quando à vista).
+    data: String,
     categoria: Option<Id>,
+    pagamento: crate::pagamento::EstadoPagamento,
+}
+
+impl FormLancar {
+    fn novo(a_receber: bool) -> Self {
+        Self {
+            a_receber,
+            ..Self::default()
+        }
+    }
 }
 
 impl Default for FormLancar {
     fn default() -> Self {
-        let hoje = Data::hoje(Fuso::BRASILIA).to_string();
         Self {
-            contraparte: None,
+            a_receber: true,
+            pessoa: crate::pessoa::EstadoPessoa::default(),
+            descricao: String::new(),
             valor: String::new(),
-            emissao: hoje.clone(),
-            parcelas: "1".to_owned(),
-            primeiro_vencimento: hoje,
-            intervalo: "30".to_owned(),
-            observacao: String::new(),
+            data: Data::hoje(Fuso::BRASILIA).to_string(),
             categoria: None,
+            pagamento: crate::pagamento::EstadoPagamento::novo(MeioPagamento::Pix),
         }
     }
 }
@@ -394,13 +408,34 @@ pub fn mostrar(
         ui,
         estado,
         |ui, estado| {
-            let rot = if estado.aba.a_receber() {
-                "+ Lançar a receber"
+            // Os dois lançamentos de qualquer aba; o da aba "A pagar" vem primeiro nela.
+            let pagar_primeiro = estado.aba == Aba::Pagar;
+            for a_receber in [!pagar_primeiro, pagar_primeiro] {
+                let rot = if a_receber {
+                    "+ A receber"
+                } else {
+                    "+ A pagar"
+                };
+                let b = if a_receber == !pagar_primeiro {
+                    Botao::primario(rot).tecla(ATALHO_NOVO)
+                } else {
+                    Botao::secundario(rot)
+                };
+                if ui.add(b).clicked() {
+                    estado.dlg = Dlg::Lancar(FormLancar::novo(a_receber));
+                }
+            }
+            let (rot, papel) = if pagar_primeiro {
+                ("+ Fornecedor", Papel::Fornecedor)
             } else {
-                "+ Lançar a pagar"
+                ("+ Cliente", Papel::Cliente)
             };
-            if ui.add(Botao::primario(rot).tecla(ATALHO_NOVO)).clicked() {
-                estado.dlg = Dlg::Lancar(FormLancar::default());
+            if ui.add(Botao::secundario(rot)).clicked() {
+                estado.dlg_rapido = Some(DlgRapido::Pessoa {
+                    alvo: AlvoRapido::Nenhum,
+                    papel,
+                    pessoa: crate::pessoa::EstadoPessoa::cadastro(),
+                });
             }
             if ui.add(Botao::secundario("Por categoria")).clicked() {
                 estado.carregar_analise(motor, sessao);
@@ -512,6 +547,15 @@ impl EstadoTelaFinanceiro {
             self.periodo.preset = PresetPeriodo::Semestre;
         }
         self.carregar(motor, sessao);
+        if cena == "financeiro-lancar" {
+            let mut f = FormLancar::novo(false);
+            f.pessoa.novo = true;
+            f.pessoa.nome = "Distribuidora Peças BH".to_owned();
+            f.pessoa.telefone = "(31) 3333-4444".to_owned();
+            f.descricao = "Tela de reposição — OS 12".to_owned();
+            f.valor = "180,00".to_owned();
+            self.dlg = Dlg::Lancar(f);
+        }
         if cena == "financeiro-lote" {
             self.selecao = Some(
                 self.parcelas

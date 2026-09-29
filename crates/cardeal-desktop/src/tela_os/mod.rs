@@ -43,8 +43,7 @@ use faturar::*;
 use ficha::*;
 use lista::*;
 use mod_clientes::{
-    ContatoInicial, CriarPessoa, EnderecoInicial, ItemPessoa, Papel as PapelCliente,
-    PessoasPorPapel, TipoContato, TipoDocumento, TipoEndereco, TipoPessoa,
+    EnderecoInicial, ItemPessoa, Papel as PapelCliente, PessoasPorPapel, TipoEndereco,
 };
 use mod_estoque::{ItemLocal, ItemProdutoComSaldo, Locais, ProdutosComSaldo};
 use mod_financeiro::{MeioPagamento, Titulo, TituloDaOrigem};
@@ -73,19 +72,8 @@ enum Dlg {
     #[default]
     Fechado,
     Nova {
-        /// `true` = cadastrar cliente novo; `false` = escolher da lista.
-        cliente_novo: bool,
-        cliente_sel: Option<Id>,
-        /// O texto digitado no lookup de cliente (`SeletorBusca`) — filtra por nome e
-        /// documento.
-        cliente_busca: String,
-        nome: String,
-        /// CPF ou CNPJ — opcional (pedido do usuário: só o nome do cliente é obrigatório).
-        documento: String,
-        /// Telefone/WhatsApp — opcional.
-        telefone: String,
-        /// E-mail — opcional.
-        email: String,
+        /// Cliente existente (busca) ou novo (nome, documento, telefone, e-mail).
+        cliente: crate::pessoa::EstadoPessoa,
         end_logradouro: String,
         end_numero: String,
         end_bairro: String,
@@ -119,13 +107,7 @@ enum Dlg {
 impl Dlg {
     fn nova() -> Self {
         Self::Nova {
-            cliente_novo: false,
-            cliente_sel: None,
-            cliente_busca: String::new(),
-            nome: String::new(),
-            documento: String::new(),
-            telefone: String::new(),
-            email: String::new(),
+            cliente: crate::pessoa::EstadoPessoa::default(),
             end_logradouro: String::new(),
             end_numero: String::new(),
             end_bairro: String::new(),
@@ -620,8 +602,8 @@ impl EstadoTelaOs {
     pub fn nova_para_cliente(&mut self, cliente: Id) {
         self.aba = AbaOs::Ordens;
         let mut dlg = Dlg::nova();
-        if let Dlg::Nova { cliente_sel, .. } = &mut dlg {
-            *cliente_sel = Some(cliente);
+        if let Dlg::Nova { cliente: c, .. } = &mut dlg {
+            c.selecionada = Some(cliente);
         }
         self.dlg = dlg;
     }

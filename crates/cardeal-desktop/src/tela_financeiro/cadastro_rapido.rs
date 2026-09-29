@@ -29,7 +29,7 @@ pub(super) fn dialogo_rapido(
         DlgRapido::Categoria { .. } => "Nova categoria",
     };
 
-    let fechar = Dialogo::nova(titulo).largura(420.0).mostrar(
+    let fechar = Dialogo::nova(titulo).largura(520.0).mostrar(
         ctx,
         estado,
         |ui, estado| {
@@ -37,25 +37,13 @@ pub(super) fn dialogo_rapido(
                 return;
             };
             match rapido {
-                DlgRapido::Pessoa { tipo, nome, .. } => {
-                    ui.horizontal(|ui| {
-                        for (rot, t) in [
-                            ("Pessoa física", TipoPessoa::Fisica),
-                            ("Pessoa jurídica", TipoPessoa::Juridica),
-                        ] {
-                            let sel = *tipo == t;
-                            let b = if sel {
-                                Botao::primario(rot)
-                            } else {
-                                Botao::fantasma(rot)
-                            };
-                            if ui.add(b).clicked() {
-                                *tipo = t;
-                            }
-                        }
-                    });
-                    ui.add_space(Espaco::E12);
-                    ui.add(Campo::novo("Nome", nome).marcador("Nome completo ou razão social"));
+                DlgRapido::Pessoa { papel, pessoa, .. } => {
+                    let catalogo = if *papel == Papel::Fornecedor {
+                        &estado.fornecedores
+                    } else {
+                        &estado.clientes
+                    };
+                    pessoa.mostrar_cadastro(ui, catalogo, *papel, false);
                 }
                 DlgRapido::Categoria { nome, especie, .. } => {
                     ui.add(Campo::novo("Nome", nome).marcador("Aluguel"));
@@ -92,6 +80,11 @@ pub(super) fn dialogo_rapido(
     );
     if fechar {
         estado.dlg_rapido = None;
+        return;
+    }
+    // Clicou "Usar Fulano" no aviso de duplicado: devolve o existente sem esperar "Criar".
+    if matches!(&estado.dlg_rapido, Some(DlgRapido::Pessoa { pessoa, .. }) if !pessoa.novo) {
+        criar_rapido(ctx, motor, sessao, estado);
     }
 }
 
@@ -110,49 +103,52 @@ pub(super) fn criar_rapido(
         DlgRapido::Pessoa {
             alvo,
             papel,
-            tipo,
-            nome,
+            pessoa,
         } => {
-            let nome = nome.trim().to_owned();
-            if nome.is_empty() {
-                notificar(ctx, Notificacao::aviso("Informe o nome."));
+            let (alvo, papel) = (*alvo, *papel);
+            // "Usar Fulano" no aviso de duplicado: nada a cadastrar, só devolver o existente.
+            let r = if pessoa.novo {
+                match pessoa.para_criar(papel, None) {
+                    Ok(cmd) => motor
+                        .executar(sessao, "clientes.criar_pessoa.v1", &cmd)
+                        .map(|p: PessoaCadastrada| (p.pessoa, true)),
+                    Err(msg) => {
+                        notificar(ctx, Notificacao::aviso(msg));
+                        return;
+                    }
+                }
+            } else if let Some(id) = pessoa.selecionada {
+                Ok((id, false))
+            } else {
                 return;
-            }
-            let (alvo, papel, tipo) = (*alvo, *papel, *tipo);
-            let r = motor
-                .executar(
-                    sessao,
-                    "clientes.criar_pessoa.v1",
-                    &CriarPessoa {
-                        tipo,
-                        nome,
-                        nome_fantasia: None,
-                        papel_inicial: papel,
-                        documento_tipo: None,
-                        documento_numero: None,
-                        data_nascimento: None,
-                        endereco: None,
-                        contato: None,
-                    },
-                )
-                .map(|p: PessoaCadastrada| p.pessoa);
+            };
             match r {
-                Ok(id) => {
+                Ok((id, criada)) => {
                     estado.dlg_rapido = None;
-                    estado.carregar(motor, sessao);
+                    if criada {
+                        estado.carregar(motor, sessao);
+                    }
                     match (alvo, &mut estado.dlg) {
-                        (AlvoRapido::Lancar, Dlg::Lancar(f)) => f.contraparte = Some(id),
+                        (AlvoRapido::Lancar, Dlg::Lancar(f)) => {
+                            f.pessoa.novo = false;
+                            f.pessoa.selecionada = Some(id);
+                        }
                         (AlvoRapido::Recorrencia, Dlg::NovaRecorrencia(f)) => {
                             f.contraparte = Some(id);
                         }
                         _ => {}
                     }
+                    let quem = if papel == Papel::Fornecedor {
+                        "Fornecedor"
+                    } else {
+                        "Cliente"
+                    };
                     notificar(
                         ctx,
-                        Notificacao::sucesso(if papel == Papel::Fornecedor {
-                            "Fornecedor cadastrado"
+                        Notificacao::sucesso(if criada {
+                            format!("{quem} cadastrado")
                         } else {
-                            "Cliente cadastrado"
+                            format!("{quem} já cadastrado — usando o existente")
                         }),
                     );
                 }

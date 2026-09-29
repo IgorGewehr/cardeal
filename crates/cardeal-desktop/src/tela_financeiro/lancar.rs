@@ -83,140 +83,176 @@ pub(super) fn dialogo_lancar(
     sessao: &SessaoLocal,
     estado: &mut EstadoTelaFinanceiro,
 ) {
-    let a_receber = estado.aba.a_receber();
+    let a_receber = matches!(&estado.dlg, Dlg::Lancar(f) if f.a_receber);
     let titulo = if a_receber {
-        "Lançar título a receber"
+        "Lançar a receber"
     } else {
-        "Lançar título a pagar"
-    };
-    let ops: Vec<(Id, String)> = if a_receber {
-        estado
-            .clientes
-            .iter()
-            .map(|p| (p.pessoa, p.nome.clone()))
-            .collect()
-    } else {
-        estado
-            .fornecedores
-            .iter()
-            .map(|p| (p.pessoa, p.nome.clone()))
-            .collect()
+        "Lançar a pagar"
     };
     let cats: Vec<(Id, String)> = estado
         .categorias
         .iter()
+        .filter(|c| {
+            c.especie
+                .is_none_or(|e| (e == EspecieTitulo::Receber) == a_receber)
+        })
         .map(|c| (c.id, c.nome.clone()))
         .collect();
-
-    let fechar = Dialogo::nova(titulo).largura(680.0).mostrar(
-        ctx,
-        estado,
-        |ui, estado| {
-            let Dlg::Lancar(f) = &mut estado.dlg else {
-                return;
-            };
-            SeletorOpcao::novo(
-                if a_receber {
-                    "Cliente (opcional)"
+    let dica = if a_receber {
+        "À vista = já recebido nesta data, entra no caixa/banco agora. A prazo = fica em aberto."
+    } else {
+        "À vista = já pago nesta data, sai do caixa/banco agora. A prazo = fica em aberto."
+    };
+    let fechar = Dialogo::nova(titulo)
+        .descricao(dica)
+        .largura(720.0)
+        .mostrar(
+            ctx,
+            estado,
+            |ui, estado| {
+                let Dlg::Lancar(f) = &mut estado.dlg else {
+                    return;
+                };
+                let (catalogo, papel) = if a_receber {
+                    (&estado.clientes, Papel::Cliente)
                 } else {
-                    "Fornecedor (opcional)"
-                },
-                &mut f.contraparte,
-            )
-            .opcoes(ops.clone())
-            .placeholder(if a_receber {
-                "Sem cliente informado"
-            } else {
-                "Sem fornecedor informado"
-            })
-            .mostrar(ui);
-            if ui
-                .add(botao_cadastro_rapido(if a_receber {
-                    "+ Cadastrar cliente"
-                } else {
-                    "+ Cadastrar fornecedor"
-                }))
-                .clicked()
-            {
-                estado.dlg_rapido = Some(DlgRapido::Pessoa {
-                    alvo: AlvoRapido::Lancar,
-                    papel: if a_receber {
-                        Papel::Cliente
-                    } else {
-                        Papel::Fornecedor
-                    },
-                    tipo: TipoPessoa::Fisica,
-                    nome: String::new(),
+                    (&estado.fornecedores, Papel::Fornecedor)
+                };
+                f.pessoa.mostrar(ui, catalogo, papel, true, false);
+                ui.add_space(Espaco::E12);
+                ui.columns(2, |c| {
+                    c[0].add(
+                        Campo::novo(
+                            if a_receber {
+                                "Do que é"
+                            } else {
+                                "O que foi pago / a pagar"
+                            },
+                            &mut f.descricao,
+                        )
+                        .marcador(if a_receber {
+                            "ex.: conserto do notebook, sinal da OS"
+                        } else {
+                            "ex.: conta de luz, peça para a OS 12"
+                        }),
+                    );
+                    c[1].columns(2, |c| {
+                        c[0].add(Campo::novo("Valor", &mut f.valor).marcador("0,00"));
+                        c[1].add(Campo::novo("Data", &mut f.data).mascara(Mascara::Data));
+                    });
                 });
-            }
-            ui.add_space(Espaco::E12);
-            ui.columns(2, |c| {
-                c[0].add(Campo::novo("Valor total", &mut f.valor).marcador("0,00"));
-                c[1].add(Campo::novo("Emissão", &mut f.emissao).mascara(Mascara::Data));
-            });
-            ui.add_space(Espaco::E12);
-            ui.columns(3, |c| {
-                c[0].add(Campo::novo("Parcelas", &mut f.parcelas));
-                c[1].add(
-                    Campo::novo("1º vencimento", &mut f.primeiro_vencimento).mascara(Mascara::Data),
+                ui.add_space(Espaco::E12);
+                SeletorOpcao::novo("Categoria (opcional)", &mut f.categoria)
+                    .opcoes(cats.clone())
+                    .placeholder("Sem categoria")
+                    .mostrar(ui);
+                if ui.add(botao_cadastro_rapido("+ Nova categoria")).clicked() {
+                    estado.dlg_rapido = Some(DlgRapido::Categoria {
+                        alvo: AlvoRapido::Lancar,
+                        nome: String::new(),
+                        especie: Some(if a_receber {
+                            EspecieTitulo::Receber
+                        } else {
+                            EspecieTitulo::Pagar
+                        }),
+                    });
+                }
+                ui.add_space(Espaco::E12);
+                let Dlg::Lancar(f) = &mut estado.dlg else {
+                    return;
+                };
+                f.pagamento.mostrar(
+                    ui,
+                    motor,
+                    sessao,
+                    "lancar",
+                    crate::pagamento::Prazo::Parcelado,
                 );
-                c[2].add(Campo::novo("Intervalo (dias)", &mut f.intervalo));
-            });
-            ui.add_space(Espaco::E12);
-            cardeal_ui::molecules::SeletorOpcao::novo("Categoria (opcional)", &mut f.categoria)
-                .opcoes(cats.clone())
-                .placeholder("Sem categoria")
-                .mostrar(ui);
-            if ui.add(botao_cadastro_rapido("+ Nova categoria")).clicked() {
-                estado.dlg_rapido = Some(DlgRapido::Categoria {
-                    alvo: AlvoRapido::Lancar,
-                    nome: String::new(),
-                    especie: None,
-                });
-            }
-            ui.add_space(Espaco::E12);
-            ui.add(Campo::novo("Observação", &mut f.observacao));
-        },
-        |ui, estado| {
-            if ui.add(Botao::primario("Lançar")).clicked() {
-                lancar(ui.ctx(), motor, sessao, estado);
-            }
-            if ui.add(Botao::secundario("Cancelar")).clicked() {
-                estado.dlg = Dlg::Fechado;
-            }
-        },
-    );
+            },
+            |ui, estado| {
+                if ui.add(Botao::primario("Lançar e continuar")).clicked() {
+                    lancar(ui.ctx(), motor, sessao, estado, true);
+                }
+                if ui.add(Botao::secundario("Lançar e fechar")).clicked() {
+                    lancar(ui.ctx(), motor, sessao, estado, false);
+                }
+                if ui.add(Botao::fantasma("Cancelar")).clicked() {
+                    estado.dlg = Dlg::Fechado;
+                }
+            },
+        );
     if fechar {
         estado.dlg = Dlg::Fechado;
     }
 }
 
+/// Lança o que está no formulário. Cliente/fornecedor novo é cadastrado antes (e fica
+/// escolhido no formulário: se o lançamento falhar, a correção não cadastra de novo).
+/// `continuar` = limpa o formulário para o próximo lançamento, mantendo data e meio.
 pub(super) fn lancar(
     ctx: &egui::Context,
     motor: &MotorLocal,
     sessao: &SessaoLocal,
     estado: &mut EstadoTelaFinanceiro,
+    continuar: bool,
 ) {
-    let a_receber = estado.aba.a_receber();
     let Dlg::Lancar(f) = &estado.dlg else { return };
-    // Cliente/fornecedor é opcional (pedido explícito do usuário) — um título avulso não
-    // precisa de uma pessoa cadastrada.
-    let contraparte = f.contraparte;
-    let (Ok(valor), Ok(emissao), Ok(parcelas), Ok(prim), Ok(intervalo)) = (
-        f.valor.parse::<Dinheiro>(),
-        f.emissao.parse::<Data>(),
-        f.parcelas.parse::<u16>(),
-        f.primeiro_vencimento.parse::<Data>(),
-        f.intervalo.parse::<i32>(),
-    ) else {
-        notificar(
-            ctx,
-            Notificacao::aviso("Confira os campos — valor 0,00, datas dd/mm/aaaa."),
-        );
-        return;
+    let a_receber = f.a_receber;
+    let aviso = |msg: &str| notificar(ctx, Notificacao::aviso(msg.to_owned()));
+    let valor = match f.valor.parse::<Dinheiro>() {
+        Ok(v) if v.e_positivo() => v,
+        _ => return aviso("Informe o valor (ex.: 150,00)."),
     };
-    let obs = (!f.observacao.trim().is_empty()).then(|| f.observacao.clone());
-    let cat = f.categoria;
+    let Ok(data) = f.data.parse::<Data>() else {
+        return aviso("Informe a data (dd/mm/aaaa).");
+    };
+    let (parcelas, vencimento, intervalo, quitado) = if f.pagamento.condicao.a_prazo {
+        match f.pagamento.prazo_validado() {
+            Ok((p, v, i)) => (p, v, i, None),
+            Err(msg) => return aviso(msg),
+        }
+    } else {
+        match f.pagamento.meio_validado() {
+            Ok(meio) => (
+                1,
+                data,
+                0,
+                Some(mod_financeiro::QuitadoAgora {
+                    meio_pagamento: meio,
+                    conta: f.pagamento.conta_destino(),
+                }),
+            ),
+            Err(msg) => return aviso(msg),
+        }
+    };
+    let descricao = (!f.descricao.trim().is_empty()).then(|| f.descricao.trim().to_owned());
+    let categoria = f.categoria;
+    let papel = if a_receber {
+        Papel::Cliente
+    } else {
+        Papel::Fornecedor
+    };
+
+    let contraparte = if f.pessoa.novo {
+        let cmd = match f.pessoa.para_criar(papel, None) {
+            Ok(c) => c,
+            Err(msg) => return aviso(msg),
+        };
+        match motor.executar(sessao, "clientes.criar_pessoa.v1", &cmd) {
+            Ok(p) => {
+                let p: PessoaCadastrada = p;
+                estado.carregar_nomes(motor, sessao);
+                if let Dlg::Lancar(f) = &mut estado.dlg {
+                    f.pessoa.novo = false;
+                    f.pessoa.selecionada = Some(p.pessoa);
+                }
+                Some(p.pessoa)
+            }
+            Err(e) => return notificar(ctx, Notificacao::erro(e.mensagem)),
+        }
+    } else {
+        f.pessoa.selecionada
+    };
 
     let r = if a_receber {
         motor
@@ -226,12 +262,13 @@ pub(super) fn lancar(
                 &LancarTituloAReceber {
                     cliente: contraparte,
                     valor_total: valor,
-                    emissao,
+                    emissao: data,
                     parcelas,
-                    primeiro_vencimento: prim,
+                    primeiro_vencimento: vencimento,
                     intervalo_dias: intervalo,
-                    observacao: obs,
-                    categoria: cat,
+                    observacao: descricao,
+                    categoria,
+                    quitado_agora: quitado,
                 },
             )
             .map(|_: mod_financeiro::TituloAReceberLancado| ())
@@ -243,21 +280,36 @@ pub(super) fn lancar(
                 &LancarTituloAPagar {
                     fornecedor: contraparte,
                     valor_total: valor,
-                    emissao,
+                    emissao: data,
                     parcelas,
-                    primeiro_vencimento: prim,
+                    primeiro_vencimento: vencimento,
                     intervalo_dias: intervalo,
-                    observacao: obs,
-                    categoria: cat,
+                    observacao: descricao,
+                    categoria,
+                    quitado_agora: quitado,
                 },
             )
             .map(|_: mod_financeiro::TituloAPagarLancado| ())
     };
     match r {
         Ok(()) => {
-            estado.dlg = Dlg::Fechado;
+            let msg = match (quitado.is_some(), a_receber) {
+                (true, true) => format!("Recebimento de {} lançado", valor.formatar_com_simbolo()),
+                (true, false) => format!("Pagamento de {} lançado", valor.formatar_com_simbolo()),
+                (false, true) => format!("{} a receber lançado", valor.formatar_com_simbolo()),
+                (false, false) => format!("{} a pagar lançado", valor.formatar_com_simbolo()),
+            };
+            if continuar {
+                if let Dlg::Lancar(f) = &mut estado.dlg {
+                    let anterior = std::mem::replace(f, FormLancar::novo(a_receber));
+                    f.data = anterior.data;
+                    f.pagamento = anterior.pagamento;
+                }
+            } else {
+                estado.dlg = Dlg::Fechado;
+            }
             estado.carregar(motor, sessao);
-            notificar(ctx, Notificacao::sucesso("Título lançado"));
+            notificar(ctx, Notificacao::sucesso(msg));
         }
         Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
     }
