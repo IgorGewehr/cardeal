@@ -230,7 +230,11 @@ mostrando de onde vem cada valor.
 - **Origem:** coluna Origem nas abas A receber/A pagar (`OS #12 — Maria`, Peça de OS, Compra,
   PDV, Venda, Recorrência, Manual); a busca casa por descrição e origem. Sem permissão de OS o
   rótulo fica "OS", sem erro.
-- Cena de captura nova: `financeiro-lancar`.
+- **Margem na baixa:** a baixa de uma parcela vinda de OS mostra total, custo das peças e
+  margem (R$ e %) pela consulta nova `os.margem_da_ordem.v1`; peça ainda não aplicada é
+  avisada, não estimada. As consultas de margem do mod-os foram para `consultas/margem.rs`
+  (`consultas.rs` virou diretório — estava em 835 linhas).
+- Cena de captura nova: `financeiro-lancar`; `financeiro-baixa` abre a parcela da OS.
 
 Os testes `criar_recorrencia_*` dependiam da data ("dia 1" + 35 dias de antecedência pegava
 duas ocorrências no fim do mês); agora usam o dia de hoje + 20 dias.

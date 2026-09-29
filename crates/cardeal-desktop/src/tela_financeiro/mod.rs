@@ -377,6 +377,10 @@ pub struct EstadoTelaFinanceiro {
     /// veio o dinheiro. Resolvido aqui na UI, nunca no financeiro (`docs/contratos-internos.md`
     /// §7 regra 2 — o financeiro só sabe `origem_modulo`/`origem_id`, não o que é uma OS).
     origem_labels: HashMap<Id, String>,
+    /// Receita, custo das peças e margem por OS (`os.margem_da_ordem`), consultada ao abrir a
+    /// baixa de uma parcela da OS; `None` dentro = sem permissão ou OS não achada. Limpo a
+    /// cada `carregar` (a OS pode ter mudado).
+    margens_os: HashMap<Id, Option<mod_os::MargemDaOrdemServico>>,
     contas_disp: Vec<ItemContaDisponivel>,
     erro: Option<String>,
     dlg: Dlg,
@@ -566,7 +570,8 @@ impl EstadoTelaFinanceiro {
             );
         }
         if cena == "financeiro-baixa" {
-            if let Some(p) = self.parcelas.first() {
+            let da_os = self.parcelas.iter().find(|p| p.origem_modulo == "os");
+            if let Some(p) = da_os.or_else(|| self.parcelas.first()) {
                 self.dlg = Dlg::Baixar {
                     parcela: p.parcela,
                     valor: p.saldo().formatar(),

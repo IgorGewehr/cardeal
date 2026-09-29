@@ -12,6 +12,7 @@ use crate::comandos::{
     IniciarApontamento, IniciarExecucao, MontarOrcamentoOs, ReabrirOrdemServico, RegistrarLaudo,
     RegistrarMaoDeObra, RemoverItemOrcamento, ReprovarOrcamentoOs,
 };
+use crate::consultas::MargemDaOrdem;
 use crate::consultas::OrdensDoCliente;
 use crate::consultas::{
     ApontamentosDaOrdem, BuscarDetalheOrdem, BuscarOrdens, HistoricoDoEquipamento,
@@ -66,6 +67,7 @@ impl Modulo for ModuloOs {
             .consulta::<OrdensPorId>("os.ordens_por_id.v1")
             .consulta::<OrdensDoCliente>("os.ordens_do_cliente.v1")
             .consulta::<MargemDasOrdensNoPeriodo>("os.margem_das_ordens_no_periodo.v1")
+            .consulta::<MargemDaOrdem>("os.margem_da_ordem.v1")
             .consulta::<UltimoPrecoDaPeca>("os.ultimo_preco_da_peca.v1")
             .consulta::<BuscarDetalheOrdem>("os.buscar_detalhe_ordem.v1")
             .consulta::<OrdensAguardandoAprovacao>("os.ordens_aguardando_aprovacao.v1")

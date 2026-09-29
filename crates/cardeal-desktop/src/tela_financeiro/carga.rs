@@ -44,6 +44,7 @@ impl EstadoTelaFinanceiro {
     /// Recarrega a lista da aba ativa, o painel de visão geral e o índice de nomes.
     pub fn carregar(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
         self.erro = None;
+        self.margens_os.clear();
         // Nomes primeiro: o extrato monta (e guarda) "OS #123 — cliente" com eles; carregar
         // depois deixava o rótulo sem o nome para sempre.
         self.carregar_nomes(motor, sessao);
@@ -326,6 +327,27 @@ impl EstadoTelaFinanceiro {
             };
             self.origem_labels.insert(os.id, rotulo);
         }
+    }
+
+    /// A margem da OS por trás da parcela (consultada uma vez e guardada), se a parcela
+    /// vier de uma OS e o usuário puder ver OS.
+    pub(super) fn margem_da_os(
+        &mut self,
+        motor: &MotorLocal,
+        sessao: &SessaoLocal,
+        p: &ItemTituloEmAberto,
+    ) -> Option<mod_os::MargemDaOrdemServico> {
+        let os = p.origem_id.filter(|_| p.origem_modulo == "os")?;
+        *self.margens_os.entry(os).or_insert_with(|| {
+            motor
+                .consultar(
+                    sessao,
+                    "os.margem_da_ordem.v1",
+                    &mod_os::MargemDaOrdem { ordem_servico: os },
+                )
+                .ok()
+                .flatten()
+        })
     }
 
     /// O rótulo de origem de um movimento do extrato, se resolvido (ver

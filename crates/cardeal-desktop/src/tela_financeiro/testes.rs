@@ -180,6 +180,14 @@ fn extrato_rotula_o_recebimento_da_os_com_numero_e_cliente() {
         .find(|p| p.origem_modulo == "os")
         .expect("parcela da OS");
     assert_eq!(estado.origem_da_parcela(p).0, esperado);
+    // A baixa dessa parcela mostra o que a OS rendeu (só mão de obra: margem cheia).
+    let p = p.clone();
+    let m = estado
+        .margem_da_os(&t.motor, &t.sessao, &p)
+        .expect("margem da OS");
+    assert_eq!(m.numero, os.numero);
+    assert_eq!(m.margem(), Dinheiro::reais(150));
+    assert_eq!(m.percentual(), Some(100));
     estado.busca = format!("os #{}", os.numero);
     let hoje = Data::hoje(Fuso::BRASILIA);
     assert_eq!(

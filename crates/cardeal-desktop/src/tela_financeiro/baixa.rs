@@ -56,6 +56,8 @@ pub(super) fn dialogo_baixar(
     if aceita_baixa {
         atualizar_situacao(motor, sessao, estado, p.parcela);
     }
+    let origem = estado.etiqueta_origem(&p);
+    let margem = estado.margem_da_os(motor, sessao, &p);
 
     let fechar = Dialogo::nova(format!("Parcela {} · {}", p.numero, nome))
         .largura(560.0)
@@ -79,6 +81,18 @@ pub(super) fn dialogo_baixar(
                     );
                     dado(&mut c[1], "Saldo", &p.saldo().formatar_com_simbolo());
                 });
+                ui.add_space(Espaco::E8);
+                ui.horizontal(|ui| {
+                    ui.add(Rotulo::campo("Origem"));
+                    ui.add(origem);
+                    if let Some(d) = &p.descricao {
+                        ui.add(Rotulo::interface(d.clone()).cor(ui.cores().texto_medio));
+                    }
+                });
+                if let Some(m) = margem {
+                    ui.add_space(Espaco::E8);
+                    painel_margem_os(ui, &m);
+                }
                 ui.add_space(Espaco::E16);
                 ui.add(Divisor::novo());
                 ui.add_space(Espaco::E12);
@@ -543,5 +557,36 @@ pub(super) fn baixar_lote(
             ctx,
             Notificacao::erro("Nenhuma parcela foi baixada").detalhe(e.mensagem),
         ),
+    }
+}
+
+/// Quanto a OS da parcela rendeu: total, custo das peças e margem (R$ e %) — o custo de
+/// verdade por trás do que está sendo recebido.
+fn painel_margem_os(ui: &mut egui::Ui, m: &mod_os::MargemDaOrdemServico) {
+    ui.columns(3, |c| {
+        dado(
+            &mut c[0],
+            &format!("Total da OS #{}", m.numero),
+            &m.receita.formatar_com_simbolo(),
+        );
+        dado(
+            &mut c[1],
+            "Custo das peças",
+            &m.custo_pecas.formatar_com_simbolo(),
+        );
+        let margem = match m.percentual() {
+            Some(pct) => format!("{} ({pct}%)", m.margem().formatar_com_simbolo()),
+            None => m.margem().formatar_com_simbolo(),
+        };
+        dado(&mut c[2], "Margem", &margem);
+    });
+    if m.pecas_pendentes > 0 {
+        ui.add(
+            Rotulo::campo(format!(
+                "{} peça(s) ainda não aplicada(s) — o custo delas ainda não entrou na conta.",
+                m.pecas_pendentes
+            ))
+            .cor(ui.cores().atencao),
+        );
     }
 }

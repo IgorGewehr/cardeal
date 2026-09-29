@@ -874,4 +874,27 @@ fn margem_do_mes_soma_receita_e_custo_das_os_faturadas() {
         },
     );
     assert_eq!(m.ordens, 0);
+
+    // Por OS: a faturada tem o custo real; a aberta ainda tem a peça pendente, sem custo.
+    let m: Option<mod_os::MargemDaOrdemServico> = b.consulta(
+        "os.margem_da_ordem.v1",
+        &mod_os::MargemDaOrdem {
+            ordem_servico: com_peca,
+        },
+    );
+    let m = m.expect("OS faturada");
+    assert_eq!(m.margem(), cardeal_kernel::Dinheiro::reais(110));
+    assert_eq!(m.percentual(), Some(55));
+    assert_eq!(m.pecas_pendentes, 0);
+    let m: Option<mod_os::MargemDaOrdemServico> = b.consulta(
+        "os.margem_da_ordem.v1",
+        &mod_os::MargemDaOrdem {
+            ordem_servico: aberta,
+        },
+    );
+    let m = m.expect("OS aberta");
+    assert_eq!(
+        (m.custo_pecas, m.pecas_pendentes),
+        (cardeal_kernel::Dinheiro::ZERO, 1)
+    );
 }
