@@ -7,8 +7,10 @@ mod baixa;
 mod cadastro_rapido;
 mod carga;
 mod contas;
+mod custos;
 mod fluxo;
 mod lancar;
+mod pessoal;
 mod recorrencias;
 mod renegociar;
 #[cfg(test)]
@@ -33,6 +35,7 @@ use cardeal_ui::organisms::{
 };
 use cardeal_ui::tokens::{Espaco, Rubro, TemaUi};
 use contas::*;
+use custos::*;
 use eframe::egui;
 use fluxo::*;
 use lancar::*;
@@ -57,8 +60,17 @@ enum Aba {
     Visao,
     Receber,
     Pagar,
+    Custos,
     Fluxo,
     Bancos,
+}
+
+/// A chave do topo: as contas da empresa ou as finanças pessoais do usuário.
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+enum Modo {
+    #[default]
+    Empresa,
+    Pessoal,
 }
 
 impl Aba {
@@ -339,6 +351,12 @@ pub struct EstadoTelaFinanceiro {
     busca: String,
     /// Filtro de situação da lista de parcelas; `None` = todas (o padrão).
     filtro_situacao: Option<FiltroParcelas>,
+    /// Filtro de categoria da lista; `None` = todas.
+    filtro_categoria: Option<FiltroCategoria>,
+    /// Aba Custos: receitas em vez de custos, quantos meses, e a projeção carregada.
+    custos_receitas: bool,
+    custos_meses: u8,
+    projecao: Vec<mod_financeiro::ItemProjecaoCategoria>,
     ordenacao: Ordenacao,
     nomes: HashMap<Id, String>,
     clientes: Vec<ItemPessoa>,
@@ -387,6 +405,10 @@ pub struct EstadoTelaFinanceiro {
     /// Cadastro rápido (cliente/fornecedor/categoria) aberto por cima do `dlg` principal —
     /// ver [`DlgRapido`].
     dlg_rapido: Option<DlgRapido>,
+    /// Empresa ou pessoal.
+    modo: Modo,
+    /// A parte pessoal (carregada na primeira vez que a chave vai para "Pessoal").
+    pessoal: pessoal::EstadoPessoal,
 }
 
 /// Desenha a tela inteira.
@@ -408,55 +430,24 @@ pub fn mostrar(
         );
     }
 
-    LayoutTela::nova("Financeiro").mostrar(
+    let titulo = match estado.modo {
+        Modo::Empresa => "Financeiro",
+        Modo::Pessoal => "Financeiro pessoal",
+    };
+    LayoutTela::nova(titulo).mostrar(
         ui,
         estado,
-        |ui, estado| {
-            // Os dois lançamentos de qualquer aba; o da aba "A pagar" vem primeiro nela.
-            let pagar_primeiro = estado.aba == Aba::Pagar;
-            for a_receber in [!pagar_primeiro, pagar_primeiro] {
-                let rot = if a_receber {
-                    "+ A receber"
-                } else {
-                    "+ A pagar"
-                };
-                let b = if a_receber == !pagar_primeiro {
-                    Botao::primario(rot).tecla(ATALHO_NOVO)
-                } else {
-                    Botao::secundario(rot)
-                };
-                if ui.add(b).clicked() {
-                    estado.dlg = Dlg::Lancar(FormLancar::novo(a_receber));
-                }
-            }
-            let (rot, papel) = if pagar_primeiro {
-                ("+ Fornecedor", Papel::Fornecedor)
-            } else {
-                ("+ Cliente", Papel::Cliente)
-            };
-            if ui.add(Botao::secundario(rot)).clicked() {
-                estado.dlg_rapido = Some(DlgRapido::Pessoa {
-                    alvo: AlvoRapido::Nenhum,
-                    papel,
-                    pessoa: crate::pessoa::EstadoPessoa::cadastro(),
-                });
-            }
-            if ui.add(Botao::secundario("Por categoria")).clicked() {
-                estado.carregar_analise(motor, sessao);
-                estado.dlg = Dlg::Analise;
-            }
-            if ui.add(Botao::secundario("Recorrências")).clicked() {
-                estado.carregar_recorrencias(motor, sessao);
-                estado.dlg = Dlg::Recorrencias;
-            }
-            if ui.add(Botao::secundario("+ Categoria")).clicked() {
-                estado.dlg = Dlg::NovaCategoria {
-                    nome: String::new(),
-                    especie: None,
-                };
-            }
+        |ui, estado| match estado.modo {
+            Modo::Empresa => acoes_empresa(ui, motor, sessao, estado),
+            Modo::Pessoal => pessoal::acoes(ui, &mut estado.pessoal),
         },
         |ui, estado| {
+            chave_modo(ui, estado);
+            ui.add_space(Espaco::E12);
+            if estado.modo == Modo::Pessoal {
+                pessoal::corpo(ui, motor, sessao, &mut estado.pessoal);
+                return;
+            }
             abas(ui, motor, sessao, estado);
             ui.add_space(Espaco::E16);
 
@@ -472,11 +463,16 @@ pub fn mostrar(
                 Aba::Visao => painel_visao(ui, motor, sessao, estado),
                 Aba::Fluxo => painel_fluxo(ui, motor, sessao, estado),
                 Aba::Bancos => painel_bancos(ui, estado),
+                Aba::Custos => painel_custos(ui, motor, sessao, estado),
                 _ => lista(ui, motor, sessao, estado),
             }
         },
     );
 
+    if estado.modo == Modo::Pessoal {
+        pessoal::dialogos(ui.ctx(), motor, sessao, &mut estado.pessoal);
+        return;
+    }
     match estado.dlg {
         Dlg::Fechado => {}
         Dlg::Lancar(_) => dialogo_lancar(ui.ctx(), motor, sessao, estado),
@@ -493,6 +489,73 @@ pub fn mostrar(
     }
 }
 
+/// "CONTAS DA  [Empresa] [Pessoal]" — a chave entre o financeiro da empresa e o do usuário.
+fn chave_modo(ui: &mut egui::Ui, estado: &mut EstadoTelaFinanceiro) {
+    ui.horizontal(|ui| {
+        ui.add(Rotulo::campo("CONTAS"));
+        for (modo, rot) in [
+            (Modo::Empresa, "Da empresa"),
+            (Modo::Pessoal, "Pessoais (só você vê)"),
+        ] {
+            let b = if estado.modo == modo {
+                Botao::primario(rot)
+            } else {
+                Botao::fantasma(rot)
+            };
+            if ui.add(b.pequeno()).clicked() {
+                estado.modo = modo;
+            }
+        }
+    });
+}
+
+fn acoes_empresa(
+    ui: &mut egui::Ui,
+    motor: &MotorLocal,
+    sessao: &SessaoLocal,
+    estado: &mut EstadoTelaFinanceiro,
+) {
+    // Os dois lançamentos de qualquer aba; o da aba "A pagar" vem primeiro nela.
+    let pagar_primeiro = estado.aba == Aba::Pagar;
+    for a_receber in [!pagar_primeiro, pagar_primeiro] {
+        let rot = if a_receber {
+            "+ A receber"
+        } else {
+            "+ A pagar"
+        };
+        let b = if a_receber == !pagar_primeiro {
+            Botao::primario(rot).tecla(ATALHO_NOVO)
+        } else {
+            Botao::secundario(rot)
+        };
+        if ui.add(b).clicked() {
+            estado.dlg = Dlg::Lancar(FormLancar::novo(a_receber));
+        }
+    }
+    let (rot, papel) = if pagar_primeiro {
+        ("+ Favorecido", Papel::Fornecedor)
+    } else {
+        ("+ Cliente", Papel::Cliente)
+    };
+    if ui.add(Botao::secundario(rot)).clicked() {
+        estado.dlg_rapido = Some(DlgRapido::Pessoa {
+            alvo: AlvoRapido::Nenhum,
+            papel,
+            pessoa: crate::pessoa::EstadoPessoa::cadastro(),
+        });
+    }
+    if ui.add(Botao::secundario("Recorrências")).clicked() {
+        estado.carregar_recorrencias(motor, sessao);
+        estado.dlg = Dlg::Recorrencias;
+    }
+    if ui.add(Botao::secundario("+ Categoria")).clicked() {
+        estado.dlg = Dlg::NovaCategoria {
+            nome: String::new(),
+            especie: None,
+        };
+    }
+}
+
 fn abas(
     ui: &mut egui::Ui,
     motor: &MotorLocal,
@@ -503,6 +566,7 @@ fn abas(
         (Aba::Visao, "Visão geral"),
         (Aba::Receber, "A receber"),
         (Aba::Pagar, "A pagar"),
+        (Aba::Custos, "Custos por categoria"),
         (Aba::Fluxo, "Fluxo de caixa"),
         (Aba::Bancos, "Contas bancárias"),
     ])
@@ -511,6 +575,25 @@ fn abas(
     if let Some(nova) = nova {
         estado.aba = nova;
         estado.carregar(motor, sessao);
+    }
+}
+
+/// Recorte de categoria da lista de parcelas.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FiltroCategoria {
+    Todas,
+    /// Só as sem categoria (para classificar).
+    Sem,
+    Uma(Id),
+}
+
+impl FiltroCategoria {
+    fn combina(self, categoria: Option<Id>) -> bool {
+        match self {
+            Self::Todas => true,
+            Self::Sem => categoria.is_none(),
+            Self::Uma(id) => categoria == Some(id),
+        }
     }
 }
 
@@ -546,9 +629,18 @@ fn nome_mes(comp: Competencia) -> String {
 impl EstadoTelaFinanceiro {
     /// Leva a tela à cena de demonstração (`demo_app`).
     pub fn preparar_demo(&mut self, motor: &MotorLocal, sessao: &SessaoLocal, cena: &str) {
-        if cena != "financeiro" {
-            self.aba = Aba::Receber;
-            self.periodo.preset = PresetPeriodo::Semestre;
+        match cena {
+            "financeiro" => {}
+            "financeiro-custos" => self.aba = Aba::Custos,
+            "financeiro-pagar" => self.aba = Aba::Pagar,
+            "financeiro-pessoal" | "financeiro-cartoes" | "financeiro-pessoal-novo" => {
+                self.modo = Modo::Pessoal;
+                self.pessoal.preparar_demo(motor, sessao, cena);
+            }
+            _ => {
+                self.aba = Aba::Receber;
+                self.periodo.preset = PresetPeriodo::Semestre;
+            }
         }
         self.carregar(motor, sessao);
         if cena == "financeiro-lancar" {

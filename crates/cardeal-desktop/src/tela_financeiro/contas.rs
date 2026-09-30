@@ -81,6 +81,12 @@ pub(super) fn lista(
         .iter()
         .filter(|p| p.estado.aceita_baixa() && p.vencimento < hoje)
         .count();
+    // Dinheiro que sai é vermelho; que entra, verde.
+    let tom = if a_receber {
+        Tom::Positivo
+    } else {
+        Tom::Negativo
+    };
     FaixaKpi::nova(vec![
         CartaoKpi::novo(
             if a_receber {
@@ -89,12 +95,18 @@ pub(super) fn lista(
                 "Pago no período"
             },
             estado.baixado_periodo,
-        ),
+        )
+        .tom(tom),
         CartaoKpi::contagem("Vencidas", vencidas),
         CartaoKpi::novo(
-            format!("Projeção até {}", periodo.ate.formatar_curta()),
+            if a_receber {
+                format!("A receber até {}", periodo.ate.formatar_curta())
+            } else {
+                format!("A pagar até {}", periodo.ate.formatar_curta())
+            },
             estado.projecao_periodo,
-        ),
+        )
+        .tom(tom),
     ])
     .mostrar(ui);
     ui.add_space(Espaco::E16);
@@ -109,8 +121,27 @@ pub(super) fn lista(
         return;
     }
 
+    let opcoes_categoria: Vec<(FiltroCategoria, String)> = [
+        (FiltroCategoria::Todas, "Todas as categorias".to_owned()),
+        (FiltroCategoria::Sem, "Sem categoria".to_owned()),
+    ]
+    .into_iter()
+    .chain(
+        estado
+            .categorias
+            .iter()
+            .map(|c| (FiltroCategoria::Uma(c.id), c.nome.clone())),
+    )
+    .collect();
     BarraFiltros::nova(&mut estado.busca)
-        .marcador("Buscar por nome, descrição ou origem (OS #12, compra…)")
+        .marcador("Buscar por nome, descrição, categoria ou origem (OS #12…)")
+        .filtro(|ui| {
+            SeletorOpcao::novo("Categoria", &mut estado.filtro_categoria)
+                .sem_rotulo()
+                .placeholder("Todas as categorias")
+                .opcoes(opcoes_categoria)
+                .mostrar(ui);
+        })
         .filtro(|ui| {
             SeletorOpcao::novo("Situação", &mut estado.filtro_situacao)
                 .sem_rotulo()
@@ -141,8 +172,9 @@ pub(super) fn lista(
         colunas.push(ColunaGrade::nova("").largura(40.0));
     }
     colunas.extend([
-        ColunaGrade::nova("Contraparte").largura(180.0),
-        ColunaGrade::nova("Origem").largura(190.0),
+        ColunaGrade::nova(if a_receber { "Cliente" } else { "Favorecido" }).largura(170.0),
+        ColunaGrade::nova("Categoria").largura(150.0),
+        ColunaGrade::nova("Origem").largura(170.0),
         ColunaGrade::nova("Descrição"),
         ColunaGrade::nova("Parc.").largura(60.0).numero(),
         ColunaGrade::nova("Vencimento").largura(120.0),
@@ -170,6 +202,13 @@ pub(super) fn lista(
             }
             row.col(|ui| {
                 ui.add(Rotulo::interface(estado.nome_contraparte(&p.contraparte)));
+            });
+            row.col(|ui| {
+                if p.categoria.is_some() {
+                    ui.add(Rotulo::interface(estado.nome_categoria(p.categoria)));
+                } else {
+                    ui.add(Rotulo::interface("—").cor(ui.cores().texto_fraco));
+                }
             });
             row.col(|ui| {
                 ui.add(estado.etiqueta_origem(p));
@@ -225,7 +264,12 @@ pub(super) fn lista(
             };
             if let Some((coluna, direcao)) = estado.ordenacao.clicar(&resposta) {
                 let nomes = estado.nomes.clone();
-                ordenar_parcelas(&mut estado.parcelas, &nomes, coluna, direcao);
+                let categorias: HashMap<Id, String> = estado
+                    .categorias
+                    .iter()
+                    .map(|c| (c.id, c.nome.clone()))
+                    .collect();
+                ordenar_parcelas(&mut estado.parcelas, &nomes, &categorias, coluna, direcao);
             }
         }
     }
@@ -293,11 +337,12 @@ pub(super) fn etiqueta_estado_parcela(
 }
 
 /// Ordena `parcelas` pela coluna clicada no cabeçalho da [`Grade`] de `lista` (mesma ordem
-/// das colunas: Contraparte, Origem, Descrição, Parc., Vencimento, Valor, Recebido/Pago, Saldo, Estado). `nomes` resolve o nome de
+/// das colunas: Contraparte, Categoria, Origem, Descrição, Parc., Vencimento, Valor, Recebido/Pago, Saldo, Estado). `nomes` resolve o nome de
 /// exibição da contraparte — a própria coluna 0 ordena por ele, não pelo id.
 pub(super) fn ordenar_parcelas(
     parcelas: &mut [ItemTituloEmAberto],
     nomes: &HashMap<Id, String>,
+    categorias: &HashMap<Id, String>,
     coluna: usize,
     direcao: Direcao,
 ) {
@@ -314,17 +359,24 @@ pub(super) fn ordenar_parcelas(
         };
         nomes.get(&id).cloned().unwrap_or_default()
     };
+    let cat_de = |p: &ItemTituloEmAberto| {
+        p.categoria
+            .and_then(|c| categorias.get(&c))
+            .cloned()
+            .unwrap_or_default()
+    };
     parcelas.sort_by(|a, b| {
         let ordem = match coluna {
             0 => nome_de(a).cmp(&nome_de(b)),
-            1 => a.origem_modulo.cmp(&b.origem_modulo),
-            2 => a.descricao.cmp(&b.descricao),
-            3 => a.numero.cmp(&b.numero),
-            4 => a.vencimento.cmp(&b.vencimento),
-            5 => a.valor_original.cmp(&b.valor_original),
-            6 => a.valor_baixado.cmp(&b.valor_baixado),
-            7 => a.saldo().cmp(&b.saldo()),
-            8 => a.estado.rotulo().cmp(b.estado.rotulo()),
+            1 => cat_de(a).cmp(&cat_de(b)),
+            2 => a.origem_modulo.cmp(&b.origem_modulo),
+            3 => a.descricao.cmp(&b.descricao),
+            4 => a.numero.cmp(&b.numero),
+            5 => a.vencimento.cmp(&b.vencimento),
+            6 => a.valor_original.cmp(&b.valor_original),
+            7 => a.valor_baixado.cmp(&b.valor_baixado),
+            8 => a.saldo().cmp(&b.saldo()),
+            9 => a.estado.rotulo().cmp(b.estado.rotulo()),
             _ => std::cmp::Ordering::Equal,
         };
         match direcao {

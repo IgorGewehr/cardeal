@@ -21,6 +21,7 @@ use crate::consultas::{
 };
 use crate::manifesto::MANIFESTO;
 use crate::migracoes;
+use crate::pessoal;
 
 /// O módulo financeiro, para registrar no [`Despachante`](cardeal_modkit::Despachante).
 pub struct ModuloFinanceiro;
@@ -51,6 +52,9 @@ impl Modulo for ModuloFinanceiro {
             .comando::<RenegociarTitulo>("financeiro.renegociar_titulo.v1")
             .comando::<CriarContaBancaria>("financeiro.criar_conta_bancaria.v1")
             .comando::<CriarCategoria>("financeiro.criar_categoria.v1")
+            .comando::<crate::comandos::CriarCategoriasSugeridas>(
+                "financeiro.criar_categorias_sugeridas.v1",
+            )
             .comando::<CriarRecorrencia>("financeiro.criar_recorrencia.v1")
             .comando::<MaterializarRecorrencias>("financeiro.materializar_recorrencias.v1")
             .consulta::<TitulosAReceberEmAberto>("financeiro.titulos_a_receber_em_aberto.v1")
@@ -69,7 +73,17 @@ impl Modulo for ModuloFinanceiro {
             .consulta::<ExtratoDisponivel>("financeiro.extrato_disponivel.v1")
             .consulta::<TituloDaOrigem>("financeiro.titulo_da_origem.v1")
             .consulta::<BaixasDaParcela>("financeiro.baixas_da_parcela.v1")
-            .consulta::<SituacaoDaParcela>("financeiro.situacao_da_parcela.v1");
+            .consulta::<SituacaoDaParcela>("financeiro.situacao_da_parcela.v1")
+            .consulta::<crate::projecao::ProjecaoPorCategoria>(
+                "financeiro.projecao_por_categoria.v1",
+            )
+            .comando::<pessoal::comandos::LancarPessoal>("financeiro.lancar_pessoal.v1")
+            .comando::<pessoal::comandos::MarcarPessoalPago>("financeiro.marcar_pessoal_pago.v1")
+            .comando::<pessoal::comandos::ExcluirPessoal>("financeiro.excluir_pessoal.v1")
+            .consulta::<pessoal::consultas::LancamentosPessoais>(
+                "financeiro.lancamentos_pessoais.v1",
+            )
+            .consulta::<pessoal::consultas::SugestoesPessoais>("financeiro.sugestoes_pessoais.v1");
         Ok(())
     }
 }

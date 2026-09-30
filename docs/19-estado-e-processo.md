@@ -240,6 +240,26 @@ Os testes `criar_recorrencia_*` dependiam da data ("dia 1" + 35 dias de anteced�
 duas ocorrências no fim do mês); agora usam o dia de hoje + 20 dias.
 `comandos/conta_a_pagar_avulsa.rs` (trabalho anterior, ainda sem chamador) segue pendente.
 
+### 1.7 Sessão 2026-09-30 — Custos por categoria e finanças pessoais
+
+- **A pagar não é só fornecedor:** a contraparte vira "Favorecido" (sócio, locador,
+  concessionária), a categoria fica ao lado da descrição no lançamento e ganha coluna e filtro
+  (`FiltroCategoria`) na lista. `financeiro.criar_categorias_sugeridas.v1` cria as que faltam
+  (Pró-labore, Aluguel, Energia, Contador, Peças…; `CATEGORIAS_SUGERIDAS`).
+- **Aba "Custos por categoria"** (`tela_financeiro/custos.rs`): consulta
+  `financeiro.projecao_por_categoria.v1` (`src/projecao.rs`) — por categoria e mês, o realizado
+  (baixas), o em aberto (o vencido conta no mês corrente) e as ocorrências de recorrência que
+  ainda não viraram título (depois de hoje + antecedência). Clique na categoria abre A pagar
+  filtrado por ela.
+- **Chave Empresa | Pessoal:** `mod_financeiro::pessoal` (tabela `financeiro_pessoal`,
+  migração financeiro v5, permissão `financeiro.pessoal`) — livro previsto × pago **fora do
+  Razão**, privado por `usuario` (todo SQL filtra por ele). Repetição única, parcelada (total
+  rateado) ou mensal (valor cheio); cartão por lançamento → faturas por mês. Tela em
+  `tela_financeiro/pessoal/` (visão com projeção 12 meses e saldo acumulado, lançamentos do
+  mês, cartões com "marcar fatura paga").
+- Cenas novas: `financeiro-custos`, `financeiro-pagar`, `financeiro-pessoal`,
+  `financeiro-cartoes`, `financeiro-pessoal-novo`.
+
 ## 2. Decisão estratégica registrada: por que Rust, não C#/.NET
 
 Em 2026-09-02 avaliamos um projeto irmão do mesmo autor, **SistemaX** (`../sistemax`), um ERP

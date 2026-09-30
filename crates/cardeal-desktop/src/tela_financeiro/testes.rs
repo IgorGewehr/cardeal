@@ -455,3 +455,69 @@ fn visao_geral_mostra_a_margem_das_os_faturadas_no_mes() {
     assert_eq!(m.ordens, 0);
     assert!(m.margem().e_zero());
 }
+
+#[test]
+fn custos_por_categoria_mostram_o_mes_e_levam_a_lista_filtrada() {
+    let t = motor_de_teste();
+    let _: u32 = t
+        .motor
+        .executar(
+            &t.sessao,
+            "financeiro.criar_categorias_sugeridas.v1",
+            &mod_financeiro::CriarCategoriasSugeridas,
+        )
+        .expect("sugeridas");
+    let mut estado = EstadoTelaFinanceiro {
+        aba: Aba::Custos,
+        ..Default::default()
+    };
+    estado.carregar(&t.motor, &t.sessao);
+    let aluguel = estado
+        .categorias
+        .iter()
+        .find(|c| c.nome == "Aluguel")
+        .map(|c| c.id)
+        .expect("aluguel");
+    let mut f = FormLancar::novo(false);
+    f.descricao = "Aluguel da loja".to_owned();
+    f.valor = "1500,00".to_owned();
+    f.categoria = Some(aluguel);
+    f.pagamento.condicao.a_prazo = true;
+    f.pagamento.condicao.parcelas = "1".to_owned();
+    f.pagamento.condicao.primeiro_vencimento = Data::hoje(Fuso::BRASILIA).to_string();
+    estado.dlg = Dlg::Lancar(f);
+    lancar(
+        &egui::Context::default(),
+        &t.motor,
+        &t.sessao,
+        &mut estado,
+        false,
+    );
+
+    assert!(estado.erro.is_none(), "{:?}", estado.erro);
+    let linhas = estado.linhas_custos();
+    assert_eq!(linhas[0].nome, "Aluguel");
+    assert_eq!(linhas[0].por_mes[0], Dinheiro::reais(1500));
+
+    // Clicar na categoria leva à lista "A pagar" só com ela.
+    estado.filtro_categoria = Some(FiltroCategoria::Uma(aluguel));
+    estado.aba = Aba::Pagar;
+    estado.carregar(&t.motor, &t.sessao);
+    let hoje = Data::hoje(Fuso::BRASILIA);
+    assert_eq!(
+        estado.parcelas_filtradas(FiltroParcelas::Todas, hoje).len(),
+        1
+    );
+    estado.filtro_categoria = Some(FiltroCategoria::Sem);
+    let sobra: Vec<_> = estado
+        .parcelas_filtradas(FiltroParcelas::Todas, hoje)
+        .into_iter()
+        .map(|i| {
+            (
+                estado.parcelas[i].descricao.clone(),
+                estado.parcelas[i].categoria,
+            )
+        })
+        .collect();
+    assert!(sobra.is_empty(), "{sobra:?}");
+}

@@ -48,6 +48,8 @@ pub struct ItemTituloEmAberto {
     pub origem_modulo: String,
     /// O registro de origem (a OS, a venda…), quando houver.
     pub origem_id: Option<Id>,
+    /// A categoria do título ("Aluguel", "Pró-labore"…), quando informada.
+    pub categoria: Option<Id>,
 }
 
 impl ItemTituloEmAberto {
@@ -74,7 +76,7 @@ pub fn titulos_em_aberto(
         .prepare(
             "SELECT p.id, p.titulo, p.numero, t.contraparte_tipo, t.contraparte_id,
                     p.vencimento, p.valor, p.valor_baixado, p.estado,
-                    t.observacao, t.origem_modulo, t.origem_id
+                    t.observacao, t.origem_modulo, t.origem_id, t.categoria
              FROM financeiro_parcela p
              JOIN financeiro_titulo t ON t.id = p.titulo
              WHERE t.empresa = ?1 AND t.especie = ?2 AND p.estado IN ('Aberta','Parcial')
@@ -98,6 +100,7 @@ pub fn titulos_em_aberto(
                 descricao: r.get(9)?,
                 origem_modulo: r.get(10)?,
                 origem_id: r.get::<_, Option<Vec<u8>>>(11)?.map(id_de),
+                categoria: r.get::<_, Option<Vec<u8>>>(12)?.map(id_de),
             })
         })
         .map_err(persist)?;
@@ -150,7 +153,7 @@ pub fn parcelas_no_periodo(
         .prepare(
             "SELECT p.id, p.titulo, p.numero, t.contraparte_tipo, t.contraparte_id,
                     p.vencimento, p.valor, p.valor_baixado, p.estado,
-                    t.observacao, t.origem_modulo, t.origem_id
+                    t.observacao, t.origem_modulo, t.origem_id, t.categoria
              FROM financeiro_parcela p
              JOIN financeiro_titulo t ON t.id = p.titulo
              WHERE t.empresa = ?1 AND t.especie = ?2 AND p.vencimento BETWEEN ?3 AND ?4
@@ -181,6 +184,7 @@ pub fn parcelas_no_periodo(
                     descricao: r.get(9)?,
                     origem_modulo: r.get(10)?,
                     origem_id: r.get::<_, Option<Vec<u8>>>(11)?.map(id_de),
+                    categoria: r.get::<_, Option<Vec<u8>>>(12)?.map(id_de),
                 })
             },
         )

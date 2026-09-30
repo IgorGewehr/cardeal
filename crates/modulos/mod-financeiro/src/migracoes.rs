@@ -165,6 +165,30 @@ CREATE INDEX financeiro_titulo_origem
     ON financeiro_titulo(empresa, origem_modulo, origem_id);
 ";
 
+// Finanças pessoais do usuário (a chave "Pessoal" do Financeiro): fora do Razão e dos
+// títulos da empresa, privadas por `usuario`. Tabela nova, sem FK de outras apontando para ela.
+const SQL_PESSOAL: &str = r"
+CREATE TABLE financeiro_pessoal (
+    id         BLOB PRIMARY KEY,
+    empresa    BLOB    NOT NULL REFERENCES nucleo_empresa(id),
+    usuario    BLOB    NOT NULL,
+    grupo      BLOB    NOT NULL,
+    tipo       TEXT    NOT NULL CHECK (tipo IN ('Receita','Despesa')),
+    descricao  TEXT    NOT NULL,
+    categoria  TEXT    NOT NULL,
+    valor      INTEGER NOT NULL,
+    vencimento INTEGER NOT NULL,
+    parcela    INTEGER NOT NULL,
+    parcelas   INTEGER NOT NULL,
+    cartao     TEXT,
+    pago_em    INTEGER,
+    criado_em  INTEGER NOT NULL
+) STRICT;
+CREATE INDEX financeiro_pessoal_usuario_venc
+    ON financeiro_pessoal(empresa, usuario, vencimento);
+CREATE INDEX financeiro_pessoal_grupo ON financeiro_pessoal(grupo);
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -188,6 +212,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 4,
         nome: "financeiro_indice_origem",
         sql: SQL_INDICE_ORIGEM,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 5,
+        nome: "financeiro_pessoal",
+        sql: SQL_PESSOAL,
         tipo: TipoMigracao::Esquema,
     },
 ];

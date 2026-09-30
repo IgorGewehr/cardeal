@@ -51,7 +51,7 @@ impl EstadoPessoa {
         self.digitos_documento().len() == 14
     }
 
-    /// Desenha o bloco. `papel` dá o rótulo ("Cliente"/"Fornecedor"); `opcional` diz se dá
+    /// Desenha o bloco. `papel` dá o rótulo ("Cliente"/"Favorecido"); `opcional` diz se dá
     /// para seguir sem ninguém; `com_email` mostra o campo de e-mail no cadastro. Devolve
     /// `true` quando está no modo "novo" (o chamador pode acrescentar campos, como endereço).
     pub fn mostrar(
@@ -62,8 +62,9 @@ impl EstadoPessoa {
         opcional: bool,
         com_email: bool,
     ) -> bool {
+        // A pagar não é só fornecedor: sócio (pró-labore), locador, concessionária…
         let nome_papel = if papel == Papel::Fornecedor {
-            "Fornecedor"
+            "Favorecido"
         } else {
             "Cliente"
         };
@@ -111,7 +112,7 @@ impl EstadoPessoa {
         com_email: bool,
     ) {
         let nome_papel = if papel == Papel::Fornecedor {
-            "fornecedor"
+            "favorecido"
         } else {
             "cliente"
         };
@@ -195,7 +196,7 @@ impl EstadoPessoa {
         let nome = self.nome.trim();
         if nome.is_empty() {
             return Err(if papel == Papel::Fornecedor {
-                "Informe o nome do fornecedor."
+                "Informe o nome do favorecido."
             } else {
                 "Informe o nome do cliente."
             });

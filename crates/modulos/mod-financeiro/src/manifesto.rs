@@ -247,6 +247,13 @@ const PERMISSOES: &[Permissao] = &[
         Risco::Medio,
         Some("projecao"),
     ),
+    // ── pessoal ──────────────────────────────────────────────────────────────
+    perm(
+        "financeiro.pessoal",
+        "Usar as finanças pessoais (só as próprias)",
+        Risco::Baixo,
+        None,
+    ),
     // ── categoria ────────────────────────────────────────────────────────────
     perm(
         "financeiro.categoria.ver",

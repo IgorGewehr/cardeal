@@ -14,6 +14,7 @@ mod baixar_pagamento;
 mod baixar_recebimento;
 mod cadastrar_caixa;
 mod criar_categoria;
+mod criar_categorias_sugeridas;
 mod criar_conta_bancaria;
 mod criar_recorrencia;
 mod estornar_baixa;
@@ -34,6 +35,7 @@ pub use baixar_pagamento::{baixar_pagamento_comum, BaixarPagamento, PagamentoBai
 pub use baixar_recebimento::{baixar_recebimento_comum, BaixarRecebimento, RecebimentoBaixado};
 pub use cadastrar_caixa::{CadastrarCaixa, CaixaCadastrado};
 pub use criar_categoria::{CategoriaCriada, CriarCategoria};
+pub use criar_categorias_sugeridas::{CriarCategoriasSugeridas, CATEGORIAS_SUGERIDAS};
 pub use criar_conta_bancaria::{ContaBancariaCriada, CriarContaBancaria};
 pub use criar_recorrencia::{CriarRecorrencia, RecorrenciaCriada};
 pub use estornar_baixa::{estornar_baixa_comum, BaixaFoiEstornada, EstornarBaixa};

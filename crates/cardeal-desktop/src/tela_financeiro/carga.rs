@@ -54,6 +54,9 @@ impl EstadoTelaFinanceiro {
         if matches!(self.aba, Aba::Receber | Aba::Pagar) {
             self.carregar_parcelas_periodo(motor, sessao);
         }
+        if self.aba == Aba::Custos {
+            self.carregar_custos(motor, sessao);
+        }
         if matches!(self.aba, Aba::Fluxo | Aba::Bancos) {
             self.carregar_fluxo(motor, sessao);
         }
@@ -425,19 +428,21 @@ impl EstadoTelaFinanceiro {
             .filter(|&i| {
                 let p = &self.parcelas[i];
                 situacao.combina(p, hoje)
+                    && self.filtro_categoria.is_none_or(|c| c.combina(p.categoria))
                     && (termo.is_empty() || self.texto_busca(p).contains(&termo))
             })
             .collect()
     }
 
-    /// O que a busca da lista compara: contraparte, descrição e origem ("OS #12 — Maria",
-    /// "Compra"…), em minúsculas.
+    /// O que a busca da lista compara: contraparte, descrição, origem ("OS #12 — Maria",
+    /// "Compra"…) e categoria, em minúsculas.
     fn texto_busca(&self, p: &ItemTituloEmAberto) -> String {
         format!(
-            "{} {} {}",
+            "{} {} {} {}",
             self.nome_contraparte(&p.contraparte),
             p.descricao.as_deref().unwrap_or_default(),
-            self.origem_da_parcela(p).0
+            self.origem_da_parcela(p).0,
+            self.nome_categoria(p.categoria)
         )
         .to_lowercase()
     }
@@ -449,7 +454,7 @@ impl EstadoTelaFinanceiro {
 
     pub(super) fn nome_contraparte(&self, c: &Option<Contraparte>) -> String {
         let Some(c) = c else {
-            return "Sem cliente/fornecedor".to_owned();
+            return "—".to_owned();
         };
         let id = match c {
             Contraparte::Cliente(i)

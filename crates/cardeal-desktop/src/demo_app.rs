@@ -7,7 +7,8 @@
 //! ```
 //!
 //! Cenas: `os`, `os-detalhe`, `os-nova`, `os-faturar`, `financeiro`, `financeiro-receber`,
-//! `financeiro-baixa`, `financeiro-lancar`. Sem `CARDEAL_DEMO_PNG` a janela fica aberta para mexer.
+//! `financeiro-baixa`, `financeiro-lancar`, `financeiro-custos`, `financeiro-pagar`,
+//! `financeiro-pessoal`, `financeiro-cartoes`, `financeiro-pessoal-novo`. Sem `CARDEAL_DEMO_PNG` a janela fica aberta para mexer.
 
 use cardeal_cliente::{MotorLocal, SessaoLocal};
 use cardeal_kernel::{Data, Dinheiro, Fuso, Id, Preco, Quantidade};
@@ -379,6 +380,7 @@ pub fn semear(motor: &MotorLocal) -> SessaoLocal {
             )
             .expect("título");
     }
+    semear_custos_e_pessoal(motor, &s, hoje);
     for nome in ["Nubank", "Banco do Brasil"] {
         let _: mod_financeiro::ContaBancariaCriada = motor
             .executar(
@@ -391,4 +393,158 @@ pub fn semear(motor: &MotorLocal) -> SessaoLocal {
             .expect("conta");
     }
     s
+}
+
+/// Custos da empresa por categoria (aluguel, pró-labore, energia, peças) e as finanças
+/// pessoais do usuário (pró-labore, faculdade, cartão parcelado) para as cenas de custos e
+/// pessoal.
+fn semear_custos_e_pessoal(motor: &MotorLocal, s: &SessaoLocal, hoje: Data) {
+    use mod_financeiro::pessoal::comandos::LancarPessoal;
+    use mod_financeiro::pessoal::{NovoPessoal, Repeticao, TipoPessoal};
+
+    let _: u32 = motor
+        .executar(
+            s,
+            "financeiro.criar_categorias_sugeridas.v1",
+            &mod_financeiro::CriarCategoriasSugeridas,
+        )
+        .expect("categorias");
+    let cats: Vec<mod_financeiro::CategoriaFinanceira> = motor
+        .consultar(s, "financeiro.categorias.v1", &mod_financeiro::Categorias)
+        .expect("categorias");
+    let cat = |nome: &str| cats.iter().find(|c| c.nome == nome).map(|c| c.id);
+    let inicio = hoje.inicio_do_mes();
+    for mes in 0..4 {
+        for (nome, descricao, reais, dia, pago) in [
+            ("Aluguel", "Aluguel da loja", 2_200, 5, mes == 0),
+            ("Pró-labore", "Pró-labore do Igor", 4_000, 5, mes == 0),
+            (
+                "Energia elétrica",
+                "Conta de luz",
+                380 + mes * 20,
+                12,
+                false,
+            ),
+            ("Internet e telefone", "Internet fibra", 150, 15, false),
+            ("Contador", "Honorários do contador", 450, 10, false),
+        ] {
+            let venc = inicio.mais_meses(mes).mais_dias(dia - 1);
+            let _: mod_financeiro::TituloAPagarLancado = motor
+                .executar(
+                    s,
+                    "financeiro.lancar_titulo_a_pagar.v1",
+                    &mod_financeiro::LancarTituloAPagar {
+                        fornecedor: None,
+                        valor_total: Dinheiro::reais(i64::from(reais)),
+                        emissao: venc,
+                        parcelas: 1,
+                        primeiro_vencimento: venc,
+                        intervalo_dias: 0,
+                        observacao: Some(descricao.to_owned()),
+                        categoria: cat(nome),
+                        quitado_agora: pago.then_some(mod_financeiro::QuitadoAgora {
+                            meio_pagamento: mod_financeiro::MeioPagamento::Pix,
+                            conta: None,
+                        }),
+                    },
+                )
+                .expect("custo");
+        }
+    }
+    let pessoal = |tipo,
+                   descricao: &str,
+                   categoria: &str,
+                   reais: i64,
+                   dia: i32,
+                   repeticao,
+                   cartao: Option<&str>| {
+        let _: Vec<cardeal_kernel::Id> = motor
+            .executar(
+                s,
+                "financeiro.lancar_pessoal.v1",
+                &LancarPessoal(NovoPessoal {
+                    tipo,
+                    descricao: descricao.to_owned(),
+                    categoria: categoria.to_owned(),
+                    valor: Dinheiro::reais(reais),
+                    primeiro_vencimento: inicio.mais_dias(dia - 1),
+                    repeticao,
+                    cartao: cartao.map(str::to_owned),
+                    primeira_paga: false,
+                }),
+            )
+            .expect("pessoal");
+    };
+    pessoal(
+        TipoPessoal::Receita,
+        "Pró-labore",
+        "Pró-labore",
+        4_000,
+        5,
+        Repeticao::Mensal { meses: 12 },
+        None,
+    );
+    pessoal(
+        TipoPessoal::Receita,
+        "Venda de celular usado",
+        "Vendas por fora",
+        900,
+        18,
+        Repeticao::Unica,
+        None,
+    );
+    pessoal(
+        TipoPessoal::Despesa,
+        "Parcelamentos anteriores",
+        "Compras",
+        800,
+        10,
+        Repeticao::Mensal { meses: 10 },
+        Some("Nubank"),
+    );
+    pessoal(
+        TipoPessoal::Despesa,
+        "Notebook",
+        "Compras",
+        3_600,
+        10,
+        Repeticao::Parcelada { vezes: 12 },
+        Some("Nubank"),
+    );
+    pessoal(
+        TipoPessoal::Despesa,
+        "Mercado do mês",
+        "Alimentação",
+        650,
+        10,
+        Repeticao::Unica,
+        Some("Inter"),
+    );
+    pessoal(
+        TipoPessoal::Despesa,
+        "Faculdade",
+        "Educação",
+        890,
+        8,
+        Repeticao::Mensal { meses: 18 },
+        None,
+    );
+    pessoal(
+        TipoPessoal::Despesa,
+        "Aluguel do apartamento",
+        "Moradia",
+        1_400,
+        5,
+        Repeticao::Mensal { meses: 12 },
+        None,
+    );
+    pessoal(
+        TipoPessoal::Despesa,
+        "Luz e internet de casa",
+        "Contas da casa",
+        260,
+        15,
+        Repeticao::Mensal { meses: 12 },
+        None,
+    );
 }

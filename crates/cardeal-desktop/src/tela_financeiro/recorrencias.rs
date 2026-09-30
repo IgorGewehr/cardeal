@@ -150,7 +150,7 @@ pub(super) fn dialogo_nova_recorrencia(
                 if a_receber {
                     "Cliente (opcional)"
                 } else {
-                    "Fornecedor (opcional)"
+                    "Favorecido (opcional)"
                 },
                 &mut f.contraparte,
             )
@@ -158,14 +158,14 @@ pub(super) fn dialogo_nova_recorrencia(
             .placeholder(if a_receber {
                 "Sem cliente informado"
             } else {
-                "Sem fornecedor informado"
+                "Sem favorecido informado"
             })
             .mostrar(ui);
             if ui
                 .add(botao_cadastro_rapido(if a_receber {
                     "+ Cadastrar cliente"
                 } else {
-                    "+ Cadastrar fornecedor"
+                    "+ Cadastrar favorecido"
                 }))
                 .clicked()
             {

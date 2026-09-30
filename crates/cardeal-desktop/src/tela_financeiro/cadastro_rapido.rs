@@ -24,7 +24,7 @@ pub(super) fn dialogo_rapido(
         DlgRapido::Pessoa {
             papel: Papel::Fornecedor,
             ..
-        } => "Novo fornecedor",
+        } => "Novo favorecido (fornecedor, locador, sócio…)",
         DlgRapido::Pessoa { .. } => "Novo cliente",
         DlgRapido::Categoria { .. } => "Nova categoria",
     };
@@ -139,7 +139,7 @@ pub(super) fn criar_rapido(
                         _ => {}
                     }
                     let quem = if papel == Papel::Fornecedor {
-                        "Fornecedor"
+                        "Favorecido"
                     } else {
                         "Cliente"
                     };

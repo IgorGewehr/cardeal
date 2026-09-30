@@ -76,6 +76,8 @@ mod manifesto;
 mod meio_pagamento;
 pub mod migracoes;
 mod modulo;
+pub mod pessoal;
+mod projecao;
 pub mod receituario;
 mod recorrencia;
 mod repositorio;
@@ -102,6 +104,7 @@ pub use comandos::{
 pub use comandos::{
     BaixarPagamentosEmLote, BaixarRecebimentosEmLote, BaixasEmLoteFeitas, DadosBaixaEmLote,
 };
+pub use comandos::{CriarCategoriasSugeridas, CATEGORIAS_SUGERIDAS};
 pub use consultas::{
     titulo_da_origem, BaixasDaParcela, Caixas, Categorias, ContasDeCaixa, ContasDeResultado,
     ContasDisponiveis, ExtratoDisponivel, ItemBaixa, ItemCaixa, ItemContaDisponivel,
@@ -115,6 +118,7 @@ pub use erros::ErroFinanceiro;
 pub use manifesto::{manifesto, MANIFESTO};
 pub use meio_pagamento::MeioPagamento;
 pub use modulo::ModuloFinanceiro;
+pub use projecao::{ItemProjecaoCategoria, ProjecaoPorCategoria};
 pub use receituario::Autoria;
 pub use recorrencia::{Periodicidade, Recorrencia, TipoValor};
 pub use repositorio::{BaixaGravada, RepositorioFinanceiro};

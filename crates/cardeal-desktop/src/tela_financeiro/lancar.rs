@@ -120,33 +120,39 @@ pub(super) fn dialogo_lancar(
                 };
                 f.pessoa.mostrar(ui, catalogo, papel, true, false);
                 ui.add_space(Espaco::E12);
+                let mut nova_categoria = false;
                 ui.columns(2, |c| {
                     c[0].add(
                         Campo::novo(
                             if a_receber {
                                 "Do que é"
                             } else {
-                                "O que foi pago / a pagar"
+                                "O que é esta despesa"
                             },
                             &mut f.descricao,
                         )
                         .marcador(if a_receber {
                             "ex.: conserto do notebook, sinal da OS"
                         } else {
-                            "ex.: conta de luz, peça para a OS 12"
+                            "ex.: aluguel de outubro, pró-labore, conta de luz"
                         }),
                     );
-                    c[1].columns(2, |c| {
-                        c[0].add(Campo::novo("Valor", &mut f.valor).marcador("0,00"));
-                        c[1].add(Campo::novo("Data", &mut f.data).mascara(Mascara::Data));
-                    });
-                });
-                ui.add_space(Espaco::E12);
-                SeletorOpcao::novo("Categoria (opcional)", &mut f.categoria)
+                    SeletorOpcao::novo(
+                        if a_receber {
+                            "Categoria"
+                        } else {
+                            "Categoria — para onde vai o dinheiro"
+                        },
+                        &mut f.categoria,
+                    )
                     .opcoes(cats.clone())
-                    .placeholder("Sem categoria")
-                    .mostrar(ui);
-                if ui.add(botao_cadastro_rapido("+ Nova categoria")).clicked() {
+                    .placeholder("Escolha (aluguel, pró-labore, peças…)")
+                    .mostrar(&mut c[1]);
+                    nova_categoria = c[1]
+                        .add(botao_cadastro_rapido("+ Nova categoria"))
+                        .clicked();
+                });
+                if nova_categoria {
                     estado.dlg_rapido = Some(DlgRapido::Categoria {
                         alvo: AlvoRapido::Lancar,
                         nome: String::new(),
@@ -157,6 +163,13 @@ pub(super) fn dialogo_lancar(
                         }),
                     });
                 }
+                let Dlg::Lancar(f) = &mut estado.dlg else {
+                    return;
+                };
+                ui.columns(2, |c| {
+                    c[0].add(Campo::novo("Valor", &mut f.valor).marcador("0,00"));
+                    c[1].add(Campo::novo("Data", &mut f.data).mascara(Mascara::Data));
+                });
                 ui.add_space(Espaco::E12);
                 let Dlg::Lancar(f) = &mut estado.dlg else {
                     return;
