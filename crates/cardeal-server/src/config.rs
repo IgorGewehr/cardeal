@@ -24,6 +24,16 @@ pub struct ConfigServidor {
     pub logins_simultaneos: usize,
     /// Validade de uma sessão.
     pub validade_sessao: Duration,
+    /// Tentativas de login por IP dentro de [`Self::janela_login`].
+    pub logins_por_ip: u32,
+    /// A janela do limite de login por IP.
+    pub janela_login: Duration,
+    /// Confiar no cabeçalho `CF-Connecting-IP` para saber o IP do cliente — **só** quando o
+    /// servidor está atrás do Cloudflare Tunnel (senão qualquer um forja o cabeçalho).
+    pub confiar_cloudflare: bool,
+    /// Por quanto tempo uma resposta idempotente é guardada (reenvios depois disso executam de
+    /// novo). Reenvio por queda de rede acontece em segundos; uma semana é folga de sobra.
+    pub retencao_idempotencia: Duration,
 }
 
 impl ConfigServidor {
@@ -36,6 +46,10 @@ impl ConfigServidor {
             teto_empresas: 256,
             logins_simultaneos: 2,
             validade_sessao: Duration::from_secs(14 * 24 * 60 * 60),
+            logins_por_ip: 30,
+            janela_login: Duration::from_secs(5 * 60),
+            confiar_cloudflare: false,
+            retencao_idempotencia: Duration::from_secs(7 * 24 * 60 * 60),
         }
     }
 

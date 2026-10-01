@@ -306,6 +306,41 @@ duas ocorrências no fim do mês); agora usam o dia de hoje + 20 dias.
   segmentadas feitas com botões (custos, recorrências, cadastro rápido) viraram `Abas`.
   Nome da contraparte em `texto_forte` na grade.
 
+### 1.11 Sessão 2026-10-01 (noite) — Cardeal online: servidor multi-tenant (ADR-0016)
+
+Branch `feat/servidor-multi-tenant`. Decisão do usuário: web = **egui compilado para WASM**
+(paridade total com o desktop), deploy = Docker + Cloudflare Tunnel, RAM e velocidade acima de
+tudo. Feito, com números medidos (`crates/cardeal-server/examples/carga.rs`):
+
+- `cardeal-motor` (extraído de `cardeal-cliente`, que agora só reexporta + autoatualizador):
+  o motor de **uma** empresa. `Plano` = despacho + conjunto efetivo + migrações preparados uma
+  vez por processo e compartilhados. `executar_bruto`/`consultar_bruto` (bytes postcard, o
+  caminho da rede), `sessao_do_usuario` (sessão sem senha, para a conta do servidor),
+  `definir_empresa_nova`, `podar_idempotencia`. `configurar_inicial` devolve o id do admin.
+- `cardeal-distribuicao`: a lista única de módulos (desktop e servidor).
+- **Idempotência de verdade**: `Despachante::executar_comando_idempotente` grava a resposta em
+  `nucleo_idempotencia` na mesma transação; reenvio devolve a resposta original.
+- `ConfigArmazenamento::servidor` (1 leitor, cache 2 MiB/1 MiB, mmap 64 MiB).
+- `cardeal-protocol` real (rotas, cabeçalhos, login, `status_http`), sem tokio/rusqlite.
+- `cardeal-server`: diretório global (`diretorio.db`: contas e-mail+Argon2id, empresas,
+  vínculos conta→empresa→usuário, sessões por BLAKE3 do token), `Frota` (abre sob demanda,
+  despeja ociosas, teto, nunca abre a mesma base duas vezes), cache de sessões, limite de login
+  por IP, cabeçalhos de segurança, SIGTERM limpo, alocador mimalloc ajustado
+  (`src/alocador.rs`, único `unsafe`). 20 testes (11 ponta a ponta por HTTP).
+- Imagem Docker de 31 MB (`packaging/servidor/`), container em repouso ~2 MiB. Guia em
+  `docs/build/servidor.md`.
+
+Medido: processo vazio 6,9 MB; ~0,8 MB de heap por empresa aberta; consulta quente p50 120 µs
+/ p99 210 µs; empresa fria p50 11 ms. Descartado com medição: desligar o lookaside do SQLite
+(−90 KB/empresa, mas p50 118→151 µs).
+
+**Próximos passos, em ordem:** `MotorRemoto` em `cardeal-cliente` (desktop falando com o
+servidor) → cliente egui/WASM servido pelo próprio servidor (assets pré-comprimidos, cache
+imutável) → telas assíncronas → backup Litestream → R2 → autoatendimento com verificação de
+e-mail. Otimizações medidas em espera: escritor sem thread dedicada por empresa (hoje 1 thread
+por empresa aberta) e pular a verificação de migrações por impressão digital (~3 ms da
+abertura a frio).
+
 ## 2. Decisão estratégica registrada: por que Rust, não C#/.NET
 
 Em 2026-09-02 avaliamos um projeto irmão do mesmo autor, **SistemaX** (`../sistemax`), um ERP

@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use cardeal_auth::{Papel, PoliticaSenha, RepositorioAuth, Sessao, Usuario};
-use cardeal_kernel::{ChaveIdempotencia, CodigoErro, Erro, Fuso, Id, Resultado};
+use cardeal_kernel::{ChaveIdempotencia, CodigoErro, Erro, Fuso, Id, Instante, Resultado};
 use cardeal_ledger::semear_plano_padrao;
 use cardeal_modkit::{Ambiente, Comando, Consulta, Modulo, PedidoAtivacao};
 use cardeal_storage::{Armazenamento, ConfigArmazenamento, ContextoEscrita, ErroArmazenamento};
@@ -234,6 +234,27 @@ impl MotorLocal {
         self.empresa = empresa;
         self.ambiente = ambiente_de(empresa, &self.plano);
         Ok(())
+    }
+
+    /// Apaga as respostas idempotentes gravadas antes de `antes_de` — reenvios depois disso
+    /// executam de novo. Devolve quantas apagou.
+    ///
+    /// # Errors
+    /// Erro de escrita.
+    pub fn podar_idempotencia(&self, antes_de: Instante) -> Resultado<usize> {
+        let ctx = ContextoEscrita::novo(self.empresa, Id::NULO, self.dispositivo, Id::novo());
+        self.arm
+            .escritor()
+            .executar(ctx, move |uow| {
+                uow.conexao()
+                    .execute(
+                        "DELETE FROM nucleo_idempotencia WHERE criado_em < ?1",
+                        [antes_de.em_micros()],
+                    )
+                    .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+            })
+            .map(|c| c.valor)
+            .map_err(erro_armazenamento)
     }
 
     /// A empresa desta base.

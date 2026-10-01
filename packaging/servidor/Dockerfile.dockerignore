@@ -1,0 +1,7 @@
+# Contexto mínimo: só o que o `cargo build` do servidor precisa.
+target
+dist
+dados
+.git
+.claude
+*.txt

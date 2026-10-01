@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use cardeal_kernel::{CodigoErro, Erro, Id, Resultado};
+use cardeal_kernel::{CodigoErro, Erro, Id, Instante, Resultado};
 use cardeal_motor::{MotorLocal, Plano, SessaoLocal};
 use cardeal_storage::ConfigArmazenamento;
 use parking_lot::Mutex;
@@ -162,9 +162,11 @@ impl Frota {
             .count()
     }
 
-    /// Fecha as empresas sem uso há mais que a ociosidade e sem requisição em curso. Devolve
-    /// quantas fechou. **Bloqueante** (espera as threads de escrita): `spawn_blocking`.
-    pub fn despejar_ociosas(&self) -> usize {
+    /// Fecha as empresas sem uso há mais que a ociosidade e sem requisição em curso. Antes de
+    /// fechar, poda as respostas idempotentes gravadas antes de `idempotencia_antes_de` — a
+    /// faxina acontece aqui, na manutenção, nunca no caminho de uma requisição. Devolve quantas
+    /// fechou. **Bloqueante** (espera as threads de escrita): `spawn_blocking`.
+    pub fn despejar_ociosas(&self, idempotencia_antes_de: Instante) -> usize {
         let limite = self
             .agora_ms()
             .saturating_sub(u64::try_from(self.ociosidade.as_millis()).unwrap_or(u64::MAX));
@@ -180,11 +182,23 @@ impl Frota {
                 .collect()
         };
         let n = despejadas.iter().filter(|r| r.0.is_some()).count();
+        for e in despejadas.iter().filter_map(|r| r.0.as_ref()) {
+            if let Err(erro) = e.motor.podar_idempotencia(idempotencia_antes_de) {
+                tracing::warn!(empresa = %e.motor.empresa(), erro = %erro.mensagem, "poda de idempotência falhou");
+            }
+        }
         drop(despejadas);
         if n > 0 {
             tracing::info!(fechadas = n, "empresas ociosas fechadas");
         }
         n
+    }
+
+    /// Fecha todas as empresas, esperando as requisições em curso terminarem (desligamento).
+    /// Devolve quantas fechou. **Bloqueante.**
+    pub fn fechar_todas(&self) -> usize {
+        let vagas: Vec<Arc<Vaga>> = self.vagas.lock().drain().map(|(_, v)| v).collect();
+        vagas.iter().filter_map(|v| v.aberta.lock().take()).count()
     }
 
     /// Acima do teto: retira as vagas livres menos usadas até caber, nunca a que está sendo

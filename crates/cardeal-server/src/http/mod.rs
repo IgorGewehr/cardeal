@@ -1,7 +1,9 @@
 //! A camada HTTP: só traduz requisição ↔ chamada. Nenhuma regra de negócio mora aqui.
 
+mod camadas;
 mod credencial;
 mod despacho;
+mod origem;
 mod resposta;
 mod sessao;
 
@@ -42,6 +44,8 @@ pub fn roteador(servidor: Arc<Servidor>) -> Router {
             StatusCode::GATEWAY_TIMEOUT,
             TEMPO_MAXIMO,
         ))
+        .layer(middleware::from_fn(camadas::seguranca))
+        .layer(middleware::from_fn(camadas::registro))
         .with_state(servidor)
 }
 

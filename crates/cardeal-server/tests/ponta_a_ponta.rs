@@ -31,9 +31,13 @@ struct Ambiente {
 }
 
 fn ambiente(ociosidade: Duration) -> Ambiente {
+    ambiente_com(|c| c.ociosidade = ociosidade)
+}
+
+fn ambiente_com(ajuste: impl FnOnce(&mut ConfigServidor)) -> Ambiente {
     let pasta = tempfile::tempdir().unwrap();
     let mut config = ConfigServidor::em(pasta.path());
-    config.ociosidade = ociosidade;
+    ajuste(&mut config);
     let servidor = Servidor::abrir(config).unwrap();
     let nova = |empresa: &str, email: &str| NovaEmpresa {
         razao_social: empresa.into(),
@@ -422,4 +426,115 @@ async fn empresa_abre_sob_demanda_fecha_ociosa_e_reabre_sem_perder_nada() {
         "reaberta de forma transparente, com os dados"
     );
     assert_eq!(a.servidor.frota().abertas(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn respostas_da_api_trazem_cabecalhos_de_seguranca_e_nunca_vao_para_cache() {
+    let a = ambiente(Duration::from_secs(600));
+    let r = login(&a.app, "ana@x.com", SENHA, TipoCliente::Nativo).await;
+    let h = &r.cabecalhos;
+    assert_eq!(h.get(header::CACHE_CONTROL).unwrap(), "no-store");
+    assert_eq!(h.get(header::X_CONTENT_TYPE_OPTIONS).unwrap(), "nosniff");
+    assert!(h.get(header::STRICT_TRANSPORT_SECURITY).is_some());
+    assert!(h
+        .get(header::CONTENT_SECURITY_POLICY)
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .contains("default-src 'none'"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn login_demais_do_mesmo_ip_recebe_429_mas_outro_ip_entra() {
+    let a = ambiente_com(|c| {
+        c.logins_por_ip = 3;
+        c.confiar_cloudflare = true;
+    });
+    let pedido = postcard::to_stdvec(&PedidoLogin {
+        email: "ana@x.com".into(),
+        senha: "errada-errada".into(),
+        cliente: TipoCliente::Nativo,
+    })
+    .unwrap();
+    let de = |ip: &str| vec![("cf-connecting-ip", ip.to_owned())];
+    for _ in 0..3 {
+        let r = chamar(
+            &a.app,
+            Method::POST,
+            ROTA_SESSAO,
+            None,
+            &de("203.0.113.7"),
+            pedido.clone(),
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+    }
+    let bloqueado = chamar(
+        &a.app,
+        Method::POST,
+        ROTA_SESSAO,
+        None,
+        &de("203.0.113.7"),
+        pedido.clone(),
+    )
+    .await;
+    assert_eq!(bloqueado.status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(bloqueado.erro().codigo, CodigoErro::MUITAS_TENTATIVAS);
+
+    let certo = postcard::to_stdvec(&PedidoLogin {
+        email: "beto@x.com".into(),
+        senha: SENHA.into(),
+        cliente: TipoCliente::Nativo,
+    })
+    .unwrap();
+    let outro = chamar(
+        &a.app,
+        Method::POST,
+        ROTA_SESSAO,
+        None,
+        &de("198.51.100.4"),
+        certo,
+    )
+    .await;
+    assert_eq!(outro.status, StatusCode::OK);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn despejo_poda_respostas_idempotentes_vencidas() {
+    let a = ambiente_com(|c| {
+        c.ociosidade = Duration::ZERO;
+        c.retencao_idempotencia = Duration::ZERO;
+    });
+    let t = token(&a.app, "ana@x.com").await;
+    let chave = Id::novo();
+    let pessoa = |nome| criar_pessoa(nome);
+    comando(
+        &a.app,
+        &t,
+        a.empresa_ana,
+        "clientes.criar_pessoa.v1",
+        &pessoa("Primeira"),
+        chave,
+    )
+    .await
+    .valor::<mod_clientes::PessoaCadastrada>();
+
+    let s = Arc::clone(&a.servidor);
+    tokio::task::spawn_blocking(move || s.manutencao())
+        .await
+        .unwrap();
+
+    // Retenção zero: a chave foi podada no despejo, então o mesmo envio executa de novo.
+    comando(
+        &a.app,
+        &t,
+        a.empresa_ana,
+        "clientes.criar_pessoa.v1",
+        &pessoa("Primeira"),
+        chave,
+    )
+    .await
+    .valor::<mod_clientes::PessoaCadastrada>();
+    let lista: Vec<ItemPessoa> = clientes(&a.app, &t, a.empresa_ana).await.valor();
+    assert_eq!(lista.len(), 2);
 }

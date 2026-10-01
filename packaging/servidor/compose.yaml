@@ -1,0 +1,42 @@
+# O Cardeal online numa VPS: servidor + Cloudflare Tunnel. Nenhuma porta é aberta na VPS — o
+# túnel sai de dentro para a Cloudflare, que entrega HTTPS, WAF e DDoS na frente.
+#
+#   CLOUDFLARE_TUNNEL_TOKEN=... docker compose -f packaging/servidor/compose.yaml up -d
+#   docker compose -f packaging/servidor/compose.yaml run --rm cardeal \
+#       provisionar --empresa "Loja" --cnpj 11222333000181 --email dono@loja.com --nome "Dono"
+#   (senha em CARDEAL_SENHA)
+
+services:
+  cardeal:
+    build:
+      context: ../..
+      dockerfile: packaging/servidor/Dockerfile
+    image: cardeal-server
+    restart: unless-stopped
+    volumes:
+      - dados:/dados
+    environment:
+      CARDEAL_OCIOSIDADE_MIN: "10"
+      CARDEAL_TETO_EMPRESAS: "256"
+      # Seguro só porque nenhuma porta é publicada: o único caminho até aqui é o túnel.
+      CARDEAL_CONFIAR_CLOUDFLARE: "true"
+      CARDEAL_SENHA: ${CARDEAL_SENHA:-}
+    # Teto duro de memória: 256 empresas abertas ao mesmo tempo cabem com folga (~0,8 MB cada).
+    mem_limit: 512m
+    read_only: true
+    # SIGTERM → o servidor termina as requisições em curso e fecha cada base limpa.
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+
+  tunel:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?defina o token do túnel}
+    depends_on:
+      - cardeal
+
+volumes:
+  dados:

@@ -52,6 +52,10 @@ enum Acao {
         /// Máximo de empresas abertas ao mesmo tempo.
         #[arg(long, env = "CARDEAL_TETO_EMPRESAS", default_value_t = 256)]
         teto_empresas: usize,
+        /// Usar `CF-Connecting-IP` como IP do cliente. Só ligue se o servidor for alcançável
+        /// **apenas** pelo Cloudflare Tunnel.
+        #[arg(long, env = "CARDEAL_CONFIAR_CLOUDFLARE", default_value_t = false)]
+        confiar_cloudflare: bool,
     },
     /// Cria uma empresa nova e dá acesso a uma conta.
     Provisionar {
@@ -79,6 +83,7 @@ fn main() -> anyhow::Result<()> {
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "info,tower_http=warn".into()),
         )
+        .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stderr()))
         .compact()
         .init();
     alocador::configurar();
@@ -90,10 +95,12 @@ fn main() -> anyhow::Result<()> {
             trabalhadores,
             ociosidade_min,
             teto_empresas,
+            confiar_cloudflare,
         } => {
             let mut config = ConfigServidor::em(cli.dados);
             config.ociosidade = Duration::from_secs(ociosidade_min * 60);
             config.teto_empresas = teto_empresas;
+            config.confiar_cloudflare = confiar_cloudflare;
             servir(config, endereco, trabalhadores)
         }
         Acao::Provisionar {
@@ -143,12 +150,39 @@ fn servir(
         tokio::spawn(std::sync::Arc::clone(&servidor).manter(Duration::from_secs(60)));
         let ouvinte = tokio::net::TcpListener::bind(endereco).await?;
         tracing::info!(%endereco, "cardeal-server no ar");
-        axum::serve(ouvinte, roteador(servidor))
-            .with_graceful_shutdown(async {
-                let _ = tokio::signal::ctrl_c().await;
-                tracing::info!("encerrando");
-            })
-            .await?;
+        axum::serve(
+            ouvinte,
+            roteador(std::sync::Arc::clone(&servidor))
+                .into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .with_graceful_shutdown(sinal_de_desligamento())
+        .await?;
+        // Requisições em curso já terminaram: fecha cada base com o lote final confirmado.
+        let s = std::sync::Arc::clone(&servidor);
+        tokio::task::spawn_blocking(move || s.encerrar()).await?;
         Ok(())
     })
+}
+
+/// `Ctrl+C` (terminal) ou `SIGTERM` (Docker, systemd) — os dois encerram com calma.
+async fn sinal_de_desligamento() {
+    let ctrl_c = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+    #[cfg(unix)]
+    let term = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut s) => {
+                s.recv().await;
+            }
+            Err(_) => std::future::pending::<()>().await,
+        }
+    };
+    #[cfg(not(unix))]
+    let term = std::future::pending::<()>();
+    tokio::select! {
+        () = ctrl_c => {},
+        () = term => {},
+    }
+    tracing::info!("encerrando");
 }

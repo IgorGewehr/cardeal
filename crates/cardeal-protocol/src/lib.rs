@@ -64,6 +64,7 @@ pub const fn versao_aceita(versao: u16) -> bool {
 pub const fn status_http(codigo: CodigoErro) -> u16 {
     match codigo.0 {
         2002 => 404,
+        4003 => 429,
         3001 | 3003 | 3004 => 403,
         3002 | 3005 | 3006 => 401,
         1000..=1999 => 422,
@@ -93,6 +94,7 @@ mod testes {
         assert_eq!(status_http(CodigoErro::SESSAO_INVALIDA), 401);
         assert_eq!(status_http(CodigoErro::CREDENCIAL_INVALIDA), 401);
         assert_eq!(status_http(CodigoErro::VERSAO_DESATUALIZADA), 409);
+        assert_eq!(status_http(CodigoErro::MUITAS_TENTATIVAS), 429);
         assert_eq!(status_http(CodigoErro::BANCO_INDISPONIVEL), 503);
         assert_eq!(status_http(CodigoErro::TEMPO_ESGOTADO), 504);
         assert_eq!(status_http(CodigoErro::FALHA_INTERNA), 503);

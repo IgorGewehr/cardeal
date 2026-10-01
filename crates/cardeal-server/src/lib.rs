@@ -22,6 +22,7 @@ mod config;
 pub mod diretorio;
 pub mod frota;
 mod http;
+mod limitador;
 pub mod provisionamento;
 pub mod sessoes;
 mod token;
@@ -47,6 +48,7 @@ pub struct Servidor {
     frota: Frota,
     sessoes: Sessoes,
     logins: tokio::sync::Semaphore,
+    limitador: limitador::LimitadorLogin,
 }
 
 impl Servidor {
@@ -69,6 +71,11 @@ impl Servidor {
         );
         Ok(Arc::new(Self {
             logins: tokio::sync::Semaphore::new(config.logins_simultaneos.max(1)),
+            limitador: limitador::LimitadorLogin::novo(
+                config.logins_por_ip,
+                config.janela_login,
+                100_000,
+            ),
             config,
             plano,
             diretorio,
@@ -104,11 +111,22 @@ impl Servidor {
     /// Uma rodada de manutenção: fecha empresas ociosas, apaga sessões expiradas e poda o
     /// cache. **Bloqueante.**
     pub fn manutencao(&self) {
-        self.frota.despejar_ociosas();
+        let retencao =
+            i64::try_from(self.config.retencao_idempotencia.as_secs()).unwrap_or(i64::MAX);
+        self.frota
+            .despejar_ociosas(Instante::agora().mais_segundos(-retencao));
+        self.limitador.podar();
         if let Err(e) = self.diretorio.limpar_sessoes_expiradas(Instante::agora()) {
             tracing::warn!(erro = %e.mensagem, "limpeza de sessões falhou");
         }
         self.sessoes.podar();
+    }
+
+    /// Fecha todas as empresas abertas (desligamento): cada base termina o lote em curso e
+    /// sai limpa. **Bloqueante.**
+    pub fn encerrar(&self) {
+        let n = self.frota.fechar_todas();
+        tracing::info!(fechadas = n, "empresas fechadas no desligamento");
     }
 
     /// Roda [`Self::manutencao`] a cada `intervalo`, para sempre. Para usar com `tokio::spawn`.

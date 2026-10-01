@@ -3,20 +3,38 @@
 use std::sync::Arc;
 
 use axum::body::Bytes;
-use axum::extract::State;
+use std::net::SocketAddr;
+
+use axum::extract::{ConnectInfo, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use cardeal_kernel::{CodigoErro, Erro};
 use cardeal_protocol::{PedidoLogin, TipoCliente};
 
-use super::credencial;
 use super::resposta::{bloqueante, ler, postcard, ErroHttp};
+use super::{credencial, origem};
 use crate::{autenticacao, Servidor};
 
 pub(super) async fn entrar(
     State(servidor): State<Arc<Servidor>>,
+    par: Option<ConnectInfo<SocketAddr>>,
+    headers: HeaderMap,
     corpo: Bytes,
 ) -> Result<Response, ErroHttp> {
+    let ip = origem::ip_do_cliente(
+        &headers,
+        par.map(|ConnectInfo(p)| p),
+        servidor.config.confiar_cloudflare,
+    );
+    if let Some(ip) = ip {
+        if !servidor.limitador.permitir(ip) {
+            tracing::warn!(%ip, "limite de login por IP atingido");
+            return Err(ErroHttp(Erro::novo(
+                CodigoErro::MUITAS_TENTATIVAS,
+                "tentativas de login demais a partir desta rede — aguarde alguns minutos",
+            )));
+        }
+    }
     let pedido: PedidoLogin = ler(&corpo)?;
     // O semáforo limita quantos Argon2id (19 MiB cada) rodam ao mesmo tempo.
     let _licenca = servidor

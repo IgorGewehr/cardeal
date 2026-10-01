@@ -81,6 +81,8 @@ impl CodigoErro {
     pub const VERSAO_DESATUALIZADA: Self = Self(4001);
     /// O recurso está travado por outra sessão.
     pub const RECURSO_TRAVADO: Self = Self(4002);
+    /// Tentativas demais em pouco tempo (ex.: login) — aguarde e tente de novo.
+    pub const MUITAS_TENTATIVAS: Self = Self(4003);
 
     // ── 5xxx — infraestrutura ────────────────────────────────────────────────
     /// Falha interna não classificada.
