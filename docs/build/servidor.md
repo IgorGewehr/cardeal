@@ -20,11 +20,13 @@ navegador / desktop ─ HTTPS ─ Cloudflare (TLS, WAF, DDoS)
 
 | | |
 |---|---|
-| Imagem Docker | 31 MB (binário + glibc distroless) |
-| Container em repouso | ~2 MiB |
+| Imagem Docker | 36 MB (servidor + cliente web pré-comprimido + glibc distroless) |
+| Container em repouso | ~2,5 MiB |
+| Container depois de login + consulta | ~4,4 MiB |
 | Por empresa aberta | ~0,8 MB de heap (0,53 MB dentro do SQLite) |
-| Empresa fria (1ª requisição após ociosa) | p50 11 ms |
-| Consulta quente, ponta a ponta | p50 120 µs, p99 210 µs |
+| Empresa fria (1ª requisição após ociosa) | p50 2,0 ms (impressão do plano: pula verificação) |
+| Consulta quente, ponta a ponta | p50 70 µs, p99 80 µs |
+| Cliente web | WASM 2,33 MB → **1,03 MB brotli**; aba ~4 MB acima de uma aba vazia |
 
 Para reproduzir:
 
@@ -65,6 +67,9 @@ CARDEAL_SENHA='senha-da-conta' docker compose -f packaging/servidor/compose.yaml
   --empresa "Assistência Exemplo" --cnpj 11222333000181 \
   --email dono@exemplo.com --nome "Dono"
 ```
+
+A imagem já traz o cliente do navegador (`CARDEAL_WEB=/web`): abra o hostname do túnel e
+entre com o e-mail e a senha da conta.
 
 A senha vai por variável de ambiente, nunca por argumento (argumento aparece no histórico do
 shell e no `ps`). Um e-mail que já tem conta ganha acesso à empresa nova sem trocar a senha —
