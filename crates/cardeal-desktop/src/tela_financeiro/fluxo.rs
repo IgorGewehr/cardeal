@@ -10,16 +10,14 @@ pub(super) fn painel_fluxo(
 ) {
     ui.horizontal(|ui| {
         ui.add(Rotulo::campo("PERÍODO"));
-        for (d, rot) in [(30_i64, "30 dias"), (90, "90 dias"), (365, "12 meses")] {
-            let b = if estado.fluxo_dias == d {
-                Botao::primario(rot).pequeno()
-            } else {
-                Botao::fantasma(rot).pequeno()
-            };
-            if ui.add(b).clicked() {
-                estado.fluxo_dias = d;
-                estado.carregar_fluxo(motor, sessao);
-            }
+        ui.add_space(Espaco::E8);
+        if let Some(d) = Abas::nova(&[(30_i64, "30 dias"), (90, "90 dias"), (365, "12 meses")])
+            .selecionada(estado.fluxo_dias)
+            .id_salt("financeiro-fluxo-periodo")
+            .mostrar(ui)
+        {
+            estado.fluxo_dias = d;
+            estado.carregar_fluxo(motor, sessao);
         }
     });
     ui.add_space(Espaco::E12);
@@ -68,12 +66,17 @@ pub(super) fn painel_fluxo(
     ui.add_space(Espaco::E16);
 
     if estado.extrato.is_empty() {
-        ui.add(Rotulo::campo(
-            "Nenhum movimento realizado no período. Este é o livro do que efetivamente entrou e saiu — títulos ainda não baixados não aparecem aqui.",
-        ));
+        EstadoVazio::novo(
+            Icone::Dinheiro,
+            "Nenhum movimento no período. Aqui só entra o que de fato entrou ou saiu do caixa e \
+             dos bancos — título ainda em aberto não aparece.",
+        )
+        .mostrar(ui);
         return;
     }
 
+    ui.add(Rotulo::titulo_secao("Extrato"));
+    ui.add_space(Espaco::E8);
     let colunas = vec![
         ColunaGrade::nova("Data").largura(96.0),
         ColunaGrade::nova("Histórico"),
@@ -121,15 +124,15 @@ pub(super) fn painel_fluxo(
 }
 
 pub(super) fn painel_bancos(ui: &mut egui::Ui, estado: &mut EstadoTelaFinanceiro) {
-    if ui.add(Botao::primario("+ Nova conta bancária")).clicked() {
-        estado.dlg = Dlg::NovaContaBancaria {
-            nome: String::new(),
-        };
-    }
-    ui.add_space(Espaco::E12);
-
     if estado.contas_disp.is_empty() {
-        ui.add(Rotulo::campo("Nenhuma conta no grupo Disponível."));
+        if EstadoVazio::novo(Icone::Dinheiro, "Nenhuma conta de caixa ou banco ainda.")
+            .acao("+ Nova conta bancária")
+            .mostrar(ui)
+        {
+            estado.dlg = Dlg::NovaContaBancaria {
+                nome: String::new(),
+            };
+        }
         return;
     }
     let total: Dinheiro = estado
@@ -144,28 +147,43 @@ pub(super) fn painel_bancos(ui: &mut egui::Ui, estado: &mut EstadoTelaFinanceiro
         ColunaGrade::nova("Tipo").largura(90.0),
         ColunaGrade::nova("Saldo").largura(140.0).numero(),
     ];
-    Grade::nova(colunas).mostrar(ui, estado.contas_disp.len(), |i, row| {
-        let c = &estado.contas_disp[i];
-        row.col(|ui| {
-            ui.add(Rotulo::interface(c.nome.clone()));
-        });
-        row.col(|ui| {
-            ui.add(Rotulo::campo(c.codigo.clone()));
-        });
-        row.col(|ui| {
-            ui.add(Rotulo::campo(if c.e_caixa { "Caixa" } else { "Banco" }));
-        });
-        row.col(|ui| {
-            ui.add(ValorDinheiro::novo(c.saldo));
-        });
-    });
-    ui.add_space(Espaco::E12);
-    ui.horizontal(|ui| {
-        ui.add(Rotulo::titulo_secao("Total disponível"));
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.add(Rotulo::titulo_secao(total.formatar_com_simbolo()));
-        });
-    });
+    let mut nova = false;
+    Painel::novo()
+        .titulo(format!(
+            "Total disponível · {}",
+            total.formatar_com_simbolo()
+        ))
+        .compacto()
+        .mostrar_com_acoes(
+            ui,
+            |ui| {
+                nova = ui
+                    .add(Botao::secundario("+ Nova conta bancária").pequeno())
+                    .clicked()
+            },
+            |ui| {
+                Grade::nova(colunas).mostrar(ui, estado.contas_disp.len(), |i, row| {
+                    let c = &estado.contas_disp[i];
+                    row.col(|ui| {
+                        ui.add(Rotulo::interface(c.nome.clone()));
+                    });
+                    row.col(|ui| {
+                        ui.add(Rotulo::campo(c.codigo.clone()));
+                    });
+                    row.col(|ui| {
+                        ui.add(Rotulo::campo(if c.e_caixa { "Caixa" } else { "Banco" }));
+                    });
+                    row.col(|ui| {
+                        ui.add(ValorDinheiro::novo(c.saldo));
+                    });
+                });
+            },
+        );
+    if nova {
+        estado.dlg = Dlg::NovaContaBancaria {
+            nome: String::new(),
+        };
+    }
 }
 
 pub(super) fn dialogo_conta_bancaria(

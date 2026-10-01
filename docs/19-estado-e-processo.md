@@ -238,7 +238,7 @@ mostrando de onde vem cada valor.
 
 Os testes `criar_recorrencia_*` dependiam da data ("dia 1" + 35 dias de antecedência pegava
 duas ocorrências no fim do mês); agora usam o dia de hoje + 20 dias.
-`comandos/conta_a_pagar_avulsa.rs` (trabalho anterior, ainda sem chamador) segue pendente.
+`comandos/conta_a_pagar_avulsa.rs` (trabalho anterior, ainda sem chamador) foi commitado em 2026-10-01; falta ligar `mod-os`/`mod-compras` a ele.
 
 ### 1.7 Sessão 2026-09-30 — Custos por categoria e finanças pessoais
 
@@ -259,6 +259,27 @@ duas ocorrências no fim do mês); agora usam o dia de hoje + 20 dias.
   mês, cartões com "marcar fatura paga").
 - Cenas novas: `financeiro-custos`, `financeiro-pagar`, `financeiro-pessoal`,
   `financeiro-cartoes`, `financeiro-pessoal-novo`.
+
+### 1.8 Sessão 2026-10-01 — Lançar sem pessoa e acabamento do Financeiro
+
+- **Sem cliente/favorecido:** `crate::pessoa::EstadoPessoa` ganhou `nenhuma` (só quando o bloco
+  é `opcional`): a chave vira "Sem favorecido | Favorecido existente | Novo favorecido". O
+  lançamento do Financeiro começa em "Sem…" (`EstadoPessoa::sem_pessoa()`) e o bloco foi para
+  depois de valor/data; `lancar` usa `escolhida()`/`cadastrando()`, que respeitam o "Sem"
+  mesmo com algo digitado antes.
+- **Acabamento:** toda escolha segmentada da tela (Empresa/Pessoal, período, 30/90 dias,
+  "Serve para", meses da análise, existente/novo) agora é `Abas` — antes eram laços de
+  `Botao::primario/fantasma` com cara de botão vermelho solto. Cabeçalho com hierarquia
+  (lançamentos em primário/secundário, cadastros em fantasma). `BarraFiltros::acao` (novo,
+  com entrada na galeria) põe "Receber/Pagar várias" na linha dos filtros; a faixa de
+  seleção virou `Painel` realçado. Células vazias mostram "—" esmaecido; Fluxo e Bancos
+  usam `EstadoVazio`, o total disponível vai no cabeçalho do `Painel` da grade, e
+  "Ver tabela" das categorias fica no cabeçalho do cartão.
+- Cenas novas: `financeiro-fluxo`, `financeiro-bancos`.
+- O teste `baixa_de_parcela_vencida_sugere_o_total_com_multa` dependia do dia do mês
+  (vencimento de 10 dias atrás fora do período "Mês" nos dias 1–10); agora fixa o período.
+- No banco local do usuário, o movimento financeiro de teste (2 títulos das OS #4/#5, baixas e
+  4 lançamentos do Razão) foi apagado à mão, com backup em `~/.local/share/cardeal-backups/`.
 
 ## 2. Decisão estratégica registrada: por que Rust, não C#/.NET
 

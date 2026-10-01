@@ -31,19 +31,14 @@ pub(super) fn dialogo_analise(
             ctx,
             estado,
             |ui, estado| {
-                ui.horizontal(|ui| {
-                    for m in [3_u8, 6, 12] {
-                        let b = if meses == m {
-                            Botao::primario(format!("{m} meses"))
-                        } else {
-                            Botao::fantasma(format!("{m} meses"))
-                        };
-                        if ui.add(b).clicked() {
-                            estado.analise_meses = m;
-                            estado.carregar_analise(motor, sessao);
-                        }
-                    }
-                });
+                if let Some(m) = Abas::nova(&[(3_u8, "3 meses"), (6, "6 meses"), (12, "12 meses")])
+                    .selecionada(meses)
+                    .id_salt("analise-meses")
+                    .mostrar(ui)
+                {
+                    estado.analise_meses = m;
+                    estado.carregar_analise(motor, sessao);
+                }
                 ui.add_space(Espaco::E12);
 
                 if linhas.is_empty() {
@@ -173,24 +168,27 @@ pub(super) fn painel_visao(
     // Faixa "vence em 7 dias".
     let (nr, vr) = estado.dash_venc_receber;
     let (np, vp) = estado.dash_venc_pagar;
-    Painel::novo()
-        .realce(if np > 0 { Tom::Atencao } else { Tom::Neutro })
-        .compacto()
-        .mostrar(ui, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.add(Rotulo::campo("PRÓXIMOS 7 DIAS"));
-                ui.add_space(Espaco::E16);
-                ui.add(
-                    Rotulo::interface(format!("{np} a pagar · {}", vp.formatar_com_simbolo()))
-                        .cor(cores.negativo),
-                );
-                ui.add_space(Espaco::E16);
-                ui.add(
-                    Rotulo::interface(format!("{nr} a receber · {}", vr.formatar_com_simbolo()))
-                        .cor(cores.positivo),
-                );
-            });
+    // Só chama atenção quando há o que pagar na semana; senão é um cartão comum.
+    let faixa = if np > 0 {
+        Painel::novo().realce(Tom::Atencao)
+    } else {
+        Painel::novo()
+    };
+    faixa.compacto().mostrar(ui, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            ui.add(Rotulo::campo("PRÓXIMOS 7 DIAS"));
+            ui.add_space(Espaco::E16);
+            ui.add(
+                Rotulo::interface(format!("{np} a pagar · {}", vp.formatar_com_simbolo()))
+                    .cor(cores.negativo),
+            );
+            ui.add_space(Espaco::E16);
+            ui.add(
+                Rotulo::interface(format!("{nr} a receber · {}", vr.formatar_com_simbolo()))
+                    .cor(cores.positivo),
+            );
         });
+    });
     ui.add_space(Espaco::E24);
 
     let tem_dados = estado
@@ -200,9 +198,21 @@ pub(super) fn painel_visao(
     let tem_categorias = !estado.analise.is_empty();
 
     let cartao_grafico = |ui: &mut egui::Ui, titulo: &str, corpo: &dyn Fn(&mut egui::Ui)| {
-        ui.add(Rotulo::titulo_secao(titulo));
-        ui.add_space(Espaco::E8);
-        Painel::novo().plano().mostrar(ui, corpo);
+        Painel::novo().plano().titulo(titulo).mostrar(ui, corpo);
+    };
+    // O recorte por categoria leva o atalho para a tabela completa no próprio cabeçalho.
+    let mut ver_categorias = false;
+    let mut cartao_categorias = |ui: &mut egui::Ui| {
+        Painel::novo()
+            .plano()
+            .titulo("Por categoria — últimos 6 meses")
+            .mostrar_com_acoes(
+                ui,
+                |ui| {
+                    ver_categorias = ui.add(Botao::fantasma("Ver tabela").pequeno()).clicked();
+                },
+                |ui| GraficoBarrasHorizontais::novo(&estado.top_categorias()).mostrar(ui),
+            );
     };
 
     let largura = ui.available_width();
@@ -212,9 +222,7 @@ pub(super) fn painel_visao(
             cartao_grafico(&mut col[0], "Recebido × pago — últimos 6 meses", &|ui| {
                 grafico_fluxo(ui, estado, &cores)
             });
-            cartao_grafico(&mut col[1], "Por categoria — últimos 6 meses", &|ui| {
-                GraficoBarrasHorizontais::novo(&estado.top_categorias()).mostrar(ui);
-            });
+            cartao_categorias(&mut col[1]);
         });
     } else {
         cartao_grafico(ui, "Recebido × pago — últimos 6 meses", &|ui| {
@@ -222,13 +230,10 @@ pub(super) fn painel_visao(
         });
         if tem_categorias {
             ui.add_space(Espaco::E16);
-            cartao_grafico(ui, "Por categoria — últimos 6 meses", &|ui| {
-                GraficoBarrasHorizontais::novo(&estado.top_categorias()).mostrar(ui);
-            });
+            cartao_categorias(ui);
         }
     }
-    ui.add_space(Espaco::E16);
-    if ui.add(Botao::secundario("Ver por categoria")).clicked() {
+    if ver_categorias {
         estado.carregar_analise(motor, sessao);
         estado.dlg = Dlg::Analise;
     }

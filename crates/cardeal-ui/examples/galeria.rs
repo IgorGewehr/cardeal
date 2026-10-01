@@ -101,6 +101,9 @@ impl Galeria {
                     .opcao(1, "Sem estoque")
                     .mostrar(ui);
             })
+            .acao(|ui| {
+                ui.add(Botao::secundario("Exportar").pequeno());
+            })
             .mostrar(ui);
 
         let termo = self.lista_busca.trim().to_lowercase();

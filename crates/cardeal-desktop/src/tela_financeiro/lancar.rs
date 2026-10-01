@@ -24,20 +24,17 @@ pub(super) fn dialogo_categoria(
             ui.add_space(Espaco::E12);
             ui.horizontal(|ui| {
                 ui.add(Rotulo::campo("Serve para"));
-                for (rot, valor) in [
-                    ("Ambas", None),
-                    ("Só a receber", Some(EspecieTitulo::Receber)),
-                    ("Só a pagar", Some(EspecieTitulo::Pagar)),
-                ] {
-                    let sel = *especie == valor;
-                    let b = if sel {
-                        Botao::primario(rot)
-                    } else {
-                        Botao::fantasma(rot)
-                    };
-                    if ui.add(b).clicked() {
-                        *especie = valor;
-                    }
+                ui.add_space(Espaco::E8);
+                if let Some(e) = Abas::nova(&[
+                    (None, "Ambas"),
+                    (Some(EspecieTitulo::Receber), "Só a receber"),
+                    (Some(EspecieTitulo::Pagar), "Só a pagar"),
+                ])
+                .selecionada(*especie)
+                .id_salt("categoria-especie")
+                .mostrar(ui)
+                {
+                    *especie = e;
                 }
             });
         },
@@ -113,13 +110,6 @@ pub(super) fn dialogo_lancar(
                 let Dlg::Lancar(f) = &mut estado.dlg else {
                     return;
                 };
-                let (catalogo, papel) = if a_receber {
-                    (&estado.clientes, Papel::Cliente)
-                } else {
-                    (&estado.fornecedores, Papel::Fornecedor)
-                };
-                f.pessoa.mostrar(ui, catalogo, papel, true, false);
-                ui.add_space(Espaco::E12);
                 let mut nova_categoria = false;
                 ui.columns(2, |c| {
                     c[0].add(
@@ -170,10 +160,14 @@ pub(super) fn dialogo_lancar(
                     c[0].add(Campo::novo("Valor", &mut f.valor).marcador("0,00"));
                     c[1].add(Campo::novo("Data", &mut f.data).mascara(Mascara::Data));
                 });
-                ui.add_space(Espaco::E12);
-                let Dlg::Lancar(f) = &mut estado.dlg else {
-                    return;
+                ui.add_space(Espaco::E16);
+                let (catalogo, papel) = if a_receber {
+                    (&estado.clientes, Papel::Cliente)
+                } else {
+                    (&estado.fornecedores, Papel::Fornecedor)
                 };
+                f.pessoa.mostrar(ui, catalogo, papel, true, false);
+                ui.add_space(Espaco::E16);
                 f.pagamento.mostrar(
                     ui,
                     motor,
@@ -246,7 +240,7 @@ pub(super) fn lancar(
         Papel::Fornecedor
     };
 
-    let contraparte = if f.pessoa.novo {
+    let contraparte = if f.pessoa.cadastrando() {
         let cmd = match f.pessoa.para_criar(papel, None) {
             Ok(c) => c,
             Err(msg) => return aviso(msg),
@@ -264,7 +258,7 @@ pub(super) fn lancar(
             Err(e) => return notificar(ctx, Notificacao::erro(e.mensagem)),
         }
     } else {
-        f.pessoa.selecionada
+        f.pessoa.escolhida()
     };
 
     let r = if a_receber {

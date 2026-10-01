@@ -7,7 +7,7 @@
 //! ```
 //!
 //! Cenas: `os`, `os-detalhe`, `os-nova`, `os-faturar`, `financeiro`, `financeiro-receber`,
-//! `financeiro-baixa`, `financeiro-lancar`, `financeiro-custos`, `financeiro-pagar`,
+//! `financeiro-baixa`, `financeiro-lancar`, `financeiro-custos`, `financeiro-pagar`, `financeiro-fluxo`, `financeiro-bancos`,
 //! `financeiro-pessoal`, `financeiro-cartoes`, `financeiro-pessoal-novo`. Sem `CARDEAL_DEMO_PNG` a janela fica aberta para mexer.
 
 use cardeal_cliente::{MotorLocal, SessaoLocal};

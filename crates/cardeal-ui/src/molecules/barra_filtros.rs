@@ -6,6 +6,10 @@
 //! um `Campo`), e o resultado divergia: só a de clientes tinha o "✕", e na de OS o limite de
 //! 360px valia para a linha **inteira**, espremendo o filtro de status contra o campo. Aqui a
 //! largura da busca e a do filtro são separadas, e o comportamento é um só.
+//!
+//! Ações da lista que não são "criar" (ex.: "Receber várias", "Exportar") vão em
+//! [`BarraFiltros::acao`], alinhadas à direita na mesma linha — antes ficavam sozinhas numa
+//! linha própria entre a barra e a grade.
 
 use egui::Ui;
 
@@ -27,6 +31,7 @@ pub struct BarraFiltros<'a> {
     busca: &'a mut String,
     marcador: String,
     filtros: Vec<Filtro<'a>>,
+    acoes: Vec<Filtro<'a>>,
 }
 
 impl<'a> BarraFiltros<'a> {
@@ -36,6 +41,7 @@ impl<'a> BarraFiltros<'a> {
             busca,
             marcador: String::new(),
             filtros: Vec::new(),
+            acoes: Vec::new(),
         }
     }
 
@@ -53,6 +59,13 @@ impl<'a> BarraFiltros<'a> {
         self
     }
 
+    /// Acrescenta uma ação à direita da barra (tipicamente um `Botao::secundario(..).pequeno()`).
+    /// Várias ações ficam na ordem em que foram dadas, da esquerda para a direita.
+    pub fn acao(mut self, desenhar: impl FnOnce(&mut Ui) + 'a) -> Self {
+        self.acoes.push(Box::new(desenhar));
+        self
+    }
+
     /// Desenha a barra e deixa um respiro embaixo. Devolve `true` no quadro em que o texto de
     /// busca mudou (digitado ou limpo) — para a tela que refaz a consulta no servidor.
     pub fn mostrar(self, ui: &mut Ui) -> bool {
@@ -60,6 +73,7 @@ impl<'a> BarraFiltros<'a> {
             busca,
             marcador,
             filtros,
+            acoes,
         } = self;
         let mut mudou = false;
         ui.horizontal(|ui| {
@@ -76,6 +90,13 @@ impl<'a> BarraFiltros<'a> {
                 ui.scope(|ui| {
                     ui.set_max_width(LARGURA_FILTRO);
                     filtro(ui);
+                });
+            }
+            if !acoes.is_empty() {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    for acao in acoes.into_iter().rev() {
+                        acao(ui);
+                    }
                 });
             }
         });

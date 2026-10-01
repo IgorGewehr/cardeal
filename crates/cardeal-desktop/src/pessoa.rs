@@ -5,7 +5,7 @@
 
 use cardeal_kernel::Id;
 use cardeal_ui::atoms::{Botao, Rotulo};
-use cardeal_ui::molecules::{Campo, Mascara, OpcaoBusca, SeletorBusca};
+use cardeal_ui::molecules::{Abas, Campo, Mascara, OpcaoBusca, SeletorBusca};
 use cardeal_ui::tokens::{Espaco, TemaUi};
 use eframe::egui;
 use mod_clientes::{
@@ -18,6 +18,9 @@ use mod_clientes::{
 pub struct EstadoPessoa {
     /// `true` = cadastrar agora; `false` = escolher do catálogo.
     pub novo: bool,
+    /// Lançamento sem ninguém relacionado (só vale quando o bloco é `opcional`): o bloco
+    /// some e quem usa o estado trata como "sem pessoa", mesmo com algo escolhido antes.
+    pub nenhuma: bool,
     /// A pessoa escolhida do catálogo.
     pub selecionada: Option<Id>,
     /// O texto digitado na busca.
@@ -51,6 +54,29 @@ impl EstadoPessoa {
         self.digitos_documento().len() == 14
     }
 
+    /// Começa em "sem ninguém" — para o lançamento rápido do financeiro, onde a pessoa é a
+    /// exceção (conta de luz, aluguel, venda avulsa).
+    pub fn sem_pessoa() -> Self {
+        Self {
+            nenhuma: true,
+            ..Self::default()
+        }
+    }
+
+    /// A pessoa escolhida, respeitando "sem ninguém".
+    pub fn escolhida(&self) -> Option<Id> {
+        if self.nenhuma {
+            None
+        } else {
+            self.selecionada
+        }
+    }
+
+    /// Vai cadastrar alguém agora (e não está em "sem ninguém").
+    pub fn cadastrando(&self) -> bool {
+        self.novo && !self.nenhuma
+    }
+
     /// Desenha o bloco. `papel` dá o rótulo ("Cliente"/"Favorecido"); `opcional` diz se dá
     /// para seguir sem ninguém; `com_email` mostra o campo de e-mail no cadastro. Devolve
     /// `true` quando está no modo "novo" (o chamador pode acrescentar campos, como endereço).
@@ -68,30 +94,43 @@ impl EstadoPessoa {
         } else {
             "Cliente"
         };
-        ui.horizontal(|ui| {
-            for (novo, rotulo) in [
-                (false, format!("{nome_papel} existente")),
-                (true, format!("Novo {}", nome_papel.to_lowercase())),
-            ] {
-                let b = if self.novo == novo {
-                    Botao::primario(rotulo)
-                } else {
-                    Botao::fantasma(rotulo)
-                };
-                if ui.add(b.pequeno()).clicked() {
-                    self.novo = novo;
-                }
-            }
-        });
+        #[derive(Clone, Copy, PartialEq)]
+        enum Modo {
+            Nenhuma,
+            Existente,
+            Novo,
+        }
+        let sem = format!("Sem {}", nome_papel.to_lowercase());
+        let existente = format!("{nome_papel} existente");
+        let novo = format!("Novo {}", nome_papel.to_lowercase());
+        let mut itens = Vec::with_capacity(3);
+        if opcional {
+            itens.push((Modo::Nenhuma, sem.as_str()));
+        }
+        itens.push((Modo::Existente, existente.as_str()));
+        itens.push((Modo::Novo, novo.as_str()));
+        let atual = if opcional && self.nenhuma {
+            Modo::Nenhuma
+        } else if self.novo {
+            Modo::Novo
+        } else {
+            Modo::Existente
+        };
+        if let Some(m) = Abas::nova(&itens)
+            .selecionada(atual)
+            .id_salt("pessoa-modo")
+            .mostrar(ui)
+        {
+            self.nenhuma = m == Modo::Nenhuma;
+            self.novo = m == Modo::Novo;
+        }
+        if opcional && self.nenhuma {
+            return false;
+        }
         ui.add_space(Espaco::E8);
 
         if !self.novo {
-            let rotulo = if opcional {
-                format!("{nome_papel} (opcional)")
-            } else {
-                nome_papel.to_owned()
-            };
-            SeletorBusca::novo(rotulo, &mut self.busca, &mut self.selecionada)
+            SeletorBusca::novo(nome_papel, &mut self.busca, &mut self.selecionada)
                 .opcoes(opcoes(catalogo))
                 .marcador("Buscar por nome, telefone ou documento…")
                 .mostrar(ui);

@@ -9,9 +9,10 @@ use cardeal_ui::organisms::RespostaGrade;
 /// tela precisa recarregar.
 pub(super) fn seletor_periodo(ui: &mut egui::Ui, filtro: &mut FiltroPeriodo) -> bool {
     let mut mudou = false;
-    ui.horizontal_wrapped(|ui| {
+    ui.horizontal(|ui| {
         ui.add(Rotulo::campo("PERÍODO"));
-        for (preset, rot) in [
+        ui.add_space(Espaco::E8);
+        let novo = Abas::nova(&[
             (PresetPeriodo::Dia, "Dia"),
             (PresetPeriodo::Semana, "Semana"),
             (PresetPeriodo::Mes, "Mês"),
@@ -19,26 +20,22 @@ pub(super) fn seletor_periodo(ui: &mut egui::Ui, filtro: &mut FiltroPeriodo) -> 
             (PresetPeriodo::Semestre, "Semestre"),
             (PresetPeriodo::Ano, "Ano"),
             (PresetPeriodo::Personalizado, "Personalizado"),
-        ] {
-            let sel = filtro.preset == preset;
-            let b = if sel {
-                Botao::primario(rot).pequeno()
-            } else {
-                Botao::fantasma(rot).pequeno()
-            };
-            if ui.add(b).clicked() && !sel {
-                filtro.preset = preset;
-                if preset == PresetPeriodo::Personalizado {
-                    let hoje = Data::hoje(Fuso::BRASILIA).to_string();
-                    if filtro.de_personalizado.is_empty() {
-                        filtro.de_personalizado = hoje.clone();
-                    }
-                    if filtro.ate_personalizado.is_empty() {
-                        filtro.ate_personalizado = hoje;
-                    }
-                } else {
-                    mudou = true;
+        ])
+        .selecionada(filtro.preset)
+        .id_salt("financeiro-periodo")
+        .mostrar(ui);
+        if let Some(preset) = novo {
+            filtro.preset = preset;
+            if preset == PresetPeriodo::Personalizado {
+                let hoje = Data::hoje(Fuso::BRASILIA).to_string();
+                if filtro.de_personalizado.is_empty() {
+                    filtro.de_personalizado = hoje.clone();
                 }
+                if filtro.ate_personalizado.is_empty() {
+                    filtro.ate_personalizado = hoje;
+                }
+            } else {
+                mudou = true;
             }
         }
     });
@@ -155,11 +152,24 @@ pub(super) fn lista(
                 )
                 .mostrar(ui);
         })
+        .acao(|ui| {
+            // "Receber/Pagar várias" liga o modo de seleção; ligado, a faixa abaixo assume.
+            if estado.selecao.is_none() {
+                let rotulo = if a_receber {
+                    "Receber várias"
+                } else {
+                    "Pagar várias"
+                };
+                if ui.add(Botao::secundario(rotulo).pequeno()).clicked() {
+                    estado.selecao = Some(Vec::new());
+                }
+            }
+        })
         .mostrar(ui);
 
     let situacao = estado.filtro_situacao.unwrap_or(FiltroParcelas::Todas);
     let indices = estado.parcelas_filtradas(situacao, hoje);
-    barra_selecao(ui, estado, a_receber);
+    barra_selecao(ui, estado);
     let selecionando = estado.selecao.is_some();
     // Com a coluna da caixa de seleção na frente, os índices de coluna andam uma casa.
     let desloc = usize::from(selecionando);
@@ -201,7 +211,12 @@ pub(super) fn lista(
                 });
             }
             row.col(|ui| {
-                ui.add(Rotulo::interface(estado.nome_contraparte(&p.contraparte)));
+                let nome = estado.nome_contraparte(&p.contraparte);
+                if nome == "—" {
+                    ui.add(Rotulo::interface("—").cor(ui.cores().texto_fraco));
+                } else {
+                    ui.add(Rotulo::interface(nome));
+                }
             });
             row.col(|ui| {
                 if p.categoria.is_some() {
@@ -213,11 +228,13 @@ pub(super) fn lista(
             row.col(|ui| {
                 ui.add(estado.etiqueta_origem(p));
             });
-            row.col(|ui| {
-                ui.add(
-                    Rotulo::interface(p.descricao.clone().unwrap_or_default())
-                        .cor(ui.cores().texto_medio),
-                );
+            row.col(|ui| match p.descricao.as_deref().map(str::trim) {
+                Some(d) if !d.is_empty() => {
+                    ui.add(Rotulo::interface(d.to_owned()).cor(ui.cores().texto_medio));
+                }
+                _ => {
+                    ui.add(Rotulo::interface("—").cor(ui.cores().texto_fraco));
+                }
             });
             row.col(|ui| {
                 ui.add(Rotulo::interface(p.numero.to_string()));
@@ -389,51 +406,46 @@ pub(super) fn ordenar_parcelas(
 /// A faixa acima da grade para quitar várias parcelas de uma vez: "Baixar várias" liga o
 /// modo de seleção; com ele ligado, mostra quantas e quanto estão marcadas e o botão que abre
 /// [`Dlg::BaixarLote`].
-fn barra_selecao(ui: &mut egui::Ui, estado: &mut EstadoTelaFinanceiro, a_receber: bool) {
-    ui.horizontal(|ui| match &estado.selecao {
-        None => {
-            let rotulo = if a_receber {
-                "Receber várias"
-            } else {
-                "Pagar várias"
-            };
-            if ui.add(Botao::secundario(rotulo).pequeno()).clicked() {
-                estado.selecao = Some(Vec::new());
-            }
-        }
-        Some(ids) => {
-            let total = estado
-                .parcelas
-                .iter()
-                .filter(|p| ids.contains(&p.parcela))
-                .fold(Dinheiro::ZERO, |acc, p| acc + p.saldo());
-            ui.add(Rotulo::interface(format!(
-                "{} selecionada(s) · {}",
-                ids.len(),
-                total.formatar_com_simbolo()
-            )));
-            let vazio = ids.is_empty();
-            if ui
-                .add(
-                    Botao::primario("Baixar selecionadas")
-                        .pequeno()
-                        .habilitado(!vazio),
-                )
-                .clicked()
-            {
-                estado.dlg = Dlg::BaixarLote {
-                    data: Data::hoje(Fuso::BRASILIA).to_string(),
-                    pagamento: crate::pagamento::EstadoPagamento::novo(MeioPagamento::Pix),
-                };
-            }
-            if ui
-                .add(Botao::fantasma("Cancelar seleção").pequeno())
-                .clicked()
-            {
-                estado.selecao = None;
-            }
-        }
-    });
+fn barra_selecao(ui: &mut egui::Ui, estado: &mut EstadoTelaFinanceiro) {
+    let Some(ids) = &estado.selecao else { return };
+    let quantas = ids.len();
+    let total = estado
+        .parcelas
+        .iter()
+        .filter(|p| ids.contains(&p.parcela))
+        .fold(Dinheiro::ZERO, |acc, p| acc + p.saldo());
+    Painel::novo()
+        .realce(Tom::Info)
+        .compacto()
+        .mostrar(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.add(Rotulo::interface(format!(
+                    "{quantas} selecionada(s) · {}",
+                    total.formatar_com_simbolo()
+                )));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui
+                        .add(
+                            Botao::primario("Baixar selecionadas")
+                                .pequeno()
+                                .habilitado(quantas > 0),
+                        )
+                        .clicked()
+                    {
+                        estado.dlg = Dlg::BaixarLote {
+                            data: Data::hoje(Fuso::BRASILIA).to_string(),
+                            pagamento: crate::pagamento::EstadoPagamento::novo(MeioPagamento::Pix),
+                        };
+                    }
+                    if ui
+                        .add(Botao::fantasma("Cancelar seleção").pequeno())
+                        .clicked()
+                    {
+                        estado.selecao = None;
+                    }
+                });
+            });
+        });
     ui.add_space(Espaco::E8);
 }
 

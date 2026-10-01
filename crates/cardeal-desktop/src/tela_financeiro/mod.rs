@@ -296,7 +296,8 @@ struct FormLancar {
     /// A receber ou a pagar — escolhido pelo botão, não pela aba (dá para lançar os dois de
     /// qualquer aba).
     a_receber: bool,
-    /// Cliente/fornecedor do catálogo ou cadastrado ali mesmo (opcional).
+    /// Cliente/favorecido do catálogo, cadastrado ali mesmo ou ninguém (o padrão: a maioria
+    /// dos lançamentos do dia — luz, aluguel, venda avulsa — não precisa de pessoa).
     pessoa: crate::pessoa::EstadoPessoa,
     /// O que é ("Conta de luz", "Conserto do notebook") — vira a descrição na grade.
     descricao: String,
@@ -320,7 +321,7 @@ impl Default for FormLancar {
     fn default() -> Self {
         Self {
             a_receber: true,
-            pessoa: crate::pessoa::EstadoPessoa::default(),
+            pessoa: crate::pessoa::EstadoPessoa::sem_pessoa(),
             descricao: String::new(),
             valor: String::new(),
             data: Data::hoje(Fuso::BRASILIA).to_string(),
@@ -489,22 +490,20 @@ pub fn mostrar(
     }
 }
 
-/// "CONTAS DA  [Empresa] [Pessoal]" — a chave entre o financeiro da empresa e o do usuário.
+/// "CONTAS  [Da empresa | Pessoais]" — a chave entre o financeiro da empresa e o do usuário.
 fn chave_modo(ui: &mut egui::Ui, estado: &mut EstadoTelaFinanceiro) {
     ui.horizontal(|ui| {
         ui.add(Rotulo::campo("CONTAS"));
-        for (modo, rot) in [
+        ui.add_space(Espaco::E8);
+        if let Some(modo) = Abas::nova(&[
             (Modo::Empresa, "Da empresa"),
             (Modo::Pessoal, "Pessoais (só você vê)"),
-        ] {
-            let b = if estado.modo == modo {
-                Botao::primario(rot)
-            } else {
-                Botao::fantasma(rot)
-            };
-            if ui.add(b.pequeno()).clicked() {
-                estado.modo = modo;
-            }
+        ])
+        .selecionada(estado.modo)
+        .id_salt("financeiro-modo")
+        .mostrar(ui)
+        {
+            estado.modo = modo;
         }
     });
 }
@@ -537,22 +536,24 @@ fn acoes_empresa(
     } else {
         ("+ Cliente", Papel::Cliente)
     };
-    if ui.add(Botao::secundario(rot)).clicked() {
+    // Cadastros e configurações ficam um degrau abaixo dos lançamentos (fantasma), para o
+    // olho achar primeiro "+ A receber"/"+ A pagar".
+    if ui.add(Botao::fantasma(rot)).clicked() {
         estado.dlg_rapido = Some(DlgRapido::Pessoa {
             alvo: AlvoRapido::Nenhum,
             papel,
             pessoa: crate::pessoa::EstadoPessoa::cadastro(),
         });
     }
-    if ui.add(Botao::secundario("Recorrências")).clicked() {
-        estado.carregar_recorrencias(motor, sessao);
-        estado.dlg = Dlg::Recorrencias;
-    }
-    if ui.add(Botao::secundario("+ Categoria")).clicked() {
+    if ui.add(Botao::fantasma("+ Categoria")).clicked() {
         estado.dlg = Dlg::NovaCategoria {
             nome: String::new(),
             especie: None,
         };
+    }
+    if ui.add(Botao::fantasma("Recorrências")).clicked() {
+        estado.carregar_recorrencias(motor, sessao);
+        estado.dlg = Dlg::Recorrencias;
     }
 }
 
@@ -633,6 +634,8 @@ impl EstadoTelaFinanceiro {
             "financeiro" => {}
             "financeiro-custos" => self.aba = Aba::Custos,
             "financeiro-pagar" => self.aba = Aba::Pagar,
+            "financeiro-fluxo" => self.aba = Aba::Fluxo,
+            "financeiro-bancos" => self.aba = Aba::Bancos,
             "financeiro-pessoal" | "financeiro-cartoes" | "financeiro-pessoal-novo" => {
                 self.modo = Modo::Pessoal;
                 self.pessoal.preparar_demo(motor, sessao, cena);
@@ -645,6 +648,7 @@ impl EstadoTelaFinanceiro {
         self.carregar(motor, sessao);
         if cena == "financeiro-lancar" {
             let mut f = FormLancar::novo(false);
+            f.pessoa.nenhuma = false;
             f.pessoa.novo = true;
             f.pessoa.nome = "Distribuidora Peças BH".to_owned();
             f.pessoa.telefone = "(31) 3333-4444".to_owned();

@@ -207,6 +207,7 @@ fn lancar_pago_agora_com_fornecedor_novo_cadastra_quita_e_limpa_para_o_proximo()
     let fornecedores_antes = estado.fornecedores.len();
 
     let mut f = FormLancar::novo(false);
+    f.pessoa.nenhuma = false;
     f.pessoa.novo = true;
     f.pessoa.nome = "Distribuidora Peças BH".to_owned();
     f.pessoa.telefone = "31 3333-4444".to_owned();
@@ -363,8 +364,15 @@ fn baixa_de_parcela_vencida_sugere_o_total_com_multa() {
             },
         )
         .expect("renegociar");
+    // Período explícito: o padrão ("Mês") deixa de fora o vencimento de 10 dias atrás nos
+    // primeiros dias do mês.
     let mut estado = EstadoTelaFinanceiro {
         aba: Aba::Receber,
+        periodo: FiltroPeriodo {
+            preset: PresetPeriodo::Personalizado,
+            de_personalizado: hoje.mais_dias(-60).to_string(),
+            ate_personalizado: hoje.to_string(),
+        },
         ..Default::default()
     };
     estado.carregar(&t.motor, &t.sessao);
@@ -520,4 +528,42 @@ fn custos_por_categoria_mostram_o_mes_e_levam_a_lista_filtrada() {
         })
         .collect();
     assert!(sobra.is_empty(), "{sobra:?}");
+}
+
+#[test]
+fn lancar_sem_pessoa_ignora_quem_estava_escolhido() {
+    let t = motor_de_teste();
+    let mut estado = EstadoTelaFinanceiro {
+        aba: Aba::Pagar,
+        ..Default::default()
+    };
+    estado.carregar(&t.motor, &t.sessao);
+    let fornecedores_antes = estado.fornecedores.len();
+
+    // Começa em "Sem favorecido"; mesmo com um nome digitado no "Novo" (e o usuário tendo
+    // voltado para "Sem"), nada é cadastrado e o título sai sem contraparte.
+    let mut f = FormLancar::novo(false);
+    assert!(f.pessoa.nenhuma);
+    f.pessoa.novo = true;
+    f.pessoa.nome = "Não deveria ser cadastrado".to_owned();
+    f.descricao = "Conta de luz".to_owned();
+    f.valor = "95,40".to_owned();
+    f.pagamento = crate::pagamento::EstadoPagamento::novo(MeioPagamento::Dinheiro);
+    estado.dlg = Dlg::Lancar(f);
+    lancar(
+        &egui::Context::default(),
+        &t.motor,
+        &t.sessao,
+        &mut estado,
+        false,
+    );
+
+    assert_eq!(estado.fornecedores.len(), fornecedores_antes);
+    let p = estado
+        .parcelas
+        .iter()
+        .find(|p| p.descricao.as_deref() == Some("Conta de luz"))
+        .expect("parcela lançada");
+    assert!(p.contraparte.is_none());
+    assert_eq!(p.estado, EstadoParcela::Quitada);
 }
