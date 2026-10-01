@@ -8,7 +8,7 @@ impl EstadoTelaFinanceiro {
     /// (`financeiro.materializar_recorrencias.v1`, idempotente) e depois recarrega. É o que
     /// roda ao entrar no sistema e ao abrir a área de Financeiro — até existir agendador, é o
     /// que faz o aluguel cadastrado como recorrente aparecer em "A pagar".
-    pub fn gerar_recorrencias_e_carregar(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
+    pub fn gerar_recorrencias_e_carregar(&mut self, motor: &Motor, sessao: &Sessao) {
         if sessao.concede("financeiro.recorrencia.criar") {
             match motor.executar(
                 sessao,
@@ -42,7 +42,7 @@ impl EstadoTelaFinanceiro {
     }
 
     /// Recarrega a lista da aba ativa, o painel de visão geral e o índice de nomes.
-    pub fn carregar(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
+    pub fn carregar(&mut self, motor: &Motor, sessao: &Sessao) {
         self.erro = None;
         self.margens_os.clear();
         // Nomes primeiro: o extrato monta (e guarda) "OS #123 — cliente" com eles; carregar
@@ -63,7 +63,7 @@ impl EstadoTelaFinanceiro {
     }
 
     /// Clientes e fornecedores (seletores do lançamento e o índice `nomes`).
-    pub(super) fn carregar_nomes(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
+    pub(super) fn carregar_nomes(&mut self, motor: &Motor, sessao: &Sessao) {
         if let Ok(c) = motor.consultar(
             sessao,
             "clientes.pessoas_por_papel.v1",
@@ -95,7 +95,7 @@ impl EstadoTelaFinanceiro {
     /// Recarrega a listagem (qualquer estado, dentro do período selecionado) e os dois
     /// cards da aba ativa (Receber/Pagar): quanto foi baixado no período, e a projeção do
     /// saldo em aberto que já vence até o fim do período.
-    pub(super) fn carregar_parcelas_periodo(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
+    pub(super) fn carregar_parcelas_periodo(&mut self, motor: &Motor, sessao: &Sessao) {
         let hoje = Data::hoje(Fuso::BRASILIA);
         let periodo = self.periodo.resolver(hoje);
         let a_receber = self.aba.a_receber();
@@ -151,7 +151,7 @@ impl EstadoTelaFinanceiro {
 
     /// Alimenta o painel de visão geral: saldos em aberto, o que vence em 7 dias e a série
     /// de recebido × pago dos últimos 6 meses.
-    pub(super) fn carregar_dashboard(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
+    pub(super) fn carregar_dashboard(&mut self, motor: &Motor, sessao: &Sessao) {
         let hoje = Data::hoje(Fuso::BRASILIA);
         let em7 = hoje.mais_dias(7);
 
@@ -260,7 +260,7 @@ impl EstadoTelaFinanceiro {
         itens
     }
 
-    pub(super) fn carregar_fluxo(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
+    pub(super) fn carregar_fluxo(&mut self, motor: &Motor, sessao: &Sessao) {
         if self.fluxo_dias == 0 {
             self.fluxo_dias = 30;
         }
@@ -296,7 +296,7 @@ impl EstadoTelaFinanceiro {
     /// Resolve "OS #123 — cliente" para cada OS por trás do extrato e das parcelas da aba
     /// (`self.origem_labels`, consumido por [`rotulo_origem`] e pela coluna Origem). Só `"os"`
     /// precisa de consulta — as outras origens se rotulam pelo módulo.
-    pub(super) fn carregar_origens(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
+    pub(super) fn carregar_origens(&mut self, motor: &Motor, sessao: &Sessao) {
         let do_extrato = self
             .extrato
             .iter()
@@ -336,8 +336,8 @@ impl EstadoTelaFinanceiro {
     /// vier de uma OS e o usuário puder ver OS.
     pub(super) fn margem_da_os(
         &mut self,
-        motor: &MotorLocal,
-        sessao: &SessaoLocal,
+        motor: &Motor,
+        sessao: &Sessao,
         p: &ItemTituloEmAberto,
     ) -> Option<mod_os::MargemDaOrdemServico> {
         let os = p.origem_id.filter(|_| p.origem_modulo == "os")?;
@@ -361,7 +361,7 @@ impl EstadoTelaFinanceiro {
             .map(String::as_str)
     }
 
-    pub(super) fn carregar_analise(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
+    pub(super) fn carregar_analise(&mut self, motor: &Motor, sessao: &Sessao) {
         if self.analise_meses == 0 {
             self.analise_meses = 6;
         }
@@ -377,7 +377,7 @@ impl EstadoTelaFinanceiro {
         }
     }
 
-    pub(super) fn carregar_recorrencias(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
+    pub(super) fn carregar_recorrencias(&mut self, motor: &Motor, sessao: &Sessao) {
         match motor.consultar(sessao, "financeiro.recorrencias.v1", &Recorrencias) {
             Ok(v) => self.recorrencias = v,
             Err(e) => self.erro = Some(e.mensagem),
@@ -386,12 +386,7 @@ impl EstadoTelaFinanceiro {
 
     /// Contas de resultado da espécie pedida — Receitas p/ recorrência a receber, Despesas
     /// p/ a pagar. O seletor de `conta_contrapartida` do formulário.
-    pub(super) fn carregar_contas(
-        &mut self,
-        motor: &MotorLocal,
-        sessao: &SessaoLocal,
-        a_receber: bool,
-    ) {
+    pub(super) fn carregar_contas(&mut self, motor: &Motor, sessao: &Sessao, a_receber: bool) {
         let especie = if a_receber {
             EspecieTitulo::Receber
         } else {
@@ -412,7 +407,7 @@ impl EstadoTelaFinanceiro {
 
     /// Recarrega só as categorias — usado depois de criar uma nova, sem repetir o resto do
     /// que `carregar` busca.
-    pub(super) fn carregar_categorias(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
+    pub(super) fn carregar_categorias(&mut self, motor: &Motor, sessao: &Sessao) {
         match motor.consultar(sessao, "financeiro.categorias.v1", &Categorias) {
             Ok(v) => self.categorias = v,
             Err(e) => self.erro = Some(e.mensagem),

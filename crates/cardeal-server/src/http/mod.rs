@@ -35,6 +35,7 @@ pub fn roteador(servidor: Arc<Servidor>) -> Router {
         .route(ROTA_SESSAO, post(sessao::entrar).delete(sessao::sair))
         .route("/v1/e/:empresa/cmd/:nome", post(despacho::comando))
         .route("/v1/e/:empresa/qry/:nome", post(despacho::consulta))
+        .route("/v1/e/:empresa/sessao", get(despacho::sessao))
         .layer(middleware::from_fn(exigir_protocolo));
     Router::new()
         .route(ROTA_SAUDE, get(saude))

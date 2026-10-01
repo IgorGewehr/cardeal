@@ -1,7 +1,7 @@
 //! O aplicativo desktop do Cardeal. Ver `docs/12-ui-ux.md`.
 //!
 //! Shell com sidebar agrupada sobre o design system Rubro — login real
-//! (`cardeal_cliente::MotorLocal`, monoposto). Navegação: Comercial (Vendas, Clientes),
+//! (`cardeal_cliente::Motor`, monoposto). Navegação: Comercial (Vendas, Clientes),
 //! Suprimentos (Estoque, Compras), Serviços (OS), Financeiro. Cada tela abre na lista
 //! inteira; criar/ver um item acontece num `Dialogo` (regra de UI do projeto). Telas com UI:
 //! Ordens de Serviço e Estoque; as demais mostram `tela_em_construcao` (backend já responde).
@@ -27,7 +27,7 @@ mod testes_comum;
 use std::path::PathBuf;
 
 use cardeal_cliente::atualizador::{self, ResultadoAplicacao, VersaoDisponivel};
-use cardeal_cliente::{MotorLocal, SessaoLocal};
+use cardeal_cliente::{Motor, Sessao};
 use cardeal_modkit::Icone;
 use cardeal_ui::atoms::{Botao, BotaoChevron, Divisor, Rotulo};
 use cardeal_ui::molecules::Campo;
@@ -365,7 +365,7 @@ const GRUPOS_SIDEBAR: &[cardeal_ui::organisms::GrupoSidebar<'static>] = &[
 
 /// Tudo que a sessão autenticada carrega.
 struct EstadoAutenticado {
-    sessao: SessaoLocal,
+    sessao: Sessao,
     area: Area,
     pdv: tela_pdv::EstadoTelaPdv,
     settings: tela_settings::EstadoTelaSettings,
@@ -381,7 +381,7 @@ struct EstadoAutenticado {
 impl EstadoAutenticado {
     /// Leva o app à cena pedida pela demo (`demo_app`).
     #[cfg(feature = "demo")]
-    fn preparar_demo(&mut self, motor: &MotorLocal, cena: &str) {
+    fn preparar_demo(&mut self, motor: &Motor, cena: &str) {
         let s = &self.sessao;
         if cena == "cliente" {
             self.area = Area::Clientes;
@@ -398,7 +398,7 @@ impl EstadoAutenticado {
     }
 
     /// Recarrega a área ativa — F5, e o ponto único caso outra coisa precise forçar refresh.
-    fn recarregar_area(&mut self, motor: &MotorLocal) {
+    fn recarregar_area(&mut self, motor: &Motor) {
         let s = &self.sessao;
         match self.area {
             Area::Pdv => self.pdv.carregar(motor, s),
@@ -440,7 +440,7 @@ enum Acao {
     Nenhuma,
     AlternarTema,
     AdminCriado(String),
-    LoginOk(SessaoLocal),
+    LoginOk(Sessao),
     MudarArea(Area),
     AlternarSidebar,
     TentarNovamente,
@@ -505,7 +505,7 @@ fn instalar_atualizacao_em_segundo_plano(
 }
 
 struct App {
-    motor: Option<MotorLocal>,
+    motor: Option<Motor>,
     tema: Tema,
     tema_aplicado: Option<Tema>,
     sidebar_expandida: bool,
@@ -570,7 +570,7 @@ impl App {
     fn carregar(&mut self) {
         #[cfg(feature = "demo")]
         if let Some(demo) = &self.demo {
-            let motor = MotorLocal::abrir(
+            let motor = Motor::abrir(
                 &demo.base,
                 &cardeal_distribuicao::modulos(),
                 &cardeal_distribuicao::pedido_ativacao(),
@@ -585,7 +585,7 @@ impl App {
             }
             return;
         }
-        match MotorLocal::abrir(
+        match Motor::abrir(
             &caminho_da_base(),
             &cardeal_distribuicao::modulos(),
             &cardeal_distribuicao::pedido_ativacao(),
@@ -617,7 +617,7 @@ impl App {
         }
     }
 
-    fn entrar(&mut self, sessao: SessaoLocal) {
+    fn entrar(&mut self, sessao: Sessao) {
         let Some(motor) = &self.motor else { return };
         let mut os = tela_os::EstadoTelaOs::default();
         let mut estoque = tela_estoque::EstadoTelaEstoque::default();

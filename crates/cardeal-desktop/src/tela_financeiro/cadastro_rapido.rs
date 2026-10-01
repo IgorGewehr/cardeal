@@ -13,8 +13,8 @@ pub(super) fn botao_cadastro_rapido(rotulo: &str) -> Botao {
 /// (que continua aberto por trás). Ver [`DlgRapido`].
 pub(super) fn dialogo_rapido(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaFinanceiro,
 ) {
     let Some(rapido) = &estado.dlg_rapido else {
@@ -89,8 +89,8 @@ pub(super) fn dialogo_rapido(
 /// principal ([`AlvoRapido`]) que pediu o cadastro.
 pub(super) fn criar_rapido(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaFinanceiro,
 ) {
     let Some(rapido) = &estado.dlg_rapido else {

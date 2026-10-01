@@ -6,8 +6,8 @@ use super::*;
 /// Desenha a confirmação pendente (se houver) e executa a ação quando confirmada.
 pub(super) fn confirmacoes(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaOs,
 ) {
     if let Some((ordem_servico, rotulo)) = estado.confirmar_exclusao.clone() {

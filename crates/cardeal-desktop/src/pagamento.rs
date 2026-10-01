@@ -2,7 +2,7 @@
 //! organismo [`SeletorPagamento`] com os meios de `mod-financeiro`, carrega as contas
 //! bancárias candidatas e cria uma conta nova no meio do fluxo, sem sair do diálogo.
 
-use cardeal_cliente::{MotorLocal, SessaoLocal};
+use cardeal_cliente::{Motor, Sessao};
 use cardeal_kernel::{Data, Dinheiro, Id};
 use cardeal_ui::atoms::Botao;
 use cardeal_ui::molecules::Campo;
@@ -121,8 +121,8 @@ impl EstadoPagamento {
     pub fn mostrar(
         &mut self,
         ui: &mut egui::Ui,
-        motor: &MotorLocal,
-        sessao: &SessaoLocal,
+        motor: &Motor,
+        sessao: &Sessao,
         id: &str,
         com_prazo: Prazo,
     ) {
@@ -134,8 +134,8 @@ impl EstadoPagamento {
     pub fn mostrar_com(
         &mut self,
         ui: &mut egui::Ui,
-        motor: &MotorLocal,
-        sessao: &SessaoLocal,
+        motor: &Motor,
+        sessao: &Sessao,
         id: &str,
         com_prazo: Prazo,
         pendente: Option<&str>,
@@ -202,7 +202,7 @@ impl EstadoPagamento {
         }
     }
 
-    fn criar_conta(&mut self, ctx: &egui::Context, motor: &MotorLocal, sessao: &SessaoLocal) {
+    fn criar_conta(&mut self, ctx: &egui::Context, motor: &Motor, sessao: &Sessao) {
         let nome = self.nova_conta_nome.trim().to_owned();
         if nome.is_empty() {
             notificar(ctx, Notificacao::aviso("Informe o nome da conta."));

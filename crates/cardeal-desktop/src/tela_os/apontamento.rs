@@ -21,8 +21,8 @@ pub(super) fn formatar_duracao(segundos: i64) -> String {
 /// (`docs/modulos/os.md`: apontamento de tempo real, diferente da mão de obra orçada).
 pub(super) fn secao_apontamento(
     ui: &mut egui::Ui,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaOs,
     ordem_servico: Id,
 ) {

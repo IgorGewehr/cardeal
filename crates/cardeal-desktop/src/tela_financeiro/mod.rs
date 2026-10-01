@@ -21,7 +21,7 @@ use std::collections::HashMap;
 
 use baixa::*;
 use cadastro_rapido::*;
-use cardeal_cliente::{MotorLocal, SessaoLocal};
+use cardeal_cliente::{Motor, Sessao};
 use cardeal_kernel::{Competencia, Data, Dinheiro, Fuso, Id, Periodo};
 use cardeal_ledger::Contraparte;
 use cardeal_modkit::Icone;
@@ -415,8 +415,8 @@ pub struct EstadoTelaFinanceiro {
 /// Desenha a tela inteira.
 pub fn mostrar(
     ui: &mut egui::Ui,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaFinanceiro,
 ) {
     if estado.recorrencias_geradas > 0 {
@@ -508,8 +508,8 @@ fn chave_modo(ui: &mut egui::Ui, estado: &mut EstadoTelaFinanceiro) {
 
 fn acoes_empresa(
     ui: &mut egui::Ui,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaFinanceiro,
 ) {
     // Os dois lançamentos de qualquer aba; o da aba "A pagar" vem primeiro nela.
@@ -561,12 +561,7 @@ fn acoes_empresa(
     }
 }
 
-fn abas(
-    ui: &mut egui::Ui,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
-    estado: &mut EstadoTelaFinanceiro,
-) {
+fn abas(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTelaFinanceiro) {
     let nova = Abas::nova(&[
         (Aba::Visao, "Visão geral"),
         (Aba::Receber, "A receber"),
@@ -633,7 +628,7 @@ fn nome_mes(comp: Competencia) -> String {
 #[cfg(feature = "demo")]
 impl EstadoTelaFinanceiro {
     /// Leva a tela à cena de demonstração (`demo_app`).
-    pub fn preparar_demo(&mut self, motor: &MotorLocal, sessao: &SessaoLocal, cena: &str) {
+    pub fn preparar_demo(&mut self, motor: &Motor, sessao: &Sessao, cena: &str) {
         match cena {
             "financeiro" => {}
             "financeiro-custos" => self.aba = Aba::Custos,

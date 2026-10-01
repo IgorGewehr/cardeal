@@ -163,8 +163,8 @@ fn sugestoes(ui: &mut egui::Ui, itens: &[String], alvo: &mut String) {
 
 pub(super) fn dialogo(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoPessoal,
 ) {
     let DlgPessoal::Novo(f) = &estado.dlg else {
@@ -316,8 +316,8 @@ pub(super) fn dialogo(
 
 pub(super) fn lancar(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoPessoal,
     continuar: bool,
 ) {

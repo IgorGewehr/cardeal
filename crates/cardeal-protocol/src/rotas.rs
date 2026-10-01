@@ -19,3 +19,9 @@ pub fn rota_comando(empresa: Id, nome: &str) -> String {
 pub fn rota_consulta(empresa: Id, nome: &str) -> String {
     format!("/v1/e/{empresa}/qry/{nome}")
 }
+
+/// A sessão da conta numa empresa (`GET`): `/v1/e/{empresa}/sessao`.
+#[must_use]
+pub fn rota_sessao_empresa(empresa: Id) -> String {
+    format!("/v1/e/{empresa}/sessao")
+}

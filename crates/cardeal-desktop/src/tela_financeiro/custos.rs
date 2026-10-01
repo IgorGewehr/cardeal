@@ -19,7 +19,7 @@ pub(super) struct LinhaCustos {
 }
 
 impl EstadoTelaFinanceiro {
-    pub(super) fn carregar_custos(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
+    pub(super) fn carregar_custos(&mut self, motor: &Motor, sessao: &Sessao) {
         if self.custos_meses == 0 {
             self.custos_meses = 6;
         }
@@ -100,8 +100,8 @@ impl EstadoTelaFinanceiro {
 
 pub(super) fn painel_custos(
     ui: &mut egui::Ui,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaFinanceiro,
 ) {
     let mut recarregar = false;
@@ -386,8 +386,8 @@ fn detalhe_do_mes(ui: &mut egui::Ui, estado: &EstadoTelaFinanceiro, atual: Compe
 
 /// Abre "A pagar"/"A receber" do ano filtrado pela categoria clicada.
 fn abrir_categoria(
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaFinanceiro,
     linha: &LinhaCustos,
 ) {
@@ -407,8 +407,8 @@ fn abrir_categoria(
 
 fn criar_sugeridas(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaFinanceiro,
 ) {
     match motor.executar(

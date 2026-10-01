@@ -6,8 +6,8 @@ use super::*;
 
 pub(super) fn dialogos(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaPdv,
 ) {
     match &estado.dlg {
@@ -47,8 +47,8 @@ pub(super) fn enter_pressionado(ui: &egui::Ui) -> bool {
 
 pub(super) fn dialogo_cadastrar(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaPdv,
 ) {
     let contas: Vec<(Id, String)> = estado
@@ -117,8 +117,8 @@ pub(super) fn dialogo_cadastrar(
 
 pub(super) fn dialogo_abrir(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaPdv,
 ) {
     let Some(caixa) = estado.caixa_sel else {
@@ -190,8 +190,8 @@ pub(super) fn dialogo_abrir(
 
 pub(super) fn dialogo_desconto(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaPdv,
 ) {
     let Dlg::Desconto { linha, .. } = &estado.dlg else {
@@ -285,7 +285,7 @@ pub(super) fn dialogo_desconto(
 
 pub(super) fn dialogo_cancelar_cupom(
     ctx: &egui::Context,
-    motor: &MotorLocal,
+    motor: &Motor,
     estado: &mut EstadoTelaPdv,
 ) {
     let titulo = format!(
@@ -393,8 +393,8 @@ pub(super) fn dialogo_cancelar_cupom(
 /// operador não tem como saber antes —, então o campo fica sempre à vista.
 pub(super) fn dialogo_fechar_caixa(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaPdv,
 ) {
     let Some(sessao_caixa) = estado.sessao_aberta() else {
@@ -497,8 +497,8 @@ pub(super) fn dialogo_fechar_caixa(
 /// `F9`: retirada de dinheiro da gaveta (`financeiro.registrar_sangria.v1`).
 pub(super) fn dialogo_sangria(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaPdv,
 ) {
     let Some(sessao_caixa) = estado.sessao_aberta() else {

@@ -1,19 +1,19 @@
 //! Apoio aos testes das telas: um motor de verdade (SQLite num arquivo temporário), já
 //! configurado e com o administrador logado — o mesmo caminho que o app percorre.
 
-use cardeal_cliente::{MotorLocal, SessaoLocal};
+use cardeal_cliente::{Motor, Sessao};
 
 /// O motor aberto, o arquivo que o sustenta (apagado ao sair de escopo) e a sessão do admin.
 pub struct MotorDeTeste {
     pub _arquivo: tempfile::NamedTempFile,
-    pub motor: MotorLocal,
-    pub sessao: SessaoLocal,
+    pub motor: Motor,
+    pub sessao: Sessao,
 }
 
 /// Abre um motor novo com todos os módulos do app e faz login como administrador.
 pub fn motor_de_teste() -> MotorDeTeste {
     let arquivo = tempfile::NamedTempFile::new().expect("arquivo temporário");
-    let motor = MotorLocal::abrir(
+    let motor = Motor::abrir(
         arquivo.path(),
         &cardeal_distribuicao::modulos(),
         &cardeal_distribuicao::pedido_ativacao(),

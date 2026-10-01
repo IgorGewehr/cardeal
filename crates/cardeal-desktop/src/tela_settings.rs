@@ -1,12 +1,10 @@
 //! Tela de Configurações — empresa, aparência e acesso.
 //!
 //! `nucleo`/`auth` não são módulos de despacho; esta tela fala com o motor direto
-//! (`MotorLocal::empresa_resumo`/`atualizar_empresa`/`usuarios`/`papeis`), como já fazem o
+//! (`Motor::empresa_resumo`/`atualizar_empresa`/`usuarios`/`papeis`), como já fazem o
 //! primeiro acesso e o login.
 
-use cardeal_cliente::{
-    EmpresaResumo, IdentidadeVisual, MotorLocal, PapelResumo, SessaoLocal, UsuarioResumo,
-};
+use cardeal_cliente::{EmpresaResumo, IdentidadeVisual, Motor, PapelResumo, Sessao, UsuarioResumo};
 use cardeal_ui::atoms::{Botao, Rotulo};
 use cardeal_ui::molecules::{dado, Abas, Campo};
 use cardeal_ui::organisms::{notificar, ColunaGrade, Grade, LayoutTela, Notificacao, Painel};
@@ -46,7 +44,7 @@ pub struct EstadoTelaSettings {
 
 impl EstadoTelaSettings {
     /// Carrega empresa, usuários e papéis.
-    pub fn carregar(&mut self, motor: &MotorLocal, _sessao: &SessaoLocal) {
+    pub fn carregar(&mut self, motor: &Motor, _sessao: &Sessao) {
         self.erro = None;
         match motor.empresa_resumo() {
             Ok(e) => {
@@ -77,8 +75,8 @@ impl EstadoTelaSettings {
 /// Desenha a tela.
 pub fn mostrar(
     ui: &mut egui::Ui,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaSettings,
     tema: &mut Tema,
 ) {
@@ -122,8 +120,8 @@ fn abas(ui: &mut egui::Ui, estado: &mut EstadoTelaSettings) {
 
 fn secao_empresa(
     ui: &mut egui::Ui,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaSettings,
 ) {
     let cnpj = estado
@@ -180,8 +178,8 @@ fn secao_empresa(
 
 fn secao_identidade(
     ui: &mut egui::Ui,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaSettings,
 ) {
     garantir_textura_logo(ui, estado);
@@ -269,8 +267,8 @@ fn secao_identidade(
 
 fn escolher_logo(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaSettings,
 ) {
     let Some(caminho) = rfd::FileDialog::new()

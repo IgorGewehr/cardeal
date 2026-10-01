@@ -3,9 +3,9 @@
 //!
 //! Lista com KPIs e filtros (estado, cliente, busca, período) + um `Dialogo` para
 //! criar/editar/ver-e-agir. "Gerar PDF" monta o documento com `cardeal-pdf` e a identidade
-//! da empresa (`MotorLocal::identidade_visual`).
+//! da empresa (`Motor::identidade_visual`).
 
-use cardeal_cliente::{IdentidadeVisual, MotorLocal, SessaoLocal};
+use cardeal_cliente::{IdentidadeVisual, Motor, Sessao};
 use cardeal_kernel::{Data, Dinheiro, Fuso, Id, Instante, Percentual, Preco, Quantidade};
 use cardeal_modkit::Icone;
 use cardeal_pdf::{gerar_orcamento, IdentidadeEmpresa, ItemPdf, OrcamentoPdf};
@@ -160,7 +160,7 @@ pub struct EstadoOrcamentos {
 
 impl EstadoOrcamentos {
     /// Recarrega a lista (com os filtros atuais), os KPIs e os catálogos.
-    pub fn carregar(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
+    pub fn carregar(&mut self, motor: &Motor, sessao: &Sessao) {
         let hoje = Data::hoje(Fuso::BRASILIA);
         let consulta = OrcamentosRecentes {
             estado: self.f_estado,
@@ -195,7 +195,7 @@ impl EstadoOrcamentos {
         }
     }
 
-    fn abrir_detalhe(&mut self, motor: &MotorLocal, sessao: &SessaoLocal, id: Id) {
+    fn abrir_detalhe(&mut self, motor: &Motor, sessao: &Sessao, id: Id) {
         match motor.consultar(
             sessao,
             "orcamentos.buscar_orcamento.v1",
@@ -219,12 +219,7 @@ pub fn abrir_novo(estado: &mut EstadoOrcamentos) {
 // ── Corpo (dentro do LayoutTela da tela de OS) ───────────────────────────────
 
 /// Desenha o miolo da aba: KPIs + filtros + grade.
-pub fn corpo(
-    ui: &mut egui::Ui,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
-    estado: &mut EstadoOrcamentos,
-) {
+pub fn corpo(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoOrcamentos) {
     if let Some(erro) = &estado.erro {
         ui.add(
             Rotulo::interface(erro.clone())
@@ -300,8 +295,8 @@ pub fn corpo(
 /// Desenha os dialogs da aba (chamado depois do `LayoutTela`, com `ui.ctx()`).
 pub fn dialogos(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoOrcamentos,
 ) {
     // Cancelar é irreversível: confirma antes, sem desenhar o diálogo de baixo (o Esc fecharia
@@ -376,12 +371,7 @@ const ESTADOS_FILTRO: [(Option<EstadoOrcamento>, &str); 7] = [
     (Some(EstadoOrcamento::Convertido), "Convertido"),
 ];
 
-fn filtros(
-    ui: &mut egui::Ui,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
-    estado: &mut EstadoOrcamentos,
-) {
+fn filtros(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoOrcamentos) {
     Painel::novo()
         .realce(Tom::Neutro)
         .compacto()
@@ -448,8 +438,8 @@ fn filtros(
 
 fn dialogo_form(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoOrcamentos,
 ) {
     let ops_cli: Vec<(Id, String)> = estado
@@ -673,12 +663,7 @@ fn coletar_itens(f: &FormOrcamento) -> Result<Vec<NovoItemOrcamento>, String> {
     Ok(itens)
 }
 
-fn salvar_form(
-    ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
-    estado: &mut EstadoOrcamentos,
-) {
+fn salvar_form(ctx: &egui::Context, motor: &Motor, sessao: &Sessao, estado: &mut EstadoOrcamentos) {
     let Dlg::Form(f) = &estado.dlg else { return };
 
     let cliente = if f.cliente_avulso {
@@ -809,8 +794,8 @@ fn salvar_form(
 
 fn dialogo_detalhe(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoOrcamentos,
 ) {
     let Some(detalhe) = estado.detalhe.clone() else {
@@ -917,8 +902,8 @@ fn corpo_detalhe(ui: &mut egui::Ui, d: &DetalheOrcamento) {
 
 fn acoes_detalhe(
     ui: &mut egui::Ui,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoOrcamentos,
     d: &DetalheOrcamento,
 ) {
@@ -1017,8 +1002,8 @@ fn acoes_detalhe(
 
 fn dialogo_decisao(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoOrcamentos,
 ) {
     let (aprovado, id) = match (&estado.dlg, &estado.detalhe) {
@@ -1084,8 +1069,8 @@ fn dialogo_decisao(
 
 fn dialogo_converter(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoOrcamentos,
 ) {
     let id = match &estado.detalhe {
@@ -1227,8 +1212,8 @@ fn gerar_pdf(ctx: &egui::Context, estado: &EstadoOrcamentos, d: &DetalheOrcament
 #[allow(clippy::too_many_arguments)]
 fn aplicar<C>(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoOrcamentos,
     id: Id,
     nome: &str,

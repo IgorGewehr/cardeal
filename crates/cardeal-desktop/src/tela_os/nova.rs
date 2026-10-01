@@ -4,8 +4,8 @@ use super::*;
 
 pub(super) fn dialogo_editar_dados(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaOs,
     ordem_servico: Id,
 ) {
@@ -74,8 +74,8 @@ pub(super) fn dialogo_editar_dados(
 
 pub(super) fn dialogo_nova(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaOs,
 ) {
     // Enter confirma "Abrir OS" — o mesmo botão que já valida (`abrir_os` mostra o aviso
@@ -160,8 +160,8 @@ pub(super) fn dialogo_nova(
 
 pub(super) fn abrir_os(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaOs,
 ) {
     let Dlg::Nova {

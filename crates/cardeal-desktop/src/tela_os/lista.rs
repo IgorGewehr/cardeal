@@ -2,12 +2,7 @@
 
 use super::*;
 
-pub(super) fn lista(
-    ui: &mut egui::Ui,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
-    estado: &mut EstadoTelaOs,
-) {
+pub(super) fn lista(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTelaOs) {
     let sem_busca = estado.busca.trim().is_empty()
         && matches!(estado.filtro_status, None | Some(FiltroStatusOs::Ativas));
     if estado.ativas.is_empty() && estado.ordens.is_empty() && sem_busca {

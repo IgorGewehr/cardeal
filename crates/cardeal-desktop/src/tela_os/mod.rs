@@ -21,7 +21,7 @@ mod testes;
 
 use andamento::*;
 use apontamento::*;
-use cardeal_cliente::{IdentidadeVisual, MotorLocal, SessaoLocal, UsuarioResumo};
+use cardeal_cliente::{IdentidadeVisual, Motor, Sessao, UsuarioResumo};
 use cardeal_kernel::{Data, Dinheiro, Fuso, Id, Instante, Percentual, Preco, Quantidade};
 use cardeal_modkit::Icone;
 use cardeal_pdf::{gerar_comprovante_os, ComprovanteOsPdf, IdentidadeEmpresa, ItemPdf};
@@ -220,7 +220,7 @@ impl EstadoTelaOs {
     /// Carga completa — ao entrar na tela ou no F5: catálogos (clientes, produtos, locais,
     /// usuários, identidade), orçamentos e a lista. Depois de uma ação na OS, use as
     /// recargas parciais abaixo: recarregar tudo a cada clique travava a tela.
-    pub fn carregar(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
+    pub fn carregar(&mut self, motor: &Motor, sessao: &Sessao) {
         if self.filtro_status.is_none() {
             self.filtro_status = Some(FiltroStatusOs::Ativas);
         }
@@ -248,7 +248,7 @@ impl EstadoTelaOs {
 
     /// A fila ativa (indicadores) e a lista com a busca atual — o que muda depois de
     /// qualquer ação numa OS.
-    fn recarregar_lista(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
+    fn recarregar_lista(&mut self, motor: &Motor, sessao: &Sessao) {
         match motor.consultar(sessao, "os.ordens_em_aberto.v1", &OrdensEmAberto) {
             Ok(ativas) => {
                 self.ativas = ativas;
@@ -267,7 +267,7 @@ impl EstadoTelaOs {
     }
 
     /// O catálogo de clientes (nome na lista, busca por nome, seletor da nova OS).
-    fn carregar_clientes(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
+    fn carregar_clientes(&mut self, motor: &Motor, sessao: &Sessao) {
         if let Ok(c) = motor.consultar(
             sessao,
             "clientes.pessoas_por_papel.v1",
@@ -281,7 +281,7 @@ impl EstadoTelaOs {
     }
 
     /// Produtos com saldo — muda quando uma peça é aplicada ou volta ao estoque.
-    fn carregar_produtos(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
+    fn carregar_produtos(&mut self, motor: &Motor, sessao: &Sessao) {
         if let Ok(p) = motor.consultar(sessao, "estoque.produtos_com_saldo.v1", &ProdutosComSaldo) {
             self.produtos = p;
         }
@@ -290,7 +290,7 @@ impl EstadoTelaOs {
     /// Refaz a lista com a busca e o filtro de status atuais — no motor, sem teto que
     /// esconda OS antigas. O nome do cliente é resolvido aqui (catálogo de `mod-clientes`) e
     /// vai como lista de ids.
-    fn buscar_ordens(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
+    fn buscar_ordens(&mut self, motor: &Motor, sessao: &Sessao) {
         let termo = self.busca.trim();
         let digitos = cardeal_kernel::texto::somente_digitos(termo);
         let clientes = if termo.is_empty() {
@@ -333,7 +333,7 @@ impl EstadoTelaOs {
         }
     }
 
-    pub(crate) fn abrir_detalhe(&mut self, motor: &MotorLocal, sessao: &SessaoLocal, id: Id) {
+    pub(crate) fn abrir_detalhe(&mut self, motor: &Motor, sessao: &Sessao, id: Id) {
         match motor.consultar(
             sessao,
             "os.buscar_detalhe_ordem.v1",
@@ -386,7 +386,7 @@ impl EstadoTelaOs {
     }
 
     /// Recarrega os apontamentos de tempo e o total acumulado da ordem.
-    fn carregar_apontamentos(&mut self, motor: &MotorLocal, sessao: &SessaoLocal, ordem: Id) {
+    fn carregar_apontamentos(&mut self, motor: &Motor, sessao: &Sessao, ordem: Id) {
         self.apontamentos = motor
             .consultar(
                 sessao,
@@ -422,12 +422,7 @@ impl EstadoTelaOs {
 }
 
 /// Desenha a tela inteira.
-pub fn mostrar(
-    ui: &mut egui::Ui,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
-    estado: &mut EstadoTelaOs,
-) {
+pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTelaOs) {
     LayoutTela::nova("Ordens de Serviço").mostrar(
         ui,
         estado,
@@ -574,8 +569,8 @@ pub(crate) const fn estado_etiqueta(e: EstadoOs) -> (&'static str, Tom) {
 #[allow(clippy::too_many_arguments)]
 fn aplicar_e_recarregar<C: cardeal_modkit::Comando + serde::Serialize>(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaOs,
     ordem: Id,
     nome: &str,
@@ -609,7 +604,7 @@ impl EstadoTelaOs {
     }
 
     /// Abre a gaveta de uma OS — vindo da ficha do cliente.
-    pub fn abrir_ordem(&mut self, motor: &MotorLocal, sessao: &SessaoLocal, ordem: Id) {
+    pub fn abrir_ordem(&mut self, motor: &Motor, sessao: &Sessao, ordem: Id) {
         self.aba = AbaOs::Ordens;
         self.abrir_detalhe(motor, sessao, ordem);
     }
@@ -618,7 +613,7 @@ impl EstadoTelaOs {
 #[cfg(feature = "demo")]
 impl EstadoTelaOs {
     /// Abre o diálogo da cena de demonstração (`demo_app`).
-    pub fn preparar_demo(&mut self, motor: &MotorLocal, sessao: &SessaoLocal, cena: &str) {
+    pub fn preparar_demo(&mut self, motor: &Motor, sessao: &Sessao, cena: &str) {
         self.carregar(motor, sessao);
         let primeira = self
             .ordens

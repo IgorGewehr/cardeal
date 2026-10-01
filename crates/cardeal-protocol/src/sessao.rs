@@ -45,3 +45,14 @@ pub struct RespostaLogin {
     /// O token, **só** para [`TipoCliente::Nativo`].
     pub token: Option<String>,
 }
+
+/// `GET /v1/e/{empresa}/sessao`: quem a conta é **dentro** de uma empresa — para a interface
+/// mostrar o nome e esconder o que o papel não permite. O servidor continua decidindo cada
+/// comando; isto é só conveniência de tela.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InfoSessao {
+    /// O usuário da conta nesta empresa.
+    pub usuario: Id,
+    /// As permissões concedidas pelos papéis dele.
+    pub permissoes: Vec<String>,
+}

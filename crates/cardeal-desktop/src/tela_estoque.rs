@@ -6,7 +6,7 @@
 //! (produtos abaixo do ponto de pedido — `estoque.produtos_abaixo_do_ponto_pedido.v1`, já
 //! existia no backend mas não estava ligado a nenhuma tela).
 
-use cardeal_cliente::{MotorLocal, SessaoLocal};
+use cardeal_cliente::{Motor, Sessao};
 use cardeal_kernel::{Fuso, Id, Preco, Quantidade};
 use cardeal_modkit::Icone;
 use cardeal_ui::atoms::{Botao, Divisor, Etiqueta, Rotulo, Tom, ATALHO_NOVO};
@@ -102,7 +102,7 @@ pub struct EstadoTelaEstoque {
 
 impl EstadoTelaEstoque {
     /// Recarrega produtos, grupos, unidades, locais e o radar de reposição.
-    pub fn carregar(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
+    pub fn carregar(&mut self, motor: &Motor, sessao: &Sessao) {
         match motor.consultar(sessao, "estoque.produtos_com_saldo.v1", &ProdutosComSaldo) {
             Ok(p) => self.produtos = p,
             Err(e) => self.erro = Some(e.mensagem),
@@ -161,12 +161,7 @@ impl EstadoTelaEstoque {
 }
 
 /// Desenha a tela inteira.
-pub fn mostrar(
-    ui: &mut egui::Ui,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
-    estado: &mut EstadoTelaEstoque,
-) {
+pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTelaEstoque) {
     LayoutTela::nova("Estoque").mostrar(
         ui,
         estado,
@@ -248,12 +243,7 @@ pub fn mostrar(
     }
 }
 
-fn lista(
-    ui: &mut egui::Ui,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
-    estado: &mut EstadoTelaEstoque,
-) {
+fn lista(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTelaEstoque) {
     if estado.produtos.is_empty() {
         if estado.erro.is_none()
             && EstadoVazio::novo(Icone::Estoque, "Nenhum produto cadastrado ainda.")
@@ -351,12 +341,7 @@ fn lista(
 /// e abre o dialog de edição — precisa vir do backend, não de `ItemProdutoComSaldo` (que não
 /// carrega esses campos), senão "Salvar" apagaria o que já estava cadastrado
 /// (`EditarDetalhesTecnicosProduto` substitui os detalhes técnicos por completo).
-fn abrir_editar(
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
-    estado: &mut EstadoTelaEstoque,
-    indice: usize,
-) {
+fn abrir_editar(motor: &Motor, sessao: &Sessao, estado: &mut EstadoTelaEstoque, indice: usize) {
     let produto = estado.produtos[indice].produto;
     match motor.consultar(
         sessao,
@@ -480,8 +465,8 @@ const fn rotulo_movimento(tipo: TipoMovimento) -> (&'static str, Tom) {
 
 fn dialogo_ver(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaEstoque,
     i: usize,
 ) {
@@ -570,8 +555,8 @@ fn dialogo_ver(
 /// bloco do cadastro (`bloco_detalhes_tecnicos`).
 fn dialogo_editar(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaEstoque,
     i: usize,
 ) {
@@ -612,8 +597,8 @@ fn dialogo_editar(
 
 fn salvar_detalhes_tecnicos(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaEstoque,
     produto: Id,
 ) {
@@ -637,8 +622,8 @@ fn salvar_detalhes_tecnicos(
 /// ponto de pedido sem sair do fluxo.
 fn dialogo_repor(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaEstoque,
     i: usize,
 ) {
@@ -726,8 +711,8 @@ fn dialogo_repor(
 
 fn registrar_entrada_radar(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaEstoque,
     produto: Id,
 ) {
@@ -764,8 +749,8 @@ fn registrar_entrada_radar(
 
 fn salvar_ponto_pedido(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaEstoque,
     produto: Id,
 ) {
@@ -799,8 +784,8 @@ fn salvar_ponto_pedido(
 
 fn dialogo_novo(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaEstoque,
 ) {
     let pronto = estado.grupo_selecionado.is_some() && estado.unidade_selecionada.is_some();
@@ -828,12 +813,7 @@ fn dialogo_novo(
     }
 }
 
-fn corpo_novo(
-    ui: &mut egui::Ui,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
-    estado: &mut EstadoTelaEstoque,
-) {
+fn corpo_novo(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTelaEstoque) {
     let grupo_pronto = !estado.grupos.is_empty();
     let unidade_pronta = !estado.unidades.is_empty();
 
@@ -967,12 +947,7 @@ fn montar_detalhes_tecnicos(estado: &EstadoTelaEstoque) -> Option<DetalhesTecnic
     (d != DetalhesTecnicos::default()).then_some(d)
 }
 
-fn bloco_grupo(
-    ui: &mut egui::Ui,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
-    estado: &mut EstadoTelaEstoque,
-) {
+fn bloco_grupo(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTelaEstoque) {
     if estado.grupos.is_empty() {
         ui.add(Rotulo::campo("Nenhum grupo ainda — crie um:"));
         ui.add(Campo::novo("Código", &mut estado.novo_grupo_codigo).marcador("PECAS"));
@@ -1014,8 +989,8 @@ fn bloco_grupo(
 
 fn bloco_unidade(
     ui: &mut egui::Ui,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaEstoque,
 ) {
     if estado.unidades.is_empty() {
@@ -1060,12 +1035,7 @@ fn bloco_unidade(
     }
 }
 
-fn bloco_local(
-    ui: &mut egui::Ui,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
-    estado: &mut EstadoTelaEstoque,
-) {
+fn bloco_local(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTelaEstoque) {
     if estado.locais.is_empty() {
         ui.add(Campo::novo("Nome do local", &mut estado.novo_local_nome).marcador("Depósito"));
         ui.add_space(Espaco::E8);
@@ -1100,12 +1070,7 @@ fn bloco_local(
     }
 }
 
-fn cadastrar(
-    ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
-    estado: &mut EstadoTelaEstoque,
-) {
+fn cadastrar(ctx: &egui::Context, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTelaEstoque) {
     let detalhes_tecnicos = montar_detalhes_tecnicos(estado);
 
     let r = motor.executar(

@@ -11,7 +11,7 @@
 
 mod ficha;
 
-use cardeal_cliente::{MotorLocal, SessaoLocal};
+use cardeal_cliente::{Motor, Sessao};
 use cardeal_kernel::Id;
 use cardeal_modkit::Icone;
 use cardeal_ui::atoms::{Botao, Divisor, Etiqueta, Rotulo, ValorDinheiro, ATALHO_NOVO};
@@ -234,7 +234,7 @@ pub struct EstadoTelaClientes {
 
 impl EstadoTelaClientes {
     /// Recarrega a lista de clientes (aplicando o termo de busca atual).
-    pub fn carregar(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
+    pub fn carregar(&mut self, motor: &Motor, sessao: &Sessao) {
         let termo = (!self.busca.trim().is_empty()).then(|| self.busca.clone());
         match motor.consultar(
             sessao,
@@ -255,7 +255,7 @@ impl EstadoTelaClientes {
         }
     }
 
-    fn abrir_detalhe(&mut self, motor: &MotorLocal, sessao: &SessaoLocal, id: Id) {
+    fn abrir_detalhe(&mut self, motor: &Motor, sessao: &Sessao, id: Id) {
         match motor.consultar(
             sessao,
             "clientes.detalhe_pessoa.v1",
@@ -272,12 +272,7 @@ impl EstadoTelaClientes {
 }
 
 /// Desenha a tela inteira.
-pub fn mostrar(
-    ui: &mut egui::Ui,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
-    estado: &mut EstadoTelaClientes,
-) {
+pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTelaClientes) {
     LayoutTela::nova("Clientes").mostrar(
         ui,
         estado,
@@ -346,12 +341,7 @@ pub fn mostrar(
     }
 }
 
-fn lista(
-    ui: &mut egui::Ui,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
-    estado: &mut EstadoTelaClientes,
-) {
+fn lista(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTelaClientes) {
     if estado.pessoas.is_empty() {
         let msg = if estado.busca.trim().is_empty() {
             "Nenhum cliente cadastrado ainda."
@@ -431,12 +421,7 @@ fn ordenar_pessoas(pessoas: &mut [ItemPessoa], coluna: usize, direcao: Direcao) 
     });
 }
 
-fn dialogo(
-    ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
-    estado: &mut EstadoTelaClientes,
-) {
+fn dialogo(ctx: &egui::Context, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTelaClientes) {
     let modo = estado.form.as_ref().map_or(Modo::Criar, |f| f.modo);
     let titulo = match modo {
         Modo::Criar => "Novo cliente".to_owned(),
@@ -683,12 +668,7 @@ fn montar_endereco_inicial(f: &Form) -> Option<EnderecoInicial> {
     })
 }
 
-fn criar(
-    ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
-    estado: &mut EstadoTelaClientes,
-) {
+fn criar(ctx: &egui::Context, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTelaClientes) {
     let Some(f) = estado.form.as_ref() else {
         return;
     };
@@ -761,12 +741,7 @@ fn criar(
     }
 }
 
-fn salvar(
-    ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
-    estado: &mut EstadoTelaClientes,
-) {
+fn salvar(ctx: &egui::Context, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTelaClientes) {
     let Some(f) = estado.form.as_ref() else {
         return;
     };
@@ -873,8 +848,8 @@ fn salvar(
 
 fn excluir(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaClientes,
     pessoa: Id,
 ) {
@@ -902,7 +877,7 @@ fn excluir(
 #[cfg(feature = "demo")]
 impl EstadoTelaClientes {
     /// Abre a ficha do primeiro cliente com OS (cena `cliente` da demo).
-    pub fn preparar_demo(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
+    pub fn preparar_demo(&mut self, motor: &Motor, sessao: &Sessao) {
         self.carregar(motor, sessao);
         if let Some(p) = self.pessoas.iter().find(|p| p.nome.starts_with("Maria")) {
             let id = p.pessoa;

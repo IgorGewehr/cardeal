@@ -13,8 +13,8 @@ use mod_estoque::{
 /// produto, local e 5 unidades em estoque, e abre uma OS. Devolve o que os testes usam.
 struct Cenario {
     _arquivo: tempfile::NamedTempFile,
-    motor: MotorLocal,
-    sessao: SessaoLocal,
+    motor: Motor,
+    sessao: Sessao,
     ctx: egui::Context,
     estado: EstadoTelaOs,
     os: Id,

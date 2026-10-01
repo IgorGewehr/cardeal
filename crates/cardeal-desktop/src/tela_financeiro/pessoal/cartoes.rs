@@ -8,8 +8,8 @@ use mod_financeiro::pessoal::faturas_do_mes;
 
 pub(super) fn painel(
     ui: &mut egui::Ui,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoPessoal,
 ) {
     let mes = estado.mes();

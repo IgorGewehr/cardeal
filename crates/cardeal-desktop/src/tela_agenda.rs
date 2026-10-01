@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 
-use cardeal_cliente::{MotorLocal, SessaoLocal};
+use cardeal_cliente::{Motor, Sessao};
 use cardeal_kernel::{Data, Fuso, Hora, Id, Instante};
 use cardeal_ui::atoms::{Botao, Divisor, Etiqueta, Rotulo, Tom, ATALHO_NOVO};
 use cardeal_ui::molecules::{dado, Abas, Campo, Mascara, SeletorOpcao};
@@ -109,7 +109,7 @@ impl Modo {
 
 impl EstadoTelaAgenda {
     /// Carrega compromissos do período visível, recursos e clientes.
-    pub fn carregar(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
+    pub fn carregar(&mut self, motor: &Motor, sessao: &Sessao) {
         let base = self.base.get_or_insert_with(|| Data::hoje(FUSO));
         let (inicio, fim) = periodo(*base, self.modo);
 
@@ -174,12 +174,7 @@ fn periodo(base: Data, modo: Modo) -> (Instante, Instante) {
 }
 
 /// Desenha a tela inteira.
-pub fn mostrar(
-    ui: &mut egui::Ui,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
-    estado: &mut EstadoTelaAgenda,
-) {
+pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTelaAgenda) {
     LayoutTela::nova("Agenda").mostrar(
         ui,
         estado,
@@ -304,8 +299,8 @@ fn form_em(estado: &EstadoTelaAgenda, data: Data, hora: u32) -> FormComp {
 
 fn barra_controles(
     ui: &mut egui::Ui,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaAgenda,
 ) {
     let base = estado.base.unwrap_or_else(|| Data::hoje(FUSO));
@@ -417,8 +412,8 @@ fn resumo_dia_texto(estado: &EstadoTelaAgenda) -> (String, Tom) {
 
 fn dialogo_novo(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaAgenda,
 ) {
     let ops_cli: Vec<(Id, String)> = estado
@@ -484,12 +479,7 @@ fn dialogo_novo(
     }
 }
 
-fn agendar(
-    ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
-    estado: &mut EstadoTelaAgenda,
-) {
+fn agendar(ctx: &egui::Context, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTelaAgenda) {
     let Dlg::Novo(f) = &estado.dlg else { return };
     let f = f.clone();
     if f.titulo.trim().is_empty() {
@@ -546,8 +536,8 @@ fn agendar(
 
 fn dialogo_recurso(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaAgenda,
 ) {
     const TIPOS: [(TipoRecurso, &str); 4] = [
@@ -616,12 +606,7 @@ fn parse_hora(s: &str) -> Option<Hora> {
     Hora::de_hms(h.trim().parse().ok()?, m.trim().parse().unwrap_or(0), 0).ok()
 }
 
-fn dialogo_ver(
-    ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
-    estado: &mut EstadoTelaAgenda,
-) {
+fn dialogo_ver(ctx: &egui::Context, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTelaAgenda) {
     let Dlg::Ver(id) = estado.dlg else { return };
     let Some(c) = estado.compromissos.iter().find(|c| c.id == id).cloned() else {
         estado.dlg = Dlg::Fechado;
@@ -674,8 +659,8 @@ fn dialogo_ver(
 
 fn acoes_estado(
     ui: &mut egui::Ui,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaAgenda,
     c: &Compromisso,
 ) {
@@ -744,8 +729,8 @@ fn acoes_estado(
 
 fn aplicar<C: cardeal_modkit::Comando + serde::Serialize>(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaAgenda,
     nome: &str,
     comando: &C,

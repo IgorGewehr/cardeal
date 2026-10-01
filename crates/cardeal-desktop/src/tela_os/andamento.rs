@@ -48,8 +48,8 @@ pub(super) fn proximo_passo(detalhe: &DetalheOrdem) -> Option<ProximoPasso> {
 /// Executa o passo (ou abre a confirmação/diálogo que ele exige).
 pub(super) fn executar_proximo(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaOs,
     os: Id,
     passo: ProximoPasso,

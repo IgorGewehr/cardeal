@@ -25,7 +25,7 @@ pub enum PedidoParaOs {
 
 impl Ficha {
     /// Carrega as OS e o que o cliente deve (sem permissão, a parte fica vazia).
-    pub(super) fn carregar(motor: &MotorLocal, sessao: &SessaoLocal, cliente: Id) -> Self {
+    pub(super) fn carregar(motor: &Motor, sessao: &Sessao, cliente: Id) -> Self {
         let ordens: Vec<OrdemServico> = motor
             .consultar(
                 sessao,

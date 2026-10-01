@@ -10,7 +10,7 @@
 //! `financeiro-baixa`, `financeiro-lancar`, `financeiro-custos`, `financeiro-pagar`, `financeiro-fluxo`, `financeiro-bancos`,
 //! `financeiro-pessoal`, `financeiro-cartoes`, `financeiro-pessoal-novo`. Sem `CARDEAL_DEMO_PNG` a janela fica aberta para mexer.
 
-use cardeal_cliente::{MotorLocal, SessaoLocal};
+use cardeal_cliente::{Motor, Sessao};
 use cardeal_kernel::{Data, Dinheiro, Fuso, Id, Preco, Quantidade};
 use eframe::egui;
 use mod_clientes::{ContatoInicial, CriarPessoa, Papel, PessoaCadastrada, TipoContato, TipoPessoa};
@@ -84,7 +84,7 @@ impl Captura {
 }
 
 /// Configura a empresa, faz login e cria os dados de exemplo. Devolve a sessão do admin.
-pub fn semear(motor: &MotorLocal) -> SessaoLocal {
+pub fn semear(motor: &Motor) -> Sessao {
     motor
         .configurar_inicial(
             "Assistência Demo",
@@ -398,7 +398,7 @@ pub fn semear(motor: &MotorLocal) -> SessaoLocal {
 /// Custos da empresa por categoria (aluguel, pró-labore, energia, peças) e as finanças
 /// pessoais do usuário (pró-labore, faculdade, cartão parcelado) para as cenas de custos e
 /// pessoal.
-fn semear_custos_e_pessoal(motor: &MotorLocal, s: &SessaoLocal, hoje: Data) {
+fn semear_custos_e_pessoal(motor: &Motor, s: &Sessao, hoje: Data) {
     use mod_financeiro::pessoal::comandos::LancarPessoal;
     use mod_financeiro::pessoal::{NovoPessoal, Repeticao, TipoPessoal};
 

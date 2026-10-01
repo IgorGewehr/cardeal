@@ -4,8 +4,8 @@ use super::*;
 
 pub(super) fn dialogo_detalhe(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaOs,
 ) {
     let Some(detalhe) = estado.detalhe.clone() else {
@@ -65,8 +65,8 @@ pub(super) const fn pode_faturar(estado: EstadoOs) -> bool {
 
 pub(super) fn corpo_detalhe(
     ui: &mut egui::Ui,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaOs,
     detalhe: &DetalheOrdem,
 ) {

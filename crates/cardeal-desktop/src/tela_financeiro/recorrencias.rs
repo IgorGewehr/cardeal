@@ -4,8 +4,8 @@ use super::*;
 
 pub(super) fn dialogo_recorrencias(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaFinanceiro,
 ) {
     let linhas: Vec<(String, String, String, String, bool)> = estado
@@ -92,8 +92,8 @@ pub(super) fn dialogo_recorrencias(
 
 pub(super) fn dialogo_nova_recorrencia(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaFinanceiro,
 ) {
     let a_receber = match &estado.dlg {
@@ -249,8 +249,8 @@ pub(super) fn dialogo_nova_recorrencia(
 
 pub(super) fn criar_recorrencia(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaFinanceiro,
 ) {
     let Dlg::NovaRecorrencia(f) = &estado.dlg else {

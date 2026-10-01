@@ -45,6 +45,11 @@ impl SessaoLocal {
     pub fn concede(&self, permissao: &str) -> bool {
         self.sessao.autorizacoes().concede(permissao)
     }
+
+    /// Todas as permissões concedidas, em ordem.
+    pub fn permissoes(&self) -> impl Iterator<Item = &str> {
+        self.sessao.autorizacoes().iter()
+    }
 }
 
 impl MotorLocal {

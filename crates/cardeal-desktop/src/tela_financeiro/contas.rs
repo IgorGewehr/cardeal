@@ -56,8 +56,8 @@ pub(super) fn seletor_periodo(ui: &mut egui::Ui, filtro: &mut FiltroPeriodo) -> 
 
 pub(super) fn lista(
     ui: &mut egui::Ui,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaFinanceiro,
 ) {
     if seletor_periodo(ui, &mut estado.periodo) {

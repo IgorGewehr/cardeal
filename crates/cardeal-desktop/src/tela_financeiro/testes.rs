@@ -4,7 +4,7 @@ use super::*;
 use crate::testes_comum::motor_de_teste;
 use mod_clientes::{CriarPessoa, TipoPessoa};
 
-fn lancar_a_receber(motor: &MotorLocal, sessao: &SessaoLocal, reais: i64) -> Id {
+fn lancar_a_receber(motor: &Motor, sessao: &Sessao, reais: i64) -> Id {
     let hoje = Data::hoje(Fuso::BRASILIA);
     let r: mod_financeiro::TituloAReceberLancado = motor
         .executar(

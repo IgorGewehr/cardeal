@@ -15,7 +15,7 @@
 
 use std::collections::HashMap;
 
-use cardeal_cliente::{MotorLocal, SessaoLocal};
+use cardeal_cliente::{Motor, Sessao};
 use cardeal_kernel::{Dinheiro, Id};
 use cardeal_modkit::Icone;
 use cardeal_ui::atoms::{Botao, Caixa, Divisor, Etiqueta, Rotulo, Tom, ValorDinheiro, ATALHO_NOVO};
@@ -102,7 +102,7 @@ pub struct EstadoTelaCompras {
 
 impl EstadoTelaCompras {
     /// Recarrega notas, fornecedores, produtos e locais.
-    pub fn carregar(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
+    pub fn carregar(&mut self, motor: &Motor, sessao: &Sessao) {
         match motor.consultar(sessao, "compras.notas_recentes.v1", &NotasRecentes) {
             Ok(n) => {
                 self.notas = n;
@@ -133,7 +133,7 @@ impl EstadoTelaCompras {
         }
     }
 
-    fn abrir_nota(&mut self, motor: &MotorLocal, sessao: &SessaoLocal, nota: Id) {
+    fn abrir_nota(&mut self, motor: &Motor, sessao: &Sessao, nota: Id) {
         let Some(item) = self.notas.iter().find(|n| n.nota == nota).cloned() else {
             return;
         };
@@ -147,7 +147,7 @@ impl EstadoTelaCompras {
         self.dlg = Dlg::Ver;
     }
 
-    fn recarregar_itens(&mut self, motor: &MotorLocal, sessao: &SessaoLocal, nota: Id) {
+    fn recarregar_itens(&mut self, motor: &Motor, sessao: &Sessao, nota: Id) {
         self.itens_nota = motor
             .consultar(sessao, "compras.itens_da_nota.v1", &ItensDaNota { nota })
             .unwrap_or_default();
@@ -162,12 +162,7 @@ impl EstadoTelaCompras {
 }
 
 /// Desenha a tela inteira.
-pub fn mostrar(
-    ui: &mut egui::Ui,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
-    estado: &mut EstadoTelaCompras,
-) {
+pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTelaCompras) {
     LayoutTela::nova("Compras").mostrar(
         ui,
         estado,
@@ -212,8 +207,8 @@ pub fn mostrar(
 /// burocracia que sobrava na importação. `importar_varios_xml` faz o trabalho de verdade.
 fn importar_xml(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaCompras,
 ) {
     let caminhos = rfd::FileDialog::new()
@@ -230,8 +225,8 @@ fn importar_xml(
 /// acesso de sempre) — clicar de novo depois que chegam notas novas é seguro.
 fn importar_pasta_xml(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaCompras,
 ) {
     let Some(pasta) = rfd::FileDialog::new().pick_folder() else {
@@ -276,8 +271,8 @@ fn importar_pasta_xml(
 /// diálogos em sequência seria pior que deixar o balcão escolher da lista.
 fn importar_varios_xml(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaCompras,
     caminhos: Vec<std::path::PathBuf>,
 ) {
@@ -363,12 +358,7 @@ fn importar_varios_xml(
     notificar(ctx, n);
 }
 
-fn lista(
-    ui: &mut egui::Ui,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
-    estado: &mut EstadoTelaCompras,
-) {
+fn lista(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTelaCompras) {
     if estado.notas.is_empty() {
         if estado.erro.is_none()
             && EstadoVazio::novo(Icone::Nota, "Nenhuma nota de entrada.")
@@ -491,8 +481,8 @@ fn ordenar_notas(
 
 fn dialogo_nova(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaCompras,
 ) {
     let fechar = Dialogo::nova("Nova nota de entrada")
@@ -563,12 +553,7 @@ fn dialogo_nova(
     }
 }
 
-fn lancar(
-    ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
-    estado: &mut EstadoTelaCompras,
-) {
+fn lancar(ctx: &egui::Context, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTelaCompras) {
     let f = &estado.nova;
     let Ok(data_emissao) = f.data.parse() else {
         notificar(
@@ -634,8 +619,8 @@ fn lancar(
 
 fn dialogo_ver(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaCompras,
 ) {
     let Some(n) = estado.nota_aberta.clone() else {
@@ -831,8 +816,8 @@ fn linha_item_casamento(
 
 fn vincular_item(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaCompras,
     nota: Id,
     item_nota: Id,
@@ -856,8 +841,8 @@ fn vincular_item(
 
 fn confirmar(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaCompras,
     nota: Id,
 ) {

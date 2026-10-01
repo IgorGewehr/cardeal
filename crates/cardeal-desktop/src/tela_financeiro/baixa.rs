@@ -4,8 +4,8 @@ use super::*;
 
 pub(super) fn dialogo_baixar(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaFinanceiro,
 ) {
     if !matches!(estado.dlg, Dlg::Baixar { .. }) {
@@ -253,8 +253,8 @@ pub(super) fn baixa_historico(ui: &mut egui::Ui, b: &ItemBaixa) -> Option<Id> {
 
 pub(super) fn baixar(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaFinanceiro,
     p: &ItemTituloEmAberto,
 ) {
@@ -328,8 +328,8 @@ pub(super) fn baixar(
 /// arriscaria apontar para a parcela errada.
 pub(super) fn estornar(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaFinanceiro,
     baixa: Id,
 ) {
@@ -366,8 +366,8 @@ pub(super) fn estornar(
 /// antecipação) e, enquanto o valor não foi editado à mão, sugere esse total — antes a tela
 /// sugeria só o principal, e uma parcela vencida "paga inteira" virava parcial.
 pub(super) fn atualizar_situacao(
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaFinanceiro,
     parcela: Id,
 ) {
@@ -438,8 +438,8 @@ pub(super) fn composicao_do_devido(s: &mod_financeiro::SituacaoNaData) -> Option
 /// e conta — um comando só (`…_em_lote.v1`): ou todas, ou nenhuma.
 pub(super) fn dialogo_baixar_lote(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaFinanceiro,
 ) {
     let selecionadas: Vec<ItemTituloEmAberto> = estado
@@ -510,8 +510,8 @@ pub(super) fn dialogo_baixar_lote(
 
 pub(super) fn baixar_lote(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaFinanceiro,
     selecionadas: &[ItemTituloEmAberto],
 ) {

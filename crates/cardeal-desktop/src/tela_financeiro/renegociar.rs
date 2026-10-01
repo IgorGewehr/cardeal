@@ -96,8 +96,8 @@ pub(super) fn secao_renegociar(ui: &mut egui::Ui, form: &mut FormRenegociar, sal
 /// A confirmação e a execução — chamada depois do diálogo da parcela, para desenhar por cima.
 pub(super) fn confirmar_renegociacao(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaFinanceiro,
     titulo: Id,
 ) {

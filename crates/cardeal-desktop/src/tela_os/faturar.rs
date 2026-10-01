@@ -8,8 +8,8 @@ use super::*;
 /// (parcelas em aberto no financeiro).
 pub(super) fn dialogo_faturar(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaOs,
 ) {
     let Some(detalhe) = estado.detalhe.clone() else {
@@ -67,8 +67,8 @@ pub(super) fn dialogo_faturar(
 /// Executa `FaturarOrdemServico` com a condição escolhida em `Dlg::Faturar`.
 pub(super) fn faturar_os(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaOs,
     os: &OrdemServico,
 ) {

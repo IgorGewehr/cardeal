@@ -222,7 +222,7 @@ impl Default for EstadoTelaPdv {
 
 impl EstadoTelaPdv {
     /// Carrega caixas, catálogos e produtos.
-    pub fn carregar(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
+    pub fn carregar(&mut self, motor: &Motor, sessao: &Sessao) {
         self.erro = None;
         match motor.consultar(sessao, "financeiro.caixas.v1", &Caixas) {
             Ok(c) => self.caixas = c,

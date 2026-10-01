@@ -4,8 +4,8 @@ use super::*;
 
 pub(super) fn painel_fluxo(
     ui: &mut egui::Ui,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaFinanceiro,
 ) {
     ui.horizontal(|ui| {
@@ -188,8 +188,8 @@ pub(super) fn painel_bancos(ui: &mut egui::Ui, estado: &mut EstadoTelaFinanceiro
 
 pub(super) fn dialogo_conta_bancaria(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaFinanceiro,
 ) {
     let fechar = Dialogo::nova("Nova conta bancária").largura(460.0).mostrar(

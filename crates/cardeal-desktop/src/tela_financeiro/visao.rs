@@ -4,8 +4,8 @@ use super::*;
 
 pub(super) fn dialogo_analise(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaFinanceiro,
 ) {
     // Agrega o que veio (categoria × mês) em uma linha por categoria: receita, custo, saldo.
@@ -98,8 +98,8 @@ pub(super) const LIMIAR_COLUNAS_VISAO: f32 = 760.0;
 
 pub(super) fn painel_visao(
     ui: &mut egui::Ui,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaFinanceiro,
 ) {
     let cores = ui.cores();

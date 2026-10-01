@@ -84,8 +84,8 @@ pub(super) fn painel(ui: &mut egui::Ui, estado: &mut EstadoPessoal) {
 
 pub(super) fn dialogo_ver(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoPessoal,
     id: Id,
 ) {

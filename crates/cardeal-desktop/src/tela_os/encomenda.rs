@@ -123,8 +123,8 @@ impl FormChegada {
 
 /// Depois de encomendar ou registrar a chegada: volta à gaveta da OS ou fica na lista.
 fn depois_de_salvar(
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaOs,
     ordem: Id,
     volta: bool,
@@ -140,8 +140,8 @@ fn depois_de_salvar(
 
 pub(super) fn dialogo_encomendar(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaOs,
 ) {
     let Dlg::Encomendar(f) = &estado.dlg else {
@@ -189,13 +189,7 @@ pub(super) fn dialogo_encomendar(
     }
 }
 
-fn voltar(
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
-    estado: &mut EstadoTelaOs,
-    ordem: Id,
-    volta: bool,
-) {
+fn voltar(motor: &Motor, sessao: &Sessao, estado: &mut EstadoTelaOs, ordem: Id, volta: bool) {
     if volta {
         estado.abrir_detalhe(motor, sessao, ordem);
     } else {
@@ -203,12 +197,7 @@ fn voltar(
     }
 }
 
-fn encomendar(
-    ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
-    estado: &mut EstadoTelaOs,
-) {
+fn encomendar(ctx: &egui::Context, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTelaOs) {
     let Dlg::Encomendar(f) = &estado.dlg else {
         return;
     };
@@ -254,8 +243,8 @@ fn encomendar(
 
 pub(super) fn dialogo_chegada(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaOs,
 ) {
     let Dlg::Chegou(f) = &estado.dlg else {
@@ -309,8 +298,8 @@ pub(super) fn dialogo_chegada(
 
 pub(super) fn registrar_chegada(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaOs,
 ) {
     let Dlg::Chegou(f) = &estado.dlg else {

@@ -4,8 +4,8 @@ use super::*;
 
 pub(super) fn adicionar_mao_de_obra(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaOs,
     os: Id,
 ) {
@@ -45,8 +45,8 @@ pub(super) fn adicionar_mao_de_obra(
 
 pub(super) fn adicionar_peca(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaOs,
     os: Id,
 ) {
@@ -127,8 +127,8 @@ pub(super) fn adicionar_peca(
 /// precisar abrir o estoque para descobrir.
 pub(super) fn aplicar_pecas(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaOs,
     ordem: Id,
     itens: &[Id],
@@ -184,8 +184,8 @@ pub(super) fn aplicar_pecas(
 /// dois toda vez. Ordem: a tabela de preço (se a empresa mantém uma), senão o último preço
 /// cobrado dessa peça numa OS, senão só mostra o custo como referência.
 pub(super) fn sugerir_preco(
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaOs,
     produto: Id,
 ) {

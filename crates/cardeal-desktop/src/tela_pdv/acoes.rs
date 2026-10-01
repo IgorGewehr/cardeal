@@ -7,8 +7,8 @@ use super::*;
 pub(super) fn aplicar(
     acao: Acao,
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaPdv,
 ) {
     match acao {
@@ -117,8 +117,8 @@ pub(super) fn aplicar(
 /// `Enter` no campo de bipe: código de barras → busca exata; texto → o resultado destacado.
 pub(super) fn bipar(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaPdv,
 ) {
     estado.atualizar_resultados();
@@ -167,8 +167,8 @@ pub(super) fn bipar(
 /// antes do primeiro item, só guarda — `garantir_cupom` o leva no `AbrirCupom`.
 pub(super) fn identificar_cliente(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaPdv,
     escolhido: Option<(Id, String)>,
 ) {
@@ -198,8 +198,8 @@ pub(super) fn identificar_cliente(
 /// Resolve um código de barras no produto, avisando o operador se não achar.
 pub(super) fn produto_por_gtin(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     gtin: &str,
 ) -> Option<Id> {
     match motor.consultar(
@@ -228,8 +228,8 @@ pub(super) fn produto_por_gtin(
 /// vigente na tabela do terminal. Não mexe no cupom.
 pub(super) fn consultar_preco(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaPdv,
 ) {
     let Dlg::ConsultaPreco { termo, .. } = &estado.dlg else {
@@ -283,8 +283,8 @@ pub(super) fn consultar_preco(
 
 pub(super) fn garantir_cupom(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaPdv,
 ) -> Option<Id> {
     if let Some(c) = estado.cupom {
@@ -330,8 +330,8 @@ pub(super) fn garantir_cupom(
 /// Adiciona um item ao cupom. Devolve se deu certo.
 pub(super) fn adicionar(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaPdv,
     produto: Id,
     quantidade: Quantidade,
@@ -388,8 +388,8 @@ pub(super) fn adicionar(
 
 pub(super) fn cancelar_item(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaPdv,
     i: usize,
 ) {
@@ -424,8 +424,8 @@ pub(super) fn cancelar_item(
 /// permissão `pdv.cupom.cancelar`.
 pub(super) fn cancelar_cupom(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    autorizador: &SessaoLocal,
+    motor: &Motor,
+    autorizador: &Sessao,
     estado: &mut EstadoTelaPdv,
     motivo: String,
 ) -> bool {
@@ -488,8 +488,8 @@ pub(super) fn pedir_finalizar(ctx: &egui::Context, estado: &mut EstadoTelaPdv) {
 
 pub(super) fn finalizar(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaPdv,
 ) {
     let fiscal = egui::Id::new("pdv-fiscal");

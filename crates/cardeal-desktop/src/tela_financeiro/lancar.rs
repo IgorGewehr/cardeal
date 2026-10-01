@@ -4,8 +4,8 @@ use super::*;
 
 pub(super) fn dialogo_categoria(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaFinanceiro,
 ) {
     let fechar = Dialogo::nova("Nova categoria").largura(460.0).mostrar(
@@ -76,8 +76,8 @@ pub(super) fn dialogo_categoria(
 
 pub(super) fn dialogo_lancar(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaFinanceiro,
 ) {
     let a_receber = matches!(&estado.dlg, Dlg::Lancar(f) if f.a_receber);
@@ -216,8 +216,8 @@ pub(super) fn dialogo_lancar(
 /// `continuar` = limpa o formulário para o próximo lançamento, mantendo data e meio.
 pub(super) fn lancar(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaFinanceiro,
     continuar: bool,
 ) {

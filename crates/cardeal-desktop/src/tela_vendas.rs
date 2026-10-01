@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 
-use cardeal_cliente::{MotorLocal, SessaoLocal};
+use cardeal_cliente::{Motor, Sessao};
 use cardeal_kernel::{Id, Percentual};
 use cardeal_modkit::Icone;
 use cardeal_ui::atoms::{Botao, Divisor, Rotulo, ValorDinheiro, ATALHO_NOVO};
@@ -63,7 +63,7 @@ pub struct EstadoTelaVendas {
 
 impl EstadoTelaVendas {
     /// Recarrega pedidos + catálogos (clientes, produtos, tabelas, locais).
-    pub fn carregar(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
+    pub fn carregar(&mut self, motor: &Motor, sessao: &Sessao) {
         match motor.consultar(sessao, "vendas.pedidos_recentes.v1", &PedidosRecentes) {
             Ok(p) => {
                 self.pedidos = p;
@@ -93,7 +93,7 @@ impl EstadoTelaVendas {
         }
     }
 
-    fn abrir_pedido(&mut self, motor: &MotorLocal, sessao: &SessaoLocal, i: usize) {
+    fn abrir_pedido(&mut self, motor: &Motor, sessao: &Sessao, i: usize) {
         let Some(p) = self.pedidos.get(i) else { return };
         let id = p.pedido;
         self.itens_ped = motor
@@ -106,7 +106,7 @@ impl EstadoTelaVendas {
         self.dlg = Dlg::Ver(i);
     }
 
-    fn recarregar_itens(&mut self, motor: &MotorLocal, sessao: &SessaoLocal, pedido: Id) {
+    fn recarregar_itens(&mut self, motor: &Motor, sessao: &Sessao, pedido: Id) {
         self.itens_ped = motor
             .consultar(
                 sessao,
@@ -116,7 +116,7 @@ impl EstadoTelaVendas {
             .unwrap_or_default();
     }
 
-    fn carregar_regras(&mut self, motor: &MotorLocal, sessao: &SessaoLocal, tabela: Id) {
+    fn carregar_regras(&mut self, motor: &Motor, sessao: &Sessao, tabela: Id) {
         self.regras = motor
             .consultar(
                 sessao,
@@ -142,12 +142,7 @@ impl EstadoTelaVendas {
 }
 
 /// Desenha a tela inteira.
-pub fn mostrar(
-    ui: &mut egui::Ui,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
-    estado: &mut EstadoTelaVendas,
-) {
+pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTelaVendas) {
     LayoutTela::nova("Vendas").mostrar(
         ui,
         estado,
@@ -212,12 +207,7 @@ pub fn mostrar(
     }
 }
 
-fn lista(
-    ui: &mut egui::Ui,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
-    estado: &mut EstadoTelaVendas,
-) {
+fn lista(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTelaVendas) {
     if estado.pedidos.is_empty() {
         if estado.erro.is_none() {
             EstadoVazio::novo(Icone::Carrinho, "Nenhum pedido ainda.").mostrar(ui);
@@ -259,8 +249,8 @@ fn lista(
 
 fn dialogo_novo(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaVendas,
 ) {
     let ops_cli: Vec<(Id, String)> = estado
@@ -331,8 +321,8 @@ fn dialogo_novo(
 
 fn criar_pedido(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaVendas,
 ) {
     let (Some(cliente), Some(tabela), Some(local)) =
@@ -369,8 +359,8 @@ fn criar_pedido(
 
 fn dialogo_ver(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaVendas,
     i: usize,
 ) {
@@ -448,8 +438,8 @@ fn dialogo_ver(
 
 fn adicionar_item(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaVendas,
     pedido: Id,
 ) {
@@ -485,8 +475,8 @@ fn adicionar_item(
 
 fn acoes(
     ui: &mut egui::Ui,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaVendas,
     p: &ItemPedido,
 ) {
@@ -568,8 +558,8 @@ fn acoes(
 
 fn dialogo_tabelas(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaVendas,
 ) {
     let ops_prod: Vec<(Id, String)> = estado
@@ -661,8 +651,8 @@ fn dialogo_tabelas(
 
 fn criar_tabela(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaVendas,
 ) {
     if estado.tab_nome.trim().is_empty() {
@@ -692,8 +682,8 @@ fn criar_tabela(
 
 fn criar_regra(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaVendas,
     tabela: Id,
 ) {
@@ -731,8 +721,8 @@ fn criar_regra(
 
 fn aplicar<C: cardeal_modkit::Comando + serde::Serialize>(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoTelaVendas,
     nome: &str,
     comando: &C,

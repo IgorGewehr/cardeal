@@ -93,6 +93,9 @@ impl CodigoErro {
     pub const TEMPO_ESGOTADO: Self = Self(5003);
     /// Falha de leitura ou escrita em disco.
     pub const FALHA_DE_DISCO: Self = Self(5004);
+    /// Sem conexão com o servidor (rede caiu, servidor fora do ar) — o cliente remoto tentou de
+    /// novo e desistiu.
+    pub const SEM_CONEXAO: Self = Self(5005);
 
     // ── 6xxx — integração externa ────────────────────────────────────────────
     /// A API fiscal está indisponível.

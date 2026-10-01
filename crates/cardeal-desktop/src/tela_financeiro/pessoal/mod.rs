@@ -10,7 +10,7 @@ mod lista;
 mod testes;
 mod visao;
 
-use cardeal_cliente::{MotorLocal, SessaoLocal};
+use cardeal_cliente::{Motor, Sessao};
 use cardeal_kernel::{Competencia, Data, Dinheiro, Fuso, Id, Periodo};
 use cardeal_modkit::Icone;
 use cardeal_ui::atoms::{Botao, Etiqueta, Rotulo, ValorDinheiro, ATALHO_NOVO};
@@ -63,7 +63,7 @@ impl EstadoPessoal {
             .unwrap_or_else(|| Data::hoje(Fuso::BRASILIA).competencia())
     }
 
-    pub(crate) fn carregar(&mut self, motor: &MotorLocal, sessao: &SessaoLocal) {
+    pub(crate) fn carregar(&mut self, motor: &Motor, sessao: &Sessao) {
         self.carregado = true;
         let atual = Data::hoje(Fuso::BRASILIA).inicio_do_mes();
         let periodo = Periodo::novo(atual.mais_meses(-6), atual.mais_meses(12).fim_do_mes());
@@ -97,8 +97,8 @@ impl EstadoPessoal {
     fn marcar(
         &mut self,
         ctx: &egui::Context,
-        motor: &MotorLocal,
-        sessao: &SessaoLocal,
+        motor: &Motor,
+        sessao: &Sessao,
         ids: Vec<Id>,
         pago: bool,
     ) {
@@ -143,12 +143,7 @@ pub(crate) fn acoes(ui: &mut egui::Ui, estado: &mut EstadoPessoal) {
 }
 
 /// O corpo da tela no modo pessoal.
-pub(crate) fn corpo(
-    ui: &mut egui::Ui,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
-    estado: &mut EstadoPessoal,
-) {
+pub(crate) fn corpo(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoPessoal) {
     if !estado.carregado {
         estado.carregar(motor, sessao);
     }
@@ -184,8 +179,8 @@ pub(crate) fn corpo(
 /// Os diálogos do modo pessoal.
 pub(crate) fn dialogos(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoPessoal,
 ) {
     match estado.dlg {
@@ -258,8 +253,8 @@ fn valor_com_sinal(l: &LancamentoPessoal) -> Dinheiro {
 
 fn excluir(
     ctx: &egui::Context,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
+    motor: &Motor,
+    sessao: &Sessao,
     estado: &mut EstadoPessoal,
     id: Id,
     e_seguintes: bool,
@@ -292,7 +287,7 @@ fn excluir(
 #[cfg(feature = "demo")]
 impl EstadoPessoal {
     /// Leva a parte pessoal à cena de demonstração.
-    pub(crate) fn preparar_demo(&mut self, motor: &MotorLocal, sessao: &SessaoLocal, cena: &str) {
+    pub(crate) fn preparar_demo(&mut self, motor: &Motor, sessao: &Sessao, cena: &str) {
         self.carregar(motor, sessao);
         match cena {
             "financeiro-cartoes" => self.aba = AbaPessoal::Cartoes,

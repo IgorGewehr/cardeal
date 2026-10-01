@@ -9,7 +9,7 @@ use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
 use cardeal_kernel::{ChaveIdempotencia, CodigoErro, Erro, Id, Resultado};
-use cardeal_protocol::CABECALHO_IDEMPOTENCIA;
+use cardeal_protocol::{InfoSessao, CABECALHO_IDEMPOTENCIA};
 
 use super::credencial::exigir_token;
 use super::resposta::{bloqueante, ErroHttp, Postcard};
@@ -89,4 +89,23 @@ pub(super) async fn consulta(
     })
     .await
     .map(Postcard)
+}
+
+/// Quem a conta é nesta empresa: usuário e permissões, para a interface.
+pub(super) async fn sessao(
+    State(servidor): State<Arc<Servidor>>,
+    Path(empresa): Path<String>,
+    headers: HeaderMap,
+) -> Result<Postcard, ErroHttp> {
+    let token = exigir_token(&headers)?;
+    let empresa = empresa_da_rota(&empresa)?;
+    let info = bloqueante(move || {
+        let (_, sessao) = entrar_na_empresa(&servidor, &token, empresa)?;
+        Ok(InfoSessao {
+            usuario: sessao.usuario(),
+            permissoes: sessao.permissoes().map(str::to_owned).collect(),
+        })
+    })
+    .await?;
+    super::resposta::postcard(&info)
 }

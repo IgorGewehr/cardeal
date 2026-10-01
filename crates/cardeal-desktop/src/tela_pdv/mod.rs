@@ -25,7 +25,7 @@ mod pagamento;
 mod testes;
 mod visao;
 
-use cardeal_cliente::{MotorLocal, SessaoLocal};
+use cardeal_cliente::{Motor, Sessao};
 use cardeal_kernel::texto::casa_por_palavras;
 use cardeal_kernel::{Arredondamento, Dinheiro, Id, Percentual, Preco, Quantidade};
 use cardeal_modkit::Icone;
@@ -91,12 +91,7 @@ fn abrir(ctx: &egui::Context, estado: &mut EstadoTelaPdv, dlg: Dlg) {
 // ── entrada principal ────────────────────────────────────────────────────────
 
 /// Desenha a tela inteira e executa o que ela pediu.
-pub fn mostrar(
-    ui: &mut egui::Ui,
-    motor: &MotorLocal,
-    sessao: &SessaoLocal,
-    estado: &mut EstadoTelaPdv,
-) {
+pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTelaPdv) {
     // Execução adiada do fechamento fiscal: o clique só marcou a intenção; agora, um quadro
     // depois, o spinner/toast já pintaram e podemos rodar a chamada bloqueante.
     if std::mem::take(&mut estado.finalizar_pendente) {
