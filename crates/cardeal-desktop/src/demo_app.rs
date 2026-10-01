@@ -8,7 +8,7 @@
 //!
 //! Cenas: `os`, `os-detalhe`, `os-nova`, `os-faturar`, `financeiro`, `financeiro-receber`,
 //! `financeiro-baixa`, `financeiro-lancar`, `financeiro-custos`, `financeiro-pagar`, `financeiro-fluxo`, `financeiro-bancos`,
-//! `financeiro-pessoal`, `financeiro-cartoes`, `financeiro-pessoal-novo`. Sem `CARDEAL_DEMO_PNG` a janela fica aberta para mexer.
+//! `financeiro-pessoal`, `financeiro-cartoes`, `financeiro-pessoal-novo`, `login`, `login-servidor`. Sem `CARDEAL_DEMO_PNG` a janela fica aberta para mexer.
 
 use cardeal_cliente::{Motor, Sessao};
 use cardeal_kernel::{Data, Dinheiro, Fuso, Id, Preco, Quantidade};

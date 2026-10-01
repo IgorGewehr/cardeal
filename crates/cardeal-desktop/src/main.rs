@@ -8,6 +8,7 @@
 
 #[cfg(feature = "demo")]
 mod demo_app;
+mod login;
 mod pagamento;
 mod pessoa;
 mod tela_agenda;
@@ -427,11 +428,7 @@ enum Tela {
         admin_senha: String,
         erro: Option<String>,
     },
-    Login {
-        login: String,
-        senha: String,
-        erro: Option<String>,
-    },
+    Login(login::EstadoLogin),
     Autenticado(Box<EstadoAutenticado>),
 }
 
@@ -440,7 +437,7 @@ enum Acao {
     Nenhuma,
     AlternarTema,
     AdminCriado(String),
-    LoginOk(Sessao),
+    LoginOk(Box<login::Entrada>),
     MudarArea(Area),
     AlternarSidebar,
     TentarNovamente,
@@ -578,6 +575,15 @@ impl App {
             .expect("abrir a base da demo");
             let sessao = demo_app::semear(&motor);
             let cena = demo.cena.clone();
+            if cena.starts_with("login") {
+                self.motor = Some(motor);
+                self.tela = Tela::Login(if cena == "login-servidor" {
+                    login::EstadoLogin::no_servidor("app.cardeal.com.br", "dono@loja.com.br")
+                } else {
+                    login::EstadoLogin::default()
+                });
+                return;
+            }
             self.motor = Some(motor);
             self.entrar(sessao);
             if let (Tela::Autenticado(estado), Some(motor)) = (&mut self.tela, &self.motor) {
@@ -603,11 +609,7 @@ impl App {
                         erro: None,
                     }
                 } else {
-                    Tela::Login {
-                        login: String::new(),
-                        senha: String::new(),
-                        erro: None,
-                    }
+                    Tela::Login(login::EstadoLogin::lembrado())
                 };
             }
             Err(e) => {
@@ -619,25 +621,17 @@ impl App {
 
     fn entrar(&mut self, sessao: Sessao) {
         let Some(motor) = &self.motor else { return };
+        // Só a área inicial carrega agora; as outras carregam ao serem abertas (`MudarArea`
+        // sempre recarrega). Com o motor local isso é só um login mais rápido; com o servidor
+        // é a diferença entre um login instantâneo e dezenas de idas e voltas pela rede.
         let mut os = tela_os::EstadoTelaOs::default();
-        let mut estoque = tela_estoque::EstadoTelaEstoque::default();
-        let mut clientes = tela_clientes::EstadoTelaClientes::default();
-        let mut financeiro = tela_financeiro::EstadoTelaFinanceiro::default();
         os.carregar(motor, &sessao);
-        estoque.carregar(motor, &sessao);
-        clientes.carregar(motor, &sessao);
-        financeiro.gerar_recorrencias_e_carregar(motor, &sessao);
-        let mut vendas = tela_vendas::EstadoTelaVendas::default();
-        vendas.carregar(motor, &sessao);
-        let mut compras = tela_compras::EstadoTelaCompras::default();
-        compras.carregar(motor, &sessao);
-        let mut agenda = tela_agenda::EstadoTelaAgenda::default();
-        agenda.carregar(motor, &sessao);
-        let mut pdv = tela_pdv::EstadoTelaPdv::default();
-        pdv.carregar(motor, &sessao);
-        let mut settings = tela_settings::EstadoTelaSettings::default();
-        settings.carregar(motor, &sessao);
-
+        let mut financeiro = tela_financeiro::EstadoTelaFinanceiro::default();
+        if let Some(e) = financeiro.gerar_recorrencias(motor, &sessao) {
+            // A tela repete a geração (e mostra o erro) quando o Financeiro for aberto.
+            tracing::warn!("recorrências não geradas no login: {e}");
+        }
+        let (estoque, clientes, vendas, compras, agenda, pdv, settings) = Default::default();
         self.tela = Tela::Autenticado(Box::new(EstadoAutenticado {
             sessao,
             area: Area::Os,
@@ -925,31 +919,10 @@ impl eframe::App for App {
                         }
                     });
                 }
-                Tela::Login { login, senha, erro } => {
-                    ui.add_space(Espaco::E64);
-                    Cartao::novo().largura(360.0).mostrar(ui, |ui| {
-                        ui.vertical_centered(|ui| {
-                            ui.add(Rotulo::titulo_tela("Cardeal"));
-                        });
-                        ui.add_space(Espaco::E24);
-                        ui.add(Campo::novo("Login", login));
-                        ui.add_space(Espaco::E12);
-                        ui.add(Campo::novo("Senha", senha).senha(true).erro(erro.clone()));
-                        ui.add_space(Espaco::E16);
-
-                        let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
-                        let clicou = ui
-                            .add(Botao::primario("Entrar").atalho("Enter").preenche_largura())
-                            .clicked();
-                        if clicou || enter {
-                            if let Some(motor) = &self.motor {
-                                match motor.autenticar(login, senha) {
-                                    Ok(sessao) => acao = Acao::LoginOk(sessao),
-                                    Err(e) => *erro = Some(e.mensagem),
-                                }
-                            }
-                        }
-                    });
+                Tela::Login(estado) => {
+                    if let Some(entrada) = login::mostrar(ui, self.motor.as_ref(), estado) {
+                        acao = Acao::LoginOk(Box::new(entrada));
+                    }
                 }
                 Tela::Autenticado(estado) => {
                     let Some(motor) = &self.motor else { return };
@@ -1042,13 +1015,16 @@ impl eframe::App for App {
                 ),
             },
             Acao::AdminCriado(login) => {
-                self.tela = Tela::Login {
-                    login,
-                    senha: String::new(),
-                    erro: None,
-                }
+                self.tela = Tela::Login(login::EstadoLogin::com_login(login));
             }
-            Acao::LoginOk(sessao) => self.entrar(sessao),
+            Acao::LoginOk(entrada) => match *entrada {
+                login::Entrada::Local(sessao) => self.entrar(sessao),
+                login::Entrada::Remota(motor, sessao) => {
+                    // A partir daqui todas as telas falam com o servidor.
+                    self.motor = Some(motor);
+                    self.entrar(sessao);
+                }
+            },
             Acao::MudarArea(area) => {
                 if let (Tela::Autenticado(estado), Some(motor)) = (&mut self.tela, &self.motor) {
                     if estado.area != area {

@@ -9,24 +9,32 @@ impl EstadoTelaFinanceiro {
     /// roda ao entrar no sistema e ao abrir a área de Financeiro — até existir agendador, é o
     /// que faz o aluguel cadastrado como recorrente aparecer em "A pagar".
     pub fn gerar_recorrencias_e_carregar(&mut self, motor: &Motor, sessao: &Sessao) {
-        if sessao.concede("financeiro.recorrencia.criar") {
-            match motor.executar(
-                sessao,
-                "financeiro.materializar_recorrencias.v1",
-                &mod_financeiro::MaterializarRecorrencias,
-            ) {
-                Ok(gerados) => {
-                    let gerados: Vec<Id> = gerados;
-                    self.recorrencias_geradas += gerados.len();
-                }
-                Err(e) => {
-                    self.carregar(motor, sessao);
-                    self.erro = Some(format!("Recorrências não geradas: {}", e.mensagem));
-                    return;
-                }
-            }
-        }
+        let falhou = self.gerar_recorrencias(motor, sessao);
         self.carregar(motor, sessao);
+        if let Some(e) = falhou {
+            self.erro = Some(format!("Recorrências não geradas: {e}"));
+        }
+    }
+
+    /// Materializa as recorrências vencidas (um comando só) — no login, sem carregar a tela:
+    /// as contas do mês nascem mesmo que ninguém abra o Financeiro. Devolve a mensagem de erro,
+    /// se houver.
+    pub fn gerar_recorrencias(&mut self, motor: &Motor, sessao: &Sessao) -> Option<String> {
+        if !sessao.concede("financeiro.recorrencia.criar") {
+            return None;
+        }
+        match motor.executar(
+            sessao,
+            "financeiro.materializar_recorrencias.v1",
+            &mod_financeiro::MaterializarRecorrencias,
+        ) {
+            Ok(gerados) => {
+                let gerados: Vec<Id> = gerados;
+                self.recorrencias_geradas += gerados.len();
+                None
+            }
+            Err(e) => Some(e.mensagem),
+        }
     }
 
     /// Guarda o erro de uma consulta para aparecer no topo da tela (em vez de o valor virar
