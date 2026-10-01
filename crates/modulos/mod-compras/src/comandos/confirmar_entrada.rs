@@ -5,10 +5,10 @@
 use cardeal_kernel::Id;
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::Resultado;
+use cardeal_modkit::Comando;
 #[cfg(feature = "sqlite")]
+use cardeal_modkit::Ctx;
 use cardeal_modkit::Risco;
-#[cfg(feature = "sqlite")]
-use cardeal_modkit::{Comando, Ctx};
 #[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
@@ -44,13 +44,13 @@ pub struct EntradaConfirmada {
     pub pago: bool,
 }
 
-#[cfg(feature = "sqlite")]
 impl Comando for ConfirmarEntrada {
     type Saida = EntradaConfirmada;
     const PERMISSAO: &'static str = "compras.entrada.confirmar";
     const RISCO: Risco = Risco::Alto;
     const AUDITA: bool = true;
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         let preferencias = RepositorioCompras::novo(uow).preferencias(ctx.empresa)?;
         let gerar_titulo = self

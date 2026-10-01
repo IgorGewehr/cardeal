@@ -5,10 +5,10 @@
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::Resultado;
 use cardeal_kernel::{Dinheiro, Id, Preco, Quantidade};
+use cardeal_modkit::Comando;
 #[cfg(feature = "sqlite")]
+use cardeal_modkit::Ctx;
 use cardeal_modkit::Risco;
-#[cfg(feature = "sqlite")]
-use cardeal_modkit::{Comando, Ctx};
 #[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
@@ -40,12 +40,12 @@ pub struct SaidaRegistrada {
     pub gerou_divergencia: bool,
 }
 
-#[cfg(feature = "sqlite")]
 impl Comando for RegistrarSaida {
     type Saida = SaidaRegistrada;
     const PERMISSAO: &'static str = "estoque.movimento.saida";
     const RISCO: Risco = Risco::Medio;
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         let g = registrar_saida_comum(
             DadosSaida {

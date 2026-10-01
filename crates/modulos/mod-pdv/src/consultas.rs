@@ -8,8 +8,9 @@
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::{Erro, Resultado};
 use cardeal_kernel::{Id, Preco, Quantidade};
+use cardeal_modkit::Consulta;
 #[cfg(feature = "sqlite")]
-use cardeal_modkit::{Consulta, Ctx};
+use cardeal_modkit::Ctx;
 #[cfg(feature = "sqlite")]
 use mod_estoque::{ProdutoPorId, SaldoDisponivelDoProduto};
 #[cfg(feature = "sqlite")]
@@ -42,11 +43,11 @@ pub struct PrecoConsultado {
     pub disponivel: Quantidade,
 }
 
-#[cfg(feature = "sqlite")]
 impl Consulta for PrecoDoProduto {
     type Saida = PrecoConsultado;
     const PERMISSAO: &'static str = "pdv.preco.consultar";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         let produto = ProdutoPorId {
             produto: self.produto,

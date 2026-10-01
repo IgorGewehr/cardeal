@@ -5,13 +5,13 @@
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::Resultado;
 use cardeal_kernel::{Data, Dinheiro, Id, Instante, Preco, Quantidade};
+use cardeal_modkit::Consulta;
 #[cfg(feature = "sqlite")]
-use cardeal_modkit::{Consulta, Ctx};
+use cardeal_modkit::Ctx;
 #[cfg(feature = "sqlite")]
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
-#[cfg(feature = "sqlite")]
 use crate::produto::Produto;
 use crate::produto::{EstadoLote, OrigemLote};
 #[cfg(feature = "sqlite")]
@@ -88,11 +88,11 @@ pub fn produtos_com_saldo(
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProdutosComSaldo;
 
-#[cfg(feature = "sqlite")]
 impl Consulta for ProdutosComSaldo {
     type Saida = Vec<ItemProdutoComSaldo>;
     const PERMISSAO: &'static str = "estoque.produto.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         produtos_com_saldo(conexao, ctx.empresa)
     }
@@ -130,11 +130,11 @@ pub struct ProdutoPorCodigoBarras {
     pub codigo_barras: String,
 }
 
-#[cfg(feature = "sqlite")]
 impl Consulta for ProdutoPorCodigoBarras {
     type Saida = Option<Produto>;
     const PERMISSAO: &'static str = "estoque.produto.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         produto_por_codigo_barras(conexao, ctx.empresa, &self.codigo_barras)
     }
@@ -149,11 +149,11 @@ pub struct ProdutoPorId {
     pub produto: Id,
 }
 
-#[cfg(feature = "sqlite")]
 impl Consulta for ProdutoPorId {
     type Saida = Option<Produto>;
     const PERMISSAO: &'static str = "estoque.produto.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         conexao
             .query_row(
@@ -187,11 +187,11 @@ pub struct ItemGrupoProduto {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GruposProduto;
 
-#[cfg(feature = "sqlite")]
 impl Consulta for GruposProduto {
     type Saida = Vec<ItemGrupoProduto>;
     const PERMISSAO: &'static str = "estoque.produto.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         let mut stmt = conexao
             .prepare("SELECT id, codigo, nome FROM estoque_grupo_produto WHERE empresa = ?1 ORDER BY nome ASC")
@@ -226,11 +226,11 @@ pub struct ItemUnidade {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Unidades;
 
-#[cfg(feature = "sqlite")]
 impl Consulta for Unidades {
     type Saida = Vec<ItemUnidade>;
     const PERMISSAO: &'static str = "estoque.produto.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         let mut stmt = conexao
             .prepare(
@@ -310,11 +310,11 @@ pub struct SaldoDisponivelDoProduto {
     pub produto: Id,
 }
 
-#[cfg(feature = "sqlite")]
 impl Consulta for SaldoDisponivelDoProduto {
     type Saida = Quantidade;
     const PERMISSAO: &'static str = "estoque.saldo.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, _ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         saldo_disponivel_do_produto(conexao, self.produto)
     }
@@ -335,11 +335,11 @@ pub struct ItemLocal {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Locais;
 
-#[cfg(feature = "sqlite")]
 impl Consulta for Locais {
     type Saida = Vec<ItemLocal>;
     const PERMISSAO: &'static str = "estoque.produto.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         let mut stmt = conexao
             .prepare("SELECT id, nome, tipo FROM estoque_local WHERE empresa = ?1 AND ativo = 1 ORDER BY nome ASC")
@@ -419,11 +419,11 @@ pub fn produtos_abaixo_do_ponto_pedido(
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProdutosAbaixoDoPontoPedido;
 
-#[cfg(feature = "sqlite")]
 impl Consulta for ProdutosAbaixoDoPontoPedido {
     type Saida = Vec<ItemAbaixoDoPontoPedido>;
     const PERMISSAO: &'static str = "estoque.compra_sugerida.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         produtos_abaixo_do_ponto_pedido(conexao, ctx.empresa)
     }
@@ -472,11 +472,11 @@ pub struct MovimentosDoProduto {
     pub origem_modulo: Option<String>,
 }
 
-#[cfg(feature = "sqlite")]
 impl Consulta for MovimentosDoProduto {
     type Saida = Vec<Movimento>;
     const PERMISSAO: &'static str = "estoque.movimento.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, _ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         movimentos_do_produto(conexao, self.produto, self.origem_modulo.as_deref())
     }
@@ -736,11 +736,11 @@ pub struct DetalheDoLotePorCodigo {
     pub codigo: String,
 }
 
-#[cfg(feature = "sqlite")]
 impl Consulta for DetalheDoLotePorCodigo {
     type Saida = Option<DetalheLote>;
     const PERMISSAO: &'static str = "estoque.lote.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         detalhe_do_lote_por_codigo(conexao, ctx.empresa, &self.codigo)
     }
@@ -810,11 +810,11 @@ pub struct LotesDisponiveisDoProduto {
     pub produto: Id,
 }
 
-#[cfg(feature = "sqlite")]
 impl Consulta for LotesDisponiveisDoProduto {
     type Saida = Vec<ItemLoteDisponivel>;
     const PERMISSAO: &'static str = "estoque.lote.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, _ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         lotes_disponiveis_do_produto(conexao, self.produto)
     }

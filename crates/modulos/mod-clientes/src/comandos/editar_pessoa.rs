@@ -6,10 +6,10 @@
 use cardeal_kernel::{Data, Id};
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::{Erro, Resultado};
+use cardeal_modkit::Comando;
 #[cfg(feature = "sqlite")]
+use cardeal_modkit::Ctx;
 use cardeal_modkit::Risco;
-#[cfg(feature = "sqlite")]
-use cardeal_modkit::{Comando, Ctx};
 #[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
@@ -41,12 +41,12 @@ pub struct PessoaEditada {
     pub pessoa: Id,
 }
 
-#[cfg(feature = "sqlite")]
 impl Comando for EditarPessoa {
     type Saida = PessoaEditada;
     const PERMISSAO: &'static str = "clientes.pessoa.editar";
     const RISCO: Risco = Risco::Baixo;
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, _ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         // 1. Carregar.
         let mut pessoa = RepositorioClientes::novo(uow)

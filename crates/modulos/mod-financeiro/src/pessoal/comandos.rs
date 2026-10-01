@@ -4,10 +4,10 @@
 use cardeal_kernel::{Data, Id};
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::{Erro, Resultado};
+use cardeal_modkit::Comando;
 #[cfg(feature = "sqlite")]
+use cardeal_modkit::Ctx;
 use cardeal_modkit::Risco;
-#[cfg(feature = "sqlite")]
-use cardeal_modkit::{Comando, Ctx};
 #[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 #[cfg(feature = "sqlite")]
@@ -26,13 +26,13 @@ use crate::repositorio::{blob, persist};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LancarPessoal(pub NovoPessoal);
 
-#[cfg(feature = "sqlite")]
 impl Comando for LancarPessoal {
     /// Os ids gerados, em ordem.
     type Saida = Vec<Id>;
     const PERMISSAO: &'static str = "financeiro.pessoal";
     const RISCO: Risco = Risco::Baixo;
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         let lancamentos = gerar(&self.0, ctx.hoje())?;
         let agora = uow.agora().em_micros();
@@ -79,13 +79,13 @@ pub struct MarcarPessoalPago {
     pub data: Data,
 }
 
-#[cfg(feature = "sqlite")]
 impl Comando for MarcarPessoalPago {
     /// Quantos foram alterados.
     type Saida = usize;
     const PERMISSAO: &'static str = "financeiro.pessoal";
     const RISCO: Risco = Risco::Baixo;
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         let pago_em = self.pago.then(|| dias(self.data));
         let mut n = 0;
@@ -113,13 +113,13 @@ pub struct ExcluirPessoal {
     pub e_seguintes: bool,
 }
 
-#[cfg(feature = "sqlite")]
 impl Comando for ExcluirPessoal {
     /// Quantos foram excluídos.
     type Saida = usize;
     const PERMISSAO: &'static str = "financeiro.pessoal";
     const RISCO: Risco = Risco::Medio;
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         let conn = uow.conexao();
         let (grupo, parcela): (Vec<u8>, i64) = conn

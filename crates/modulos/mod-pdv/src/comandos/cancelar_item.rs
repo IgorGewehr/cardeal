@@ -4,10 +4,10 @@
 use cardeal_kernel::Id;
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::{Erro, Resultado};
+use cardeal_modkit::Comando;
 #[cfg(feature = "sqlite")]
+use cardeal_modkit::Ctx;
 use cardeal_modkit::Risco;
-#[cfg(feature = "sqlite")]
-use cardeal_modkit::{Comando, Ctx};
 #[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
@@ -30,12 +30,12 @@ pub struct CancelarItem {
     pub motivo: String,
 }
 
-#[cfg(feature = "sqlite")]
 impl Comando for CancelarItem {
     type Saida = ();
     const PERMISSAO: &'static str = "pdv.item.cancelar";
     const RISCO: Risco = Risco::Baixo;
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, _ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         // 1. Carregar.
         let mut cupom = carregar_cupom(uow, self.cupom)?;

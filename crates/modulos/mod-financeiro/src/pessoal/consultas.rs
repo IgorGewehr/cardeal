@@ -5,13 +5,13 @@ use cardeal_kernel::Data;
 use cardeal_kernel::Periodo;
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::{Dinheiro, Id, Resultado};
+use cardeal_modkit::Consulta;
 #[cfg(feature = "sqlite")]
-use cardeal_modkit::{Consulta, Ctx};
+use cardeal_modkit::Ctx;
 #[cfg(feature = "sqlite")]
 use rusqlite::{params, Connection, Row};
 use serde::{Deserialize, Serialize};
 
-#[cfg(feature = "sqlite")]
 use super::LancamentoPessoal;
 #[cfg(feature = "sqlite")]
 use super::TipoPessoal;
@@ -90,11 +90,11 @@ pub struct LancamentosPessoais {
     pub periodo: Periodo,
 }
 
-#[cfg(feature = "sqlite")]
 impl Consulta for LancamentosPessoais {
     type Saida = Vec<LancamentoPessoal>;
     const PERMISSAO: &'static str = "financeiro.pessoal";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         lancamentos_do_usuario(conexao, ctx.empresa, ctx.usuario, self.periodo)
     }
@@ -113,11 +113,11 @@ pub struct Sugestoes {
     pub cartoes: Vec<String>,
 }
 
-#[cfg(feature = "sqlite")]
 impl Consulta for SugestoesPessoais {
     type Saida = Sugestoes;
     const PERMISSAO: &'static str = "financeiro.pessoal";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         let distintos = |coluna: &str| -> Resultado<Vec<String>> {
             let sql = format!(

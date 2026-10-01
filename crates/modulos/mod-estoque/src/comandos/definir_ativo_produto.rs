@@ -6,10 +6,10 @@
 use cardeal_kernel::Id;
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::{Erro, Resultado};
+use cardeal_modkit::Comando;
 #[cfg(feature = "sqlite")]
+use cardeal_modkit::Ctx;
 use cardeal_modkit::Risco;
-#[cfg(feature = "sqlite")]
-use cardeal_modkit::{Comando, Ctx};
 #[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
@@ -26,12 +26,12 @@ pub struct DefinirAtivoProduto {
     pub ativo: bool,
 }
 
-#[cfg(feature = "sqlite")]
 impl Comando for DefinirAtivoProduto {
     type Saida = ();
     const PERMISSAO: &'static str = "estoque.produto.editar";
     const RISCO: Risco = Risco::Baixo;
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, _ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         let mut repo = RepositorioEstoque::novo(uow);
         repo.buscar_produto(self.produto)?

@@ -10,22 +10,20 @@ use std::collections::HashMap;
 use cardeal_kernel::Resultado;
 use cardeal_kernel::{Competencia, Data, Dinheiro, Id, Periodo};
 use cardeal_ledger::Contraparte;
+use cardeal_modkit::Consulta;
 #[cfg(feature = "sqlite")]
-use cardeal_modkit::{Consulta, Ctx};
+use cardeal_modkit::Ctx;
 #[cfg(feature = "sqlite")]
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
-#[cfg(feature = "sqlite")]
 use crate::categoria::CategoriaFinanceira;
-#[cfg(feature = "sqlite")]
 use crate::recorrencia::Recorrencia;
 #[cfg(feature = "sqlite")]
 use crate::repositorio::{
     blob, categoria_de_linha, contraparte_join_opt, data_de, especie_de, especie_txt, estado_de,
     id_de, persist, recorrencia_de_linha, titulo_de_linha,
 };
-#[cfg(feature = "sqlite")]
 use crate::titulo::Titulo;
 use crate::titulo::{EspecieTitulo, EstadoParcela};
 
@@ -124,11 +122,11 @@ pub fn titulos_em_aberto(
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TitulosAReceberEmAberto;
 
-#[cfg(feature = "sqlite")]
 impl Consulta for TitulosAReceberEmAberto {
     type Saida = Vec<ItemTituloEmAberto>;
     const PERMISSAO: &'static str = "financeiro.receber.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         titulos_em_aberto(conexao, ctx.empresa, EspecieTitulo::Receber)
     }
@@ -138,11 +136,11 @@ impl Consulta for TitulosAReceberEmAberto {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TitulosAPagarEmAberto;
 
-#[cfg(feature = "sqlite")]
 impl Consulta for TitulosAPagarEmAberto {
     type Saida = Vec<ItemTituloEmAberto>;
     const PERMISSAO: &'static str = "financeiro.pagar.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         titulos_em_aberto(conexao, ctx.empresa, EspecieTitulo::Pagar)
     }
@@ -216,11 +214,11 @@ pub struct ParcelasAReceberNoPeriodo {
     pub periodo: Periodo,
 }
 
-#[cfg(feature = "sqlite")]
 impl Consulta for ParcelasAReceberNoPeriodo {
     type Saida = Vec<ItemTituloEmAberto>;
     const PERMISSAO: &'static str = "financeiro.receber.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         parcelas_no_periodo(conexao, ctx.empresa, EspecieTitulo::Receber, self.periodo)
     }
@@ -234,11 +232,11 @@ pub struct ParcelasAPagarNoPeriodo {
     pub periodo: Periodo,
 }
 
-#[cfg(feature = "sqlite")]
 impl Consulta for ParcelasAPagarNoPeriodo {
     type Saida = Vec<ItemTituloEmAberto>;
     const PERMISSAO: &'static str = "financeiro.pagar.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         parcelas_no_periodo(conexao, ctx.empresa, EspecieTitulo::Pagar, self.periodo)
     }
@@ -285,11 +283,11 @@ pub struct TotalRecebidoNoPeriodo {
     pub periodo: Periodo,
 }
 
-#[cfg(feature = "sqlite")]
 impl Consulta for TotalRecebidoNoPeriodo {
     type Saida = Dinheiro;
     const PERMISSAO: &'static str = "financeiro.receber.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         total_baixado_no_periodo(conexao, ctx.empresa, EspecieTitulo::Receber, self.periodo)
     }
@@ -302,11 +300,11 @@ pub struct TotalPagoNoPeriodo {
     pub periodo: Periodo,
 }
 
-#[cfg(feature = "sqlite")]
 impl Consulta for TotalPagoNoPeriodo {
     type Saida = Dinheiro;
     const PERMISSAO: &'static str = "financeiro.pagar.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         total_baixado_no_periodo(conexao, ctx.empresa, EspecieTitulo::Pagar, self.periodo)
     }
@@ -352,11 +350,11 @@ pub struct TituloDaOrigem {
     pub origem_id: Id,
 }
 
-#[cfg(feature = "sqlite")]
 impl Consulta for TituloDaOrigem {
     type Saida = Option<Titulo>;
     const PERMISSAO: &'static str = "financeiro.receber.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         titulo_da_origem(conexao, ctx.empresa, &self.origem_modulo, self.origem_id)
     }
@@ -414,11 +412,11 @@ pub struct SituacaoNaData {
     pub total_devido: Dinheiro,
 }
 
-#[cfg(feature = "sqlite")]
 impl Consulta for SituacaoDaParcela {
     type Saida = SituacaoNaData;
     const PERMISSAO: &'static str = "financeiro.receber.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, _ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         let parcela = crate::repositorio::parcela_por_id(conexao, self.parcela)?
             .ok_or_else(|| cardeal_kernel::Erro::nao_encontrado("parcela"))?;
@@ -443,11 +441,11 @@ pub struct BaixasDaParcela {
     pub parcela: Id,
 }
 
-#[cfg(feature = "sqlite")]
 impl Consulta for BaixasDaParcela {
     type Saida = Vec<ItemBaixa>;
     const PERMISSAO: &'static str = "financeiro.receber.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         let mut stmt = conexao
             .prepare(
@@ -502,11 +500,11 @@ pub fn categorias_ativas(conexao: &Connection, empresa: Id) -> Resultado<Vec<Cat
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Categorias;
 
-#[cfg(feature = "sqlite")]
 impl Consulta for Categorias {
     type Saida = Vec<CategoriaFinanceira>;
     const PERMISSAO: &'static str = "financeiro.categoria.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         categorias_ativas(conexao, ctx.empresa)
     }
@@ -538,11 +536,11 @@ pub struct TotalPorCategoriaNoPeriodo {
     pub periodo: Periodo,
 }
 
-#[cfg(feature = "sqlite")]
 impl Consulta for TotalPorCategoriaNoPeriodo {
     type Saida = Vec<ItemTotalPorCategoria>;
     const PERMISSAO: &'static str = "financeiro.categoria.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         let mut stmt = conexao
             .prepare(
@@ -617,11 +615,11 @@ pub struct ContasDeResultado {
     pub especie: EspecieTitulo,
 }
 
-#[cfg(feature = "sqlite")]
 impl Consulta for ContasDeResultado {
     type Saida = Vec<ItemContaResultado>;
     const PERMISSAO: &'static str = "financeiro.recorrencia.criar";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         let natureza = match self.especie {
             EspecieTitulo::Receber => "Receita",
@@ -655,11 +653,11 @@ impl Consulta for ContasDeResultado {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Recorrencias;
 
-#[cfg(feature = "sqlite")]
 impl Consulta for Recorrencias {
     type Saida = Vec<Recorrencia>;
     const PERMISSAO: &'static str = "financeiro.recorrencia.criar";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         let mut stmt = conexao
             .prepare(
@@ -696,11 +694,11 @@ pub struct ItemCaixa {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Caixas;
 
-#[cfg(feature = "sqlite")]
 impl Consulta for Caixas {
     type Saida = Vec<ItemCaixa>;
     const PERMISSAO: &'static str = "financeiro.caixa.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         let mut stmt = conexao
             .prepare(
@@ -733,11 +731,11 @@ impl Consulta for Caixas {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContasDeCaixa;
 
-#[cfg(feature = "sqlite")]
 impl Consulta for ContasDeCaixa {
     type Saida = Vec<ItemContaResultado>;
     const PERMISSAO: &'static str = "financeiro.caixa.cadastrar";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         let mut stmt = conexao
             .prepare(
@@ -790,11 +788,11 @@ pub struct ItemContaDisponivel {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContasDisponiveis;
 
-#[cfg(feature = "sqlite")]
 impl Consulta for ContasDisponiveis {
     type Saida = Vec<ItemContaDisponivel>;
     const PERMISSAO: &'static str = "financeiro.banco.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         let mut stmt = conexao
             .prepare(
@@ -862,11 +860,11 @@ pub struct ExtratoDisponivel {
     pub conta: Option<Id>,
 }
 
-#[cfg(feature = "sqlite")]
 impl Consulta for ExtratoDisponivel {
     type Saida = Vec<ItemMovimentoDisponivel>;
     const PERMISSAO: &'static str = "financeiro.banco.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         // `LEFT JOIN financeiro_baixa`/`financeiro_parcela`/`financeiro_titulo`: quando este
         // movimento é a baixa de uma parcela, remonta até o título de origem — sem o

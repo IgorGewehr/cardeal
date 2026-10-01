@@ -6,10 +6,10 @@
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::{Erro, Resultado};
 use cardeal_kernel::{Id, Instante};
+use cardeal_modkit::Comando;
 #[cfg(feature = "sqlite")]
+use cardeal_modkit::Ctx;
 use cardeal_modkit::Risco;
-#[cfg(feature = "sqlite")]
-use cardeal_modkit::{Comando, Ctx};
 #[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
@@ -30,13 +30,13 @@ pub struct AjustarApontamento {
     pub motivo: String,
 }
 
-#[cfg(feature = "sqlite")]
 impl Comando for AjustarApontamento {
     type Saida = i64;
     const PERMISSAO: &'static str = "os.apontamento.ajustar";
     const RISCO: Risco = Risco::Medio;
     const AUDITA: bool = true;
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, _ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         // 1. Carregar.
         let mut repo = RepositorioOs::novo(uow);

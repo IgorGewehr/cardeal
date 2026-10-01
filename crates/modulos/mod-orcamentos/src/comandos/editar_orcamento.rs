@@ -3,10 +3,10 @@
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::{Erro, Resultado};
 use cardeal_kernel::{Id, Percentual};
+use cardeal_modkit::Comando;
 #[cfg(feature = "sqlite")]
+use cardeal_modkit::Ctx;
 use cardeal_modkit::Risco;
-#[cfg(feature = "sqlite")]
-use cardeal_modkit::{Comando, Ctx};
 #[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
@@ -47,12 +47,12 @@ pub struct EditarOrcamento {
     pub desconto_percentual: Percentual,
 }
 
-#[cfg(feature = "sqlite")]
 impl Comando for EditarOrcamento {
     type Saida = ();
     const PERMISSAO: &'static str = "orcamentos.orcamento.editar";
     const RISCO: Risco = Risco::Baixo;
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, _ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         let mut orcamento = carregar_orcamento(uow, self.orcamento)?;
         let validade = orcamento

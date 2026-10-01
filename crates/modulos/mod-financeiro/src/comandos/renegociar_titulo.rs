@@ -15,10 +15,10 @@
 use cardeal_kernel::{Data, Dinheiro, Id, Percentual};
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::{Erro, Resultado};
+use cardeal_modkit::Comando;
 #[cfg(feature = "sqlite")]
+use cardeal_modkit::Ctx;
 use cardeal_modkit::Risco;
-#[cfg(feature = "sqlite")]
-use cardeal_modkit::{Comando, Ctx};
 #[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
@@ -61,13 +61,13 @@ pub struct TituloFoiRenegociado {
     pub saldo: Dinheiro,
 }
 
-#[cfg(feature = "sqlite")]
 impl Comando for RenegociarTitulo {
     type Saida = TituloFoiRenegociado;
     const PERMISSAO: &'static str = "financeiro.receber.renegociar";
     const RISCO: Risco = Risco::Alto;
     const AUDITA: bool = true;
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         // 1. Carregar.
         let titulo_original = RepositorioFinanceiro::novo(uow)

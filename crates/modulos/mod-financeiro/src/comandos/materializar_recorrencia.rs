@@ -5,16 +5,17 @@
 //! então chamar a mais não duplica nada. [`materializar_recorrencias_pendentes`] continua
 //! `pub` para o agendador futuro chamar direto, fora do despacho.
 
+use cardeal_kernel::Id;
 #[cfg(feature = "sqlite")]
-use cardeal_kernel::{Erro, Id, Resultado};
+use cardeal_kernel::{Erro, Resultado};
 #[cfg(feature = "sqlite")]
 use cardeal_ledger::RepositorioRazao;
 #[cfg(feature = "sqlite")]
 use cardeal_ledger::{Contas, PapelConta, Razao};
+use cardeal_modkit::Comando;
 #[cfg(feature = "sqlite")]
+use cardeal_modkit::Ctx;
 use cardeal_modkit::Risco;
-#[cfg(feature = "sqlite")]
-use cardeal_modkit::{Comando, Ctx};
 #[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
@@ -35,7 +36,6 @@ use crate::titulo::EspecieTitulo;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MaterializarRecorrencias;
 
-#[cfg(feature = "sqlite")]
 impl Comando for MaterializarRecorrencias {
     type Saida = Vec<Id>;
     // Quem pode criar a regra pode fazê-la render títulos; um perfil sem acesso ao
@@ -43,6 +43,7 @@ impl Comando for MaterializarRecorrencias {
     const PERMISSAO: &'static str = "financeiro.recorrencia.criar";
     const RISCO: Risco = Risco::Baixo;
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         materializar_recorrencias_pendentes(ctx, uow)
     }

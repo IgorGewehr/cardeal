@@ -3,10 +3,10 @@
 use cardeal_kernel::{Data, Id, Preco, Quantidade};
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::{Erro, Resultado};
+use cardeal_modkit::Comando;
 #[cfg(feature = "sqlite")]
+use cardeal_modkit::Ctx;
 use cardeal_modkit::Risco;
-#[cfg(feature = "sqlite")]
-use cardeal_modkit::{Comando, Ctx};
 #[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
@@ -44,12 +44,12 @@ pub struct RegraPrecoCriada {
     pub regra_preco: Id,
 }
 
-#[cfg(feature = "sqlite")]
 impl Comando for CriarRegraPreco {
     type Saida = RegraPrecoCriada;
     const PERMISSAO: &'static str = "vendas.tabela_preco.editar";
     const RISCO: Risco = Risco::Baixo;
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         let alvo = match (self.alvo_produto, self.alvo_grupo) {
             (Some(p), None) => AlvoRegra::Produto(p),

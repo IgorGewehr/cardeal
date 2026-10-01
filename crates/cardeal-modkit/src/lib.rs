@@ -38,6 +38,7 @@
 #![allow(clippy::module_name_repetitions, clippy::must_use_candidate)]
 #![allow(clippy::result_large_err)] // `Erro`/`ErroArmazenamento` são grandes de propósito (detalhes ao usuário)
 
+mod contrato;
 #[cfg(feature = "sqlite")]
 mod despacho;
 mod icone;
@@ -45,8 +46,9 @@ mod manifesto;
 mod permissao;
 mod registro;
 
+pub use contrato::{Comando, Consulta};
 #[cfg(feature = "sqlite")]
-pub use despacho::{Ambiente, Comando, Consulta, Ctx, Despachante, Modulo, Registro};
+pub use despacho::{Ambiente, Ctx, Despachante, Modulo, Registro};
 pub use icone::Icone;
 pub use manifesto::{ContaPadrao, EntradaMenu, ErroManifesto, IdModulo, Manifesto, Submodulo};
 pub use permissao::{Permissao, Risco};

@@ -9,10 +9,10 @@
 use cardeal_kernel::Id;
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::{Erro, Resultado};
+use cardeal_modkit::Comando;
 #[cfg(feature = "sqlite")]
+use cardeal_modkit::Ctx;
 use cardeal_modkit::Risco;
-#[cfg(feature = "sqlite")]
-use cardeal_modkit::{Comando, Ctx};
 #[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
@@ -42,12 +42,12 @@ pub struct ApontamentoIniciado {
     pub apontamento: Id,
 }
 
-#[cfg(feature = "sqlite")]
 impl Comando for IniciarApontamento {
     type Saida = ApontamentoIniciado;
     const PERMISSAO: &'static str = "os.apontamento.iniciar";
     const RISCO: Risco = Risco::Baixo;
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, _ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         // 1. Carregar / validar que a ordem existe.
         let os = carregar_ordem(uow, self.ordem_servico)?;

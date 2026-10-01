@@ -3,16 +3,17 @@
 use cardeal_kernel::Id;
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::{Erro, Resultado};
+use cardeal_modkit::Comando;
 #[cfg(feature = "sqlite")]
+use cardeal_modkit::Ctx;
 use cardeal_modkit::Risco;
-#[cfg(feature = "sqlite")]
-use cardeal_modkit::{Comando, Ctx};
 #[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "sqlite")]
-use crate::comandos::{carregar_orcamento, OrcamentoCriado};
+use crate::comandos::carregar_orcamento;
+use crate::comandos::OrcamentoCriado;
 #[cfg(feature = "sqlite")]
 use crate::item::ItemOrcamento;
 #[cfg(feature = "sqlite")]
@@ -27,12 +28,12 @@ pub struct DuplicarOrcamento {
     pub orcamento: Id,
 }
 
-#[cfg(feature = "sqlite")]
 impl Comando for DuplicarOrcamento {
     type Saida = OrcamentoCriado;
     const PERMISSAO: &'static str = "orcamentos.orcamento.criar";
     const RISCO: Risco = Risco::Baixo;
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         let origem = carregar_orcamento(uow, self.orcamento)?;
         let itens_origem = RepositorioOrcamentos::novo(uow).itens_do_orcamento(origem.id)?;

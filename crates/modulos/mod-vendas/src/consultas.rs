@@ -4,16 +4,15 @@
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::Resultado;
 use cardeal_kernel::{Data, Dinheiro, Id};
+use cardeal_modkit::Consulta;
 #[cfg(feature = "sqlite")]
-use cardeal_modkit::{Consulta, Ctx};
+use cardeal_modkit::Ctx;
 #[cfg(feature = "sqlite")]
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
 use crate::pedido::EstadoPedido;
-#[cfg(feature = "sqlite")]
 use crate::pedido::ItemVenda;
-#[cfg(feature = "sqlite")]
 use crate::preco::{RegraPreco, TabelaPreco};
 #[cfg(feature = "sqlite")]
 use crate::repositorio::{
@@ -42,11 +41,11 @@ pub struct ItemPedido {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PedidosRecentes;
 
-#[cfg(feature = "sqlite")]
 impl Consulta for PedidosRecentes {
     type Saida = Vec<ItemPedido>;
     const PERMISSAO: &'static str = "vendas.pedido.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         let mut stmt = conexao
             .prepare(
@@ -81,11 +80,11 @@ impl Consulta for PedidosRecentes {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TabelasDePreco;
 
-#[cfg(feature = "sqlite")]
 impl Consulta for TabelasDePreco {
     type Saida = Vec<TabelaPreco>;
     const PERMISSAO: &'static str = "vendas.tabela_preco.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         let mut stmt = conexao
             .prepare(
@@ -111,11 +110,11 @@ pub struct RegrasDaTabela {
     pub tabela: Id,
 }
 
-#[cfg(feature = "sqlite")]
 impl Consulta for RegrasDaTabela {
     type Saida = Vec<RegraPreco>;
     const PERMISSAO: &'static str = "vendas.tabela_preco.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, _ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         let mut stmt = conexao
             .prepare(
@@ -142,11 +141,11 @@ pub struct ItensDoPedido {
     pub pedido: Id,
 }
 
-#[cfg(feature = "sqlite")]
 impl Consulta for ItensDoPedido {
     type Saida = Vec<ItemVenda>;
     const PERMISSAO: &'static str = "vendas.pedido.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, _ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         let mut stmt = conexao
             .prepare(

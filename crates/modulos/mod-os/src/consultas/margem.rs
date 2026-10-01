@@ -4,8 +4,9 @@
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::Resultado;
 use cardeal_kernel::{Dinheiro, Id};
+use cardeal_modkit::Consulta;
 #[cfg(feature = "sqlite")]
-use cardeal_modkit::{Consulta, Ctx};
+use cardeal_modkit::Ctx;
 #[cfg(feature = "sqlite")]
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -42,11 +43,11 @@ impl MargemDasOrdens {
     }
 }
 
-#[cfg(feature = "sqlite")]
 impl Consulta for MargemDasOrdensNoPeriodo {
     type Saida = MargemDasOrdens;
     const PERMISSAO: &'static str = "os.ordem.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         // O instante (micros UTC) do começo do primeiro dia e do fim do último, em Brasília.
         let meia_noite = |d: cardeal_kernel::Data| {
@@ -125,11 +126,11 @@ impl MargemDaOrdemServico {
     }
 }
 
-#[cfg(feature = "sqlite")]
 impl Consulta for MargemDaOrdem {
     type Saida = Option<MargemDaOrdemServico>;
     const PERMISSAO: &'static str = "os.ordem.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         let ordem = conexao
             .query_row(

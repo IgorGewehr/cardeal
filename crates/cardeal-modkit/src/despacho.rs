@@ -33,9 +33,8 @@ use cardeal_storage::{
     ConjuntoMigracoes, ContextoEscrita, ErroArmazenamento, Escritor, Leitor, UnidadeDeTrabalho,
 };
 use rusqlite::Connection;
-use serde::de::DeserializeOwned;
-use serde::Serialize;
 
+use crate::contrato::{Comando, Consulta};
 use crate::manifesto::Manifesto;
 use crate::permissao::Risco;
 use crate::registro::ConjuntoEfetivo;
@@ -117,45 +116,6 @@ impl Ctx {
     pub fn de_sessao(sessao: &Sessao, ambiente: &Ambiente) -> Self {
         montar_ctx(sessao, ambiente)
     }
-}
-
-/// Um comando: uma intenção de mudar o estado. `docs/15-convencoes-codigo.md` §3 e §6.
-///
-/// A macro `#[comando(...)]` (a nascer em `cardeal-protocol`) preencherá `PERMISSAO`,
-/// `RISCO` e `AUDITA`; por ora o módulo implementa o trait à mão.
-pub trait Comando: DeserializeOwned + Send + 'static {
-    /// O que o comando devolve em caso de sucesso.
-    type Saida: Serialize + Send + 'static;
-
-    /// A permissão exigida — sem isto, não compila (`docs/08 §3.5`).
-    const PERMISSAO: &'static str;
-
-    /// O risco da ação, para a interface e a auditoria.
-    const RISCO: Risco = Risco::Medio;
-
-    /// Se verdadeiro, a operação deve ser registrada em `nucleo_auditoria`.
-    const AUDITA: bool = false;
-
-    /// Executa o comando dentro da unidade de trabalho do escritor.
-    ///
-    /// # Errors
-    /// Qualquer erro de domínio do módulo — desfaz o `SAVEPOINT` da tarefa.
-    fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida>;
-}
-
-/// Uma consulta: uma leitura, sem efeito. Roda sobre uma conexão do pool do [`Leitor`].
-pub trait Consulta: DeserializeOwned + Send + 'static {
-    /// O que a consulta devolve.
-    type Saida: Serialize + Send + 'static;
-
-    /// A permissão exigida.
-    const PERMISSAO: &'static str;
-
-    /// Executa a consulta.
-    ///
-    /// # Errors
-    /// Qualquer erro de domínio do módulo.
-    fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida>;
 }
 
 /// Um módulo de negócio, do ponto de vista do motor. Ver `docs/contratos-internos.md` §4.

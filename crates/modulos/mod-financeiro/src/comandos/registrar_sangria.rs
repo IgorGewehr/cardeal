@@ -12,10 +12,10 @@ use cardeal_kernel::{Erro, Resultado};
 use cardeal_ledger::Razao;
 #[cfg(feature = "sqlite")]
 use cardeal_ledger::RepositorioRazao;
+use cardeal_modkit::Comando;
 #[cfg(feature = "sqlite")]
+use cardeal_modkit::Ctx;
 use cardeal_modkit::Risco;
-#[cfg(feature = "sqlite")]
-use cardeal_modkit::{Comando, Ctx};
 #[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
@@ -47,13 +47,13 @@ pub struct SangriaFoiRegistrada {
     pub lancamento: Id,
 }
 
-#[cfg(feature = "sqlite")]
 impl Comando for RegistrarSangria {
     type Saida = SangriaFoiRegistrada;
     const PERMISSAO: &'static str = "financeiro.caixa.sangria";
     const RISCO: Risco = Risco::Medio;
     const AUDITA: bool = true;
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         let (sessao, caixa) = carregar_sessao_e_caixa(uow, self.sessao)?;
         let contas = contas_caixa_rotina(uow, ctx, &caixa)?;

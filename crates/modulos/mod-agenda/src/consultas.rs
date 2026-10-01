@@ -4,15 +4,14 @@
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::Resultado;
 use cardeal_kernel::{Id, Instante};
+use cardeal_modkit::Consulta;
 #[cfg(feature = "sqlite")]
-use cardeal_modkit::{Consulta, Ctx};
+use cardeal_modkit::Ctx;
 #[cfg(feature = "sqlite")]
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 
-#[cfg(feature = "sqlite")]
 use crate::compromisso::Compromisso;
-#[cfg(feature = "sqlite")]
 use crate::recurso::DisponibilidadeRecurso;
 #[cfg(feature = "sqlite")]
 use crate::repositorio::{blob, compromisso_de_linha, disponibilidade_de_linha, id_de, persist};
@@ -148,11 +147,11 @@ pub struct AgendaDoRecurso {
     pub fim: Instante,
 }
 
-#[cfg(feature = "sqlite")]
 impl Consulta for AgendaDoRecurso {
     type Saida = Vec<Compromisso>;
     const PERMISSAO: &'static str = "agenda.compromisso.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, _ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         compromissos_do_recurso_no_periodo(conexao, self.recurso, self.inicio, self.fim)
     }
@@ -168,11 +167,11 @@ pub struct DisponibilidadeNoPeriodo {
     pub recurso: Id,
 }
 
-#[cfg(feature = "sqlite")]
 impl Consulta for DisponibilidadeNoPeriodo {
     type Saida = Vec<DisponibilidadeRecurso>;
     const PERMISSAO: &'static str = "agenda.compromisso.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, _ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         disponibilidade_do_recurso(conexao, self.recurso)
     }
@@ -191,11 +190,11 @@ pub struct ConflitosDeAgenda {
     pub fim: Instante,
 }
 
-#[cfg(feature = "sqlite")]
 impl Consulta for ConflitosDeAgenda {
     type Saida = Vec<Compromisso>;
     const PERMISSAO: &'static str = "agenda.compromisso.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, _ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         compromissos_do_recurso_sobrepondo(conexao, self.recurso, self.inicio, self.fim)
     }
@@ -206,11 +205,11 @@ impl Consulta for ConflitosDeAgenda {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProximosCompromissos;
 
-#[cfg(feature = "sqlite")]
 impl Consulta for ProximosCompromissos {
     type Saida = Vec<Compromisso>;
     const PERMISSAO: &'static str = "agenda.compromisso.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         proximos_compromissos(conexao, ctx.empresa, ctx.agora)
     }
@@ -229,11 +228,11 @@ pub struct CompromissosNoPeriodo {
     pub recurso: Option<Id>,
 }
 
-#[cfg(feature = "sqlite")]
 impl Consulta for CompromissosNoPeriodo {
     type Saida = Vec<Compromisso>;
     const PERMISSAO: &'static str = "agenda.compromisso.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         let mut stmt = conexao
             .prepare(
@@ -268,11 +267,11 @@ impl Consulta for CompromissosNoPeriodo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Recursos;
 
-#[cfg(feature = "sqlite")]
 impl Consulta for Recursos {
     type Saida = Vec<crate::recurso::Recurso>;
     const PERMISSAO: &'static str = "agenda.compromisso.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         use crate::recurso::{Recurso, TipoRecurso};
         let tipo_de = |s: &str| match s {

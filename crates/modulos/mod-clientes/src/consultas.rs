@@ -5,8 +5,9 @@
 use cardeal_kernel::Id;
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::{Instante, Resultado};
+use cardeal_modkit::Consulta;
 #[cfg(feature = "sqlite")]
-use cardeal_modkit::{Consulta, Ctx};
+use cardeal_modkit::Ctx;
 #[cfg(feature = "sqlite")]
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -208,11 +209,11 @@ pub struct DetalhePessoa {
     pub pessoa: Id,
 }
 
-#[cfg(feature = "sqlite")]
 impl Consulta for DetalhePessoa {
     type Saida = Option<PessoaDetalhada>;
     const PERMISSAO: &'static str = "clientes.pessoa.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, _ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         let Some(pessoa) = pessoa_por_id(conexao, self.pessoa)? else {
             return Ok(None);
@@ -262,11 +263,11 @@ pub struct PessoasPorPapel {
     pub busca: Option<String>,
 }
 
-#[cfg(feature = "sqlite")]
 impl Consulta for PessoasPorPapel {
     type Saida = Vec<ItemPessoa>;
     const PERMISSAO: &'static str = "clientes.pessoa.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         let bruto = self
             .busca

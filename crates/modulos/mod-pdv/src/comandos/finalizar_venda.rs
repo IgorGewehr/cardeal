@@ -18,10 +18,10 @@ use cardeal_ledger::PapelConta;
 use cardeal_ledger::RepositorioRazao;
 #[cfg(feature = "sqlite")]
 use cardeal_ledger::{Contas, Razao};
+use cardeal_modkit::Comando;
 #[cfg(feature = "sqlite")]
+use cardeal_modkit::Ctx;
 use cardeal_modkit::Risco;
-#[cfg(feature = "sqlite")]
-use cardeal_modkit::{Comando, Ctx};
 #[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 #[cfg(feature = "sqlite")]
@@ -67,13 +67,13 @@ pub struct VendaFoiFinalizada {
     pub total: Dinheiro,
 }
 
-#[cfg(feature = "sqlite")]
 impl Comando for FinalizarVenda {
     type Saida = VendaFoiFinalizada;
     const PERMISSAO: &'static str = "pdv.venda.finalizar";
     const RISCO: Risco = Risco::Alto;
     const AUDITA: bool = true;
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         // 1. Carregar.
         let mut cupom = carregar_cupom(uow, self.cupom)?;

@@ -3,10 +3,10 @@
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::{Erro, Resultado};
 use cardeal_kernel::{Id, Percentual};
+use cardeal_modkit::Comando;
 #[cfg(feature = "sqlite")]
+use cardeal_modkit::Ctx;
 use cardeal_modkit::Risco;
-#[cfg(feature = "sqlite")]
-use cardeal_modkit::{Comando, Ctx};
 #[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
@@ -27,12 +27,12 @@ pub struct AplicarDescontoItem {
     pub desconto_percentual: Percentual,
 }
 
-#[cfg(feature = "sqlite")]
 impl Comando for AplicarDescontoItem {
     type Saida = ();
     const PERMISSAO: &'static str = "pdv.desconto.aplicar";
     const RISCO: Risco = Risco::Medio;
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         // 1. Carregar.
         let mut cupom = carregar_cupom(uow, self.cupom)?;

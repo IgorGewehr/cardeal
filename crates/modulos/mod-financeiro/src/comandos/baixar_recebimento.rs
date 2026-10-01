@@ -12,10 +12,10 @@ use cardeal_kernel::Resultado;
 use cardeal_kernel::{Data, Dinheiro, Id};
 #[cfg(feature = "sqlite")]
 use cardeal_ledger::PapelConta;
+use cardeal_modkit::Comando;
 #[cfg(feature = "sqlite")]
+use cardeal_modkit::Ctx;
 use cardeal_modkit::Risco;
-#[cfg(feature = "sqlite")]
-use cardeal_modkit::{Comando, Ctx};
 #[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
@@ -55,13 +55,13 @@ pub struct RecebimentoBaixado {
     pub saldo_restante: Dinheiro,
 }
 
-#[cfg(feature = "sqlite")]
 impl Comando for BaixarRecebimento {
     type Saida = RecebimentoBaixado;
     const PERMISSAO: &'static str = "financeiro.receber.baixar";
     const RISCO: Risco = Risco::Medio;
     const AUDITA: bool = true;
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         baixar_recebimento_comum(
             self.parcela,

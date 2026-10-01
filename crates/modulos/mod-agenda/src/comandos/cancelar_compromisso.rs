@@ -3,10 +3,10 @@
 use cardeal_kernel::Id;
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::{Erro, Resultado};
+use cardeal_modkit::Comando;
 #[cfg(feature = "sqlite")]
+use cardeal_modkit::Ctx;
 use cardeal_modkit::Risco;
-#[cfg(feature = "sqlite")]
-use cardeal_modkit::{Comando, Ctx};
 #[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
@@ -25,12 +25,12 @@ pub struct CancelarCompromisso {
     pub compromisso: Id,
 }
 
-#[cfg(feature = "sqlite")]
 impl Comando for CancelarCompromisso {
     type Saida = ();
     const PERMISSAO: &'static str = "agenda.compromisso.cancelar";
     const RISCO: Risco = Risco::Medio;
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, _ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         // 1. Carregar.
         let mut c = carregar_compromisso(uow, self.compromisso)?;

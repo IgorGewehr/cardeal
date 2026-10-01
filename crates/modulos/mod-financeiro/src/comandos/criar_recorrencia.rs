@@ -8,10 +8,10 @@ use cardeal_kernel::{Data, Dinheiro, Id};
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::{Erro, Resultado, Versao};
 use cardeal_ledger::Contraparte;
+use cardeal_modkit::Comando;
 #[cfg(feature = "sqlite")]
+use cardeal_modkit::Ctx;
 use cardeal_modkit::Risco;
-#[cfg(feature = "sqlite")]
-use cardeal_modkit::{Comando, Ctx};
 #[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
@@ -69,12 +69,12 @@ pub struct RecorrenciaCriada {
     pub recorrencia: Id,
 }
 
-#[cfg(feature = "sqlite")]
 impl Comando for CriarRecorrencia {
     type Saida = RecorrenciaCriada;
     const PERMISSAO: &'static str = "financeiro.recorrencia.criar";
     const RISCO: Risco = Risco::Medio;
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         // 1. Validar (domínio puro).
         let recorrencia = Recorrencia {

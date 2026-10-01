@@ -11,8 +11,9 @@ use cardeal_kernel::Resultado;
 use cardeal_kernel::{Competencia, Dinheiro, Id};
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::{Data, Periodo};
+use cardeal_modkit::Consulta;
 #[cfg(feature = "sqlite")]
-use cardeal_modkit::{Consulta, Ctx};
+use cardeal_modkit::Ctx;
 #[cfg(feature = "sqlite")]
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
@@ -59,11 +60,11 @@ pub struct ProjecaoPorCategoria {
     pub meses: u8,
 }
 
-#[cfg(feature = "sqlite")]
 impl Consulta for ProjecaoPorCategoria {
     type Saida = Vec<ItemProjecaoCategoria>;
     const PERMISSAO: &'static str = "financeiro.projecao.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         let meses = i32::from(self.meses.clamp(1, 24));
         let janela = Periodo::novo(

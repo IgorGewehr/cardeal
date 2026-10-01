@@ -13,10 +13,10 @@ use cardeal_kernel::{Arredondamento, CodigoErro, Erro, Resultado};
 use cardeal_kernel::{Data, Dinheiro, Id, Preco};
 #[cfg(feature = "sqlite")]
 use cardeal_ledger::PapelConta;
+use cardeal_modkit::Comando;
 #[cfg(feature = "sqlite")]
+use cardeal_modkit::Ctx;
 use cardeal_modkit::Risco;
-#[cfg(feature = "sqlite")]
-use cardeal_modkit::{Comando, Ctx};
 #[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 #[cfg(feature = "sqlite")]
@@ -52,12 +52,12 @@ pub struct EncomendarPeca {
     pub previsao_chegada: Option<Data>,
 }
 
-#[cfg(feature = "sqlite")]
 impl Comando for EncomendarPeca {
     type Saida = ();
     const PERMISSAO: &'static str = "os.orcamento.montar";
     const RISCO: Risco = Risco::Baixo;
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         let (_, mut item) = carregar_item_pendente(uow, self.ordem_servico, self.item_peca)?;
         let fornecedor = self.fornecedor.trim();
@@ -124,13 +124,13 @@ pub struct ChegadaRegistrada {
     pub pago: bool,
 }
 
-#[cfg(feature = "sqlite")]
 impl Comando for RegistrarChegadaDaPeca {
     type Saida = ChegadaRegistrada;
     const PERMISSAO: &'static str = "os.peca.aplicar";
     const RISCO: Risco = Risco::Medio;
     const AUDITA: bool = true;
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         // Mexe no financeiro também: as permissões de lá são conferidas aqui.
         let pago_agora = matches!(self.pagamento, PagamentoDaPeca::PagoAgora { .. });

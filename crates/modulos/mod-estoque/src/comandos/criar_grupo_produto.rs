@@ -4,10 +4,10 @@
 use cardeal_kernel::Id;
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::{CodigoErro, Erro, Resultado};
+use cardeal_modkit::Comando;
 #[cfg(feature = "sqlite")]
+use cardeal_modkit::Ctx;
 use cardeal_modkit::Risco;
-#[cfg(feature = "sqlite")]
-use cardeal_modkit::{Comando, Ctx};
 #[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
@@ -33,12 +33,12 @@ pub struct GrupoProdutoCriado {
     pub grupo_produto: Id,
 }
 
-#[cfg(feature = "sqlite")]
 impl Comando for CriarGrupoProduto {
     type Saida = GrupoProdutoCriado;
     const PERMISSAO: &'static str = "estoque.produto.criar";
     const RISCO: Risco = Risco::Baixo;
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         let codigo = self.codigo.trim();
         let nome = self.nome.trim();

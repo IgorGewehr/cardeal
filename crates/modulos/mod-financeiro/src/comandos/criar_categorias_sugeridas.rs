@@ -4,10 +4,10 @@
 
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::{Erro, Resultado};
+use cardeal_modkit::Comando;
 #[cfg(feature = "sqlite")]
+use cardeal_modkit::Ctx;
 use cardeal_modkit::Risco;
-#[cfg(feature = "sqlite")]
-use cardeal_modkit::{Comando, Ctx};
 #[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
@@ -44,13 +44,13 @@ pub const CATEGORIAS_SUGERIDAS: &[(&str, EspecieTitulo)] = &[
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CriarCategoriasSugeridas;
 
-#[cfg(feature = "sqlite")]
 impl Comando for CriarCategoriasSugeridas {
     /// Quantas foram criadas.
     type Saida = u32;
     const PERMISSAO: &'static str = "financeiro.categoria.criar";
     const RISCO: Risco = Risco::Baixo;
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         let normalizar = |s: &str| s.trim().to_lowercase();
         let existentes: Vec<String> = RepositorioFinanceiro::novo(uow)

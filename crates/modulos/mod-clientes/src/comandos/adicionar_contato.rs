@@ -7,10 +7,10 @@
 use cardeal_kernel::Id;
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::{Erro, Resultado};
+use cardeal_modkit::Comando;
 #[cfg(feature = "sqlite")]
+use cardeal_modkit::Ctx;
 use cardeal_modkit::Risco;
-#[cfg(feature = "sqlite")]
-use cardeal_modkit::{Comando, Ctx};
 #[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
@@ -43,12 +43,12 @@ pub struct ContatoFoiAdicionado {
     pub contato: Id,
 }
 
-#[cfg(feature = "sqlite")]
 impl Comando for AdicionarContato {
     type Saida = ContatoFoiAdicionado;
     const PERMISSAO: &'static str = "clientes.pessoa.editar";
     const RISCO: Risco = Risco::Baixo;
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         adicionar_contato_comum(&self, ctx, uow)
     }

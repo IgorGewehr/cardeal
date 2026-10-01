@@ -5,10 +5,10 @@
 use cardeal_kernel::Id;
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::{CodigoErro, Erro, Resultado};
+use cardeal_modkit::Comando;
 #[cfg(feature = "sqlite")]
+use cardeal_modkit::Ctx;
 use cardeal_modkit::Risco;
-#[cfg(feature = "sqlite")]
-use cardeal_modkit::{Comando, Ctx};
 #[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
@@ -36,12 +36,12 @@ pub struct DefinirPreferenciasCompras {
     pub pago_no_ato_padrao: bool,
 }
 
-#[cfg(feature = "sqlite")]
 impl Comando for DefinirPreferenciasCompras {
     type Saida = ();
     const PERMISSAO: &'static str = "compras.entrada.preferencias";
     const RISCO: Risco = Risco::Medio;
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         if self.confirma_automaticamente_quando_tudo_casa && self.local_padrao.is_none() {
             return Err(Erro::novo(

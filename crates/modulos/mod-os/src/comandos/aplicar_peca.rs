@@ -15,10 +15,10 @@
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::{Erro, Resultado};
 use cardeal_kernel::{Id, Preco};
+use cardeal_modkit::Comando;
 #[cfg(feature = "sqlite")]
+use cardeal_modkit::Ctx;
 use cardeal_modkit::Risco;
-#[cfg(feature = "sqlite")]
-use cardeal_modkit::{Comando, Ctx};
 #[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 #[cfg(feature = "sqlite")]
@@ -62,13 +62,13 @@ pub struct PecaFoiAplicada {
     pub gerou_divergencia: bool,
 }
 
-#[cfg(feature = "sqlite")]
 impl Comando for AplicarPeca {
     type Saida = PecaFoiAplicada;
     const PERMISSAO: &'static str = "os.peca.aplicar";
     const RISCO: Risco = Risco::Medio;
     const AUDITA: bool = true;
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         aplicar_peca_comum(self, ctx, uow)
     }
@@ -88,13 +88,13 @@ pub struct AplicarPecas {
     pub local: Id,
 }
 
-#[cfg(feature = "sqlite")]
 impl Comando for AplicarPecas {
     type Saida = Vec<PecaFoiAplicada>;
     const PERMISSAO: &'static str = "os.peca.aplicar";
     const RISCO: Risco = Risco::Medio;
     const AUDITA: bool = true;
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         self.itens
             .iter()

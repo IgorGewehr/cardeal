@@ -5,13 +5,13 @@
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::Resultado;
 use cardeal_kernel::{Id, Quantidade};
+use cardeal_modkit::Consulta;
 #[cfg(feature = "sqlite")]
-use cardeal_modkit::{Consulta, Ctx};
+use cardeal_modkit::Ctx;
 #[cfg(feature = "sqlite")]
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
-#[cfg(feature = "sqlite")]
 use crate::apontamento::ApontamentoDeTempo;
 use crate::execucao::{ItemMaoDeObra, ItemPeca};
 use crate::laudo::LaudoTecnico;
@@ -202,11 +202,11 @@ pub fn historico_da_ordem(conexao: &Connection, ordem: Id) -> Resultado<Vec<Pass
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrdensEmAberto;
 
-#[cfg(feature = "sqlite")]
 impl Consulta for OrdensEmAberto {
     type Saida = Vec<OrdemServico>;
     const PERMISSAO: &'static str = "os.ordem.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         ordens_nao_finalizadas(conexao, ctx.empresa)
     }
@@ -223,11 +223,11 @@ impl Consulta for OrdensEmAberto {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TodasAsOrdens;
 
-#[cfg(feature = "sqlite")]
 impl Consulta for TodasAsOrdens {
     type Saida = Vec<OrdemServico>;
     const PERMISSAO: &'static str = "os.ordem.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         let mut stmt = conexao
             .prepare(
@@ -292,11 +292,11 @@ pub struct BuscarOrdens {
     pub limite: u32,
 }
 
-#[cfg(feature = "sqlite")]
 impl Consulta for BuscarOrdens {
     type Saida = Vec<OrdemServico>;
     const PERMISSAO: &'static str = "os.ordem.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         let mut stmt = conexao
             .prepare(
@@ -359,11 +359,11 @@ pub struct OrdensPorId {
     pub ordens: Vec<Id>,
 }
 
-#[cfg(feature = "sqlite")]
 impl Consulta for OrdensPorId {
     type Saida = Vec<OrdemServico>;
     const PERMISSAO: &'static str = "os.ordem.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         let mut saida = Vec::with_capacity(self.ordens.len());
         // Lotes de 500 ficam bem abaixo do limite de parâmetros do SQLite.
@@ -399,11 +399,11 @@ pub struct UltimoPrecoDaPeca {
     pub produto: Id,
 }
 
-#[cfg(feature = "sqlite")]
 impl Consulta for UltimoPrecoDaPeca {
     type Saida = Option<cardeal_kernel::Preco>;
     const PERMISSAO: &'static str = "os.ordem.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         conexao
             .query_row(
@@ -430,11 +430,11 @@ pub struct OrdensDoCliente {
     pub cliente: Id,
 }
 
-#[cfg(feature = "sqlite")]
 impl Consulta for OrdensDoCliente {
     type Saida = Vec<OrdemServico>;
     const PERMISSAO: &'static str = "os.ordem.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         let mut stmt = conexao
             .prepare(
@@ -463,11 +463,11 @@ pub struct BuscarDetalheOrdem {
     pub ordem_servico: Id,
 }
 
-#[cfg(feature = "sqlite")]
 impl Consulta for BuscarDetalheOrdem {
     type Saida = Option<DetalheOrdem>;
     const PERMISSAO: &'static str = "os.ordem.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, _ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         let Some(ordem) = buscar_ordem(conexao, self.ordem_servico)? else {
             return Ok(None);
@@ -519,11 +519,11 @@ pub fn ordens_aguardando_aprovacao(
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrdensAguardandoAprovacao;
 
-#[cfg(feature = "sqlite")]
 impl Consulta for OrdensAguardandoAprovacao {
     type Saida = Vec<OrdemServico>;
     const PERMISSAO: &'static str = "os.ordem.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         ordens_aguardando_aprovacao(conexao, ctx.empresa)
     }
@@ -584,11 +584,11 @@ pub struct HistoricoDoEquipamento {
     pub excluir: Option<Id>,
 }
 
-#[cfg(feature = "sqlite")]
 impl Consulta for HistoricoDoEquipamento {
     type Saida = Vec<OrdemServico>;
     const PERMISSAO: &'static str = "os.ordem.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, _ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         historico_do_equipamento(conexao, self.cliente, &self.equipamento, self.excluir)
     }
@@ -625,11 +625,11 @@ pub struct ApontamentosDaOrdem {
     pub ordem_servico: Id,
 }
 
-#[cfg(feature = "sqlite")]
 impl Consulta for ApontamentosDaOrdem {
     type Saida = Vec<ApontamentoDeTempo>;
     const PERMISSAO: &'static str = "os.ordem.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, _ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         apontamentos_da_ordem(conexao, self.ordem_servico)
     }
@@ -661,11 +661,11 @@ pub struct TempoTotalDaOrdem {
     pub ordem_servico: Id,
 }
 
-#[cfg(feature = "sqlite")]
 impl Consulta for TempoTotalDaOrdem {
     type Saida = i64;
     const PERMISSAO: &'static str = "os.ordem.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, _ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         tempo_total_da_ordem(conexao, self.ordem_servico)
     }
@@ -706,11 +706,11 @@ pub struct TempoPorTecnicoNoPeriodo {
     pub ate: cardeal_kernel::Instante,
 }
 
-#[cfg(feature = "sqlite")]
 impl Consulta for TempoPorTecnicoNoPeriodo {
     type Saida = i64;
     const PERMISSAO: &'static str = "os.ordem.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, _ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         tempo_por_tecnico_no_periodo(conexao, self.tecnico, self.de, self.ate)
     }
@@ -786,11 +786,11 @@ pub fn pecas_aguardando_estoque(
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct PecasAguardandoEstoque;
 
-#[cfg(feature = "sqlite")]
 impl Consulta for PecasAguardandoEstoque {
     type Saida = Vec<ItemAguardandoEstoque>;
     const PERMISSAO: &'static str = "os.ordem.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         pecas_aguardando_estoque(conexao, ctx.empresa)
     }

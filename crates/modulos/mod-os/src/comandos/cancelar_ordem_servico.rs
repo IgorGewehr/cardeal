@@ -13,10 +13,10 @@
 use cardeal_kernel::Id;
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::{Erro, Resultado};
+use cardeal_modkit::Comando;
 #[cfg(feature = "sqlite")]
+use cardeal_modkit::Ctx;
 use cardeal_modkit::Risco;
-#[cfg(feature = "sqlite")]
-use cardeal_modkit::{Comando, Ctx};
 #[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 #[cfg(feature = "sqlite")]
@@ -47,13 +47,13 @@ pub struct OrdemServicoCancelada {
     pub pecas_pendentes_de_estorno_manual: usize,
 }
 
-#[cfg(feature = "sqlite")]
 impl Comando for CancelarOrdemServico {
     type Saida = OrdemServicoCancelada;
     const PERMISSAO: &'static str = "os.ordem.cancelar";
     const RISCO: Risco = Risco::Medio;
     const AUDITA: bool = true;
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         // 1. Carregar.
         let mut os = carregar_ordem(uow, self.ordem_servico)?;

@@ -10,10 +10,10 @@ use cardeal_kernel::Resultado;
 use cardeal_kernel::{Data, Dinheiro, Id};
 #[cfg(feature = "sqlite")]
 use cardeal_ledger::{Contraparte, PapelConta};
+use cardeal_modkit::Comando;
 #[cfg(feature = "sqlite")]
+use cardeal_modkit::Ctx;
 use cardeal_modkit::Risco;
-#[cfg(feature = "sqlite")]
-use cardeal_modkit::{Comando, Ctx};
 #[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
@@ -64,12 +64,12 @@ pub struct TituloAPagarLancado {
     pub lancamentos: Vec<Id>,
 }
 
-#[cfg(feature = "sqlite")]
 impl Comando for LancarTituloAPagar {
     type Saida = TituloAPagarLancado;
     const PERMISSAO: &'static str = "financeiro.pagar.criar";
     const RISCO: Risco = Risco::Baixo;
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         if self.quitado_agora.is_some() {
             quitado_agora::validar(EspecieTitulo::Pagar, self.parcelas, ctx)?;

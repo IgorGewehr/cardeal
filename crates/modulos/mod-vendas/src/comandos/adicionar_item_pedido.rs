@@ -14,10 +14,10 @@
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::{Erro, Resultado};
 use cardeal_kernel::{Id, Percentual, Preco, Quantidade};
+use cardeal_modkit::Comando;
 #[cfg(feature = "sqlite")]
+use cardeal_modkit::Ctx;
 use cardeal_modkit::Risco;
-#[cfg(feature = "sqlite")]
-use cardeal_modkit::{Comando, Ctx};
 #[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 #[cfg(feature = "sqlite")]
@@ -59,12 +59,12 @@ pub struct ItemFoiAdicionado {
     pub total_pedido: cardeal_kernel::Dinheiro,
 }
 
-#[cfg(feature = "sqlite")]
 impl Comando for AdicionarItemPedido {
     type Saida = ItemFoiAdicionado;
     const PERMISSAO: &'static str = "vendas.pedido.editar";
     const RISCO: Risco = Risco::Baixo;
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         // 1. Carregar.
         let mut pedido = carregar_pedido(uow, self.pedido)?;

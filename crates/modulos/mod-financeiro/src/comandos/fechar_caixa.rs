@@ -11,10 +11,10 @@ use cardeal_kernel::{Erro, Resultado};
 use cardeal_ledger::RepositorioRazao;
 #[cfg(feature = "sqlite")]
 use cardeal_ledger::{Contas, PapelConta, Razao};
+use cardeal_modkit::Comando;
 #[cfg(feature = "sqlite")]
+use cardeal_modkit::Ctx;
 use cardeal_modkit::Risco;
-#[cfg(feature = "sqlite")]
-use cardeal_modkit::{Comando, Ctx};
 #[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
@@ -52,13 +52,13 @@ pub struct CaixaFoiFechado {
     pub lancamento_ajuste: Option<Id>,
 }
 
-#[cfg(feature = "sqlite")]
 impl Comando for FecharCaixa {
     type Saida = CaixaFoiFechado;
     const PERMISSAO: &'static str = "financeiro.caixa.fechar";
     const RISCO: Risco = Risco::Medio;
     const AUDITA: bool = true;
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         let (sessao, caixa) = carregar_sessao_e_caixa(uow, self.sessao)?;
 

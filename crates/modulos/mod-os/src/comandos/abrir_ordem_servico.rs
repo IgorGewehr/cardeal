@@ -10,10 +10,10 @@
 use cardeal_kernel::Id;
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::{CodigoErro, Erro, Resultado};
+use cardeal_modkit::Comando;
 #[cfg(feature = "sqlite")]
+use cardeal_modkit::Ctx;
 use cardeal_modkit::Risco;
-#[cfg(feature = "sqlite")]
-use cardeal_modkit::{Comando, Ctx};
 #[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 #[cfg(feature = "sqlite")]
@@ -58,12 +58,12 @@ pub struct OrdemServicoAberta {
     pub numero: u64,
 }
 
-#[cfg(feature = "sqlite")]
 impl Comando for AbrirOrdemServico {
     type Saida = OrdemServicoAberta;
     const PERMISSAO: &'static str = "os.ordem.criar";
     const RISCO: Risco = Risco::Baixo;
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         abrir_ordem_comum(self, ctx, uow)
     }
@@ -101,12 +101,12 @@ pub struct OrdemComClienteNovoAberta {
     pub ordem: OrdemServicoAberta,
 }
 
-#[cfg(feature = "sqlite")]
 impl Comando for AbrirOrdemComClienteNovo {
     type Saida = OrdemComClienteNovoAberta;
     const PERMISSAO: &'static str = "os.ordem.criar";
     const RISCO: Risco = Risco::Baixo;
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         // O comando tem uma só permissão declarada; a de cadastrar pessoa é conferida aqui,
         // para não virar uma porta dos fundos para quem só pode abrir OS.

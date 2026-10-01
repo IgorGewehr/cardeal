@@ -11,10 +11,10 @@ use cardeal_kernel::{Erro, Resultado};
 use cardeal_ledger::Razao;
 #[cfg(feature = "sqlite")]
 use cardeal_ledger::RepositorioRazao;
+use cardeal_modkit::Comando;
 #[cfg(feature = "sqlite")]
+use cardeal_modkit::Ctx;
 use cardeal_modkit::Risco;
-#[cfg(feature = "sqlite")]
-use cardeal_modkit::{Comando, Ctx};
 #[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
@@ -48,12 +48,12 @@ pub struct CaixaFoiAberto {
     pub lancamento_suprimento: Option<Id>,
 }
 
-#[cfg(feature = "sqlite")]
 impl Comando for AbrirCaixa {
     type Saida = CaixaFoiAberto;
     const PERMISSAO: &'static str = "financeiro.caixa.abrir";
     const RISCO: Risco = Risco::Baixo;
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         let caixa = RepositorioFinanceiro::novo(uow)
             .buscar_caixa(self.caixa)?

@@ -7,10 +7,10 @@
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::{Cnpj, Erro, Id, Resultado};
 use cardeal_kernel::{Data, Dinheiro, Preco, Quantidade};
+use cardeal_modkit::Comando;
 #[cfg(feature = "sqlite")]
+use cardeal_modkit::Ctx;
 use cardeal_modkit::Risco;
-#[cfg(feature = "sqlite")]
-use cardeal_modkit::{Comando, Ctx};
 #[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
@@ -23,7 +23,8 @@ use crate::preferencias::RateioPor;
 use crate::repositorio::RepositorioCompras;
 
 #[cfg(feature = "sqlite")]
-use super::{resolver_fornecedor, RelatorioImportacao};
+use super::resolver_fornecedor;
+use super::RelatorioImportacao;
 #[cfg(feature = "sqlite")]
 use crate::eventos::EntradaAConferir;
 
@@ -98,12 +99,12 @@ fn valor_produtos_e_pesos(itens: &[ItemNotaManual], rateio_por: RateioPor) -> (D
     (valor_produtos, pesos)
 }
 
-#[cfg(feature = "sqlite")]
 impl Comando for LancarNotaManual {
     type Saida = RelatorioImportacao;
     const PERMISSAO: &'static str = "compras.entrada.importar";
     const RISCO: Risco = Risco::Baixo;
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         let cnpj = Cnpj::novo(&self.fornecedor_cnpj)?;
         let fornecedor = resolver_fornecedor(&cnpj, &self.fornecedor_nome, ctx, uow)?;

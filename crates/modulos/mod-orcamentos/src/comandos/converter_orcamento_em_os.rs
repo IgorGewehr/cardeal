@@ -8,10 +8,10 @@
 use cardeal_kernel::Id;
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::{Erro, Resultado};
+use cardeal_modkit::Comando;
 #[cfg(feature = "sqlite")]
+use cardeal_modkit::Ctx;
 use cardeal_modkit::Risco;
-#[cfg(feature = "sqlite")]
-use cardeal_modkit::{Comando, Ctx};
 #[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 #[cfg(feature = "sqlite")]
@@ -47,12 +47,12 @@ pub struct OrcamentoConvertido {
     pub numero: u64,
 }
 
-#[cfg(feature = "sqlite")]
 impl Comando for ConverterOrcamentoEmOs {
     type Saida = OrcamentoConvertido;
     const PERMISSAO: &'static str = "orcamentos.orcamento.converter";
     const RISCO: Risco = Risco::Medio;
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         if !ctx.ativo("os") {
             return Err(Erro::de_dominio(&ErroOrcamentos::ModuloOsInativo));

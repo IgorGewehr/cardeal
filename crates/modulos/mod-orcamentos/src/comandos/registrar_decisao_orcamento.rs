@@ -3,10 +3,10 @@
 use cardeal_kernel::Id;
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::{Erro, Resultado};
+use cardeal_modkit::Comando;
 #[cfg(feature = "sqlite")]
+use cardeal_modkit::Ctx;
 use cardeal_modkit::Risco;
-#[cfg(feature = "sqlite")]
-use cardeal_modkit::{Comando, Ctx};
 #[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
@@ -29,12 +29,12 @@ pub struct RegistrarDecisaoOrcamento {
     pub identificacao: Option<String>,
 }
 
-#[cfg(feature = "sqlite")]
 impl Comando for RegistrarDecisaoOrcamento {
     type Saida = ();
     const PERMISSAO: &'static str = "orcamentos.orcamento.decidir";
     const RISCO: Risco = Risco::Medio;
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         let mut orcamento = carregar_orcamento(uow, self.orcamento)?;
 

@@ -14,10 +14,10 @@ use cardeal_kernel::{Id, Quantidade};
 use cardeal_ledger::RepositorioRazao;
 #[cfg(feature = "sqlite")]
 use cardeal_ledger::{Contas, PapelConta, Razao};
+use cardeal_modkit::Comando;
 #[cfg(feature = "sqlite")]
+use cardeal_modkit::Ctx;
 use cardeal_modkit::Risco;
-#[cfg(feature = "sqlite")]
-use cardeal_modkit::{Comando, Ctx};
 #[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
@@ -60,13 +60,13 @@ pub struct SaldoAjustado {
     pub lancamento: Option<Id>,
 }
 
-#[cfg(feature = "sqlite")]
 impl Comando for AjustarSaldo {
     type Saida = SaldoAjustado;
     const PERMISSAO: &'static str = "estoque.movimento.ajustar";
     const RISCO: Risco = Risco::Alto;
     const AUDITA: bool = true;
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         // 1. Validar o motivo antes de tocar em qualquer estado (§11.8).
         if self.motivo.trim().chars().count() < 10 {

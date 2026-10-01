@@ -5,8 +5,9 @@
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::Resultado;
 use cardeal_kernel::{Data, Dinheiro, Id, Percentual};
+use cardeal_modkit::Consulta;
 #[cfg(feature = "sqlite")]
-use cardeal_modkit::{Consulta, Ctx};
+use cardeal_modkit::Ctx;
 #[cfg(feature = "sqlite")]
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
@@ -56,11 +57,11 @@ pub struct OrcamentosRecentes {
     pub ate: Option<Data>,
 }
 
-#[cfg(feature = "sqlite")]
 impl Consulta for OrcamentosRecentes {
     type Saida = Vec<ItemOrcamentoLista>;
     const PERMISSAO: &'static str = "orcamentos.orcamento.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         let hoje = ctx.hoje();
         let (sql, filtra_estado) = if let Some(estado) = self.estado {
@@ -186,11 +187,11 @@ pub struct BuscarOrcamento {
     pub orcamento: Id,
 }
 
-#[cfg(feature = "sqlite")]
 impl Consulta for BuscarOrcamento {
     type Saida = Option<DetalheOrcamento>;
     const PERMISSAO: &'static str = "orcamentos.orcamento.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, _ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         let Some(orcamento) = buscar_orcamento(conexao, self.orcamento)? else {
             return Ok(None);
@@ -225,11 +226,11 @@ pub struct ResumoOrcamentosSaida {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResumoOrcamentos;
 
-#[cfg(feature = "sqlite")]
 impl Consulta for ResumoOrcamentos {
     type Saida = ResumoOrcamentosSaida;
     const PERMISSAO: &'static str = "orcamentos.orcamento.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         let corte = ctx.hoje().mais_dias(-30);
         let mut stmt = conexao

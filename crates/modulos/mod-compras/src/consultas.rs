@@ -7,8 +7,9 @@
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::{CodigoErro, Erro, Resultado};
 use cardeal_kernel::{Data, Dinheiro, Id};
+use cardeal_modkit::Consulta;
 #[cfg(feature = "sqlite")]
-use cardeal_modkit::{Consulta, Ctx};
+use cardeal_modkit::Ctx;
 #[cfg(feature = "sqlite")]
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
@@ -19,7 +20,6 @@ use cardeal_kernel::{Preco, Quantidade};
 #[cfg(feature = "sqlite")]
 use crate::nota::EstadoCasamento;
 use crate::nota::EstadoNotaEntrada;
-#[cfg(feature = "sqlite")]
 use crate::nota::ItemNotaEntrada;
 
 #[cfg(feature = "sqlite")]
@@ -83,11 +83,11 @@ pub struct ItemNota {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NotasRecentes;
 
-#[cfg(feature = "sqlite")]
 impl Consulta for NotasRecentes {
     type Saida = Vec<ItemNota>;
     const PERMISSAO: &'static str = "compras.entrada.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         let mut stmt = conexao
             .prepare(
@@ -126,11 +126,11 @@ pub struct ItensDaNota {
     pub nota: Id,
 }
 
-#[cfg(feature = "sqlite")]
 impl Consulta for ItensDaNota {
     type Saida = Vec<ItemNotaEntrada>;
     const PERMISSAO: &'static str = "compras.entrada.ver";
 
+    #[cfg(feature = "sqlite")]
     fn executar(self, _ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         let mut stmt = conexao
             .prepare(
