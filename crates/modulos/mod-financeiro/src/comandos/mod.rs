@@ -13,6 +13,7 @@ mod baixar_em_lote;
 mod baixar_pagamento;
 mod baixar_recebimento;
 mod cadastrar_caixa;
+mod conta_a_pagar_avulsa;
 mod criar_categoria;
 mod criar_categorias_sugeridas;
 mod criar_conta_bancaria;
@@ -34,6 +35,7 @@ pub use baixar_em_lote::{
 pub use baixar_pagamento::{baixar_pagamento_comum, BaixarPagamento, PagamentoBaixado};
 pub use baixar_recebimento::{baixar_recebimento_comum, BaixarRecebimento, RecebimentoBaixado};
 pub use cadastrar_caixa::{CadastrarCaixa, CaixaCadastrado};
+pub use conta_a_pagar_avulsa::{lancar_conta_a_pagar_avulsa, DadosContaAvulsa, PagamentoAvulso};
 pub use criar_categoria::{CategoriaCriada, CriarCategoria};
 pub use criar_categorias_sugeridas::{CriarCategoriasSugeridas, CATEGORIAS_SUGERIDAS};
 pub use criar_conta_bancaria::{ContaBancariaCriada, CriarContaBancaria};

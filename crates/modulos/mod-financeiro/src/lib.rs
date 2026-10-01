@@ -101,6 +101,7 @@ pub use comandos::{
     SuprimentoFoiRegistrado, TituloAPagarLancado, TituloAReceberLancado, TituloFoiRenegociado,
     TituloGravado,
 };
+pub use comandos::{lancar_conta_a_pagar_avulsa, DadosContaAvulsa, PagamentoAvulso};
 pub use comandos::{
     BaixarPagamentosEmLote, BaixarRecebimentosEmLote, BaixasEmLoteFeitas, DadosBaixaEmLote,
 };
