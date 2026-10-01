@@ -59,6 +59,18 @@ enum Acao {
         /// Pasta do cliente do navegador (`cargo xtask construir-web` → `dist/web`).
         #[arg(long, env = "CARDEAL_WEB")]
         web: Option<PathBuf>,
+        /// Minutos entre backups (0 desliga). Só bases que mudaram são copiadas.
+        #[arg(long, env = "CARDEAL_BACKUP_MIN", default_value_t = 60)]
+        backup_min: u64,
+        /// Quantas cópias de cada base guardar.
+        #[arg(long, env = "CARDEAL_BACKUP_RETER", default_value_t = 48)]
+        backup_reter: usize,
+    },
+    /// Uma rodada de backup agora (para cron ou antes de uma atualização).
+    Backup {
+        /// Quantas cópias de cada base guardar.
+        #[arg(long, default_value_t = 48)]
+        reter: usize,
     },
     /// Cria uma empresa nova e dá acesso a uma conta.
     Provisionar {
@@ -100,13 +112,33 @@ fn main() -> anyhow::Result<()> {
             teto_empresas,
             confiar_cloudflare,
             web,
+            backup_min,
+            backup_reter,
         } => {
             let mut config = ConfigServidor::em(cli.dados);
             config.ociosidade = Duration::from_secs(ociosidade_min * 60);
             config.teto_empresas = teto_empresas;
             config.confiar_cloudflare = confiar_cloudflare;
             config.web = web;
-            servir(config, endereco, trabalhadores)
+            let backup =
+                (backup_min > 0).then(|| (Duration::from_secs(backup_min * 60), backup_reter));
+            servir(config, endereco, trabalhadores, backup)
+        }
+        Acao::Backup { reter } => {
+            let config = ConfigServidor::em(cli.dados);
+            let r = cardeal_server::backup::executar(&config, reter)
+                .map_err(|e| anyhow::anyhow!(e.mensagem))?;
+            println!(
+                "backup: {} copiadas, {} sem mudança, {} falhas, {} KiB",
+                r.copiadas,
+                r.sem_mudanca,
+                r.falhas,
+                r.bytes / 1024
+            );
+            if r.falhas > 0 {
+                anyhow::bail!("{} bases falharam (ver o log)", r.falhas);
+            }
+            Ok(())
         }
         Acao::Provisionar {
             empresa,
@@ -140,6 +172,7 @@ fn servir(
     config: ConfigServidor,
     endereco: SocketAddr,
     trabalhadores: usize,
+    backup: Option<(Duration, usize)>,
 ) -> anyhow::Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(trabalhadores.max(1))
@@ -153,6 +186,9 @@ fn servir(
     runtime.block_on(async move {
         let servidor = Servidor::abrir(config).map_err(|e| anyhow::anyhow!(e.mensagem))?;
         tokio::spawn(std::sync::Arc::clone(&servidor).manter(Duration::from_secs(60)));
+        if let Some((intervalo, reter)) = backup {
+            tokio::spawn(std::sync::Arc::clone(&servidor).manter_backup(intervalo, reter));
+        }
         let ouvinte = tokio::net::TcpListener::bind(endereco).await?;
         tracing::info!(%endereco, "cardeal-server no ar");
         axum::serve(

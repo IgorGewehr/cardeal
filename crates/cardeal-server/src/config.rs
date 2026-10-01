@@ -3,6 +3,7 @@
 //! ```text
 //! <dados>/diretorio.db          contas, empresas, vínculos, sessões
 //! <dados>/empresas/<id>.db      uma base SQLite por empresa
+//! <dados>/backup/<base>/…       snapshots zstd (ver `backup`)
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -61,6 +62,12 @@ impl ConfigServidor {
     #[must_use]
     pub fn caminho_diretorio(&self) -> PathBuf {
         self.dados.join("diretorio.db")
+    }
+
+    /// A pasta dos backups (`<dados>/backup/<base>/<carimbo>.db.zst`).
+    #[must_use]
+    pub fn pasta_backup(&self) -> PathBuf {
+        self.dados.join("backup")
     }
 
     /// A pasta das bases de empresa.

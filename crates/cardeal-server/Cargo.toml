@@ -39,6 +39,7 @@ anyhow.workspace     = true
 tracing.workspace    = true
 tracing-subscriber.workspace = true
 mimalloc.workspace   = true
+zstd.workspace       = true
 libmimalloc-sys = { version = "0.1", features = ["extended"] }
 
 [dev-dependencies]
@@ -46,7 +47,8 @@ tempfile.workspace  = true
 tower = { workspace = true, features = ["util"] }
 mod-clientes.workspace = true
 mod-empresa.workspace  = true
+zstd.workspace         = true
+rusqlite.workspace     = true
 serde.workspace    = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 mimalloc.workspace = true
-rusqlite.workspace = true

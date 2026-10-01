@@ -87,6 +87,8 @@ shell e no `ps`). Um e-mail que já tem conta ganha acesso à empresa nova sem t
 | `CARDEAL_WEB` | — | pasta do cliente do navegador (`dist/web`) |
 | `CARDEAL_CONFIAR_CLOUDFLARE` | `false` | usar `CF-Connecting-IP`; **só** com a porta inacessível de fora do túnel |
 | `MIMALLOC_ARENA_EAGER_COMMIT` | `0` (na imagem) | não reservar memória antes do uso |
+| `CARDEAL_BACKUP_MIN` | `60` | minutos entre backups (0 desliga) |
+| `CARDEAL_BACKUP_RETER` | `48` | cópias guardadas por base |
 | `RUST_LOG` | `info,tower_http=warn` | `debug` registra toda requisição |
 
 ## 7. Segurança
@@ -108,5 +110,13 @@ shell e no `ps`). Um e-mail que já tem conta ganha acesso à empresa nova sem t
   cada base com o lote final confirmado.
 - **Manutenção** (a cada minuto, sozinha): fecha empresas ociosas, poda respostas idempotentes
   com mais de 7 dias, apaga sessões vencidas.
-- **Backup:** pendente — Litestream replicando `/dados` para o Cloudflare R2 (ver
-  `docs/19-estado-e-processo.md`).
+- **Backup:** o servidor tira, a cada `CARDEAL_BACKUP_MIN` (60), um snapshot de cada base
+  **que mudou** (`VACUUM INTO` numa conexão de leitura — a empresa continua operando), em
+  `/dados/backup/<base>/<carimbo UTC>.db.zst`, guardando as `CARDEAL_BACKUP_RETER` (48) mais
+  novas. O serviço `backup-r2` do compose copia a pasta para o Cloudflare R2 **cifrada no
+  cliente** (`rclone crypt`). Variáveis: `R2_ENDPOINT`, `R2_ACCESS_KEY_ID`,
+  `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_CRIPTO_SENHA` (`rclone obscure`).
+  Rodada manual: `cardeal-server backup`.
+- **Restaurar uma empresa:** parar o servidor (ou esperar a empresa sair da memória),
+  `zstd -d <cópia>.db.zst -o /dados/empresas/<id>.db`, apagar `<id>.db-wal`/`-shm` antigos,
+  subir de novo. A cópia passa por `PRAGMA integrity_check` no teste de ponta a ponta.

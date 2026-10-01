@@ -18,6 +18,8 @@ services:
     environment:
       CARDEAL_OCIOSIDADE_MIN: "10"
       CARDEAL_TETO_EMPRESAS: "256"
+      CARDEAL_BACKUP_MIN: "60"
+      CARDEAL_BACKUP_RETER: "48"
       # Seguro só porque nenhuma porta é publicada: o único caminho até aqui é o túnel.
       CARDEAL_CONFIAR_CLOUDFLARE: "true"
       CARDEAL_SENHA: ${CARDEAL_SENHA:-}
@@ -28,6 +30,36 @@ services:
     stop_grace_period: 30s
     security_opt:
       - no-new-privileges:true
+
+  # Leva os snapshots (`/dados/backup`, gerados pelo próprio servidor a cada hora — só as
+  # bases que mudaram) ao Cloudflare R2, **cifrados no cliente** (remote `crypt` do rclone):
+  # quem tiver acesso ao bucket não lê dado de empresa nenhuma. Sem as variáveis R2_*, o
+  # serviço fica parado — o backup local continua sendo gerado.
+  backup-r2:
+    image: rclone/rclone:latest
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        [ -z "$$RCLONE_CONFIG_R2_ACCESS_KEY_ID" ] && { echo "R2 não configurado"; exec sleep infinity; }
+        while true; do
+          rclone copy /dados/backup cifrado: --transfers 4 --checksum --exclude "ultima-assinatura" \
+            && echo "backup enviado ao R2"
+          sleep 3600
+        done
+    volumes:
+      - dados:/dados:ro
+    environment:
+      RCLONE_CONFIG_R2_TYPE: s3
+      RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+      RCLONE_CONFIG_R2_ENDPOINT: ${R2_ENDPOINT:-}
+      RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
+      RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
+      RCLONE_CONFIG_CIFRADO_TYPE: crypt
+      RCLONE_CONFIG_CIFRADO_REMOTE: r2:${R2_BUCKET:-cardeal-backup}
+      # Senha do crypt já "obscurecida" (`rclone obscure <senha>`) — guarde a original fora
+      # da VPS: sem ela, o backup não volta.
+      RCLONE_CONFIG_CIFRADO_PASSWORD: ${R2_CRIPTO_SENHA:-}
 
   tunel:
     image: cloudflare/cloudflared:latest

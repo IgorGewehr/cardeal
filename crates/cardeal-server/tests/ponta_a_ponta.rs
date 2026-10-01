@@ -595,3 +595,90 @@ async fn dados_e_logo_da_empresa_pelo_despacho() {
         consultar("empresa.identidade_visual.v1").await.valor();
     assert_eq!(identidade.logo_png, Some(png));
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn backup_copia_so_o_que_mudou_e_a_copia_restaura_com_os_dados() {
+    let a = ambiente(Duration::from_secs(600));
+    let t = token(&a.app, "ana@x.com").await;
+    comando(
+        &a.app,
+        &t,
+        a.empresa_ana,
+        "clientes.criar_pessoa.v1",
+        &criar_pessoa("Cliente no backup"),
+        Id::novo(),
+    )
+    .await
+    .valor::<mod_clientes::PessoaCadastrada>();
+
+    // Com a empresa aberta (escritor vivo): o snapshot é uma leitura do WAL.
+    let s = Arc::clone(&a.servidor);
+    let r1 = tokio::task::spawn_blocking(move || s.fazer_backup(5))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        (r1.copiadas, r1.falhas),
+        (3, 0),
+        "diretório + duas empresas"
+    );
+
+    let s = Arc::clone(&a.servidor);
+    let r2 = tokio::task::spawn_blocking(move || s.fazer_backup(5))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        (r2.copiadas, r2.sem_mudanca),
+        (0, 3),
+        "nada mudou, nada copiado"
+    );
+
+    comando(
+        &a.app,
+        &t,
+        a.empresa_ana,
+        "clientes.criar_pessoa.v1",
+        &criar_pessoa("Outro"),
+        Id::novo(),
+    )
+    .await
+    .valor::<mod_clientes::PessoaCadastrada>();
+    let s = Arc::clone(&a.servidor);
+    let r3 = tokio::task::spawn_blocking(move || s.fazer_backup(5))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(r3.copiadas, 1, "só a empresa que recebeu a escrita");
+
+    // Restaurar: descomprimir a cópia mais nova e abrir como uma base qualquer.
+    let pasta = a
+        .servidor
+        .config()
+        .pasta_backup()
+        .join(a.empresa_ana.to_string());
+    let mut copias: Vec<_> = std::fs::read_dir(&pasta)
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.to_string_lossy().ends_with(".db.zst"))
+        .collect();
+    copias.sort();
+    assert_eq!(copias.len(), 2);
+    let restaurada = pasta.join("restaurada.db");
+    let bytes = zstd::decode_all(std::fs::File::open(copias.last().unwrap()).unwrap()).unwrap();
+    std::fs::write(&restaurada, bytes).unwrap();
+    let c = rusqlite::Connection::open(&restaurada).unwrap();
+    let nomes: Vec<String> = c
+        .prepare("SELECT nome FROM clientes_pessoa ORDER BY nome")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(nomes, ["Cliente no backup", "Outro"]);
+    let integridade: String = c
+        .query_row("PRAGMA integrity_check", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(integridade, "ok");
+}

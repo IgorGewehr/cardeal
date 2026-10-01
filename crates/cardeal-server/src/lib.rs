@@ -18,6 +18,7 @@
 #![allow(clippy::result_large_err)] // `Erro` é grande de propósito (detalhes ao usuário)
 
 pub mod autenticacao;
+pub mod backup;
 mod config;
 pub mod diretorio;
 pub mod frota;
@@ -127,6 +128,25 @@ impl Servidor {
     pub fn encerrar(&self) {
         let n = self.frota.fechar_todas();
         tracing::info!(fechadas = n, "empresas fechadas no desligamento");
+    }
+
+    /// Uma rodada de backup (ver [`backup`]). **Bloqueante.**
+    ///
+    /// # Errors
+    /// A pasta de backup não pôde ser criada.
+    pub fn fazer_backup(&self, reter: usize) -> Resultado<backup::RelatorioBackup> {
+        backup::executar(&self.config, reter)
+    }
+
+    /// Faz backup a cada `intervalo`, para sempre (a primeira rodada logo ao subir).
+    pub async fn manter_backup(self: Arc<Self>, intervalo: Duration, reter: usize) {
+        let mut relogio = tokio::time::interval(intervalo);
+        relogio.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            relogio.tick().await;
+            let s = Arc::clone(&self);
+            let _ = tokio::task::spawn_blocking(move || s.fazer_backup(reter)).await;
+        }
     }
 
     /// Roda [`Self::manutencao`] a cada `intervalo`, para sempre. Para usar com `tokio::spawn`.
