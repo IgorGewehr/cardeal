@@ -334,12 +334,30 @@ Medido: processo vazio 6,9 MB; ~0,8 MB de heap por empresa aberta; consulta quen
 / p99 210 µs; empresa fria p50 11 ms. Descartado com medição: desligar o lookaside do SQLite
 (−90 KB/empresa, mas p50 118→151 µs).
 
-**Próximos passos, em ordem:** `MotorRemoto` em `cardeal-cliente` (desktop falando com o
-servidor) → cliente egui/WASM servido pelo próprio servidor (assets pré-comprimidos, cache
-imutável) → telas assíncronas → backup Litestream → R2 → autoatendimento com verificação de
-e-mail. Otimizações medidas em espera: escritor sem thread dedicada por empresa (hoje 1 thread
-por empresa aberta) e pular a verificação de migrações por impressão digital (~3 ms da
-abertura a frio).
+**Depois, na mesma noite (todas as fatias com commit + push na branch):**
+
+- **Domínio compila para WASM.** Feature `sqlite` (padrão) em ledger, auth, modkit e nos
+  módulos: repositório/migrações/`fn executar` atrás dela; `Comando`/`Consulta` (tipo da
+  saída, `PERMISSAO`) existem sempre (`cardeal-modkit/src/contrato.rs`). Catraca
+  `cargo xtask verificar-wasm` (18 crates, `-D warnings`) na CI. Dependências mortas
+  removidas (auth: rcgen/subtle/zeroize/blake3; modkit: ahash/indexmap).
+- **`mod-empresa`**: dados, identidade visual, logo, usuários e papéis pelo despacho; os
+  métodos do `MotorLocal` viraram atalhos sobre o mesmo SQL.
+- **`cardeal-cliente`**: fachada `Motor`/`Sessao` (Local | Remoto) — o desktop inteiro fala só
+  com ela; `remoto::protocolo` sem I/O; `Remoto` síncrono com reenvio idempotente (mesma
+  chave). Desktop ganhou "Entrar no servidor" (`login.rs`) e login rápido (só a área
+  inicial carrega).
+- **`cardeal-web`** (egui/WASM, glow): login, recarregar sem senha, empresa, lista de
+  clientes, sair; `cargo xtask construir-web`; servido pelo próprio servidor (`--web`), cache
+  imutável + CSP estrita; imagem Docker com tudo (36 MB).
+- **Fontes recortadas** (`scripts/recortar-fontes.sh`): 1,75 MB → 256 KB (desktop e web).
+- **Servidor**: impressão do plano (`nucleo_esquema`) — abertura a frio 10,8 → 2,0 ms;
+  backup incremental (`VACUUM INTO` + zstd + retenção, sidecar rclone cifrado para o R2);
+  métricas Prometheus (`/metricas`); limite de login por IP; SIGTERM limpo.
+
+**Para decidir com o usuário:** o plano das telas assíncronas em `docs/20-cliente-web.md` §3
+(muda as telas do desktop, em uso real). **Otimizações medidas em espera:** escritor sem
+thread dedicada por empresa; fontes de reserva do egui no web (§4 do doc 20).
 
 ## 2. Decisão estratégica registrada: por que Rust, não C#/.NET
 
