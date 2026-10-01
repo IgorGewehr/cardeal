@@ -72,23 +72,29 @@ em telas OLED.
 
 ## 3. Tipografia
 
-Escala aumentada em 2026-09-11 (revisão de UI/UX pedida pelo usuário a partir de capturas de
-tela reais do app: texto pequeno demais para uma janela 1920×1080). Valores antigos entre
-parênteses — o token central é [`Papel`](../crates/cardeal-ui/src/tokens/tipografia.rs), nunca
-um tamanho solto numa tela.
+Revisada em 2026-10-01: até então as fontes vinham de `C:\Windows\Fonts` e, no Linux, nada
+carregava — todo texto saía na mesma fonte e peso, e título, rótulo, botão e explicação só se
+distinguiam pelo tamanho. Agora **Inter** (Regular/Medium/SemiBold) e **JetBrains Mono**
+(Regular/Medium) vão embutidas (`crates/cardeal-ui/assets/fontes/`, OFL), cada peso como uma
+família do egui. O token é [`Papel`](../crates/cardeal-ui/src/tokens/tipografia.rs) — nunca um
+tamanho, peso ou cor solto numa tela. Hierarquia por **três eixos juntos**: tamanho, peso e cor.
 
-| Papel | Fonte | Tamanho | Peso |
-|---|---|---|---|
-| Interface | **Inter** | 14 px (era 13) | 400 / 500 |
-| Título de tela | Inter | 23 px (era 20) | 600 |
-| Título de seção | Inter | 17 px (era 15) | 600 |
-| Rótulo de campo | Inter | 13 px (era 12) | 500, `texto-medio` |
-| **Números / dinheiro** | **Inter Tabular** (`font-feature-settings: "tnum"`) | 14 px (era 13) | 500 |
-| Valor em destaque (Pulso) | Inter Display | 36 px (era 32) | 600, `tnum` |
-| Código, chave de acesso, log | **JetBrains Mono** | 13 px (era 12) | 400 |
+| Papel (`Rotulo::…`) | Fonte | Tamanho | Peso / cor | Uso |
+|---|---|---|---|---|
+| `ValorDestaque` | Inter | 30 px | 600, `texto-forte` | Valor de KPI |
+| `TituloTela` (`titulo_tela`) | Inter | 24 px | 600, `texto-forte` | Título da tela |
+| `TituloSecao` (`titulo_secao`) | Inter | 16 px | 600, `texto-forte` | Seção, cartão, diálogo |
+| `Interface` (`interface`) | Inter | 14 px | 400, `texto` | Corpo, célula |
+| `Acao` | Inter | 14 px | 500 | Rótulo de botão |
+| `RotuloCampo` (`campo`) | Inter | 13 px | 500, `texto-medio` | Nome de campo, cabeçalho de coluna, aba |
+| `Apoio` (`apoio`) | Inter | 13 px | 400, `texto-medio` | Explicação, dica, linha secundária (quebra linha) |
+| `Sobrelinha` (`sobrelinha`) | Inter | 11 px | 600, caixa alta +0,8 px, `texto-medio` | Rótulo acima de valor/grupo ("Período") |
+| `Numero` | JetBrains Mono | 13 px | 500 | Dinheiro em tabela (tabular) |
+| `Codigo` (`codigo`) | JetBrains Mono | 12 px | 400 | Chave de acesso, log, tecla |
 
-Fontes embutidas no binário (~4 MB) para garantir renderização idêntica em qualquer Windows.
-Escala global ajustável (90% a 150%) para telas de balcão e para acessibilidade.
+Regra prática: frase explicativa é `apoio`, nunca `campo`; rótulo curto acima de um valor é
+`sobrelinha` escrito em caixa normal (o papel converte). Escala global ajustável (90% a 150%)
+para telas de balcão e para acessibilidade.
 
 ## 4. Espaçamento, raio, elevação
 

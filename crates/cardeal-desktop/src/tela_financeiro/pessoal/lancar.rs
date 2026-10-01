@@ -244,7 +244,7 @@ pub(super) fn dialogo(
             let despesa = f.tipo == TipoPessoal::Despesa;
             ui.columns(2, |c| {
                 c[0].horizontal(|ui| {
-                    ui.add(Rotulo::campo("REPETE"));
+                    ui.add(Rotulo::sobrelinha("Repete"));
                     for (m, rot) in [
                         (ModoRepeticao::Unica, "Uma vez"),
                         (ModoRepeticao::Parcelada, "Parcelado"),

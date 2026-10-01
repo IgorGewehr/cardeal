@@ -15,7 +15,7 @@ pub(super) fn dialogo_categoria(
             let Dlg::NovaCategoria { nome, especie } = &mut estado.dlg else {
                 return;
             };
-            ui.add(Rotulo::campo(
+            ui.add(Rotulo::apoio(
                 "Rótulo livre para relatório — \"Aluguel\", \"Peças\", \"Assinatura SaaS\". \
                  Não afeta a contabilização, só agrupa os gráficos de \"Por categoria\".",
             ));
@@ -96,9 +96,11 @@ pub(super) fn dialogo_lancar(
         .map(|c| (c.id, c.nome.clone()))
         .collect();
     let dica = if a_receber {
-        "À vista = já recebido nesta data, entra no caixa/banco agora. A prazo = fica em aberto."
+        "À vista: com \"Já recebido\" marcado, entra no caixa/banco agora; desmarcado, fica a \
+         receber. A prazo: parcelas e vencimentos."
     } else {
-        "À vista = já pago nesta data, sai do caixa/banco agora. A prazo = fica em aberto."
+        "À vista: com \"Já pago\" marcado, sai do caixa/banco agora; desmarcado, fica a pagar. \
+         A prazo: parcelas e vencimentos."
     };
     let fechar = Dialogo::nova(titulo)
         .descricao(dica)
@@ -168,12 +170,17 @@ pub(super) fn dialogo_lancar(
                 };
                 f.pessoa.mostrar(ui, catalogo, papel, true, false);
                 ui.add_space(Espaco::E16);
-                f.pagamento.mostrar(
+                f.pagamento.mostrar_com(
                     ui,
                     motor,
                     sessao,
                     "lancar",
                     crate::pagamento::Prazo::Parcelado,
+                    Some(if a_receber {
+                        "Já recebido"
+                    } else {
+                        "Já pago"
+                    }),
                 );
             },
             |ui, estado| {
@@ -218,6 +225,9 @@ pub(super) fn lancar(
             Ok((p, v, i)) => (p, v, i, None),
             Err(msg) => return aviso(msg),
         }
+    } else if !f.pagamento.condicao.pago {
+        // À vista ainda não pago: uma parcela em aberto vencendo na data do lançamento.
+        (1, data, 0, None)
     } else {
         match f.pagamento.meio_validado() {
             Ok(meio) => (

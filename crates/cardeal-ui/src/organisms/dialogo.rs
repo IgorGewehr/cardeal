@@ -121,7 +121,7 @@ impl Dialogo {
                                         ui.add(Rotulo::titulo_secao(self.titulo.clone()));
                                         if let Some(d) = &self.descricao {
                                             ui.add_space(Espaco::E4);
-                                            ui.add(Rotulo::campo(d.clone()).quebravel());
+                                            ui.add(Rotulo::apoio(d.clone()));
                                         }
                                     });
                                     ui.with_layout(

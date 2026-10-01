@@ -910,7 +910,7 @@ impl eframe::App for App {
                         ui.vertical_centered(|ui| {
                             ui.add(Rotulo::titulo_tela("Bem-vindo ao Cardeal"));
                             ui.add_space(Espaco::E4);
-                            ui.add(Rotulo::campo(
+                            ui.add(Rotulo::apoio(
                                 "Primeiro acesso — cadastre sua empresa e o administrador.",
                             ));
                         });

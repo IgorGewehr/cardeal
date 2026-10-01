@@ -25,22 +25,13 @@ const CHAVE_TEMA: &str = "cardeal:tema";
 /// Os estilos de texto do `egui` cru, lidos de [`Papel`] (nunca repetidos como literal).
 fn estilos_de_texto() -> std::collections::BTreeMap<TextStyle, FontId> {
     [
-        (
-            TextStyle::Small,
-            FontId::new(Papel::RotuloCampo.tamanho(), FontFamily::Proportional),
-        ),
+        (TextStyle::Small, Papel::Apoio.font_id()),
         (
             TextStyle::Body,
             FontId::new(Papel::Interface.tamanho(), FontFamily::Proportional),
         ),
-        (
-            TextStyle::Button,
-            FontId::new(Papel::Interface.tamanho(), FontFamily::Proportional),
-        ),
-        (
-            TextStyle::Heading,
-            FontId::new(Papel::TituloTela.tamanho(), FontFamily::Proportional),
-        ),
+        (TextStyle::Button, Papel::Acao.font_id()),
+        (TextStyle::Heading, Papel::TituloTela.font_id()),
         (
             TextStyle::Monospace,
             FontId::new(Papel::Codigo.tamanho(), FontFamily::Monospace),

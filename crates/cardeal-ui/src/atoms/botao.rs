@@ -229,7 +229,7 @@ impl Botao {
 impl Widget for Botao {
     fn ui(self, ui: &mut Ui) -> Response {
         let cores = ui.cores();
-        let fonte = Papel::Interface.font_id();
+        let fonte = Papel::Acao.font_id();
         let texto = match &self.dica_de_atalho(ui) {
             Some(a) => format!("{}    {a}", self.rotulo),
             None => self.rotulo.clone(),

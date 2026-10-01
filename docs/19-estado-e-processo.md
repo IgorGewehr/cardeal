@@ -281,6 +281,19 @@ duas ocorrências no fim do mês); agora usam o dia de hoje + 20 dias.
 - No banco local do usuário, o movimento financeiro de teste (2 títulos das OS #4/#5, baixas e
   4 lançamentos do Razão) foi apagado à mão, com backup em `~/.local/share/cardeal-backups/`.
 
+### 1.9 Sessão 2026-10-01 (tarde) — Tipografia de verdade e "já pago"
+
+- **Fontes embutidas:** Inter (Regular/Medium/SemiBold) e JetBrains Mono (Regular/Medium) em
+  `crates/cardeal-ui/assets/fontes/` via `include_bytes!` — antes só carregavam de
+  `C:\Windows\Fonts`, e no Linux tudo saía num peso só. `Papel` ganhou `Acao` (botões),
+  `Sobrelinha` (caixa alta espaçada) e `Apoio` (explicação); `Rotulo::sobrelinha`/`apoio`.
+  Escala e regra em `docs/12-ui-ux.md` §3. Nas telas, rótulos em CAIXA ALTA viraram
+  `sobrelinha` e frases longas em `Rotulo::campo` viraram `apoio`.
+- **À vista sem pagar:** `CondicaoPagamento.pago` + `SeletorPagamento::com_pendente("Já pago")`
+  (na galeria): desmarcado, o lançamento do Financeiro é parcela única em aberto vencendo na
+  data — sem montar "a prazo". `EstadoPagamento::mostrar_com` repassa o rótulo.
+- Chave do topo: "Pessoais" (sem o parêntese).
+
 ## 2. Decisão estratégica registrada: por que Rust, não C#/.NET
 
 Em 2026-09-02 avaliamos um projeto irmão do mesmo autor, **SistemaX** (`../sistemax`), um ERP

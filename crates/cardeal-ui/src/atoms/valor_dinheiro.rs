@@ -87,12 +87,10 @@ impl Widget for ValorDinheiro {
             self.valor.formatar_com_simbolo()
         };
 
-        let mut rt = egui::RichText::new(texto)
-            .font(self.papel.font_id())
-            .color(cor);
-        if self.papel.enfatico() {
-            rt = rt.strong();
-        }
-        ui.label(rt)
+        ui.label(
+            egui::RichText::new(texto)
+                .font(self.papel.font_id())
+                .color(cor),
+        )
     }
 }

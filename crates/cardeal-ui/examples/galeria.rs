@@ -387,8 +387,12 @@ impl eframe::App for Galeria {
                 ui.add(Rotulo::titulo_secao("Tipografia"));
                 ui.add(Rotulo::titulo_tela("Título de tela"));
                 ui.add(Rotulo::titulo_secao("Título de seção"));
+                ui.add(Rotulo::sobrelinha("Sobrelinha — acima de valor ou grupo"));
                 ui.add(Rotulo::campo("Rótulo de campo"));
                 ui.add(Rotulo::interface("Texto de interface padrão"));
+                ui.add(Rotulo::apoio(
+                    "Texto de apoio: a explicação ou dica, um degrau abaixo do corpo.",
+                ));
                 ui.add(ValorDinheiro::novo(Dinheiro::reais(1234)).com_sinal());
                 ui.add(ValorDinheiro::novo(Dinheiro::reais(-560)).com_sinal());
                 ui.add(Rotulo::codigo(
@@ -420,6 +424,7 @@ impl eframe::App for Galeria {
                     .meio(2, "Pix", true)
                     .meio(3, "Cartão", true)
                     .contas([(1_u8, "Nubank (1.1.2.01)"), (2, "Banco do Brasil (1.1.2.02)")])
+                    .com_pendente("Já pago")
                     .mostrar(ui);
                 if resposta.pediu_nova_conta {
                     notificar(ui.ctx(), Notificacao::info("A tela abre o cadastro de conta"));

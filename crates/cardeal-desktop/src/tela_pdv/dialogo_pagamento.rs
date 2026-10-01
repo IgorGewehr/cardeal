@@ -170,12 +170,12 @@ pub(super) fn resumo_pagamento(
         Situacao::Excesso(d) => ("EXCEDE", d, Tom::Negativo),
     };
     ui.columns(3, |c| {
-        c[0].add(Rotulo::campo("TOTAL"));
+        c[0].add(Rotulo::sobrelinha("Total"));
         c[0].add(Rotulo::novo(
             Papel::TituloTela,
             total.formatar_com_simbolo(),
         ));
-        c[1].add(Rotulo::campo("RECEBIDO"));
+        c[1].add(Rotulo::sobrelinha("Recebido"));
         c[1].add(Rotulo::novo(
             Papel::TituloTela,
             recebido.formatar_com_simbolo(),

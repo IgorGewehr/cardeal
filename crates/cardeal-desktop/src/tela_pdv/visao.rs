@@ -66,7 +66,7 @@ pub(super) fn corpo_sem_caixa(ui: &mut egui::Ui, estado: &mut EstadoTelaPdv) {
         .realce(Tom::Atencao)
         .titulo(format!("{nome} está fechado"))
         .mostrar(ui, |ui| {
-            ui.add(Rotulo::campo(
+            ui.add(Rotulo::apoio(
                 "Abra a sessão de caixa com o valor de troco inicial para começar a vender.",
             ));
             ui.add_space(Espaco::E16);
@@ -133,7 +133,7 @@ pub(super) fn resultado_venda(ui: &mut egui::Ui, estado: &EstadoTelaPdv) {
         ui.add(Rotulo::interface(format!("Venda nº {} finalizada", v.numero)).cor(positivo));
         ui.add_space(Espaco::E8);
         if v.troco > Dinheiro::ZERO {
-            ui.add(Rotulo::campo("TROCO"));
+            ui.add(Rotulo::sobrelinha("Troco"));
             ui.add(Rotulo::novo(
                 Papel::ValorDestaque,
                 v.troco.formatar_com_simbolo(),
@@ -144,7 +144,7 @@ pub(super) fn resultado_venda(ui: &mut egui::Ui, estado: &EstadoTelaPdv) {
                 v.total.formatar_com_simbolo()
             )));
         } else {
-            ui.add(Rotulo::campo("TOTAL"));
+            ui.add(Rotulo::sobrelinha("Total"));
             ui.add(Rotulo::novo(
                 Papel::ValorDestaque,
                 v.total.formatar_com_simbolo(),
@@ -326,7 +326,7 @@ pub(super) fn detalhe(ui: &mut egui::Ui, estado: &mut EstadoTelaPdv) {
     let total = estado.total;
     let cliente = estado.cliente.as_ref().map(|c| c.1.clone());
     Painel::novo().mostrar(ui, |ui| {
-        ui.add(Rotulo::campo("TOTAL"));
+        ui.add(Rotulo::sobrelinha("Total"));
         ui.add_space(Espaco::E4);
         ui.add(Rotulo::novo(
             Papel::ValorDestaque,

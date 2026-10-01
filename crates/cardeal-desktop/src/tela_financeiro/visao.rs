@@ -42,7 +42,7 @@ pub(super) fn dialogo_analise(
                 ui.add_space(Espaco::E12);
 
                 if linhas.is_empty() {
-                    ui.add(Rotulo::campo(
+                    ui.add(Rotulo::apoio(
                         "Nada baixado com categoria no período — categorize os títulos ao lançar.",
                     ));
                     return;
@@ -176,7 +176,7 @@ pub(super) fn painel_visao(
     };
     faixa.compacto().mostrar(ui, |ui| {
         ui.horizontal_wrapped(|ui| {
-            ui.add(Rotulo::campo("PRÓXIMOS 7 DIAS"));
+            ui.add(Rotulo::sobrelinha("Próximos 7 dias"));
             ui.add_space(Espaco::E16);
             ui.add(
                 Rotulo::interface(format!("{np} a pagar · {}", vp.formatar_com_simbolo()))
@@ -251,7 +251,7 @@ pub(super) fn grafico_fluxo(
         .iter()
         .any(|m| m.receita.e_positivo() || m.custo.e_positivo());
     if !tem_dados {
-        ui.add(Rotulo::campo(
+        ui.add(Rotulo::apoio(
             "Sem baixas nos últimos 6 meses — o gráfico aparece conforme você recebe e paga títulos.",
         ));
         return;

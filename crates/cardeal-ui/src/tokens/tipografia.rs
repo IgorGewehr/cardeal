@@ -1,50 +1,58 @@
 //! Camada 0 (ions) — tipografia. `docs/12-ui-ux.md` §3.
 //!
-//! O doc pede **Inter** (interface), **Inter Tabular** (números) e **`JetBrains` Mono**
-//! (código), embutidas no binário. Enquanto os arquivos `.ttf` da marca não estão no
-//! repositório, [`instalar_fontes`] carrega os substitutos que **todo Windows já tem**:
+//! As fontes da marca vão **embutidas no binário** (`assets/fontes/`, licença OFL):
 //!
-//! - **Segoe UI** como fonte de interface — moderna, nativa, no espírito da Inter;
-//! - **Segoe UI Semibold/Bold** como a família `cardeal-forte`, dando peso **de verdade** aos
-//!   títulos (o `RichText::strong` do egui só muda a cor, não engorda o traço);
-//! - **Cascadia Mono** (ou Consolas) como monoespaçada — e também como a família
-//!   `cardeal-num`: monoespaçada é perfeitamente tabular, então as colunas de dinheiro
-//!   alinham a vírgula sem depender da feature `tnum`.
+//! - **Inter** Regular / Medium / semibold — interface, rótulos/botões e títulos. Cada peso
+//!   é uma família própria (`Proportional`, `cardeal-medio`, `cardeal-forte`), porque o egui
+//!   não lê fonte variável e o `RichText::strong` só muda a cor, não engorda o traço;
+//! - **`JetBrains` Mono** Regular / Medium — código e a família `cardeal-num` das colunas de
+//!   dinheiro (monoespaçada é tabular por construção: a vírgula alinha).
 //!
-//! Quando `crates/cardeal-ui/assets/fontes/` ganhar os arquivos reais, `instalar_fontes`
-//! passa a embuti-los e o visual fica idêntico em qualquer máquina.
+//! Antes (até 2026-10-01) as fontes eram lidas de `C:\Windows\Fonts`: no Linux nada
+//! carregava e **todo** papel caía na mesma fonte e peso do egui — título, rótulo, botão e
+//! explicação só se distinguiam pelo tamanho. A hierarquia agora vem de três eixos juntos:
+//! tamanho, peso e cor (`texto_forte` → `texto` → `texto_medio`).
 
 use egui::{FontData, FontDefinitions, FontFamily, FontId, RichText};
 
 use super::cores::Cores;
 
-/// A família de peso forte (títulos) — Segoe UI Semibold quando disponível.
+/// A família de peso forte (títulos, valores) — Inter semibold.
 const FAMILIA_FORTE: &str = "cardeal-forte";
+/// A família de peso médio (rótulos, botões, abas) — Inter Medium.
+const FAMILIA_MEDIA: &str = "cardeal-medio";
 /// A família tabular (números, dinheiro) — monoespaçada.
 const FAMILIA_NUM: &str = "cardeal-num";
 
 /// Um papel tipográfico — tamanho, peso e família. `docs/12-ui-ux.md` §3.
 ///
-/// **Escala aumentada em 2026-09-11** (revisão de UI/UX pedida pelo usuário: "as coisas
-/// estão muito pequenas" — evidenciado por capturas de tela reais do app rodando em
-/// 1920×1080 com o conteúdo espremido e ilegível de longe). Valores antigos entre
-/// parênteses. O aumento é só aqui — todo componente que já lê `Papel` cresce junto, sem
-/// precisar mexer em cada tela.
+/// A escala (2026-10-01): títulos e valores em semibold e `texto_forte`; rótulos, botões e
+/// sobrelinhas em Medium; corpo em Regular; explicação (`Apoio`) menor e em `texto_medio`.
+/// Dois papéis vizinhos nunca diferem só em um eixo.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Papel {
-    /// Texto de interface padrão. 14px / 400 (era 13px).
+    /// Texto de interface padrão (corpo, célula de tabela). 14px / Regular, `texto`.
     Interface,
-    /// Título de tela. 23px / 600 (era 20px).
+    /// Título de tela. 24px / semibold, `texto_forte`.
     TituloTela,
-    /// Título de seção. 17px / 600 (era 15px).
+    /// Título de seção, de cartão e de diálogo. 16px / semibold, `texto_forte`.
     TituloSecao,
-    /// Rótulo de campo. 13px / 500, `texto_medio` (era 12px).
+    /// Rótulo de campo, cabeçalho de coluna, aba. 13px / Medium, `texto_medio`.
     RotuloCampo,
-    /// Números e dinheiro — tabular. 14px / 500 (era 13px).
+    /// Rótulo de botão. 14px / Medium.
+    Acao,
+    /// Sobrelinha: o rótulo curto em CAIXA ALTA espaçada acima de um valor ou grupo
+    /// ("A RECEBER EM ABERTO", "PERÍODO", grupos da barra lateral). 11px / semibold,
+    /// `texto_medio`. Use [`Papel::preparar`] (ou `Rotulo::sobrelinha`) para a caixa alta.
+    Sobrelinha,
+    /// Texto de apoio: explicação, dica, descrição de diálogo, linha secundária de um cartão.
+    /// 13px / Regular, `texto_medio`.
+    Apoio,
+    /// Números e dinheiro em tabela — tabular. 13px / `JetBrains` Mono Medium.
     Numero,
-    /// Valor em destaque (Pulso). 36px / 600, tabular (era 32px).
+    /// Valor em destaque (KPI). 30px / semibold, `texto_forte`.
     ValorDestaque,
-    /// Código, chave de acesso, log. 13px / 400, monoespaçada (era 12px).
+    /// Código, chave de acesso, log, tecla de atalho. 12px / `JetBrains` Mono.
     Codigo,
 }
 
@@ -53,22 +61,32 @@ impl Papel {
     #[must_use]
     pub const fn tamanho(self) -> f32 {
         match self {
-            Self::TituloTela => 23.0,
-            Self::ValorDestaque => 36.0,
-            Self::TituloSecao => 17.0,
-            Self::RotuloCampo | Self::Codigo => 13.0,
-            Self::Interface | Self::Numero => 14.0,
+            Self::ValorDestaque => 30.0,
+            Self::TituloTela => 24.0,
+            Self::TituloSecao => 16.0,
+            Self::Interface | Self::Acao => 14.0,
+            Self::RotuloCampo | Self::Apoio | Self::Numero => 13.0,
+            Self::Codigo => 12.0,
+            Self::Sobrelinha => 11.0,
         }
     }
 
-    /// Verdadeiro para papéis que ganham um leve reforço de contraste (`RichText::strong`).
-    /// O **peso** de verdade vem da família (`cardeal-forte`), não daqui.
+    /// Espaço extra entre letras (px) — só a sobrelinha, que é caixa alta pequena.
     #[must_use]
-    pub const fn enfatico(self) -> bool {
-        matches!(
-            self,
-            Self::TituloTela | Self::TituloSecao | Self::ValorDestaque
-        )
+    pub const fn espacamento(self) -> f32 {
+        match self {
+            Self::Sobrelinha => 0.8,
+            _ => 0.0,
+        }
+    }
+
+    /// O texto como o papel o escreve (a sobrelinha é sempre caixa alta).
+    #[must_use]
+    pub fn preparar(self, texto: String) -> String {
+        match self {
+            Self::Sobrelinha => texto.to_uppercase(),
+            _ => texto,
+        }
     }
 
     /// Verdadeiro para papéis que usam algarismos tabulares.
@@ -84,10 +102,11 @@ impl Papel {
             // Só as colunas de tabela usam a monoespaçada (alinham a vírgula). O valor de
             // destaque é grande e único — proporcional, com peso.
             Self::Numero => FontFamily::Name(FAMILIA_NUM.into()),
-            Self::TituloTela | Self::TituloSecao | Self::ValorDestaque => {
+            Self::TituloTela | Self::TituloSecao | Self::ValorDestaque | Self::Sobrelinha => {
                 FontFamily::Name(FAMILIA_FORTE.into())
             }
-            Self::Interface | Self::RotuloCampo => FontFamily::Proportional,
+            Self::RotuloCampo | Self::Acao => FontFamily::Name(FAMILIA_MEDIA.into()),
+            Self::Interface | Self::Apoio => FontFamily::Proportional,
         }
     }
 
@@ -100,101 +119,79 @@ impl Papel {
     /// Aplica o papel a um texto, na cor apropriada do tema.
     #[must_use]
     pub fn texto(self, conteudo: impl Into<String>, cores: &Cores) -> RichText {
-        let mut rt = RichText::new(conteudo)
+        RichText::new(self.preparar(conteudo.into()))
             .font(self.font_id())
-            .color(self.cor_padrao(cores));
-        if self.enfatico() {
-            rt = rt.strong();
-        }
-        rt
+            .color(self.cor_padrao(cores))
+            .extra_letter_spacing(self.espacamento())
     }
 
+    /// A cor do papel no tema.
     #[must_use]
-    const fn cor_padrao(self, cores: &Cores) -> egui::Color32 {
+    pub const fn cor_padrao(self, cores: &Cores) -> egui::Color32 {
         match self {
-            Self::RotuloCampo => cores.texto_medio,
-            Self::TituloTela | Self::ValorDestaque => cores.texto_forte,
+            Self::RotuloCampo | Self::Sobrelinha | Self::Apoio => cores.texto_medio,
+            Self::TituloTela | Self::TituloSecao | Self::ValorDestaque => cores.texto_forte,
             _ => cores.texto,
         }
     }
 }
 
-fn ler(defs: &mut FontDefinitions, nome: &str, caminhos: &[&str]) -> bool {
-    for c in caminhos {
-        if let Ok(bytes) = std::fs::read(c) {
-            defs.font_data
-                .insert(nome.to_owned(), FontData::from_owned(bytes));
-            return true;
-        }
-    }
-    false
-}
-
-/// Instala as fontes de interface. Best-effort: se um arquivo não existir, o egui segue com
-/// a fonte que já tinha para aquele papel. No Windows os três substitutos existem desde o
-/// Windows 10/11.
+/// Instala as fontes embutidas e as famílias de peso. Os glifos que a Inter não tem (setas,
+/// símbolos) caem nas fontes padrão do egui, mantidas como reserva no fim de cada família.
 pub fn instalar_fontes(ctx: &egui::Context) {
+    const INTER_REGULAR: &[u8] = include_bytes!("../../assets/fontes/Inter-Regular.ttf");
+    const INTER_MEDIUM: &[u8] = include_bytes!("../../assets/fontes/Inter-Medium.ttf");
+    const INTER_SEMIBOLD: &[u8] = include_bytes!("../../assets/fontes/Inter-SemiBold.ttf");
+    const MONO_REGULAR: &[u8] = include_bytes!("../../assets/fontes/JetBrainsMono-Regular.ttf");
+    const MONO_MEDIUM: &[u8] = include_bytes!("../../assets/fontes/JetBrainsMono-Medium.ttf");
+
     let mut defs = FontDefinitions::default();
-
-    let tem_ui = ler(&mut defs, "cardeal-ui", &[r"C:\Windows\Fonts\segoeui.ttf"]);
-    let tem_forte = ler(
-        &mut defs,
-        "cardeal-ui-forte",
-        &[
-            r"C:\Windows\Fonts\seguisb.ttf",
-            r"C:\Windows\Fonts\segoeuib.ttf",
-        ],
-    );
-    let tem_mono = ler(
-        &mut defs,
-        "cardeal-mono",
-        &[
-            r"C:\Windows\Fonts\CascadiaMono.ttf",
-            r"C:\Windows\Fonts\CascadiaCode.ttf",
-            r"C:\Windows\Fonts\consola.ttf",
-        ],
-    );
-
-    if tem_ui {
-        if let Some(fam) = defs.families.get_mut(&FontFamily::Proportional) {
-            fam.insert(0, "cardeal-ui".to_owned());
-        }
-    }
-    if tem_mono {
-        if let Some(fam) = defs.families.get_mut(&FontFamily::Monospace) {
-            fam.insert(0, "cardeal-mono".to_owned());
-        }
+    for (nome, bytes) in [
+        ("inter-regular", INTER_REGULAR),
+        ("inter-medium", INTER_MEDIUM),
+        ("inter-semibold", INTER_SEMIBOLD),
+        ("mono-regular", MONO_REGULAR),
+        ("mono-medium", MONO_MEDIUM),
+    ] {
+        defs.font_data
+            .insert(nome.to_owned(), FontData::from_static(bytes));
     }
 
-    // A família de fallback para os nomes customizados, quando o arquivo não carregou.
-    let base_prop = defs
+    let reserva_prop = defs
         .families
         .get(&FontFamily::Proportional)
         .cloned()
         .unwrap_or_default();
-    let base_mono = defs
+    let reserva_mono = defs
         .families
         .get(&FontFamily::Monospace)
         .cloned()
         .unwrap_or_default();
-
-    let forte = if tem_forte {
-        let mut v = vec!["cardeal-ui-forte".to_owned()];
-        v.extend(base_prop.iter().cloned());
+    let com_reserva = |primeira: &str, reserva: &[String]| {
+        let mut v = vec![primeira.to_owned()];
+        v.extend(reserva.iter().cloned());
         v
-    } else {
-        base_prop.clone()
     };
-    defs.families
-        .insert(FontFamily::Name(FAMILIA_FORTE.into()), forte);
-    defs.families
-        .insert(FontFamily::Name(FAMILIA_NUM.into()), base_mono);
 
-    ctx.set_fonts(defs);
-    tracing::debug!(
-        tem_ui,
-        tem_forte,
-        tem_mono,
-        "instalar_fontes: substitutos do Windows (Inter/JetBrains Mono ainda não embutidas)"
+    defs.families.insert(
+        FontFamily::Proportional,
+        com_reserva("inter-regular", &reserva_prop),
     );
+    defs.families.insert(
+        FontFamily::Name(FAMILIA_MEDIA.into()),
+        com_reserva("inter-medium", &reserva_prop),
+    );
+    defs.families.insert(
+        FontFamily::Name(FAMILIA_FORTE.into()),
+        com_reserva("inter-semibold", &reserva_prop),
+    );
+    defs.families.insert(
+        FontFamily::Monospace,
+        com_reserva("mono-regular", &reserva_mono),
+    );
+    defs.families.insert(
+        FontFamily::Name(FAMILIA_NUM.into()),
+        com_reserva("mono-medium", &reserva_mono),
+    );
+    ctx.set_fonts(defs);
 }

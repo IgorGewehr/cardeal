@@ -117,7 +117,7 @@ impl<'a> GraficoBarras<'a> {
                 } else {
                     format!("{valor:.0}")
                 },
-                Papel::RotuloCampo.font_id(),
+                Papel::Apoio.font_id(),
                 cores.texto_fraco,
             );
         }
@@ -167,7 +167,7 @@ impl<'a> GraficoBarras<'a> {
                 egui::pos2(cx, plot.bottom() + 6.0),
                 egui::Align2::CENTER_TOP,
                 rotulo_x,
-                Papel::RotuloCampo.font_id(),
+                Papel::Apoio.font_id(),
                 cores.texto_medio,
             );
         }
@@ -188,7 +188,7 @@ impl<'a> GraficoBarras<'a> {
                 p.rect_filled(quad, Raio::CAMPO, serie.cor);
                 let galley = p.layout_no_wrap(
                     serie.rotulo.clone(),
-                    Papel::RotuloCampo.font_id(),
+                    Papel::Apoio.font_id(),
                     cores.texto_medio,
                 );
                 let largura_txt = galley.size().x;

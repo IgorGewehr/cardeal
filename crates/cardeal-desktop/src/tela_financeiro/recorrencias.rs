@@ -40,7 +40,7 @@ pub(super) fn dialogo_recorrencias(
         ctx,
         estado,
         |ui, _estado| {
-            ui.add(Rotulo::campo(
+            ui.add(Rotulo::apoio(
                 "Regras que geram títulos automaticamente — aluguel, internet, assinaturas. \
                      Nenhum título é criado agora; cada ocorrência vira título real na data.",
             ));

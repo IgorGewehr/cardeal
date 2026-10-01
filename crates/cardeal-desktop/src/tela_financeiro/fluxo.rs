@@ -9,7 +9,7 @@ pub(super) fn painel_fluxo(
     estado: &mut EstadoTelaFinanceiro,
 ) {
     ui.horizontal(|ui| {
-        ui.add(Rotulo::campo("PERÍODO"));
+        ui.add(Rotulo::sobrelinha("Período"));
         ui.add_space(Espaco::E8);
         if let Some(d) = Abas::nova(&[(30_i64, "30 dias"), (90, "90 dias"), (365, "12 meses")])
             .selecionada(estado.fluxo_dias)
@@ -199,7 +199,7 @@ pub(super) fn dialogo_conta_bancaria(
             let Dlg::NovaContaBancaria { nome } = &mut estado.dlg else {
                 return;
             };
-            ui.add(Rotulo::campo(
+            ui.add(Rotulo::apoio(
                 "Entra no plano como conta analítica do grupo 1.1 (Disponível).",
             ));
             ui.add_space(Espaco::E8);

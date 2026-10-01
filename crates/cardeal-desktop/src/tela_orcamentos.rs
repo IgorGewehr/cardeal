@@ -1039,7 +1039,7 @@ fn dialogo_decisao(
         |ui, estado| {
             let Dlg::Decisao { identificacao, .. } = &mut estado.dlg else { return };
             if aprovado {
-                ui.add(Rotulo::campo(
+                ui.add(Rotulo::apoio(
                     "A aprovação nunca é implícita — registre quem aprovou (nome e documento, ou \"assinatura em anexo\").",
                 ));
                 ui.add_space(Espaco::E8);
@@ -1100,7 +1100,7 @@ fn dialogo_converter(
         estado,
         |ui, estado| {
             let Dlg::Converter { garantia } = &mut estado.dlg else { return };
-            ui.add(Rotulo::campo(
+            ui.add(Rotulo::apoio(
                 "Abre uma ordem de serviço para este cliente, com o assunto como equipamento e os \
                  itens do orçamento lançados como mão de obra. Você segue montando o restante na OS.",
             ));

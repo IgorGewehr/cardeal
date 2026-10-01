@@ -96,7 +96,7 @@ pub(super) fn painel(ui: &mut egui::Ui, estado: &mut EstadoPessoal) {
     ui.add_space(Espaco::E16);
 
     ui.add(Rotulo::titulo_secao("Projeção mês a mês"));
-    ui.add(Rotulo::campo(
+    ui.add(Rotulo::apoio(
         "Saldo acumulado = quanto sobra (ou falta) somando mês a mês a partir do mês em foco, \
          com tudo o que já está lançado: parcelas do cartão, contas fixas e receitas.",
     ));

@@ -76,18 +76,7 @@ impl<'a> Sidebar<'a> {
                                 999.0,
                                 cores.rubro.gamma_multiply(0.55),
                             );
-                            let espacado: String = titulo
-                                .to_uppercase()
-                                .chars()
-                                .flat_map(|c| [c, '\u{2009}'])
-                                .collect();
-                            ui.label(
-                                egui::RichText::new(espacado)
-                                    .font(Papel::RotuloCampo.font_id())
-                                    .color(cores.texto_medio)
-                                    .size(10.5)
-                                    .strong(),
-                            );
+                            ui.label(Papel::Sobrelinha.texto(titulo, &cores));
                         });
                         ui.add_space(Espaco::E4);
                     } else if gi > 0 {

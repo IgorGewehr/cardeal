@@ -118,7 +118,7 @@ pub(super) fn painel_custos(
             }
         }
         ui.add_space(Espaco::E16);
-        ui.add(Rotulo::campo("PRÓXIMOS"));
+        ui.add(Rotulo::sobrelinha("Próximos"));
         for meses in [3_u8, 6, 12] {
             let b = if estado.custos_meses == meses {
                 Botao::primario(format!("{meses} meses"))
@@ -220,7 +220,7 @@ pub(super) fn painel_custos(
     } else {
         "Custos por categoria, mês a mês"
     }));
-    ui.add(Rotulo::campo(
+    ui.add(Rotulo::apoio(
         "Cada valor soma o que já foi pago, o que está em aberto (o vencido conta no mês \
          atual) e o que as recorrências ainda vão gerar. Clique numa categoria para ver as contas.",
     ));

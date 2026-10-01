@@ -567,3 +567,37 @@ fn lancar_sem_pessoa_ignora_quem_estava_escolhido() {
     assert!(p.contraparte.is_none());
     assert_eq!(p.estado, EstadoParcela::Quitada);
 }
+
+#[test]
+fn lancar_a_vista_sem_marcar_pago_fica_em_aberto_vencendo_na_data() {
+    let t = motor_de_teste();
+    let mut estado = EstadoTelaFinanceiro {
+        aba: Aba::Pagar,
+        ..Default::default()
+    };
+    estado.carregar(&t.motor, &t.sessao);
+
+    let mut f = FormLancar::novo(false);
+    assert!(f.pagamento.condicao.pago, "à vista começa como já pago");
+    f.pagamento.condicao.pago = false;
+    f.descricao = "Internet de outubro".to_owned();
+    f.valor = "120,00".to_owned();
+    let data = f.data.parse::<Data>().expect("data padrão");
+    estado.dlg = Dlg::Lancar(f);
+    lancar(
+        &egui::Context::default(),
+        &t.motor,
+        &t.sessao,
+        &mut estado,
+        false,
+    );
+
+    let p = estado
+        .parcelas
+        .iter()
+        .find(|p| p.descricao.as_deref() == Some("Internet de outubro"))
+        .expect("parcela lançada");
+    assert_eq!(p.estado, EstadoParcela::Aberta);
+    assert_eq!(p.vencimento, data);
+    assert!(p.valor_baixado.e_zero());
+}

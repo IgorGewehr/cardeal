@@ -467,7 +467,7 @@ pub(super) fn dialogo_baixar_lote(
                 ui.add(ValorDinheiro::novo(principal));
             });
             ui.add(
-                Rotulo::campo("Juros, multa e desconto de cada uma são calculados na data.")
+                Rotulo::apoio("Juros, multa e desconto de cada uma são calculados na data.")
                     .cor(ui.cores().texto_medio),
             );
             ui.add_space(Espaco::E12);

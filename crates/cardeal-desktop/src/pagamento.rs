@@ -126,6 +126,20 @@ impl EstadoPagamento {
         id: &str,
         com_prazo: Prazo,
     ) {
+        self.mostrar_com(ui, motor, sessao, id, com_prazo, None);
+    }
+
+    /// Como [`Self::mostrar`], e à vista pergunta "já pago?" com a caixa `pendente`
+    /// (ver `SeletorPagamento::com_pendente`).
+    pub fn mostrar_com(
+        &mut self,
+        ui: &mut egui::Ui,
+        motor: &MotorLocal,
+        sessao: &SessaoLocal,
+        id: &str,
+        com_prazo: Prazo,
+        pendente: Option<&str>,
+    ) {
         if !self.contas_carregadas {
             self.contas_carregadas = true;
             match motor.consultar(
@@ -163,6 +177,9 @@ impl EstadoPagamento {
             Prazo::Nenhum => {}
             Prazo::Parcelado => seletor = seletor.com_prazo(),
             Prazo::Unico => seletor = seletor.com_prazo_unico(),
+        }
+        if let Some(rotulo) = pendente {
+            seletor = seletor.com_pendente(rotulo);
         }
         if seletor.mostrar(ui).pediu_nova_conta {
             self.criando_conta = true;

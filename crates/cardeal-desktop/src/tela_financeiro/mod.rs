@@ -493,15 +493,13 @@ pub fn mostrar(
 /// "CONTAS  [Da empresa | Pessoais]" — a chave entre o financeiro da empresa e o do usuário.
 fn chave_modo(ui: &mut egui::Ui, estado: &mut EstadoTelaFinanceiro) {
     ui.horizontal(|ui| {
-        ui.add(Rotulo::campo("CONTAS"));
+        ui.add(Rotulo::sobrelinha("Contas"));
         ui.add_space(Espaco::E8);
-        if let Some(modo) = Abas::nova(&[
-            (Modo::Empresa, "Da empresa"),
-            (Modo::Pessoal, "Pessoais (só você vê)"),
-        ])
-        .selecionada(estado.modo)
-        .id_salt("financeiro-modo")
-        .mostrar(ui)
+        if let Some(modo) =
+            Abas::nova(&[(Modo::Empresa, "Da empresa"), (Modo::Pessoal, "Pessoais")])
+                .selecionada(estado.modo)
+                .id_salt("financeiro-modo")
+                .mostrar(ui)
         {
             estado.modo = modo;
         }

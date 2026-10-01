@@ -10,7 +10,7 @@ use cardeal_ui::organisms::RespostaGrade;
 pub(super) fn seletor_periodo(ui: &mut egui::Ui, filtro: &mut FiltroPeriodo) -> bool {
     let mut mudou = false;
     ui.horizontal(|ui| {
-        ui.add(Rotulo::campo("PERÍODO"));
+        ui.add(Rotulo::sobrelinha("Período"));
         ui.add_space(Espaco::E8);
         let novo = Abas::nova(&[
             (PresetPeriodo::Dia, "Dia"),

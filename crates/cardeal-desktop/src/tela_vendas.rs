@@ -619,7 +619,7 @@ fn dialogo_tabelas(
                 ui.add(Rotulo::titulo_secao("Regras de preço"));
                 ui.add_space(Espaco::E4);
                 if estado.regras.is_empty() {
-                    ui.add(Rotulo::campo(
+                    ui.add(Rotulo::apoio(
                         "Nenhuma regra — os itens não terão preço sem isto.",
                     ));
                 }

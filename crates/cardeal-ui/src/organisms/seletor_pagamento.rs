@@ -10,13 +10,18 @@
 //!    candidata (com uma só, ela é escolhida sozinha). Sem nenhuma, o seletor devolve
 //!    [`RespostaPagamento::pediu_nova_conta`] para a tela abrir o cadastro rápido.
 //!
+//! Com [`SeletorPagamento::com_pendente`], o "à vista" ganha a caixa "Já pago" (marcada por
+//! padrão): desmarcada, o lançamento é de parcela única que fica em aberto — a conta que já
+//! se sabe que vai pagar, sem o trabalho de montar parcelas e vencimentos. Sem pagamento, não
+//! há meio para perguntar.
+//!
 //! O componente não conhece `mod-financeiro`: a tela diz quais meios existem e quais pedem
 //! conta. As strings de parcelas/data ficam no estado para a tela converter (e validar) na hora
 //! de confirmar, como qualquer `Campo`.
 
 use egui::Ui;
 
-use crate::atoms::{Botao, Rotulo};
+use crate::atoms::{Botao, Caixa, Rotulo};
 use crate::molecules::{Abas, Campo, Mascara, SeletorOpcao};
 use crate::tokens::Espaco;
 
@@ -35,6 +40,9 @@ pub struct CondicaoPagamento<M, C> {
     pub primeiro_vencimento: String,
     /// Dias entre parcelas.
     pub intervalo_dias: String,
+    /// À vista: já foi pago/recebido (só perguntado com [`SeletorPagamento::com_pendente`];
+    /// sem ele, à vista é sempre pago).
+    pub pago: bool,
 }
 
 impl<M, C> Default for CondicaoPagamento<M, C> {
@@ -46,6 +54,7 @@ impl<M, C> Default for CondicaoPagamento<M, C> {
             parcelas: "1".to_owned(),
             primeiro_vencimento: String::new(),
             intervalo_dias: "30".to_owned(),
+            pago: true,
         }
     }
 }
@@ -85,6 +94,7 @@ pub struct SeletorPagamento<'a, M, C> {
     contas: Vec<(C, String)>,
     com_prazo: bool,
     so_vencimento: bool,
+    pendente: Option<String>,
 }
 
 impl<'a, M: PartialEq + Copy, C: PartialEq + Copy> SeletorPagamento<'a, M, C> {
@@ -97,6 +107,7 @@ impl<'a, M: PartialEq + Copy, C: PartialEq + Copy> SeletorPagamento<'a, M, C> {
             contas: Vec::new(),
             com_prazo: false,
             so_vencimento: false,
+            pendente: None,
         }
     }
 
@@ -131,6 +142,13 @@ impl<'a, M: PartialEq + Copy, C: PartialEq + Copy> SeletorPagamento<'a, M, C> {
         self
     }
 
+    /// À vista pergunta se já foi pago, com a caixa `rotulo` ("Já pago", "Já recebido") —
+    /// ver [`CondicaoPagamento::pago`].
+    pub fn com_pendente(mut self, rotulo: impl Into<String>) -> Self {
+        self.pendente = Some(rotulo.into());
+        self
+    }
+
     /// Desenha o bloco.
     pub fn mostrar(self, ui: &mut Ui) -> RespostaPagamento {
         let Self {
@@ -140,6 +158,7 @@ impl<'a, M: PartialEq + Copy, C: PartialEq + Copy> SeletorPagamento<'a, M, C> {
             contas,
             com_prazo,
             so_vencimento,
+            pendente,
         } = self;
         let mut resposta = RespostaPagamento::default();
 
@@ -176,6 +195,12 @@ impl<'a, M: PartialEq + Copy, C: PartialEq + Copy> SeletorPagamento<'a, M, C> {
                             .marcador("30"),
                     );
                 });
+                return resposta;
+            }
+        }
+
+        if let Some(rotulo) = pendente {
+            if !perguntar_pago(ui, &mut condicao.pago, rotulo) {
                 return resposta;
             }
         }
@@ -230,4 +255,18 @@ impl<'a, M: PartialEq + Copy, C: PartialEq + Copy> SeletorPagamento<'a, M, C> {
         }
         resposta
     }
+}
+
+/// A caixa "Já pago" do à vista. Devolve `true` quando está pago (o bloco segue para o meio).
+fn perguntar_pago(ui: &mut Ui, pago: &mut bool, rotulo: String) -> bool {
+    ui.add(Caixa::nova(pago, rotulo));
+    if *pago {
+        ui.add_space(Espaco::E12);
+    } else {
+        ui.add_space(Espaco::E4);
+        ui.add(Rotulo::apoio(
+            "Fica em aberto, vencendo na data do lançamento — dê baixa quando pagar.",
+        ));
+    }
+    *pago
 }

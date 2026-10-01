@@ -139,7 +139,7 @@ impl Widget for CartaoKpi {
                 ui.set_min_width(ui.available_width().max(0.0));
                 ui.horizontal(|ui| {
                     ui.vertical(|ui| {
-                        ui.add(Rotulo::campo(self.rotulo.to_uppercase()));
+                        ui.add(Rotulo::sobrelinha(self.rotulo));
                         ui.add_space(Espaco::E4);
                         let papel = if self.compacto {
                             Papel::TituloTela
@@ -149,7 +149,7 @@ impl Widget for CartaoKpi {
                         desenhar_valor(ui, self.conteudo, self.tom, papel, id, &cores);
                         if let Some(variacao) = self.variacao {
                             ui.add_space(Espaco::E4);
-                            ui.add(Rotulo::campo(variacao));
+                            ui.add(Rotulo::apoio(variacao));
                         }
                     });
                     if let Some(icone) = self.icone {

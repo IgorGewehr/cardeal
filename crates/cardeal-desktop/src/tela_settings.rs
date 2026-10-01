@@ -141,7 +141,7 @@ fn secao_empresa(
         dado(ui, "CNPJ", &cnpj);
         ui.add_space(Espaco::E12);
 
-        ui.add(Rotulo::campo("REGIME TRIBUTÁRIO"));
+        ui.add(Rotulo::sobrelinha("Regime tributário"));
         ui.add_space(Espaco::E4);
         ui.horizontal_wrapped(|ui| {
             for (i, rot) in REGIME_ROTULO.iter().enumerate() {
@@ -189,7 +189,7 @@ fn secao_identidade(
     cartao(ui, |ui| {
         ui.add(Rotulo::titulo_secao("Identidade para documentos"));
         ui.add_space(Espaco::E4);
-        ui.add(Rotulo::campo(
+        ui.add(Rotulo::apoio(
             "Aparece no cabeçalho do PDF de orçamento — e de qualquer documento futuro.",
         ));
         ui.add_space(Espaco::E12);
@@ -343,7 +343,7 @@ fn secao_aparencia(ui: &mut egui::Ui, tema: &mut Tema) {
             ui.add_space(Espaco::E8);
         }
         ui.add_space(Espaco::E4);
-        ui.add(Rotulo::campo(
+        ui.add(Rotulo::apoio(
             "A escolha vale para este computador e é lembrada entre sessões (Ctrl+Shift+D alterna rápido).",
         ));
     });
@@ -408,7 +408,7 @@ fn secao_acesso(ui: &mut egui::Ui, estado: &mut EstadoTelaSettings) {
         });
     });
     ui.add_space(Espaco::E12);
-    ui.add(Rotulo::campo(
+    ui.add(Rotulo::apoio(
         "Criar e editar usuários e papéis chega numa próxima versão — hoje o assistente de primeiro acesso cria o administrador.",
     ));
 }
