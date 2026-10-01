@@ -1,0 +1,33 @@
+[package]
+name         = "cardeal-web"
+description  = "O Cardeal no navegador: egui compilado para WASM, falando com o cardeal-server (ADR-0016)."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+cardeal-kernel.workspace   = true
+cardeal-protocol.workspace = true
+cardeal-ui      = { path = "../cardeal-ui" }
+cardeal-cliente = { path = "../cardeal-cliente", default-features = false }
+mod-clientes    = { path = "../modulos/mod-clientes", default-features = false }
+egui.workspace     = true
+serde.workspace    = true
+postcard.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# Só o renderizador WebGL2 (glow): menor que o wgpu e roda em qualquer navegador atual.
+eframe = { version = "0.29", default-features = false, features = ["glow", "default_fonts"] }
+wasm-bindgen         = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys               = "0.3"
+web-sys = { version = "0.3", features = [
+    "Window", "Document", "HtmlCanvasElement", "Element",
+    "Request", "RequestInit", "RequestCredentials", "Headers", "Response",
+] }

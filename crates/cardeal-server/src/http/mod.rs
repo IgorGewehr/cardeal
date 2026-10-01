@@ -6,6 +6,7 @@ mod despacho;
 mod origem;
 mod resposta;
 mod sessao;
+mod web;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -37,10 +38,11 @@ pub fn roteador(servidor: Arc<Servidor>) -> Router {
         .route("/v1/e/:empresa/qry/:nome", post(despacho::consulta))
         .route("/v1/e/:empresa/sessao", get(despacho::sessao))
         .layer(middleware::from_fn(exigir_protocolo));
-    Router::new()
-        .route(ROTA_SAUDE, get(saude))
-        .merge(v1)
-        .layer(DefaultBodyLimit::max(TETO_CORPO_BYTES))
+    let mut app = Router::new().route(ROTA_SAUDE, get(saude)).merge(v1);
+    if let Some(pasta) = servidor.config.web.clone() {
+        app = app.merge(web::rotas(&pasta));
+    }
+    app.layer(DefaultBodyLimit::max(TETO_CORPO_BYTES))
         .layer(TimeoutLayer::with_status_code(
             StatusCode::GATEWAY_TIMEOUT,
             TEMPO_MAXIMO,

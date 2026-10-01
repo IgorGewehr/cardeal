@@ -42,7 +42,22 @@ docker compose -f packaging/servidor/compose.yaml up -d --build
 No painel do túnel, aponte o hostname público (ex.: `app.cardeal.com.br`) para
 `http://cardeal:8080`.
 
-## 4. Criar uma empresa
+## 4. Cliente do navegador
+
+```sh
+cargo binstall wasm-bindgen-cli@0.2.127 wasm-opt   # uma vez
+cargo xtask construir-web                          # → dist/web/
+cardeal-server servir --web dist/web               # ou CARDEAL_WEB=dist/web
+```
+
+O mesmo `cardeal-ui` do desktop, compilado para WASM (egui + WebGL2). O `index.html` vai
+sem cache; o resto mora em `app/<hash do conteúdo>/` com cache imutável de um ano e
+`.br`/`.gz` gerados no build — o servidor não comprime nada por requisição. A página tem CSP
+estrita (`script-src 'self' 'wasm-unsafe-eval'`, nada inline). Medido (2026-10-01, Firefox
+156): WASM de 3,75 MB / **1,37 MB em brotli**; segunda abertura em ~0,3 s; a aba do app tem
+~9 MB privados a mais que uma aba vazia (sem contar a composição gráfica, que vai para a GPU).
+
+## 5. Criar uma empresa
 
 ```sh
 CARDEAL_SENHA='senha-da-conta' docker compose -f packaging/servidor/compose.yaml run --rm \
@@ -55,7 +70,7 @@ A senha vai por variável de ambiente, nunca por argumento (argumento aparece no
 shell e no `ps`). Um e-mail que já tem conta ganha acesso à empresa nova sem trocar a senha —
 é assim que um contador atende várias empresas com um login só.
 
-## 5. Variáveis
+## 6. Variáveis
 
 | Variável | Padrão | O quê |
 |---|---|---|
@@ -64,11 +79,12 @@ shell e no `ps`). Um e-mail que já tem conta ganha acesso à empresa nova sem t
 | `CARDEAL_OCIOSIDADE_MIN` | `10` | minutos sem uso até a empresa sair da memória |
 | `CARDEAL_TETO_EMPRESAS` | `256` | máximo aberto ao mesmo tempo |
 | `CARDEAL_TRABALHADORES` | `2` | threads do runtime (o trabalho de banco vai ao pool de bloqueio) |
+| `CARDEAL_WEB` | — | pasta do cliente do navegador (`dist/web`) |
 | `CARDEAL_CONFIAR_CLOUDFLARE` | `false` | usar `CF-Connecting-IP`; **só** com a porta inacessível de fora do túnel |
 | `MIMALLOC_ARENA_EAGER_COMMIT` | `0` (na imagem) | não reservar memória antes do uso |
 | `RUST_LOG` | `info,tower_http=warn` | `debug` registra toda requisição |
 
-## 6. Segurança
+## 7. Segurança
 
 - Senhas: Argon2id (19 MiB, t=2), no máximo 2 hashes simultâneos (pico de RAM fixo).
 - Força bruta: bloqueio progressivo por conta (5 → 1 min, 10 → 15 min) **e** 30 tentativas
@@ -81,7 +97,7 @@ shell e no `ps`). Um e-mail que já tem conta ganha acesso à empresa nova sem t
 - Container: usuário sem privilégio, sistema de arquivos somente leitura (exceto `/dados`),
   `no-new-privileges`.
 
-## 7. Operação
+## 8. Operação
 
 - **Desligar:** `SIGTERM` (o padrão de `docker stop`) termina as requisições em curso e fecha
   cada base com o lote final confirmado.

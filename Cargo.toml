@@ -14,6 +14,7 @@ members = [
     "crates/cardeal-pdf",
     "crates/cardeal-ui",
     "crates/cardeal-desktop",
+    "crates/cardeal-web",
     "crates/cardeal-fiscal",
     "crates/cardeal-testkit",
     "crates/modulos/mod-empresa",
@@ -98,7 +99,7 @@ rusqlite    = { version = "0.32", features = ["bundled", "blob", "backup", "func
 tokio       = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync", "signal", "fs"] }
 axum        = { version = "0.7", features = ["ws", "http2", "macros"] }
 tower        = "0.5"
-tower-http   = { version = "0.6", features = ["compression-zstd", "limit", "timeout", "trace"] }
+tower-http   = { version = "0.6", features = ["compression-zstd", "limit", "timeout", "trace", "fs"] }
 reqwest      = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "gzip"] }
 rustls       = "0.23"
 rcgen        = "0.13"
@@ -170,6 +171,11 @@ debug         = false
 [profile.balcao]
 inherits      = "release"
 opt-level     = "s"
+
+# Cliente do navegador (cardeal-web → WASM): tamanho é tempo de abertura numa conexão 4G.
+[profile.web]
+inherits  = "release"
+opt-level = "z"
 
 # Perfil de medição: release com símbolos, para flamegraph e orçamento de recursos.
 [profile.medicao]

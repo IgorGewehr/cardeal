@@ -11,6 +11,7 @@ use std::process::Command;
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 
+mod construir_web;
 mod verificar_ui;
 mod verificar_wasm;
 
@@ -45,6 +46,13 @@ enum Comando {
     /// Falha se o domínio usado pelo cliente web deixar de compilar para `wasm32` sem SQLite
     /// (ADR-0016).
     VerificarWasm,
+    /// Compila o cliente do navegador (egui → WASM) em `dist/web/`, versionado e
+    /// pré-comprimido, pronto para o `cardeal-server --web dist/web` (ADR-0016).
+    ConstruirWeb {
+        /// Pula o `wasm-opt` (build mais rápido em desenvolvimento, arquivo maior).
+        #[arg(long)]
+        sem_wasm_opt: bool,
+    },
 }
 
 #[derive(ValueEnum, Clone, Copy, PartialEq, Eq)]
@@ -66,6 +74,7 @@ fn main() -> Result<()> {
         },
         Comando::VerificarUi { gerar_baseline } => verificar_ui::executar(&raiz, gerar_baseline),
         Comando::VerificarWasm => verificar_wasm::executar(&raiz),
+        Comando::ConstruirWeb { sem_wasm_opt } => construir_web::executar(&raiz, sem_wasm_opt),
     }
 }
 

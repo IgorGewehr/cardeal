@@ -16,10 +16,14 @@
 /// Verificação/download/aplicação de atualização via GitHub Releases — ver `docs/build/atualizacao.md`.
 #[cfg(not(target_arch = "wasm32"))]
 pub mod atualizador;
+// A fachada precisa de um motor síncrono: o local, ou o remoto do desktop. No navegador o
+// cliente web fala com `remoto::protocolo` direto, sobre `fetch` assíncrono.
+#[cfg(any(feature = "local", not(target_arch = "wasm32")))]
 mod motor;
 pub mod remoto;
 
 #[cfg(feature = "local")]
 pub use cardeal_motor::{MotorLocal, SessaoLocal};
 pub use mod_empresa::{EmpresaResumo, IdentidadeVisual, PapelResumo, UsuarioResumo};
+#[cfg(any(feature = "local", not(target_arch = "wasm32")))]
 pub use motor::{Motor, Sessao};

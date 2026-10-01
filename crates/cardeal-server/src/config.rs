@@ -34,6 +34,9 @@ pub struct ConfigServidor {
     /// Por quanto tempo uma resposta idempotente é guardada (reenvios depois disso executam de
     /// novo). Reenvio por queda de rede acontece em segundos; uma semana é folga de sobra.
     pub retencao_idempotencia: Duration,
+    /// A pasta do cliente do navegador (`cargo xtask construir-web` → `dist/web`). `None`: o
+    /// servidor só atende a API.
+    pub web: Option<PathBuf>,
 }
 
 impl ConfigServidor {
@@ -50,6 +53,7 @@ impl ConfigServidor {
             janela_login: Duration::from_secs(5 * 60),
             confiar_cloudflare: false,
             retencao_idempotencia: Duration::from_secs(7 * 24 * 60 * 60),
+            web: None,
         }
     }
 

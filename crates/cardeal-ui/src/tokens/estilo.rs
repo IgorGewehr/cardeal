@@ -151,7 +151,18 @@ pub fn instalar_estilo(ctx: &Context, tema: Tema) {
     // Foco sempre visível (`docs/12-ui-ux.md` §9).
     style.visuals.clip_rect_margin = 3.0_f32;
 
-    ctx.set_style(style);
+    // O egui guarda um estilo por tema (claro/escuro) e o eframe web troca para o tema do
+    // sistema logo depois de criar o app: gravar só no tema ativo deixava a web com os campos
+    // sem moldura (o estilo padrão do egui). O design system vale nos dois, e quem escolhe o
+    // tema é o Cardeal (`Tema`), não o sistema por baixo dele.
+    let style = std::sync::Arc::new(style);
+    ctx.set_style_of(egui::Theme::Light, style.clone());
+    ctx.set_style_of(egui::Theme::Dark, style);
+    ctx.set_theme(if tema.e_escuro() {
+        egui::Theme::Dark
+    } else {
+        egui::Theme::Light
+    });
 }
 
 fn sombra(

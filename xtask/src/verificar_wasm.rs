@@ -29,6 +29,8 @@ const CRATES: &[&str] = &[
     "mod-pdv",
     "mod-compras",
     "mod-orcamentos",
+    "cardeal-cliente",
+    "cardeal-web",
 ];
 
 const ALVO: &str = "wasm32-unknown-unknown";

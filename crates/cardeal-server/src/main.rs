@@ -56,6 +56,9 @@ enum Acao {
         /// **apenas** pelo Cloudflare Tunnel.
         #[arg(long, env = "CARDEAL_CONFIAR_CLOUDFLARE", default_value_t = false)]
         confiar_cloudflare: bool,
+        /// Pasta do cliente do navegador (`cargo xtask construir-web` → `dist/web`).
+        #[arg(long, env = "CARDEAL_WEB")]
+        web: Option<PathBuf>,
     },
     /// Cria uma empresa nova e dá acesso a uma conta.
     Provisionar {
@@ -96,11 +99,13 @@ fn main() -> anyhow::Result<()> {
             ociosidade_min,
             teto_empresas,
             confiar_cloudflare,
+            web,
         } => {
             let mut config = ConfigServidor::em(cli.dados);
             config.ociosidade = Duration::from_secs(ociosidade_min * 60);
             config.teto_empresas = teto_empresas;
             config.confiar_cloudflare = confiar_cloudflare;
+            config.web = web;
             servir(config, endereco, trabalhadores)
         }
         Acao::Provisionar {
