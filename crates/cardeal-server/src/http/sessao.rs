@@ -79,3 +79,33 @@ pub(super) async fn sair(
     )
         .into_response())
 }
+
+/// `GET /v1/sessao`: a sessão do cookie/token ainda vale? Devolve o mesmo que o login (sem o
+/// token) — é o que deixa o navegador recarregar a página sem pedir a senha de novo.
+pub(super) async fn atual(
+    State(servidor): State<Arc<Servidor>>,
+    headers: HeaderMap,
+) -> Result<Response, ErroHttp> {
+    let token = credencial::exigir_token(&headers)?;
+    let s = Arc::clone(&servidor);
+    let resposta = bloqueante(move || {
+        let sessao = s.sessoes.resolver(&s.diretorio, &token)?;
+        let nome = s.diretorio.nome_da_conta(sessao.conta)?.unwrap_or_default();
+        let empresas = s
+            .diretorio
+            .vinculos(sessao.conta)?
+            .into_iter()
+            .map(|v| cardeal_protocol::EmpresaAcessivel {
+                id: v.empresa,
+                nome: v.nome,
+            })
+            .collect();
+        Ok(cardeal_protocol::RespostaLogin {
+            nome,
+            empresas,
+            token: None,
+        })
+    })
+    .await?;
+    Ok(postcard(&resposta)?.into_response())
+}

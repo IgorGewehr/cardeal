@@ -736,3 +736,22 @@ async fn metricas_so_com_token_e_contam_o_que_aconteceu() {
         assert!(texto.contains(esperado), "faltou {esperado:?} em:\n{texto}");
     }
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sessao_atual_sobrevive_a_recarga_e_morre_no_logout() {
+    let a = ambiente(Duration::from_secs(600));
+    let t = token(&a.app, "ana@x.com").await;
+    let atual: RespostaLogin = chamar(&a.app, Method::GET, ROTA_SESSAO, Some(&t), &[], vec![])
+        .await
+        .valor();
+    assert_eq!(atual.nome, "Pessoa");
+    assert_eq!(atual.empresas.len(), 1);
+    assert!(
+        atual.token.is_none(),
+        "o token nunca volta no corpo de \"quem sou eu\""
+    );
+
+    chamar(&a.app, Method::DELETE, ROTA_SESSAO, Some(&t), &[], vec![]).await;
+    let depois = chamar(&a.app, Method::GET, ROTA_SESSAO, Some(&t), &[], vec![]).await;
+    assert_eq!(depois.status, StatusCode::UNAUTHORIZED);
+}

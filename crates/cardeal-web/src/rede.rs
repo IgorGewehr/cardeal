@@ -79,3 +79,18 @@ pub fn disparar<T: DeserializeOwned + 'static>(ctx: &egui::Context, pedido: Pedi
     });
     Pendente(rx)
 }
+
+/// Como [`disparar`], para respostas sem corpo (`204`, o logout).
+pub fn disparar_sem_corpo(ctx: &egui::Context, pedido: Pedido) -> Pendente<()> {
+    let (tx, rx) = mpsc::channel();
+    let ctx = ctx.clone();
+    wasm_bindgen_futures::spawn_local(async move {
+        let r = match fetch(&pedido).await {
+            Ok(resposta) => protocolo::interpretar_vazio(&resposta),
+            Err(e) => Err(Erro::novo(CodigoErro::SEM_CONEXAO, e)),
+        };
+        let _ = tx.send(r);
+        ctx.request_repaint();
+    });
+    Pendente(rx)
+}

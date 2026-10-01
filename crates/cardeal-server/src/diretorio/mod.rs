@@ -136,6 +136,22 @@ impl Diretorio {
             .map_err(|e| falha(&e))
     }
 
+    /// O nome de exibição de uma conta.
+    ///
+    /// # Errors
+    /// Falha do SQLite.
+    pub fn nome_da_conta(&self, conta: Id) -> Resultado<Option<String>> {
+        self.conn
+            .lock()
+            .query_row(
+                "SELECT nome FROM conta WHERE id = ?1",
+                [conta.em_bytes().as_slice()],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|e| falha(&e))
+    }
+
     /// Cria uma conta.
     ///
     /// # Errors

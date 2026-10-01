@@ -33,7 +33,10 @@ const TEMPO_MAXIMO: Duration = Duration::from_secs(30);
 /// O roteador completo.
 pub fn roteador(servidor: Arc<Servidor>) -> Router {
     let v1 = Router::new()
-        .route(ROTA_SESSAO, post(sessao::entrar).delete(sessao::sair))
+        .route(
+            ROTA_SESSAO,
+            post(sessao::entrar).get(sessao::atual).delete(sessao::sair),
+        )
         .route("/v1/e/:empresa/cmd/:nome", post(despacho::comando))
         .route("/v1/e/:empresa/qry/:nome", post(despacho::consulta))
         .route("/v1/e/:empresa/sessao", get(despacho::sessao))

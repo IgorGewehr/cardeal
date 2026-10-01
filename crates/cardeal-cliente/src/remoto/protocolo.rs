@@ -74,6 +74,12 @@ pub fn login(pedido: &cardeal_protocol::PedidoLogin) -> Resultado<Pedido> {
     Ok(base(Metodo::Post, ROTA_SESSAO.to_owned(), carga(pedido)?))
 }
 
+/// "Quem sou eu": a sessão do cookie ainda vale? (Mesma resposta do login, sem token.)
+#[must_use]
+pub fn sessao_atual() -> Pedido {
+    base(Metodo::Get, ROTA_SESSAO.to_owned(), Vec::new())
+}
+
 /// O pedido de logout.
 #[must_use]
 pub fn logout() -> Pedido {
