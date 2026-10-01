@@ -13,21 +13,28 @@ type Resultado<T> = Result<T, ErroArmazenamento>;
 pub(crate) struct Alvo {
     uri: String,
     memoria: bool,
+    cache_escritor: String,
+    cache_leitor: String,
+    mmap: String,
 }
 
 impl Alvo {
     pub(crate) fn de(cfg: &ConfigArmazenamento) -> Self {
-        if cfg.e_memoria() {
+        let (uri, memoria) = if cfg.e_memoria() {
             let id = cardeal_kernel::Id::novo();
-            Self {
-                uri: format!("file:cardeal-mem-{}?mode=memory&cache=shared", id.curto()),
-                memoria: true,
-            }
+            (
+                format!("file:cardeal-mem-{}?mode=memory&cache=shared", id.curto()),
+                true,
+            )
         } else {
-            Self {
-                uri: cfg.caminho.to_string_lossy().into_owned(),
-                memoria: false,
-            }
+            (cfg.caminho.to_string_lossy().into_owned(), false)
+        };
+        Self {
+            uri,
+            memoria,
+            cache_escritor: format!("-{}", cfg.cache_escritor_kib),
+            cache_leitor: format!("-{}", cfg.cache_leitor_kib),
+            mmap: cfg.mmap_bytes.to_string(),
         }
     }
 }
@@ -56,8 +63,8 @@ pub(crate) fn abrir_escritor(alvo: &Alvo) -> Resultado<Connection> {
             ("synchronous", "FULL"),
             ("foreign_keys", "ON"),
             ("busy_timeout", "5000"),
-            ("cache_size", "-16384"),
-            ("mmap_size", "268435456"),
+            ("cache_size", &alvo.cache_escritor),
+            ("mmap_size", &alvo.mmap),
             ("wal_autocheckpoint", "4000"),
             ("journal_size_limit", "67108864"),
             ("temp_store", "MEMORY"),
@@ -80,8 +87,8 @@ pub(crate) fn abrir_leitor(alvo: &Alvo) -> Resultado<Connection> {
             ("synchronous", "NORMAL"),
             ("query_only", "ON"),
             ("foreign_keys", "ON"),
-            ("cache_size", "-8192"),
-            ("mmap_size", "268435456"),
+            ("cache_size", &alvo.cache_leitor),
+            ("mmap_size", &alvo.mmap),
         ]
     };
     aplicar_pragmas(&c, pragmas)?;

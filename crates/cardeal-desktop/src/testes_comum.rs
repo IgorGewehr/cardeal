@@ -13,8 +13,12 @@ pub struct MotorDeTeste {
 /// Abre um motor novo com todos os módulos do app e faz login como administrador.
 pub fn motor_de_teste() -> MotorDeTeste {
     let arquivo = tempfile::NamedTempFile::new().expect("arquivo temporário");
-    let motor = MotorLocal::abrir(arquivo.path(), &crate::modulos(), &crate::pedido_ativacao())
-        .expect("abrir motor");
+    let motor = MotorLocal::abrir(
+        arquivo.path(),
+        &cardeal_distribuicao::modulos(),
+        &cardeal_distribuicao::pedido_ativacao(),
+    )
+    .expect("abrir motor");
     motor
         .configurar_inicial(
             "Assistência Teste",

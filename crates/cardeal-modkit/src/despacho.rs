@@ -28,7 +28,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use cardeal_auth::{autorizar, AutorizacoesEfetivas, Escopo, Sessao, ValorLimite};
-use cardeal_kernel::{CodigoErro, Data, Erro, Fuso, Id, Instante, Resultado};
+use cardeal_kernel::{ChaveIdempotencia, CodigoErro, Data, Erro, Fuso, Id, Instante, Resultado};
 use cardeal_storage::{
     ConjuntoMigracoes, ContextoEscrita, ErroArmazenamento, Escritor, Leitor, UnidadeDeTrabalho,
 };
@@ -300,6 +300,18 @@ impl Ambiente {
         }
     }
 
+    /// Como [`Self::novo`], com um conjunto efetivo já compartilhado — muitas empresas com a
+    /// mesma distribuição (o servidor multi-tenant, ADR-0016) apontam para o mesmo conjunto em
+    /// vez de cada uma guardar uma cópia.
+    #[must_use]
+    pub fn compartilhado(empresa: Id, conjunto: Arc<ConjuntoEfetivo>) -> Self {
+        Self {
+            empresa,
+            conjunto,
+            fuso: Fuso::BRASILIA,
+        }
+    }
+
     /// Fixa o fuso da empresa.
     #[must_use]
     pub const fn com_fuso(mut self, fuso: Fuso) -> Self {
@@ -385,6 +397,25 @@ impl Despachante {
         ambiente: &Ambiente,
         escritor: &Escritor,
     ) -> Resultado<Vec<u8>> {
+        self.executar_comando_idempotente(nome, carga, None, sessao, ambiente, escritor)
+    }
+
+    /// Como [`Self::executar_comando`], com chave de idempotência: se o mesmo comando já foi
+    /// confirmado com esta chave, devolve a resposta gravada **sem executar de novo**; senão,
+    /// executa e grava a resposta na mesma transação (`docs/09-protocolo-api.md` §1, princípio
+    /// 3). É o caminho de todo comando que chega pela rede, onde reenvio é rotina.
+    ///
+    /// # Errors
+    /// Como [`Self::executar_comando`]; e `DUPLICADO` se a chave já foi usada por outro comando.
+    pub fn executar_comando_idempotente(
+        &self,
+        nome: &str,
+        carga: &[u8],
+        chave: Option<ChaveIdempotencia>,
+        sessao: &Sessao,
+        ambiente: &Ambiente,
+        escritor: &Escritor,
+    ) -> Resultado<Vec<u8>> {
         let entrada = self
             .comandos
             .get(nome)
@@ -404,8 +435,18 @@ impl Despachante {
         );
         cte.agora = ctx.agora;
         cte.correlacao = ctx.correlacao;
+        cte.chave = chave;
+        let nome = nome.to_owned();
 
-        match escritor.executar(cte, move |uow| executor(&ctx, uow, &carga)) {
+        let trabalho = move |uow: &mut UnidadeDeTrabalho<'_>| {
+            if let Some(resposta) = uow.resposta_idempotente(&nome)? {
+                return Ok(resposta);
+            }
+            let resposta = executor(&ctx, uow, &carga)?;
+            uow.gravar_resposta_idempotente(&nome, &resposta)?;
+            Ok(resposta)
+        };
+        match escritor.executar(cte, trabalho) {
             Ok(confirmado) => Ok(confirmado.valor),
             Err(ErroArmazenamento::Dominio(e)) => Err(e),
             Err(outro) => Err(Erro::de_dominio(&outro)),

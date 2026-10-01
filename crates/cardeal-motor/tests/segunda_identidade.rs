@@ -2,8 +2,8 @@
 //! `docs/modulos/pdv.md` §11 regra 3): autenticar um supervisor de verdade e conferir que ele
 //! tem a permissão antes de agir em nome dele.
 
-use cardeal_cliente::MotorLocal;
 use cardeal_modkit::{Modulo, PedidoAtivacao};
+use cardeal_motor::MotorLocal;
 
 fn modulos() -> Vec<&'static dyn Modulo> {
     vec![

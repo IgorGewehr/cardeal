@@ -26,6 +26,7 @@ cardeal-ledger.workspace  = true
 cardeal-modkit.workspace  = true
 cardeal-ui.workspace      = true
 cardeal-cliente.workspace = true
+cardeal-distribuicao.workspace = true
 cardeal-pdf.workspace     = true
 
 mod-financeiro.workspace = true

@@ -395,3 +395,125 @@ fn contexto_de_escrita_carrega_empresa_usuario_e_dispositivo_da_sessao() {
         .unwrap();
     assert_eq!(postcard::from_bytes::<i64>(&total_bytes).unwrap(), 1);
 }
+
+fn contar(d: &Despachante, arm: &Armazenamento, sessao: &Sessao, ambiente: &Ambiente) -> i64 {
+    let bytes = d
+        .executar_consulta(
+            "demo.contar_notas.v1",
+            &postcard::to_stdvec(&ContarNotas).unwrap(),
+            sessao,
+            ambiente,
+            arm.leitor(),
+        )
+        .unwrap();
+    postcard::from_bytes(&bytes).unwrap()
+}
+
+#[test]
+fn reenvio_com_a_mesma_chave_devolve_a_resposta_original_sem_gravar_de_novo() {
+    let (_dir, arm) = base();
+    let d = despachante();
+    let empresa = Id::novo();
+    let ambiente = ambiente_demo(empresa);
+    let sessao = sessao_com(empresa, &["demo.nota.criar", "demo.nota.ver"]);
+    let carga = postcard::to_stdvec(&CriarNota {
+        texto: "venda".into(),
+    })
+    .unwrap();
+    let chave = Some(cardeal_kernel::ChaveIdempotencia::nova());
+
+    let enviar = || {
+        d.executar_comando_idempotente(
+            "demo.criar_nota.v1",
+            &carga,
+            chave,
+            &sessao,
+            &ambiente,
+            arm.escritor(),
+        )
+        .unwrap()
+    };
+    let primeira = enviar();
+    let reenvio = enviar();
+
+    assert_eq!(
+        primeira, reenvio,
+        "o reenvio devolve exatamente a mesma resposta"
+    );
+    assert_eq!(
+        contar(&d, &arm, &sessao, &ambiente),
+        1,
+        "e não cria uma segunda nota"
+    );
+}
+
+#[test]
+fn chave_reaproveitada_por_outro_comando_e_recusada() {
+    let (_dir, arm) = base();
+    let d = despachante();
+    let empresa = Id::novo();
+    let ambiente = ambiente_demo(empresa);
+    let sessao = sessao_com(empresa, &["demo.nota.criar"]);
+    let carga = postcard::to_stdvec(&CriarNota { texto: "a".into() }).unwrap();
+    let chave = cardeal_kernel::ChaveIdempotencia::nova();
+
+    d.executar_comando_idempotente(
+        "demo.criar_nota.v1",
+        &carga,
+        Some(chave),
+        &sessao,
+        &ambiente,
+        arm.escritor(),
+    )
+    .unwrap();
+    // Simula um cliente com bug: outro nome de comando sob a mesma chave. O nome não existe
+    // no registro, então troca-se só a gravação: grava-se a chave à mão com outro comando.
+    let erro = arm
+        .escritor()
+        .executar(
+            cardeal_storage::ContextoEscrita::novo(empresa, Id::novo(), Id::novo(), Id::novo())
+                .com_chave(chave),
+            |uow| uow.resposta_idempotente("demo.outro_comando.v1"),
+        )
+        .unwrap_err();
+    match erro {
+        cardeal_storage::ErroArmazenamento::Dominio(e) => {
+            assert_eq!(e.codigo, CodigoErro::DUPLICADO);
+        }
+        outro => panic!("esperava DUPLICADO, veio {outro:?}"),
+    }
+}
+
+#[test]
+fn comando_que_falha_nao_queima_a_chave() {
+    let (_dir, arm) = base();
+    let d = despachante();
+    let empresa = Id::novo();
+    let ambiente = ambiente_demo(empresa);
+    let sessao = sessao_com(empresa, &["demo.nota.criar", "demo.nota.ver"]);
+    let chave = Some(cardeal_kernel::ChaveIdempotencia::nova());
+
+    let vazia = postcard::to_stdvec(&CriarNota { texto: " ".into() }).unwrap();
+    d.executar_comando_idempotente(
+        "demo.criar_nota.v1",
+        &vazia,
+        chave,
+        &sessao,
+        &ambiente,
+        arm.escritor(),
+    )
+    .unwrap_err();
+
+    // O SAVEPOINT desfez também a gravação da chave: corrigir e reenviar com ela funciona.
+    let boa = postcard::to_stdvec(&CriarNota { texto: "ok".into() }).unwrap();
+    d.executar_comando_idempotente(
+        "demo.criar_nota.v1",
+        &boa,
+        chave,
+        &sessao,
+        &ambiente,
+        arm.escritor(),
+    )
+    .unwrap();
+    assert_eq!(contar(&d, &arm, &sessao, &ambiente), 1);
+}

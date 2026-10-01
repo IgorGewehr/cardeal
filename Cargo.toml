@@ -6,6 +6,8 @@ members = [
     "crates/cardeal-storage",
     "crates/cardeal-modkit",
     "crates/cardeal-auth",
+    "crates/cardeal-motor",
+    "crates/cardeal-distribuicao",
     "crates/cardeal-protocol",
     "crates/cardeal-server",
     "crates/cardeal-cliente",
@@ -47,6 +49,8 @@ cardeal-ledger    = { path = "crates/cardeal-ledger" }
 cardeal-storage   = { path = "crates/cardeal-storage" }
 cardeal-modkit    = { path = "crates/cardeal-modkit" }
 cardeal-auth      = { path = "crates/cardeal-auth" }
+cardeal-motor     = { path = "crates/cardeal-motor" }
+cardeal-distribuicao = { path = "crates/cardeal-distribuicao" }
 cardeal-protocol  = { path = "crates/cardeal-protocol" }
 cardeal-cliente   = { path = "crates/cardeal-cliente" }
 cardeal-pdf       = { path = "crates/cardeal-pdf" }

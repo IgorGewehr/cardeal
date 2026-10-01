@@ -8,8 +8,8 @@
 //! submódulo não-essencial (ex.: "laudo" de `mod-os`), este teste quebra ANTES do usuário abrir
 //! o app e trombar com "Sem permissão para ...".
 
-use cardeal_cliente::MotorLocal;
 use cardeal_modkit::{Consulta, Modulo, PedidoAtivacao};
+use cardeal_motor::MotorLocal;
 use mod_estoque::ProdutosComSaldo;
 use mod_financeiro::TitulosAReceberEmAberto;
 use mod_os::OrdensEmAberto;
@@ -42,7 +42,7 @@ fn pedido_ativacao() -> PedidoAtivacao {
 
 fn consultar<C: Consulta + serde::Serialize>(
     motor: &MotorLocal,
-    sessao: &cardeal_cliente::SessaoLocal,
+    sessao: &cardeal_motor::SessaoLocal,
     nome: &str,
     consulta: &C,
 ) where

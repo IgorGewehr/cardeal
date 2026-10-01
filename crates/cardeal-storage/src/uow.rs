@@ -216,6 +216,66 @@ impl<'a> UnidadeDeTrabalho<'a> {
         Ok(())
     }
 
+    /// A resposta já confirmada para a chave de idempotência desta unidade de trabalho, se o
+    /// mesmo comando já rodou com ela — um reenvio depois de uma queda de rede devolve isto em
+    /// vez de executar de novo (`docs/03-pilar-resiliencia.md` §2.2). Sem chave no contexto,
+    /// sempre `None`.
+    ///
+    /// # Errors
+    /// [`ErroArmazenamento::Dominio`] com `DUPLICADO` se a chave foi usada por **outro**
+    /// comando — um cliente reaproveitando chave é um bug, não uma repetição; falha do SQLite.
+    pub fn resposta_idempotente(&self, comando: &str) -> Resultado<Option<Vec<u8>>> {
+        let Some(chave) = self.ctx.chave else {
+            return Ok(None);
+        };
+        let gravada: Option<(String, Vec<u8>)> = self
+            .conn
+            .query_row(
+                "SELECT comando, resposta FROM nucleo_idempotencia WHERE chave = ?1",
+                [chave.em_bytes().as_slice()],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()
+            .map_err(ErroArmazenamento::sqlite)?;
+        match gravada {
+            Some((outro, _)) if outro != comando => {
+                Err(ErroArmazenamento::Dominio(cardeal_kernel::Erro::novo(
+                    cardeal_kernel::CodigoErro::DUPLICADO,
+                    format!(
+                        "a chave de idempotência {chave} já foi usada pelo comando \"{outro}\""
+                    ),
+                )))
+            }
+            Some((_, resposta)) => Ok(Some(resposta)),
+            None => Ok(None),
+        }
+    }
+
+    /// Grava a resposta do comando sob a chave de idempotência do contexto, **na mesma
+    /// transação** do próprio comando — ou os dois ficam, ou nenhum. Sem chave, não faz nada.
+    ///
+    /// # Errors
+    /// Falha do SQLite.
+    pub fn gravar_resposta_idempotente(&mut self, comando: &str, resposta: &[u8]) -> Resultado<()> {
+        let Some(chave) = self.ctx.chave else {
+            return Ok(());
+        };
+        self.conn
+            .execute(
+                "INSERT INTO nucleo_idempotencia (chave, dispositivo, comando, resposta, criado_em)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![
+                    chave.em_bytes().as_slice(),
+                    sql::blob(self.ctx.dispositivo),
+                    comando,
+                    resposta,
+                    self.ctx.agora.em_micros(),
+                ],
+            )
+            .map_err(ErroArmazenamento::sqlite)?;
+        Ok(())
+    }
+
     /// O próximo número de uma sequência por empresa (número de lançamento, de venda…).
     /// Cada chamada consome um número.
     ///

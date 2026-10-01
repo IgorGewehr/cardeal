@@ -29,6 +29,7 @@ deliberadamente honestas — um ADR sem trade-off real não está fazendo seu tr
 | [0013](0013-uuidv7-como-identidade.md) | UUIDv7 como chave primária, número sequencial como identificador do usuário | Aceita | 2026-09-01 |
 | [0014](0014-modularidade-em-runtime-por-manifesto.md) | Modularidade resolvida em runtime por manifesto declarativo | Aceita | 2026-09-01 |
 | [0015](0015-atomic-design-obrigatorio-na-ui.md) | Atomic Design é obrigatório: telas só compõem `cardeal-ui`, nunca `egui` cru | Aceita | 2026-09-19 |
+| [0016](0016-servidor-multi-tenant-e-cliente-web.md) | Servidor multi-tenant com um SQLite por empresa e cliente web em egui/WASM | Aceita | 2026-10-01 |
 
 ## Como usar
 

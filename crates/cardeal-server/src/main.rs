@@ -1,5 +1,154 @@
-//! O motor do Cardeal. Ver docs/01-arquitetura-geral.md §7 (sequência de boot).
-//! Implementação pendente — ver docs/17-roadmap.md, Fase 0.
-fn main() {
-    println!("cardeal-server: implementação pendente — ver docs/17-roadmap.md");
+//! `cardeal-server` — o Cardeal online (ADR-0016).
+//!
+//! ```text
+//! cardeal-server servir      --dados ./dados --endereco 127.0.0.1:8080
+//! cardeal-server provisionar --dados ./dados --empresa "Loja" --cnpj … --email … --nome …
+//!                            (senha em CARDEAL_SENHA — nunca na linha de comando, que vai
+//!                             para o histórico do shell e para o `ps`)
+//! ```
+
+#![deny(unsafe_code)] // única exceção: `alocador`, auditada e testada
+
+mod alocador;
+
+use std::net::SocketAddr;
+use std::path::PathBuf;
+use std::time::Duration;
+
+use cardeal_server::provisionamento::{provisionar, NovaEmpresa};
+use cardeal_server::{roteador, ConfigServidor, Servidor};
+use clap::{Parser, Subcommand};
+
+#[global_allocator]
+static ALOCADOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
+#[derive(Parser)]
+#[command(
+    name = "cardeal-server",
+    version,
+    about = "O Cardeal online: muitas empresas, um SQLite por empresa."
+)]
+struct Cli {
+    /// Pasta dos dados (diretório + bases das empresas).
+    #[arg(long, env = "CARDEAL_DADOS", default_value = "./dados", global = true)]
+    dados: PathBuf,
+    #[command(subcommand)]
+    acao: Acao,
+}
+
+#[derive(Subcommand)]
+enum Acao {
+    /// Sobe o servidor HTTP.
+    Servir {
+        /// Endereço de escuta. Atrás do Cloudflare Tunnel, deixe em 127.0.0.1.
+        #[arg(long, env = "CARDEAL_ENDERECO", default_value = "127.0.0.1:8080")]
+        endereco: SocketAddr,
+        /// Threads do runtime assíncrono (o trabalho de banco roda no pool de bloqueio).
+        #[arg(long, env = "CARDEAL_TRABALHADORES", default_value_t = 2)]
+        trabalhadores: usize,
+        /// Minutos sem uso até uma empresa ser fechada.
+        #[arg(long, env = "CARDEAL_OCIOSIDADE_MIN", default_value_t = 10)]
+        ociosidade_min: u64,
+        /// Máximo de empresas abertas ao mesmo tempo.
+        #[arg(long, env = "CARDEAL_TETO_EMPRESAS", default_value_t = 256)]
+        teto_empresas: usize,
+    },
+    /// Cria uma empresa nova e dá acesso a uma conta.
+    Provisionar {
+        /// Razão social.
+        #[arg(long)]
+        empresa: String,
+        /// CNPJ.
+        #[arg(long)]
+        cnpj: String,
+        /// E-mail da conta administradora.
+        #[arg(long)]
+        email: String,
+        /// Nome da pessoa.
+        #[arg(long)]
+        nome: String,
+        /// Senha da conta (só usada se a conta ainda não existe).
+        #[arg(long, env = "CARDEAL_SENHA", hide_env_values = true)]
+        senha: String,
+    },
+}
+
+fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "info,tower_http=warn".into()),
+        )
+        .compact()
+        .init();
+    alocador::configurar();
+
+    let cli = Cli::parse();
+    match cli.acao {
+        Acao::Servir {
+            endereco,
+            trabalhadores,
+            ociosidade_min,
+            teto_empresas,
+        } => {
+            let mut config = ConfigServidor::em(cli.dados);
+            config.ociosidade = Duration::from_secs(ociosidade_min * 60);
+            config.teto_empresas = teto_empresas;
+            servir(config, endereco, trabalhadores)
+        }
+        Acao::Provisionar {
+            empresa,
+            cnpj,
+            email,
+            nome,
+            senha,
+        } => {
+            let config = ConfigServidor::em(cli.dados);
+            let servidor = Servidor::abrir(config).map_err(|e| anyhow::anyhow!(e.mensagem))?;
+            let feita = provisionar(
+                servidor.config(),
+                servidor.plano(),
+                servidor.diretorio(),
+                &NovaEmpresa {
+                    razao_social: empresa,
+                    cnpj,
+                    email,
+                    nome,
+                    senha,
+                },
+            )
+            .map_err(|e| anyhow::anyhow!(e.mensagem))?;
+            println!("empresa {} criada (conta {})", feita.empresa, feita.conta);
+            Ok(())
+        }
+    }
+}
+
+fn servir(
+    config: ConfigServidor,
+    endereco: SocketAddr,
+    trabalhadores: usize,
+) -> anyhow::Result<()> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(trabalhadores.max(1))
+        // O pool de bloqueio (SQLite, Argon2id) cresce sob demanda e encolhe sozinho depois
+        // de 10 s ocioso; o teto evita que um pico vire centenas de threads.
+        .max_blocking_threads(64)
+        .thread_keep_alive(Duration::from_secs(10))
+        .thread_name("cardeal")
+        .enable_all()
+        .build()?;
+    runtime.block_on(async move {
+        let servidor = Servidor::abrir(config).map_err(|e| anyhow::anyhow!(e.mensagem))?;
+        tokio::spawn(std::sync::Arc::clone(&servidor).manter(Duration::from_secs(60)));
+        let ouvinte = tokio::net::TcpListener::bind(endereco).await?;
+        tracing::info!(%endereco, "cardeal-server no ar");
+        axum::serve(ouvinte, roteador(servidor))
+            .with_graceful_shutdown(async {
+                let _ = tokio::signal::ctrl_c().await;
+                tracing::info!("encerrando");
+            })
+            .await?;
+        Ok(())
+    })
 }

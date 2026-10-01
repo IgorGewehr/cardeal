@@ -1,0 +1,22 @@
+[package]
+name         = "cardeal-distribuicao"
+description  = "A distribuição do produto: quais módulos o Cardeal liga, para o desktop e o servidor."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+
+[dependencies]
+cardeal-modkit.workspace = true
+
+mod-financeiro.workspace = true
+mod-clientes.workspace   = true
+mod-estoque.workspace    = true
+mod-compras.workspace    = true
+mod-vendas.workspace     = true
+mod-os.workspace         = true
+mod-orcamentos.workspace = true
+mod-agenda.workspace     = true
+mod-pdv.workspace        = true

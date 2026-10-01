@@ -28,7 +28,7 @@ use std::path::PathBuf;
 
 use cardeal_cliente::atualizador::{self, ResultadoAplicacao, VersaoDisponivel};
 use cardeal_cliente::{MotorLocal, SessaoLocal};
-use cardeal_modkit::{Icone, Modulo, PedidoAtivacao};
+use cardeal_modkit::Icone;
 use cardeal_ui::atoms::{Botao, BotaoChevron, Divisor, Rotulo};
 use cardeal_ui::molecules::Campo;
 use cardeal_ui::organisms::{
@@ -80,37 +80,6 @@ fn caminho_da_base() -> PathBuf {
     let dir = diretorio_de_dados();
     let _ = std::fs::create_dir_all(&dir);
     dir.join("cardeal.db")
-}
-
-fn modulos() -> Vec<&'static dyn Modulo> {
-    vec![
-        &mod_financeiro::ModuloFinanceiro,
-        &mod_clientes::ModuloClientes,
-        &mod_estoque::ModuloEstoque,
-        &mod_compras::ModuloCompras,
-        &mod_vendas::ModuloVendas,
-        &mod_os::ModuloOs,
-        &mod_orcamentos::ModuloOrcamentos,
-        &mod_agenda::ModuloAgenda,
-        &mod_pdv::ModuloPdv,
-    ]
-}
-
-/// Liga todos os módulos do desktop **e todos os seus submódulos** — as telas usam
-/// funcionalidade de submódulos não-essenciais (contas a pagar, contas bancárias, fluxo,
-/// recurso de agenda, laudo de OS, limite de crédito...) e sem isso as permissões
-/// correspondentes nem entram no catálogo, travando o admin com "Sem permissão para ...".
-fn pedido_ativacao() -> PedidoAtivacao {
-    let mut pedido = PedidoAtivacao::nova();
-    for m in modulos() {
-        let manifesto = m.manifesto();
-        let id = manifesto.id.como_str();
-        pedido = pedido.com_modulo(id);
-        for sub in manifesto.submodulos {
-            pedido = pedido.com_submodulo(id, sub.id);
-        }
-    }
-    pedido
 }
 
 /// Bytes do PNG mestre da marca (cardeal geométrico em Rubro 500, ver `assets/marca/`) —
@@ -601,8 +570,12 @@ impl App {
     fn carregar(&mut self) {
         #[cfg(feature = "demo")]
         if let Some(demo) = &self.demo {
-            let motor = MotorLocal::abrir(&demo.base, &modulos(), &pedido_ativacao())
-                .expect("abrir a base da demo");
+            let motor = MotorLocal::abrir(
+                &demo.base,
+                &cardeal_distribuicao::modulos(),
+                &cardeal_distribuicao::pedido_ativacao(),
+            )
+            .expect("abrir a base da demo");
             let sessao = demo_app::semear(&motor);
             let cena = demo.cena.clone();
             self.motor = Some(motor);
@@ -612,7 +585,11 @@ impl App {
             }
             return;
         }
-        match MotorLocal::abrir(&caminho_da_base(), &modulos(), &pedido_ativacao()) {
+        match MotorLocal::abrir(
+            &caminho_da_base(),
+            &cardeal_distribuicao::modulos(),
+            &cardeal_distribuicao::pedido_ativacao(),
+        ) {
             Ok(motor) => {
                 let precisa_config = motor.precisa_de_configuracao_inicial().unwrap_or(true);
                 self.motor = Some(motor);
@@ -941,7 +918,7 @@ impl eframe::App for App {
                                     admin_nome,
                                     admin_senha,
                                 ) {
-                                    Ok(()) => acao = Acao::AdminCriado(admin_login.clone()),
+                                    Ok(_) => acao = Acao::AdminCriado(admin_login.clone()),
                                     Err(e) => *erro = Some(e.mensagem),
                                 }
                             }
