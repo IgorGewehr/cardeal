@@ -91,7 +91,13 @@ impl MotorLocal {
     /// Erro de abertura/migração do armazenamento.
     pub fn abrir_com_plano(cfg: ConfigArmazenamento, plano: &Arc<Plano>) -> Resultado<Self> {
         let arm = Armazenamento::abrir(cfg).map_err(erro_armazenamento)?;
-        arm.migrar(&plano.migracoes).map_err(erro_armazenamento)?;
+        // Mesma impressão do plano que a última abertura verificou: o programa não mudou desde
+        // então, e migrações + sincronização do admin não têm o que fazer (~5 ms a menos na
+        // abertura a frio de cada empresa no servidor).
+        let em_dia = impressao_gravada(&arm)? == Some(plano.impressao);
+        if !em_dia {
+            arm.migrar(&plano.migracoes).map_err(erro_armazenamento)?;
+        }
 
         let empresa_persistida = arm
             .leitor()
@@ -111,8 +117,11 @@ impl MotorLocal {
         // catálogo de permissões defasado — o admin fica travado fora das telas novas com
         // "Sem permissão para ...". A cada abertura, completa esse papel com o que faltar do
         // catálogo atual dos módulos ativos (só adiciona; nunca remove).
-        if empresa_persistida.is_some() {
+        if !em_dia && empresa_persistida.is_some() {
             sincronizar_papel_admin(&arm, empresa, &plano.conjunto)?;
+            // Só depois de tudo verificado — e só com empresa: uma base nova ainda passa pelo
+            // primeiro acesso, e a próxima abertura precisa sincronizar o admin criado nele.
+            gravar_impressao(&arm, empresa, plano.impressao)?;
         }
 
         Ok(Self {
@@ -170,7 +179,7 @@ impl MotorLocal {
         let admin_senha = admin_senha.to_string();
 
         let ctx = ContextoEscrita::novo(empresa, Id::novo(), self.dispositivo, Id::novo());
-        self.arm
+        let admin = self.arm
             .escritor()
             .executar(ctx, move |uow| {
                 uow.conexao()
@@ -198,7 +207,11 @@ impl MotorLocal {
                 Ok(usuario.id)
             })
             .map_err(erro_armazenamento)
-            .map(|c| c.valor)
+            .map(|c| c.valor)?;
+        // Migrações recém-verificadas e admin com o catálogo inteiro: a próxima abertura
+        // não tem o que conferir.
+        gravar_impressao(&self.arm, empresa, self.plano.impressao)?;
+        Ok(admin)
     }
 
     /// Autentica um login/senha e monta a sessão, cruzando os papéis do usuário com o
@@ -362,4 +375,38 @@ impl MotorLocal {
 
 fn ambiente_de(empresa: Id, plano: &Plano) -> Ambiente {
     Ambiente::compartilhado(empresa, Arc::clone(&plano.conjunto)).com_fuso(Fuso::BRASILIA)
+}
+
+const CHAVE_IMPRESSAO: &str = "impressao_plano";
+
+fn impressao_gravada(arm: &Armazenamento) -> Resultado<Option<[u8; 32]>> {
+    arm.leitor()
+        .consultar(|c| {
+            c.query_row(
+                "SELECT valor FROM nucleo_esquema WHERE chave = ?1",
+                [CHAVE_IMPRESSAO],
+                |r| r.get::<_, Vec<u8>>(0),
+            )
+            .optional()
+            .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+        })
+        .map_err(erro_armazenamento)
+        .map(|v| v.and_then(|b| <[u8; 32]>::try_from(b).ok()))
+}
+
+fn gravar_impressao(arm: &Armazenamento, empresa: Id, impressao: [u8; 32]) -> Resultado<()> {
+    let ctx = ContextoEscrita::novo(empresa, Id::NULO, Id::NULO, Id::novo());
+    arm.escritor()
+        .executar(ctx, move |uow| {
+            uow.conexao()
+                .execute(
+                    "INSERT INTO nucleo_esquema (chave, valor) VALUES (?1, ?2)
+                     ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor",
+                    rusqlite::params![CHAVE_IMPRESSAO, impressao.as_slice()],
+                )
+                .map(|_| ())
+                .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+        })
+        .map(|_| ())
+        .map_err(erro_armazenamento)
 }

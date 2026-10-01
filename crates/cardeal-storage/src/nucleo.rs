@@ -181,6 +181,18 @@ CREATE TABLE nucleo_papel_limite (
 ) STRICT, WITHOUT ROWID;
 ";
 
+/// O esquema já aplicado nesta base, resumido: a impressão digital do plano de módulos (hash
+/// das migrações e do catálogo de permissões) gravada na última abertura que verificou tudo.
+/// Se a próxima abertura traz a mesma impressão, nada mudou no programa — e a verificação
+/// de migrações e a sincronização do papel de administrador podem ser puladas (ADR-0016:
+/// abertura a frio de empresa no servidor).
+const SQL_ESQUEMA: &str = r"
+CREATE TABLE nucleo_esquema (
+    chave TEXT PRIMARY KEY,
+    valor BLOB NOT NULL
+) STRICT, WITHOUT ROWID;
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -192,6 +204,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 2,
         nome: "nucleo_papel_limite",
         sql: SQL_PAPEL_LIMITE,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 3,
+        nome: "nucleo_esquema",
+        sql: SQL_ESQUEMA,
         tipo: TipoMigracao::Esquema,
     },
 ];
