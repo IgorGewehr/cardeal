@@ -65,6 +65,9 @@ enum Acao {
         /// Quantas cópias de cada base guardar.
         #[arg(long, env = "CARDEAL_BACKUP_RETER", default_value_t = 48)]
         backup_reter: usize,
+        /// Token do `GET /metricas` (Prometheus). Sem ele, a rota não existe.
+        #[arg(long, env = "CARDEAL_METRICAS_TOKEN", hide_env_values = true)]
+        metricas_token: Option<String>,
     },
     /// Uma rodada de backup agora (para cron ou antes de uma atualização).
     Backup {
@@ -114,12 +117,14 @@ fn main() -> anyhow::Result<()> {
             web,
             backup_min,
             backup_reter,
+            metricas_token,
         } => {
             let mut config = ConfigServidor::em(cli.dados);
             config.ociosidade = Duration::from_secs(ociosidade_min * 60);
             config.teto_empresas = teto_empresas;
             config.confiar_cloudflare = confiar_cloudflare;
             config.web = web;
+            config.token_metricas = metricas_token.filter(|t| !t.trim().is_empty());
             let backup =
                 (backup_min > 0).then(|| (Duration::from_secs(backup_min * 60), backup_reter));
             servir(config, endereco, trabalhadores, backup)

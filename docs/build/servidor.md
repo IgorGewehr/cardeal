@@ -89,6 +89,7 @@ shell e no `ps`). Um e-mail que já tem conta ganha acesso à empresa nova sem t
 | `MIMALLOC_ARENA_EAGER_COMMIT` | `0` (na imagem) | não reservar memória antes do uso |
 | `CARDEAL_BACKUP_MIN` | `60` | minutos entre backups (0 desliga) |
 | `CARDEAL_BACKUP_RETER` | `48` | cópias guardadas por base |
+| `CARDEAL_METRICAS_TOKEN` | — | liga `GET /metricas` (Prometheus) com `Authorization: Bearer` |
 | `RUST_LOG` | `info,tower_http=warn` | `debug` registra toda requisição |
 
 ## 7. Segurança
@@ -110,6 +111,10 @@ shell e no `ps`). Um e-mail que já tem conta ganha acesso à empresa nova sem t
   cada base com o lote final confirmado.
 - **Manutenção** (a cada minuto, sozinha): fecha empresas ociosas, poda respostas idempotentes
   com mais de 7 dias, apaga sessões vencidas.
+- **Métricas:** `GET /metricas` (com `CARDEAL_METRICAS_TOKEN`): requisições e erros por
+  tipo (comando, consulta, sessão, estático), histograma de latência, logins recusados,
+  bloqueios por IP, empresas abertas, sessões em cache e RSS do processo. Custo no caminho
+  quente: dois incrementos atômicos.
 - **Backup:** o servidor tira, a cada `CARDEAL_BACKUP_MIN` (60), um snapshot de cada base
   **que mudou** (`VACUUM INTO` numa conexão de leitura — a empresa continua operando), em
   `/dados/backup/<base>/<carimbo UTC>.db.zst`, guardando as `CARDEAL_BACKUP_RETER` (48) mais

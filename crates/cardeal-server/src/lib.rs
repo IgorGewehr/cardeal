@@ -24,6 +24,7 @@ pub mod diretorio;
 pub mod frota;
 mod http;
 mod limitador;
+mod metricas;
 pub mod provisionamento;
 pub mod sessoes;
 mod token;
@@ -50,6 +51,7 @@ pub struct Servidor {
     sessoes: Sessoes,
     logins: tokio::sync::Semaphore,
     limitador: limitador::LimitadorLogin,
+    metricas: metricas::Metricas,
 }
 
 impl Servidor {
@@ -77,6 +79,7 @@ impl Servidor {
                 config.janela_login,
                 100_000,
             ),
+            metricas: metricas::Metricas::default(),
             config,
             plano,
             diretorio,

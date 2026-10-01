@@ -682,3 +682,57 @@ async fn backup_copia_so_o_que_mudou_e_a_copia_restaura_com_os_dados() {
         .unwrap();
     assert_eq!(integridade, "ok");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn metricas_so_com_token_e_contam_o_que_aconteceu() {
+    let sem = ambiente(Duration::from_secs(600));
+    let r = sem
+        .app
+        .clone()
+        .oneshot(Request::get("/metricas").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(
+        r.status(),
+        StatusCode::NOT_FOUND,
+        "sem token configurado, a rota não existe"
+    );
+
+    let a = ambiente_com(|c| c.token_metricas = Some("segredo-das-metricas".into()));
+    login(&a.app, "ana@x.com", "senha-errada-123", TipoCliente::Nativo).await;
+    let t = token(&a.app, "ana@x.com").await;
+    clientes(&a.app, &t, a.empresa_ana)
+        .await
+        .valor::<Vec<ItemPessoa>>();
+
+    let pedir = |token: &'static str| {
+        a.app.clone().oneshot(
+            Request::get("/metricas")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+    };
+    assert_eq!(
+        pedir("chute").await.unwrap().status(),
+        StatusCode::UNAUTHORIZED
+    );
+    let r = pedir("segredo-das-metricas").await.unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    let texto = String::from_utf8(
+        axum::body::to_bytes(r.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    for esperado in [
+        "cardeal_requisicoes_total{tipo=\"consulta\"} 1",
+        "cardeal_requisicoes_total{tipo=\"sessao\"} 2",
+        "cardeal_logins_recusados_total 1",
+        "cardeal_empresas_abertas 1",
+        "process_resident_memory_bytes",
+    ] {
+        assert!(texto.contains(esperado), "faltou {esperado:?} em:\n{texto}");
+    }
+}

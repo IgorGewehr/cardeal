@@ -28,6 +28,7 @@ pub(super) async fn entrar(
     );
     if let Some(ip) = ip {
         if !servidor.limitador.permitir(ip) {
+            servidor.metricas.limite_ip_atingido();
             tracing::warn!(%ip, "limite de login por IP atingido");
             return Err(ErroHttp(Erro::novo(
                 CodigoErro::MUITAS_TENTATIVAS,
@@ -45,8 +46,9 @@ pub(super) async fn entrar(
     let s = Arc::clone(&servidor);
     let validade = servidor.config.validade_sessao;
     let (email, senha) = (pedido.email, pedido.senha);
-    let aceito =
-        bloqueante(move || autenticacao::entrar(&s.diretorio, &email, &senha, validade)).await?;
+    let aceito = bloqueante(move || autenticacao::entrar(&s.diretorio, &email, &senha, validade))
+        .await
+        .inspect_err(|_| servidor.metricas.login_recusado())?;
 
     let mut resposta = aceito.resposta;
     let mut headers = HeaderMap::new();

@@ -38,6 +38,8 @@ pub struct ConfigServidor {
     /// A pasta do cliente do navegador (`cargo xtask construir-web` → `dist/web`). `None`: o
     /// servidor só atende a API.
     pub web: Option<PathBuf>,
+    /// Token do `GET /metricas` (Prometheus). `None`: a rota não existe.
+    pub token_metricas: Option<String>,
 }
 
 impl ConfigServidor {
@@ -55,6 +57,7 @@ impl ConfigServidor {
             confiar_cloudflare: false,
             retencao_idempotencia: Duration::from_secs(7 * 24 * 60 * 60),
             web: None,
+            token_metricas: None,
         }
     }
 

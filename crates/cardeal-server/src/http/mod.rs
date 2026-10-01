@@ -38,7 +38,10 @@ pub fn roteador(servidor: Arc<Servidor>) -> Router {
         .route("/v1/e/:empresa/qry/:nome", post(despacho::consulta))
         .route("/v1/e/:empresa/sessao", get(despacho::sessao))
         .layer(middleware::from_fn(exigir_protocolo));
-    let mut app = Router::new().route(ROTA_SAUDE, get(saude)).merge(v1);
+    let mut app = Router::new()
+        .route(ROTA_SAUDE, get(saude))
+        .route("/metricas", get(camadas::metricas))
+        .merge(v1);
     if let Some(pasta) = servidor.config.web.clone() {
         app = app.merge(web::rotas(&pasta));
     }
@@ -48,7 +51,10 @@ pub fn roteador(servidor: Arc<Servidor>) -> Router {
             TEMPO_MAXIMO,
         ))
         .layer(middleware::from_fn(camadas::seguranca))
-        .layer(middleware::from_fn(camadas::registro))
+        .layer(middleware::from_fn_with_state(
+            Arc::clone(&servidor),
+            camadas::registro,
+        ))
         .with_state(servidor)
 }
 
