@@ -336,6 +336,14 @@ impl eframe::App for Galeria {
                     ui.add(Botao::primario("Desabilitado").habilitado(false));
                 });
                 ui.add_space(Espaco::E8);
+                // `.tom()`: a cor diz o lado do dinheiro (entra = positivo, sai = negativo).
+                ui.horizontal_wrapped(|ui| {
+                    ui.add(Botao::primario("+ A receber").tom(Tom::Positivo));
+                    ui.add(Botao::secundario("+ A pagar").tom(Tom::Negativo));
+                    ui.add(Botao::secundario("Aviso").tom(Tom::Atencao));
+                    ui.add(Botao::fantasma("+ Nova categoria").pequeno().tom(Tom::Neutro));
+                });
+                ui.add_space(Espaco::E8);
                 ui.add(Botao::primario("Botão de largura cheia").preenche_largura());
 
                 ui.add_space(Espaco::E24);

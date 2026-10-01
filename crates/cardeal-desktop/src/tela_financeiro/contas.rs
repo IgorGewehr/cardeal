@@ -215,7 +215,8 @@ pub(super) fn lista(
                 if nome == "—" {
                     ui.add(Rotulo::interface("—").cor(ui.cores().texto_fraco));
                 } else {
-                    ui.add(Rotulo::interface(nome));
+                    // Quem é a parcela é o que o olho procura primeiro na linha.
+                    ui.add(Rotulo::interface(nome).cor(ui.cores().texto_forte));
                 }
             });
             row.col(|ui| {
@@ -427,6 +428,11 @@ fn barra_selecao(ui: &mut egui::Ui, estado: &mut EstadoTelaFinanceiro) {
                     if ui
                         .add(
                             Botao::primario("Baixar selecionadas")
+                                .tom(if estado.aba.a_receber() {
+                                    Tom::Positivo
+                                } else {
+                                    Tom::Negativo
+                                })
                                 .pequeno()
                                 .habilitado(quantas > 0),
                         )

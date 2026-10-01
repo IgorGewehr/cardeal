@@ -294,6 +294,18 @@ duas ocorrências no fim do mês); agora usam o dia de hoje + 20 dias.
   data — sem montar "a prazo". `EstadoPagamento::mostrar_com` repassa o rótulo.
 - Chave do topo: "Pessoais" (sem o parêntese).
 
+### 1.10 Sessão 2026-10-01 (fim) — Cor como feedback
+
+- `Botao::tom(Tom)`: primário preenchido no tom; secundário/fantasma com texto e contorno no
+  tom. Sem tom, o hover de secundário/fantasma acende na marca (contorno, texto e fundo
+  `rubro_ativo`); o primário ganha brilho da própria cor no hover; o atalho (`Ctrl+N`) sai
+  menor, em mono e apagado. Galeria tem os quatro casos.
+- `Abas`: a ativa em `rubro`, a inativa com fundo `superficie_hover` no hover.
+- Financeiro: verde = dinheiro que entra, vermelho = que sai — "+ A receber"/"+ A pagar",
+  "Lançar…", "Confirmar recebimento/pagamento", "Baixar selecionadas". As últimas escolhas
+  segmentadas feitas com botões (custos, recorrências, cadastro rápido) viraram `Abas`.
+  Nome da contraparte em `texto_forte` na grade.
+
 ## 2. Decisão estratégica registrada: por que Rust, não C#/.NET
 
 Em 2026-09-02 avaliamos um projeto irmão do mesmo autor, **SistemaX** (`../sistemax`), um ERP

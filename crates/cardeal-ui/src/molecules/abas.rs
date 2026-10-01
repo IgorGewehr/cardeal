@@ -118,10 +118,16 @@ impl<'a, T: PartialEq + Copy> Abas<'a, T> {
             );
             let resp = ui.interact(seg, id.with(i), Sense::click());
             let ativa = i == idx_sel;
+            // A ativa leva a cor da marca; a inativa acende um fundo leve no hover — o
+            // segmento diz que é clicável antes do clique.
+            if !ativa && resp.hovered() {
+                ui.painter()
+                    .rect_filled(seg.shrink(1.0), Raio::CAMPO, cores.superficie_hover);
+            }
             let cor = if ativa {
-                cores.texto_forte
+                cores.rubro
             } else if resp.hovered() {
-                cores.texto
+                cores.texto_forte
             } else {
                 cores.texto_medio
             };

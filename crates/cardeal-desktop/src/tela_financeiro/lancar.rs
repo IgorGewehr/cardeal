@@ -184,10 +184,21 @@ pub(super) fn dialogo_lancar(
                 );
             },
             |ui, estado| {
-                if ui.add(Botao::primario("Lançar e continuar")).clicked() {
+                let tom = if a_receber {
+                    Tom::Positivo
+                } else {
+                    Tom::Negativo
+                };
+                if ui
+                    .add(Botao::primario("Lançar e continuar").tom(tom))
+                    .clicked()
+                {
                     lancar(ui.ctx(), motor, sessao, estado, true);
                 }
-                if ui.add(Botao::secundario("Lançar e fechar")).clicked() {
+                if ui
+                    .add(Botao::secundario("Lançar e fechar").tom(tom))
+                    .clicked()
+                {
                     lancar(ui.ctx(), motor, sessao, estado, false);
                 }
                 if ui.add(Botao::fantasma("Cancelar")).clicked() {

@@ -33,7 +33,7 @@ use cardeal_ui::organisms::{
     notificar, ColunaGrade, Dialogo, Direcao, FaixaKpi, Grade, GraficoBarras,
     GraficoBarrasHorizontais, LayoutTela, Notificacao, Ordenacao, Painel, SerieBarras,
 };
-use cardeal_ui::tokens::{Espaco, Rubro, TemaUi};
+use cardeal_ui::tokens::{Espaco, TemaUi};
 use contas::*;
 use custos::*;
 use eframe::egui;
@@ -520,10 +520,16 @@ fn acoes_empresa(
         } else {
             "+ A pagar"
         };
-        let b = if a_receber == !pagar_primeiro {
-            Botao::primario(rot).tecla(ATALHO_NOVO)
+        // Verde = dinheiro que entra, vermelho = que sai: o botão já diz o lado do caixa.
+        let tom = if a_receber {
+            Tom::Positivo
         } else {
-            Botao::secundario(rot)
+            Tom::Negativo
+        };
+        let b = if a_receber == !pagar_primeiro {
+            Botao::primario(rot).tom(tom).tecla(ATALHO_NOVO)
+        } else {
+            Botao::secundario(rot).tom(tom)
         };
         if ui.add(b).clicked() {
             estado.dlg = Dlg::Lancar(FormLancar::novo(a_receber));

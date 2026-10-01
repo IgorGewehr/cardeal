@@ -322,7 +322,7 @@ CARDEAL_DEMO_PNG=/tmp/x.png cargo run -p cardeal-desktop --features demo` (ver `
 
 | Componente | Notas de comportamento |
 |---|---|
-| `Botao` | Variantes: primário (`rubro-500`), secundário (contorno), fantasma, destrutivo (`rubro-700` contorno) |
+| `Botao` | Variantes: primário (`rubro-500`), secundário (contorno), fantasma, destrutivo (`rubro-700` contorno). `.tom(Tom)` dá a cor semântica (entra = positivo, sai = negativo); hover acende no acento (marca ou tom) |
 | `CampoMoeda` | Digitação da direita para a esquerda (`1` `2` `3` `4` → `R$ 12,34`), como toda calculadora e todo ERP brasileiro |
 | `CampoDocumento` | Máscara automática CPF/CNPJ pelo tamanho, com validação de dígito |
 | `CampoData` | Aceita `10/03`, `1003`, `hoje`, `ontem`, `+7`, `fim do mês` |

@@ -183,7 +183,12 @@ pub(super) fn dialogo_baixar(
                 }
             },
             |ui, estado| {
-                if aceita_baixa && ui.add(Botao::primario("Confirmar baixa")).clicked() {
+                let (rotulo, tom) = if estado.aba.a_receber() {
+                    ("Confirmar recebimento", Tom::Positivo)
+                } else {
+                    ("Confirmar pagamento", Tom::Negativo)
+                };
+                if aceita_baixa && ui.add(Botao::primario(rotulo).tom(tom)).clicked() {
                     baixar(ui.ctx(), motor, sessao, estado, &p);
                 }
                 if ui.add(Botao::secundario("Fechar")).clicked() {
@@ -485,7 +490,12 @@ pub(super) fn dialogo_baixar_lote(
             );
         },
         |ui, estado| {
-            if ui.add(Botao::primario("Confirmar")).clicked() {
+            let tom = if a_receber {
+                Tom::Positivo
+            } else {
+                Tom::Negativo
+            };
+            if ui.add(Botao::primario("Confirmar").tom(tom)).clicked() {
                 baixar_lote(ui.ctx(), motor, sessao, estado, &selecionadas);
             }
             if ui.add(Botao::secundario("Cancelar")).clicked() {

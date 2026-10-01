@@ -128,21 +128,15 @@ pub(super) fn dialogo_nova_recorrencia(
             let Dlg::NovaRecorrencia(f) = &mut estado.dlg else {
                 return;
             };
-            ui.horizontal(|ui| {
-                for (rot, receber) in [("A pagar", false), ("A receber", true)] {
-                    let sel = f.a_receber == receber;
-                    let b = if sel {
-                        Botao::primario(rot)
-                    } else {
-                        Botao::fantasma(rot)
-                    };
-                    if ui.add(b).clicked() && !sel {
-                        f.a_receber = receber;
-                        f.contraparte = None;
-                        f.conta = None;
-                    }
-                }
-            });
+            if let Some(receber) = Abas::nova(&[(false, "A pagar"), (true, "A receber")])
+                .selecionada(f.a_receber)
+                .id_salt("recorrencia-especie")
+                .mostrar(ui)
+            {
+                f.a_receber = receber;
+                f.contraparte = None;
+                f.conta = None;
+            }
             ui.add_space(Espaco::E12);
             ui.add(Campo::novo("Descrição", &mut f.descricao).marcador("Aluguel da loja"));
             ui.add_space(Espaco::E12);
@@ -212,20 +206,17 @@ pub(super) fn dialogo_nova_recorrencia(
             ui.add_space(Espaco::E12);
             ui.horizontal(|ui| {
                 ui.add(Rotulo::campo("Periodicidade"));
-                for (rot, p) in [
-                    ("Mensal", PeriodoRec::Mensal),
-                    ("Semanal", PeriodoRec::Semanal),
-                    ("Anual", PeriodoRec::Anual),
-                ] {
-                    let sel = f.periodicidade == p;
-                    let b = if sel {
-                        Botao::primario(rot)
-                    } else {
-                        Botao::fantasma(rot)
-                    };
-                    if ui.add(b).clicked() {
-                        f.periodicidade = p;
-                    }
+                ui.add_space(Espaco::E8);
+                if let Some(p) = Abas::nova(&[
+                    (PeriodoRec::Mensal, "Mensal"),
+                    (PeriodoRec::Semanal, "Semanal"),
+                    (PeriodoRec::Anual, "Anual"),
+                ])
+                .selecionada(f.periodicidade)
+                .id_salt("recorrencia-periodo")
+                .mostrar(ui)
+                {
+                    f.periodicidade = p;
                 }
             });
             ui.add_space(Espaco::E12);

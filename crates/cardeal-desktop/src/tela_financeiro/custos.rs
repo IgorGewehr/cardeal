@@ -106,29 +106,24 @@ pub(super) fn painel_custos(
 ) {
     let mut recarregar = false;
     ui.horizontal_wrapped(|ui| {
-        for (receitas, rot) in [(false, "Custos"), (true, "Receitas")] {
-            let b = if estado.custos_receitas == receitas {
-                Botao::primario(rot)
-            } else {
-                Botao::fantasma(rot)
-            };
-            if ui.add(b.pequeno()).clicked() && estado.custos_receitas != receitas {
-                estado.custos_receitas = receitas;
-                recarregar = true;
-            }
+        if let Some(r) = Abas::nova(&[(false, "Custos"), (true, "Receitas")])
+            .selecionada(estado.custos_receitas)
+            .id_salt("custos-especie")
+            .mostrar(ui)
+        {
+            estado.custos_receitas = r;
+            recarregar = true;
         }
         ui.add_space(Espaco::E16);
         ui.add(Rotulo::sobrelinha("Próximos"));
-        for meses in [3_u8, 6, 12] {
-            let b = if estado.custos_meses == meses {
-                Botao::primario(format!("{meses} meses"))
-            } else {
-                Botao::fantasma(format!("{meses} meses"))
-            };
-            if ui.add(b.pequeno()).clicked() && estado.custos_meses != meses {
-                estado.custos_meses = meses;
-                recarregar = true;
-            }
+        ui.add_space(Espaco::E8);
+        if let Some(m) = Abas::nova(&[(3_u8, "3 meses"), (6, "6 meses"), (12, "12 meses")])
+            .selecionada(estado.custos_meses)
+            .id_salt("custos-meses")
+            .mostrar(ui)
+        {
+            estado.custos_meses = m;
+            recarregar = true;
         }
         if estado.faltam_sugeridas() {
             ui.add_space(Espaco::E16);

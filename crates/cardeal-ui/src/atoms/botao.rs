@@ -12,8 +12,11 @@ use egui::{
     Widget,
 };
 
-use crate::atoms::Spinner;
+use crate::atoms::{Spinner, Tom};
 use crate::tokens::{ativar, lerp_cor, modal_aberto, Mov, Papel, Raio, Rubro, TemaUi};
+
+/// Espaço entre o rótulo e o atalho de teclado.
+const VAO_ATALHO: f32 = 10.0;
 
 /// `Ctrl+N` (`Cmd+N` no macOS) — "novo": o atalho de criar em toda tela de listagem.
 pub const ATALHO_NOVO: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::N);
@@ -47,6 +50,7 @@ pub struct Botao {
     pequeno: bool,
     carregando: bool,
     cor: Option<Color32>,
+    tom: Option<Tom>,
 }
 
 impl Botao {
@@ -81,6 +85,7 @@ impl Botao {
             pequeno: false,
             carregando: false,
             cor: None,
+            tom: None,
         }
     }
 
@@ -91,6 +96,23 @@ impl Botao {
     pub const fn cor(mut self, cor: Color32) -> Self {
         self.cor = Some(cor);
         self
+    }
+
+    /// Dá ao botão a cor de um tom semântico — dinheiro que entra (`Positivo`), que sai
+    /// (`Negativo`), aviso (`Atencao`). O primário fica preenchido no tom; secundário e
+    /// fantasma ganham texto/contorno no tom e fundo suave no hover. Sem tom, a cor é a da
+    /// marca (`rubro`).
+    pub const fn tom(mut self, tom: Tom) -> Self {
+        self.tom = Some(tom);
+        self
+    }
+
+    /// `(cor forte, fundo suave)` do botão: o tom pedido ou a marca.
+    fn acento(&self, cores: &crate::tokens::Cores) -> (Color32, Color32) {
+        match self.tom {
+            Some(Tom::Neutro) | None => (cores.rubro, cores.rubro_ativo),
+            Some(t) => t.cores(cores),
+        }
     }
 
     /// Anota o atalho de teclado ao lado do rótulo (ex.: `F2`) — `docs/12-ui-ux.md` §8.
@@ -142,7 +164,7 @@ impl Botao {
     ) -> (Option<Color32>, Option<Stroke>, Color32) {
         match self.variante {
             VarianteBotao::Primario => (
-                Some(Rubro::R500.gamma_multiply(0.4_f32)),
+                Some(self.acento(cores).0.gamma_multiply(0.4_f32)),
                 None,
                 Rubro::CONTRASTE.gamma_multiply(0.7_f32),
             ),
@@ -171,27 +193,52 @@ impl Botao {
         th: f32,
         tp: f32,
     ) -> (Option<Color32>, Option<Stroke>, Color32) {
+        let (acento, suave) = self.acento(cores);
+        let realce = th.max(tp);
         match self.variante {
             VarianteBotao::Primario => {
-                let fundo = lerp_cor(lerp_cor(Rubro::R500, Rubro::R400, th), Rubro::R600, tp);
+                // Hover clareia, press escurece — sobre a cor do tom (ou `rubro-500`).
+                let base = if self.tom.is_some_and(|t| t != Tom::Neutro) {
+                    acento
+                } else {
+                    Rubro::R500
+                };
+                let claro = lerp_cor(base, Color32::WHITE, 0.14_f32);
+                let escuro = lerp_cor(base, Color32::BLACK, 0.14_f32);
+                let fundo = lerp_cor(lerp_cor(base, claro, th), escuro, tp);
                 (Some(fundo), None, Rubro::CONTRASTE)
             }
             VarianteBotao::Secundario => {
-                let realce = th.max(tp);
-                let fundo = cores.superficie_2.gamma_multiply(realce);
-                let borda = lerp_cor(cores.borda_forte, cores.texto_fraco, realce);
+                // Repouso: contorno neutro (ou no tom); hover: contorno, texto e fundo suave
+                // no acento — o botão "responde" com a cor de quem ele é.
+                let (borda_rep, texto_rep) = if self.tom.is_some() {
+                    (acento.gamma_multiply(0.55_f32), acento)
+                } else {
+                    (cores.borda_forte, cores.texto)
+                };
+                let fundo = lerp_cor(cores.superficie, suave, realce);
                 (
                     Some(fundo),
-                    Some(Stroke::new(1.0_f32 + 0.25_f32 * realce, borda)),
-                    cores.texto,
+                    Some(Stroke::new(
+                        1.0_f32 + 0.25_f32 * realce,
+                        lerp_cor(borda_rep, acento, realce),
+                    )),
+                    lerp_cor(texto_rep, acento, realce),
                 )
             }
             VarianteBotao::Fantasma => {
-                let fundo = cores.superficie_2.gamma_multiply(th.max(tp));
-                (Some(fundo), None, cores.texto)
+                let texto_rep = if self.tom.is_some() {
+                    acento
+                } else {
+                    cores.texto
+                };
+                (
+                    Some(suave.gamma_multiply(realce)),
+                    None,
+                    lerp_cor(texto_rep, acento, realce),
+                )
             }
             VarianteBotao::Destrutivo => {
-                let realce = th.max(tp);
                 let fundo = cores.negativo_suave.gamma_multiply(realce);
                 (
                     Some(fundo),
@@ -226,17 +273,88 @@ impl Botao {
     }
 }
 
+impl Botao {
+    /// Anel de foco, brilho de hover (só a ação de peso), preenchimento e contorno.
+    fn pintar_fundo(
+        &self,
+        ui: &Ui,
+        rect: Rect,
+        (fill, stroke): (Option<Color32>, Option<Stroke>),
+        th: f32,
+        tf: f32,
+    ) {
+        let painter = ui.painter();
+        // Anel de foco de teclado: um halo externo suave + o anel nítido, ambos
+        // surgindo com `tf` (`docs/12-ui-ux.md` §9 — foco sempre visível).
+        if tf > 0.001_f32 {
+            painter.rect_stroke(
+                rect.expand(4.0_f32),
+                Raio::ITEM + 4.0_f32,
+                Stroke::new(4.0_f32, Rubro::R500.gamma_multiply(0.18_f32 * tf)),
+            );
+            painter.rect_stroke(
+                rect.expand(2.0_f32),
+                Raio::ITEM + 2.0_f32,
+                Stroke::new(2.0_f32, Rubro::R500.gamma_multiply(tf)),
+            );
+        }
+        // A ação de peso ganha um brilho da própria cor no hover (elevação com cor, não
+        // sombra cinza).
+        if let (true, Some(f)) = (self.levanta_no_hover() && th > 0.001_f32, fill) {
+            let brilho = egui::epaint::Shadow {
+                offset: egui::vec2(0.0, 3.0),
+                blur: 12.0,
+                spread: 0.0,
+                color: f.gamma_multiply(0.35_f32 * th),
+            };
+            painter.add(brilho.as_shape(rect, Raio::ITEM));
+        }
+        if let Some(f) = fill {
+            painter.rect_filled(rect, Raio::ITEM, f);
+        }
+        if let Some(s) = stroke {
+            painter.rect_stroke(rect, Raio::ITEM, s);
+        }
+    }
+}
+
+/// Rótulo centrado e, ao lado, o atalho menor e apagado.
+fn pintar_texto(
+    ui: &Ui,
+    rect: Rect,
+    rotulo: std::sync::Arc<egui::Galley>,
+    atalho: Option<std::sync::Arc<egui::Galley>>,
+    fg: Color32,
+) {
+    let largura_rotulo = rotulo.size().x;
+    let largura = largura_rotulo + atalho.as_ref().map_or(0.0, |g| g.size().x + VAO_ATALHO);
+    let inicio = rect.center().x - largura / 2.0;
+    let pos = egui::pos2(inicio, rect.center().y - rotulo.size().y / 2.0);
+    ui.painter().galley(pos, rotulo, fg);
+    if let Some(g) = atalho {
+        let pos = egui::pos2(
+            inicio + largura_rotulo + VAO_ATALHO,
+            rect.center().y - g.size().y / 2.0,
+        );
+        ui.painter().galley(pos, g, fg.gamma_multiply(0.72_f32));
+    }
+}
+
 impl Widget for Botao {
     fn ui(self, ui: &mut Ui) -> Response {
         let cores = ui.cores();
-        let fonte = Papel::Acao.font_id();
-        let texto = match &self.dica_de_atalho(ui) {
-            Some(a) => format!("{}    {a}", self.rotulo),
-            None => self.rotulo.clone(),
-        };
-        let galley = ui
-            .painter()
-            .layout_no_wrap(texto, fonte, Color32::PLACEHOLDER);
+        let galley = ui.painter().layout_no_wrap(
+            self.rotulo.clone(),
+            Papel::Acao.font_id(),
+            Color32::PLACEHOLDER,
+        );
+        // O atalho vai à parte, menor e apagado: lê-se o rótulo primeiro, a tecla depois.
+        let atalho = self.dica_de_atalho(ui).map(|a| {
+            ui.painter()
+                .layout_no_wrap(a, Papel::Codigo.font_id(), Color32::PLACEHOLDER)
+        });
+        let largura_texto =
+            galley.size().x + atalho.as_ref().map_or(0.0, |g| g.size().x + VAO_ATALHO);
 
         let (padding, altura_min) = if self.pequeno {
             (Vec2::new(12.0_f32, 6.0_f32), 34.0_f32)
@@ -246,7 +364,7 @@ impl Widget for Botao {
         let largura = if self.preenche_largura {
             ui.available_width()
         } else {
-            galley.size().x + padding.x * 2.0
+            largura_texto + padding.x * 2.0
         };
         let tamanho = Vec2::new(largura, altura_min.max(galley.size().y + padding.y * 2.0));
 
@@ -299,37 +417,14 @@ impl Widget for Botao {
             let fg = self
                 .cor
                 .map_or(fg, |c| if self.habilitado { c } else { fg });
-            {
-                let painter = ui.painter();
-                // Anel de foco de teclado: um halo externo suave + o anel nítido, ambos
-                // surgindo com `tf` (`docs/12-ui-ux.md` §9 — foco sempre visível).
-                if tf > 0.001_f32 {
-                    painter.rect_stroke(
-                        rect.expand(4.0_f32),
-                        Raio::ITEM + 4.0_f32,
-                        Stroke::new(4.0_f32, Rubro::R500.gamma_multiply(0.18_f32 * tf)),
-                    );
-                    painter.rect_stroke(
-                        rect.expand(2.0_f32),
-                        Raio::ITEM + 2.0_f32,
-                        Stroke::new(2.0_f32, Rubro::R500.gamma_multiply(tf)),
-                    );
-                }
-                if let Some(f) = fill {
-                    painter.rect_filled(rect, Raio::ITEM, f);
-                }
-                if let Some(s) = stroke {
-                    painter.rect_stroke(rect, Raio::ITEM, s);
-                }
-            }
+            self.pintar_fundo(ui, rect, (fill, stroke), th, tf);
             if self.carregando {
                 let mut filho = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(
                     egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
                 ));
                 filho.add(Spinner::novo().pequeno().cor(fg));
             } else {
-                let pos = rect.center() - galley.size() / 2.0;
-                ui.painter().galley(pos, galley, fg);
+                pintar_texto(ui, rect, galley, atalho, fg);
             }
         }
 

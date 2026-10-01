@@ -6,7 +6,7 @@ use super::*;
 /// — para abrir um cadastro rápido ([`DlgRapido`]) logo abaixo do seletor que ele
 /// complementa.
 pub(super) fn botao_cadastro_rapido(rotulo: &str) -> Botao {
-    Botao::fantasma(rotulo).pequeno().cor(Rubro::R500)
+    Botao::fantasma(rotulo).pequeno().tom(Tom::Neutro)
 }
 
 /// O cadastro rápido — um segundo `Dialogo`, menor, empilhado por cima do `dlg` principal
@@ -50,20 +50,17 @@ pub(super) fn dialogo_rapido(
                     ui.add_space(Espaco::E12);
                     ui.horizontal(|ui| {
                         ui.add(Rotulo::campo("Serve para"));
-                        for (rot, valor) in [
-                            ("Ambas", None),
-                            ("Só a receber", Some(EspecieTitulo::Receber)),
-                            ("Só a pagar", Some(EspecieTitulo::Pagar)),
-                        ] {
-                            let sel = *especie == valor;
-                            let b = if sel {
-                                Botao::primario(rot)
-                            } else {
-                                Botao::fantasma(rot)
-                            };
-                            if ui.add(b).clicked() {
-                                *especie = valor;
-                            }
+                        ui.add_space(Espaco::E8);
+                        if let Some(e) = Abas::nova(&[
+                            (None, "Ambas"),
+                            (Some(EspecieTitulo::Receber), "Só a receber"),
+                            (Some(EspecieTitulo::Pagar), "Só a pagar"),
+                        ])
+                        .selecionada(*especie)
+                        .id_salt("rapido-especie")
+                        .mostrar(ui)
+                        {
+                            *especie = e;
                         }
                     });
                 }
