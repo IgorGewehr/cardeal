@@ -1,12 +1,21 @@
 //! `Enviado → Aprovado | Recusado` — registra a decisão do cliente (nunca implícita).
 
-use cardeal_kernel::{Erro, Id, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::Id;
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::comandos::carregar_orcamento;
+#[cfg(feature = "sqlite")]
 use crate::eventos::OrcamentoAprovado;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioOrcamentos;
 
 /// Registra a aprovação ou recusa do cliente.
@@ -20,6 +29,7 @@ pub struct RegistrarDecisaoOrcamento {
     pub identificacao: Option<String>,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for RegistrarDecisaoOrcamento {
     type Saida = ();
     const PERMISSAO: &'static str = "orcamentos.orcamento.decidir";

@@ -6,6 +6,7 @@
 //! nome, nunca pelo tipo Rust.
 
 use cardeal_kernel::{Data, Dinheiro, Id};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::EventoDominio;
 use serde::Serialize;
 
@@ -22,6 +23,7 @@ pub struct TituloLancado {
     pub parcelas: u16,
 }
 
+#[cfg(feature = "sqlite")]
 impl EventoDominio for TituloLancado {
     const TIPO: &'static str = "financeiro.titulo_lancado.v1";
 
@@ -45,6 +47,7 @@ pub struct ParcelaBaixada {
     pub lancamento: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl EventoDominio for ParcelaBaixada {
     const TIPO: &'static str = "financeiro.parcela_baixada.v1";
 
@@ -64,6 +67,7 @@ pub struct BaixaEstornada {
     pub lancamento_estorno: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl EventoDominio for BaixaEstornada {
     const TIPO: &'static str = "financeiro.baixa_estornada.v1";
 
@@ -83,6 +87,7 @@ pub struct TituloRenegociado {
     pub saldo: Dinheiro,
 }
 
+#[cfg(feature = "sqlite")]
 impl EventoDominio for TituloRenegociado {
     const TIPO: &'static str = "financeiro.titulo_renegociado.v1";
 
@@ -104,6 +109,7 @@ pub struct CaixaAberto {
     pub valor_abertura: Dinheiro,
 }
 
+#[cfg(feature = "sqlite")]
 impl EventoDominio for CaixaAberto {
     const TIPO: &'static str = "financeiro.caixa_aberto.v1";
 
@@ -125,6 +131,7 @@ pub struct CaixaFechado {
     pub quebra: Dinheiro,
 }
 
+#[cfg(feature = "sqlite")]
 impl EventoDominio for CaixaFechado {
     const TIPO: &'static str = "financeiro.caixa_fechado.v1";
 
@@ -144,6 +151,7 @@ pub struct SangriaRegistrada {
     pub motivo: String,
 }
 
+#[cfg(feature = "sqlite")]
 impl EventoDominio for SangriaRegistrada {
     const TIPO: &'static str = "financeiro.sangria_registrada.v1";
 
@@ -165,6 +173,7 @@ pub struct RecorrenciaMaterializada {
     pub valor: Dinheiro,
 }
 
+#[cfg(feature = "sqlite")]
 impl EventoDominio for RecorrenciaMaterializada {
     const TIPO: &'static str = "financeiro.recorrencia_materializada.v1";
 

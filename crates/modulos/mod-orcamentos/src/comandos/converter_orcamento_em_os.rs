@@ -5,15 +5,26 @@
 //! regra 2): atomicidade importa mais que desacoplamento a qualquer custo. A dependência é
 //! só num sentido — `mod-os` não conhece `mod-orcamentos`.
 
-use cardeal_kernel::{Erro, Id, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::Id;
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
+#[cfg(feature = "sqlite")]
 use mod_os::{ItemMaoDeObra, OrdemServico, RepositorioOs};
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::comandos::carregar_orcamento;
+#[cfg(feature = "sqlite")]
 use crate::erros::ErroOrcamentos;
+#[cfg(feature = "sqlite")]
 use crate::eventos::OrcamentoConvertidoEmOs;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioOrcamentos;
 
 /// Converte um orçamento aprovado em OS.
@@ -36,6 +47,7 @@ pub struct OrcamentoConvertido {
     pub numero: u64,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for ConverterOrcamentoEmOs {
     type Saida = OrcamentoConvertido;
     const PERMISSAO: &'static str = "orcamentos.orcamento.converter";

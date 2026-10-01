@@ -9,21 +9,37 @@
 //! nível do financeiro (`ConstrutorTitulo`, `RepositorioFinanceiro::inserir_titulo`) para
 //! gravar o título vinculado a esse mesmo lançamento — nunca cria um segundo.
 
-use cardeal_kernel::{Data, Dinheiro, Erro, Id, Resultado};
-use cardeal_ledger::{
-    Contas, Contraparte as ContraparteRazao, PapelConta, Razao, RepositorioRazao,
-};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::{Data, Dinheiro, Id};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_ledger::Contraparte as ContraparteRazao;
+#[cfg(feature = "sqlite")]
+use cardeal_ledger::RepositorioRazao;
+#[cfg(feature = "sqlite")]
+use cardeal_ledger::{Contas, PapelConta, Razao};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
+use mod_financeiro::MeioPagamento;
+#[cfg(feature = "sqlite")]
 use mod_financeiro::{
-    baixar_recebimento_comum, ConstrutorTitulo, EspecieTitulo, MeioPagamento, RepositorioFinanceiro,
+    baixar_recebimento_comum, ConstrutorTitulo, EspecieTitulo, RepositorioFinanceiro,
 };
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::comandos::{autoria_de, carregar_ordem};
+#[cfg(feature = "sqlite")]
 use crate::eventos::OrdemFaturada;
+#[cfg(feature = "sqlite")]
 use crate::execucao::ItemPeca;
+#[cfg(feature = "sqlite")]
 use crate::receituario::{faturar_ordem_servico, ContasFaturamento};
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioOs;
 
 /// Se/como a OS já foi paga no ato de faturar — o caso comum no balcão: cliente paga na
@@ -73,6 +89,7 @@ pub struct OrdemServicoFaturada {
     pub titulo_pago: bool,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for FaturarOrdemServico {
     type Saida = OrdemServicoFaturada;
     const PERMISSAO: &'static str = "os.faturar";
@@ -205,6 +222,7 @@ impl Comando for FaturarOrdemServico {
 
 /// Baixa do estoque as peças ainda não aplicadas (faturar direto não pode deixar o custo zerado
 /// e inflar a margem) e devolve o custo total das peças da OS — o CMV do lançamento.
+#[cfg(feature = "sqlite")]
 fn baixar_pecas_e_somar_custo(
     ordem: Id,
     ctx: &Ctx,

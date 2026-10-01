@@ -1,11 +1,19 @@
 //! Envia o orçamento montado para aprovação do cliente.
 
-use cardeal_kernel::{Erro, Id, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::Id;
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::comandos::carregar_ordem;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioOs;
 
 /// Envia o orçamento para aprovação.
@@ -15,6 +23,7 @@ pub struct EnviarParaAprovacao {
     pub ordem_servico: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for EnviarParaAprovacao {
     type Saida = ();
     const PERMISSAO: &'static str = "os.orcamento.enviar";

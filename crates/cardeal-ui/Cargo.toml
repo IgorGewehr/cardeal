@@ -11,7 +11,7 @@ repository.workspace   = true
 
 [dependencies]
 cardeal-kernel.workspace  = true
-cardeal-modkit.workspace  = true
+cardeal-modkit = { path = "../cardeal-modkit", default-features = false }
 egui.workspace         = true
 egui_extras.workspace  = true
 serde.workspace        = true

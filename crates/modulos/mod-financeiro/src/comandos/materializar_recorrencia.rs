@@ -5,16 +5,29 @@
 //! então chamar a mais não duplica nada. [`materializar_recorrencias_pendentes`] continua
 //! `pub` para o agendador futuro chamar direto, fora do despacho.
 
+#[cfg(feature = "sqlite")]
 use cardeal_kernel::{Erro, Id, Resultado};
-use cardeal_ledger::{Contas, PapelConta, Razao, RepositorioRazao};
-use cardeal_modkit::{Comando, Ctx, Risco};
+#[cfg(feature = "sqlite")]
+use cardeal_ledger::RepositorioRazao;
+#[cfg(feature = "sqlite")]
+use cardeal_ledger::{Contas, PapelConta, Razao};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::comandos::autoria_de;
+#[cfg(feature = "sqlite")]
 use crate::receituario::{lancar_titulo, ContasTitulo};
+#[cfg(feature = "sqlite")]
 use crate::recorrencia::Recorrencia;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioFinanceiro;
+#[cfg(feature = "sqlite")]
 use crate::titulo::EspecieTitulo;
 
 /// Gera os títulos das recorrências que já venceram ou entraram na janela de geração.
@@ -22,6 +35,7 @@ use crate::titulo::EspecieTitulo;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MaterializarRecorrencias;
 
+#[cfg(feature = "sqlite")]
 impl Comando for MaterializarRecorrencias {
     type Saida = Vec<Id>;
     // Quem pode criar a regra pode fazê-la render títulos; um perfil sem acesso ao
@@ -47,6 +61,7 @@ impl Comando for MaterializarRecorrencias {
 /// # Errors
 /// Erro de domínio (`RegraDeRecorrenciaInvalida`, papel de conta não mapeado) — desfaz o
 /// `SAVEPOINT` da tarefa junto com o resto.
+#[cfg(feature = "sqlite")]
 pub fn materializar_recorrencias_pendentes(
     ctx: &Ctx,
     uow: &mut UnidadeDeTrabalho,
@@ -69,6 +84,7 @@ pub fn materializar_recorrencias_pendentes(
 
 /// Grava o título de uma ocorrência (`vencimento`) de `r` — lançamento no razão, título e
 /// evento, tudo na mesma transação.
+#[cfg(feature = "sqlite")]
 fn materializar_uma(
     r: &Recorrencia,
     vencimento: cardeal_kernel::Data,

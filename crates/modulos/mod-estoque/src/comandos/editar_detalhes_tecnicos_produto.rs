@@ -3,12 +3,19 @@
 //! Não toca nome/NCM/código de barras, que continuam sem comando de edição nesta fatia
 //! (`docs/modulos/estoque.md` §5).
 
-use cardeal_kernel::{Erro, Id, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::Id;
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
 use crate::produto::DetalhesTecnicos;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioEstoque;
 
 /// Edita os detalhes técnicos de um produto.
@@ -21,6 +28,7 @@ pub struct EditarDetalhesTecnicosProduto {
     pub detalhes: DetalhesTecnicos,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for EditarDetalhesTecnicosProduto {
     type Saida = ();
     const PERMISSAO: &'static str = "estoque.produto.editar";

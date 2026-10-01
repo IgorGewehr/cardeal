@@ -56,9 +56,12 @@ mod cupom;
 mod erros;
 pub mod eventos;
 mod manifesto;
+#[cfg(feature = "sqlite")]
 pub mod migracoes;
+#[cfg(feature = "sqlite")]
 mod modulo;
 pub mod receituario;
+#[cfg(feature = "sqlite")]
 mod repositorio;
 
 pub use comandos::{
@@ -71,5 +74,7 @@ pub use cupom::{
 };
 pub use erros::ErroPdv;
 pub use manifesto::{manifesto, MANIFESTO};
+#[cfg(feature = "sqlite")]
 pub use modulo::ModuloPdv;
+#[cfg(feature = "sqlite")]
 pub use repositorio::RepositorioPdv;

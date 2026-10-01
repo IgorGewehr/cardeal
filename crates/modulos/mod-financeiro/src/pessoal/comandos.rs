@@ -1,20 +1,32 @@
 //! Escrita dos lançamentos pessoais. Toda alteração filtra por `usuario` da sessão: ninguém
 //! mexe no pessoal de outro, nem com o id em mãos.
 
-use cardeal_kernel::{Data, Erro, Id, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::{Data, Id};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
+#[cfg(feature = "sqlite")]
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use super::consultas::{dias, tipo_txt};
-use super::{gerar, NovoPessoal};
+#[cfg(feature = "sqlite")]
+use super::gerar;
+use super::NovoPessoal;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::{blob, persist};
 
 /// Lança uma receita/despesa pessoal (com as parcelas ou meses que ela tiver).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LancarPessoal(pub NovoPessoal);
 
+#[cfg(feature = "sqlite")]
 impl Comando for LancarPessoal {
     /// Os ids gerados, em ordem.
     type Saida = Vec<Id>;
@@ -67,6 +79,7 @@ pub struct MarcarPessoalPago {
     pub data: Data,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for MarcarPessoalPago {
     /// Quantos foram alterados.
     type Saida = usize;
@@ -100,6 +113,7 @@ pub struct ExcluirPessoal {
     pub e_seguintes: bool,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for ExcluirPessoal {
     /// Quantos foram excluídos.
     type Saida = usize;

@@ -61,22 +61,29 @@ mod consultas;
 mod erros;
 pub mod eventos;
 mod manifesto;
+#[cfg(feature = "sqlite")]
 pub mod migracoes;
+#[cfg(feature = "sqlite")]
 mod modulo;
 mod nota;
 mod preferencias;
+#[cfg(feature = "sqlite")]
 mod repositorio;
 
 pub use casamento::{casar, RegraCasamentoAprendida, ResultadoCasamento, LIMIAR_SUGESTAO_FORTE};
+#[cfg(feature = "sqlite")]
+pub use comandos::{confirmar_entrada_comum, importar_nota_da_sefaz, verificar_notas_na_sefaz};
 pub use comandos::{
-    confirmar_entrada_comum, importar_nota_da_sefaz, verificar_notas_na_sefaz, ConfirmacaoEntrada,
-    ConfirmarEntrada, DefinirPreferenciasCompras, EntradaConfirmada, ImportarNotaDeArquivoXml,
-    ItemNotaManual, LancarNotaManual, RelatorioImportacao, VincularProdutoManual,
+    ConfirmacaoEntrada, ConfirmarEntrada, DefinirPreferenciasCompras, EntradaConfirmada,
+    ImportarNotaDeArquivoXml, ItemNotaManual, LancarNotaManual, RelatorioImportacao,
+    VincularProdutoManual,
 };
 pub use consultas::{ItemNota, ItensDaNota, NotasRecentes};
 pub use erros::ErroCompras;
 pub use manifesto::{manifesto, MANIFESTO};
+#[cfg(feature = "sqlite")]
 pub use modulo::ModuloCompras;
 pub use nota::{EstadoCasamento, EstadoNotaEntrada, ItemNotaEntrada, NotaEntrada};
 pub use preferencias::{PreferenciasCompras, RateioPor};
+#[cfg(feature = "sqlite")]
 pub use repositorio::RepositorioCompras;

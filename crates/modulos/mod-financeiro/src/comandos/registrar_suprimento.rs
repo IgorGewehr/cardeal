@@ -2,13 +2,24 @@
 //!
 //! Receituário (`docs/modulos/financeiro.md` §7): D Caixa / C Bancos-Cofre.
 
-use cardeal_kernel::{Dinheiro, Erro, Id, Resultado};
-use cardeal_ledger::{Razao, RepositorioRazao};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::{Dinheiro, Id};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_ledger::Razao;
+#[cfg(feature = "sqlite")]
+use cardeal_ledger::RepositorioRazao;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::comandos::{autoria_de, carregar_sessao_e_caixa, contas_caixa_rotina};
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioFinanceiro;
 
 /// Registra um suprimento numa sessão de caixa.
@@ -29,6 +40,7 @@ pub struct SuprimentoFoiRegistrado {
     pub lancamento: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for RegistrarSuprimento {
     type Saida = SuprimentoFoiRegistrado;
     const PERMISSAO: &'static str = "financeiro.caixa.suprimento";

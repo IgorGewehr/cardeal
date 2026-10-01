@@ -4,15 +4,28 @@
 //!
 //! Receituário: falta → D Quebra de caixa / C Caixa; sobra → D Caixa / C Outras receitas.
 
-use cardeal_kernel::{Dinheiro, Erro, Id, Resultado};
-use cardeal_ledger::{Contas, PapelConta, Razao, RepositorioRazao};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::{Dinheiro, Id};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_ledger::RepositorioRazao;
+#[cfg(feature = "sqlite")]
+use cardeal_ledger::{Contas, PapelConta, Razao};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::caixa::{ContasCaixa, TOLERANCIA_QUEBRA};
+#[cfg(feature = "sqlite")]
 use crate::comandos::{autoria_de, carregar_sessao_e_caixa};
+#[cfg(feature = "sqlite")]
 use crate::eventos::CaixaFechado;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioFinanceiro;
 
 /// Fecha uma sessão de caixa.
@@ -39,6 +52,7 @@ pub struct CaixaFoiFechado {
     pub lancamento_ajuste: Option<Id>,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for FecharCaixa {
     type Saida = CaixaFoiFechado;
     const PERMISSAO: &'static str = "financeiro.caixa.fechar";

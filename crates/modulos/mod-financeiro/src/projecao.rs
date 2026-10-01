@@ -3,14 +3,23 @@
 //! do Financeiro: "quanto vou gastar com aluguel, pró-labore e energia nos próximos meses, e
 //! por quê".
 
+#[cfg(feature = "sqlite")]
 use std::collections::HashMap;
 
-use cardeal_kernel::{Competencia, Data, Dinheiro, Id, Periodo, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::Resultado;
+use cardeal_kernel::{Competencia, Dinheiro, Id};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Data, Periodo};
+#[cfg(feature = "sqlite")]
 use cardeal_modkit::{Consulta, Ctx};
+#[cfg(feature = "sqlite")]
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::recorrencia::Recorrencia;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::{blob, data_de, especie_txt, id_de, persist, recorrencia_de_linha};
 use crate::titulo::EspecieTitulo;
 
@@ -50,6 +59,7 @@ pub struct ProjecaoPorCategoria {
     pub meses: u8,
 }
 
+#[cfg(feature = "sqlite")]
 impl Consulta for ProjecaoPorCategoria {
     type Saida = Vec<ItemProjecaoCategoria>;
     const PERMISSAO: &'static str = "financeiro.projecao.ver";
@@ -80,9 +90,12 @@ impl Consulta for ProjecaoPorCategoria {
 }
 
 #[derive(Default)]
+#[cfg(feature = "sqlite")]
 struct Acumulador(HashMap<(Option<Id>, Competencia), ItemProjecaoCategoria>);
 
+#[cfg(feature = "sqlite")]
 impl Acumulador {
+    #[cfg(feature = "sqlite")]
     fn item(
         &mut self,
         categoria: Option<Id>,
@@ -99,6 +112,7 @@ impl Acumulador {
             })
     }
 
+    #[cfg(feature = "sqlite")]
     fn itens(self) -> Vec<ItemProjecaoCategoria> {
         let mut v: Vec<_> = self.0.into_values().collect();
         v.sort_by_key(|i| (i.competencia, i.categoria));
@@ -106,6 +120,7 @@ impl Acumulador {
     }
 }
 
+#[cfg(feature = "sqlite")]
 fn realizado(
     conexao: &Connection,
     empresa: Id,
@@ -147,6 +162,7 @@ fn realizado(
     Ok(())
 }
 
+#[cfg(feature = "sqlite")]
 fn em_aberto(
     conexao: &Connection,
     empresa: Id,
@@ -191,6 +207,7 @@ fn em_aberto(
     Ok(())
 }
 
+#[cfg(feature = "sqlite")]
 fn recorrencias_ativas(conexao: &Connection, empresa: Id) -> Resultado<Vec<Recorrencia>> {
     let mut stmt = conexao
         .prepare(
@@ -211,6 +228,7 @@ fn recorrencias_ativas(conexao: &Connection, empresa: Id) -> Resultado<Vec<Recor
 
 /// As ocorrências que a materialização ainda não gerou (depois de `hoje` + antecedência) e
 /// caem na janela. Recorrência de valor não fixo fica de fora — não há valor para projetar.
+#[cfg(feature = "sqlite")]
 fn projetar_recorrencia(r: &Recorrencia, janela: Periodo, hoje: Data, acc: &mut Acumulador) {
     let Ok(valor) = r.valor_de() else { return };
     let gerada_ate = hoje.mais_dias(i32::from(r.antecedencia_geracao_dias));

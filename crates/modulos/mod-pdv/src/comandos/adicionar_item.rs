@@ -2,15 +2,26 @@
 //! no item. `docs/modulos/pdv.md` §5 — "não decide preço nem regra de desconto, lê
 //! `TabelaPreco`/`RegraPreco` de `vendas` pela mesma porta que o pedido de balcão usa".
 
-use cardeal_kernel::{Erro, Id, Preco, Quantidade, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+use cardeal_kernel::{Id, Preco, Quantidade};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
+#[cfg(feature = "sqlite")]
 use mod_estoque::RepositorioEstoque;
+#[cfg(feature = "sqlite")]
 use mod_vendas::{preco_vigente, RepositorioVendas};
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::comandos::carregar_cupom;
+#[cfg(feature = "sqlite")]
 use crate::cupom::ItemCupom;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioPdv;
 
 /// Acrescenta um item ao cupom (só em `EmAndamento`).
@@ -37,6 +48,7 @@ pub struct ItemFoiAdicionado {
     pub total_cupom: cardeal_kernel::Dinheiro,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for AdicionarItem {
     type Saida = ItemFoiAdicionado;
     const PERMISSAO: &'static str = "pdv.venda.editar";

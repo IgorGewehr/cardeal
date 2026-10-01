@@ -4,16 +4,30 @@
 //! Receituário (`docs/modulos/financeiro.md` §7): D Caixa / C Bancos-Cofre, só quando
 //! `valor_abertura > 0`.
 
-use cardeal_kernel::{Dinheiro, Erro, Id, Resultado};
-use cardeal_ledger::{Razao, RepositorioRazao};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::{Dinheiro, Id};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_ledger::Razao;
+#[cfg(feature = "sqlite")]
+use cardeal_ledger::RepositorioRazao;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::caixa::{MovimentoCaixa, SessaoCaixa, TipoMovimento};
+#[cfg(feature = "sqlite")]
 use crate::comandos::{autoria_de, contas_caixa_rotina};
+#[cfg(feature = "sqlite")]
 use crate::erros::ErroFinanceiro;
+#[cfg(feature = "sqlite")]
 use crate::eventos::CaixaAberto;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioFinanceiro;
 
 /// Abre uma sessão para um caixa físico.
@@ -34,6 +48,7 @@ pub struct CaixaFoiAberto {
     pub lancamento_suprimento: Option<Id>,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for AbrirCaixa {
     type Saida = CaixaFoiAberto;
     const PERMISSAO: &'static str = "financeiro.caixa.abrir";

@@ -7,18 +7,28 @@
 //! O vínculo com `agenda.CriarCompromisso` fica para quando o módulo `agenda` existir — por
 //! ora `compromisso` não é gravado.
 
-use cardeal_kernel::{CodigoErro, Erro, Id, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::Id;
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{CodigoErro, Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
-use mod_clientes::{
-    adicionar_contato_comum, criar_pessoa_comum, pessoa_por_id, AdicionarContato, ContatoInicial,
-    CriarPessoa,
-};
+#[cfg(feature = "sqlite")]
+use mod_clientes::{adicionar_contato_comum, criar_pessoa_comum, pessoa_por_id, AdicionarContato};
+use mod_clientes::{ContatoInicial, CriarPessoa};
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::erros::ErroOs;
+#[cfg(feature = "sqlite")]
 use crate::eventos::OrdemAberta;
-use crate::ordem::{FichaEntrada, OrdemServico};
+use crate::ordem::FichaEntrada;
+#[cfg(feature = "sqlite")]
+use crate::ordem::OrdemServico;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioOs;
 
 /// Abre uma ordem de serviço.
@@ -48,6 +58,7 @@ pub struct OrdemServicoAberta {
     pub numero: u64,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for AbrirOrdemServico {
     type Saida = OrdemServicoAberta;
     const PERMISSAO: &'static str = "os.ordem.criar";
@@ -90,6 +101,7 @@ pub struct OrdemComClienteNovoAberta {
     pub ordem: OrdemServicoAberta,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for AbrirOrdemComClienteNovo {
     type Saida = OrdemComClienteNovoAberta;
     const PERMISSAO: &'static str = "os.ordem.criar";
@@ -134,6 +146,7 @@ impl Comando for AbrirOrdemComClienteNovo {
 }
 
 /// O corpo de [`AbrirOrdemServico`], reaproveitado por [`AbrirOrdemComClienteNovo`].
+#[cfg(feature = "sqlite")]
 fn abrir_ordem_comum(
     dados: AbrirOrdemServico,
     ctx: &Ctx,

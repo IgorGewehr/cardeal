@@ -3,6 +3,7 @@
 //! tipo Rust.
 
 use cardeal_kernel::{Dinheiro, Id};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::EventoDominio;
 use serde::Serialize;
 
@@ -13,6 +14,7 @@ pub struct PedidoConfirmado {
     pub pedido: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl EventoDominio for PedidoConfirmado {
     const TIPO: &'static str = "vendas.pedido_confirmado.v1";
 
@@ -32,6 +34,7 @@ pub struct PedidoFaturado {
     pub total: Dinheiro,
 }
 
+#[cfg(feature = "sqlite")]
 impl EventoDominio for PedidoFaturado {
     const TIPO: &'static str = "vendas.pedido_faturado.v1";
 
@@ -47,6 +50,7 @@ pub struct PedidoCancelado {
     pub pedido: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl EventoDominio for PedidoCancelado {
     const TIPO: &'static str = "vendas.pedido_cancelado.v1";
 

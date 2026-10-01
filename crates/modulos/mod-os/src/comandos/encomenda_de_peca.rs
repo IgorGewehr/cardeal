@@ -8,20 +8,33 @@
 //! CMV do faturamento. O título nasce com `origem_modulo = "os_peca"` e o item como origem —
 //! nunca `"os"`, que é a origem do título a **receber** da OS (desfaturar o procura por ela).
 
-use cardeal_kernel::{Arredondamento, CodigoErro, Data, Dinheiro, Erro, Id, Preco, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Arredondamento, CodigoErro, Erro, Resultado};
+use cardeal_kernel::{Data, Dinheiro, Id, Preco};
+#[cfg(feature = "sqlite")]
 use cardeal_ledger::PapelConta;
-use cardeal_modkit::{Comando, Ctx, Risco};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
+#[cfg(feature = "sqlite")]
 use mod_estoque::{registrar_entrada_comum, DadosEntrada};
+use mod_financeiro::MeioPagamento;
+#[cfg(feature = "sqlite")]
 use mod_financeiro::{
     baixar_pagamento_comum, lancar_titulo_comum, DadosLancamentoTitulo, EspecieTitulo,
-    MeioPagamento,
 };
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::comandos::carregar_ordem;
+#[cfg(feature = "sqlite")]
 use crate::erros::ErroOs;
+#[cfg(feature = "sqlite")]
 use crate::execucao::{Encomenda, ItemPeca};
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioOs;
 
 /// Marca uma peça do orçamento como pedida ao fornecedor (ou corrige o pedido).
@@ -39,6 +52,7 @@ pub struct EncomendarPeca {
     pub previsao_chegada: Option<Data>,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for EncomendarPeca {
     type Saida = ();
     const PERMISSAO: &'static str = "os.orcamento.montar";
@@ -110,6 +124,7 @@ pub struct ChegadaRegistrada {
     pub pago: bool,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for RegistrarChegadaDaPeca {
     type Saida = ChegadaRegistrada;
     const PERMISSAO: &'static str = "os.peca.aplicar";
@@ -197,6 +212,7 @@ impl Comando for RegistrarChegadaDaPeca {
 
 /// Lança a conta a pagar da peça (origem `"os_peca"`, o item) e, se foi paga na hora, a baixa.
 /// Devolve o título.
+#[cfg(feature = "sqlite")]
 fn lancar_conta_da_peca(
     item: Id,
     custo_total: Dinheiro,
@@ -252,6 +268,7 @@ fn lancar_conta_da_peca(
 }
 
 /// A OS (não finalizada) e o item de peça dela, ainda não aplicado.
+#[cfg(feature = "sqlite")]
 fn carregar_item_pendente(
     uow: &mut UnidadeDeTrabalho,
     ordem: Id,

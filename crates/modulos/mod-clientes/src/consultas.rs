@@ -2,15 +2,23 @@
 //! `clientes_documento`/`clientes_limite_credito` — `docs/modulos/clientes.md` §10 (a ficha
 //! de pessoa e a busca por papel, para o seletor de cliente/fornecedor de OS/compras/vendas).
 
-use cardeal_kernel::{Id, Instante, Resultado};
+use cardeal_kernel::Id;
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Instante, Resultado};
+#[cfg(feature = "sqlite")]
 use cardeal_modkit::{Consulta, Ctx};
+#[cfg(feature = "sqlite")]
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "sqlite")]
 use smallvec::SmallVec;
 
 use crate::cadastro::{Contato, DocumentoPessoa, Endereco};
 use crate::credito::LimiteCredito;
-use crate::pessoa::{Papel, PapelPessoa, Pessoa};
+#[cfg(feature = "sqlite")]
+use crate::pessoa::PapelPessoa;
+use crate::pessoa::{Papel, Pessoa};
+#[cfg(feature = "sqlite")]
 use crate::repositorio::{
     blob, contato_de_linha, data_de, documento_de_linha, endereco_de_linha, estado_pessoa_de,
     id_de, limite_credito_de_linha, papel_de, papel_txt, persist, tipo_pessoa_de,
@@ -20,6 +28,7 @@ use crate::repositorio::{
 ///
 /// # Errors
 /// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+#[cfg(feature = "sqlite")]
 pub fn pessoa_por_id(conexao: &Connection, id: Id) -> Resultado<Option<Pessoa>> {
     let cabecalho = conexao
         .query_row(
@@ -71,6 +80,7 @@ pub fn pessoa_por_id(conexao: &Connection, id: Id) -> Resultado<Option<Pessoa>> 
 ///
 /// # Errors
 /// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+#[cfg(feature = "sqlite")]
 pub fn papeis_da_pessoa(conexao: &Connection, pessoa: Id) -> Resultado<SmallVec<[PapelPessoa; 2]>> {
     let mut stmt = conexao
         .prepare(
@@ -102,6 +112,7 @@ pub fn papeis_da_pessoa(conexao: &Connection, pessoa: Id) -> Resultado<SmallVec<
 ///
 /// # Errors
 /// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+#[cfg(feature = "sqlite")]
 pub fn documentos_da_pessoa(conexao: &Connection, pessoa: Id) -> Resultado<Vec<DocumentoPessoa>> {
     let mut stmt = conexao
         .prepare("SELECT id, empresa, pessoa, tipo, numero, orgao_emissor, validado_sefaz_em FROM clientes_documento WHERE pessoa = ?1 ORDER BY rowid")
@@ -118,6 +129,7 @@ pub fn documentos_da_pessoa(conexao: &Connection, pessoa: Id) -> Resultado<Vec<D
 ///
 /// # Errors
 /// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+#[cfg(feature = "sqlite")]
 pub fn limite_credito_da_pessoa(
     conexao: &Connection,
     pessoa: Id,
@@ -137,6 +149,7 @@ pub fn limite_credito_da_pessoa(
 ///
 /// # Errors
 /// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+#[cfg(feature = "sqlite")]
 pub fn contatos_da_pessoa(conexao: &Connection, pessoa: Id) -> Resultado<Vec<Contato>> {
     let mut stmt = conexao
         .prepare(
@@ -156,6 +169,7 @@ pub fn contatos_da_pessoa(conexao: &Connection, pessoa: Id) -> Resultado<Vec<Con
 ///
 /// # Errors
 /// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+#[cfg(feature = "sqlite")]
 pub fn enderecos_da_pessoa(conexao: &Connection, pessoa: Id) -> Resultado<Vec<Endereco>> {
     let mut stmt = conexao
         .prepare(
@@ -194,6 +208,7 @@ pub struct DetalhePessoa {
     pub pessoa: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Consulta for DetalhePessoa {
     type Saida = Option<PessoaDetalhada>;
     const PERMISSAO: &'static str = "clientes.pessoa.ver";
@@ -247,6 +262,7 @@ pub struct PessoasPorPapel {
     pub busca: Option<String>,
 }
 
+#[cfg(feature = "sqlite")]
 impl Consulta for PessoasPorPapel {
     type Saida = Vec<ItemPessoa>;
     const PERMISSAO: &'static str = "clientes.pessoa.ver";

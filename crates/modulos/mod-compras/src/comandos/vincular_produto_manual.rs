@@ -2,15 +2,26 @@
 //! próxima nota do mesmo fornecedor com o mesmo código nunca mais perguntar
 //! (`docs/modulos/compras.md` §11.2).
 
-use cardeal_kernel::{Erro, Id, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::Id;
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::casamento::RegraCasamentoAprendida;
+#[cfg(feature = "sqlite")]
 use crate::comandos::carregar_nota;
+#[cfg(feature = "sqlite")]
 use crate::erros::ErroCompras;
+#[cfg(feature = "sqlite")]
 use crate::nota::EstadoNotaEntrada;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioCompras;
 
 /// Vincula um item de nota a um produto do estoque.
@@ -22,6 +33,7 @@ pub struct VincularProdutoManual {
     pub produto: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for VincularProdutoManual {
     type Saida = ();
     const PERMISSAO: &'static str = "compras.entrada.conferir";

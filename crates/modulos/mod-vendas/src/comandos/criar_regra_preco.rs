@@ -1,12 +1,21 @@
 //! Cria uma regra de preço dentro de uma tabela. `docs/modulos/vendas.md` §5.
 
-use cardeal_kernel::{Data, Erro, Id, Preco, Quantidade, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::{Data, Id, Preco, Quantidade};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::erros::ErroVendas;
+#[cfg(feature = "sqlite")]
 use crate::preco::{AlvoRegra, RegraPreco};
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioVendas;
 
 /// Cria uma regra de preço. `alvo_produto` **xor** `alvo_grupo` deve vir preenchido.
@@ -35,6 +44,7 @@ pub struct RegraPrecoCriada {
     pub regra_preco: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for CriarRegraPreco {
     type Saida = RegraPrecoCriada;
     const PERMISSAO: &'static str = "vendas.tabela_preco.editar";

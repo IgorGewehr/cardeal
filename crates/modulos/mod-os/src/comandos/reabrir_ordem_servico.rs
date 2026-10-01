@@ -4,13 +4,22 @@
 //! é aceito antes de `Concluida`/`Faturada`), então não há financeiro para reverter aqui —
 //! laudo/orçamento/itens já gravados continuam intactos, só o estado destrava de novo.
 
-use cardeal_kernel::{Erro, Id, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::Id;
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::comandos::carregar_ordem;
+#[cfg(feature = "sqlite")]
 use crate::eventos::OrdemReaberta;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioOs;
 
 /// Reabre uma ordem de serviço cancelada.
@@ -20,6 +29,7 @@ pub struct ReabrirOrdemServico {
     pub ordem_servico: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for ReabrirOrdemServico {
     type Saida = ();
     const PERMISSAO: &'static str = "os.ordem.reabrir";

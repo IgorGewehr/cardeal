@@ -2,12 +2,20 @@
 //! [`super::confirmar_entrada_comum`] (o corpo é compartilhado com a confirmação automática
 //! disparada por [`super::importar_nota_da_sefaz`]).
 
-use cardeal_kernel::{Id, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::Id;
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::Resultado;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::comandos::confirmar_entrada_comum;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioCompras;
 
 /// Confirma a entrada de uma nota com todos os itens já casados.
@@ -36,6 +44,7 @@ pub struct EntradaConfirmada {
     pub pago: bool,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for ConfirmarEntrada {
     type Saida = EntradaConfirmada;
     const PERMISSAO: &'static str = "compras.entrada.confirmar";

@@ -1,13 +1,23 @@
 //! Clona um orçamento como um novo `Rascunho` — atalho para "faça outro parecido".
 
-use cardeal_kernel::{Erro, Id, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::Id;
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::comandos::{carregar_orcamento, OrcamentoCriado};
+#[cfg(feature = "sqlite")]
 use crate::item::ItemOrcamento;
+#[cfg(feature = "sqlite")]
 use crate::orcamento::{Cabecalho, Orcamento};
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioOrcamentos;
 
 /// Duplica um orçamento existente.
@@ -17,6 +27,7 @@ pub struct DuplicarOrcamento {
     pub orcamento: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for DuplicarOrcamento {
     type Saida = OrcamentoCriado;
     const PERMISSAO: &'static str = "orcamentos.orcamento.criar";

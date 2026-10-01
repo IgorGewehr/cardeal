@@ -1,19 +1,27 @@
 //! As consultas da agenda: leitura autorizada sobre `agenda_compromisso`/`agenda_disponibilidade`
 //! (`docs/modulos/agenda.md` §6).
 
-use cardeal_kernel::{Id, Instante, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::Resultado;
+use cardeal_kernel::{Id, Instante};
+#[cfg(feature = "sqlite")]
 use cardeal_modkit::{Consulta, Ctx};
+#[cfg(feature = "sqlite")]
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::compromisso::Compromisso;
+#[cfg(feature = "sqlite")]
 use crate::recurso::DisponibilidadeRecurso;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::{blob, compromisso_de_linha, disponibilidade_de_linha, id_de, persist};
 
 /// As regras de disponibilidade de um recurso — sem elas, o recurso é sempre disponível.
 ///
 /// # Errors
 /// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+#[cfg(feature = "sqlite")]
 pub fn disponibilidade_do_recurso(
     conexao: &Connection,
     recurso: Id,
@@ -37,6 +45,7 @@ pub fn disponibilidade_do_recurso(
 ///
 /// # Errors
 /// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+#[cfg(feature = "sqlite")]
 pub fn compromissos_do_recurso_sobrepondo(
     conexao: &Connection,
     recurso: Id,
@@ -68,6 +77,7 @@ pub fn compromissos_do_recurso_sobrepondo(
 ///
 /// # Errors
 /// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+#[cfg(feature = "sqlite")]
 pub fn compromissos_do_recurso_no_periodo(
     conexao: &Connection,
     recurso: Id,
@@ -100,6 +110,7 @@ pub fn compromissos_do_recurso_no_periodo(
 ///
 /// # Errors
 /// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+#[cfg(feature = "sqlite")]
 pub fn proximos_compromissos(
     conexao: &Connection,
     empresa: Id,
@@ -137,6 +148,7 @@ pub struct AgendaDoRecurso {
     pub fim: Instante,
 }
 
+#[cfg(feature = "sqlite")]
 impl Consulta for AgendaDoRecurso {
     type Saida = Vec<Compromisso>;
     const PERMISSAO: &'static str = "agenda.compromisso.ver";
@@ -156,6 +168,7 @@ pub struct DisponibilidadeNoPeriodo {
     pub recurso: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Consulta for DisponibilidadeNoPeriodo {
     type Saida = Vec<DisponibilidadeRecurso>;
     const PERMISSAO: &'static str = "agenda.compromisso.ver";
@@ -178,6 +191,7 @@ pub struct ConflitosDeAgenda {
     pub fim: Instante,
 }
 
+#[cfg(feature = "sqlite")]
 impl Consulta for ConflitosDeAgenda {
     type Saida = Vec<Compromisso>;
     const PERMISSAO: &'static str = "agenda.compromisso.ver";
@@ -192,6 +206,7 @@ impl Consulta for ConflitosDeAgenda {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProximosCompromissos;
 
+#[cfg(feature = "sqlite")]
 impl Consulta for ProximosCompromissos {
     type Saida = Vec<Compromisso>;
     const PERMISSAO: &'static str = "agenda.compromisso.ver";
@@ -214,6 +229,7 @@ pub struct CompromissosNoPeriodo {
     pub recurso: Option<Id>,
 }
 
+#[cfg(feature = "sqlite")]
 impl Consulta for CompromissosNoPeriodo {
     type Saida = Vec<Compromisso>;
     const PERMISSAO: &'static str = "agenda.compromisso.ver";
@@ -252,6 +268,7 @@ impl Consulta for CompromissosNoPeriodo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Recursos;
 
+#[cfg(feature = "sqlite")]
 impl Consulta for Recursos {
     type Saida = Vec<crate::recurso::Recurso>;
     const PERMISSAO: &'static str = "agenda.compromisso.ver";

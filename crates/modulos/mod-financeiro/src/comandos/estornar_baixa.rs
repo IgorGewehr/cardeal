@@ -5,15 +5,28 @@
 //! Não há, ainda, um conceito de "período fechado" no sistema — a checagem que o spec original
 //! previa (`PeriodoFechado`) fica para quando existir fechamento de competência.
 
-use cardeal_kernel::{Erro, Id, Resultado};
-use cardeal_ledger::{Razao, RepositorioRazao};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::Id;
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_ledger::Razao;
+#[cfg(feature = "sqlite")]
+use cardeal_ledger::RepositorioRazao;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::erros::ErroFinanceiro;
+#[cfg(feature = "sqlite")]
 use crate::eventos::BaixaEstornada;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioFinanceiro;
+#[cfg(feature = "sqlite")]
 use crate::titulo::EstadoParcela;
 
 /// Estorna uma baixa já aplicada.
@@ -34,6 +47,7 @@ pub struct BaixaFoiEstornada {
     pub lancamento_estorno: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for EstornarBaixa {
     type Saida = BaixaFoiEstornada;
     const PERMISSAO: &'static str = "financeiro.receber.estornar";
@@ -55,6 +69,7 @@ impl Comando for EstornarBaixa {
 /// # Errors
 /// Igual a [`EstornarBaixa`]: erro de domínio (baixa/parcela não encontrada, baixa já
 /// estornada, parcela encerrada por renegociação/cancelamento) ou de infraestrutura.
+#[cfg(feature = "sqlite")]
 pub fn estornar_baixa_comum(
     baixa: Id,
     motivo: &str,

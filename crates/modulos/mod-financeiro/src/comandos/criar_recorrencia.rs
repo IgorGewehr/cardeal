@@ -4,13 +4,22 @@
 //! chamado por uma tarefa agendada (ainda não existe um agendador no motor — ver o próprio
 //! `src/lib.rs`).
 
-use cardeal_kernel::{Data, Dinheiro, Erro, Id, Resultado, Versao};
+use cardeal_kernel::{Data, Dinheiro, Id};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado, Versao};
 use cardeal_ledger::Contraparte;
-use cardeal_modkit::{Comando, Ctx, Risco};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
-use crate::recorrencia::{Periodicidade, Recorrencia, TipoValor};
+#[cfg(feature = "sqlite")]
+use crate::recorrencia::Recorrencia;
+use crate::recorrencia::{Periodicidade, TipoValor};
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioFinanceiro;
 use crate::titulo::EspecieTitulo;
 
@@ -60,6 +69,7 @@ pub struct RecorrenciaCriada {
     pub recorrencia: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for CriarRecorrencia {
     type Saida = RecorrenciaCriada;
     const PERMISSAO: &'static str = "financeiro.recorrencia.criar";

@@ -3,13 +3,23 @@
 //! `docs/modulos/clientes.md` §3 — não estava no §5 original, mesmo motivo de
 //! `AdicionarContato`.
 
-use cardeal_kernel::{Erro, Id, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::Id;
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
-use crate::cadastro::{Endereco, TipoEndereco};
+#[cfg(feature = "sqlite")]
+use crate::cadastro::Endereco;
+use crate::cadastro::TipoEndereco;
+#[cfg(feature = "sqlite")]
 use crate::erros::ErroClientes;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioClientes;
 
 /// Adiciona um endereço a uma pessoa.
@@ -44,6 +54,7 @@ pub struct EnderecoFoiAdicionado {
     pub endereco: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for AdicionarEndereco {
     type Saida = EnderecoFoiAdicionado;
     const PERMISSAO: &'static str = "clientes.pessoa.editar";

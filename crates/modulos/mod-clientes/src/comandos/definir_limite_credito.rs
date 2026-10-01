@@ -3,12 +3,20 @@
 //! `docs/modulos/clientes.md` §5. Cria o [`LimiteCredito`] na primeira vez; ajusta o valor
 //! nas seguintes — nunca mexe na `situacao` (bloqueio/liberação são comandos à parte).
 
-use cardeal_kernel::{Dinheiro, Erro, Id, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::{Dinheiro, Id};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::credito::LimiteCredito;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioClientes;
 
 /// Define ou ajusta o limite de crédito de um cliente.
@@ -29,6 +37,7 @@ pub struct LimiteCreditoDefinido {
     pub limite: Dinheiro,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for DefinirLimiteCredito {
     type Saida = LimiteCreditoDefinido;
     const PERMISSAO: &'static str = "clientes.credito.definir_limite";

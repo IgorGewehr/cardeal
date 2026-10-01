@@ -14,15 +14,28 @@
 //! baixada do estoque físico em `AplicarPeca`, no momento da aplicação — o faturamento (e
 //! portanto o desfaturamento) nunca tocou nisso.
 
-use cardeal_kernel::{Erro, Id, Resultado};
-use cardeal_ledger::{Razao, RepositorioRazao};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::Id;
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_ledger::Razao;
+#[cfg(feature = "sqlite")]
+use cardeal_ledger::RepositorioRazao;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
+#[cfg(feature = "sqlite")]
 use mod_financeiro::{estornar_baixa_comum, titulo_da_origem, RepositorioFinanceiro};
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::comandos::carregar_ordem;
+#[cfg(feature = "sqlite")]
 use crate::eventos::OrdemDesfaturada;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioOs;
 
 /// Desfatura a ordem de serviço.
@@ -41,6 +54,7 @@ pub struct OrdemServicoDesfaturada {
     pub baixas_estornadas: usize,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for DesfaturarOrdemServico {
     type Saida = OrdemServicoDesfaturada;
     const PERMISSAO: &'static str = "os.desfaturar";

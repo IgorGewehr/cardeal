@@ -31,9 +31,12 @@ mod erros;
 pub mod eventos;
 mod item;
 mod manifesto;
+#[cfg(feature = "sqlite")]
 pub mod migracoes;
+#[cfg(feature = "sqlite")]
 mod modulo;
 mod orcamento;
+#[cfg(feature = "sqlite")]
 mod repositorio;
 
 pub use comandos::{
@@ -48,6 +51,8 @@ pub use consultas::{
 pub use erros::ErroOrcamentos;
 pub use item::ItemOrcamento;
 pub use manifesto::{manifesto, MANIFESTO};
+#[cfg(feature = "sqlite")]
 pub use modulo::ModuloOrcamentos;
 pub use orcamento::{EstadoOrcamento, Orcamento};
+#[cfg(feature = "sqlite")]
 pub use repositorio::RepositorioOrcamentos;

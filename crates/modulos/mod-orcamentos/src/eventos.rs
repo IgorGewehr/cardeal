@@ -2,6 +2,7 @@
 //! assinantes casam pelo nome, nunca pelo tipo Rust.
 
 use cardeal_kernel::{Dinheiro, Id};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::EventoDominio;
 use serde::Serialize;
 
@@ -16,6 +17,7 @@ pub struct OrcamentoAprovado {
     pub total: Dinheiro,
 }
 
+#[cfg(feature = "sqlite")]
 impl EventoDominio for OrcamentoAprovado {
     const TIPO: &'static str = "orcamentos.orcamento_aprovado.v1";
 
@@ -33,6 +35,7 @@ pub struct OrcamentoConvertidoEmOs {
     pub ordem_servico: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl EventoDominio for OrcamentoConvertidoEmOs {
     const TIPO: &'static str = "orcamentos.orcamento_convertido.v1";
 

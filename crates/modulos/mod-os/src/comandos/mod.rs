@@ -47,15 +47,21 @@ pub use registrar_mao_de_obra::RegistrarMaoDeObra;
 pub use remover_item_orcamento::{RemoverItemOrcamento, TipoItemOrcamento};
 pub use reprovar_orcamento_os::ReprovarOrcamentoOs;
 
+#[cfg(feature = "sqlite")]
 use cardeal_kernel::{Erro, Id, Resultado};
+#[cfg(feature = "sqlite")]
 use cardeal_modkit::Ctx;
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 
+#[cfg(feature = "sqlite")]
 use crate::ordem::OrdemServico;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioOs;
 
 /// Carrega uma ordem de serviço ou devolve `NAO_ENCONTRADO`. Usado por todo comando que
 /// opera sobre uma OS já existente.
+#[cfg(feature = "sqlite")]
 pub(crate) fn carregar_ordem(uow: &mut UnidadeDeTrabalho, id: Id) -> Resultado<OrdemServico> {
     RepositorioOs::novo(uow)
         .buscar_ordem(id)?
@@ -63,6 +69,7 @@ pub(crate) fn carregar_ordem(uow: &mut UnidadeDeTrabalho, id: Id) -> Resultado<O
 }
 
 /// A [`crate::receituario::Autoria`] extraída de um [`Ctx`] de comando.
+#[cfg(feature = "sqlite")]
 pub(crate) fn autoria_de(ctx: &Ctx) -> crate::receituario::Autoria {
     crate::receituario::Autoria {
         usuario: ctx.usuario,

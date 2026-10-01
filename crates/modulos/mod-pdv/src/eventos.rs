@@ -2,6 +2,7 @@
 //! Nomes versionados — assinantes casam pelo nome, nunca pelo tipo Rust.
 
 use cardeal_kernel::{Dinheiro, Id};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::EventoDominio;
 use serde::Serialize;
 
@@ -16,6 +17,7 @@ pub struct VendaFinalizada {
     pub total: Dinheiro,
 }
 
+#[cfg(feature = "sqlite")]
 impl EventoDominio for VendaFinalizada {
     const TIPO: &'static str = "pdv.venda_finalizada.v1";
 
@@ -35,6 +37,7 @@ pub struct CupomCancelado {
     pub autorizado_por: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl EventoDominio for CupomCancelado {
     const TIPO: &'static str = "pdv.cupom_cancelado.v1";
 
@@ -54,6 +57,7 @@ pub struct ItemCancelado {
     pub motivo: String,
 }
 
+#[cfg(feature = "sqlite")]
 impl EventoDominio for ItemCancelado {
     const TIPO: &'static str = "pdv.item_cancelado.v1";
 

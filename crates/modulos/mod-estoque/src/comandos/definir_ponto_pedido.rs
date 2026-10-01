@@ -3,11 +3,18 @@
 //! (`docs/modulos/estoque.md` §5). Não toca nome/NCM/detalhes técnicos, que têm seus
 //! próprios comandos.
 
-use cardeal_kernel::{Erro, Id, Quantidade, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+use cardeal_kernel::{Id, Quantidade};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioEstoque;
 
 /// Define o ponto de pedido e o estoque mínimo de um produto.
@@ -22,6 +29,7 @@ pub struct DefinirPontoPedido {
     pub estoque_minimo: Option<Quantidade>,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for DefinirPontoPedido {
     type Saida = ();
     const PERMISSAO: &'static str = "estoque.produto.editar";

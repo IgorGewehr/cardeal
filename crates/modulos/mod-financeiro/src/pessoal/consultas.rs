@@ -1,13 +1,24 @@
 //! Leitura dos lançamentos pessoais — sempre só os do usuário da sessão.
 
-use cardeal_kernel::{Data, Dinheiro, Id, Periodo, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::Data;
+use cardeal_kernel::Periodo;
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Dinheiro, Id, Resultado};
+#[cfg(feature = "sqlite")]
 use cardeal_modkit::{Consulta, Ctx};
+#[cfg(feature = "sqlite")]
 use rusqlite::{params, Connection, Row};
 use serde::{Deserialize, Serialize};
 
-use super::{LancamentoPessoal, TipoPessoal};
+#[cfg(feature = "sqlite")]
+use super::LancamentoPessoal;
+#[cfg(feature = "sqlite")]
+use super::TipoPessoal;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::{blob, data_de, id_de, persist};
 
+#[cfg(feature = "sqlite")]
 pub(super) const fn tipo_txt(t: TipoPessoal) -> &'static str {
     match t {
         TipoPessoal::Receita => "Receita",
@@ -15,6 +26,7 @@ pub(super) const fn tipo_txt(t: TipoPessoal) -> &'static str {
     }
 }
 
+#[cfg(feature = "sqlite")]
 fn de_linha(r: &Row<'_>) -> rusqlite::Result<LancamentoPessoal> {
     Ok(LancamentoPessoal {
         id: id_de(r.get(0)?),
@@ -39,6 +51,7 @@ fn de_linha(r: &Row<'_>) -> rusqlite::Result<LancamentoPessoal> {
 ///
 /// # Errors
 /// Falha do SQLite.
+#[cfg(feature = "sqlite")]
 pub fn lancamentos_do_usuario(
     conexao: &Connection,
     empresa: Id,
@@ -77,6 +90,7 @@ pub struct LancamentosPessoais {
     pub periodo: Periodo,
 }
 
+#[cfg(feature = "sqlite")]
 impl Consulta for LancamentosPessoais {
     type Saida = Vec<LancamentoPessoal>;
     const PERMISSAO: &'static str = "financeiro.pessoal";
@@ -99,6 +113,7 @@ pub struct Sugestoes {
     pub cartoes: Vec<String>,
 }
 
+#[cfg(feature = "sqlite")]
 impl Consulta for SugestoesPessoais {
     type Saida = Sugestoes;
     const PERMISSAO: &'static str = "financeiro.pessoal";
@@ -126,6 +141,7 @@ impl Consulta for SugestoesPessoais {
 }
 
 /// A data (em dias) para o SQL.
+#[cfg(feature = "sqlite")]
 pub(super) fn dias(d: Data) -> i64 {
     i64::from(d.em_dias())
 }

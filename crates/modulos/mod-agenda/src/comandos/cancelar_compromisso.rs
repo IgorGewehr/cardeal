@@ -1,12 +1,21 @@
 //! Cancela um compromisso — nunca apaga (`docs/modulos/agenda.md` §11.3).
 
-use cardeal_kernel::{Erro, Id, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::Id;
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::comandos::carregar_compromisso;
+#[cfg(feature = "sqlite")]
 use crate::eventos::CompromissoCancelado;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioAgenda;
 
 /// Cancela um compromisso ativo (`Agendado`, `Confirmado` ou `EmAndamento`).
@@ -16,6 +25,7 @@ pub struct CancelarCompromisso {
     pub compromisso: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for CancelarCompromisso {
     type Saida = ();
     const PERMISSAO: &'static str = "agenda.compromisso.cancelar";

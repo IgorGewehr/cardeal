@@ -11,15 +11,26 @@
 //! permissão `vendas.pedido.descontar` do manifesto fica sem uso até valer a pena separar
 //! `AdicionarItemPedido` em dois comandos.
 
-use cardeal_kernel::{Erro, Id, Percentual, Preco, Quantidade, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+use cardeal_kernel::{Id, Percentual, Preco, Quantidade};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
+#[cfg(feature = "sqlite")]
 use mod_estoque::RepositorioEstoque;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::comandos::{carregar_pedido, limite_desconto};
+#[cfg(feature = "sqlite")]
 use crate::pedido::ItemVenda;
+#[cfg(feature = "sqlite")]
 use crate::preco::preco_vigente;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioVendas;
 
 /// Acrescenta um item ao pedido (só em `Rascunho`).
@@ -48,6 +59,7 @@ pub struct ItemFoiAdicionado {
     pub total_pedido: cardeal_kernel::Dinheiro,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for AdicionarItemPedido {
     type Saida = ItemFoiAdicionado;
     const PERMISSAO: &'static str = "vendas.pedido.editar";

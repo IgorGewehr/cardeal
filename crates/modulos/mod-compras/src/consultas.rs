@@ -4,28 +4,41 @@
 //! Auto-contida (helpers locais de `blob`/`id_de`/`persist`) para não depender da
 //! visibilidade dos helpers de `repositorio.rs`.
 
-use cardeal_kernel::{CodigoErro, Data, Dinheiro, Erro, Id, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{CodigoErro, Erro, Resultado};
+use cardeal_kernel::{Data, Dinheiro, Id};
+#[cfg(feature = "sqlite")]
 use cardeal_modkit::{Consulta, Ctx};
+#[cfg(feature = "sqlite")]
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use cardeal_kernel::{Preco, Quantidade};
 
-use crate::nota::{EstadoCasamento, EstadoNotaEntrada, ItemNotaEntrada};
+#[cfg(feature = "sqlite")]
+use crate::nota::EstadoCasamento;
+use crate::nota::EstadoNotaEntrada;
+#[cfg(feature = "sqlite")]
+use crate::nota::ItemNotaEntrada;
 
+#[cfg(feature = "sqlite")]
 fn blob(id: Id) -> Vec<u8> {
     id.em_bytes().to_vec()
 }
 
+#[cfg(feature = "sqlite")]
 fn id_de(bytes: Vec<u8>) -> Id {
     Id::de_bytes(bytes.try_into().unwrap_or([0u8; 16]))
 }
 
 #[allow(clippy::needless_pass_by_value)] // usado como `map_err(persist)`
+#[cfg(feature = "sqlite")]
 fn persist(e: rusqlite::Error) -> Erro {
     Erro::novo(CodigoErro::FALHA_INTERNA, format!("compras/SQL: {e}"))
 }
 
+#[cfg(feature = "sqlite")]
 fn estado_de(s: &str) -> EstadoNotaEntrada {
     match s {
         "Conferida" => EstadoNotaEntrada::Conferida,
@@ -35,6 +48,7 @@ fn estado_de(s: &str) -> EstadoNotaEntrada {
     }
 }
 
+#[cfg(feature = "sqlite")]
 fn casamento_de(s: &str) -> EstadoCasamento {
     match s {
         "Casado" => EstadoCasamento::Casado,
@@ -69,6 +83,7 @@ pub struct ItemNota {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NotasRecentes;
 
+#[cfg(feature = "sqlite")]
 impl Consulta for NotasRecentes {
     type Saida = Vec<ItemNota>;
     const PERMISSAO: &'static str = "compras.entrada.ver";
@@ -111,6 +126,7 @@ pub struct ItensDaNota {
     pub nota: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Consulta for ItensDaNota {
     type Saida = Vec<ItemNotaEntrada>;
     const PERMISSAO: &'static str = "compras.entrada.ver";

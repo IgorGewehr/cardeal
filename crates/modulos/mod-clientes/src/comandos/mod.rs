@@ -16,12 +16,14 @@ mod definir_limite_credito;
 mod desativar_pessoa;
 mod editar_pessoa;
 
-pub use adicionar_contato::{adicionar_contato_comum, AdicionarContato, ContatoFoiAdicionado};
+#[cfg(feature = "sqlite")]
+pub use adicionar_contato::adicionar_contato_comum;
+pub use adicionar_contato::{AdicionarContato, ContatoFoiAdicionado};
 pub use adicionar_endereco::{AdicionarEndereco, EnderecoFoiAdicionado};
 pub use adicionar_papel::{AdicionarPapel, PapelFoiAdicionado};
-pub use criar_pessoa::{
-    criar_pessoa_comum, ContatoInicial, CriarPessoa, EnderecoInicial, PessoaCadastrada,
-};
+#[cfg(feature = "sqlite")]
+pub use criar_pessoa::criar_pessoa_comum;
+pub use criar_pessoa::{ContatoInicial, CriarPessoa, EnderecoInicial, PessoaCadastrada};
 pub use definir_limite_credito::{DefinirLimiteCredito, LimiteCreditoDefinido};
 pub use desativar_pessoa::{DesativarPessoa, PessoaDesativada, PessoaReativada, ReativarPessoa};
 pub use editar_pessoa::{EditarPessoa, PessoaEditada};

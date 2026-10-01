@@ -18,16 +18,23 @@ pub use criar_regra_preco::{CriarRegraPreco, RegraPrecoCriada};
 pub use criar_tabela_preco::{CriarTabelaPreco, TabelaPrecoCriada};
 pub use faturar_pedido::{FaturarPedido, PedidoFoiFaturado};
 
+#[cfg(feature = "sqlite")]
 use cardeal_auth::ValorLimite;
+#[cfg(feature = "sqlite")]
 use cardeal_kernel::{Erro, Id, Percentual, Resultado};
+#[cfg(feature = "sqlite")]
 use cardeal_modkit::Ctx;
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 
+#[cfg(feature = "sqlite")]
 use crate::pedido::Pedido;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioVendas;
 
 /// Carrega um pedido ou devolve `NAO_ENCONTRADO`. Usado por todo comando que opera sobre um
 /// pedido já existente.
+#[cfg(feature = "sqlite")]
 pub(crate) fn carregar_pedido(uow: &mut UnidadeDeTrabalho, id: Id) -> Resultado<Pedido> {
     RepositorioVendas::novo(uow)
         .buscar_pedido(id)?
@@ -35,6 +42,7 @@ pub(crate) fn carregar_pedido(uow: &mut UnidadeDeTrabalho, id: Id) -> Resultado<
 }
 
 /// A [`crate::receituario::Autoria`] extraída de um [`Ctx`] de comando.
+#[cfg(feature = "sqlite")]
 pub(crate) fn autoria_de(ctx: &Ctx) -> crate::receituario::Autoria {
     crate::receituario::Autoria {
         usuario: ctx.usuario,
@@ -45,6 +53,7 @@ pub(crate) fn autoria_de(ctx: &Ctx) -> crate::receituario::Autoria {
 
 /// O teto de desconto do papel do usuário (`vendas.desconto_maximo`, §11.4). Sem limite
 /// configurado para o papel, o teto é zero — desconto exige um limite explícito.
+#[cfg(feature = "sqlite")]
 pub(crate) fn limite_desconto(ctx: &Ctx) -> Percentual {
     match ctx.limite("vendas.desconto_maximo") {
         Some(ValorLimite::Percentual(p)) => p,

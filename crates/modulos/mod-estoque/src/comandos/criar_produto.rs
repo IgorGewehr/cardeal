@@ -1,11 +1,20 @@
 //! Cadastra um produto (fatia mínima: sem grade/lote/validade ainda — ver `src/lib.rs`).
 
-use cardeal_kernel::{Erro, Id, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::Id;
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
-use crate::produto::{DetalhesTecnicos, Produto};
+use crate::produto::DetalhesTecnicos;
+#[cfg(feature = "sqlite")]
+use crate::produto::Produto;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioEstoque;
 
 /// Cadastra um produto.
@@ -35,6 +44,7 @@ pub struct ProdutoCriado {
     pub produto: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for CriarProduto {
     type Saida = ProdutoCriado;
     const PERMISSAO: &'static str = "estoque.produto.criar";

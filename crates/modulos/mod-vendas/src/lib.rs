@@ -42,11 +42,14 @@ mod devolucao;
 mod erros;
 pub mod eventos;
 mod manifesto;
+#[cfg(feature = "sqlite")]
 pub mod migracoes;
+#[cfg(feature = "sqlite")]
 mod modulo;
 mod pedido;
 mod preco;
 pub mod receituario;
+#[cfg(feature = "sqlite")]
 mod repositorio;
 
 pub use comandos::{
@@ -59,7 +62,9 @@ pub use consultas::{ItemPedido, ItensDoPedido, PedidosRecentes, RegrasDaTabela, 
 pub use devolucao::{Devolucao, EstadoDevolucao, ItemDevolvido, TipoDevolucao};
 pub use erros::ErroVendas;
 pub use manifesto::{manifesto, MANIFESTO};
+#[cfg(feature = "sqlite")]
 pub use modulo::ModuloVendas;
 pub use pedido::{EstadoOrcamento, EstadoPedido, ItemVenda, Orcamento, Pedido};
 pub use preco::{preco_vigente, AlvoRegra, RegraPreco, TabelaPreco, TipoTabela};
+#[cfg(feature = "sqlite")]
 pub use repositorio::RepositorioVendas;

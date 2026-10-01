@@ -9,7 +9,10 @@ authors.workspace      = true
 repository.workspace   = true
 
 [features]
-default = []
+default = ["sqlite"]
+# Persistência em SQLite (despacho, repositório, migrações). Desligada, sobra o domínio
+# e os tipos de comando/consulta — o que o cliente egui/WASM compila (ADR-0016).
+sqlite = ["dep:cardeal-storage", "dep:rusqlite", "cardeal-ledger/sqlite", "cardeal-modkit/sqlite", "cardeal-auth/sqlite", "mod-financeiro/sqlite", "mod-estoque/sqlite"]
 # Telas do módulo (compiladas apenas no desktop).
 ui = ["dep:cardeal-ui", "dep:egui"]
 # Submódulos — ver docs/04-pilar-modularidade.md §2.1
@@ -24,18 +27,18 @@ completo = ["orcamento", "pedido", "tabela_preco", "comissao", "entrega", "devol
 
 [dependencies]
 cardeal-kernel.workspace  = true
-cardeal-ledger.workspace  = true
-cardeal-storage.workspace = true
-cardeal-modkit.workspace  = true
-cardeal-auth.workspace    = true
-mod-financeiro.workspace  = true
-mod-estoque.workspace     = true
+cardeal-ledger = { path = "../../cardeal-ledger", default-features = false }
+cardeal-storage = { workspace = true, optional = true }
+cardeal-modkit = { path = "../../cardeal-modkit", default-features = false }
+cardeal-auth = { path = "../../cardeal-auth", default-features = false }
+mod-financeiro = { path = "../mod-financeiro", default-features = false }
+mod-estoque = { path = "../mod-estoque", default-features = false }
 cardeal-ui = { workspace = true, optional = true }
 egui       = { workspace = true, optional = true }
 serde.workspace     = true
 thiserror.workspace = true
 smallvec.workspace  = true
-rusqlite.workspace  = true
+rusqlite = { workspace = true, optional = true }
 tracing.workspace   = true
 
 [dev-dependencies]

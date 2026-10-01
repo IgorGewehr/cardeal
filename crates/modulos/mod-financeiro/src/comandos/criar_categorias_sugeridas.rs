@@ -2,12 +2,19 @@
 //! variáveis (peças, impostos) e receitas (serviços, vendas) — criadas de uma vez, sem
 //! repetir as que já existem (compara o nome sem caixa nem espaços nas pontas).
 
+#[cfg(feature = "sqlite")]
 use cardeal_kernel::{Erro, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::categoria::CategoriaFinanceira;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioFinanceiro;
 use crate::titulo::EspecieTitulo;
 
@@ -37,6 +44,7 @@ pub const CATEGORIAS_SUGERIDAS: &[(&str, EspecieTitulo)] = &[
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CriarCategoriasSugeridas;
 
+#[cfg(feature = "sqlite")]
 impl Comando for CriarCategoriasSugeridas {
     /// Quantas foram criadas.
     type Saida = u32;

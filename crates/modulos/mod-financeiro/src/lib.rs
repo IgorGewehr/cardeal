@@ -74,12 +74,15 @@ mod erros;
 pub mod eventos;
 mod manifesto;
 mod meio_pagamento;
+#[cfg(feature = "sqlite")]
 pub mod migracoes;
+#[cfg(feature = "sqlite")]
 mod modulo;
 pub mod pessoal;
 mod projecao;
 pub mod receituario;
 mod recorrencia;
+#[cfg(feature = "sqlite")]
 mod repositorio;
 mod titulo;
 
@@ -89,39 +92,50 @@ pub use caixa::{
     TipoMovimento, TOLERANCIA_QUEBRA,
 };
 pub use categoria::CategoriaFinanceira;
+#[cfg(feature = "sqlite")]
+pub use comandos::lancar_conta_a_pagar_avulsa;
+#[cfg(feature = "sqlite")]
+pub use comandos::lancar_titulo_comum;
 pub use comandos::QuitadoAgora;
+#[cfg(feature = "sqlite")]
 pub use comandos::{
-    baixar_pagamento_comum, baixar_recebimento_comum, estornar_baixa_comum, lancar_titulo_comum,
-    materializar_recorrencias_pendentes, AbrirCaixa, BaixaFoiEstornada, BaixarPagamento,
-    BaixarRecebimento, CadastrarCaixa, CaixaCadastrado, CaixaFoiAberto, CaixaFoiFechado,
-    CategoriaCriada, ContaBancariaCriada, CriarCategoria, CriarContaBancaria, CriarRecorrencia,
-    DadosLancamentoTitulo, EstornarBaixa, FecharCaixa, LancarTituloAPagar, LancarTituloAReceber,
-    MaterializarRecorrencias, PagamentoBaixado, RecebimentoBaixado, RecorrenciaCriada,
-    RegistrarSangria, RegistrarSuprimento, RenegociarTitulo, SangriaFoiRegistrada,
-    SuprimentoFoiRegistrado, TituloAPagarLancado, TituloAReceberLancado, TituloFoiRenegociado,
-    TituloGravado,
+    baixar_pagamento_comum, baixar_recebimento_comum, estornar_baixa_comum,
+    materializar_recorrencias_pendentes,
 };
-pub use comandos::{lancar_conta_a_pagar_avulsa, DadosContaAvulsa, PagamentoAvulso};
+pub use comandos::{
+    AbrirCaixa, BaixaFoiEstornada, BaixarPagamento, BaixarRecebimento, CadastrarCaixa,
+    CaixaCadastrado, CaixaFoiAberto, CaixaFoiFechado, CategoriaCriada, ContaBancariaCriada,
+    CriarCategoria, CriarContaBancaria, CriarRecorrencia, DadosLancamentoTitulo, EstornarBaixa,
+    FecharCaixa, LancarTituloAPagar, LancarTituloAReceber, MaterializarRecorrencias,
+    PagamentoBaixado, RecebimentoBaixado, RecorrenciaCriada, RegistrarSangria, RegistrarSuprimento,
+    RenegociarTitulo, SangriaFoiRegistrada, SuprimentoFoiRegistrado, TituloAPagarLancado,
+    TituloAReceberLancado, TituloFoiRenegociado, TituloGravado,
+};
 pub use comandos::{
     BaixarPagamentosEmLote, BaixarRecebimentosEmLote, BaixasEmLoteFeitas, DadosBaixaEmLote,
 };
 pub use comandos::{CriarCategoriasSugeridas, CATEGORIAS_SUGERIDAS};
+pub use comandos::{DadosContaAvulsa, PagamentoAvulso};
+#[cfg(feature = "sqlite")]
+pub use consultas::titulo_da_origem;
 pub use consultas::{
-    titulo_da_origem, BaixasDaParcela, Caixas, Categorias, ContasDeCaixa, ContasDeResultado,
-    ContasDisponiveis, ExtratoDisponivel, ItemBaixa, ItemCaixa, ItemContaDisponivel,
-    ItemContaResultado, ItemMovimentoDisponivel, ItemTituloEmAberto, ItemTotalPorCategoria,
-    ParcelasAPagarNoPeriodo, ParcelasAReceberNoPeriodo, Recorrencias, TituloDaOrigem,
-    TitulosAPagarEmAberto, TitulosAReceberEmAberto, TotalPagoNoPeriodo, TotalPorCategoriaNoPeriodo,
+    BaixasDaParcela, Caixas, Categorias, ContasDeCaixa, ContasDeResultado, ContasDisponiveis,
+    ExtratoDisponivel, ItemBaixa, ItemCaixa, ItemContaDisponivel, ItemContaResultado,
+    ItemMovimentoDisponivel, ItemTituloEmAberto, ItemTotalPorCategoria, ParcelasAPagarNoPeriodo,
+    ParcelasAReceberNoPeriodo, Recorrencias, TituloDaOrigem, TitulosAPagarEmAberto,
+    TitulosAReceberEmAberto, TotalPagoNoPeriodo, TotalPorCategoriaNoPeriodo,
     TotalRecebidoNoPeriodo,
 };
 pub use consultas::{SituacaoDaParcela, SituacaoNaData};
 pub use erros::ErroFinanceiro;
 pub use manifesto::{manifesto, MANIFESTO};
 pub use meio_pagamento::MeioPagamento;
+#[cfg(feature = "sqlite")]
 pub use modulo::ModuloFinanceiro;
 pub use projecao::{ItemProjecaoCategoria, ProjecaoPorCategoria};
 pub use receituario::Autoria;
 pub use recorrencia::{Periodicidade, Recorrencia, TipoValor};
+#[cfg(feature = "sqlite")]
 pub use repositorio::{BaixaGravada, RepositorioFinanceiro};
 pub use titulo::{
     ConstrutorTitulo, EspecieTitulo, EstadoParcela, FormaCobranca, Parcela, PoliticaJuros, Titulo,

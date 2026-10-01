@@ -1,10 +1,17 @@
 //! Cadastra um local de estoque (loja, depósito, filial…).
 
-use cardeal_kernel::{CodigoErro, Erro, Id, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::Id;
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{CodigoErro, Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioEstoque;
 
 /// O tipo de um local de estoque.
@@ -21,6 +28,7 @@ pub enum TipoLocal {
 }
 
 impl TipoLocal {
+    #[cfg(feature = "sqlite")]
     const fn texto(self) -> &'static str {
         match self {
             Self::Loja => "Loja",
@@ -47,6 +55,7 @@ pub struct LocalCriado {
     pub local: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for CriarLocal {
     type Saida = LocalCriado;
     const PERMISSAO: &'static str = "estoque.local.criar";

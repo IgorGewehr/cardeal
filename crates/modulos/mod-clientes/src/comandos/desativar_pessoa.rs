@@ -5,12 +5,20 @@
 //! títulos (`docs/modulos/clientes.md` §4, §11.6 — mesmo raciocínio da anonimização LGPD,
 //! só que reversível).
 
-use cardeal_kernel::{Erro, Id, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::Id;
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::erros::ErroClientes;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioClientes;
 
 /// Desativa uma pessoa.
@@ -27,6 +35,7 @@ pub struct PessoaDesativada {
     pub pessoa: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for DesativarPessoa {
     type Saida = PessoaDesativada;
     const PERMISSAO: &'static str = "clientes.pessoa.editar";
@@ -59,6 +68,7 @@ pub struct PessoaReativada {
     pub pessoa: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for ReativarPessoa {
     type Saida = PessoaReativada;
     const PERMISSAO: &'static str = "clientes.pessoa.editar";

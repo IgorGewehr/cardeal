@@ -9,11 +9,17 @@ authors.workspace      = true
 repository.workspace   = true
 
 
+[features]
+# Persistência em SQLite. Desligada, sobra o domínio puro — o que o cliente egui/WASM
+# (ADR-0016) compila para conhecer os tipos sem levar o SQLite para o navegador.
+default = ["sqlite"]
+sqlite  = ["dep:cardeal-storage", "dep:rusqlite"]
+
 [dependencies]
 cardeal-kernel.workspace  = true
-cardeal-storage.workspace = true
+cardeal-storage = { workspace = true, optional = true }
 serde.workspace = true
-rusqlite.workspace = true
+rusqlite = { workspace = true, optional = true }
 thiserror.workspace = true
 smallvec.workspace = true
 tracing.workspace = true

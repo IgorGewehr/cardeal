@@ -7,14 +7,26 @@
 //! plano de contas), fora do escopo deste comando; até ela existir, a conta é escolhida entre
 //! as que já existem (ex.: `1.1.01` do plano padrão, ou uma sub-conta cadastrada à mão).
 
-use cardeal_kernel::{Erro, Id, Resultado, Versao};
-use cardeal_ledger::{PortaRazao, RepositorioRazao, TipoConta};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::Id;
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado, Versao};
+#[cfg(feature = "sqlite")]
+use cardeal_ledger::TipoConta;
+#[cfg(feature = "sqlite")]
+use cardeal_ledger::{PortaRazao, RepositorioRazao};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::caixa::Caixa;
+#[cfg(feature = "sqlite")]
 use crate::erros::ErroFinanceiro;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioFinanceiro;
 
 /// Cadastra um caixa físico.
@@ -37,6 +49,7 @@ pub struct CaixaCadastrado {
     pub caixa: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for CadastrarCaixa {
     type Saida = CaixaCadastrado;
     const PERMISSAO: &'static str = "financeiro.caixa.cadastrar";

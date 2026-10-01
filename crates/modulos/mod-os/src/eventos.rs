@@ -2,6 +2,7 @@
 //! Nomes versionados — assinantes casam pelo nome, nunca pelo tipo Rust.
 
 use cardeal_kernel::{Dinheiro, Id};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::EventoDominio;
 use serde::Serialize;
 
@@ -14,6 +15,7 @@ pub struct OrdemAberta {
     pub cliente: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl EventoDominio for OrdemAberta {
     const TIPO: &'static str = "os.ordem_aberta.v1";
 
@@ -31,6 +33,7 @@ pub struct OrcamentoAprovado {
     pub valor_total: Dinheiro,
 }
 
+#[cfg(feature = "sqlite")]
 impl EventoDominio for OrcamentoAprovado {
     const TIPO: &'static str = "os.orcamento_aprovado.v1";
 
@@ -54,6 +57,7 @@ pub struct OrdemFaturada {
     pub titulo: Option<Id>,
 }
 
+#[cfg(feature = "sqlite")]
 impl EventoDominio for OrdemFaturada {
     const TIPO: &'static str = "os.ordem_faturada.v1";
 
@@ -69,6 +73,7 @@ pub struct OrdemCancelada {
     pub ordem_servico: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl EventoDominio for OrdemCancelada {
     const TIPO: &'static str = "os.ordem_cancelada.v1";
 
@@ -87,6 +92,7 @@ pub struct OrdemDesfaturada {
     pub titulo: Option<Id>,
 }
 
+#[cfg(feature = "sqlite")]
 impl EventoDominio for OrdemDesfaturada {
     const TIPO: &'static str = "os.ordem_desfaturada.v1";
 
@@ -102,6 +108,7 @@ pub struct OrdemReaberta {
     pub ordem_servico: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl EventoDominio for OrdemReaberta {
     const TIPO: &'static str = "os.ordem_reaberta.v1";
 

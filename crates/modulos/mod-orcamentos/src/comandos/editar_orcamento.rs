@@ -1,12 +1,21 @@
 //! Regrava o cabeçalho de um orçamento — só enquanto `Rascunho`/`Enviado`.
 
-use cardeal_kernel::{Erro, Id, Percentual, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+use cardeal_kernel::{Id, Percentual};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::comandos::carregar_orcamento;
+#[cfg(feature = "sqlite")]
 use crate::orcamento::Cabecalho;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioOrcamentos;
 
 /// Edita o cabeçalho de um orçamento.
@@ -38,6 +47,7 @@ pub struct EditarOrcamento {
     pub desconto_percentual: Percentual,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for EditarOrcamento {
     type Saida = ();
     const PERMISSAO: &'static str = "orcamentos.orcamento.editar";

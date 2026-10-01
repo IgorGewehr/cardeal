@@ -1,11 +1,20 @@
 //! Substitui a lista inteira de itens de um orçamento — a tela manda o vetor final.
 
-use cardeal_kernel::{Erro, Id, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::Id;
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
-use crate::comandos::{carregar_orcamento, montar_itens, NovoItemOrcamento};
+use crate::comandos::NovoItemOrcamento;
+#[cfg(feature = "sqlite")]
+use crate::comandos::{carregar_orcamento, montar_itens};
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioOrcamentos;
 
 /// Define os itens de um orçamento (substitui os que houver).
@@ -17,6 +26,7 @@ pub struct DefinirItensOrcamento {
     pub itens: Vec<NovoItemOrcamento>,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for DefinirItensOrcamento {
     type Saida = ();
     const PERMISSAO: &'static str = "orcamentos.orcamento.editar";

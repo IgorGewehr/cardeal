@@ -3,13 +3,21 @@
 //! (principal + juros + multa − desconto, o mesmo cálculo da baixa individual), no mesmo meio
 //! e conta. **Tudo ou nada**: se uma falhar (já quitada, da espécie errada), nenhuma é baixada.
 
-use cardeal_kernel::{Data, Dinheiro, Erro, Id, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::{Data, Dinheiro, Id};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use super::{baixar_pagamento_comum, baixar_recebimento_comum};
 use crate::meio_pagamento::MeioPagamento;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioFinanceiro;
 
 /// Os dados comuns às duas espécies.
@@ -42,6 +50,7 @@ pub struct BaixarRecebimentosEmLote(pub DadosBaixaEmLote);
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BaixarPagamentosEmLote(pub DadosBaixaEmLote);
 
+#[cfg(feature = "sqlite")]
 impl Comando for BaixarRecebimentosEmLote {
     type Saida = BaixasEmLoteFeitas;
     const PERMISSAO: &'static str = "financeiro.receber.baixar";
@@ -65,6 +74,7 @@ impl Comando for BaixarRecebimentosEmLote {
     }
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for BaixarPagamentosEmLote {
     type Saida = BaixasEmLoteFeitas;
     const PERMISSAO: &'static str = "financeiro.pagar.baixar";
@@ -88,6 +98,7 @@ impl Comando for BaixarPagamentosEmLote {
     }
 }
 
+#[cfg(feature = "sqlite")]
 fn quitar_todas(
     d: &DadosBaixaEmLote,
     uow: &mut UnidadeDeTrabalho,

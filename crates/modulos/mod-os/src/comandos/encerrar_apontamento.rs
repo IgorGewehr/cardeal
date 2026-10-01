@@ -1,10 +1,17 @@
 //! Encerra um apontamento de tempo em aberto — "parou o cronômetro".
 
-use cardeal_kernel::{Erro, Id, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::Id;
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioOs;
 
 /// Encerra um apontamento de tempo.
@@ -14,6 +21,7 @@ pub struct EncerrarApontamento {
     pub apontamento: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for EncerrarApontamento {
     type Saida = i64;
     const PERMISSAO: &'static str = "os.apontamento.encerrar";

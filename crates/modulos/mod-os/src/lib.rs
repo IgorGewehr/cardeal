@@ -70,10 +70,13 @@ pub mod eventos;
 mod execucao;
 mod laudo;
 mod manifesto;
+#[cfg(feature = "sqlite")]
 pub mod migracoes;
+#[cfg(feature = "sqlite")]
 mod modulo;
 mod ordem;
 pub mod receituario;
+#[cfg(feature = "sqlite")]
 mod repositorio;
 
 pub use apontamento::ApontamentoDeTempo;
@@ -99,6 +102,8 @@ pub use erros::ErroOs;
 pub use execucao::{Encomenda, ItemMaoDeObra, ItemPeca};
 pub use laudo::LaudoTecnico;
 pub use manifesto::{manifesto, MANIFESTO};
+#[cfg(feature = "sqlite")]
 pub use modulo::ModuloOs;
 pub use ordem::{EstadoOs, FichaEntrada, OrdemServico};
+#[cfg(feature = "sqlite")]
 pub use repositorio::RepositorioOs;

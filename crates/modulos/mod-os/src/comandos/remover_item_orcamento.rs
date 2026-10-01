@@ -3,12 +3,20 @@
 //! `docs/modulos/os.md` §5 — não estava no spec original: sem isto, um item digitado errado
 //! só se corrige cancelando a OS inteira e recomeçando do zero.
 
-use cardeal_kernel::{Erro, Id, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::Id;
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::comandos::carregar_ordem;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioOs;
 
 /// O tipo do item a remover.
@@ -31,6 +39,7 @@ pub struct RemoverItemOrcamento {
     pub tipo: TipoItemOrcamento,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for RemoverItemOrcamento {
     type Saida = ();
     const PERMISSAO: &'static str = "os.orcamento.montar";

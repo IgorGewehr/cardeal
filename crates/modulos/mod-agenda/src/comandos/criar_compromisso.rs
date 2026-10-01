@@ -6,13 +6,23 @@
 //! rodar dentro do mesmo carregar/validar de sempre, sem atalho) informando `origem_modulo`/
 //! `origem_id`; `agenda` nunca interpreta esse contexto (§1).
 
-use cardeal_kernel::{Erro, Id, Instante, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+use cardeal_kernel::{Id, Instante};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
-use crate::compromisso::{Compromisso, TipoCompromisso};
+#[cfg(feature = "sqlite")]
+use crate::compromisso::Compromisso;
+use crate::compromisso::TipoCompromisso;
+#[cfg(feature = "sqlite")]
 use crate::erros::ErroAgenda;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioAgenda;
 
 /// Cria um compromisso reservando um ou mais recursos.
@@ -46,6 +56,7 @@ pub struct CompromissoAgendado {
     pub compromisso: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for CriarCompromisso {
     type Saida = CompromissoAgendado;
     const PERMISSAO: &'static str = "agenda.compromisso.criar";
@@ -113,6 +124,7 @@ impl Comando for CriarCompromisso {
     }
 }
 
+#[cfg(feature = "sqlite")]
 fn minutos_do_dia(instante: Instante, fuso: cardeal_kernel::Fuso) -> u16 {
     let hora = instante.hora(fuso);
     u16::try_from(hora.hora() * 60 + hora.minuto()).unwrap_or(0)

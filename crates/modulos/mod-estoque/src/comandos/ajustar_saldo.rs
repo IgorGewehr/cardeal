@@ -7,17 +7,32 @@
 //! `receituario::ajuste_manual`) já existia, mas nenhum comando o expunha — não havia jeito
 //! de corrigir um saldo errado sem editar o SQLite direto.
 
-use cardeal_kernel::{Arredondamento, Dinheiro, Erro, Id, Quantidade, Resultado};
-use cardeal_ledger::{Contas, PapelConta, Razao, RepositorioRazao};
-use cardeal_modkit::{Comando, Ctx, Risco};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Arredondamento, Dinheiro, Erro, Resultado};
+use cardeal_kernel::{Id, Quantidade};
+#[cfg(feature = "sqlite")]
+use cardeal_ledger::RepositorioRazao;
+#[cfg(feature = "sqlite")]
+use cardeal_ledger::{Contas, PapelConta, Razao};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::comandos::autoria_de;
+#[cfg(feature = "sqlite")]
 use crate::erros::ErroEstoque;
+#[cfg(feature = "sqlite")]
 use crate::inventario::AjusteInventario;
+#[cfg(feature = "sqlite")]
 use crate::receituario::{ajuste_manual, ContasEstoque};
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioEstoque;
+#[cfg(feature = "sqlite")]
 use crate::saldo::{Movimento, SaldoLocal, TipoMovimento};
 
 /// Corrige o saldo disponível de um produto num local para `nova_quantidade`, exigindo um
@@ -45,6 +60,7 @@ pub struct SaldoAjustado {
     pub lancamento: Option<Id>,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for AjustarSaldo {
     type Saida = SaldoAjustado;
     const PERMISSAO: &'static str = "estoque.movimento.ajustar";

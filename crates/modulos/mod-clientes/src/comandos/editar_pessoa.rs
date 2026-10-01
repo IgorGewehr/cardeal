@@ -3,12 +3,20 @@
 //! `docs/modulos/clientes.md` §5. Recusa sobre pessoa anonimizada (LGPD) — estado terminal,
 //! `docs/modulos/clientes.md` §11.6.
 
-use cardeal_kernel::{Data, Erro, Id, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::{Data, Id};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::erros::ErroClientes;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioClientes;
 
 /// Edita nome, nome fantasia e observação de uma pessoa.
@@ -33,6 +41,7 @@ pub struct PessoaEditada {
     pub pessoa: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for EditarPessoa {
     type Saida = PessoaEditada;
     const PERMISSAO: &'static str = "clientes.pessoa.editar";

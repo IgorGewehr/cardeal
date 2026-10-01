@@ -1,11 +1,16 @@
 //! Margem das OS: receita menos o custo das peças aplicadas — de um período (o cartão da
 //! Visão geral do Financeiro) e de uma OS só (o diálogo de baixa da parcela da OS).
 
-use cardeal_kernel::{Dinheiro, Id, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::Resultado;
+use cardeal_kernel::{Dinheiro, Id};
+#[cfg(feature = "sqlite")]
 use cardeal_modkit::{Consulta, Ctx};
+#[cfg(feature = "sqlite")]
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use super::{blob, id_de, itens_peca_da_ordem, persist};
 
 /// Receita, custo das peças e margem das OS faturadas num período — "quanto as OS deram de
@@ -37,6 +42,7 @@ impl MargemDasOrdens {
     }
 }
 
+#[cfg(feature = "sqlite")]
 impl Consulta for MargemDasOrdensNoPeriodo {
     type Saida = MargemDasOrdens;
     const PERMISSAO: &'static str = "os.ordem.ver";
@@ -119,6 +125,7 @@ impl MargemDaOrdemServico {
     }
 }
 
+#[cfg(feature = "sqlite")]
 impl Consulta for MargemDaOrdem {
     type Saida = Option<MargemDaOrdemServico>;
     const PERMISSAO: &'static str = "os.ordem.ver";

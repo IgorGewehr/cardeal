@@ -32,36 +32,61 @@ pub use abrir_caixa::{AbrirCaixa, CaixaFoiAberto};
 pub use baixar_em_lote::{
     BaixarPagamentosEmLote, BaixarRecebimentosEmLote, BaixasEmLoteFeitas, DadosBaixaEmLote,
 };
-pub use baixar_pagamento::{baixar_pagamento_comum, BaixarPagamento, PagamentoBaixado};
-pub use baixar_recebimento::{baixar_recebimento_comum, BaixarRecebimento, RecebimentoBaixado};
+#[cfg(feature = "sqlite")]
+pub use baixar_pagamento::baixar_pagamento_comum;
+pub use baixar_pagamento::{BaixarPagamento, PagamentoBaixado};
+#[cfg(feature = "sqlite")]
+pub use baixar_recebimento::baixar_recebimento_comum;
+pub use baixar_recebimento::{BaixarRecebimento, RecebimentoBaixado};
 pub use cadastrar_caixa::{CadastrarCaixa, CaixaCadastrado};
-pub use conta_a_pagar_avulsa::{lancar_conta_a_pagar_avulsa, DadosContaAvulsa, PagamentoAvulso};
+#[cfg(feature = "sqlite")]
+pub use conta_a_pagar_avulsa::lancar_conta_a_pagar_avulsa;
+pub use conta_a_pagar_avulsa::{DadosContaAvulsa, PagamentoAvulso};
 pub use criar_categoria::{CategoriaCriada, CriarCategoria};
 pub use criar_categorias_sugeridas::{CriarCategoriasSugeridas, CATEGORIAS_SUGERIDAS};
 pub use criar_conta_bancaria::{ContaBancariaCriada, CriarContaBancaria};
 pub use criar_recorrencia::{CriarRecorrencia, RecorrenciaCriada};
-pub use estornar_baixa::{estornar_baixa_comum, BaixaFoiEstornada, EstornarBaixa};
+#[cfg(feature = "sqlite")]
+pub use estornar_baixa::estornar_baixa_comum;
+pub use estornar_baixa::{BaixaFoiEstornada, EstornarBaixa};
 pub use fechar_caixa::{CaixaFoiFechado, FecharCaixa};
 pub use lancar_titulo_a_pagar::{LancarTituloAPagar, TituloAPagarLancado};
 pub use lancar_titulo_a_receber::{LancarTituloAReceber, TituloAReceberLancado};
-pub use materializar_recorrencia::{materializar_recorrencias_pendentes, MaterializarRecorrencias};
+#[cfg(feature = "sqlite")]
+pub use materializar_recorrencia::materializar_recorrencias_pendentes;
+pub use materializar_recorrencia::MaterializarRecorrencias;
 pub use quitado_agora::QuitadoAgora;
 pub use registrar_sangria::{RegistrarSangria, SangriaFoiRegistrada};
 pub use registrar_suprimento::{RegistrarSuprimento, SuprimentoFoiRegistrado};
 pub use renegociar_titulo::{RenegociarTitulo, TituloFoiRenegociado};
 
-use cardeal_kernel::{Data, Dinheiro, Erro, Id, Resultado};
-use cardeal_ledger::{Contas, Contraparte, PapelConta, Razao, RepositorioRazao};
+use cardeal_kernel::{Data, Dinheiro, Id};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_ledger::RepositorioRazao;
+#[cfg(feature = "sqlite")]
+use cardeal_ledger::{Contas, Razao};
+use cardeal_ledger::{Contraparte, PapelConta};
+#[cfg(feature = "sqlite")]
 use cardeal_modkit::Ctx;
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 
+#[cfg(feature = "sqlite")]
 use crate::caixa::{Caixa, ContasCaixa, SessaoCaixa};
+#[cfg(feature = "sqlite")]
 use crate::eventos::{ParcelaBaixada, TituloLancado};
+#[cfg(feature = "sqlite")]
 use crate::receituario::{baixar_parcela, lancar_titulo, Autoria, ContasBaixa, ContasTitulo};
+#[cfg(feature = "sqlite")]
 use crate::repositorio::{BaixaGravada, RepositorioFinanceiro};
-use crate::titulo::{ConstrutorTitulo, EspecieTitulo};
+#[cfg(feature = "sqlite")]
+use crate::titulo::ConstrutorTitulo;
+use crate::titulo::EspecieTitulo;
 
 /// Extrai a [`Autoria`] de um [`Ctx`] de comando.
+#[cfg(feature = "sqlite")]
 fn autoria_de(ctx: &Ctx) -> Autoria {
     Autoria {
         usuario: ctx.usuario,
@@ -71,6 +96,7 @@ fn autoria_de(ctx: &Ctx) -> Autoria {
     }
 }
 
+#[cfg(feature = "sqlite")]
 fn especie_texto(e: EspecieTitulo) -> &'static str {
     match e {
         EspecieTitulo::Receber => "Receber",
@@ -132,6 +158,7 @@ pub struct TituloGravado {
 /// # Errors
 /// Erro de domínio (`ValorInvalido`, `NumeroDeParcelasInvalido`, papel de conta não
 /// mapeado…) — desfaz o `SAVEPOINT` da tarefa do chamador junto com o resto do comando.
+#[cfg(feature = "sqlite")]
 pub fn lancar_titulo_comum(
     dados: DadosLancamentoTitulo,
     ctx: &Ctx,
@@ -216,6 +243,7 @@ pub fn lancar_titulo_comum(
 
 /// Os dados que os dois `Baixar*` passam ao corpo comum.
 #[derive(Clone, Copy)]
+#[cfg(feature = "sqlite")]
 struct DadosBaixa {
     parcela: Id,
     valor: Dinheiro,
@@ -232,6 +260,7 @@ struct DadosBaixa {
 }
 
 /// O que o corpo comum da baixa devolve.
+#[cfg(feature = "sqlite")]
 struct BaixaFeita {
     baixa: Id,
     lancamento: Id,
@@ -240,6 +269,7 @@ struct BaixaFeita {
 }
 
 /// Carregar/validar/lançar/persistir/publicar de uma baixa — igual para as duas espécies.
+#[cfg(feature = "sqlite")]
 fn baixar_parcela_comum(
     dados: DadosBaixa,
     ctx: &Ctx,
@@ -366,6 +396,7 @@ fn baixar_parcela_comum(
 /// por conta própria — aqui ficam [`Id::NULO`], nunca lidas fora dele (mesmo truque de
 /// sentinela usado em [`baixar_parcela_comum`] para encargos/desconto que a baixa não
 /// precisou).
+#[cfg(feature = "sqlite")]
 fn contas_caixa_rotina(
     uow: &mut UnidadeDeTrabalho,
     ctx: &Ctx,
@@ -384,6 +415,7 @@ fn contas_caixa_rotina(
 }
 
 /// Carrega a sessão pelo id e o caixa dono dela.
+#[cfg(feature = "sqlite")]
 fn carregar_sessao_e_caixa(
     uow: &mut UnidadeDeTrabalho,
     sessao: Id,

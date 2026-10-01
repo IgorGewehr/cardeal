@@ -5,14 +5,25 @@
 //!
 //! [`LancarTituloAReceber`]: super::LancarTituloAReceber
 
-use cardeal_kernel::{Data, Dinheiro, Id, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::Resultado;
+use cardeal_kernel::{Data, Dinheiro, Id};
+#[cfg(feature = "sqlite")]
 use cardeal_ledger::{Contraparte, PapelConta};
-use cardeal_modkit::{Comando, Ctx, Risco};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
-use crate::comandos::quitado_agora::{self, QuitadoAgora};
+#[cfg(feature = "sqlite")]
+use crate::comandos::quitado_agora;
+use crate::comandos::quitado_agora::QuitadoAgora;
+#[cfg(feature = "sqlite")]
 use crate::comandos::{lancar_titulo_comum, DadosLancamentoTitulo};
+#[cfg(feature = "sqlite")]
 use crate::titulo::EspecieTitulo;
 
 /// Lança um título a pagar com uma ou mais parcelas.
@@ -53,6 +64,7 @@ pub struct TituloAPagarLancado {
     pub lancamentos: Vec<Id>,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for LancarTituloAPagar {
     type Saida = TituloAPagarLancado;
     const PERMISSAO: &'static str = "financeiro.pagar.criar";

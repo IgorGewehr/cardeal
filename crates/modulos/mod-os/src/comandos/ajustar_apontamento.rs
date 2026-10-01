@@ -3,11 +3,18 @@
 //! correção pós-fato nunca é silenciosa (mesma disciplina de
 //! `mod_financeiro::EstornarBaixa`/`RenegociarTitulo`).
 
-use cardeal_kernel::{Erro, Id, Instante, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+use cardeal_kernel::{Id, Instante};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioOs;
 
 /// Ajusta manualmente um apontamento de tempo.
@@ -23,6 +30,7 @@ pub struct AjustarApontamento {
     pub motivo: String,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for AjustarApontamento {
     type Saida = i64;
     const PERMISSAO: &'static str = "os.apontamento.ajustar";

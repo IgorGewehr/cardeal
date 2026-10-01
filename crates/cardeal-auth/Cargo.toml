@@ -9,19 +9,25 @@ authors.workspace      = true
 repository.workspace   = true
 
 
+[features]
+# Persistência em SQLite. Desligada, sobra o domínio puro — o que o cliente egui/WASM
+# (ADR-0016) compila para conhecer os tipos sem levar o SQLite para o navegador.
+default = ["sqlite"]
+sqlite  = ["dep:cardeal-storage", "dep:rusqlite"]
+
 [dependencies]
 cardeal-kernel.workspace = true
-cardeal-storage.workspace = true
+cardeal-storage = { workspace = true, optional = true }
 serde.workspace = true
-rusqlite.workspace = true
+rusqlite = { workspace = true, optional = true }
 thiserror.workspace = true
 argon2.workspace = true
-subtle.workspace = true
-zeroize.workspace = true
 rand.workspace = true
-blake3.workspace = true
-rcgen.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+
+# No navegador, o sal do Argon2id e os tokens vêm do `crypto.getRandomValues`.
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }

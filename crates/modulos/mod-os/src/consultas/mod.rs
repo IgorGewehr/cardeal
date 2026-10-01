@@ -2,15 +2,21 @@
 //! `os_item_peca`/`os_item_mao_de_obra` — `docs/modulos/os.md` §10 (a tela de OS precisa da
 //! lista de ordens em aberto e do detalhe completo de uma ordem).
 
-use cardeal_kernel::{Id, Quantidade, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::Resultado;
+use cardeal_kernel::{Id, Quantidade};
+#[cfg(feature = "sqlite")]
 use cardeal_modkit::{Consulta, Ctx};
+#[cfg(feature = "sqlite")]
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::apontamento::ApontamentoDeTempo;
 use crate::execucao::{ItemMaoDeObra, ItemPeca};
 use crate::laudo::LaudoTecnico;
 use crate::ordem::OrdemServico;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::{
     apontamento_de_linha, blob, id_de, item_mao_de_obra_de_linha, item_peca_de_linha,
     ordem_de_linha, persist,
@@ -23,6 +29,7 @@ pub use margem::{MargemDaOrdem, MargemDaOrdemServico, MargemDasOrdens, MargemDas
 ///
 /// # Errors
 /// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+#[cfg(feature = "sqlite")]
 pub fn buscar_ordem(conexao: &Connection, id: Id) -> Resultado<Option<OrdemServico>> {
     conexao
         .query_row(
@@ -41,6 +48,7 @@ pub fn buscar_ordem(conexao: &Connection, id: Id) -> Resultado<Option<OrdemServi
 ///
 /// # Errors
 /// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+#[cfg(feature = "sqlite")]
 pub fn itens_peca_da_ordem(conexao: &Connection, ordem_servico: Id) -> Resultado<Vec<ItemPeca>> {
     let mut stmt = conexao
         .prepare(
@@ -62,6 +70,7 @@ pub fn itens_peca_da_ordem(conexao: &Connection, ordem_servico: Id) -> Resultado
 ///
 /// # Errors
 /// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+#[cfg(feature = "sqlite")]
 pub fn itens_mao_de_obra_da_ordem(
     conexao: &Connection,
     ordem_servico: Id,
@@ -84,6 +93,7 @@ pub fn itens_mao_de_obra_da_ordem(
 ///
 /// # Errors
 /// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+#[cfg(feature = "sqlite")]
 pub fn laudo_mais_recente(
     conexao: &Connection,
     ordem_servico: Id,
@@ -114,6 +124,7 @@ pub fn laudo_mais_recente(
 ///
 /// # Errors
 /// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+#[cfg(feature = "sqlite")]
 pub fn ordens_nao_finalizadas(conexao: &Connection, empresa: Id) -> Resultado<Vec<OrdemServico>> {
     let mut stmt = conexao
         .prepare(
@@ -165,6 +176,7 @@ pub struct PassoDaOrdem {
 ///
 /// # Errors
 /// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+#[cfg(feature = "sqlite")]
 pub fn historico_da_ordem(conexao: &Connection, ordem: Id) -> Resultado<Vec<PassoDaOrdem>> {
     let mut stmt = conexao
         .prepare(
@@ -190,6 +202,7 @@ pub fn historico_da_ordem(conexao: &Connection, ordem: Id) -> Resultado<Vec<Pass
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrdensEmAberto;
 
+#[cfg(feature = "sqlite")]
 impl Consulta for OrdensEmAberto {
     type Saida = Vec<OrdemServico>;
     const PERMISSAO: &'static str = "os.ordem.ver";
@@ -210,6 +223,7 @@ impl Consulta for OrdensEmAberto {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TodasAsOrdens;
 
+#[cfg(feature = "sqlite")]
 impl Consulta for TodasAsOrdens {
     type Saida = Vec<OrdemServico>;
     const PERMISSAO: &'static str = "os.ordem.ver";
@@ -278,6 +292,7 @@ pub struct BuscarOrdens {
     pub limite: u32,
 }
 
+#[cfg(feature = "sqlite")]
 impl Consulta for BuscarOrdens {
     type Saida = Vec<OrdemServico>;
     const PERMISSAO: &'static str = "os.ordem.ver";
@@ -344,6 +359,7 @@ pub struct OrdensPorId {
     pub ordens: Vec<Id>,
 }
 
+#[cfg(feature = "sqlite")]
 impl Consulta for OrdensPorId {
     type Saida = Vec<OrdemServico>;
     const PERMISSAO: &'static str = "os.ordem.ver";
@@ -383,6 +399,7 @@ pub struct UltimoPrecoDaPeca {
     pub produto: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Consulta for UltimoPrecoDaPeca {
     type Saida = Option<cardeal_kernel::Preco>;
     const PERMISSAO: &'static str = "os.ordem.ver";
@@ -413,6 +430,7 @@ pub struct OrdensDoCliente {
     pub cliente: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Consulta for OrdensDoCliente {
     type Saida = Vec<OrdemServico>;
     const PERMISSAO: &'static str = "os.ordem.ver";
@@ -445,6 +463,7 @@ pub struct BuscarDetalheOrdem {
     pub ordem_servico: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Consulta for BuscarDetalheOrdem {
     type Saida = Option<DetalheOrdem>;
     const PERMISSAO: &'static str = "os.ordem.ver";
@@ -472,6 +491,7 @@ impl Consulta for BuscarDetalheOrdem {
 ///
 /// # Errors
 /// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+#[cfg(feature = "sqlite")]
 pub fn ordens_aguardando_aprovacao(
     conexao: &Connection,
     empresa: Id,
@@ -499,6 +519,7 @@ pub fn ordens_aguardando_aprovacao(
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrdensAguardandoAprovacao;
 
+#[cfg(feature = "sqlite")]
 impl Consulta for OrdensAguardandoAprovacao {
     type Saida = Vec<OrdemServico>;
     const PERMISSAO: &'static str = "os.ordem.ver";
@@ -512,6 +533,7 @@ impl Consulta for OrdensAguardandoAprovacao {
 /// equipamento "o mesmo aparelho" apesar de erro de digitação ou variação de texto — mais
 /// permissivo que o casamento de item de compra (0,82) porque aqui o custo de um falso
 /// positivo é só aparecer uma linha a mais no histórico, não um vínculo automático de custo.
+#[cfg(feature = "sqlite")]
 const LIMIAR_MESMO_EQUIPAMENTO: f32 = 0.5;
 
 /// Todas as ordens de serviço do mesmo cliente cujo equipamento é "parecido" com o
@@ -520,6 +542,7 @@ const LIMIAR_MESMO_EQUIPAMENTO: f32 = 0.5;
 ///
 /// # Errors
 /// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+#[cfg(feature = "sqlite")]
 pub fn historico_do_equipamento(
     conexao: &Connection,
     cliente: Id,
@@ -561,6 +584,7 @@ pub struct HistoricoDoEquipamento {
     pub excluir: Option<Id>,
 }
 
+#[cfg(feature = "sqlite")]
 impl Consulta for HistoricoDoEquipamento {
     type Saida = Vec<OrdemServico>;
     const PERMISSAO: &'static str = "os.ordem.ver";
@@ -574,6 +598,7 @@ impl Consulta for HistoricoDoEquipamento {
 ///
 /// # Errors
 /// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+#[cfg(feature = "sqlite")]
 pub fn apontamentos_da_ordem(
     conexao: &Connection,
     ordem_servico: Id,
@@ -600,6 +625,7 @@ pub struct ApontamentosDaOrdem {
     pub ordem_servico: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Consulta for ApontamentosDaOrdem {
     type Saida = Vec<ApontamentoDeTempo>;
     const PERMISSAO: &'static str = "os.ordem.ver";
@@ -615,6 +641,7 @@ impl Consulta for ApontamentosDaOrdem {
 ///
 /// # Errors
 /// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+#[cfg(feature = "sqlite")]
 pub fn tempo_total_da_ordem(conexao: &Connection, ordem_servico: Id) -> Resultado<i64> {
     let total: i64 = conexao
         .query_row(
@@ -634,6 +661,7 @@ pub struct TempoTotalDaOrdem {
     pub ordem_servico: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Consulta for TempoTotalDaOrdem {
     type Saida = i64;
     const PERMISSAO: &'static str = "os.ordem.ver";
@@ -648,6 +676,7 @@ impl Consulta for TempoTotalDaOrdem {
 ///
 /// # Errors
 /// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+#[cfg(feature = "sqlite")]
 pub fn tempo_por_tecnico_no_periodo(
     conexao: &Connection,
     tecnico: Id,
@@ -677,6 +706,7 @@ pub struct TempoPorTecnicoNoPeriodo {
     pub ate: cardeal_kernel::Instante,
 }
 
+#[cfg(feature = "sqlite")]
 impl Consulta for TempoPorTecnicoNoPeriodo {
     type Saida = i64;
     const PERMISSAO: &'static str = "os.ordem.ver";
@@ -721,6 +751,7 @@ pub struct ItemAguardandoEstoque {
 ///
 /// # Errors
 /// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+#[cfg(feature = "sqlite")]
 pub fn pecas_aguardando_estoque(
     conexao: &Connection,
     empresa: Id,
@@ -755,6 +786,7 @@ pub fn pecas_aguardando_estoque(
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct PecasAguardandoEstoque;
 
+#[cfg(feature = "sqlite")]
 impl Consulta for PecasAguardandoEstoque {
     type Saida = Vec<ItemAguardandoEstoque>;
     const PERMISSAO: &'static str = "os.ordem.ver";

@@ -21,15 +21,21 @@ pub use criar_compromisso::{CompromissoAgendado, CriarCompromisso};
 pub use criar_recurso::{CriarRecurso, RecursoCriado};
 pub use definir_disponibilidade::{DefinirDisponibilidade, DisponibilidadeDefinida};
 pub use iniciar_compromisso::IniciarCompromisso;
+#[cfg(feature = "sqlite")]
 pub use registrar_nao_comparecimento::registrar_nao_comparecimento_pendentes;
 
+#[cfg(feature = "sqlite")]
 use cardeal_kernel::{Erro, Id, Resultado};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 
+#[cfg(feature = "sqlite")]
 use crate::compromisso::Compromisso;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioAgenda;
 
 /// Carrega um compromisso ou devolve `NAO_ENCONTRADO`.
+#[cfg(feature = "sqlite")]
 pub(crate) fn carregar_compromisso(uow: &mut UnidadeDeTrabalho, id: Id) -> Resultado<Compromisso> {
     RepositorioAgenda::novo(uow)
         .buscar_compromisso(id)?

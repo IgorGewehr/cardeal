@@ -1,11 +1,19 @@
 //! Cadastra uma unidade de medida ("UN", "KG", "CX"…).
 
-use cardeal_kernel::{CodigoErro, Erro, Id, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::Id;
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{CodigoErro, Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::produto::Unidade;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioEstoque;
 
 /// Cadastra uma unidade de medida.
@@ -26,6 +34,7 @@ pub struct UnidadeCriada {
     pub unidade: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for CriarUnidade {
     type Saida = UnidadeCriada;
     const PERMISSAO: &'static str = "estoque.produto.criar";

@@ -3,14 +3,20 @@
 //! Um só lugar para isso — `mod-os` (chegada de peça) e `mod-compras` (compra rápida)
 //! chamavam, cada um, `lancar_titulo_comum` + `baixar_pagamento_comum` do seu jeito.
 
-use cardeal_kernel::{Data, Dinheiro, Erro, Id, Resultado};
+use cardeal_kernel::{Data, Dinheiro, Id};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
 use cardeal_ledger::PapelConta;
+#[cfg(feature = "sqlite")]
 use cardeal_modkit::Ctx;
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use super::{baixar_pagamento_comum, lancar_titulo_comum, DadosLancamentoTitulo};
 use crate::meio_pagamento::MeioPagamento;
+#[cfg(feature = "sqlite")]
 use crate::titulo::EspecieTitulo;
 
 /// Como a compra foi (ou vai ser) paga.
@@ -58,6 +64,7 @@ pub struct DadosContaAvulsa {
 /// # Errors
 /// Sem permissão (`financeiro.pagar.criar`, e `.baixar` se pago agora), valor não positivo,
 /// ou erro do financeiro.
+#[cfg(feature = "sqlite")]
 pub fn lancar_conta_a_pagar_avulsa(
     dados: DadosContaAvulsa,
     pagamento: PagamentoAvulso,

@@ -3,10 +3,14 @@
 //! permissão de usuário". Por isso não é [`Comando`](cardeal_modkit::Comando), mesmo padrão
 //! de `mod_financeiro::materializar_recorrencias_pendentes`.
 
+#[cfg(feature = "sqlite")]
 use cardeal_kernel::{Erro, Id, Resultado};
+#[cfg(feature = "sqlite")]
 use cardeal_modkit::Ctx;
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioAgenda;
 
 /// Varre os compromissos `Confirmado` da empresa cujo `fim` já passou de `ctx.agora` e marca
@@ -15,6 +19,7 @@ use crate::repositorio::RepositorioAgenda;
 /// # Errors
 /// Erro de domínio (`EstadoInvalido`, que não deveria ocorrer — a varredura já filtra por
 /// `Confirmado`) — desfaz o `SAVEPOINT` da tarefa junto com o resto.
+#[cfg(feature = "sqlite")]
 pub fn registrar_nao_comparecimento_pendentes(
     ctx: &Ctx,
     uow: &mut UnidadeDeTrabalho,

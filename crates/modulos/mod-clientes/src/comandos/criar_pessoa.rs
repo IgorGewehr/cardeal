@@ -7,17 +7,28 @@
 //! similaridade de nome (`SugerirMesclagem`) fica para quando o submódulo `dedup` tiver um
 //! consumidor real.
 
-use cardeal_kernel::{Data, Erro, Id, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::{Data, Id};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
-use crate::cadastro::{
-    Contato, DocumentoPessoa, Endereco, TipoContato, TipoDocumento, TipoEndereco,
-};
+#[cfg(feature = "sqlite")]
+use crate::cadastro::{Contato, DocumentoPessoa, Endereco};
+use crate::cadastro::{TipoContato, TipoDocumento, TipoEndereco};
+#[cfg(feature = "sqlite")]
 use crate::erros::ErroClientes;
+#[cfg(feature = "sqlite")]
 use crate::eventos::PessoaCriada;
-use crate::pessoa::{ConstrutorPessoa, Papel, TipoPessoa};
+#[cfg(feature = "sqlite")]
+use crate::pessoa::ConstrutorPessoa;
+use crate::pessoa::{Papel, TipoPessoa};
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioClientes;
 
 /// Um endereço informado já no cadastro da pessoa (opcional). Mesmos campos de
@@ -82,6 +93,7 @@ pub struct PessoaCadastrada {
     pub pessoa: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for CriarPessoa {
     type Saida = PessoaCadastrada;
     const PERMISSAO: &'static str = "clientes.pessoa.criar";
@@ -99,6 +111,7 @@ impl Comando for CriarPessoa {
 ///
 /// # Errors
 /// Os mesmos de [`CriarPessoa`]: dado inválido, documento duplicado, infraestrutura.
+#[cfg(feature = "sqlite")]
 pub fn criar_pessoa_comum(
     dados: CriarPessoa,
     ctx: &Ctx,

@@ -4,13 +4,21 @@
 //! cadastros. Reativar um papel antes desativado, em vez de duplicar, é regra do domínio
 //! ([`Pessoa::adicionar_papel`]).
 
-use cardeal_kernel::{Erro, Id, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::Id;
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::eventos::PapelAdicionado;
 use crate::pessoa::Papel;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::{self, RepositorioClientes};
 
 /// Acrescenta um papel a uma pessoa.
@@ -31,6 +39,7 @@ pub struct PapelFoiAdicionado {
     pub papel: Papel,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for AdicionarPapel {
     type Saida = PapelFoiAdicionado;
     const PERMISSAO: &'static str = "clientes.papel.gerenciar";

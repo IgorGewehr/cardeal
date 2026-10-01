@@ -3,13 +3,22 @@
 //! `docs/modulos/os.md` §5. Ao contrário da peça, mão de obra registrada em `EmExecucao`
 //! não precisa de consumo de estoque — só soma ao total cobrado.
 
-use cardeal_kernel::{Dinheiro, Erro, Id, Quantidade, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::{Dinheiro, Id, Quantidade};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::comandos::carregar_ordem;
+#[cfg(feature = "sqlite")]
 use crate::execucao::ItemMaoDeObra;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioOs;
 
 /// Registra um item de mão de obra.
@@ -27,6 +36,7 @@ pub struct RegistrarMaoDeObra {
     pub horas: Option<Quantidade>,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for RegistrarMaoDeObra {
     type Saida = Id;
     const PERMISSAO: &'static str = "os.execucao.registrar_mao_de_obra";

@@ -7,6 +7,7 @@
 //! existe nesta fatia.
 
 use cardeal_kernel::{Id, Instante};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::EventoDominio;
 use serde::Serialize;
 
@@ -23,6 +24,7 @@ pub struct CompromissoCriado {
     pub recursos: Vec<Id>,
 }
 
+#[cfg(feature = "sqlite")]
 impl EventoDominio for CompromissoCriado {
     const TIPO: &'static str = "agenda.compromisso_criado.v1";
 
@@ -38,6 +40,7 @@ pub struct CompromissoConfirmado {
     pub compromisso: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl EventoDominio for CompromissoConfirmado {
     const TIPO: &'static str = "agenda.compromisso_confirmado.v1";
 
@@ -53,6 +56,7 @@ pub struct CompromissoCancelado {
     pub compromisso: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl EventoDominio for CompromissoCancelado {
     const TIPO: &'static str = "agenda.compromisso_cancelado.v1";
 

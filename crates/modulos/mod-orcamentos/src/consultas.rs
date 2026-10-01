@@ -2,13 +2,18 @@
 //! `docs/09-protocolo-api.md` §5: sem cursor real ainda, teto de 500 linhas (suficiente para
 //! o volume de uma PME).
 
-use cardeal_kernel::{Data, Dinheiro, Id, Percentual, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::Resultado;
+use cardeal_kernel::{Data, Dinheiro, Id, Percentual};
+#[cfg(feature = "sqlite")]
 use cardeal_modkit::{Consulta, Ctx};
+#[cfg(feature = "sqlite")]
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
 use crate::item::ItemOrcamento;
 use crate::orcamento::{EstadoOrcamento, Orcamento};
+#[cfg(feature = "sqlite")]
 use crate::repositorio::{blob, buscar_orcamento, estado_de, itens_do_orcamento, persist};
 
 /// Uma linha da lista de orçamentos — cabeçalho para a grade, sem carregar itens.
@@ -51,6 +56,7 @@ pub struct OrcamentosRecentes {
     pub ate: Option<Data>,
 }
 
+#[cfg(feature = "sqlite")]
 impl Consulta for OrcamentosRecentes {
     type Saida = Vec<ItemOrcamentoLista>;
     const PERMISSAO: &'static str = "orcamentos.orcamento.ver";
@@ -143,6 +149,7 @@ impl Consulta for OrcamentosRecentes {
     }
 }
 
+#[cfg(feature = "sqlite")]
 fn clientes_com_orcamento(conexao: &Connection, empresa: Id, cliente: Id) -> Resultado<Vec<Id>> {
     let mut stmt = conexao
         .prepare("SELECT id FROM orcamentos_orcamento WHERE empresa = ?1 AND cliente = ?2")
@@ -179,6 +186,7 @@ pub struct BuscarOrcamento {
     pub orcamento: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Consulta for BuscarOrcamento {
     type Saida = Option<DetalheOrcamento>;
     const PERMISSAO: &'static str = "orcamentos.orcamento.ver";
@@ -217,6 +225,7 @@ pub struct ResumoOrcamentosSaida {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResumoOrcamentos;
 
+#[cfg(feature = "sqlite")]
 impl Consulta for ResumoOrcamentos {
     type Saida = ResumoOrcamentosSaida;
     const PERMISSAO: &'static str = "orcamentos.orcamento.ver";

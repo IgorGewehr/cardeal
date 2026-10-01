@@ -5,10 +5,16 @@
 //! `SaldoDisponivelDoProduto`) e aplica a mesma função pura, [`mod_vendas::preco_vigente`], que
 //! `AdicionarItem` usa — assim a consulta de preço nunca diverge do preço que a venda cobra.
 
-use cardeal_kernel::{Erro, Id, Preco, Quantidade, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+use cardeal_kernel::{Id, Preco, Quantidade};
+#[cfg(feature = "sqlite")]
 use cardeal_modkit::{Consulta, Ctx};
+#[cfg(feature = "sqlite")]
 use mod_estoque::{ProdutoPorId, SaldoDisponivelDoProduto};
+#[cfg(feature = "sqlite")]
 use mod_vendas::{preco_vigente, RegrasDaTabela, TabelasDePreco};
+#[cfg(feature = "sqlite")]
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
@@ -36,6 +42,7 @@ pub struct PrecoConsultado {
     pub disponivel: Quantidade,
 }
 
+#[cfg(feature = "sqlite")]
 impl Consulta for PrecoDoProduto {
     type Saida = PrecoConsultado;
     const PERMISSAO: &'static str = "pdv.preco.consultar";

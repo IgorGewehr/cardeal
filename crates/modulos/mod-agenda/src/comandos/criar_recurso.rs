@@ -1,11 +1,20 @@
 //! Cadastra um recurso — sala, técnico, equipamento ou pessoa.
 
-use cardeal_kernel::{Erro, Id, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::Id;
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
-use crate::recurso::{Recurso, TipoRecurso};
+#[cfg(feature = "sqlite")]
+use crate::recurso::Recurso;
+use crate::recurso::TipoRecurso;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioAgenda;
 
 /// Cadastra um recurso novo.
@@ -26,6 +35,7 @@ pub struct RecursoCriado {
     pub recurso: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for CriarRecurso {
     type Saida = RecursoCriado;
     const PERMISSAO: &'static str = "agenda.recurso.gerenciar";

@@ -37,10 +37,12 @@ mod conta;
 mod contas;
 mod erros;
 mod lancamento;
+#[cfg(feature = "sqlite")]
 pub mod migracoes;
 mod plano;
 mod porta;
 mod razao;
+#[cfg(feature = "sqlite")]
 mod repositorio;
 #[cfg(test)]
 mod testkit_interno;
@@ -53,4 +55,5 @@ pub use lancamento::{Contraparte, EstadoLancamento, Lancamento, Origem, Partida}
 pub use plano::{plano_padrao, ContaSemente};
 pub use porta::{InfoConta, PortaRazao};
 pub use razao::Razao;
+#[cfg(feature = "sqlite")]
 pub use repositorio::{semear_plano_padrao, RepositorioRazao};

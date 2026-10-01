@@ -1,11 +1,19 @@
 //! Aplica desconto a um item já no cupom (`F5`). `docs/modulos/pdv.md` §5.
 
-use cardeal_kernel::{Erro, Id, Percentual, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+use cardeal_kernel::{Id, Percentual};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::comandos::{carregar_cupom, limite_desconto};
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioPdv;
 
 /// Aplica (ou substitui) o desconto de um item.
@@ -19,6 +27,7 @@ pub struct AplicarDescontoItem {
     pub desconto_percentual: Percentual,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for AplicarDescontoItem {
     type Saida = ();
     const PERMISSAO: &'static str = "pdv.desconto.aplicar";

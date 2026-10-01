@@ -3,6 +3,7 @@
 //! pelo tipo Rust.
 
 use cardeal_kernel::{Id, Quantidade};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::EventoDominio;
 use serde::Serialize;
 
@@ -21,6 +22,7 @@ pub struct AbaixoPontoPedido {
     pub ponto_pedido: Quantidade,
 }
 
+#[cfg(feature = "sqlite")]
 impl EventoDominio for AbaixoPontoPedido {
     const TIPO: &'static str = "estoque.abaixo_ponto_pedido.v1";
 

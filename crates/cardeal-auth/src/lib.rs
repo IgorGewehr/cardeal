@@ -48,6 +48,7 @@ mod erros;
 mod escopo;
 mod limite;
 mod papel;
+#[cfg(feature = "sqlite")]
 mod repositorio;
 mod senha;
 mod sessao;
@@ -58,6 +59,7 @@ pub use erros::ErroAuth;
 pub use escopo::Escopo;
 pub use limite::ValorLimite;
 pub use papel::{Papel, PapelDeFabrica, PoliticaPapel};
+#[cfg(feature = "sqlite")]
 pub use repositorio::{consultas, RepositorioAuth};
 pub use senha::{hash_senha, verificar_senha, HashDeSenha, PoliticaSenha};
 pub use sessao::{autorizar, AutorizacoesEfetivas, EmissaoSessao, Sessao, DURACAO_PADRAO_SEGUNDOS};

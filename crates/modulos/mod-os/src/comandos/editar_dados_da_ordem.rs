@@ -2,14 +2,23 @@
 //! detalhe que faltou) e um complemento ao defeito relatado (quando o cliente lembra de mais
 //! detalhe depois). `docs/modulos/os.md` §5.
 
-use cardeal_kernel::{Erro, Id, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::Id;
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::comandos::carregar_ordem;
+#[cfg(feature = "sqlite")]
 use crate::erros::ErroOs;
 use crate::ordem::FichaEntrada;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioOs;
 
 /// Completa/corrige o equipamento e/ou complementa o defeito relatado de uma OS já aberta.
@@ -28,6 +37,7 @@ pub struct EditarDadosDaOrdem {
     pub ficha: Option<FichaEntrada>,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for EditarDadosDaOrdem {
     type Saida = ();
     const PERMISSAO: &'static str = "os.ordem.editar_dados";

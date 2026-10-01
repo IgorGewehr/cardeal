@@ -6,19 +6,34 @@
 //! (receita+desconto+CMV juntos); o título, quando existe, nasce vinculado a esse mesmo
 //! lançamento, nunca a um segundo.
 
-use cardeal_kernel::{Dinheiro, Erro, Id, Resultado};
-use cardeal_ledger::{
-    Contas, Contraparte as ContraparteRazao, PapelConta, Razao, RepositorioRazao,
-};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::{Dinheiro, Id};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_ledger::Contraparte as ContraparteRazao;
+#[cfg(feature = "sqlite")]
+use cardeal_ledger::RepositorioRazao;
+#[cfg(feature = "sqlite")]
+use cardeal_ledger::{Contas, PapelConta, Razao};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
+#[cfg(feature = "sqlite")]
 use mod_estoque::{registrar_saida_comum, DadosSaida};
+#[cfg(feature = "sqlite")]
 use mod_financeiro::{ConstrutorTitulo, EspecieTitulo, RepositorioFinanceiro};
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::comandos::{autoria_de, carregar_pedido};
+#[cfg(feature = "sqlite")]
 use crate::eventos::PedidoFaturado;
+#[cfg(feature = "sqlite")]
 use crate::receituario::{faturar_pedido, ContasFaturamento};
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioVendas;
 
 /// Fatura o pedido confirmado.
@@ -45,6 +60,7 @@ pub struct PedidoFoiFaturado {
     pub valor_total: Dinheiro,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for FaturarPedido {
     type Saida = PedidoFoiFaturado;
     const PERMISSAO: &'static str = "vendas.pedido.faturar";

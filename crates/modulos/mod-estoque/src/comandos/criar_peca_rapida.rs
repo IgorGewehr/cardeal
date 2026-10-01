@@ -5,18 +5,29 @@
 //! casada com o produto ([`completar_ncm_se_vazio`]). Se já existe produto ativo com o mesmo
 //! nome, devolve esse em vez de duplicar.
 
-use cardeal_kernel::{texto, Erro, Id, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::Id;
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{texto, Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
+#[cfg(feature = "sqlite")]
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::produto::{Produto, Unidade};
+#[cfg(feature = "sqlite")]
 use crate::repositorio::{blob, id_de, persist, RepositorioEstoque};
 
 /// Código do grupo padrão das peças criadas às pressas.
+#[cfg(feature = "sqlite")]
 const GRUPO_PADRAO: (&str, &str) = ("PECAS", "Peças");
 /// Sigla da unidade padrão.
+#[cfg(feature = "sqlite")]
 const UNIDADE_PADRAO: (&str, &str) = ("UN", "Unidade");
 
 /// Cria (ou reaproveita) uma peça só pelo nome.
@@ -35,6 +46,7 @@ pub struct PecaRapidaCriada {
     pub nova: bool,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for CriarPecaRapida {
     type Saida = PecaRapidaCriada;
     const PERMISSAO: &'static str = "estoque.produto.criar";
@@ -50,6 +62,7 @@ impl Comando for CriarPecaRapida {
 ///
 /// # Errors
 /// Nome vazio, ou erro de persistência.
+#[cfg(feature = "sqlite")]
 pub fn criar_peca_rapida_comum(
     nome: &str,
     ctx: &Ctx,
@@ -78,6 +91,7 @@ pub fn criar_peca_rapida_comum(
 ///
 /// # Errors
 /// Erro de persistência.
+#[cfg(feature = "sqlite")]
 pub fn completar_ncm_se_vazio(
     produto: Id,
     ncm: &str,
@@ -96,6 +110,7 @@ pub fn completar_ncm_se_vazio(
     Ok(())
 }
 
+#[cfg(feature = "sqlite")]
 fn produto_ativo_com_nome(
     uow: &UnidadeDeTrabalho,
     empresa: Id,
@@ -120,6 +135,7 @@ fn produto_ativo_com_nome(
     Ok(None)
 }
 
+#[cfg(feature = "sqlite")]
 fn grupo_padrao(uow: &mut UnidadeDeTrabalho, empresa: Id) -> Resultado<Id> {
     let existente: Option<Vec<u8>> = uow
         .conexao()
@@ -144,6 +160,7 @@ fn grupo_padrao(uow: &mut UnidadeDeTrabalho, empresa: Id) -> Resultado<Id> {
     Ok(id)
 }
 
+#[cfg(feature = "sqlite")]
 fn unidade_padrao(uow: &mut UnidadeDeTrabalho, empresa: Id) -> Resultado<Id> {
     let existente: Option<Vec<u8>> = uow
         .conexao()

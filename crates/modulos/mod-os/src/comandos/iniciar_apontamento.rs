@@ -6,14 +6,24 @@
 //! mesmo tempo — a checagem de apontamento aberto roda sobre TODAS as ordens do técnico, não
 //! só esta.
 
-use cardeal_kernel::{Erro, Id, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::Id;
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::apontamento::ApontamentoDeTempo;
+#[cfg(feature = "sqlite")]
 use crate::comandos::carregar_ordem;
+#[cfg(feature = "sqlite")]
 use crate::erros::ErroOs;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioOs;
 
 /// Inicia um apontamento de tempo.
@@ -32,6 +42,7 @@ pub struct ApontamentoIniciado {
     pub apontamento: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for IniciarApontamento {
     type Saida = ApontamentoIniciado;
     const PERMISSAO: &'static str = "os.apontamento.iniciar";

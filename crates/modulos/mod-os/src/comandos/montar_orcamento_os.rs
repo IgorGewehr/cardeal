@@ -3,15 +3,26 @@
 //! `docs/modulos/os.md` §5. Chamado uma vez por item — a tela monta o orçamento linha a
 //! linha. Só aceita enquanto `OrdemServico::aceita_ajuste_de_itens`.
 
-use cardeal_kernel::{Dinheiro, Erro, Id, Preco, Quantidade, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::{Dinheiro, Id, Preco, Quantidade};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::comandos::carregar_ordem;
+#[cfg(feature = "sqlite")]
 use crate::erros::ErroOs;
+#[cfg(feature = "sqlite")]
 use crate::execucao::{ItemMaoDeObra, ItemPeca};
+#[cfg(feature = "sqlite")]
 use crate::ordem::EstadoOs;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioOs;
 
 /// Um item novo para o orçamento — peça ou mão de obra.
@@ -59,6 +70,7 @@ pub struct MontarOrcamentoOs {
     pub item: ItemOrcamentoNovo,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for MontarOrcamentoOs {
     type Saida = Id;
     const PERMISSAO: &'static str = "os.orcamento.montar";
@@ -126,6 +138,7 @@ impl Comando for MontarOrcamentoOs {
 }
 
 /// Grava um item de peça e devolve `(id, total cobrado)`.
+#[cfg(feature = "sqlite")]
 fn orcar_peca(
     ordem: Id,
     produto: Id,

@@ -3,6 +3,7 @@
 //! pelo tipo Rust.
 
 use cardeal_kernel::{Dinheiro, Id};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::EventoDominio;
 use serde::Serialize;
 
@@ -18,6 +19,7 @@ pub struct EntradaAConferir {
     pub total_itens: usize,
 }
 
+#[cfg(feature = "sqlite")]
 impl EventoDominio for EntradaAConferir {
     const TIPO: &'static str = "compras.entrada_a_conferir.v1";
 
@@ -43,6 +45,7 @@ pub struct NotaConfirmada {
     pub pago: bool,
 }
 
+#[cfg(feature = "sqlite")]
 impl EventoDominio for NotaConfirmada {
     const TIPO: &'static str = "compras.nota_confirmada.v1";
 

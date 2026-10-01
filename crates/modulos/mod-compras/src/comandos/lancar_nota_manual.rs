@@ -4,16 +4,27 @@
 //! com os itens digitados em vez de extraídos de um XML — por isso **é** um `Comando` de
 //! despacho de verdade (não depende de `PortaFiscal`).
 
-use cardeal_kernel::{Cnpj, Data, Dinheiro, Erro, Id, Preco, Quantidade, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Cnpj, Erro, Id, Resultado};
+use cardeal_kernel::{Data, Dinheiro, Preco, Quantidade};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::nota::{EstadoCasamento, EstadoNotaEntrada, NotaEntrada};
+#[cfg(feature = "sqlite")]
 use crate::preferencias::RateioPor;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioCompras;
 
+#[cfg(feature = "sqlite")]
 use super::{resolver_fornecedor, RelatorioImportacao};
+#[cfg(feature = "sqlite")]
 use crate::eventos::EntradaAConferir;
 
 /// Um item digitado à mão — mesmos campos de um item de XML, sem a origem fiscal.
@@ -64,6 +75,7 @@ pub struct LancarNotaManual {
 /// para `Dinheiro::ratear_por_pesos` — computados juntos porque, no rateio por valor, o peso
 /// **é** o valor bruto do item, então não faz sentido calcular `Dinheiro::de_total` duas
 /// vezes por item.
+#[cfg(feature = "sqlite")]
 fn valor_produtos_e_pesos(itens: &[ItemNotaManual], rateio_por: RateioPor) -> (Dinheiro, Vec<i64>) {
     let brutos: Vec<Dinheiro> = itens
         .iter()
@@ -86,6 +98,7 @@ fn valor_produtos_e_pesos(itens: &[ItemNotaManual], rateio_por: RateioPor) -> (D
     (valor_produtos, pesos)
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for LancarNotaManual {
     type Saida = RelatorioImportacao;
     const PERMISSAO: &'static str = "compras.entrada.importar";

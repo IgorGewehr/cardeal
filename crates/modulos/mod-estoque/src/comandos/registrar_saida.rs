@@ -2,11 +2,18 @@
 //! [`registrar_saida_comum`](super::registrar_saida_comum) direto, com o próprio
 //! `origem_modulo`).
 
-use cardeal_kernel::{Dinheiro, Id, Preco, Quantidade, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::Resultado;
+use cardeal_kernel::{Dinheiro, Id, Preco, Quantidade};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::comandos::{registrar_saida_comum, DadosSaida};
 
 /// Registra uma saída manual de estoque.
@@ -33,6 +40,7 @@ pub struct SaidaRegistrada {
     pub gerou_divergencia: bool,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for RegistrarSaida {
     type Saida = SaidaRegistrada;
     const PERMISSAO: &'static str = "estoque.movimento.saida";

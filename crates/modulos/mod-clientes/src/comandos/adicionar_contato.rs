@@ -4,13 +4,23 @@
 //! cadastro/papel/documento/crédito); sem isto não há como o negócio ligar para o cliente
 //! quando o equipamento fica pronto.
 
-use cardeal_kernel::{Erro, Id, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::Id;
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
-use crate::cadastro::{Contato, TipoContato};
+#[cfg(feature = "sqlite")]
+use crate::cadastro::Contato;
+use crate::cadastro::TipoContato;
+#[cfg(feature = "sqlite")]
 use crate::erros::ErroClientes;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioClientes;
 
 /// Adiciona um contato a uma pessoa.
@@ -33,6 +43,7 @@ pub struct ContatoFoiAdicionado {
     pub contato: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for AdicionarContato {
     type Saida = ContatoFoiAdicionado;
     const PERMISSAO: &'static str = "clientes.pessoa.editar";
@@ -48,6 +59,7 @@ impl Comando for AdicionarContato {
 ///
 /// # Errors
 /// Os mesmos de [`AdicionarContato`].
+#[cfg(feature = "sqlite")]
 pub fn adicionar_contato_comum(
     dados: &AdicionarContato,
     ctx: &Ctx,

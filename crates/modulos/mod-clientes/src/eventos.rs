@@ -3,6 +3,7 @@
 //! pelo tipo Rust.
 
 use cardeal_kernel::Id;
+#[cfg(feature = "sqlite")]
 use cardeal_storage::EventoDominio;
 use serde::Serialize;
 
@@ -17,6 +18,7 @@ pub struct PessoaCriada {
     pub documento_principal: Option<Id>,
 }
 
+#[cfg(feature = "sqlite")]
 impl EventoDominio for PessoaCriada {
     const TIPO: &'static str = "clientes.pessoa_criada.v1";
 
@@ -34,6 +36,7 @@ pub struct PapelAdicionado {
     pub papel: &'static str,
 }
 
+#[cfg(feature = "sqlite")]
 impl EventoDominio for PapelAdicionado {
     const TIPO: &'static str = "clientes.papel_adicionado.v1";
 

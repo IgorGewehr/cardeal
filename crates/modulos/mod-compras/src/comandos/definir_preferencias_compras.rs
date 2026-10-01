@@ -2,12 +2,21 @@
 //!
 //! Decisão desta sessão, não do spec original — ver `crate::preferencias`.
 
-use cardeal_kernel::{CodigoErro, Erro, Id, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::Id;
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{CodigoErro, Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
-use crate::preferencias::{PreferenciasCompras, RateioPor};
+#[cfg(feature = "sqlite")]
+use crate::preferencias::PreferenciasCompras;
+use crate::preferencias::RateioPor;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioCompras;
 
 /// Define as preferências de importação de nota.
@@ -27,6 +36,7 @@ pub struct DefinirPreferenciasCompras {
     pub pago_no_ato_padrao: bool,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for DefinirPreferenciasCompras {
     type Saida = ();
     const PERMISSAO: &'static str = "compras.entrada.preferencias";

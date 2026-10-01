@@ -7,11 +7,18 @@
 //! entrada com o código, a origem (compra ou aparelho usado desmontado) e o custo específico
 //! desta peça.
 
-use cardeal_kernel::{Data, Id, Preco, Quantidade, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::Resultado;
+use cardeal_kernel::{Data, Id, Preco, Quantidade};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::comandos::{registrar_entrada_com_lote_comum, DadosEntrada, DadosNovoLote};
 use crate::produto::OrigemLote;
 
@@ -55,6 +62,7 @@ pub struct EntradaComLoteRegistrada {
     pub lote: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for RegistrarEntradaComLote {
     type Saida = EntradaComLoteRegistrada;
     const PERMISSAO: &'static str = "estoque.movimento.entrada_com_lote";

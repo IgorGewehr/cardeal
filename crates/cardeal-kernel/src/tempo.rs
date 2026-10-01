@@ -20,7 +20,11 @@
 
 use std::fmt;
 use std::str::FromStr;
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 use std::time::{SystemTime, UNIX_EPOCH};
+// No navegador `std::time::SystemTime::now` entra em pânico; `web-time` lê `Date.now()`.
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+use web_time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 

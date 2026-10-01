@@ -2,13 +2,19 @@
 //! o Pix que o cliente acabou de mandar. Título e baixa no mesmo COMMIT, pelo mesmo caminho
 //! de uma baixa normal (Dinheiro no Caixa, Pix/cartão na conta escolhida).
 
-use cardeal_kernel::{CodigoErro, Data, Dinheiro, Erro, Id, Resultado};
+use cardeal_kernel::Id;
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{CodigoErro, Data, Dinheiro, Erro, Resultado};
+#[cfg(feature = "sqlite")]
 use cardeal_modkit::Ctx;
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use super::{baixar_pagamento_comum, baixar_recebimento_comum};
 use crate::meio_pagamento::MeioPagamento;
+#[cfg(feature = "sqlite")]
 use crate::titulo::EspecieTitulo;
 
 /// Como o valor do lançamento já andou.
@@ -24,6 +30,7 @@ pub struct QuitadoAgora {
 ///
 /// # Errors
 /// Sem permissão de baixar a espécie, ou mais de uma parcela (quitado agora é pagamento único).
+#[cfg(feature = "sqlite")]
 pub(super) fn validar(especie: EspecieTitulo, parcelas: u16, ctx: &Ctx) -> Resultado<()> {
     let permissao = match especie {
         EspecieTitulo::Receber => "financeiro.receber.baixar",
@@ -49,6 +56,7 @@ pub(super) fn validar(especie: EspecieTitulo, parcelas: u16, ctx: &Ctx) -> Resul
 ///
 /// # Errors
 /// Os da baixa comum (caixa fechado, conta inválida…) — e o COMMIT inteiro é desfeito.
+#[cfg(feature = "sqlite")]
 pub(super) fn quitar(
     especie: EspecieTitulo,
     parcela: Option<Id>,

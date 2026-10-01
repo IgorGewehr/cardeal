@@ -12,6 +12,7 @@ use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 
 mod verificar_ui;
+mod verificar_wasm;
 
 #[derive(Parser)]
 #[command(name = "xtask", about = "Tarefas de build e empacotamento do Cardeal")]
@@ -41,6 +42,9 @@ enum Comando {
         #[arg(long)]
         gerar_baseline: bool,
     },
+    /// Falha se o domínio usado pelo cliente web deixar de compilar para `wasm32` sem SQLite
+    /// (ADR-0016).
+    VerificarWasm,
 }
 
 #[derive(ValueEnum, Clone, Copy, PartialEq, Eq)]
@@ -61,6 +65,7 @@ fn main() -> Result<()> {
             FormatoLinux::Appimage => empacotar_linux_appimage(&raiz, pular_build),
         },
         Comando::VerificarUi { gerar_baseline } => verificar_ui::executar(&raiz, gerar_baseline),
+        Comando::VerificarWasm => verificar_wasm::executar(&raiz),
     }
 }
 

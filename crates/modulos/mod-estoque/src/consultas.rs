@@ -2,12 +2,19 @@
 //! — `docs/modulos/estoque.md` §10 (a ficha de produto precisa do saldo agregado por
 //! produto para a lista principal da tela).
 
-use cardeal_kernel::{Data, Dinheiro, Id, Instante, Preco, Quantidade, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::Resultado;
+use cardeal_kernel::{Data, Dinheiro, Id, Instante, Preco, Quantidade};
+#[cfg(feature = "sqlite")]
 use cardeal_modkit::{Consulta, Ctx};
+#[cfg(feature = "sqlite")]
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
-use crate::produto::{EstadoLote, OrigemLote, Produto};
+#[cfg(feature = "sqlite")]
+use crate::produto::Produto;
+use crate::produto::{EstadoLote, OrigemLote};
+#[cfg(feature = "sqlite")]
 use crate::repositorio::{blob, id_de, movimento_de_linha, persist, produto_de_linha};
 use crate::saldo::Movimento;
 
@@ -39,6 +46,7 @@ pub struct ItemProdutoComSaldo {
 ///
 /// # Errors
 /// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+#[cfg(feature = "sqlite")]
 pub fn produtos_com_saldo(
     conexao: &Connection,
     empresa: Id,
@@ -80,6 +88,7 @@ pub fn produtos_com_saldo(
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProdutosComSaldo;
 
+#[cfg(feature = "sqlite")]
 impl Consulta for ProdutosComSaldo {
     type Saida = Vec<ItemProdutoComSaldo>;
     const PERMISSAO: &'static str = "estoque.produto.ver";
@@ -93,6 +102,7 @@ impl Consulta for ProdutosComSaldo {
 ///
 /// # Errors
 /// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+#[cfg(feature = "sqlite")]
 pub fn produto_por_codigo_barras(
     conexao: &Connection,
     empresa: Id,
@@ -120,6 +130,7 @@ pub struct ProdutoPorCodigoBarras {
     pub codigo_barras: String,
 }
 
+#[cfg(feature = "sqlite")]
 impl Consulta for ProdutoPorCodigoBarras {
     type Saida = Option<Produto>;
     const PERMISSAO: &'static str = "estoque.produto.ver";
@@ -138,6 +149,7 @@ pub struct ProdutoPorId {
     pub produto: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Consulta for ProdutoPorId {
     type Saida = Option<Produto>;
     const PERMISSAO: &'static str = "estoque.produto.ver";
@@ -175,6 +187,7 @@ pub struct ItemGrupoProduto {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GruposProduto;
 
+#[cfg(feature = "sqlite")]
 impl Consulta for GruposProduto {
     type Saida = Vec<ItemGrupoProduto>;
     const PERMISSAO: &'static str = "estoque.produto.ver";
@@ -213,6 +226,7 @@ pub struct ItemUnidade {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Unidades;
 
+#[cfg(feature = "sqlite")]
 impl Consulta for Unidades {
     type Saida = Vec<ItemUnidade>;
     const PERMISSAO: &'static str = "estoque.produto.ver";
@@ -246,6 +260,7 @@ impl Consulta for Unidades {
 ///
 /// # Errors
 /// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+#[cfg(feature = "sqlite")]
 pub fn saldo_disponivel_do_produto(conexao: &Connection, produto: Id) -> Resultado<Quantidade> {
     let soma: i64 = conexao
         .query_row(
@@ -266,6 +281,7 @@ pub fn saldo_disponivel_do_produto(conexao: &Connection, produto: Id) -> Resulta
 ///
 /// # Errors
 /// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+#[cfg(feature = "sqlite")]
 pub fn melhor_local_de_saida(
     conexao: &Connection,
     empresa: Id,
@@ -294,6 +310,7 @@ pub struct SaldoDisponivelDoProduto {
     pub produto: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Consulta for SaldoDisponivelDoProduto {
     type Saida = Quantidade;
     const PERMISSAO: &'static str = "estoque.saldo.ver";
@@ -318,6 +335,7 @@ pub struct ItemLocal {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Locais;
 
+#[cfg(feature = "sqlite")]
 impl Consulta for Locais {
     type Saida = Vec<ItemLocal>;
     const PERMISSAO: &'static str = "estoque.produto.ver";
@@ -363,6 +381,7 @@ pub struct ItemAbaixoDoPontoPedido {
 ///
 /// # Errors
 /// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+#[cfg(feature = "sqlite")]
 pub fn produtos_abaixo_do_ponto_pedido(
     conexao: &Connection,
     empresa: Id,
@@ -400,6 +419,7 @@ pub fn produtos_abaixo_do_ponto_pedido(
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProdutosAbaixoDoPontoPedido;
 
+#[cfg(feature = "sqlite")]
 impl Consulta for ProdutosAbaixoDoPontoPedido {
     type Saida = Vec<ItemAbaixoDoPontoPedido>;
     const PERMISSAO: &'static str = "estoque.compra_sugerida.ver";
@@ -416,6 +436,7 @@ impl Consulta for ProdutosAbaixoDoPontoPedido {
 ///
 /// # Errors
 /// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+#[cfg(feature = "sqlite")]
 pub fn movimentos_do_produto(
     conexao: &Connection,
     produto: Id,
@@ -451,6 +472,7 @@ pub struct MovimentosDoProduto {
     pub origem_modulo: Option<String>,
 }
 
+#[cfg(feature = "sqlite")]
 impl Consulta for MovimentosDoProduto {
     type Saida = Vec<Movimento>;
     const PERMISSAO: &'static str = "estoque.movimento.ver";
@@ -466,6 +488,7 @@ impl Consulta for MovimentosDoProduto {
 ///
 /// # Errors
 /// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+#[cfg(feature = "sqlite")]
 pub fn buscar_aparelho_origem(
     conexao: &Connection,
     id: Id,
@@ -482,6 +505,7 @@ pub fn buscar_aparelho_origem(
         .map_err(persist)
 }
 
+#[cfg(feature = "sqlite")]
 const COLUNAS_LOTE: &str = "id, empresa, produto, local, codigo, origem, fornecedor, \
     aparelho_origem, fabricacao, validade, quantidade_inicial, custo_unitario, estado, criado_em";
 
@@ -489,6 +513,7 @@ const COLUNAS_LOTE: &str = "id, empresa, produto, local, codigo, origem, fornece
 ///
 /// # Errors
 /// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+#[cfg(feature = "sqlite")]
 pub fn buscar_lote(conexao: &Connection, id: Id) -> Resultado<Option<crate::produto::Lote>> {
     conexao
         .query_row(
@@ -506,6 +531,7 @@ pub fn buscar_lote(conexao: &Connection, id: Id) -> Resultado<Option<crate::prod
 ///
 /// # Errors
 /// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+#[cfg(feature = "sqlite")]
 pub fn buscar_lote_por_codigo(
     conexao: &Connection,
     empresa: Id,
@@ -527,6 +553,7 @@ pub fn buscar_lote_por_codigo(
 ///
 /// # Errors
 /// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+#[cfg(feature = "sqlite")]
 pub fn saldo_do_lote(conexao: &Connection, lote: Id) -> Resultado<Quantidade> {
     let saldo: i64 = conexao
         .query_row(
@@ -543,6 +570,7 @@ pub fn saldo_do_lote(conexao: &Connection, lote: Id) -> Resultado<Quantidade> {
 ///
 /// # Errors
 /// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+#[cfg(feature = "sqlite")]
 pub fn movimentos_do_lote(conexao: &Connection, lote: Id) -> Resultado<Vec<Movimento>> {
     let mut stmt = conexao
         .prepare(
@@ -624,6 +652,7 @@ pub struct DetalheLote {
 ///
 /// # Errors
 /// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+#[cfg(feature = "sqlite")]
 pub fn detalhe_do_lote_por_codigo(
     conexao: &Connection,
     empresa: Id,
@@ -670,6 +699,7 @@ pub fn detalhe_do_lote_por_codigo(
     }))
 }
 
+#[cfg(feature = "sqlite")]
 fn produto_de_por_id(conexao: &Connection, id: Id) -> Resultado<Option<Produto>> {
     conexao
         .query_row(
@@ -686,6 +716,7 @@ fn produto_de_por_id(conexao: &Connection, id: Id) -> Resultado<Option<Produto>>
         .map_err(persist)
 }
 
+#[cfg(feature = "sqlite")]
 fn local_nome_de(conexao: &Connection, id: Id) -> Resultado<String> {
     conexao
         .query_row(
@@ -705,6 +736,7 @@ pub struct DetalheDoLotePorCodigo {
     pub codigo: String,
 }
 
+#[cfg(feature = "sqlite")]
 impl Consulta for DetalheDoLotePorCodigo {
     type Saida = Option<DetalheLote>;
     const PERMISSAO: &'static str = "estoque.lote.ver";
@@ -737,6 +769,7 @@ pub struct ItemLoteDisponivel {
 ///
 /// # Errors
 /// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+#[cfg(feature = "sqlite")]
 pub fn lotes_disponiveis_do_produto(
     conexao: &Connection,
     produto: Id,
@@ -777,6 +810,7 @@ pub struct LotesDisponiveisDoProduto {
     pub produto: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Consulta for LotesDisponiveisDoProduto {
     type Saida = Vec<ItemLoteDisponivel>;
     const PERMISSAO: &'static str = "estoque.lote.ver";

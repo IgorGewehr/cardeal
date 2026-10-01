@@ -12,14 +12,24 @@
 //! post-it, o `lote` — a rastreabilidade completa pedida pelo dono da assistência técnica
 //! (`docs/modulos/estoque.md` §3): "em que OS/aparelho foi aplicada, quando".
 
-use cardeal_kernel::{Erro, Id, Preco, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+use cardeal_kernel::{Id, Preco};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
+#[cfg(feature = "sqlite")]
 use mod_estoque::{registrar_saida_comum, registrar_saida_de_lote_comum, DadosSaida};
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::comandos::carregar_ordem;
+#[cfg(feature = "sqlite")]
 use crate::erros::ErroOs;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioOs;
 
 /// Aplica uma peça já orçada — consome o estoque no local informado.
@@ -52,6 +62,7 @@ pub struct PecaFoiAplicada {
     pub gerou_divergencia: bool,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for AplicarPeca {
     type Saida = PecaFoiAplicada;
     const PERMISSAO: &'static str = "os.peca.aplicar";
@@ -77,6 +88,7 @@ pub struct AplicarPecas {
     pub local: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for AplicarPecas {
     type Saida = Vec<PecaFoiAplicada>;
     const PERMISSAO: &'static str = "os.peca.aplicar";
@@ -106,6 +118,7 @@ impl Comando for AplicarPecas {
 ///
 /// # Errors
 /// OS fora de execução, item de outra ordem, item já aplicado, ou erro do estoque.
+#[cfg(feature = "sqlite")]
 fn aplicar_peca_comum(
     dados: AplicarPeca,
     ctx: &Ctx,
@@ -129,6 +142,7 @@ fn aplicar_peca_comum(
 /// Consome o estoque do item (chamada direta a `mod-estoque`, mesma transação) — do lote
 /// específico quando o técnico identificou a peça física, senão do saldo agregado — e grava o
 /// item como aplicado com o custo real. Sem checagem de estado: quem chama decide quando pode.
+#[cfg(feature = "sqlite")]
 pub(crate) fn consumir_e_aplicar(
     item: &mut crate::execucao::ItemPeca,
     ordem: Id,
@@ -169,6 +183,7 @@ pub(crate) fn consumir_e_aplicar(
 ///
 /// # Errors
 /// Nenhum local de estoque cadastrado (com peça a aplicar), ou erro do estoque.
+#[cfg(feature = "sqlite")]
 pub(crate) fn aplicar_pendentes_automaticamente(
     ordem: Id,
     ctx: &Ctx,

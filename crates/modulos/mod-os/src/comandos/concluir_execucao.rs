@@ -4,12 +4,20 @@
 //! peça pendente é aplicada aqui mesmo (antes a conclusão era recusada e o técnico tinha de
 //! voltar e clicar "Aplicar").
 
-use cardeal_kernel::{Erro, Id, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::Id;
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::comandos::carregar_ordem;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioOs;
 
 /// Conclui a execução.
@@ -19,6 +27,7 @@ pub struct ConcluirExecucao {
     pub ordem_servico: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for ConcluirExecucao {
     type Saida = ();
     const PERMISSAO: &'static str = "os.execucao.concluir";

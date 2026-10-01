@@ -58,15 +58,20 @@ mod consultas;
 mod erros;
 pub mod eventos;
 mod manifesto;
+#[cfg(feature = "sqlite")]
 pub mod migracoes;
+#[cfg(feature = "sqlite")]
 mod modulo;
 mod recurso;
+#[cfg(feature = "sqlite")]
 mod repositorio;
 
+#[cfg(feature = "sqlite")]
+pub use comandos::registrar_nao_comparecimento_pendentes;
 pub use comandos::{
-    registrar_nao_comparecimento_pendentes, CancelarCompromisso, CompromissoAgendado,
-    ConcluirCompromisso, ConfirmarCompromisso, CriarCompromisso, CriarRecurso,
-    DefinirDisponibilidade, DisponibilidadeDefinida, IniciarCompromisso, RecursoCriado,
+    CancelarCompromisso, CompromissoAgendado, ConcluirCompromisso, ConfirmarCompromisso,
+    CriarCompromisso, CriarRecurso, DefinirDisponibilidade, DisponibilidadeDefinida,
+    IniciarCompromisso, RecursoCriado,
 };
 pub use compromisso::{Compromisso, EstadoCompromisso, TipoCompromisso};
 pub use consultas::{
@@ -75,6 +80,8 @@ pub use consultas::{
 };
 pub use erros::ErroAgenda;
 pub use manifesto::{manifesto, MANIFESTO};
+#[cfg(feature = "sqlite")]
 pub use modulo::ModuloAgenda;
 pub use recurso::{DisponibilidadeRecurso, Recurso, TipoRecurso};
+#[cfg(feature = "sqlite")]
 pub use repositorio::RepositorioAgenda;

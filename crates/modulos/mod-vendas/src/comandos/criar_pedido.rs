@@ -1,11 +1,19 @@
 //! Abre um pedido `Rascunho`, sem itens. `docs/modulos/vendas.md` §5.
 
-use cardeal_kernel::{Id, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::Id;
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::Resultado;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::pedido::Pedido;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioVendas;
 
 /// Abre um pedido novo.
@@ -30,6 +38,7 @@ pub struct PedidoCriado {
     pub pedido: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for CriarPedido {
     type Saida = PedidoCriado;
     const PERMISSAO: &'static str = "vendas.pedido.criar";

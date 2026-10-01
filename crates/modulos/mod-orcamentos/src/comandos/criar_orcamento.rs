@@ -1,12 +1,21 @@
 //! Cria um orçamento comercial (cabeçalho + itens iniciais opcionais).
 
-use cardeal_kernel::{Erro, Id, Percentual, Preco, Quantidade, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+use cardeal_kernel::{Id, Percentual, Preco, Quantidade};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::comandos::montar_itens;
+#[cfg(feature = "sqlite")]
 use crate::orcamento::{Cabecalho, Orcamento};
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioOrcamentos;
 
 /// Um item na carga de criação/edição de itens.
@@ -62,6 +71,7 @@ pub struct OrcamentoCriado {
     pub numero: u64,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for CriarOrcamento {
     type Saida = OrcamentoCriado;
     const PERMISSAO: &'static str = "orcamentos.orcamento.criar";

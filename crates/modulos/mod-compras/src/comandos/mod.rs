@@ -18,30 +18,47 @@ pub use importar_nota_de_arquivo_xml::ImportarNotaDeArquivoXml;
 pub use lancar_nota_manual::{ItemNotaManual, LancarNotaManual};
 pub use vincular_produto_manual::VincularProdutoManual;
 
+#[cfg(feature = "sqlite")]
 use cardeal_fiscal::{Nsu, PortaFiscal};
-use cardeal_kernel::{Cnpj, Dinheiro, Erro, Id, Resultado, Versao};
+use cardeal_kernel::Id;
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Cnpj, Dinheiro, Erro, Resultado, Versao};
+#[cfg(feature = "sqlite")]
 use cardeal_ledger::{Contraparte, PapelConta};
+#[cfg(feature = "sqlite")]
 use cardeal_modkit::Ctx;
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
+#[cfg(feature = "sqlite")]
 use mod_clientes::{
     ConstrutorPessoa, DocumentoPessoa, Papel, RepositorioClientes, TipoDocumento, TipoPessoa,
 };
+#[cfg(feature = "sqlite")]
 use mod_estoque::{
     completar_ncm_se_vazio, registrar_entrada_comum, DadosEntrada, RepositorioEstoque,
 };
+#[cfg(feature = "sqlite")]
 use mod_financeiro::{
     baixar_pagamento_comum, lancar_titulo_comum, DadosLancamentoTitulo, EspecieTitulo,
     MeioPagamento,
 };
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::casamento::{casar, ResultadoCasamento};
+#[cfg(feature = "sqlite")]
 use crate::erros::ErroCompras;
+#[cfg(feature = "sqlite")]
 use crate::eventos::{EntradaAConferir, NotaConfirmada};
-use crate::nota::{EstadoCasamento, EstadoNotaEntrada, ItemNotaEntrada, NotaEntrada};
+use crate::nota::EstadoNotaEntrada;
+#[cfg(feature = "sqlite")]
+use crate::nota::{EstadoCasamento, ItemNotaEntrada, NotaEntrada};
+#[cfg(feature = "sqlite")]
 use crate::preferencias::{PreferenciasCompras, RateioPor};
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioCompras;
 
+#[cfg(feature = "sqlite")]
 fn carregar_nota(uow: &mut UnidadeDeTrabalho, id: Id) -> Resultado<NotaEntrada> {
     RepositorioCompras::novo(uow)
         .buscar_nota(id)?
@@ -52,6 +69,7 @@ fn carregar_nota(uow: &mut UnidadeDeTrabalho, id: Id) -> Resultado<NotaEntrada> 
 /// (`Juridica`, papel `Fornecedor`) se ainda não existir — "casamento automático: fornecedor
 /// por CNPJ" (`docs/modulos/compras.md` §5). Chamada direta a `mod-clientes`, mesma
 /// transação (`docs/contratos-internos.md` §7 regra 2).
+#[cfg(feature = "sqlite")]
 fn resolver_fornecedor(
     cnpj: &Cnpj,
     razao_social: &str,
@@ -111,6 +129,7 @@ pub struct RelatorioImportacao {
 /// # Errors
 /// Erro de domínio (`ErroFiscal::XmlInvalido` já vem tratado pelo chamador — este recebe o
 /// XML já interpretado) ou de infraestrutura (SQLite).
+#[cfg(feature = "sqlite")]
 pub fn importar_nota_da_sefaz(
     nota_xml: &cardeal_fiscal::NotaFiscalXml,
     ctx: &Ctx,
@@ -133,6 +152,7 @@ pub fn importar_nota_da_sefaz(
 ///
 /// # Errors
 /// Erro de domínio ou de infraestrutura (SQLite).
+#[cfg(feature = "sqlite")]
 pub(crate) fn importar_nota_interpretada(
     nota_xml: &cardeal_fiscal::NotaFiscalXml,
     ctx: &Ctx,
@@ -253,6 +273,7 @@ pub(crate) fn importar_nota_interpretada(
 /// [`LancarNotaManual`](crate::LancarNotaManual), que só diferem em como os itens chegaram.
 /// `Ok(None)` = não confirmou (preferência desligada, itens pendentes, ou sem local padrão) —
 /// o chamador segue o caminho normal (`AConferir` + evento).
+#[cfg(feature = "sqlite")]
 fn tentar_confirmar_automaticamente(
     nota_id: Id,
     preferencias: &PreferenciasCompras,
@@ -289,6 +310,7 @@ fn tentar_confirmar_automaticamente(
 /// entre [`importar_nota_da_sefaz`] (itens vindos do XML) e
 /// [`LancarNotaManual`](crate::LancarNotaManual) (itens digitados).
 #[allow(clippy::type_complexity)] // a tupla espelha os campos de `ItemNfe`/`ItemNotaManual`
+#[cfg(feature = "sqlite")]
 fn montar_itens<'a>(
     nota_id: Id,
     fornecedor: Id,
@@ -340,6 +362,7 @@ fn montar_itens<'a>(
 /// `codigo_barras` opcional) — os dois só diferem na origem do dado, não na lógica de
 /// casamento/rateio.
 #[allow(clippy::too_many_arguments)]
+#[cfg(feature = "sqlite")]
 fn montar_item_casado(
     nota_id: Id,
     fornecedor: Id,
@@ -398,6 +421,7 @@ fn montar_item_casado(
 /// # Errors
 /// Erro de domínio ou de infraestrutura — de qualquer nota individual (interrompe a
 /// varredura na primeira falha; o NSU só avança para as notas processadas com sucesso).
+#[cfg(feature = "sqlite")]
 pub fn verificar_notas_na_sefaz(
     porta: &dyn PortaFiscal,
     ctx: &Ctx,
@@ -464,6 +488,7 @@ pub struct ConfirmacaoEntrada {
 /// Nunca, na prática: o `.expect()` interno em `produto_casado` só executa depois de já ter
 /// confirmado, logo acima, que nenhum item está fora de `Casado` — a checagem de
 /// `ItemNaoCasado` é exatamente o que garante que todo item aqui tem produto vinculado.
+#[cfg(feature = "sqlite")]
 pub fn confirmar_entrada_comum(
     nota_id: Id,
     local: Id,

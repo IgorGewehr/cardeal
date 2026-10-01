@@ -1,11 +1,18 @@
 //! Cadastra um grupo de produto — fatia mínima: hierarquia por `pai`, sem perfil tributário
 //! ainda (ver `src/lib.rs`).
 
-use cardeal_kernel::{CodigoErro, Erro, Id, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::Id;
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{CodigoErro, Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioEstoque;
 
 /// Cadastra um grupo de produto.
@@ -26,6 +33,7 @@ pub struct GrupoProdutoCriado {
     pub grupo_produto: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for CriarGrupoProduto {
     type Saida = GrupoProdutoCriado;
     const PERMISSAO: &'static str = "estoque.produto.criar";

@@ -5,13 +5,22 @@
 //! resto do código (`CriarPedido`, `AbrirOrdemServico`, `LancarTitulo` — sempre um comando
 //! explícito de abertura) para não misturar duas responsabilidades num só `Comando`.
 
-use cardeal_kernel::{Erro, Id, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::Id;
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
+#[cfg(feature = "sqlite")]
 use mod_financeiro::{EstadoSessao, RepositorioFinanceiro};
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::cupom::Cupom;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioPdv;
 
 /// Abre um cupom novo no terminal.
@@ -40,6 +49,7 @@ pub struct CupomAberto {
     pub numero_terminal: i64,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for AbrirCupom {
     type Saida = CupomAberto;
     const PERMISSAO: &'static str = "pdv.venda.editar";

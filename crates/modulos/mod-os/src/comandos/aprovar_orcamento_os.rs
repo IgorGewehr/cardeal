@@ -2,13 +2,22 @@
 //!
 //! `docs/modulos/os.md` §11.2: a aprovação é sempre identificada, nunca implícita.
 
-use cardeal_kernel::{Erro, Id, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::Id;
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::comandos::carregar_ordem;
+#[cfg(feature = "sqlite")]
 use crate::eventos::OrcamentoAprovado;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioOs;
 
 /// Registra a aprovação do orçamento.
@@ -20,6 +29,7 @@ pub struct AprovarOrcamentoOs {
     pub identificacao_aprovador: String,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for AprovarOrcamentoOs {
     type Saida = ();
     const PERMISSAO: &'static str = "os.orcamento.aprovar";

@@ -51,26 +51,34 @@ pub mod dedup;
 mod erros;
 pub mod eventos;
 mod manifesto;
+#[cfg(feature = "sqlite")]
 pub mod migracoes;
+#[cfg(feature = "sqlite")]
 mod modulo;
 mod pessoa;
+#[cfg(feature = "sqlite")]
 mod repositorio;
 
 pub use cadastro::{Contato, DocumentoPessoa, Endereco, TipoContato, TipoDocumento, TipoEndereco};
+#[cfg(feature = "sqlite")]
+pub use comandos::{adicionar_contato_comum, criar_pessoa_comum};
 pub use comandos::{
-    adicionar_contato_comum, criar_pessoa_comum, AdicionarContato, AdicionarEndereco,
-    AdicionarPapel, ContatoFoiAdicionado, ContatoInicial, CriarPessoa, DefinirLimiteCredito,
-    DesativarPessoa, EditarPessoa, EnderecoFoiAdicionado, EnderecoInicial, LimiteCreditoDefinido,
-    PapelFoiAdicionado, PessoaCadastrada, PessoaDesativada, PessoaEditada, PessoaReativada,
-    ReativarPessoa,
+    AdicionarContato, AdicionarEndereco, AdicionarPapel, ContatoFoiAdicionado, ContatoInicial,
+    CriarPessoa, DefinirLimiteCredito, DesativarPessoa, EditarPessoa, EnderecoFoiAdicionado,
+    EnderecoInicial, LimiteCreditoDefinido, PapelFoiAdicionado, PessoaCadastrada, PessoaDesativada,
+    PessoaEditada, PessoaReativada, ReativarPessoa,
 };
-pub use consultas::{pessoa_por_id, DetalhePessoa, ItemPessoa, PessoaDetalhada, PessoasPorPapel};
+#[cfg(feature = "sqlite")]
+pub use consultas::pessoa_por_id;
+pub use consultas::{DetalhePessoa, ItemPessoa, PessoaDetalhada, PessoasPorPapel};
 pub use credito::{
     DisponivelCredito, EventoCredito, LimiteCredito, Score, SituacaoCredito, SCORE_INICIAL,
     SCORE_MAXIMO, SCORE_MINIMO,
 };
 pub use erros::ErroClientes;
 pub use manifesto::{manifesto, MANIFESTO};
+#[cfg(feature = "sqlite")]
 pub use modulo::ModuloClientes;
 pub use pessoa::{ConstrutorPessoa, EstadoPessoa, Papel, PapelPessoa, Pessoa, TipoPessoa};
+#[cfg(feature = "sqlite")]
 pub use repositorio::RepositorioClientes;

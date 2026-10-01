@@ -8,9 +8,18 @@
 //! endereçável pelo `Id`, nunca por papel — não há hoje um jeito de resolver "a conta do Banco
 //! X" por papel semântico, só listando/escolhendo pelo `Id` na tela.
 
-use cardeal_kernel::{Erro, Id, Resultado};
-use cardeal_ledger::{Conta, GrupoFluxo, Natureza, PortaRazao, RepositorioRazao};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::Id;
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_ledger::{Conta, GrupoFluxo, Natureza};
+#[cfg(feature = "sqlite")]
+use cardeal_ledger::{PortaRazao, RepositorioRazao};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
@@ -30,6 +39,7 @@ pub struct ContaBancariaCriada {
     pub codigo: String,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for CriarContaBancaria {
     type Saida = ContaBancariaCriada;
     const PERMISSAO: &'static str = "financeiro.banco.criar";

@@ -8,14 +8,20 @@ license.workspace      = true
 authors.workspace      = true
 repository.workspace   = true
 
+[features]
+default = ["sqlite"]
+# Persistência em SQLite (despacho, repositório, migrações). Desligada, sobra o domínio
+# e os tipos de comando/consulta — o que o cliente egui/WASM compila (ADR-0016).
+sqlite = ["dep:cardeal-storage", "dep:rusqlite", "cardeal-modkit/sqlite", "mod-os/sqlite"]
+
 [dependencies]
 cardeal-kernel.workspace  = true
-cardeal-storage.workspace = true
-cardeal-modkit.workspace  = true
-mod-os.workspace          = true
+cardeal-storage = { workspace = true, optional = true }
+cardeal-modkit = { path = "../../cardeal-modkit", default-features = false }
+mod-os = { path = "../mod-os", default-features = false }
 serde.workspace     = true
 thiserror.workspace = true
-rusqlite.workspace  = true
+rusqlite = { workspace = true, optional = true }
 tracing.workspace   = true
 
 [dev-dependencies]

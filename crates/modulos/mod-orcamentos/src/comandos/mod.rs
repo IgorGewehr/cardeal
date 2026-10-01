@@ -19,13 +19,20 @@ pub use editar_orcamento::EditarOrcamento;
 pub use enviar_orcamento::EnviarOrcamento;
 pub use registrar_decisao_orcamento::RegistrarDecisaoOrcamento;
 
-use cardeal_kernel::{Erro, Id, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::Id;
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 
+#[cfg(feature = "sqlite")]
 use crate::orcamento::Orcamento;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioOrcamentos;
 
 /// Carrega um orçamento ou devolve `NAO_ENCONTRADO`.
+#[cfg(feature = "sqlite")]
 pub(crate) fn carregar_orcamento(uow: &mut UnidadeDeTrabalho, id: Id) -> Resultado<Orcamento> {
     RepositorioOrcamentos::novo(uow)
         .buscar_orcamento(id)?
@@ -33,6 +40,7 @@ pub(crate) fn carregar_orcamento(uow: &mut UnidadeDeTrabalho, id: Id) -> Resulta
 }
 
 /// Converte um item da carga do comando num [`crate::item::ItemOrcamento`] validado.
+#[cfg(feature = "sqlite")]
 pub(crate) fn montar_itens(
     orcamento: Id,
     itens: Vec<NovoItemOrcamento>,

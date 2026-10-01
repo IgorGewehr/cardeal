@@ -3,11 +3,18 @@
 //! apagado (saldo, lotes, histórico de movimentações continuam intactos), e um produto com
 //! movimentação não pode virar órfão. Reversível a qualquer momento.
 
-use cardeal_kernel::{Erro, Id, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::Id;
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioEstoque;
 
 /// Ativa ou desativa um produto.
@@ -19,6 +26,7 @@ pub struct DefinirAtivoProduto {
     pub ativo: bool,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for DefinirAtivoProduto {
     type Saida = ();
     const PERMISSAO: &'static str = "estoque.produto.editar";

@@ -6,14 +6,24 @@
 //! autorizou, não reautentica — o despacho já exige a permissão `pdv.cupom.cancelar` (Alto)
 //! de quem está executando, e a autenticação do supervisor acontece antes de chegar aqui.
 
-use cardeal_kernel::{Erro, Id, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::Id;
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::comandos::carregar_cupom;
+#[cfg(feature = "sqlite")]
 use crate::erros::ErroPdv;
+#[cfg(feature = "sqlite")]
 use crate::eventos::CupomCancelado;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioPdv;
 
 /// Cancela um cupom `EmAndamento`.
@@ -27,6 +37,7 @@ pub struct CancelarCupom {
     pub autorizado_por: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for CancelarCupom {
     type Saida = ();
     const PERMISSAO: &'static str = "pdv.cupom.cancelar";

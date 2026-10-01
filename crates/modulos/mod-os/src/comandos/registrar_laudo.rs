@@ -1,12 +1,21 @@
 //! Registra o laudo técnico de uma ordem de serviço: `Aberta` → `EmDiagnostico`.
 
-use cardeal_kernel::{Erro, Id, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::Id;
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::comandos::carregar_ordem;
+#[cfg(feature = "sqlite")]
 use crate::laudo::LaudoTecnico;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioOs;
 
 /// Registra o laudo técnico.
@@ -22,6 +31,7 @@ pub struct RegistrarLaudo {
     pub tecnico: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for RegistrarLaudo {
     type Saida = Id;
     const PERMISSAO: &'static str = "os.laudo.registrar";

@@ -9,18 +9,35 @@
 //! prazo) fica para quando existir um jeito de gerar o `Titulo` correspondente sem duplicar
 //! `mod-vendas::FaturarPedido`.
 
-use cardeal_kernel::{Dinheiro, Erro, Id, Resultado};
+use cardeal_kernel::{Dinheiro, Id};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
 use cardeal_ledger::PapelConta;
-use cardeal_ledger::{Contas, Razao, RepositorioRazao};
-use cardeal_modkit::{Comando, Ctx, Risco};
+#[cfg(feature = "sqlite")]
+use cardeal_ledger::RepositorioRazao;
+#[cfg(feature = "sqlite")]
+use cardeal_ledger::{Contas, Razao};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
+#[cfg(feature = "sqlite")]
 use mod_estoque::{registrar_saida_comum, DadosSaida};
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::comandos::{autoria_de, carregar_cupom, papel_da_forma};
-use crate::cupom::{validar_pagamentos, FormaPagamentoPdv, PagamentoCupom};
+use crate::cupom::FormaPagamentoPdv;
+#[cfg(feature = "sqlite")]
+use crate::cupom::{validar_pagamentos, PagamentoCupom};
+#[cfg(feature = "sqlite")]
 use crate::eventos::VendaFinalizada;
+#[cfg(feature = "sqlite")]
 use crate::receituario::{faturar_cupom, ContasFinalizacao};
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioPdv;
 
 /// Uma forma de pagamento informada ao finalizar.
@@ -50,6 +67,7 @@ pub struct VendaFoiFinalizada {
     pub total: Dinheiro,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for FinalizarVenda {
     type Saida = VendaFoiFinalizada;
     const PERMISSAO: &'static str = "pdv.venda.finalizar";

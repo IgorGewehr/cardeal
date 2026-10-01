@@ -7,14 +7,23 @@
 //! `meio_pagamento` quem decide (`crate::MeioPagamento::papel`), a menos que `conta_destino`
 //! escolha uma conta específica na mão.
 
-use cardeal_kernel::{Data, Dinheiro, Id, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::Resultado;
+use cardeal_kernel::{Data, Dinheiro, Id};
+#[cfg(feature = "sqlite")]
 use cardeal_ledger::PapelConta;
-use cardeal_modkit::{Comando, Ctx, Risco};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::comandos::{baixar_parcela_comum, DadosBaixa};
 use crate::meio_pagamento::MeioPagamento;
+#[cfg(feature = "sqlite")]
 use crate::titulo::EspecieTitulo;
 
 /// Baixa uma parcela a receber.
@@ -46,6 +55,7 @@ pub struct RecebimentoBaixado {
     pub saldo_restante: Dinheiro,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for BaixarRecebimento {
     type Saida = RecebimentoBaixado;
     const PERMISSAO: &'static str = "financeiro.receber.baixar";
@@ -76,6 +86,7 @@ impl Comando for BaixarRecebimento {
 /// # Errors
 /// Igual a [`BaixarRecebimento`]: erro de domínio (parcela não encontrada, título de espécie
 /// diferente de `Receber`, valor inválido ou maior que o devido) ou de infraestrutura.
+#[cfg(feature = "sqlite")]
 pub fn baixar_recebimento_comum(
     parcela: Id,
     valor: Dinheiro,

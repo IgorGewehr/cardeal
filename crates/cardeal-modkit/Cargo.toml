@@ -9,17 +9,27 @@ authors.workspace      = true
 repository.workspace   = true
 
 
+[features]
+# O despacho (comandos/consultas sobre SQLite). Desligado, sobra o lado declarativo —
+# manifesto, permissões, ícones, resolução de módulos — que a UI e o cliente WASM usam.
+default = ["sqlite"]
+sqlite  = [
+    "cardeal-ledger/sqlite",
+    "dep:cardeal-storage",
+    "dep:cardeal-auth",
+    "dep:postcard",
+    "dep:rusqlite",
+]
+
 [dependencies]
 cardeal-kernel.workspace = true
-cardeal-ledger.workspace = true
-cardeal-storage.workspace = true
-cardeal-auth.workspace = true
+cardeal-ledger  = { path = "../cardeal-ledger", default-features = false }
+cardeal-storage = { workspace = true, optional = true }
+cardeal-auth    = { workspace = true, optional = true }
 serde.workspace = true
-postcard.workspace = true
-rusqlite.workspace = true
+postcard = { workspace = true, optional = true }
+rusqlite = { workspace = true, optional = true }
 thiserror.workspace = true
-indexmap.workspace = true
-ahash.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]

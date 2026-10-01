@@ -1,13 +1,22 @@
 //! Cancela um item do cupom (`F7`) — a linha continua na tabela, auditável, só sai do total.
 //! `docs/modulos/pdv.md` §5.
 
-use cardeal_kernel::{Erro, Id, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::Id;
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::comandos::carregar_cupom;
+#[cfg(feature = "sqlite")]
 use crate::eventos::ItemCancelado;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioPdv;
 
 /// Cancela um item do cupom.
@@ -21,6 +30,7 @@ pub struct CancelarItem {
     pub motivo: String,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for CancelarItem {
     type Saida = ();
     const PERMISSAO: &'static str = "pdv.item.cancelar";

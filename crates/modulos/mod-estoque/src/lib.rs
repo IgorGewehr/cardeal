@@ -65,41 +65,54 @@ mod erros;
 pub mod eventos;
 mod inventario;
 mod manifesto;
+#[cfg(feature = "sqlite")]
 pub mod migracoes;
+#[cfg(feature = "sqlite")]
 mod modulo;
 mod produto;
 pub mod receituario;
+#[cfg(feature = "sqlite")]
 mod repositorio;
 mod saldo;
 
 pub use aparelho_origem::AparelhoOrigem;
-pub use comandos::{
-    completar_ncm_se_vazio, criar_peca_rapida_comum, CriarPecaRapida, PecaRapidaCriada,
-};
+#[cfg(feature = "sqlite")]
+pub use comandos::{completar_ncm_se_vazio, criar_peca_rapida_comum};
+#[cfg(feature = "sqlite")]
 pub use comandos::{
     registrar_entrada_com_lote_comum, registrar_entrada_comum, registrar_saida_comum,
-    registrar_saida_de_lote_comum, AjustarSaldo, AparelhoOrigemRegistrado, CriarGrupoProduto,
-    CriarLocal, CriarProduto, CriarUnidade, DadosEntrada, DadosNovoLote, DadosSaida,
-    DefinirAtivoProduto, DefinirPontoPedido, EditarDetalhesTecnicosProduto,
-    EntradaComLoteRegistrada, EntradaGravada, EntradaRegistrada, GrupoProdutoCriado, LocalCriado,
-    ProdutoCriado, RegistrarAparelhoOrigem, RegistrarEntrada, RegistrarEntradaComLote,
-    RegistrarSaida, SaidaGravada, SaidaRegistrada, SaldoAjustado, TipoLocal, UnidadeCriada,
+    registrar_saida_de_lote_comum,
 };
+pub use comandos::{
+    AjustarSaldo, AparelhoOrigemRegistrado, CriarGrupoProduto, CriarLocal, CriarProduto,
+    CriarUnidade, DadosEntrada, DadosNovoLote, DadosSaida, DefinirAtivoProduto, DefinirPontoPedido,
+    EditarDetalhesTecnicosProduto, EntradaComLoteRegistrada, EntradaGravada, EntradaRegistrada,
+    GrupoProdutoCriado, LocalCriado, ProdutoCriado, RegistrarAparelhoOrigem, RegistrarEntrada,
+    RegistrarEntradaComLote, RegistrarSaida, SaidaGravada, SaidaRegistrada, SaldoAjustado,
+    TipoLocal, UnidadeCriada,
+};
+pub use comandos::{CriarPecaRapida, PecaRapidaCriada};
+#[cfg(feature = "sqlite")]
 pub use consultas::{
     melhor_local_de_saida, movimentos_do_produto, produtos_abaixo_do_ponto_pedido,
-    saldo_disponivel_do_produto, AparelhoOrigemResumo, DetalheDoLotePorCodigo, DetalheLote,
-    GruposProduto, ItemAbaixoDoPontoPedido, ItemGrupoProduto, ItemLocal, ItemLoteDisponivel,
-    ItemProdutoComSaldo, ItemUnidade, Locais, LotesDisponiveisDoProduto, MovimentosDoProduto,
-    ProdutoPorCodigoBarras, ProdutoPorId, ProdutosAbaixoDoPontoPedido, ProdutosComSaldo,
-    SaldoDisponivelDoProduto, Unidades,
+    saldo_disponivel_do_produto,
+};
+pub use consultas::{
+    AparelhoOrigemResumo, DetalheDoLotePorCodigo, DetalheLote, GruposProduto,
+    ItemAbaixoDoPontoPedido, ItemGrupoProduto, ItemLocal, ItemLoteDisponivel, ItemProdutoComSaldo,
+    ItemUnidade, Locais, LotesDisponiveisDoProduto, MovimentosDoProduto, ProdutoPorCodigoBarras,
+    ProdutoPorId, ProdutosAbaixoDoPontoPedido, ProdutosComSaldo, SaldoDisponivelDoProduto,
+    Unidades,
 };
 pub use erros::ErroEstoque;
 pub use inventario::{AjusteInventario, ContagemItem, EstadoInventario, Inventario};
 pub use manifesto::{manifesto, MANIFESTO};
+#[cfg(feature = "sqlite")]
 pub use modulo::ModuloEstoque;
 pub use produto::{
     validar_gtin, Conversao, DetalhesTecnicos, EstadoLote, Lote, OrigemLote, Produto, Unidade,
     Variacao,
 };
+#[cfg(feature = "sqlite")]
 pub use repositorio::RepositorioEstoque;
 pub use saldo::{custo_medio_movel, Movimento, SaidaAplicada, SaldoLocal, TipoMovimento};

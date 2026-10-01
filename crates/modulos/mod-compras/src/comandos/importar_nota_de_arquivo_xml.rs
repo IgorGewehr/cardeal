@@ -17,11 +17,17 @@
 //! A leitura do arquivo em si (diálogo `rfd`, decodificação de encoding) é responsabilidade
 //! da UI — este comando só recebe o texto já em UTF-8.
 
+#[cfg(feature = "sqlite")]
 use cardeal_kernel::{Erro, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::comandos::{importar_nota_interpretada, RelatorioImportacao};
 
 /// Importa uma nota de entrada a partir do XML de uma NF-e já lido de um arquivo local.
@@ -31,6 +37,7 @@ pub struct ImportarNotaDeArquivoXml {
     pub xml: String,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for ImportarNotaDeArquivoXml {
     type Saida = RelatorioImportacao;
     const PERMISSAO: &'static str = "compras.entrada.importar";

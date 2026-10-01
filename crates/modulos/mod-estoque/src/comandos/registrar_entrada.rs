@@ -2,11 +2,18 @@
 //! [`registrar_entrada_comum`](super::registrar_entrada_comum) direto, com
 //! `origem_modulo: "compras"`, quando esse módulo existir).
 
-use cardeal_kernel::{Id, Preco, Quantidade, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::Resultado;
+use cardeal_kernel::{Id, Preco, Quantidade};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::comandos::{registrar_entrada_comum, DadosEntrada};
 
 /// Registra uma entrada manual de estoque.
@@ -31,6 +38,7 @@ pub struct EntradaRegistrada {
     pub custo_medio: Preco,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for RegistrarEntrada {
     type Saida = EntradaRegistrada;
     const PERMISSAO: &'static str = "estoque.movimento.entrada";

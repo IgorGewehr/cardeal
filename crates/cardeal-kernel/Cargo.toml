@@ -17,3 +17,8 @@ smallvec.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
+
+# No navegador (egui/WASM, ADR-0016): relógio e aleatoriedade vêm do JS.
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+uuid     = { workspace = true, features = ["js"] }
+web-time = "1"

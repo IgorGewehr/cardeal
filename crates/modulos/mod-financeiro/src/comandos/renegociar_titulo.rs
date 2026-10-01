@@ -12,15 +12,26 @@
 
 #![allow(clippy::too_many_arguments)]
 
-use cardeal_kernel::{Data, Dinheiro, Erro, Id, Percentual, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::{Data, Dinheiro, Id, Percentual};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::erros::ErroFinanceiro;
+#[cfg(feature = "sqlite")]
 use crate::eventos::TituloRenegociado;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioFinanceiro;
-use crate::titulo::{ConstrutorTitulo, EstadoParcela, PoliticaJuros};
+use crate::titulo::PoliticaJuros;
+#[cfg(feature = "sqlite")]
+use crate::titulo::{ConstrutorTitulo, EstadoParcela};
 
 /// Renegocia o saldo em aberto de um título.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,6 +61,7 @@ pub struct TituloFoiRenegociado {
     pub saldo: Dinheiro,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for RenegociarTitulo {
     type Saida = TituloFoiRenegociado;
     const PERMISSAO: &'static str = "financeiro.receber.renegociar";

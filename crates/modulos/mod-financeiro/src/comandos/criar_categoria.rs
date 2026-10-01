@@ -1,12 +1,20 @@
 //! Cria uma categoria financeira — o rótulo livre de custo/receita usado para agrupar
 //! títulos em relatórios (`docs/modulos/financeiro.md` §11.9), fora do plano de contas.
 
-use cardeal_kernel::{Erro, Id, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::Id;
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::categoria::CategoriaFinanceira;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioFinanceiro;
 use crate::titulo::EspecieTitulo;
 
@@ -26,6 +34,7 @@ pub struct CategoriaCriada {
     pub categoria: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for CriarCategoria {
     type Saida = CategoriaCriada;
     const PERMISSAO: &'static str = "financeiro.categoria.criar";

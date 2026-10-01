@@ -1,11 +1,20 @@
 //! Cria uma tabela de preço. `docs/modulos/vendas.md` §5.
 
-use cardeal_kernel::{Data, Id, Resultado};
-use cardeal_modkit::{Comando, Ctx, Risco};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::Resultado;
+use cardeal_kernel::{Data, Id};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
-use crate::preco::{TabelaPreco, TipoTabela};
+#[cfg(feature = "sqlite")]
+use crate::preco::TabelaPreco;
+use crate::preco::TipoTabela;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioVendas;
 
 /// Cria uma tabela de preço.
@@ -28,6 +37,7 @@ pub struct TabelaPrecoCriada {
     pub tabela_preco: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for CriarTabelaPreco {
     type Saida = TabelaPrecoCriada;
     const PERMISSAO: &'static str = "vendas.tabela_preco.criar";

@@ -9,14 +9,23 @@
 //!
 //! [`BaixarRecebimento`]: super::BaixarRecebimento
 
-use cardeal_kernel::{Data, Dinheiro, Id, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::Resultado;
+use cardeal_kernel::{Data, Dinheiro, Id};
+#[cfg(feature = "sqlite")]
 use cardeal_ledger::PapelConta;
-use cardeal_modkit::{Comando, Ctx, Risco};
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::comandos::{baixar_parcela_comum, DadosBaixa};
 use crate::meio_pagamento::MeioPagamento;
+#[cfg(feature = "sqlite")]
 use crate::titulo::EspecieTitulo;
 
 /// Baixa uma parcela a pagar.
@@ -48,6 +57,7 @@ pub struct PagamentoBaixado {
     pub saldo_restante: Dinheiro,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for BaixarPagamento {
     type Saida = PagamentoBaixado;
     const PERMISSAO: &'static str = "financeiro.pagar.baixar";
@@ -79,6 +89,7 @@ impl Comando for BaixarPagamento {
 /// # Errors
 /// Igual a [`BaixarPagamento`]: erro de domínio (parcela não encontrada, título de espécie
 /// diferente de `Pagar`, valor inválido ou maior que o devido) ou de infraestrutura.
+#[cfg(feature = "sqlite")]
 pub fn baixar_pagamento_comum(
     parcela: Id,
     valor: Dinheiro,

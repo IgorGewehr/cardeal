@@ -1,13 +1,21 @@
 //! As consultas do módulo de vendas — leitura autorizada sobre `vendas_pedido`, sem SQL cru
 //! na tela. `docs/modulos/vendas.md` §6/§10 e `docs/09-protocolo-api.md` §5.
 
-use cardeal_kernel::{Data, Dinheiro, Id, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::Resultado;
+use cardeal_kernel::{Data, Dinheiro, Id};
+#[cfg(feature = "sqlite")]
 use cardeal_modkit::{Consulta, Ctx};
+#[cfg(feature = "sqlite")]
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
-use crate::pedido::{EstadoPedido, ItemVenda};
+use crate::pedido::EstadoPedido;
+#[cfg(feature = "sqlite")]
+use crate::pedido::ItemVenda;
+#[cfg(feature = "sqlite")]
 use crate::preco::{RegraPreco, TabelaPreco};
+#[cfg(feature = "sqlite")]
 use crate::repositorio::{
     blob, data_de, estado_pedido_de, id_de, item_de_linha, persist, regra_de_linha, tabela_de_linha,
 };
@@ -34,6 +42,7 @@ pub struct ItemPedido {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PedidosRecentes;
 
+#[cfg(feature = "sqlite")]
 impl Consulta for PedidosRecentes {
     type Saida = Vec<ItemPedido>;
     const PERMISSAO: &'static str = "vendas.pedido.ver";
@@ -72,6 +81,7 @@ impl Consulta for PedidosRecentes {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TabelasDePreco;
 
+#[cfg(feature = "sqlite")]
 impl Consulta for TabelasDePreco {
     type Saida = Vec<TabelaPreco>;
     const PERMISSAO: &'static str = "vendas.tabela_preco.ver";
@@ -101,6 +111,7 @@ pub struct RegrasDaTabela {
     pub tabela: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Consulta for RegrasDaTabela {
     type Saida = Vec<RegraPreco>;
     const PERMISSAO: &'static str = "vendas.tabela_preco.ver";
@@ -131,6 +142,7 @@ pub struct ItensDoPedido {
     pub pedido: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Consulta for ItensDoPedido {
     type Saida = Vec<ItemVenda>;
     const PERMISSAO: &'static str = "vendas.pedido.ver";

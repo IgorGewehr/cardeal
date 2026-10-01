@@ -26,9 +26,9 @@ mod registrar_saida;
 pub use ajustar_saldo::{AjustarSaldo, SaldoAjustado};
 pub use criar_grupo_produto::{CriarGrupoProduto, GrupoProdutoCriado};
 pub use criar_local::{CriarLocal, LocalCriado, TipoLocal};
-pub use criar_peca_rapida::{
-    completar_ncm_se_vazio, criar_peca_rapida_comum, CriarPecaRapida, PecaRapidaCriada,
-};
+#[cfg(feature = "sqlite")]
+pub use criar_peca_rapida::{completar_ncm_se_vazio, criar_peca_rapida_comum};
+pub use criar_peca_rapida::{CriarPecaRapida, PecaRapidaCriada};
 pub use criar_produto::{CriarProduto, ProdutoCriado};
 pub use criar_unidade::{CriarUnidade, UnidadeCriada};
 pub use definir_ativo_produto::DefinirAtivoProduto;
@@ -39,16 +39,27 @@ pub use registrar_entrada::{EntradaRegistrada, RegistrarEntrada};
 pub use registrar_entrada_com_lote::{EntradaComLoteRegistrada, RegistrarEntradaComLote};
 pub use registrar_saida::{RegistrarSaida, SaidaRegistrada};
 
-use cardeal_kernel::{Data, Erro, Id, Preco, Quantidade, Resultado};
+use cardeal_kernel::{Data, Id, Preco, Quantidade};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
 use cardeal_modkit::Ctx;
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 
+#[cfg(feature = "sqlite")]
 use crate::eventos::AbaixoPontoPedido;
-use crate::produto::{Lote, OrigemLote};
+#[cfg(feature = "sqlite")]
+use crate::produto::Lote;
+use crate::produto::OrigemLote;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioEstoque;
-use crate::saldo::{Movimento, SaidaAplicada, SaldoLocal, TipoMovimento};
+use crate::saldo::SaidaAplicada;
+#[cfg(feature = "sqlite")]
+use crate::saldo::{Movimento, SaldoLocal, TipoMovimento};
 
 /// A [`crate::receituario::Autoria`] extraída de um [`Ctx`] de comando.
+#[cfg(feature = "sqlite")]
 pub(crate) fn autoria_de(ctx: &Ctx) -> crate::receituario::Autoria {
     crate::receituario::Autoria {
         usuario: ctx.usuario,
@@ -108,6 +119,7 @@ pub struct EntradaGravada {
 /// Carregar/validar/persistir uma entrada — igual para o comando de despacho e para
 /// chamadas diretas de outros módulos. Corpo compartilhado com
 /// [`registrar_entrada_com_lote_comum`] — `dados_lote` é `None` aqui, sempre.
+#[cfg(feature = "sqlite")]
 fn registrar_entrada_interna(
     dados: DadosEntrada,
     dados_lote: Option<DadosNovoLote>,
@@ -188,6 +200,7 @@ fn registrar_entrada_interna(
 ///
 /// # Errors
 /// Erro de domínio (`QuantidadeInvalida`, `CustoUnitarioAusente`).
+#[cfg(feature = "sqlite")]
 pub fn registrar_entrada_comum(
     dados: DadosEntrada,
     ctx: &Ctx,
@@ -205,6 +218,7 @@ pub fn registrar_entrada_comum(
 /// # Errors
 /// Erro de domínio (`QuantidadeInvalida`, `CustoUnitarioAusente`, `CodigoLoteVazio`,
 /// `AparelhoOrigemAusente`), ou de persistência se o código já existir na empresa.
+#[cfg(feature = "sqlite")]
 pub fn registrar_entrada_com_lote_comum(
     dados: DadosEntrada,
     lote: DadosNovoLote,
@@ -248,6 +262,7 @@ pub struct SaidaGravada {
 /// [`cardeal_kernel::Erro`] com [`crate::ErroEstoque::QuantidadeInvalida`] se a quantidade
 /// não for positiva; [`crate::ErroEstoque::LoteInexistente`]/`LoteDeOutroProduto`/
 /// `LoteSaldoInsuficiente` quando `lote` é informado e não confere.
+#[cfg(feature = "sqlite")]
 fn registrar_saida_interna(
     dados: DadosSaida,
     lote: Option<Id>,
@@ -356,6 +371,7 @@ fn registrar_saida_interna(
 /// # Errors
 /// [`cardeal_kernel::Erro`] com [`crate::ErroEstoque::QuantidadeInvalida`] se a quantidade
 /// não for positiva.
+#[cfg(feature = "sqlite")]
 pub fn registrar_saida_comum(
     dados: DadosSaida,
     ctx: &Ctx,
@@ -374,6 +390,7 @@ pub fn registrar_saida_comum(
 /// # Errors
 /// [`crate::ErroEstoque::LoteInexistente`], [`crate::ErroEstoque::LoteDeOutroProduto`],
 /// [`crate::ErroEstoque::LoteSaldoInsuficiente`], além dos erros de [`registrar_saida_comum`].
+#[cfg(feature = "sqlite")]
 pub fn registrar_saida_de_lote_comum(
     dados: DadosSaida,
     lote: Id,

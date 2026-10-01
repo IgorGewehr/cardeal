@@ -5,14 +5,26 @@
 //! sangria não pode ultrapassar (salvo `Caixa::permite_negativo`) vem do saldo **realizado**
 //! da própria conta do caixa no Razão — não é um contador à parte.
 
-use cardeal_kernel::{Dinheiro, Erro, Id, Resultado};
-use cardeal_ledger::{Razao, RepositorioRazao};
-use cardeal_modkit::{Comando, Ctx, Risco};
+use cardeal_kernel::{Dinheiro, Id};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::{Erro, Resultado};
+#[cfg(feature = "sqlite")]
+use cardeal_ledger::Razao;
+#[cfg(feature = "sqlite")]
+use cardeal_ledger::RepositorioRazao;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::Risco;
+#[cfg(feature = "sqlite")]
+use cardeal_modkit::{Comando, Ctx};
+#[cfg(feature = "sqlite")]
 use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "sqlite")]
 use crate::comandos::{autoria_de, carregar_sessao_e_caixa, contas_caixa_rotina};
+#[cfg(feature = "sqlite")]
 use crate::eventos::SangriaRegistrada;
+#[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioFinanceiro;
 
 /// Registra uma sangria numa sessão de caixa.
@@ -35,6 +47,7 @@ pub struct SangriaFoiRegistrada {
     pub lancamento: Id,
 }
 
+#[cfg(feature = "sqlite")]
 impl Comando for RegistrarSangria {
     type Saida = SangriaFoiRegistrada;
     const PERMISSAO: &'static str = "financeiro.caixa.sangria";
