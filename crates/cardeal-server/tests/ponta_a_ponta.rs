@@ -538,3 +538,60 @@ async fn despejo_poda_respostas_idempotentes_vencidas() {
     let lista: Vec<ItemPessoa> = clientes(&a.app, &t, a.empresa_ana).await.valor();
     assert_eq!(lista.len(), 2);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn dados_e_logo_da_empresa_pelo_despacho() {
+    let a = ambiente(Duration::from_secs(600));
+    let t = token(&a.app, "ana@x.com").await;
+    let consultar = |nome: &'static str| {
+        let app = a.app.clone();
+        let t = t.clone();
+        let empresa = a.empresa_ana;
+        async move {
+            chamar(
+                &app,
+                Method::POST,
+                &rota_consulta(empresa, nome),
+                Some(&t),
+                &[],
+                postcard::to_stdvec(&()).unwrap(),
+            )
+            .await
+        }
+    };
+    let dados: mod_empresa::EmpresaResumo = consultar("empresa.dados.v1").await.valor();
+    assert_eq!(dados.razao_social, "Loja da Ana");
+
+    let nao_png = mod_empresa::DefinirLogoEmpresa {
+        png: Some(b"GIF89a".to_vec()),
+    };
+    let r = comando(
+        &a.app,
+        &t,
+        a.empresa_ana,
+        "empresa.definir_logo.v1",
+        &nao_png,
+        Id::novo(),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    let mut png = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+    png.extend_from_slice(&[0; 32]);
+    let logo = mod_empresa::DefinirLogoEmpresa {
+        png: Some(png.clone()),
+    };
+    comando(
+        &a.app,
+        &t,
+        a.empresa_ana,
+        "empresa.definir_logo.v1",
+        &logo,
+        Id::novo(),
+    )
+    .await
+    .valor::<()>();
+    let identidade: mod_empresa::IdentidadeVisual =
+        consultar("empresa.identidade_visual.v1").await.valor();
+    assert_eq!(identidade.logo_png, Some(png));
+}

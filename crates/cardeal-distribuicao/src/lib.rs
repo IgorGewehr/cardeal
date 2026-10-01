@@ -14,6 +14,7 @@ use cardeal_modkit::{Modulo, PedidoAtivacao};
 #[must_use]
 pub fn modulos() -> Vec<&'static dyn Modulo> {
     vec![
+        &mod_empresa::ModuloEmpresa,
         &mod_financeiro::ModuloFinanceiro,
         &mod_clientes::ModuloClientes,
         &mod_estoque::ModuloEstoque,

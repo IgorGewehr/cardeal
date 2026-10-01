@@ -706,18 +706,15 @@ name = "cardeal-auth"
 version = "0.2.0"
 dependencies = [
  "argon2",
- "blake3",
  "cardeal-kernel",
  "cardeal-storage",
+ "getrandom 0.2.17",
  "rand 0.8.8",
- "rcgen",
  "rusqlite",
  "serde",
- "subtle",
  "tempfile",
  "thiserror 2.0.20",
  "tracing",
- "zeroize",
 ]
 
 [[package]]
@@ -775,6 +772,7 @@ dependencies = [
  "mod-agenda",
  "mod-clientes",
  "mod-compras",
+ "mod-empresa",
  "mod-estoque",
  "mod-financeiro",
  "mod-orcamentos",
@@ -807,6 +805,7 @@ dependencies = [
  "smallvec",
  "thiserror 2.0.20",
  "uuid",
+ "web-time",
 ]
 
 [[package]]
@@ -828,12 +827,10 @@ dependencies = [
 name = "cardeal-modkit"
 version = "0.2.0"
 dependencies = [
- "ahash",
  "cardeal-auth",
  "cardeal-kernel",
  "cardeal-ledger",
  "cardeal-storage",
- "indexmap",
  "postcard",
  "rusqlite",
  "serde",
@@ -846,13 +843,13 @@ dependencies = [
 name = "cardeal-motor"
 version = "0.2.0"
 dependencies = [
- "base64 0.22.1",
  "cardeal-auth",
  "cardeal-kernel",
  "cardeal-ledger",
  "cardeal-modkit",
  "cardeal-storage",
  "mod-clientes",
+ "mod-empresa",
  "mod-estoque",
  "mod-financeiro",
  "mod-os",
@@ -900,6 +897,7 @@ dependencies = [
  "libmimalloc-sys",
  "mimalloc",
  "mod-clientes",
+ "mod-empresa",
  "parking_lot",
  "postcard",
  "rand 0.8.8",
@@ -2299,8 +2297,6 @@ checksum = "07aa2048142242915a31d35844fb311e0e53fcca590c3a0a40dcf1b841fa09eb"
 dependencies = [
  "equivalent",
  "hashbrown 0.17.1",
- "serde",
- "serde_core",
 ]
 
 [[package]]
@@ -2800,6 +2796,21 @@ dependencies = [
  "smallvec",
  "thiserror 2.0.20",
  "tracing",
+]
+
+[[package]]
+name = "mod-empresa"
+version = "0.2.0"
+dependencies = [
+ "base64 0.22.1",
+ "cardeal-auth",
+ "cardeal-kernel",
+ "cardeal-modkit",
+ "cardeal-storage",
+ "postcard",
+ "rusqlite",
+ "serde",
+ "tempfile",
 ]
 
 [[package]]
@@ -3480,16 +3491,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
-name = "pem"
-version = "3.0.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d30c53c26bc5b31a98cd02d20f25a7c8567146caf63ed593a9d87b2775291be"
-dependencies = [
- "base64 0.22.1",
- "serde_core",
-]
-
-[[package]]
 name = "percent-encoding"
 version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3919,19 +3920,6 @@ name = "raw-window-handle"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "20675572f6f24e9e76ef639bc5552774ed45f1c30e2951e1e99c59888861c539"
-
-[[package]]
-name = "rcgen"
-version = "0.13.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "75e669e5202259b5314d1ea5397316ad400819437857b90861765f24c4cf80a2"
-dependencies = [
- "pem",
- "ring",
- "rustls-pki-types",
- "time",
- "yasna",
-]
 
 [[package]]
 name = "redox_syscall"
@@ -5886,15 +5874,6 @@ dependencies = [
  "serde_json",
  "toml",
  "walkdir",
-]
-
-[[package]]
-name = "yasna"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e17bb3549cc1321ae1296b9cdc2698e2b6cb1992adfa19a8c72e5b7a738f44cd"
-dependencies = [
- "time",
 ]
 
 [[package]]

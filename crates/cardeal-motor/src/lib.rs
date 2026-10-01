@@ -22,8 +22,7 @@ mod empresa;
 mod motor;
 mod plano;
 
-pub use acesso::{PapelResumo, UsuarioResumo};
-pub use empresa::{EmpresaResumo, IdentidadeVisual};
+pub use empresa::{EmpresaResumo, IdentidadeVisual, PapelResumo, UsuarioResumo};
 pub use motor::{MotorLocal, SessaoLocal};
 pub use plano::Plano;
 

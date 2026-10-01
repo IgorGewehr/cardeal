@@ -19,6 +19,7 @@ const CRATES: &[&str] = &[
     "cardeal-auth",
     "cardeal-modkit",
     "cardeal-ui",
+    "mod-empresa",
     "mod-financeiro",
     "mod-clientes",
     "mod-estoque",

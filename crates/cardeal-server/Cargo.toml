@@ -45,6 +45,7 @@ libmimalloc-sys = { version = "0.1", features = ["extended"] }
 tempfile.workspace  = true
 tower = { workspace = true, features = ["util"] }
 mod-clientes.workspace = true
+mod-empresa.workspace  = true
 serde.workspace    = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 mimalloc.workspace = true

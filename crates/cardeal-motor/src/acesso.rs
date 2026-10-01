@@ -1,5 +1,5 @@
-//! Usuários e papéis da empresa: listagens de Configurações, a autenticação por login/senha e
-//! a sessão de um usuário já autenticado por outro meio (a conta do servidor, ADR-0016).
+//! Autenticação por login/senha, a sessão de um usuário já autenticado por outro meio (a conta
+//! do servidor, ADR-0016) e a sincronização do papel de administrador.
 
 use std::collections::BTreeSet;
 
@@ -9,101 +9,7 @@ use cardeal_modkit::ConjuntoEfetivo;
 use cardeal_storage::{Armazenamento, ContextoEscrita, ErroArmazenamento};
 use rusqlite::OptionalExtension;
 
-use crate::motor::MotorLocal;
 use crate::{como_erro_armazenamento, erro_armazenamento};
-
-impl MotorLocal {
-    /// Todos os usuários cadastrados (id, login, nome, ativo). `id` existe desde sempre em
-    /// `nucleo_usuario` — só não era selecionado porque a tela de Configurações (única
-    /// consumidora até aqui) não precisava dele; o comprovante de OS precisa para resolver
-    /// `tecnico_responsavel`/`aprovado_por` num nome exibível.
-    ///
-    /// # Errors
-    /// Erro de leitura do armazenamento.
-    pub fn usuarios(&self) -> Resultado<Vec<UsuarioResumo>> {
-        self.arm
-            .leitor()
-            .consultar(|c| {
-                let mut stmt = c
-                    .prepare("SELECT id, login, nome, ativo FROM nucleo_usuario ORDER BY nome")
-                    .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))?;
-                let linhas = stmt
-                    .query_map([], |r| {
-                        let id_bytes = r.get::<_, Vec<u8>>(0)?;
-                        Ok(UsuarioResumo {
-                            id: <[u8; 16]>::try_from(id_bytes).map_or(Id::NULO, Id::de_bytes),
-                            login: r.get(1)?,
-                            nome: r.get(2)?,
-                            ativo: r.get::<_, i64>(3)? != 0,
-                        })
-                    })
-                    .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))?;
-                linhas
-                    .collect::<rusqlite::Result<Vec<_>>>()
-                    .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
-            })
-            .map_err(erro_armazenamento)
-    }
-
-    /// Os papéis da empresa (nome, descrição, nº de permissões).
-    ///
-    /// # Errors
-    /// Erro de leitura do armazenamento.
-    pub fn papeis(&self) -> Resultado<Vec<PapelResumo>> {
-        self.arm
-            .leitor()
-            .consultar(|c| {
-                let mut stmt = c
-                    .prepare(
-                        "SELECT p.nome, p.descricao, p.sistema,
-                                (SELECT COUNT(*) FROM nucleo_papel_permissao pp WHERE pp.papel = p.id)
-                         FROM nucleo_papel p
-                         ORDER BY p.sistema DESC, p.nome",
-                    )
-                    .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))?;
-                let linhas = stmt
-                    .query_map([], |r| {
-                        Ok(PapelResumo {
-                            nome: r.get(0)?,
-                            descricao: r.get::<_, Option<String>>(1)?.unwrap_or_default(),
-                            sistema: r.get::<_, i64>(2)? != 0,
-                            permissoes: usize::try_from(r.get::<_, i64>(3)?).unwrap_or(0),
-                        })
-                    })
-                    .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))?;
-                linhas
-                    .collect::<rusqlite::Result<Vec<_>>>()
-                    .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
-            })
-            .map_err(erro_armazenamento)
-    }
-}
-
-/// Um usuário, resumido para a lista de Configurações.
-#[derive(Debug, Clone)]
-pub struct UsuarioResumo {
-    /// Identidade.
-    pub id: Id,
-    /// Login.
-    pub login: String,
-    /// Nome.
-    pub nome: String,
-    /// Se está ativo.
-    pub ativo: bool,
-}
-
-/// Um papel, resumido para a lista de Configurações.
-#[derive(Debug, Clone)]
-pub struct PapelResumo {
-    /// Nome.
-    pub nome: String,
-    /// Descrição.
-    pub descricao: String,
-    /// Papel de fábrica (imutável).
-    pub sistema: bool,
-    /// Quantas permissões concede.
-    pub permissoes: usize,
-}
 
 /// Completa o papel "Administrador" da empresa com toda permissão do catálogo atual que
 /// ainda não esteja nele. Idempotente: se nada falta, não escreve. Só adiciona — uma
