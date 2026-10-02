@@ -188,3 +188,64 @@ fn resposta_perdida_e_reenviada_com_a_mesma_chave_sem_duplicar() {
         .unwrap();
     assert_eq!(clientes(&r).len(), 1);
 }
+
+#[test]
+fn desktop_acompanha_em_tempo_real_o_que_outra_sessao_faz() {
+    use cardeal_cliente::remoto::AvisoTempoReal;
+    use std::time::{Duration, Instant};
+
+    let (_p, base) = servidor();
+    let entrar = || {
+        let mut r = Remoto::entrar(
+            Box::new(TransporteHttp::novo(&base).unwrap()),
+            "ana@x.com",
+            SENHA,
+        )
+        .unwrap();
+        let empresa = r
+            .empresas()
+            .iter()
+            .find(|e| e.nome == "Loja da Ana")
+            .unwrap()
+            .id;
+        r.escolher_empresa(empresa).unwrap();
+        r
+    };
+    let caixa = entrar();
+    let balcao = entrar();
+
+    let acordou = std::sync::Arc::new(AtomicU32::new(0));
+    let a = std::sync::Arc::clone(&acordou);
+    let assinatura = caixa
+        .acompanhar(move || {
+            a.fetch_add(1, Ordering::Relaxed);
+        })
+        .unwrap();
+    // Dá tempo de o fluxo conectar antes do comando (o que viesse antes seria só "pronto").
+    std::thread::sleep(Duration::from_millis(300));
+
+    let inicio = Instant::now();
+    balcao
+        .executar("clientes.criar_pessoa.v1", &pessoa("Gabi"))
+        .unwrap();
+    let aviso = loop {
+        if let Some(a) = assinatura.drenar().into_iter().next() {
+            break a;
+        }
+        assert!(
+            inicio.elapsed() < Duration::from_secs(5),
+            "o aviso não chegou"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    assert!(aviso.afeta("clientes"), "{aviso:?}");
+    assert_ne!(aviso, AvisoTempoReal::SessaoEncerrada);
+    assert!(
+        acordou.load(Ordering::Relaxed) >= 1,
+        "a interface é acordada"
+    );
+    println!("aviso em {:?}", inicio.elapsed());
+
+    // O logout derruba o fluxo no próximo batimento; aqui basta soltar a assinatura.
+    drop(assinatura);
+}

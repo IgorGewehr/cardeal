@@ -52,6 +52,9 @@ enum Acao {
         /// Máximo de empresas abertas ao mesmo tempo.
         #[arg(long, env = "CARDEAL_TETO_EMPRESAS", default_value_t = 256)]
         teto_empresas: usize,
+        /// Máximo de conexões de tempo real (SSE) simultâneas.
+        #[arg(long, env = "CARDEAL_TETO_TEMPO_REAL", default_value_t = 20_000)]
+        teto_tempo_real: usize,
         /// Usar `CF-Connecting-IP` como IP do cliente. Só ligue se o servidor for alcançável
         /// **apenas** pelo Cloudflare Tunnel.
         #[arg(long, env = "CARDEAL_CONFIAR_CLOUDFLARE", default_value_t = false)]
@@ -126,6 +129,7 @@ fn main() -> anyhow::Result<()> {
             trabalhadores,
             ociosidade_min,
             teto_empresas,
+            teto_tempo_real,
             confiar_cloudflare,
             web,
             backup_min,
@@ -135,6 +139,7 @@ fn main() -> anyhow::Result<()> {
             let mut config = ConfigServidor::em(cli.dados);
             config.ociosidade = Duration::from_secs(ociosidade_min * 60);
             config.teto_empresas = teto_empresas;
+            config.teto_tempo_real = teto_tempo_real;
             config.confiar_cloudflare = confiar_cloudflare;
             config.web = web;
             config.token_metricas = metricas_token.filter(|t| !t.trim().is_empty());

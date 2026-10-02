@@ -939,6 +939,7 @@ dependencies = [
  "cardeal-protocol",
  "cardeal-storage",
  "clap",
+ "futures-util",
  "libmimalloc-sys",
  "mimalloc",
  "mod-clientes",

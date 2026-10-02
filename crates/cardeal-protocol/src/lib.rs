@@ -25,7 +25,8 @@ mod rotas;
 mod sessao;
 
 pub use rotas::{
-    rota_comando, rota_consulta, rota_membro, rota_membros, rota_sessao_empresa, ROTA_SAUDE,
+    modulos_alterados, rota_comando, rota_consulta, rota_eventos, rota_membro, rota_membros,
+    rota_sessao_empresa, EVENTO_MUDOU, EVENTO_RECARREGAR, EVENTO_SESSAO_ENCERRADA, ROTA_SAUDE,
     ROTA_SENHA, ROTA_SESSAO,
 };
 pub use sessao::{

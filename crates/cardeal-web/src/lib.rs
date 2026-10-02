@@ -17,6 +17,8 @@ mod app;
 mod rede;
 #[cfg(target_arch = "wasm32")]
 mod telas;
+#[cfg(target_arch = "wasm32")]
+mod tempo_real;
 
 /// Liga o app ao `<canvas id="cardeal">` da página.
 ///

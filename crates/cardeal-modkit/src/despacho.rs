@@ -404,6 +404,8 @@ impl Despachante {
             }
             let resposta = executor(&ctx, uow, &carga)?;
             uow.gravar_resposta_idempotente(&nome, &resposta)?;
+            // Toda alteração entra no fluxo de tempo real, na mesma transação.
+            uow.registrar_alteracao(&nome)?;
             Ok(resposta)
         };
         match escritor.executar(cte, trabalho) {

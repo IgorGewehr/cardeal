@@ -65,14 +65,17 @@ pub(super) async fn comando(
     let token = exigir_token(&headers)?;
     let chave = chave(&headers)?;
     let empresa = empresa_da_rota(&empresa)?;
-    bloqueante(move || {
-        let (aberta, sessao) = entrar_na_empresa(&servidor, &token, empresa)?;
+    let s = Arc::clone(&servidor);
+    let saida = bloqueante(move || {
+        let (aberta, sessao) = entrar_na_empresa(&s, &token, empresa)?;
         aberta
             .motor()
             .executar_bruto(&sessao, &nome, &corpo, Some(chave))
     })
-    .await
-    .map(Postcard)
+    .await?;
+    // Já confirmado e no outbox: acorda quem acompanha a empresa (ver `tempo_real`).
+    servidor.tempo_real.avisar(empresa);
+    Ok(Postcard(saida))
 }
 
 pub(super) async fn consulta(

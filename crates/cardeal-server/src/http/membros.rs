@@ -92,6 +92,7 @@ pub(super) async fn adicionar(
         })
     })
     .await?;
+    servidor.tempo_real.avisar(empresa);
     Ok(postcard(&feito)?.into_response())
 }
 
@@ -128,5 +129,6 @@ pub(super) async fn remover(
         Ok(())
     })
     .await?;
+    servidor.tempo_real.avisar(empresa);
     Ok(StatusCode::NO_CONTENT.into_response())
 }

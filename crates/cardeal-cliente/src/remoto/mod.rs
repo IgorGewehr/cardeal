@@ -2,6 +2,7 @@
 //!
 //! - [`protocolo`] monta pedidos e lê respostas, sem I/O — serve ao desktop e ao navegador.
 //! - [`Remoto`] é o cliente **síncrono** do desktop, sobre um [`Transporte`].
+//! - [`tempo_real`] lê o fluxo de alterações; [`Remoto::acompanhar`] o mantém conectado.
 //!
 //! Queda de rede é rotina: um pedido que não chegou (ou cuja resposta não voltou) é reenviado
 //! até [`TENTATIVAS`] vezes. Para comando isso é seguro porque toda tentativa leva a **mesma**
@@ -9,6 +10,10 @@
 //! a resposta original em vez de vender duas vezes.
 
 pub mod protocolo;
+pub mod tempo_real;
+
+#[cfg(not(target_arch = "wasm32"))]
+mod acompanhamento;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod nativo;
@@ -24,8 +29,11 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 #[cfg(not(target_arch = "wasm32"))]
+pub use acompanhamento::Assinatura;
+#[cfg(not(target_arch = "wasm32"))]
 pub use nativo::TransporteHttp;
 pub use protocolo::{Metodo, Pedido, Resposta};
+pub use tempo_real::{AvisoTempoReal, LeitorSse};
 
 /// Quantas vezes um pedido é tentado antes de desistir com `SEM_CONEXAO`.
 pub const TENTATIVAS: u32 = 3;
@@ -38,6 +46,29 @@ pub trait Transporte: Send + Sync {
     /// # Errors
     /// A descrição da falha de rede.
     fn enviar(&self, pedido: &Pedido, token: Option<&str>) -> Result<Resposta, String>;
+
+    /// Abre o fluxo de tempo real (um `GET` que não termina) em `caminho`, continuando de
+    /// `ultimo_id`. O padrão é não ter: um transporte de teste não precisa.
+    ///
+    /// # Errors
+    /// A descrição da falha de rede.
+    fn abrir_fluxo(
+        &self,
+        caminho: &str,
+        token: Option<&str>,
+        ultimo_id: Option<u64>,
+    ) -> Result<Fluxo, String> {
+        let _ = (caminho, token, ultimo_id);
+        Err("este transporte não acompanha alterações".into())
+    }
+}
+
+/// O resultado de [`Transporte::abrir_fluxo`].
+pub enum Fluxo {
+    /// Conectado: os bytes do `text/event-stream`.
+    Aberto(Box<dyn std::io::Read + Send>),
+    /// O servidor recusou (sessão, permissão, versão) — a resposta de erro.
+    Recusado(Resposta),
 }
 
 /// O que a conta pode fazer numa empresa — espelho, para a interface, do que o servidor decide.
@@ -72,7 +103,7 @@ impl From<InfoSessao> for SessaoRemota {
 
 /// Uma conexão autenticada com o servidor.
 pub struct Remoto {
-    transporte: Box<dyn Transporte>,
+    transporte: std::sync::Arc<dyn Transporte>,
     token: String,
     nome: String,
     empresas: Vec<EmpresaAcessivel>,
@@ -107,7 +138,7 @@ impl Remoto {
             )
         })?;
         Ok(Self {
-            transporte,
+            transporte: transporte.into(),
             token,
             nome: login.nome,
             empresa: (login.empresas.len() == 1).then(|| login.empresas[0].id),

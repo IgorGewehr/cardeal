@@ -126,7 +126,12 @@ shell e no `ps`). Um e-mail que já tem conta ganha acesso à empresa nova sem t
 - **Desligar:** `SIGTERM` (o padrão de `docker stop`) termina as requisições em curso e fecha
   cada base com o lote final confirmado.
 - **Manutenção** (a cada minuto, sozinha): fecha empresas ociosas, poda respostas idempotentes
-  com mais de 7 dias, apaga sessões vencidas.
+  e alterações do tempo real com mais de 7 dias, apaga sessões vencidas.
+- **Tempo real:** `GET /v1/e/{empresa}/eventos?v=1` (SSE, ADR-0016). Atrás do Cloudflare
+  funciona sem ajuste (batimento a cada 25 s; resposta sem compressão e com
+  `Cache-Control: no-cache, no-transform`). Num nginx na frente, desligue o buffer
+  (`proxy_buffering off`; o servidor já manda `X-Accel-Buffering: no`). Teto:
+  `CARDEAL_TETO_TEMPO_REAL` (20 000); medidor `cardeal_tempo_real_conexoes`.
 - **Métricas:** `GET /metricas` (com `CARDEAL_METRICAS_TOKEN`): requisições e erros por
   tipo (comando, consulta, sessão, estático), histograma de latência, logins recusados,
   bloqueios por IP, empresas abertas, sessões em cache e RSS do processo. Custo no caminho

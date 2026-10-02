@@ -32,7 +32,11 @@ impl Estado {
         e
     }
 
-    fn recarregar(&mut self, ctx: &egui::Context) {
+    /// Pede a lista de novo (F5, ou um aviso de tempo real). Um pedido em curso basta.
+    pub fn recarregar(&mut self, ctx: &egui::Context) {
+        if self.carregando.is_some() {
+            return;
+        }
         let carga = protocolo::carga(&PessoasPorPapel {
             papel: Papel::Cliente,
             busca: None,
@@ -66,7 +70,7 @@ pub fn mostrar(ui: &mut egui::Ui, e: &mut Estado) {
             .add(Botao::secundario("Atualizar").atalho("F5"))
             .clicked();
     });
-    if recarregar && e.carregando.is_none() {
+    if recarregar {
         e.recarregar(ui.ctx());
     }
     ui.add_space(Espaco::E16);

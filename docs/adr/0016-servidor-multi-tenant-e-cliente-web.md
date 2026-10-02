@@ -80,11 +80,46 @@ desktop nativo ────────┼─ HTTPS ─ Cloudflare ─ VPS: card
 | `DELETE /v1/sessao` | logout |
 | `POST /v1/e/{empresa}/cmd/{nome}` | comando; corpo = carga `postcard`; `Idempotency-Key` obrigatório |
 | `POST /v1/e/{empresa}/qry/{nome}` | consulta; corpo = carga `postcard` |
+| `GET /v1/e/{empresa}/eventos?v=1` | tempo real (SSE): quais módulos mudaram — ver abaixo |
 | `GET /saude` | prontidão |
 
 A resposta é a saída em `postcard` (200) ou um `cardeal_kernel::Erro` em `postcard` com o status
 HTTP derivado da faixa do código (1xxx→422, 2xxx→409/404, 3xxx→401/403, 4xxx→409, 5xxx→503).
 Não existe tipo de erro paralelo para a rede: é o mesmo `Erro` que a tela já sabe mostrar.
+
+### Tempo real (adendo de 2026-10-02)
+
+O **outbox é a verdade; o sinal é só um despertador.** O despachante grava toda alteração
+confirmada no `nucleo_outbox` na mesma transação do comando (`registrar_alteracao`, além dos
+eventos de domínio). Depois de responder, o servidor toca um `watch` da empresa (só existe se
+alguém acompanha). Cada conexão SSE acordada relê o outbox do seu último `seq` e manda
+`event: mudou` + `data: os,financeiro` (só módulos em que o usuário tem permissão) com
+`id: <seq>`. **Nunca manda dados:** a tela recarrega pela consulta de sempre, com a
+autorização de sempre.
+
+- Reconexão continua do `Last-Event-ID` (o navegador devolve sozinho). Ponto podado ou de outra
+  base vira `event: recarregar` — nunca uma tela velha em silêncio.
+- Batimento a cada 25 s (abaixo dos 100 s do Cloudflare), que revalida a sessão **sem abrir a
+  empresa**: uma conexão parada não segura base na memória. Sessão caída vira
+  `sessao_encerrada`.
+- Teto de conexões (`CARDEAL_TETO_TEMPO_REAL`, 20 000), medidor
+  `cardeal_tempo_real_conexoes`. SSE fica fora da compressão (o compressor seguraria o fluxo).
+- Poda do outbox junto com a das respostas idempotentes (7 dias): no despejo da empresa no
+  servidor, na abertura no desktop.
+- Cliente: `remoto::tempo_real` (sem I/O: `AvisoTempoReal`, `LeitorSse`), `Remoto::acompanhar`
+  no desktop (thread com recuo até 30 s) e `EventSource` no navegador.
+- Medido: aviso entregue ao outro cliente em ~16 ms pela rede local, incluindo o comando.
+
+Por que SSE e não WebSocket: o fluxo é só servidor → cliente; SSE passa por qualquer proxy,
+reconecta e retoma do `Last-Event-ID` sozinho no navegador, e os comandos continuam no HTTP
+com idempotência.
+
+### Listas grandes (adendo de 2026-10-02)
+
+Nenhuma lista é cortada em silêncio: as `.v1` completas têm teto de segurança
+`TETO_LISTA_COMPLETA` (50 000); para a rede existem `.v2` paginadas por cursor (keyset, nunca
+OFFSET: `Pagina<T>`/`PedidoPagina`, 60 por página, teto 500, total na primeira página, busca
+no servidor). Financeiro: a primeira página traz também a soma dos saldos do filtro inteiro.
 
 ### Orçamento de memória
 

@@ -194,6 +194,9 @@ impl Frota {
             if let Err(erro) = e.motor.podar_idempotencia(idempotencia_antes_de) {
                 tracing::warn!(empresa = %e.motor.empresa(), erro = %erro.mensagem, "poda de idempotência falhou");
             }
+            if let Err(erro) = e.motor.podar_alteracoes(idempotencia_antes_de) {
+                tracing::warn!(empresa = %e.motor.empresa(), erro = %erro.mensagem, "poda do outbox falhou");
+            }
         }
         drop(despejadas);
         if n > 0 {

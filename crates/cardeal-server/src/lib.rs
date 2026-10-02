@@ -28,6 +28,7 @@ mod metricas;
 pub mod provisionamento;
 pub mod restauracao;
 pub mod sessoes;
+pub mod tempo_real;
 mod token;
 
 use std::sync::Arc;
@@ -53,6 +54,7 @@ pub struct Servidor {
     logins: tokio::sync::Semaphore,
     limitador: limitador::LimitadorLogin,
     metricas: metricas::Metricas,
+    tempo_real: tempo_real::TempoReal,
 }
 
 impl Servidor {
@@ -77,6 +79,7 @@ impl Servidor {
                 100_000,
             ),
             metricas: metricas::Metricas::default(),
+            tempo_real: tempo_real::TempoReal::novo(config.teto_tempo_real),
             config,
             plano,
             diretorio,
@@ -117,6 +120,7 @@ impl Servidor {
         self.frota
             .despejar_ociosas(Instante::agora().mais_segundos(-retencao));
         self.limitador.podar();
+        self.tempo_real.podar();
         if let Err(e) = self.diretorio.limpar_sessoes_expiradas(Instante::agora()) {
             tracing::warn!(erro = %e.mensagem, "limpeza de sessões falhou");
         }

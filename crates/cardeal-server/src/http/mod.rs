@@ -3,6 +3,7 @@
 mod camadas;
 mod credencial;
 mod despacho;
+mod eventos;
 mod membros;
 mod origem;
 mod resposta;
@@ -46,7 +47,10 @@ pub fn roteador(servidor: Arc<Servidor>) -> Router {
         .route("/v1/e/:empresa/sessao", get(despacho::sessao))
         .route("/v1/e/:empresa/membros", post(membros::adicionar))
         .route("/v1/e/:empresa/membros/:usuario", delete(membros::remover))
-        .layer(middleware::from_fn(exigir_protocolo));
+        .layer(middleware::from_fn(exigir_protocolo))
+        // Fora do `exigir_protocolo`: o `EventSource` não manda cabeçalho próprio (a versão
+        // vem em `?v=`), e um GET sem efeito não precisa da defesa de CORS do cabeçalho.
+        .route("/v1/e/:empresa/eventos", get(eventos::eventos));
     let mut app = Router::new()
         .route(ROTA_SAUDE, get(saude))
         .route("/metricas", get(camadas::metricas))
@@ -59,7 +63,12 @@ pub fn roteador(servidor: Arc<Servidor>) -> Router {
     // já tem `Content-Encoding`.
     let compressao = CompressionLayer::new()
         .quality(CompressionLevel::Fastest)
-        .compress_when(SizeAbove::new(1024).and(NotForContentType::IMAGES));
+        .compress_when(
+            SizeAbove::new(1024)
+                .and(NotForContentType::IMAGES)
+                // SSE comprimido ficaria preso no buffer do compressor até encher.
+                .and(NotForContentType::const_new("text/event-stream")),
+        );
     app.layer(compressao)
         .layer(DefaultBodyLimit::max(TETO_CORPO_BYTES))
         .layer(TimeoutLayer::with_status_code(

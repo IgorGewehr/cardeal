@@ -3,7 +3,7 @@
 
 use std::collections::BTreeSet;
 
-use cardeal_cliente::remoto::protocolo;
+use cardeal_cliente::remoto::{protocolo, AvisoTempoReal};
 use cardeal_modkit::Icone;
 use cardeal_protocol::{EmpresaAcessivel, InfoSessao};
 use cardeal_ui::atoms::Botao;
@@ -13,6 +13,7 @@ use cardeal_ui::tokens::{Espaco, Tema};
 use super::{clientes, conta, equipe, login};
 use crate::app::Tela;
 use crate::rede::disparar_sem_corpo;
+use crate::tempo_real::Acompanhamento;
 
 /// A área de trabalho.
 pub struct Estado {
@@ -21,6 +22,8 @@ pub struct Estado {
     clientes: clientes::Estado,
     equipe: Option<equipe::Estado>,
     conta: conta::Estado,
+    /// O que os outros fazem na empresa aparece sozinho (`None`: navegador sem `EventSource`).
+    tempo_real: Option<Acompanhamento>,
 }
 
 impl Estado {
@@ -36,6 +39,7 @@ impl Estado {
         });
         Self {
             clientes: clientes::Estado::novo(ctx, empresa.clone()),
+            tempo_real: Acompanhamento::abrir(ctx, empresa.id),
             empresa,
             area: "clientes",
             equipe,
@@ -46,6 +50,24 @@ impl Estado {
 
 /// Desenha; devolve o login quando a pessoa sai.
 pub fn mostrar(ctx: &egui::Context, e: &mut Estado) -> Option<Tela> {
+    for aviso in e
+        .tempo_real
+        .as_ref()
+        .map(Acompanhamento::drenar)
+        .unwrap_or_default()
+    {
+        if aviso == AvisoTempoReal::SessaoEncerrada {
+            return Some(Tela::Login(login::Estado::default()));
+        }
+        if aviso.afeta("clientes") {
+            e.clientes.recarregar(ctx);
+        }
+        if aviso.afeta("empresa") {
+            if let Some(eq) = e.equipe.as_mut() {
+                eq.recarregar(ctx);
+            }
+        }
+    }
     let mut itens = vec![ItemSidebar {
         id: "clientes",
         icone: Icone::Pessoas,

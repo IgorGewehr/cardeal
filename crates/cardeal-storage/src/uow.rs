@@ -141,6 +141,27 @@ impl<'a> UnidadeDeTrabalho<'a> {
         Ok(())
     }
 
+    /// Registra que **algo mudou** (o nome do comando que mudou): uma linha leve no outbox, na
+    /// mesma transação, sem carga. É o que garante que o tempo real (ADR-0016) saiba de toda
+    /// alteração — não só das que publicam um evento de domínio próprio.
+    ///
+    /// # Errors
+    /// Falha do SQLite.
+    pub fn registrar_alteracao(&mut self, tipo: &str) -> Resultado<()> {
+        self.conn
+            .execute(
+                "INSERT INTO nucleo_outbox (empresa, tipo, agregado, carga, criado_em)
+                 VALUES (?1, ?2, NULL, X'', ?3)",
+                rusqlite::params![
+                    sql::blob(self.ctx.empresa),
+                    tipo,
+                    self.ctx.agora.em_micros()
+                ],
+            )
+            .map_err(ErroArmazenamento::sqlite)?;
+        Ok(())
+    }
+
     /// Registra uma ação na auditoria encadeada por hash (`docs/06-modelo-de-dados.md` §2.1).
     ///
     /// # Errors

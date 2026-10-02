@@ -88,7 +88,11 @@ pub(super) async fn metricas(
     }
     let s = Arc::clone(&servidor);
     let texto = tokio::task::spawn_blocking(move || {
-        s.metricas.exportar(s.frota.abertas(), s.sessoes.em_cache())
+        s.metricas.exportar(
+            s.frota.abertas(),
+            s.sessoes.em_cache(),
+            s.tempo_real.conexoes(),
+        )
     })
     .await
     .unwrap_or_default();

@@ -363,6 +363,13 @@ API comprimidas; `cardeal-server saude` + `HEALTHCHECK`; imagem publicada no GHC
 674 testes. **As telas de negócio no navegador ficaram para outro momento** (decisão do
 usuário em 2026-10-02).
 
+**Disponibilidade, listas e tempo real (2026-10-02, branch `feat/disponibilidade-tempo-real`):**
+replicação contínua do WAL (perda máxima = último commit; `cardeal-server restaurar --de`);
+nenhuma lista cortada em silêncio (`TETO_LISTA_COMPLETA`) e `.v2` paginadas por cursor em
+clientes, estoque, OS e financeiro; tempo real por SSE a partir do outbox (adendos na
+ADR-0016). Desktop remoto (`Remoto::acompanhar`) e navegador (`EventSource`) já reagem. 698
+testes. **Ainda não:** as telas do desktop migrarem para as `.v2` (aí as `.v1` saem).
+
 **Para decidir com o usuário:** o plano das telas assíncronas em `docs/20-cliente-web.md` §3
 (muda as telas do desktop, em uso real). **Otimizações medidas em espera:** escritor sem
 thread dedicada por empresa; fontes de reserva do egui no web (§4 do doc 20).

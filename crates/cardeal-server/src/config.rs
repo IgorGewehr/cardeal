@@ -21,6 +21,8 @@ pub struct ConfigServidor {
     pub ociosidade: Duration,
     /// Máximo de empresas abertas ao mesmo tempo; acima disso, a menos usada é despejada.
     pub teto_empresas: usize,
+    /// Máximo de conexões de tempo real (SSE) simultâneas — cada uma custa alguns KB.
+    pub teto_tempo_real: usize,
     /// Quantos logins (Argon2id, 19 MiB cada) podem rodar ao mesmo tempo — o pico de RAM de
     /// hash fica fixo, não cresce com a carga.
     pub logins_simultaneos: usize,
@@ -35,6 +37,8 @@ pub struct ConfigServidor {
     pub confiar_cloudflare: bool,
     /// Por quanto tempo uma resposta idempotente é guardada (reenvios depois disso executam de
     /// novo). Reenvio por queda de rede acontece em segundos; uma semana é folga de sobra.
+    /// Vale também para as alterações do tempo real: um cliente desconectado por mais que
+    /// isso recebe "recarregar" em vez da lista do que perdeu.
     pub retencao_idempotencia: Duration,
     /// A pasta do cliente do navegador (`cargo xtask construir-web` → `dist/web`). `None`: o
     /// servidor só atende a API.
@@ -54,6 +58,7 @@ impl ConfigServidor {
             dados: dados.into(),
             ociosidade: Duration::from_secs(10 * 60),
             teto_empresas: 256,
+            teto_tempo_real: 20_000,
             logins_simultaneos: 2,
             validade_sessao: Duration::from_secs(14 * 24 * 60 * 60),
             logins_por_ip: 30,

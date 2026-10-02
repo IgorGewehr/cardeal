@@ -34,7 +34,9 @@ impl Tipo {
     ];
 
     pub(crate) fn de_caminho(caminho: &str) -> Self {
-        if caminho.starts_with("/v1/e/") {
+        if caminho.starts_with("/v1/e/") && caminho.ends_with("/eventos") {
+            Self::Outro
+        } else if caminho.starts_with("/v1/e/") {
             if caminho.contains("/cmd/") {
                 Self::Comando
             } else {
@@ -104,7 +106,12 @@ impl Metricas {
     }
 
     /// O texto do Prometheus, com os medidores instantâneos que só o chamador conhece.
-    pub(crate) fn exportar(&self, empresas_abertas: usize, sessoes_em_cache: usize) -> String {
+    pub(crate) fn exportar(
+        &self,
+        empresas_abertas: usize,
+        sessoes_em_cache: usize,
+        conexoes_tempo_real: usize,
+    ) -> String {
         let mut o = String::with_capacity(4096);
         let _ = writeln!(o, "# TYPE cardeal_requisicoes_total counter");
         let _ = writeln!(o, "# TYPE cardeal_requisicoes_erros_total counter");
@@ -159,6 +166,8 @@ impl Metricas {
         );
         let _ = writeln!(o, "# TYPE cardeal_empresas_abertas gauge");
         let _ = writeln!(o, "cardeal_empresas_abertas {empresas_abertas}");
+        let _ = writeln!(o, "# TYPE cardeal_tempo_real_conexoes gauge");
+        let _ = writeln!(o, "cardeal_tempo_real_conexoes {conexoes_tempo_real}");
         let _ = writeln!(o, "# TYPE cardeal_sessoes_em_cache gauge");
         let _ = writeln!(o, "cardeal_sessoes_em_cache {sessoes_em_cache}");
         if let Some(rss) = memoria_residente() {
@@ -199,11 +208,12 @@ mod testes {
         let m = Metricas::default();
         m.registrar(Tipo::Consulta, 200, Duration::from_micros(300));
         m.registrar(Tipo::Consulta, 503, Duration::from_millis(30));
-        let t = m.exportar(3, 7);
+        let t = m.exportar(3, 7, 2);
         assert!(t.contains("cardeal_requisicoes_total{tipo=\"consulta\"} 2"));
         assert!(t.contains("cardeal_requisicoes_erros_total{tipo=\"consulta\",classe=\"5xx\"} 1"));
         assert!(t.contains("cardeal_requisicao_segundos_bucket{tipo=\"consulta\",le=\"0.0005\"} 1"));
         assert!(t.contains("cardeal_requisicao_segundos_bucket{tipo=\"consulta\",le=\"0.05\"} 2"));
         assert!(t.contains("cardeal_empresas_abertas 3"));
+        assert!(t.contains("cardeal_tempo_real_conexoes 2"));
     }
 }

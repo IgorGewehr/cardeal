@@ -40,3 +40,29 @@ pub fn rota_membros(empresa: Id) -> String {
 pub fn rota_membro(empresa: Id, usuario: Id) -> String {
     format!("/v1/e/{empresa}/membros/{usuario}")
 }
+
+/// O fluxo de alterações da empresa (`GET`, `text/event-stream`): `/v1/e/{empresa}/eventos`.
+///
+/// O `EventSource` do navegador não manda cabeçalhos próprios, então a versão do protocolo
+/// vai na consulta (`?v=`). Cada evento [`EVENTO_MUDOU`] traz no `data` os módulos que
+/// mudaram, separados por vírgula, e no `id` o ponto para continuar (o navegador o devolve
+/// sozinho em `Last-Event-ID` ao reconectar). [`EVENTO_RECARREGAR`] diz que o ponto se
+/// perdeu: recarregue tudo o que está na tela.
+#[must_use]
+pub fn rota_eventos(empresa: Id) -> String {
+    format!("/v1/e/{empresa}/eventos?v={}", crate::VERSAO)
+}
+
+/// Alguns módulos mudaram (`data` = `os,financeiro`).
+pub const EVENTO_MUDOU: &str = "mudou";
+
+/// O cliente perdeu o fio (podado ou de outra base): recarregar tudo.
+pub const EVENTO_RECARREGAR: &str = "recarregar";
+
+/// A sessão caiu (logout, acesso removido): o fluxo termina.
+pub const EVENTO_SESSAO_ENCERRADA: &str = "sessao_encerrada";
+
+/// Os módulos de um evento [`EVENTO_MUDOU`].
+pub fn modulos_alterados(data: &str) -> impl Iterator<Item = &str> {
+    data.split(',').map(str::trim).filter(|m| !m.is_empty())
+}

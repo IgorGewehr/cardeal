@@ -18,10 +18,12 @@
 #![allow(clippy::result_large_err)] // `Erro`/`ErroArmazenamento` são grandes de propósito (detalhes ao usuário)
 
 mod acesso;
+mod alteracoes;
 mod empresa;
 mod motor;
 mod plano;
 
+pub use alteracoes::Alteracoes;
 pub use empresa::{EmpresaResumo, IdentidadeVisual, PapelResumo, UsuarioResumo};
 pub use motor::{MotorLocal, SessaoLocal};
 pub use plano::Plano;

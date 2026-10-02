@@ -103,7 +103,14 @@ impl Motor {
         modulos: &[&dyn cardeal_modkit::Modulo],
         pedido: &cardeal_modkit::PedidoAtivacao,
     ) -> Resultado<Self> {
-        MotorLocal::abrir(caminho, modulos, pedido).map(Self::Local)
+        let motor = MotorLocal::abrir(caminho, modulos, pedido)?;
+        // Faxina do monoposto ao abrir (no servidor ela roda no despejo da empresa): respostas
+        // idempotentes e alterações do tempo real com mais de uma semana. Falhar aqui não
+        // impede ninguém de trabalhar — tenta de novo na próxima abertura.
+        let semana = cardeal_kernel::Instante::agora().mais_segundos(-7 * 24 * 60 * 60);
+        let _ = motor.podar_idempotencia(semana);
+        let _ = motor.podar_alteracoes(semana);
+        Ok(Self::Local(motor))
     }
 
     /// Verdadeiro se a base local ainda não tem empresa (assistente de primeiro acesso). No
