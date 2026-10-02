@@ -19,6 +19,12 @@ const PERMISSOES: &[Permissao] = &[
         requer_submodulo: None,
     },
     Permissao {
+        chave: "empresa.usuarios.gerenciar",
+        descricao: "Adicionar e desativar usuários da empresa",
+        risco: Risco::Alto,
+        requer_submodulo: None,
+    },
+    Permissao {
         chave: "empresa.usuarios.ver",
         descricao: "Ver usuários e papéis",
         risco: Risco::Baixo,

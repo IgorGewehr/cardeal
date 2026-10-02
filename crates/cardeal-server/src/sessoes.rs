@@ -100,6 +100,11 @@ impl Sessoes {
         }
     }
 
+    /// Esquece todas as sessões em cache de uma conta (vínculo desfeito: recarrega já).
+    pub(crate) fn esquecer_conta(&self, conta: Id) {
+        self.cache.write().retain(|_, s| s.conta != conta);
+    }
+
     /// Esquece um token (logout).
     pub fn esquecer(&self, token: &str) {
         self.cache.write().remove(&token::hash(token));

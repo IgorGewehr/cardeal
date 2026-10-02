@@ -104,7 +104,7 @@ impl Papel {
 }
 
 /// Os papéis de fábrica de `docs/08 §3.2`. Imutáveis; servem de base para cópias.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum PapelDeFabrica {
     /// Dono / TI — tudo, inclusive reabrir período.
     Administrador,

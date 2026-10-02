@@ -57,6 +57,15 @@ impl EmpresaAberta {
     }
 }
 
+impl EmpresaAberta {
+    /// Esquece as sessões montadas de um usuário (desativado: o acesso cai já, não em 60 s).
+    pub fn esquecer_usuario(&self, usuario: Id) {
+        self.sessoes
+            .lock()
+            .retain(|_, (s, _)| s.usuario() != usuario);
+    }
+}
+
 struct Vaga {
     aberta: Mutex<Option<Arc<EmpresaAberta>>>,
     /// Milissegundos desde o início da frota — barato de tocar sem lock.

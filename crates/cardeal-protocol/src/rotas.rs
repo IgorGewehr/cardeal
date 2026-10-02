@@ -28,3 +28,15 @@ pub fn rota_consulta(empresa: Id, nome: &str) -> String {
 pub fn rota_sessao_empresa(empresa: Id) -> String {
     format!("/v1/e/{empresa}/sessao")
 }
+
+/// Os membros de uma empresa (`POST` adiciona): `/v1/e/{empresa}/membros`.
+#[must_use]
+pub fn rota_membros(empresa: Id) -> String {
+    format!("/v1/e/{empresa}/membros")
+}
+
+/// Um membro (`DELETE` desativa e desvincula): `/v1/e/{empresa}/membros/{usuario}`.
+#[must_use]
+pub fn rota_membro(empresa: Id, usuario: Id) -> String {
+    format!("/v1/e/{empresa}/membros/{usuario}")
+}

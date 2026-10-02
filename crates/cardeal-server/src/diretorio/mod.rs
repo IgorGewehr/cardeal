@@ -307,6 +307,26 @@ impl Diretorio {
             .map_err(|e| falha(&e))
     }
 
+    /// Desfaz o vínculo do `usuario` com a `empresa`. Devolve a conta que estava vinculada.
+    ///
+    /// # Errors
+    /// Falha do SQLite.
+    pub fn desvincular(&self, empresa: Id, usuario: Id) -> Resultado<Option<Id>> {
+        self.conn
+            .lock()
+            .query_row(
+                "DELETE FROM vinculo WHERE empresa = ?1 AND usuario = ?2 RETURNING conta",
+                params![empresa.em_bytes().as_slice(), usuario.em_bytes().as_slice()],
+                |r| r.get::<_, Vec<u8>>(0),
+            )
+            .optional()
+            .map_err(|e| falha(&e))
+            .map(|c| {
+                c.and_then(|b| <[u8; 16]>::try_from(b).ok())
+                    .map(Id::de_bytes)
+            })
+    }
+
     /// As empresas **ativas** em que a conta entra.
     ///
     /// # Errors

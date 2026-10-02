@@ -7,6 +7,7 @@ use cardeal_storage::ConjuntoMigracoes;
 use crate::comandos::{AtualizarDadosEmpresa, DefinirContatoEmpresa, DefinirLogoEmpresa};
 use crate::consultas::{DadosDaEmpresa, IdentidadeDaEmpresa, PapeisDaEmpresa, UsuariosDaEmpresa};
 use crate::manifesto::MANIFESTO;
+use crate::membros::{AdicionarUsuario, DesativarUsuario};
 
 /// O módulo, para registrar no [`Despachante`](cardeal_modkit::Despachante).
 pub struct ModuloEmpresa;
@@ -29,6 +30,8 @@ impl Modulo for ModuloEmpresa {
             .comando::<AtualizarDadosEmpresa>("empresa.atualizar_dados.v1")
             .comando::<DefinirContatoEmpresa>("empresa.definir_contato.v1")
             .comando::<DefinirLogoEmpresa>("empresa.definir_logo.v1")
+            .comando::<AdicionarUsuario>("empresa.adicionar_usuario.v1")
+            .comando::<DesativarUsuario>("empresa.desativar_usuario.v1")
             .consulta::<DadosDaEmpresa>("empresa.dados.v1")
             .consulta::<IdentidadeDaEmpresa>("empresa.identidade_visual.v1")
             .consulta::<UsuariosDaEmpresa>("empresa.usuarios.v1")

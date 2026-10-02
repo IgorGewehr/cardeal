@@ -17,7 +17,7 @@ use crate::frota::EmpresaAberta;
 use crate::Servidor;
 use cardeal_motor::SessaoLocal;
 
-fn empresa_da_rota(texto: &str) -> Result<Id, ErroHttp> {
+pub(super) fn empresa_da_rota(texto: &str) -> Result<Id, ErroHttp> {
     texto.parse::<Id>().map_err(|_| {
         ErroHttp(Erro::novo(
             CodigoErro::ENTRADA_INVALIDA,
@@ -44,7 +44,7 @@ fn chave(headers: &HeaderMap) -> Result<ChaveIdempotencia, ErroHttp> {
 }
 
 /// Sessão de conta → vínculo → empresa aberta → sessão do usuário nela. Bloqueante.
-fn entrar_na_empresa(
+pub(super) fn entrar_na_empresa(
     servidor: &Servidor,
     token: &str,
     empresa: Id,

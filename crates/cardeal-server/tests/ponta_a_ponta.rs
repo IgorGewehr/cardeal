@@ -832,3 +832,150 @@ async fn trocar_senha_derruba_as_outras_sessoes_e_mantem_a_atual() {
         StatusCode::OK
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn admin_poe_e_tira_gente_da_empresa_com_papel_de_fabrica() {
+    use cardeal_protocol::{rota_membro, rota_membros, MembroAdicionado, PedidoNovoMembro};
+    use mod_empresa::PapelDeFabrica;
+    let a = ambiente(Duration::from_secs(600));
+    let ana = token(&a.app, "ana@x.com").await;
+    let novo = |email: &str, papel, senha: Option<&str>| {
+        postcard::to_stdvec(&PedidoNovoMembro {
+            email: email.into(),
+            nome: "Bia".into(),
+            papel,
+            senha_inicial: senha.map(Into::into),
+        })
+        .unwrap()
+    };
+    let rota = rota_membros(a.empresa_ana);
+
+    let sem_senha = chamar(
+        &a.app,
+        Method::POST,
+        &rota,
+        Some(&ana),
+        &[],
+        novo("bia@x.com", PapelDeFabrica::Vendedor, None),
+    )
+    .await;
+    assert_eq!(sem_senha.erro().campo.as_deref(), Some("senha_inicial"));
+
+    let bia_membro: MembroAdicionado = chamar(
+        &a.app,
+        Method::POST,
+        &rota,
+        Some(&ana),
+        &[],
+        novo(
+            "Bia@X.com",
+            PapelDeFabrica::Vendedor,
+            Some("senha-da-bia-1"),
+        ),
+    )
+    .await
+    .valor();
+    assert!(bia_membro.conta_nova);
+
+    // A Bia entra, vê clientes (vendedor) e não vê o financeiro nem gerencia usuários.
+    let bia = token_com(&a.app, "bia@x.com", "senha-da-bia-1").await;
+    assert_eq!(
+        clientes(&a.app, &bia, a.empresa_ana).await.status,
+        StatusCode::OK
+    );
+    let fin = chamar(
+        &a.app,
+        Method::POST,
+        &rota_consulta(a.empresa_ana, "financeiro.categorias.v1"),
+        Some(&bia),
+        &[],
+        postcard::to_stdvec(&()).unwrap(),
+    )
+    .await;
+    assert_eq!(fin.status, StatusCode::FORBIDDEN);
+    let golpe = chamar(
+        &a.app,
+        Method::POST,
+        &rota,
+        Some(&bia),
+        &[],
+        novo(
+            "comparsa@x.com",
+            PapelDeFabrica::Administrador,
+            Some("senha-forte-999"),
+        ),
+    )
+    .await;
+    assert_eq!(golpe.status, StatusCode::FORBIDDEN);
+    assert!(
+        a.servidor
+            .diretorio()
+            .conta_por_email("comparsa@x.com")
+            .unwrap()
+            .is_none(),
+        "nada foi criado antes de checar a permissão"
+    );
+
+    // Conta que já existe (o Beto, de outra loja) só ganha o vínculo.
+    let beto: MembroAdicionado = chamar(
+        &a.app,
+        Method::POST,
+        &rota,
+        Some(&ana),
+        &[],
+        novo("beto@x.com", PapelDeFabrica::Gerente, None),
+    )
+    .await
+    .valor();
+    assert!(!beto.conta_nova);
+    let beto_login: RespostaLogin = login(&a.app, "beto@x.com", SENHA, TipoCliente::Nativo)
+        .await
+        .valor();
+    assert_eq!(beto_login.empresas.len(), 2);
+
+    // Tirar a Bia: o acesso cai na hora, não quando o cache expira.
+    let r = chamar(
+        &a.app,
+        Method::DELETE,
+        &rota_membro(a.empresa_ana, bia_membro.usuario),
+        Some(&ana),
+        &[],
+        vec![],
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::NO_CONTENT);
+    assert_ne!(
+        clientes(&a.app, &bia, a.empresa_ana).await.status,
+        StatusCode::OK
+    );
+
+    // Ninguém tira a si mesmo.
+    let eu: cardeal_protocol::InfoSessao = chamar(
+        &a.app,
+        Method::GET,
+        &cardeal_protocol::rota_sessao_empresa(a.empresa_ana),
+        Some(&ana),
+        &[],
+        vec![],
+    )
+    .await
+    .valor();
+    let r = chamar(
+        &a.app,
+        Method::DELETE,
+        &rota_membro(a.empresa_ana, eu.usuario),
+        Some(&ana),
+        &[],
+        vec![],
+    )
+    .await;
+    assert_eq!(r.erro().codigo, CodigoErro::REGRA_VIOLADA);
+}
+
+async fn token_com(app: &Router, email: &str, senha: &str) -> String {
+    login(app, email, senha, TipoCliente::Nativo)
+        .await
+        .valor::<RespostaLogin>()
+        .token
+        .unwrap()
+}

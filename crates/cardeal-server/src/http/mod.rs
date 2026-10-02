@@ -3,6 +3,7 @@
 mod camadas;
 mod credencial;
 mod despacho;
+mod membros;
 mod origem;
 mod resposta;
 mod sessao;
@@ -15,7 +16,7 @@ use axum::extract::{DefaultBodyLimit, Request};
 use axum::http::StatusCode;
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::Router;
 use cardeal_kernel::{CodigoErro, Erro};
 use cardeal_protocol::{
@@ -41,6 +42,8 @@ pub fn roteador(servidor: Arc<Servidor>) -> Router {
         .route("/v1/e/:empresa/cmd/:nome", post(despacho::comando))
         .route("/v1/e/:empresa/qry/:nome", post(despacho::consulta))
         .route("/v1/e/:empresa/sessao", get(despacho::sessao))
+        .route("/v1/e/:empresa/membros", post(membros::adicionar))
+        .route("/v1/e/:empresa/membros/:usuario", delete(membros::remover))
         .layer(middleware::from_fn(exigir_protocolo));
     let mut app = Router::new()
         .route(ROTA_SAUDE, get(saude))

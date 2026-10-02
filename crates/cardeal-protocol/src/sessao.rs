@@ -66,3 +66,27 @@ pub struct PedidoTrocaSenha {
     /// A senha nova (política: mínimo 8 caracteres, fora da lista de senhas comuns).
     pub nova: String,
 }
+
+/// `POST /v1/e/{empresa}/membros`: o administrador põe alguém para trabalhar na empresa.
+/// Um e-mail que já tem conta (um contador, um funcionário de outra loja) só ganha o vínculo;
+/// um e-mail novo exige `senha_inicial`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PedidoNovoMembro {
+    /// E-mail da pessoa — é o login dela.
+    pub email: String,
+    /// Nome exibido.
+    pub nome: String,
+    /// O papel nesta empresa.
+    pub papel: cardeal_auth::PapelDeFabrica,
+    /// Senha da conta nova (ignorada se o e-mail já tem conta).
+    pub senha_inicial: Option<String>,
+}
+
+/// Resposta de [`PedidoNovoMembro`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MembroAdicionado {
+    /// O usuário da pessoa nesta empresa.
+    pub usuario: Id,
+    /// Se a conta foi criada agora (senão, era uma conta existente que ganhou o vínculo).
+    pub conta_nova: bool,
+}

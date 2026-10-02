@@ -16,15 +16,18 @@
 mod comandos;
 mod consultas;
 mod manifesto;
+mod membros;
 #[cfg(feature = "sqlite")]
 mod modulo;
 #[cfg(feature = "sqlite")]
 pub mod sql;
 mod tipos;
 
+pub use cardeal_auth::PapelDeFabrica;
 pub use comandos::{AtualizarDadosEmpresa, DefinirContatoEmpresa, DefinirLogoEmpresa};
 pub use consultas::{DadosDaEmpresa, IdentidadeDaEmpresa, PapeisDaEmpresa, UsuariosDaEmpresa};
 pub use manifesto::{ID, MANIFESTO};
+pub use membros::{AdicionarUsuario, DesativarUsuario};
 #[cfg(feature = "sqlite")]
 pub use modulo::ModuloEmpresa;
 pub use tipos::{EmpresaResumo, IdentidadeVisual, PapelResumo, UsuarioResumo, TETO_LOGO_BYTES};

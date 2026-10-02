@@ -11,4 +11,5 @@ repository.workspace   = true
 
 [dependencies]
 cardeal-kernel.workspace = true
+cardeal-auth = { path = "../cardeal-auth", default-features = false }
 serde.workspace = true

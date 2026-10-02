@@ -25,10 +25,12 @@ mod rotas;
 mod sessao;
 
 pub use rotas::{
-    rota_comando, rota_consulta, rota_sessao_empresa, ROTA_SAUDE, ROTA_SENHA, ROTA_SESSAO,
+    rota_comando, rota_consulta, rota_membro, rota_membros, rota_sessao_empresa, ROTA_SAUDE,
+    ROTA_SENHA, ROTA_SESSAO,
 };
 pub use sessao::{
-    EmpresaAcessivel, InfoSessao, PedidoLogin, PedidoTrocaSenha, RespostaLogin, TipoCliente,
+    EmpresaAcessivel, InfoSessao, MembroAdicionado, PedidoLogin, PedidoNovoMembro,
+    PedidoTrocaSenha, RespostaLogin, TipoCliente,
 };
 
 use cardeal_kernel::CodigoErro;
