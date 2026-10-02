@@ -39,3 +39,22 @@ jobs:
 
       - name: Testes do workspace
         run: cargo test --workspace
+
+  # O cliente do navegador (ADR-0016): compila, gera a ponte JS e pré-comprime — o mesmo
+  # caminho da imagem Docker. A versão da CLI do wasm-bindgen sai do Cargo.lock.
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: cargo-bins/cargo-binstall@main
+
+      - name: Ferramentas do build web
+        run: |
+          versao=$(grep -A1 '^name = "wasm-bindgen"$' Cargo.lock | sed -n 's/version = "\(.*\)"/\1/p')
+          cargo binstall -y --locked "wasm-bindgen-cli@${versao}" wasm-opt
+
+      - name: Cliente web (cargo xtask construir-web)
+        run: cargo run -p xtask -- construir-web

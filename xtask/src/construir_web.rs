@@ -40,7 +40,42 @@ fn rodar(cmd: &mut Command, o_que: &str) -> Result<()> {
     Ok(())
 }
 
+/// A versão do `wasm-bindgen` travada no `Cargo.lock` — a CLI tem de ser exatamente esta,
+/// senão a ponte JS gerada não casa com o WASM e o app quebra só no navegador.
+fn versao_wasm_bindgen_travada(raiz: &Path) -> Result<String> {
+    let lock = fs::read_to_string(raiz.join("Cargo.lock"))?;
+    let mut linhas = lock.lines();
+    while let Some(l) = linhas.next() {
+        if l == "name = \"wasm-bindgen\"" {
+            if let Some(v) = linhas.next().and_then(|v| v.strip_prefix("version = \"")) {
+                return Ok(v.trim_end_matches('"').to_owned());
+            }
+        }
+    }
+    bail!("wasm-bindgen não está no Cargo.lock")
+}
+
+fn conferir_wasm_bindgen(raiz: &Path) -> Result<()> {
+    let travada = versao_wasm_bindgen_travada(raiz)?;
+    let saida = Command::new("wasm-bindgen")
+        .arg("--version")
+        .output()
+        .with_context(|| {
+            format!("wasm-bindgen ausente: cargo binstall wasm-bindgen-cli@{travada}")
+        })?;
+    let instalada = String::from_utf8_lossy(&saida.stdout);
+    if !instalada.contains(&travada) {
+        bail!(
+            "wasm-bindgen instalado ({}) difere do Cargo.lock ({travada}): \
+             cargo binstall wasm-bindgen-cli@{travada}",
+            instalada.trim()
+        );
+    }
+    Ok(())
+}
+
 pub fn executar(raiz: &Path, sem_wasm_opt: bool) -> Result<()> {
+    conferir_wasm_bindgen(raiz)?;
     rodar(
         Command::new(env!("CARGO")).current_dir(raiz).args([
             "build",

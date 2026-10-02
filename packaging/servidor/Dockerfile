@@ -9,10 +9,13 @@
 
 # Ferramentas do build web, pré-compiladas (compilar o binaryen levaria ~10 min).
 FROM rust:1.98-slim-bookworm AS ferramentas
+# A CLI do wasm-bindgen tem de ser a mesma versão do Cargo.lock.
+COPY Cargo.lock /tmp/Cargo.lock
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
  && curl -L --proto '=https' --tlsv1.2 -sSf \
       https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash \
- && cargo binstall -y --locked wasm-bindgen-cli@0.2.127 wasm-opt
+ && versao=$(grep -A1 '^name = "wasm-bindgen"$' /tmp/Cargo.lock | sed -n 's/version = "\(.*\)"/\1/p') \
+ && cargo binstall -y --locked "wasm-bindgen-cli@${versao}" wasm-opt
 
 FROM rust:1.98-slim-bookworm AS construcao
 COPY --from=ferramentas /usr/local/cargo/bin/wasm-bindgen /usr/local/cargo/bin/wasm-opt /usr/local/cargo/bin/
