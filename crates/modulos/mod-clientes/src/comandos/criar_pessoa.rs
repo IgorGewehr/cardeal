@@ -119,7 +119,7 @@ pub fn criar_pessoa_comum(
 ) -> Resultado<PessoaCadastrada> {
     // 1. Validar (domínio puro).
     let mut construtor = ConstrutorPessoa::nova(
-        ctx.empresa,
+        ctx.organizacao,
         dados.tipo,
         dados.nome,
         dados.papel_inicial,
@@ -137,7 +137,7 @@ pub fn criar_pessoa_comum(
     // Documento é opcional: só quando tipo E número vierem preenchidos.
     let documento = match (dados.documento_tipo, dados.documento_numero) {
         (Some(tipo), Some(numero)) if !numero.trim().is_empty() => Some(
-            DocumentoPessoa::novo(ctx.empresa, pessoa.id, tipo, &numero)
+            DocumentoPessoa::novo(ctx.organizacao, pessoa.id, tipo, &numero)
                 .map_err(|e| Erro::de_dominio(&e))?,
         ),
         _ => None,
@@ -176,7 +176,7 @@ pub fn criar_pessoa_comum(
     // 2. Duplicidade por documento — certeza, só quando há documento.
     if let Some(doc) = &documento {
         if RepositorioClientes::novo(uow)
-            .buscar_documento(ctx.empresa, doc.tipo, &doc.numero)?
+            .buscar_documento(ctx.organizacao, doc.tipo, &doc.numero)?
             .is_some()
         {
             return Err(Erro::de_dominio(&ErroClientes::DocumentoDuplicado));
@@ -192,10 +192,10 @@ pub fn criar_pessoa_comum(
         repo.inserir_documento(doc)?;
     }
     if let Some(end) = &endereco {
-        repo.inserir_endereco(ctx.empresa, end)?;
+        repo.inserir_endereco(ctx.organizacao, end)?;
     }
     if let Some(ct) = &contato {
-        repo.inserir_contato(ctx.empresa, ct)?;
+        repo.inserir_contato(ctx.organizacao, ct)?;
     }
 
     // 5. Publicar.

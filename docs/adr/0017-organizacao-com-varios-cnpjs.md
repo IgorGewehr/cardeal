@@ -38,8 +38,19 @@ isolamento físico (ADR-0016 inalterada).
   - `adicionar_empresa` cria um CNPJ com plano de contas próprio e papel Administrador
     próprio, atribuído a quem criou;
   - a sincronização do admin roda para todas as empresas.
-- **Dados:** cada CNPJ tem os seus. Financeiro, fiscal, estoque, OS e numerações são por CNPJ,
-  como a lei e a contabilidade exigem.
+- **Dados — do grupo ou do CNPJ** (decisão do usuário em 2026-10-02: "como geralmente
+  funciona"):
+
+  | Do grupo (`Ctx::organizacao`) | De cada CNPJ (`Ctx::empresa`) |
+  |---|---|
+  | clientes e fornecedores (pessoa, documentos, contatos, endereços, papéis, limite de crédito) | saldo, locais, movimentos, lotes e custo médio do estoque |
+  | catálogo de produtos: produto, grupo, unidade, código de barras, NCM | financeiro, caixa, contabilidade (plano de contas por CNPJ) |
+  | | fiscal, OS, vendas, compras, PDV, agenda, numerações |
+
+  Um cadastro do grupo grava `empresa = <matriz>`. Com um CNPJ só, `organizacao == empresa` e
+  nada muda. Cada consulta que cruza os dois lados (produto × saldo) filtra o saldo pelo CNPJ
+  da sessão. `localizacao_fisica` está no produto e, portanto, é do grupo; se uma loja
+  precisar da própria, ela vai para o saldo.
 - **Usuários:** um usuário da organização entra nas empresas em que tem papel; "usuários da
   empresa" = quem tem papel nela.
 - **Servidor:**
@@ -51,12 +62,11 @@ isolamento físico (ADR-0016 inalterada).
   - `POST /v1/e/{empresa}/empresas` cria um CNPJ na mesma organização e vincula quem pediu.
 - **Tempo real:** a leitura do outbox filtra pela empresa da conexão.
 
-## Fora desta decisão (próximo passo, decisão de produto)
+## Próximos passos
 
-**Cadastros compartilhados entre os CNPJs** (clientes/fornecedores e catálogo de produtos
-comuns ao grupo, com saldo de estoque por CNPJ). É o comum nos ERPs, e esta base única é
-justamente o que o torna possível. Exige definir, módulo a módulo, o que é do grupo e o que é
-do CNPJ. Hoje cada CNPJ tem os próprios cadastros.
+- Transferência de estoque entre CNPJs: agora é uma transação só (saída num, entrada no
+  outro). Precisa da nota fiscal de transferência.
+- Relatórios consolidados do grupo (vendas, financeiro): uma consulta sobre a mesma base.
 
 ## Consequências
 

@@ -79,7 +79,7 @@ pub fn adicionar_contato_comum(
     contato.principal = dados.principal;
 
     // 4. Persistir.
-    RepositorioClientes::novo(uow).inserir_contato(ctx.empresa, &contato)?;
+    RepositorioClientes::novo(uow).inserir_contato(ctx.organizacao, &contato)?;
 
     Ok(ContatoFoiAdicionado {
         contato: contato.id,

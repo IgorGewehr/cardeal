@@ -51,7 +51,7 @@ impl Consulta for ListarOrdens {
         let clientes = if termo.is_empty() || termo.starts_with('#') {
             Vec::new()
         } else {
-            mod_clientes::pessoas_cujo_nome_casa(conexao, ctx.empresa, termo)?
+            mod_clientes::pessoas_cujo_nome_casa(conexao, ctx.organizacao, termo)?
         };
         let criterio = CriterioBusca::novo(termo, &clientes);
         let antes_de: Option<u64> = self.pagina.chave()?;

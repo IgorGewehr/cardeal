@@ -393,7 +393,9 @@ impl MotorLocal {
         if sessao.empresa() == self.empresa {
             std::borrow::Cow::Borrowed(&self.ambiente)
         } else {
-            std::borrow::Cow::Owned(ambiente_de(sessao.empresa(), &self.plano))
+            std::borrow::Cow::Owned(
+                ambiente_de(sessao.empresa(), &self.plano).com_organizacao(self.empresa),
+            )
         }
     }
 }

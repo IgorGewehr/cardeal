@@ -301,7 +301,7 @@ impl Consulta for PessoasPorPapel {
         let linhas = stmt
             .query_map(
                 params![
-                    blob(ctx.empresa),
+                    blob(ctx.organizacao),
                     papel_txt(self.papel),
                     termo,
                     digitos,

@@ -50,7 +50,7 @@ impl Comando for CriarGrupoProduto {
         }
         let id = Id::novo();
         RepositorioEstoque::novo(uow).inserir_grupo_produto(
-            ctx.empresa,
+            ctx.organizacao,
             id,
             codigo,
             nome,

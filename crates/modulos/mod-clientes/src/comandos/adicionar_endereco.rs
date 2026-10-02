@@ -85,7 +85,7 @@ impl Comando for AdicionarEndereco {
         endereco.principal = self.principal;
 
         // 4. Persistir.
-        RepositorioClientes::novo(uow).inserir_endereco(ctx.empresa, &endereco)?;
+        RepositorioClientes::novo(uow).inserir_endereco(ctx.organizacao, &endereco)?;
 
         Ok(EnderecoFoiAdicionado {
             endereco: endereco.id,

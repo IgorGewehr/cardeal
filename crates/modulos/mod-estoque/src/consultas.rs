@@ -49,6 +49,7 @@ pub struct ItemProdutoComSaldo {
 #[cfg(feature = "sqlite")]
 pub fn produtos_com_saldo(
     conexao: &Connection,
+    organizacao: Id,
     empresa: Id,
 ) -> Resultado<Vec<ItemProdutoComSaldo>> {
     let mut stmt = conexao
@@ -59,7 +60,7 @@ pub fn produtos_com_saldo(
                     COALESCE(MAX(s.custo_medio), 0),
                     p.codigo_barras
              FROM estoque_produto p
-             LEFT JOIN estoque_saldo_local s ON s.produto = p.id
+             LEFT JOIN estoque_saldo_local s ON s.produto = p.id AND s.empresa = ?2
              WHERE p.empresa = ?1 AND p.ativo = 1
              GROUP BY p.id, p.nome, p.ncm, p.codigo_barras
              ORDER BY p.nome ASC
@@ -67,7 +68,7 @@ pub fn produtos_com_saldo(
         )
         .map_err(persist)?;
     let linhas = stmt
-        .query_map([blob(empresa)], |r| {
+        .query_map([blob(organizacao), blob(empresa)], |r| {
             Ok(ItemProdutoComSaldo {
                 produto: id_de(r.get::<_, Vec<u8>>(0)?),
                 nome: r.get(1)?,
@@ -94,7 +95,7 @@ impl Consulta for ProdutosComSaldo {
 
     #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
-        produtos_com_saldo(conexao, ctx.empresa)
+        produtos_com_saldo(conexao, ctx.organizacao, ctx.empresa)
     }
 }
 
@@ -136,7 +137,7 @@ impl Consulta for ProdutoPorCodigoBarras {
 
     #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
-        produto_por_codigo_barras(conexao, ctx.empresa, &self.codigo_barras)
+        produto_por_codigo_barras(conexao, ctx.organizacao, &self.codigo_barras)
     }
 }
 
@@ -163,7 +164,7 @@ impl Consulta for ProdutoPorId {
                         controla_grade, controla_lote, controla_validade, unidade_padrao,
                         ponto_pedido, estoque_minimo, estoque_maximo, ativo, versao
                  FROM estoque_produto WHERE empresa = ?1 AND id = ?2",
-                rusqlite::params![blob(ctx.empresa), blob(self.produto)],
+                rusqlite::params![blob(ctx.organizacao), blob(self.produto)],
                 produto_de_linha,
             )
             .optional()
@@ -197,7 +198,7 @@ impl Consulta for GruposProduto {
             .prepare("SELECT id, codigo, nome FROM estoque_grupo_produto WHERE empresa = ?1 ORDER BY nome ASC")
             .map_err(persist)?;
         let linhas = stmt
-            .query_map([blob(ctx.empresa)], |r| {
+            .query_map([blob(ctx.organizacao)], |r| {
                 Ok(ItemGrupoProduto {
                     id: id_de(r.get::<_, Vec<u8>>(0)?),
                     codigo: r.get(1)?,
@@ -238,7 +239,7 @@ impl Consulta for Unidades {
             )
             .map_err(persist)?;
         let linhas = stmt
-            .query_map([blob(ctx.empresa)], |r| {
+            .query_map([blob(ctx.organizacao)], |r| {
                 Ok(ItemUnidade {
                     id: id_de(r.get::<_, Vec<u8>>(0)?),
                     sigla: r.get(1)?,
@@ -261,12 +262,16 @@ impl Consulta for Unidades {
 /// # Errors
 /// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
 #[cfg(feature = "sqlite")]
-pub fn saldo_disponivel_do_produto(conexao: &Connection, produto: Id) -> Resultado<Quantidade> {
+pub fn saldo_disponivel_do_produto(
+    conexao: &Connection,
+    empresa: Id,
+    produto: Id,
+) -> Resultado<Quantidade> {
     let soma: i64 = conexao
         .query_row(
             "SELECT COALESCE(SUM(quantidade_disponivel), 0) FROM estoque_saldo_local
-             WHERE produto = ?1",
-            [blob(produto)],
+             WHERE produto = ?1 AND empresa = ?2",
+            [blob(produto), blob(empresa)],
             |r| r.get(0),
         )
         .map_err(persist)?;
@@ -315,8 +320,8 @@ impl Consulta for SaldoDisponivelDoProduto {
     const PERMISSAO: &'static str = "estoque.saldo.ver";
 
     #[cfg(feature = "sqlite")]
-    fn executar(self, _ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
-        saldo_disponivel_do_produto(conexao, self.produto)
+    fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        saldo_disponivel_do_produto(conexao, ctx.empresa, self.produto)
     }
 }
 
@@ -384,6 +389,7 @@ pub struct ItemAbaixoDoPontoPedido {
 #[cfg(feature = "sqlite")]
 pub fn produtos_abaixo_do_ponto_pedido(
     conexao: &Connection,
+    organizacao: Id,
     empresa: Id,
 ) -> Resultado<Vec<ItemAbaixoDoPontoPedido>> {
     let mut stmt = conexao
@@ -391,7 +397,7 @@ pub fn produtos_abaixo_do_ponto_pedido(
             "SELECT p.id, p.nome, p.ponto_pedido, p.estoque_minimo,
                     COALESCE(SUM(s.quantidade_disponivel), 0) AS disponivel
              FROM estoque_produto p
-             LEFT JOIN estoque_saldo_local s ON s.produto = p.id
+             LEFT JOIN estoque_saldo_local s ON s.produto = p.id AND s.empresa = ?2
              WHERE p.empresa = ?1 AND p.ativo = 1 AND p.ponto_pedido IS NOT NULL
              GROUP BY p.id, p.nome, p.ponto_pedido, p.estoque_minimo
              HAVING disponivel < p.ponto_pedido
@@ -400,7 +406,7 @@ pub fn produtos_abaixo_do_ponto_pedido(
         )
         .map_err(persist)?;
     let linhas = stmt
-        .query_map([blob(empresa)], |r| {
+        .query_map([blob(organizacao), blob(empresa)], |r| {
             Ok(ItemAbaixoDoPontoPedido {
                 produto: id_de(r.get::<_, Vec<u8>>(0)?),
                 nome: r.get(1)?,
@@ -425,7 +431,7 @@ impl Consulta for ProdutosAbaixoDoPontoPedido {
 
     #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
-        produtos_abaixo_do_ponto_pedido(conexao, ctx.empresa)
+        produtos_abaixo_do_ponto_pedido(conexao, ctx.organizacao, ctx.empresa)
     }
 }
 

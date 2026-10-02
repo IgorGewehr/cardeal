@@ -43,8 +43,12 @@ use crate::registro::ConjuntoEfetivo;
 /// empresa tem ativo. Ver `docs/contratos-internos.md` §4.
 #[derive(Debug, Clone)]
 pub struct Ctx {
-    /// A empresa.
+    /// A empresa (o CNPJ) em que se age.
     pub empresa: Id,
+    /// A organização (o id da matriz): **dona dos cadastros do grupo** — clientes,
+    /// fornecedores e catálogo de produtos são da organização, não de um CNPJ (ADR-0017).
+    /// Com um CNPJ só, é a própria `empresa`.
+    pub organizacao: Id,
     /// O usuário responsável.
     pub usuario: Id,
     /// O dispositivo de origem.
@@ -244,6 +248,7 @@ fn saida_invalida(e: postcard::Error) -> ErroArmazenamento {
 #[derive(Debug, Clone)]
 pub struct Ambiente {
     empresa: Id,
+    organizacao: Id,
     conjunto: Arc<ConjuntoEfetivo>,
     fuso: Fuso,
 }
@@ -255,6 +260,7 @@ impl Ambiente {
     pub fn novo(empresa: Id, conjunto: ConjuntoEfetivo) -> Self {
         Self {
             empresa,
+            organizacao: empresa,
             conjunto: Arc::new(conjunto),
             fuso: Fuso::BRASILIA,
         }
@@ -267,9 +273,17 @@ impl Ambiente {
     pub fn compartilhado(empresa: Id, conjunto: Arc<ConjuntoEfetivo>) -> Self {
         Self {
             empresa,
+            organizacao: empresa,
             conjunto,
             fuso: Fuso::BRASILIA,
         }
+    }
+
+    /// Fixa a organização (a matriz) de um CNPJ que não é ela (ADR-0017).
+    #[must_use]
+    pub const fn com_organizacao(mut self, organizacao: Id) -> Self {
+        self.organizacao = organizacao;
+        self
     }
 
     /// Fixa o fuso da empresa.
@@ -464,6 +478,7 @@ fn verificar_acesso(permissao: &str, sessao: &Sessao, ambiente: &Ambiente) -> Re
 fn montar_ctx(sessao: &Sessao, ambiente: &Ambiente) -> Ctx {
     Ctx {
         empresa: ambiente.empresa,
+        organizacao: ambiente.organizacao,
         usuario: sessao.usuario,
         dispositivo: sessao.dispositivo,
         sessao: sessao.id,

@@ -51,7 +51,7 @@ impl Comando for CriarUnidade {
         }
         let unidade = Unidade {
             id: Id::novo(),
-            empresa: ctx.empresa,
+            empresa: ctx.organizacao,
             sigla: sigla.to_string(),
             nome: nome.to_string(),
             fracionavel: self.fracionavel,

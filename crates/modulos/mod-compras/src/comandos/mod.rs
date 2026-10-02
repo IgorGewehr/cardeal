@@ -380,7 +380,7 @@ fn montar_item_casado(
     // produto, não uma inferência por fornecedor+código) — `crate::casamento` §cascata.
     let produto_por_gtin = match codigo_barras.filter(|g| !g.is_empty()) {
         Some(gtin) => RepositorioEstoque::novo(uow)
-            .buscar_produto_por_codigo_barras(ctx.empresa, gtin)?
+            .buscar_produto_por_codigo_barras(ctx.organizacao, gtin)?
             .map(|p| p.id),
         None => None,
     };
@@ -389,7 +389,7 @@ fn montar_item_casado(
         fornecedor,
         codigo_fornecedor,
     )?;
-    let candidatos = RepositorioEstoque::novo(uow).produtos_por_ncm(ctx.empresa, ncm)?;
+    let candidatos = RepositorioEstoque::novo(uow).produtos_por_ncm(ctx.organizacao, ncm)?;
     let candidatos_ref: Vec<(Id, &str)> = candidatos
         .iter()
         .map(|(id, nome)| (*id, nome.as_str()))

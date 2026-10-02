@@ -374,9 +374,10 @@ testes. **Ainda não:** as telas do desktop migrarem para as `.v2` (aí as `.v1`
 motor faz sessão por CNPJ, `adicionar_empresa` (plano de contas e admin próprios); o
 servidor mapeia empresa → base no diretório (v2) e tem `POST /v1/e/{empresa}/empresas`;
 sair de um CNPJ não tira o usuário dos outros. Também: reenvio idempotente no navegador e
-alerta de falha da réplica (`/saude` → `degradado`). **Pendente:** decidir os cadastros
-compartilhados entre CNPJs (ADR-0017, "Fora desta decisão") e as telas para criar/trocar
-de CNPJ (desktop e web).
+alerta de falha da réplica (`/saude` → `degradado`). Clientes/fornecedores e o catálogo de
+produtos são do grupo (`Ctx::organizacao`); estoque, financeiro, fiscal e OS, de cada CNPJ.
+**Pendente:** as telas para criar e trocar de CNPJ (desktop e web), transferência entre CNPJs
+e relatórios consolidados.
 
 **Para decidir com o usuário:** o plano das telas assíncronas em `docs/20-cliente-web.md` §3
 (muda as telas do desktop, em uso real). **Otimizações medidas em espera:** escritor sem

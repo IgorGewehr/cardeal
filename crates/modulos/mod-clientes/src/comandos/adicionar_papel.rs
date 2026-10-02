@@ -65,7 +65,7 @@ impl Comando for AdicionarPapel {
             .expect("acabou de ser adicionado");
         {
             let mut repo = RepositorioClientes::novo(uow);
-            repo.inserir_papel(pessoa.id, ctx.empresa, &papel_pessoa)?;
+            repo.inserir_papel(pessoa.id, ctx.organizacao, &papel_pessoa)?;
             repo.atualizar_pessoa(&pessoa)?;
         }
 

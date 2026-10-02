@@ -1,5 +1,6 @@
 //! A listagem paginada de produtos (`estoque.produtos.v2`) — o caminho da rede: cursor
 //! `(nome, id)`, busca no servidor (nome, código de barras ou NCM), total na primeira página.
+//! O catálogo é da organização; o saldo, do CNPJ da sessão (ADR-0017).
 //! A `v1` ([`crate::ProdutosComSaldo`]) continua para o desktop até a migração das telas.
 
 use cardeal_modkit::{Consulta, Pagina, PedidoPagina};
@@ -47,9 +48,9 @@ impl Consulta for ListarProdutos {
         let (nome_apos, id_apos) = depois.unzip();
         let sql = format!(
             "SELECT p.id, p.nome, p.ncm,
-                    COALESCE((SELECT SUM(s.quantidade_disponivel) FROM estoque_saldo_local s WHERE s.produto = p.id), 0),
-                    COALESCE((SELECT SUM(s.quantidade_reservada) FROM estoque_saldo_local s WHERE s.produto = p.id), 0),
-                    COALESCE((SELECT MAX(s.custo_medio) FROM estoque_saldo_local s WHERE s.produto = p.id), 0),
+                    COALESCE((SELECT SUM(s.quantidade_disponivel) FROM estoque_saldo_local s WHERE s.produto = p.id AND s.empresa = ?7), 0),
+                    COALESCE((SELECT SUM(s.quantidade_reservada) FROM estoque_saldo_local s WHERE s.produto = p.id AND s.empresa = ?7), 0),
+                    COALESCE((SELECT MAX(s.custo_medio) FROM estoque_saldo_local s WHERE s.produto = p.id AND s.empresa = ?7), 0),
                     p.codigo_barras
              FROM estoque_produto p
              {FILTRO}
@@ -62,12 +63,13 @@ impl Consulta for ListarProdutos {
             .map_err(persist)?
             .query_map(
                 params![
-                    blob(ctx.empresa),
+                    blob(ctx.organizacao),
                     termo,
                     exato,
                     nome_apos,
                     id_apos,
-                    self.pagina.linhas_sql()
+                    self.pagina.linhas_sql(),
+                    blob(ctx.empresa)
                 ],
                 |r| {
                     Ok(ItemProdutoComSaldo {
@@ -88,7 +90,7 @@ impl Consulta for ListarProdutos {
             let n: i64 = conexao
                 .prepare_cached(&format!("SELECT COUNT(*) FROM estoque_produto p {FILTRO}"))
                 .map_err(persist)?
-                .query_row(params![blob(ctx.empresa), termo, exato], |r| r.get(0))
+                .query_row(params![blob(ctx.organizacao), termo, exato], |r| r.get(0))
                 .map_err(persist)?;
             Some(u64::try_from(n).unwrap_or(0))
         } else {

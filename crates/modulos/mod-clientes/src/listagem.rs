@@ -73,7 +73,7 @@ impl Consulta for ListarPessoas {
         let linhas = stmt
             .query_map(
                 params![
-                    blob(ctx.empresa),
+                    blob(ctx.organizacao),
                     papel_txt(self.papel),
                     termo,
                     digitos,
@@ -99,7 +99,7 @@ impl Consulta for ListarPessoas {
                 .prepare_cached(&format!("SELECT COUNT(*) {FILTRO}"))
                 .map_err(persist)?
                 .query_row(
-                    params![blob(ctx.empresa), papel_txt(self.papel), termo, digitos],
+                    params![blob(ctx.organizacao), papel_txt(self.papel), termo, digitos],
                     |r| r.get(0),
                 )
                 .map_err(persist)?;

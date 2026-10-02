@@ -1,22 +1,34 @@
-//! Uma organização com vários CNPJs numa base (ADR-0017): cada CNPJ com os próprios dados,
-//! sessões por CNPJ, só quem pode cria CNPJ, e a matriz continua a principal ao reabrir.
+//! Uma organização com vários CNPJs numa base (ADR-0017): clientes e catálogo de produtos
+//! são do grupo; saldo de estoque e o resto, de cada CNPJ. Sessões por CNPJ, só quem pode
+//! cria CNPJ, e a matriz continua a principal ao reabrir.
 
 use cardeal_kernel::CodigoErro;
 use cardeal_modkit::{Modulo, PedidoAtivacao};
 use cardeal_motor::MotorLocal;
 use mod_clientes::{CriarPessoa, ItemPessoa, ModuloClientes, Papel, PessoasPorPapel, TipoPessoa};
 use mod_empresa::ModuloEmpresa;
+use mod_estoque::{
+    AjustarSaldo, CriarGrupoProduto, CriarLocal, CriarProduto, CriarUnidade, GrupoProdutoCriado,
+    ItemProdutoComSaldo, ListarProdutos, LocalCriado, ModuloEstoque, ProdutoCriado, SaldoAjustado,
+    SaldoDisponivelDoProduto, TipoLocal, UnidadeCriada,
+};
 
 const SENHA: &str = "senha-forte-123";
 
 fn modulos() -> Vec<&'static dyn Modulo> {
-    vec![&ModuloEmpresa, &ModuloClientes]
+    vec![&ModuloEmpresa, &ModuloClientes, &ModuloEstoque]
 }
 
 fn abrir(arquivo: &std::path::Path) -> MotorLocal {
-    let pedido = PedidoAtivacao::nova()
-        .com_modulo("empresa")
-        .com_modulo("clientes");
+    let mut pedido = PedidoAtivacao::nova();
+    for m in modulos() {
+        let manifesto = m.manifesto();
+        let id = manifesto.id.como_str();
+        pedido = pedido.com_modulo(id);
+        for sub in manifesto.submodulos {
+            pedido = pedido.com_submodulo(id, sub.id);
+        }
+    }
     MotorLocal::abrir(arquivo, &modulos(), &pedido).unwrap()
 }
 
@@ -47,7 +59,7 @@ fn clientes(motor: &MotorLocal, s: &cardeal_motor::SessaoLocal) -> Vec<String> {
 }
 
 #[test]
-fn cada_cnpj_tem_os_proprios_dados_e_o_admin_entra_nos_dois() {
+fn clientes_e_catalogo_sao_do_grupo_e_o_saldo_e_de_cada_cnpj() {
     let arquivo = tempfile::NamedTempFile::new().unwrap();
     let motor = abrir(arquivo.path());
     let admin = motor
@@ -85,11 +97,111 @@ fn cada_cnpj_tem_os_proprios_dados_e_o_admin_entra_nos_dois() {
         .unwrap();
     assert_eq!(por_conta.empresa(), filial);
 
-    // Dados isolados por CNPJ.
+    // Clientes são do grupo: cadastrado em qualquer CNPJ, aparece nos dois.
     criar(&motor, &na_matriz, "Cliente da Matriz");
     criar(&motor, &na_filial, "Cliente da Filial");
-    assert_eq!(clientes(&motor, &na_matriz), vec!["Cliente da Matriz"]);
-    assert_eq!(clientes(&motor, &na_filial), vec!["Cliente da Filial"]);
+    let todos = vec!["Cliente da Filial", "Cliente da Matriz"];
+    assert_eq!(clientes(&motor, &na_matriz), todos);
+    assert_eq!(clientes(&motor, &na_filial), todos);
+
+    // Catálogo do grupo, saldo de cada CNPJ.
+    let grupo: GrupoProdutoCriado = motor
+        .executar(
+            &na_matriz,
+            "estoque.criar_grupo_produto.v1",
+            &CriarGrupoProduto {
+                codigo: "P".into(),
+                nome: "Peças".into(),
+                pai: None,
+            },
+        )
+        .unwrap();
+    let un: UnidadeCriada = motor
+        .executar(
+            &na_matriz,
+            "estoque.criar_unidade.v1",
+            &CriarUnidade {
+                sigla: "UN".into(),
+                nome: "Unidade".into(),
+                fracionavel: false,
+            },
+        )
+        .unwrap();
+    let tela: ProdutoCriado = motor
+        .executar(
+            &na_matriz,
+            "estoque.criar_produto.v1",
+            &CriarProduto {
+                grupo_produto: grupo.grupo_produto,
+                nome: "Tela iPhone 11".into(),
+                ncm: "85177099".into(),
+                unidade_padrao: un.unidade,
+                codigo_barras: Some("7891234567895".into()),
+                detalhes_tecnicos: None,
+            },
+        )
+        .unwrap();
+    let local_filial: LocalCriado = motor
+        .executar(
+            &na_filial,
+            "estoque.criar_local.v1",
+            &CriarLocal {
+                nome: "Balcão Centro".into(),
+                tipo: TipoLocal::Loja,
+            },
+        )
+        .unwrap();
+    let _: SaldoAjustado = motor
+        .executar(
+            &na_filial,
+            "estoque.ajustar_saldo.v1",
+            &AjustarSaldo {
+                produto: tela.produto,
+                local: local_filial.local,
+                nova_quantidade: cardeal_kernel::Quantidade::unidades(5),
+                motivo: "inventário inicial".into(),
+            },
+        )
+        .unwrap();
+    let produtos = |s| -> Vec<ItemProdutoComSaldo> {
+        let q = ListarProdutos {
+            busca: None,
+            pagina: cardeal_modkit::PedidoPagina::primeira(10),
+        };
+        let p: cardeal_modkit::Pagina<ItemProdutoComSaldo> =
+            motor.consultar(s, "estoque.produtos.v2", &q).unwrap();
+        p.itens
+    };
+    let (m, f) = (produtos(&na_matriz), produtos(&na_filial));
+    assert_eq!(
+        m.len(),
+        1,
+        "o produto cadastrado na matriz aparece nos dois"
+    );
+    assert_eq!(f.len(), 1);
+    assert_eq!(
+        m[0].disponivel,
+        cardeal_kernel::Quantidade::unidades(0),
+        "saldo da matriz"
+    );
+    assert_eq!(
+        f[0].disponivel,
+        cardeal_kernel::Quantidade::unidades(5),
+        "saldo da filial"
+    );
+    let saldo = |s| -> cardeal_kernel::Quantidade {
+        motor
+            .consultar(
+                s,
+                "estoque.saldo_disponivel_do_produto.v1",
+                &SaldoDisponivelDoProduto {
+                    produto: tela.produto,
+                },
+            )
+            .unwrap()
+    };
+    assert_eq!(saldo(&na_matriz), cardeal_kernel::Quantidade::unidades(0));
+    assert_eq!(saldo(&na_filial), cardeal_kernel::Quantidade::unidades(5));
 
     // Dados cadastrais de cada um.
     let dados = |s| -> mod_empresa::EmpresaResumo {

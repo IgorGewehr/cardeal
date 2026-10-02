@@ -69,16 +69,16 @@ pub fn criar_peca_rapida_comum(
     uow: &mut UnidadeDeTrabalho,
 ) -> Resultado<PecaRapidaCriada> {
     let nome = nome.trim();
-    if let Some(existente) = produto_ativo_com_nome(uow, ctx.empresa, nome)? {
+    if let Some(existente) = produto_ativo_com_nome(uow, ctx.organizacao, nome)? {
         return Ok(PecaRapidaCriada {
             produto: existente,
             nova: false,
         });
     }
-    let grupo = grupo_padrao(uow, ctx.empresa)?;
-    let unidade = unidade_padrao(uow, ctx.empresa)?;
-    let produto =
-        Produto::novo(ctx.empresa, grupo, nome, "", unidade).map_err(|e| Erro::de_dominio(&e))?;
+    let grupo = grupo_padrao(uow, ctx.organizacao)?;
+    let unidade = unidade_padrao(uow, ctx.organizacao)?;
+    let produto = Produto::novo(ctx.organizacao, grupo, nome, "", unidade)
+        .map_err(|e| Erro::de_dominio(&e))?;
     RepositorioEstoque::novo(uow).inserir_produto(&produto)?;
     Ok(PecaRapidaCriada {
         produto: produto.id,

@@ -791,7 +791,8 @@ pub fn pecas_aguardando_estoque(
             if item.aplicada || item.estornada {
                 continue;
             }
-            let saldo_disponivel = mod_estoque::saldo_disponivel_do_produto(conexao, item.produto)?;
+            let saldo_disponivel =
+                mod_estoque::saldo_disponivel_do_produto(conexao, empresa, item.produto)?;
             if saldo_disponivel < item.quantidade || item.encomenda.is_some() {
                 pendentes.push(ItemAguardandoEstoque {
                     ordem_servico: os.id,

@@ -56,7 +56,7 @@ impl Comando for DefinirLimiteCredito {
         } else {
             let lc = LimiteCredito::definir(self.pessoa, self.limite, ctx.agora)
                 .map_err(|e| Erro::de_dominio(&e))?;
-            repo.inserir_limite_credito(ctx.empresa, &lc)?;
+            repo.inserir_limite_credito(ctx.organizacao, &lc)?;
         }
 
         Ok(LimiteCreditoDefinido {

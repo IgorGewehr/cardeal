@@ -1,6 +1,6 @@
 //! Organização com vários CNPJs pelo HTTP (ADR-0017): o admin cadastra uma filial na mesma
-//! base, a vê no login, cada CNPJ tem os próprios dados, um funcionário pode estar só num
-//! deles, e ninguém de fora cadastra CNPJ na organização dos outros.
+//! base, a vê no login, os clientes são do grupo, um funcionário pode estar só num CNPJ, e
+//! ninguém de fora cadastra CNPJ na organização dos outros.
 
 mod comum;
 
@@ -32,7 +32,7 @@ fn nomes(r: &Resposta) -> Vec<String> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn filial_na_mesma_base_com_dados_proprios_e_acesso_por_cnpj() {
+async fn filial_na_mesma_base_com_clientes_do_grupo_e_acesso_por_cnpj() {
     let a = ambiente(Duration::from_secs(600));
     let ana = token(&a.app, "ana@x.com").await;
 
@@ -67,7 +67,7 @@ async fn filial_na_mesma_base_com_dados_proprios_e_acesso_por_cnpj() {
     esperado.sort();
     assert_eq!(ids, esperado);
 
-    // Cada CNPJ com os próprios clientes — e a mesma base aberta, não duas.
+    // Clientes são do grupo — e a mesma base aberta, não duas.
     for (empresa, nome) in [
         (a.empresa_ana, "Cliente da Matriz"),
         (filial.id, "Cliente do Centro"),
@@ -83,14 +83,9 @@ async fn filial_na_mesma_base_com_dados_proprios_e_acesso_por_cnpj() {
         .await
         .valor::<mod_clientes::PessoaCadastrada>();
     }
-    assert_eq!(
-        nomes(&clientes(&a.app, &ana, a.empresa_ana).await),
-        vec!["Cliente da Matriz"]
-    );
-    assert_eq!(
-        nomes(&clientes(&a.app, &ana, filial.id).await),
-        vec!["Cliente do Centro"]
-    );
+    let grupo = vec!["Cliente da Matriz", "Cliente do Centro"];
+    assert_eq!(nomes(&clientes(&a.app, &ana, a.empresa_ana).await), grupo);
+    assert_eq!(nomes(&clientes(&a.app, &ana, filial.id).await), grupo);
     assert_eq!(
         a.servidor.frota().abertas(),
         1,

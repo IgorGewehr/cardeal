@@ -53,7 +53,7 @@ impl Comando for CriarProduto {
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         // 1/2. Validar (domínio puro).
         let mut produto = Produto::novo(
-            ctx.empresa,
+            ctx.organizacao,
             self.grupo_produto,
             self.nome,
             &self.ncm,
