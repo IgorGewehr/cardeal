@@ -41,7 +41,7 @@ pub struct ItemProdutoComSaldo {
 }
 
 /// Todos os produtos ativos com saldo agregado, por nome. Sem cursor real ainda, mesma
-/// decisão do financeiro (`docs/09-protocolo-api.md` §5): um teto de 500 linhas é suficiente
+/// decisão do financeiro (`docs/09-protocolo-api.md` §5): sem corte silencioso — teto de segurança `cardeal_modkit::TETO_LISTA_COMPLETA` (a lista paginada para a rede é a `.v2`)
 /// para o catálogo de uma PME.
 ///
 /// # Errors

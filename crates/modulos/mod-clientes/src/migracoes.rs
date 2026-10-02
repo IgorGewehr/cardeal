@@ -88,6 +88,12 @@ CREATE TABLE clientes_endereco (
 CREATE INDEX clientes_endereco_pessoa ON clientes_endereco(pessoa);
 ";
 
+/// A listagem paginada ordena por `(nome, id)` e continua depois do cursor: o índice cobre a
+/// ordem inteira, então qualquer página custa o mesmo.
+const SQL_LISTA_PAGINADA: &str = r"
+CREATE INDEX clientes_pessoa_lista ON clientes_pessoa(empresa, nome, id) WHERE estado = 'Ativa';
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -99,6 +105,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 2,
         nome: "clientes_contato_e_endereco",
         sql: SQL_CONTATO_ENDERECO,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 3,
+        nome: "clientes_lista_paginada",
+        sql: SQL_LISTA_PAGINADA,
         tipo: TipoMigracao::Esquema,
     },
 ];

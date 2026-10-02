@@ -50,6 +50,7 @@ mod credito;
 pub mod dedup;
 mod erros;
 pub mod eventos;
+mod listagem;
 mod manifesto;
 #[cfg(feature = "sqlite")]
 pub mod migracoes;
@@ -76,6 +77,9 @@ pub use credito::{
     SCORE_MAXIMO, SCORE_MINIMO,
 };
 pub use erros::ErroClientes;
+pub use listagem::ListarPessoas;
+#[cfg(feature = "sqlite")]
+pub use listagem::{nomes_das_pessoas, pessoas_cujo_nome_casa};
 pub use manifesto::{manifesto, MANIFESTO};
 #[cfg(feature = "sqlite")]
 pub use modulo::ModuloClientes;

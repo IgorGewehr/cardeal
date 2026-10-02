@@ -37,7 +37,7 @@ pub struct ItemPedido {
 }
 
 /// Lista os pedidos da empresa, mais recentes primeiro. Sem cursor real ainda
-/// (`docs/09-protocolo-api.md` §5) — teto de 200 linhas, suficiente para o volume de uma PME.
+/// (`docs/09-protocolo-api.md` §5) — sem corte silencioso — teto de segurança `cardeal_modkit::TETO_LISTA_COMPLETA` (a lista paginada para a rede é a `.v2`), suficiente para o volume de uma PME.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PedidosRecentes;
 

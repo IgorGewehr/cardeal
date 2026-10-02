@@ -46,6 +46,7 @@ impl Modulo for ModuloEstoque {
             .comando::<AjustarSaldo>("estoque.ajustar_saldo.v1")
             .comando::<RegistrarAparelhoOrigem>("estoque.registrar_aparelho_origem.v1")
             .consulta::<ProdutosComSaldo>("estoque.produtos_com_saldo.v1")
+            .consulta::<crate::listagem::ListarProdutos>("estoque.produtos.v2")
             .consulta::<ProdutoPorCodigoBarras>("estoque.produto_por_codigo_barras.v1")
             .consulta::<ProdutoPorId>("estoque.produto_por_id.v1")
             .consulta::<SaldoDisponivelDoProduto>("estoque.saldo_disponivel_do_produto.v1")

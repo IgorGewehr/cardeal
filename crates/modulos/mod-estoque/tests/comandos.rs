@@ -1123,3 +1123,88 @@ fn produtos_com_saldo_nao_corta_a_lista_em_silencio() {
     assert_eq!(itens.len(), 600);
     assert_eq!(itens.last().unwrap().nome, "Peça 0599");
 }
+
+#[test]
+fn listagem_paginada_de_produtos_busca_por_nome_e_codigo() {
+    use cardeal_modkit::{Pagina, PedidoPagina};
+    use mod_estoque::ListarProdutos;
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloEstoque]).unwrap();
+    let s = sessao(empresa, &["estoque.produto.criar", "estoque.produto.ver"]);
+    let exec = |nome: &str, c: Vec<u8>| {
+        d.executar_comando(nome, &c, &s, &ambiente(empresa), arm.escritor())
+            .unwrap()
+    };
+    let grupo: GrupoProdutoCriado = postcard::from_bytes(&exec(
+        "estoque.criar_grupo_produto.v1",
+        carga(&CriarGrupoProduto {
+            codigo: "P".into(),
+            nome: "Peças".into(),
+            pai: None,
+        }),
+    ))
+    .unwrap();
+    let unidade: UnidadeCriada = postcard::from_bytes(&exec(
+        "estoque.criar_unidade.v1",
+        carga(&CriarUnidade {
+            sigla: "UN".into(),
+            nome: "Unidade".into(),
+            fracionavel: false,
+        }),
+    ))
+    .unwrap();
+    for i in 0..70 {
+        exec(
+            "estoque.criar_produto.v1",
+            carga(&CriarProduto {
+                grupo_produto: grupo.grupo_produto,
+                nome: format!("{} {i:02}", if i % 2 == 0 { "Tela" } else { "Bateria" }),
+                ncm: "85076000".into(),
+                unidade_padrao: unidade.unidade,
+                codigo_barras: (i == 7).then(|| "7891234567895".to_string()),
+                detalhes_tecnicos: None,
+            }),
+        );
+    }
+    let listar = |busca: Option<&str>, pagina: PedidoPagina| -> Pagina<ItemProdutoComSaldo> {
+        let q = ListarProdutos {
+            busca: busca.map(Into::into),
+            pagina,
+        };
+        postcard::from_bytes(
+            &d.executar_consulta(
+                "estoque.produtos.v2",
+                &carga(&q),
+                &s,
+                &ambiente(empresa),
+                arm.leitor(),
+            )
+            .unwrap(),
+        )
+        .unwrap()
+    };
+    let p1 = listar(None, PedidoPagina::primeira(25));
+    assert_eq!(p1.total, Some(70));
+    let mut todos = p1.itens;
+    let mut proximo = p1.proximo;
+    while let Some(c) = proximo {
+        let p = listar(
+            None,
+            PedidoPagina {
+                apos: Some(c),
+                limite: 25,
+            },
+        );
+        todos.extend(p.itens);
+        proximo = p.proximo;
+    }
+    assert_eq!(todos.len(), 70);
+    assert!(todos.windows(2).all(|w| w[0].nome <= w[1].nome));
+    assert_eq!(
+        listar(Some("tela"), PedidoPagina::primeira(100)).total,
+        Some(35)
+    );
+    let bipe = listar(Some("7891234567895"), PedidoPagina::primeira(10));
+    assert_eq!(bipe.itens.len(), 1);
+    assert_eq!(bipe.itens[0].nome, "Bateria 07");
+}

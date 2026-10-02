@@ -638,3 +638,131 @@ fn busca_acha_pelo_telefone_e_o_catalogo_nao_para_em_200() {
     // O catálogo inteiro, sem o teto de 200.
     assert_eq!(buscar(None).len(), 206);
 }
+
+fn cliente_chamado(d: &Despachante, arm: &Armazenamento, empresa: Id, s: &Sessao, nome: &str) {
+    let cmd = CriarPessoa {
+        tipo: TipoPessoa::Fisica,
+        nome: nome.to_string(),
+        nome_fantasia: None,
+        papel_inicial: Papel::Cliente,
+        documento_tipo: None,
+        documento_numero: None,
+        data_nascimento: None,
+        endereco: None,
+        contato: None,
+    };
+    d.executar_comando(
+        "clientes.criar_pessoa.v1",
+        &carga(&cmd),
+        s,
+        &ambiente(empresa),
+        arm.escritor(),
+    )
+    .unwrap();
+}
+
+fn pagina(
+    d: &Despachante,
+    arm: &Armazenamento,
+    empresa: Id,
+    s: &Sessao,
+    busca: Option<&str>,
+    pedido: cardeal_modkit::PedidoPagina,
+) -> cardeal_modkit::Pagina<ItemPessoa> {
+    let q = mod_clientes::ListarPessoas {
+        papel: Papel::Cliente,
+        busca: busca.map(Into::into),
+        pagina: pedido,
+    };
+    let saida = d
+        .executar_consulta(
+            "clientes.pessoas.v2",
+            &carga(&q),
+            s,
+            &ambiente(empresa),
+            arm.leitor(),
+        )
+        .unwrap();
+    postcard::from_bytes(&saida).unwrap()
+}
+
+#[test]
+fn listagem_paginada_entrega_todos_em_ordem_sem_repetir_nem_pular() {
+    use cardeal_modkit::PedidoPagina;
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloClientes]).unwrap();
+    let s = sessao(empresa, &["clientes.pessoa.criar", "clientes.pessoa.ver"]);
+    for i in 0..130 {
+        // Nomes repetidos de propósito: o desempate pelo id tem de funcionar.
+        cliente_chamado(&d, &arm, empresa, &s, &format!("Cliente {:03}", i / 2));
+    }
+
+    let p1 = pagina(&d, &arm, empresa, &s, None, PedidoPagina::primeira(50));
+    assert_eq!(p1.total, Some(130));
+    assert_eq!(p1.itens.len(), 50);
+
+    // Entre a página 1 e a 2, alguém cadastra um cliente que cai *antes* do cursor: com
+    // OFFSET ele empurraria tudo e repetiria uma linha; com cursor, nada muda.
+    cliente_chamado(&d, &arm, empresa, &s, "AAA Recém-chegado");
+
+    let mut todos = p1.itens.clone();
+    let mut proximo = p1.proximo.clone();
+    let mut paginas = 1;
+    while let Some(c) = proximo {
+        let p = pagina(
+            &d,
+            &arm,
+            empresa,
+            &s,
+            None,
+            PedidoPagina {
+                apos: Some(c),
+                limite: 50,
+            },
+        );
+        assert!(p.total.is_none(), "total só na primeira página");
+        todos.extend(p.itens);
+        proximo = p.proximo;
+        paginas += 1;
+    }
+    assert_eq!(paginas, 3);
+    assert_eq!(todos.len(), 130, "sem perder nem repetir");
+    let ids: std::collections::HashSet<_> = todos.iter().map(|p| p.pessoa).collect();
+    assert_eq!(ids.len(), 130);
+    assert!(
+        todos.windows(2).all(|w| w[0].nome <= w[1].nome),
+        "em ordem de nome"
+    );
+}
+
+#[test]
+fn listagem_paginada_busca_no_servidor_e_teto_por_pagina() {
+    use cardeal_modkit::PedidoPagina;
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloClientes]).unwrap();
+    let s = sessao(empresa, &["clientes.pessoa.criar", "clientes.pessoa.ver"]);
+    for i in 0..30 {
+        cliente_chamado(&d, &arm, empresa, &s, &format!("Silva {i:02}"));
+        cliente_chamado(&d, &arm, empresa, &s, &format!("Souza {i:02}"));
+    }
+    let p = pagina(
+        &d,
+        &arm,
+        empresa,
+        &s,
+        Some("silva"),
+        PedidoPagina::primeira(20),
+    );
+    assert_eq!(p.total, Some(30));
+    assert!(p.itens.iter().all(|x| x.nome.starts_with("Silva")));
+    let tudo = pagina(
+        &d,
+        &arm,
+        empresa,
+        &s,
+        None,
+        PedidoPagina::primeira(u16::MAX),
+    );
+    assert_eq!(tudo.itens.len(), 60, "abaixo do teto vem tudo numa página");
+    assert!(tudo.proximo.is_none());
+}

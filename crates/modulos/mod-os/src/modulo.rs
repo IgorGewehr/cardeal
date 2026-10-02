@@ -64,6 +64,7 @@ impl Modulo for ModuloOs {
             .consulta::<OrdensEmAberto>("os.ordens_em_aberto.v1")
             .consulta::<TodasAsOrdens>("os.todas_as_ordens.v1")
             .consulta::<BuscarOrdens>("os.buscar_ordens.v1")
+            .consulta::<crate::consultas::ListarOrdens>("os.ordens.v2")
             .consulta::<OrdensPorId>("os.ordens_por_id.v1")
             .consulta::<OrdensDoCliente>("os.ordens_do_cliente.v1")
             .consulta::<MargemDasOrdensNoPeriodo>("os.margem_das_ordens_no_periodo.v1")

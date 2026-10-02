@@ -72,6 +72,7 @@ mod comandos;
 mod consultas;
 mod erros;
 pub mod eventos;
+mod listagem;
 mod manifesto;
 mod meio_pagamento;
 #[cfg(feature = "sqlite")]
@@ -128,6 +129,9 @@ pub use consultas::{
 };
 pub use consultas::{SituacaoDaParcela, SituacaoNaData};
 pub use erros::ErroFinanceiro;
+pub use listagem::{
+    FiltroParcelas, ListarParcelasAPagar, ListarParcelasAReceber, PaginaParcelas, SituacaoParcelas,
+};
 pub use manifesto::{manifesto, MANIFESTO};
 pub use meio_pagamento::MeioPagamento;
 #[cfg(feature = "sqlite")]

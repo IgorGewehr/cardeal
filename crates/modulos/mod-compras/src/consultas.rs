@@ -78,7 +78,7 @@ pub struct ItemNota {
     pub itens: u32,
 }
 
-/// Lista as notas de entrada da empresa, mais recentes primeiro. Teto de 200 linhas
+/// Lista as notas de entrada da empresa, mais recentes primeiro. sem corte silencioso — teto de segurança `cardeal_modkit::TETO_LISTA_COMPLETA` (a lista paginada para a rede é a `.v2`)
 /// (`docs/09-protocolo-api.md` §5).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NotasRecentes;

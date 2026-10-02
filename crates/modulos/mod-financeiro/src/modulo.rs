@@ -58,6 +58,8 @@ impl Modulo for ModuloFinanceiro {
             .comando::<CriarRecorrencia>("financeiro.criar_recorrencia.v1")
             .comando::<MaterializarRecorrencias>("financeiro.materializar_recorrencias.v1")
             .consulta::<TitulosAReceberEmAberto>("financeiro.titulos_a_receber_em_aberto.v1")
+            .consulta::<crate::listagem::ListarParcelasAReceber>("financeiro.parcelas_a_receber.v2")
+            .consulta::<crate::listagem::ListarParcelasAPagar>("financeiro.parcelas_a_pagar.v2")
             .consulta::<TitulosAPagarEmAberto>("financeiro.titulos_a_pagar_em_aberto.v1")
             .consulta::<ParcelasAReceberNoPeriodo>("financeiro.parcelas_a_receber_no_periodo.v1")
             .consulta::<ParcelasAPagarNoPeriodo>("financeiro.parcelas_a_pagar_no_periodo.v1")

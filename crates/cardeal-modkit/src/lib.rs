@@ -43,6 +43,7 @@ mod contrato;
 mod despacho;
 mod icone;
 mod manifesto;
+mod pagina;
 mod permissao;
 mod registro;
 
@@ -51,5 +52,6 @@ pub use contrato::{Comando, Consulta, TETO_LISTA_COMPLETA};
 pub use despacho::{Ambiente, Ctx, Despachante, Modulo, Registro};
 pub use icone::Icone;
 pub use manifesto::{ContaPadrao, EntradaMenu, ErroManifesto, IdModulo, Manifesto, Submodulo};
+pub use pagina::{Cursor, Pagina, PedidoPagina};
 pub use permissao::{Permissao, Risco};
 pub use registro::{ConjuntoEfetivo, ErroRegistro, PedidoAtivacao, RegistroModulos};

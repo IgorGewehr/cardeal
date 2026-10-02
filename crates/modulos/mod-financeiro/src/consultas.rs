@@ -69,7 +69,7 @@ impl ItemTituloEmAberto {
 }
 
 /// As parcelas em aberto (`Aberta`/`Parcial`) de uma espécie, por vencimento. Sem cursor real
-/// ainda (`docs/09-protocolo-api.md` §5 previa `Pagina<T>`) — um teto de 500 linhas é
+/// ainda (`docs/09-protocolo-api.md` §5 previa `Pagina<T>`) — sem corte silencioso — teto de segurança `cardeal_modkit::TETO_LISTA_COMPLETA` (a lista paginada para a rede é a `.v2`) é
 /// suficiente para o volume de uma PME e evita construir paginação por chave antes de haver
 /// um caso de uso que precise dela.
 ///
@@ -95,27 +95,38 @@ pub fn titulos_em_aberto(
         .map_err(persist)?;
     let linhas = stmt
         .query_map(params![blob(empresa), especie_txt(especie)], |r| {
-            let contraparte = contraparte_join_opt(&r.get::<_, String>(3)?, r.get(4)?);
-            Ok(ItemTituloEmAberto {
-                parcela: id_de(r.get(0)?),
-                titulo: id_de(r.get(1)?),
-                numero: u16::try_from(r.get::<_, i64>(2)?).unwrap_or(1),
-                especie,
-                contraparte,
-                vencimento: data_de(r.get(5)?),
-                valor_original: Dinheiro::centavos(r.get(6)?),
-                valor_baixado: Dinheiro::centavos(r.get(7)?),
-                estado: estado_de(&r.get::<_, String>(8)?),
-                descricao: r.get(9)?,
-                origem_modulo: r.get(10)?,
-                origem_id: r.get::<_, Option<Vec<u8>>>(11)?.map(id_de),
-                categoria: r.get::<_, Option<Vec<u8>>>(12)?.map(id_de),
-            })
+            item_parcela_de_linha(r, especie)
         })
         .map_err(persist)?;
     linhas
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(persist)
+}
+
+/// Uma linha `p.id, p.titulo, p.numero, t.contraparte_tipo, t.contraparte_id, p.vencimento,
+/// p.valor, p.valor_baixado, p.estado, t.observacao, t.origem_modulo, t.origem_id,
+/// t.categoria` → [`ItemTituloEmAberto`]. Compartilhado com a listagem paginada.
+#[cfg(feature = "sqlite")]
+pub(crate) fn item_parcela_de_linha(
+    r: &rusqlite::Row<'_>,
+    especie: EspecieTitulo,
+) -> rusqlite::Result<ItemTituloEmAberto> {
+    let contraparte = contraparte_join_opt(&r.get::<_, String>(3)?, r.get(4)?);
+    Ok(ItemTituloEmAberto {
+        parcela: id_de(r.get(0)?),
+        titulo: id_de(r.get(1)?),
+        numero: u16::try_from(r.get::<_, i64>(2)?).unwrap_or(1),
+        especie,
+        contraparte,
+        vencimento: data_de(r.get(5)?),
+        valor_original: Dinheiro::centavos(r.get(6)?),
+        valor_baixado: Dinheiro::centavos(r.get(7)?),
+        estado: estado_de(&r.get::<_, String>(8)?),
+        descricao: r.get(9)?,
+        origem_modulo: r.get(10)?,
+        origem_id: r.get::<_, Option<Vec<u8>>>(11)?.map(id_de),
+        categoria: r.get::<_, Option<Vec<u8>>>(12)?.map(id_de),
+    })
 }
 
 /// Lista as parcelas a receber em aberto (`Aberta`/`Parcial`), por vencimento.

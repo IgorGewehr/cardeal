@@ -22,7 +22,9 @@ use crate::repositorio::{
     ordem_de_linha, persist,
 };
 
+mod listagem;
 mod margem;
+pub use listagem::{ItemListaOrdem, ListarOrdens};
 pub use margem::{MargemDaOrdem, MargemDaOrdemServico, MargemDasOrdens, MargemDasOrdensNoPeriodo};
 
 /// Busca uma ordem de serviço pelo id.
@@ -120,7 +122,7 @@ pub fn laudo_mais_recente(
 
 /// As ordens ainda não finalizadas (nem faturadas, canceladas ou reprovadas) — o que sustenta
 /// a lista principal da tela de OS. Sem cursor real ainda, mesma decisão do financeiro
-/// (`docs/09-protocolo-api.md` §5): um teto de 500 linhas é suficiente para uma PME.
+/// (`docs/09-protocolo-api.md` §5): sem corte silencioso — teto de segurança `cardeal_modkit::TETO_LISTA_COMPLETA` (a lista paginada para a rede é a `.v2`) para uma PME.
 ///
 /// # Errors
 /// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
@@ -219,7 +221,8 @@ impl Consulta for OrdensEmAberto {
 /// conseguir ver/filtrar/ordenar por qualquer status, inclusive os finalizados.
 ///
 /// Mesmo teto de paginação das demais consultas sem cursor real (`docs/09-protocolo-api.md`
-/// §5): 500 linhas, mais que suficiente para o histórico de uma PME combinado com busca.
+/// §5): sem corte silencioso — teto de segurança `cardeal_modkit::TETO_LISTA_COMPLETA`; a
+/// lista paginada para a rede é `os.ordens.v2`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TodasAsOrdens;
 
@@ -308,31 +311,8 @@ impl Consulta for BuscarOrdens {
                  ORDER BY numero DESC",
             )
             .map_err(persist)?;
-        let termo = self.termo.trim();
-        // "#12" é inequívoco: só o número. "12" sozinho também pode ser parte do aparelho
-        // ("Galaxy A12"), então casa número (prefixo) **ou** texto.
-        let so_numero = termo.strip_prefix('#').map(str::trim);
-        let numero_digitado = so_numero
-            .unwrap_or(termo)
-            .chars()
-            .all(|c| c.is_ascii_digit())
-            .then(|| so_numero.unwrap_or(termo));
-        let casa = |os: &OrdemServico| {
-            if termo.is_empty() {
-                return true;
-            }
-            let pelo_numero = numero_digitado
-                .is_some_and(|n| !n.is_empty() && os.numero.to_string().starts_with(n));
-            if so_numero.is_some() {
-                return pelo_numero;
-            }
-            pelo_numero
-                || self.clientes.contains(&os.cliente)
-                || cardeal_kernel::texto::casa_por_palavras(
-                    &format!("{} {}", os.equipamento, os.defeito_relatado),
-                    termo,
-                )
-        };
+        let criterio = CriterioBusca::novo(&self.termo, &self.clientes);
+        let casa = |os: &OrdemServico| criterio.casa(os);
         let mut saida = Vec::new();
         let linhas = stmt
             .query_map([blob(ctx.empresa)], ordem_de_linha)
@@ -347,6 +327,55 @@ impl Consulta for BuscarOrdens {
             }
         }
         Ok(saida)
+    }
+}
+
+/// O critério de texto da busca de OS — o mesmo na lista do desktop (`BuscarOrdens`) e na
+/// paginada da rede (`ListarOrdens`). "#12" é só o número; "12" também pode ser parte do
+/// aparelho; qualquer outro texto casa por palavras (sem acento) no aparelho/defeito, ou pelo
+/// cliente cujo nome casou.
+#[cfg(feature = "sqlite")]
+pub(crate) struct CriterioBusca<'a> {
+    termo: &'a str,
+    so_numero: Option<&'a str>,
+    numero_digitado: Option<&'a str>,
+    clientes: &'a [Id],
+}
+
+#[cfg(feature = "sqlite")]
+impl<'a> CriterioBusca<'a> {
+    pub(crate) fn novo(termo: &'a str, clientes: &'a [Id]) -> Self {
+        let termo = termo.trim();
+        let so_numero = termo.strip_prefix('#').map(str::trim);
+        let numero_digitado = so_numero
+            .unwrap_or(termo)
+            .chars()
+            .all(|c| c.is_ascii_digit())
+            .then(|| so_numero.unwrap_or(termo));
+        Self {
+            termo,
+            so_numero,
+            numero_digitado,
+            clientes,
+        }
+    }
+
+    pub(crate) fn casa(&self, os: &OrdemServico) -> bool {
+        if self.termo.is_empty() {
+            return true;
+        }
+        let pelo_numero = self
+            .numero_digitado
+            .is_some_and(|n| !n.is_empty() && os.numero.to_string().starts_with(n));
+        if self.so_numero.is_some() {
+            return pelo_numero;
+        }
+        pelo_numero
+            || self.clientes.contains(&os.cliente)
+            || cardeal_kernel::texto::casa_por_palavras(
+                &format!("{} {}", os.equipamento, os.defeito_relatado),
+                self.termo,
+            )
     }
 }
 

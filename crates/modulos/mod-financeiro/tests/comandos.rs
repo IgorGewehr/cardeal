@@ -2050,3 +2050,62 @@ fn lancar_ja_quitado_sem_permissao_de_baixa_nao_grava_nada() {
     assert_eq!(erro.codigo, CodigoErro::REGRA_VIOLADA);
     assert_eq!(conta_lancamentos(&arm, empresa), 0);
 }
+
+#[test]
+fn listagem_paginada_traz_o_saldo_de_tudo_e_nao_da_pagina() {
+    use cardeal_modkit::PedidoPagina;
+    use mod_financeiro::{
+        FiltroParcelas, ListarParcelasAReceber, PaginaParcelas, SituacaoParcelas,
+    };
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloFinanceiro]).unwrap();
+    let s = sessao(
+        empresa,
+        &["financeiro.receber.criar", "financeiro.receber.ver"],
+    );
+    for _ in 0..25 {
+        lancar(&d, &arm, empresa, &s, Dinheiro::reais(30), 3); // 75 parcelas de R$ 10
+    }
+    let listar = |pagina: PedidoPagina| -> PaginaParcelas {
+        let q = ListarParcelasAReceber(FiltroParcelas {
+            situacao: SituacaoParcelas::EmAberto,
+            periodo: None,
+            pagina,
+        });
+        postcard::from_bytes(
+            &d.executar_consulta(
+                "financeiro.parcelas_a_receber.v2",
+                &carga(&q),
+                &s,
+                &ambiente(empresa),
+                arm.leitor(),
+            )
+            .unwrap(),
+        )
+        .unwrap()
+    };
+    let p1 = listar(PedidoPagina::primeira(30));
+    assert_eq!(p1.pagina.itens.len(), 30);
+    assert_eq!(p1.pagina.total, Some(75));
+    assert_eq!(
+        p1.saldo_total,
+        Some(Dinheiro::reais(750)),
+        "o total é do filtro inteiro, não das 30 da página"
+    );
+
+    let mut todas = p1.pagina.itens;
+    let mut proximo = p1.pagina.proximo;
+    while let Some(c) = proximo {
+        let p = listar(PedidoPagina {
+            apos: Some(c),
+            limite: 30,
+        });
+        assert!(p.saldo_total.is_none());
+        todas.extend(p.pagina.itens);
+        proximo = p.pagina.proximo;
+    }
+    assert_eq!(todas.len(), 75);
+    assert!(todas.windows(2).all(|w| w[0].vencimento <= w[1].vencimento));
+    let unicas: std::collections::HashSet<_> = todas.iter().map(|i| i.parcela).collect();
+    assert_eq!(unicas.len(), 75);
+}

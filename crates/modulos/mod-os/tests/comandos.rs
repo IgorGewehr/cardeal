@@ -3109,3 +3109,107 @@ fn montar_orcamento_aceita_peca_nova_com_os_em_execucao() {
     assert_eq!(detalhe.itens_peca.len(), 1);
     assert_eq!(detalhe.itens_peca[0].produto, produto.produto);
 }
+
+#[test]
+fn listagem_paginada_de_os_busca_pelo_nome_do_cliente_no_servidor() {
+    use cardeal_modkit::{Pagina, PedidoPagina};
+    use mod_os::{FiltroEstadoOs, ItemListaOrdem, ListarOrdens};
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloClientes, &ModuloEstoque, &ModuloOs]).unwrap();
+    let mut s = sessao_completa(empresa);
+    let amb = ambiente(empresa);
+    let novo_cliente = |nome: &str| -> Id {
+        let c: PessoaCadastrada = postcard::from_bytes(
+            &d.executar_comando(
+                "clientes.criar_pessoa.v1",
+                &carga(&CriarPessoa {
+                    tipo: TipoPessoa::Fisica,
+                    nome: nome.into(),
+                    nome_fantasia: None,
+                    papel_inicial: Papel::Cliente,
+                    documento_tipo: None,
+                    documento_numero: None,
+                    data_nascimento: None,
+                    endereco: None,
+                    contato: None,
+                }),
+                &s,
+                &amb,
+                arm.escritor(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        c.pessoa
+    };
+    let joao = novo_cliente("João Açúcar");
+    let maria = novo_cliente("Maria Souza");
+    for i in 0..45 {
+        d.executar_comando(
+            "os.abrir_ordem_servico.v1",
+            &carga(&AbrirOrdemServico {
+                cliente: if i % 3 == 0 { joao } else { maria },
+                equipamento: format!("Aparelho {i}"),
+                defeito_relatado: "Não liga".into(),
+                tecnico_responsavel: Id::novo(),
+                garantia_dias: 90,
+                ficha: mod_os::FichaEntrada::default(),
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap();
+    }
+    s = sessao_completa(empresa);
+    let listar = |busca: &str, pagina: PedidoPagina| -> Pagina<ItemListaOrdem> {
+        let q = ListarOrdens {
+            filtro: FiltroEstadoOs::Todas,
+            busca: busca.into(),
+            pagina,
+        };
+        postcard::from_bytes(
+            &d.executar_consulta("os.ordens.v2", &carga(&q), &s, &amb, arm.leitor())
+                .unwrap(),
+        )
+        .unwrap()
+    };
+
+    let p1 = listar("", PedidoPagina::primeira(20));
+    assert_eq!(p1.total, Some(45));
+    assert_eq!(
+        p1.itens.first().unwrap().ordem.numero,
+        45,
+        "mais recentes primeiro"
+    );
+    let p2 = listar(
+        "",
+        PedidoPagina {
+            apos: p1.proximo.clone(),
+            limite: 20,
+        },
+    );
+    let p3 = listar(
+        "",
+        PedidoPagina {
+            apos: p2.proximo.clone(),
+            limite: 20,
+        },
+    );
+    assert!(p3.proximo.is_none());
+    let numeros: Vec<u64> = [p1.itens, p2.itens, p3.itens]
+        .concat()
+        .iter()
+        .map(|i| i.ordem.numero)
+        .collect();
+    assert_eq!(numeros, (1..=45).rev().collect::<Vec<_>>());
+
+    // "acucar joao" acha as OS do "João Açúcar" — palavras, sem acento, resolvido no servidor.
+    let do_joao = listar("acucar joao", PedidoPagina::primeira(100));
+    assert_eq!(do_joao.total, Some(15));
+    assert!(do_joao
+        .itens
+        .iter()
+        .all(|i| i.cliente_nome.as_deref() == Some("João Açúcar")));
+    assert_eq!(listar("#7", PedidoPagina::primeira(10)).itens.len(), 1);
+}

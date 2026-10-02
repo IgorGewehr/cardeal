@@ -189,6 +189,11 @@ CREATE INDEX financeiro_pessoal_usuario_venc
 CREATE INDEX financeiro_pessoal_grupo ON financeiro_pessoal(grupo);
 ";
 
+/// A listagem paginada de parcelas ordena por `(vencimento, id)` em qualquer estado.
+const SQL_LISTA_PAGINADA: &str = r"
+CREATE INDEX financeiro_parcela_lista ON financeiro_parcela(empresa, vencimento, id);
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -218,6 +223,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 5,
         nome: "financeiro_pessoal",
         sql: SQL_PESSOAL,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 6,
+        nome: "financeiro_lista_paginada",
+        sql: SQL_LISTA_PAGINADA,
         tipo: TipoMigracao::Esquema,
     },
 ];

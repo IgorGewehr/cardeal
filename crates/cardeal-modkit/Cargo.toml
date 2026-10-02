@@ -17,7 +17,6 @@ sqlite  = [
     "cardeal-ledger/sqlite",
     "dep:cardeal-storage",
     "dep:cardeal-auth",
-    "dep:postcard",
     "dep:rusqlite",
 ]
 
@@ -27,7 +26,7 @@ cardeal-ledger  = { path = "../cardeal-ledger", default-features = false }
 cardeal-storage = { workspace = true, optional = true }
 cardeal-auth    = { workspace = true, optional = true }
 serde.workspace = true
-postcard = { workspace = true, optional = true }
+postcard.workspace = true
 rusqlite = { workspace = true, optional = true }
 thiserror.workspace = true
 tracing.workspace = true

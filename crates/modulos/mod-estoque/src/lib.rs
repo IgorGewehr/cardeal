@@ -64,6 +64,7 @@ mod consultas;
 mod erros;
 pub mod eventos;
 mod inventario;
+mod listagem;
 mod manifesto;
 #[cfg(feature = "sqlite")]
 pub mod migracoes;
@@ -106,6 +107,7 @@ pub use consultas::{
 };
 pub use erros::ErroEstoque;
 pub use inventario::{AjusteInventario, ContagemItem, EstadoInventario, Inventario};
+pub use listagem::ListarProdutos;
 pub use manifesto::{manifesto, MANIFESTO};
 #[cfg(feature = "sqlite")]
 pub use modulo::ModuloEstoque;

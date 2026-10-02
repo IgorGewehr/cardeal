@@ -158,6 +158,11 @@ CREATE INDEX estoque_lote_aparelho_origem ON estoque_lote(aparelho_origem)
 CREATE INDEX estoque_lote_validade ON estoque_lote(empresa, validade) WHERE estado = 'Ativo';
 ";
 
+/// A listagem paginada de produtos ordena por `(nome, id)` e continua depois do cursor.
+const SQL_LISTA_PAGINADA: &str = r"
+CREATE INDEX estoque_produto_lista ON estoque_produto(empresa, nome, id) WHERE ativo = 1;
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -181,6 +186,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 4,
         nome: "estoque_lote_e_aparelho_origem",
         sql: SQL_LOTE_E_APARELHO_ORIGEM,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 5,
+        nome: "estoque_lista_paginada",
+        sql: SQL_LISTA_PAGINADA,
         tipo: TipoMigracao::Esquema,
     },
 ];

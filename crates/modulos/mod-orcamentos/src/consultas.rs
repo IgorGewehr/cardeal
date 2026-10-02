@@ -1,5 +1,5 @@
 //! As consultas do módulo de orçamentos — leitura autorizada, sem SQL cru na tela.
-//! `docs/09-protocolo-api.md` §5: sem cursor real ainda, teto de 500 linhas (suficiente para
+//! `docs/09-protocolo-api.md` §5: sem cursor real ainda, sem corte silencioso — teto de segurança `cardeal_modkit::TETO_LISTA_COMPLETA` (a lista paginada para a rede é a `.v2`) (suficiente para
 //! o volume de uma PME).
 
 #[cfg(feature = "sqlite")]

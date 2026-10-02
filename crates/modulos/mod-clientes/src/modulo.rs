@@ -36,7 +36,8 @@ impl Modulo for ModuloClientes {
             .comando::<DesativarPessoa>("clientes.desativar_pessoa.v1")
             .comando::<ReativarPessoa>("clientes.reativar_pessoa.v1")
             .consulta::<DetalhePessoa>("clientes.detalhe_pessoa.v1")
-            .consulta::<PessoasPorPapel>("clientes.pessoas_por_papel.v1");
+            .consulta::<PessoasPorPapel>("clientes.pessoas_por_papel.v1")
+            .consulta::<crate::listagem::ListarPessoas>("clientes.pessoas.v2");
         Ok(())
     }
 }
