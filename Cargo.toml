@@ -99,7 +99,7 @@ rusqlite    = { version = "0.32", features = ["bundled", "blob", "backup", "func
 tokio       = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync", "signal", "fs"] }
 axum        = { version = "0.7", features = ["ws", "http2", "macros"] }
 tower        = "0.5"
-tower-http   = { version = "0.6", features = ["compression-zstd", "limit", "timeout", "trace", "fs"] }
+tower-http   = { version = "0.6", features = ["compression-zstd", "compression-br", "compression-gzip", "limit", "timeout", "trace", "fs"] }
 reqwest      = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "gzip"] }
 rustls       = "0.23"
 rcgen        = "0.13"

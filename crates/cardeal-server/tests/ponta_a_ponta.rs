@@ -979,3 +979,61 @@ async fn token_com(app: &Router, email: &str, senha: &str) -> String {
         .token
         .unwrap()
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn lista_grande_sai_comprimida_e_resposta_pequena_nao() {
+    let a = ambiente(Duration::from_secs(600));
+    let t = token(&a.app, "ana@x.com").await;
+    for i in 0..60 {
+        let p = criar_pessoa(&format!("Cliente número {i:03} da Silva"));
+        comando(
+            &a.app,
+            &t,
+            a.empresa_ana,
+            "clientes.criar_pessoa.v1",
+            &p,
+            Id::novo(),
+        )
+        .await
+        .valor::<mod_clientes::PessoaCadastrada>();
+    }
+    let zstd_aceito = [("accept-encoding", "zstd".to_owned())];
+    let q = PessoasPorPapel {
+        papel: Papel::Cliente,
+        busca: None,
+    };
+    let rota = rota_consulta(a.empresa_ana, "clientes.pessoas_por_papel.v1");
+    let r = chamar(
+        &a.app,
+        Method::POST,
+        &rota,
+        Some(&t),
+        &zstd_aceito,
+        postcard::to_stdvec(&q).unwrap(),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.cabecalhos.get(header::CONTENT_ENCODING).unwrap(), "zstd");
+    let cru = zstd::decode_all(r.corpo.as_slice()).unwrap();
+    assert!(
+        r.corpo.len() < cru.len() / 2,
+        "{} → {}",
+        cru.len(),
+        r.corpo.len()
+    );
+    let lista: Vec<ItemPessoa> = postcard::from_bytes(&cru).unwrap();
+    assert_eq!(lista.len(), 60);
+
+    let rota = rota_consulta(a.empresa_ana, "empresa.dados.v1");
+    let pequena = chamar(
+        &a.app,
+        Method::POST,
+        &rota,
+        Some(&t),
+        &zstd_aceito,
+        postcard::to_stdvec(&()).unwrap(),
+    )
+    .await;
+    assert!(pequena.cabecalhos.get(header::CONTENT_ENCODING).is_none());
+    pequena.valor::<mod_empresa::EmpresaResumo>();
+}

@@ -22,6 +22,8 @@ use cardeal_kernel::{CodigoErro, Erro};
 use cardeal_protocol::{
     versao_aceita, CABECALHO_PROTOCOLO, ROTA_SAUDE, ROTA_SENHA, ROTA_SESSAO, TETO_CORPO_BYTES,
 };
+use tower_http::compression::predicate::{NotForContentType, Predicate as _, SizeAbove};
+use tower_http::compression::{CompressionLayer, CompressionLevel};
 use tower_http::timeout::TimeoutLayer;
 
 use crate::Servidor;
@@ -52,7 +54,14 @@ pub fn roteador(servidor: Arc<Servidor>) -> Router {
     if let Some(pasta) = servidor.config.web.clone() {
         app = app.merge(web::rotas(&pasta));
     }
-    app.layer(DefaultBodyLimit::max(TETO_CORPO_BYTES))
+    // Respostas da API acima de 1 KB (listas) saem comprimidas no nível rápido — o Cloudflare
+    // não comprime `postcard`. Estáticos já vêm prontos (`.br`/`.gz`) e a camada pula o que
+    // já tem `Content-Encoding`.
+    let compressao = CompressionLayer::new()
+        .quality(CompressionLevel::Fastest)
+        .compress_when(SizeAbove::new(1024).and(NotForContentType::IMAGES));
+    app.layer(compressao)
+        .layer(DefaultBodyLimit::max(TETO_CORPO_BYTES))
         .layer(TimeoutLayer::with_status_code(
             StatusCode::GATEWAY_TIMEOUT,
             TEMPO_MAXIMO,
