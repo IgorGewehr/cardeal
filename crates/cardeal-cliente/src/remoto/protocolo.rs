@@ -96,6 +96,31 @@ pub fn trocar_senha(atual: &str, nova: &str) -> Resultado<Pedido> {
     ))
 }
 
+/// Põe alguém na empresa (`POST /v1/e/{empresa}/membros`).
+///
+/// # Errors
+/// Falha de serialização.
+pub fn adicionar_membro(
+    empresa: Id,
+    novo: &cardeal_protocol::PedidoNovoMembro,
+) -> Resultado<Pedido> {
+    Ok(base(
+        Metodo::Post,
+        cardeal_protocol::rota_membros(empresa),
+        carga(novo)?,
+    ))
+}
+
+/// Tira alguém da empresa (`DELETE /v1/e/{empresa}/membros/{usuario}`).
+#[must_use]
+pub fn remover_membro(empresa: Id, usuario: Id) -> Pedido {
+    base(
+        Metodo::Delete,
+        cardeal_protocol::rota_membro(empresa, usuario),
+        Vec::new(),
+    )
+}
+
 /// O pedido de logout.
 #[must_use]
 pub fn logout() -> Pedido {

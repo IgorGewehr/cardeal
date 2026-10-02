@@ -9,8 +9,6 @@ use cardeal_ui::organisms::{ColunaGrade, Grade};
 use cardeal_ui::tokens::Espaco;
 use mod_clientes::{ItemPessoa, Papel, PessoasPorPapel};
 
-use super::login;
-use crate::app::Tela;
 use crate::rede::{disparar, Pendente};
 
 /// O estado da lista.
@@ -50,8 +48,8 @@ impl Estado {
     }
 }
 
-/// Desenha a lista; devolve o login quando a pessoa sai.
-pub fn mostrar(ui: &mut egui::Ui, e: &mut Estado) -> Option<Tela> {
+/// Desenha a lista.
+pub fn mostrar(ui: &mut egui::Ui, e: &mut Estado) {
     if let Some(r) = e.carregando.as_ref().and_then(Pendente::pronto) {
         e.carregando = None;
         match r {
@@ -63,18 +61,11 @@ pub fn mostrar(ui: &mut egui::Ui, e: &mut Estado) -> Option<Tela> {
         }
     }
     let mut recarregar = ui.input(|i| i.key_pressed(egui::Key::F5));
-    let mut sair = false;
-    CabecalhoTela::novo(format!("Clientes — {}", e.empresa.nome)).mostrar(ui, |ui| {
+    CabecalhoTela::novo("Clientes").mostrar(ui, |ui| {
         recarregar |= ui
             .add(Botao::secundario("Atualizar").atalho("F5"))
             .clicked();
-        sair = ui.add(Botao::fantasma("Sair")).clicked();
     });
-    if sair {
-        // Melhor esforço: sem rede, o cookie expira sozinho; a tela volta ao login já.
-        let _: Pendente<()> = disparar_vazio(ui.ctx());
-        return Some(Tela::Login(login::Estado::default()));
-    }
     if recarregar && e.carregando.is_none() {
         e.recarregar(ui.ctx());
     }
@@ -109,9 +100,4 @@ pub fn mostrar(ui: &mut egui::Ui, e: &mut Estado) -> Option<Tela> {
             ui.add(Rotulo::interface(p.telefone.clone().unwrap_or_default()));
         });
     });
-    None
-}
-
-fn disparar_vazio(ctx: &egui::Context) -> Pendente<()> {
-    crate::rede::disparar_sem_corpo(ctx, protocolo::logout())
 }

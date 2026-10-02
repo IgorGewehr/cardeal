@@ -7,7 +7,7 @@ use cardeal_ui::atoms::{Botao, Rotulo};
 use cardeal_ui::organisms::Cartao;
 use cardeal_ui::tokens::Espaco;
 
-use super::clientes;
+use super::principal;
 use crate::app::Tela;
 use crate::rede::{disparar, Pendente};
 
@@ -40,9 +40,13 @@ pub fn mostrar(ui: &mut egui::Ui, e: &mut Estado) -> Option<Tela> {
     {
         e.entrando = None;
         match r {
-            Ok(_sessao) => {
+            Ok(sessao) => {
                 let empresa = e.empresas.iter().find(|x| x.id == id).cloned()?;
-                return Some(Tela::Clientes(clientes::Estado::novo(ui.ctx(), empresa)));
+                return Some(Tela::Principal(Box::new(principal::Estado::novo(
+                    ui.ctx(),
+                    empresa,
+                    sessao,
+                ))));
             }
             Err(erro) => e.erro = Some(erro.mensagem),
         }

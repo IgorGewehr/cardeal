@@ -17,6 +17,8 @@ cardeal-protocol.workspace = true
 cardeal-ui      = { path = "../cardeal-ui" }
 cardeal-cliente = { path = "../cardeal-cliente", default-features = false }
 mod-clientes    = { path = "../modulos/mod-clientes", default-features = false }
+mod-empresa     = { path = "../modulos/mod-empresa", default-features = false }
+cardeal-modkit  = { path = "../cardeal-modkit", default-features = false }
 egui.workspace     = true
 serde.workspace    = true
 postcard.workspace = true
