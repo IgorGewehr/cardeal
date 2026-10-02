@@ -44,6 +44,7 @@ mod evento;
 mod leitor;
 mod migracao;
 mod nucleo;
+mod replicacao;
 mod segredo;
 mod sql;
 mod uow;
@@ -57,6 +58,7 @@ pub use evento::{EventoDominio, RegistroAuditoria};
 pub use leitor::Leitor;
 pub use migracao::{ConjuntoMigracoes, Migracao, RelatorioMigracao, TipoMigracao};
 pub use nucleo::conjunto as conjunto_nucleo;
+pub use replicacao::{restaurar, ConfigReplicacao, Replicador, Restauracao};
 pub use segredo::Segredo;
 pub use uow::{FaixaNumeracao, Trava, UnidadeDeTrabalho};
 

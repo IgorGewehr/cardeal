@@ -10,6 +10,7 @@ use std::path::Path;
 
 use cardeal_auth::{Bloqueio, HashDeSenha};
 use cardeal_kernel::{CodigoErro, Erro, Id, Instante, Resultado};
+use cardeal_storage::{ConfigReplicacao, Replicador};
 use parking_lot::Mutex;
 use rusqlite::{params, Connection, OptionalExtension};
 
@@ -55,6 +56,9 @@ pub struct SessaoPersistida {
 /// O diretório aberto.
 pub struct Diretorio {
     conn: Mutex<Connection>,
+    /// Replicação contínua do WAL (ver `cardeal_storage::Replicador`): o diretório é a única
+    /// base com conexão própria, e o único escritor dela.
+    replicador: Mutex<Option<Replicador>>,
 }
 
 fn falha(e: &rusqlite::Error) -> Erro {
@@ -78,7 +82,7 @@ impl Diretorio {
     ///
     /// # Errors
     /// `BANCO_INDISPONIVEL` se o arquivo não abre ou a migração falha.
-    pub fn abrir(caminho: &Path) -> Resultado<Self> {
+    pub fn abrir(caminho: &Path, replicacao: Option<ConfigReplicacao>) -> Resultado<Self> {
         if let Some(pasta) = caminho.parent() {
             std::fs::create_dir_all(pasta).map_err(|e| {
                 Erro::novo(
@@ -100,9 +104,24 @@ impl Diretorio {
                 .map_err(|e| falha(&e))?;
         }
         migrar(&conn)?;
+        let replicador = replicacao.map(|cfg| {
+            Replicador::abrir(&conn, caminho, cfg.clone()).unwrap_or_else(|e| {
+                tracing::error!(erro = %e, "replicação do diretório não iniciou — nova tentativa na próxima escrita");
+                Replicador::degradado(caminho, cfg)
+            })
+        });
         Ok(Self {
             conn: Mutex::new(conn),
+            replicador: Mutex::new(replicador),
         })
+    }
+
+    /// Copia para a réplica o que a última escrita deixou no WAL.
+    fn replicar(&self) {
+        let conn = self.conn.lock();
+        if let Some(r) = self.replicador.lock().as_mut() {
+            r.apos_commit(&conn);
+        }
     }
 
     // ── contas ─────────────────────────────────────────────────────────────
@@ -179,6 +198,7 @@ impl Diretorio {
                 }
                 outro => falha(&outro),
             })?;
+        self.replicar();
         Ok(id)
     }
 
@@ -208,7 +228,8 @@ impl Diretorio {
     /// # Errors
     /// Falha do SQLite.
     pub fn gravar_senha(&self, conta: Id, senha: &HashDeSenha) -> Resultado<()> {
-        self.conn
+        let r = self
+            .conn
             .lock()
             .execute(
                 "UPDATE conta SET senha_hash = ?2, tentativas = 0, bloqueado_ate = NULL
@@ -216,7 +237,9 @@ impl Diretorio {
                 params![conta.em_bytes().as_slice(), senha.como_phc()],
             )
             .map(|_| ())
-            .map_err(|e| falha(&e))
+            .map_err(|e| falha(&e));
+        self.replicar();
+        r
     }
 
     /// Encerra todas as sessões da conta, menos a do `manter`. Devolve os hashes encerrados
@@ -244,6 +267,9 @@ impl Diretorio {
             .filter_map(Result::ok)
             .filter_map(|v| <[u8; 32]>::try_from(v).ok())
             .collect();
+        drop(stmt);
+        drop(conn);
+        self.replicar();
         Ok(linhas)
     }
 
@@ -252,7 +278,8 @@ impl Diretorio {
     /// # Errors
     /// Falha do SQLite.
     pub fn gravar_bloqueio(&self, conta: Id, bloqueio: Bloqueio) -> Resultado<()> {
-        self.conn
+        let r = self
+            .conn
             .lock()
             .execute(
                 "UPDATE conta SET tentativas = ?2, bloqueado_ate = ?3 WHERE id = ?1",
@@ -263,7 +290,9 @@ impl Diretorio {
                 ],
             )
             .map(|_| ())
-            .map_err(|e| falha(&e))
+            .map_err(|e| falha(&e));
+        self.replicar();
+        r
     }
 
     // ── empresas e vínculos ────────────────────────────────────────────────
@@ -273,7 +302,8 @@ impl Diretorio {
     /// # Errors
     /// Falha do SQLite.
     pub fn registrar_empresa(&self, empresa: Id, nome: &str) -> Resultado<()> {
-        self.conn
+        let r = self
+            .conn
             .lock()
             .execute(
                 "INSERT INTO empresa (id, nome, criada_em) VALUES (?1, ?2, ?3)",
@@ -284,7 +314,9 @@ impl Diretorio {
                 ],
             )
             .map(|_| ())
-            .map_err(|e| falha(&e))
+            .map_err(|e| falha(&e));
+        self.replicar();
+        r
     }
 
     /// Dá a uma conta acesso a uma empresa, como um usuário daquela base.
@@ -292,7 +324,8 @@ impl Diretorio {
     /// # Errors
     /// Falha do SQLite (inclusive conta/empresa inexistente).
     pub fn vincular(&self, conta: Id, empresa: Id, usuario: Id) -> Resultado<()> {
-        self.conn
+        let r = self
+            .conn
             .lock()
             .execute(
                 "INSERT INTO vinculo (conta, empresa, usuario) VALUES (?1, ?2, ?3)
@@ -304,7 +337,9 @@ impl Diretorio {
                 ],
             )
             .map(|_| ())
-            .map_err(|e| falha(&e))
+            .map_err(|e| falha(&e));
+        self.replicar();
+        r
     }
 
     /// Desfaz o vínculo do `usuario` com a `empresa`. Devolve a conta que estava vinculada.
@@ -312,7 +347,8 @@ impl Diretorio {
     /// # Errors
     /// Falha do SQLite.
     pub fn desvincular(&self, empresa: Id, usuario: Id) -> Resultado<Option<Id>> {
-        self.conn
+        let r = self
+            .conn
             .lock()
             .query_row(
                 "DELETE FROM vinculo WHERE empresa = ?1 AND usuario = ?2 RETURNING conta",
@@ -324,7 +360,9 @@ impl Diretorio {
             .map(|c| {
                 c.and_then(|b| <[u8; 16]>::try_from(b).ok())
                     .map(Id::de_bytes)
-            })
+            });
+        self.replicar();
+        r
     }
 
     /// As empresas **ativas** em que a conta entra.
@@ -362,7 +400,8 @@ impl Diretorio {
     /// # Errors
     /// Falha do SQLite.
     pub(crate) fn criar_sessao(&self, hash: &HashToken, sessao: SessaoPersistida) -> Resultado<()> {
-        self.conn
+        let r = self
+            .conn
             .lock()
             .execute(
                 "INSERT INTO sessao (token_hash, id, conta, criada_em, expira_em)
@@ -376,7 +415,9 @@ impl Diretorio {
                 ],
             )
             .map(|_| ())
-            .map_err(|e| falha(&e))
+            .map_err(|e| falha(&e));
+        self.replicar();
+        r
     }
 
     /// A sessão deste token, se existir e não tiver expirado.
@@ -410,14 +451,17 @@ impl Diretorio {
     /// # Errors
     /// Falha do SQLite.
     pub(crate) fn encerrar_sessao(&self, hash: &HashToken) -> Resultado<()> {
-        self.conn
+        let r = self
+            .conn
             .lock()
             .execute(
                 "DELETE FROM sessao WHERE token_hash = ?1",
                 [hash.as_slice()],
             )
             .map(|_| ())
-            .map_err(|e| falha(&e))
+            .map_err(|e| falha(&e));
+        self.replicar();
+        r
     }
 
     /// Apaga as sessões expiradas. Devolve quantas.
@@ -425,13 +469,25 @@ impl Diretorio {
     /// # Errors
     /// Falha do SQLite.
     pub fn limpar_sessoes_expiradas(&self, agora: Instante) -> Resultado<usize> {
-        self.conn
+        let r = self
+            .conn
             .lock()
             .execute(
                 "DELETE FROM sessao WHERE expira_em <= ?1",
                 [agora.em_micros()],
             )
-            .map_err(|e| falha(&e))
+            .map_err(|e| falha(&e));
+        self.replicar();
+        r
+    }
+}
+
+impl Drop for Diretorio {
+    fn drop(&mut self) {
+        let conn = self.conn.lock();
+        if let Some(r) = self.replicador.lock().as_mut() {
+            r.fechar(&conn);
+        }
     }
 }
 
@@ -455,7 +511,7 @@ mod testes {
 
     fn diretorio() -> (tempfile::TempDir, Diretorio) {
         let pasta = tempfile::tempdir().unwrap();
-        let dir = Diretorio::abrir(&pasta.path().join("diretorio.db")).unwrap();
+        let dir = Diretorio::abrir(&pasta.path().join("diretorio.db"), None).unwrap();
         (pasta, dir)
     }
 
@@ -475,8 +531,8 @@ mod testes {
     fn reabrir_nao_reaplica_migracao() {
         let pasta = tempfile::tempdir().unwrap();
         let caminho = pasta.path().join("diretorio.db");
-        drop(Diretorio::abrir(&caminho).unwrap());
-        Diretorio::abrir(&caminho).unwrap();
+        drop(Diretorio::abrir(&caminho, None).unwrap());
+        Diretorio::abrir(&caminho, None).unwrap();
     }
 
     #[test]

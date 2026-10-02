@@ -27,6 +27,8 @@ pub struct ConfigArmazenamento {
     /// Janela de `mmap`, em bytes. Páginas mapeadas vivem no page cache do SO — não contam
     /// como memória anônima do processo e o kernel as reclama sob pressão.
     pub mmap_bytes: u64,
+    /// Replicação contínua do WAL (ver [`crate::ConfigReplicacao`]). `None`: sem réplica.
+    pub replicacao: Option<crate::ConfigReplicacao>,
 }
 
 impl ConfigArmazenamento {
@@ -43,6 +45,7 @@ impl ConfigArmazenamento {
             cache_escritor_kib: 16 * 1024,
             cache_leitor_kib: 8 * 1024,
             mmap_bytes: 256 * 1024 * 1024,
+            replicacao: None,
         }
     }
 
@@ -76,7 +79,15 @@ impl ConfigArmazenamento {
             cache_escritor_kib: 2 * 1024,
             cache_leitor_kib: 1024,
             mmap_bytes: 0,
+            replicacao: None,
         }
+    }
+
+    /// Liga a replicação contínua do WAL nesta base.
+    #[must_use]
+    pub fn com_replicacao(mut self, replicacao: crate::ConfigReplicacao) -> Self {
+        self.replicacao = Some(replicacao);
+        self
     }
 
     /// Verdadeiro se a base é a `:memory:`.

@@ -2,7 +2,7 @@
 //! ADR-0016 — uma empresa só ocupa RAM enquanto está sendo usada.
 //!
 //! - **Abre sob demanda.** A primeira requisição de uma empresa abre a base (perfil
-//!   [`ConfigArmazenamento::servidor`]); as seguintes reaproveitam.
+//!   [`cardeal_storage::ConfigArmazenamento::servidor`], com réplica contínua); as seguintes reaproveitam.
 //! - **Despeja ociosas.** [`Frota::despejar_ociosas`] fecha as que passaram da ociosidade.
 //! - **Teto.** Acima de `teto` abertas, a menos usada (e livre) é despejada antes de abrir outra.
 //!
@@ -11,14 +11,13 @@
 //! conferido sob o lock do mapa — ninguém consegue um clone novo nesse meio-tempo).
 
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::config::ConfigServidor;
 use cardeal_kernel::{CodigoErro, Erro, Id, Instante, Resultado};
 use cardeal_motor::{MotorLocal, Plano, SessaoLocal};
-use cardeal_storage::ConfigArmazenamento;
 use parking_lot::Mutex;
 
 /// Por quanto tempo a sessão de um usuário numa empresa (papéis × permissões) é reaproveitada
@@ -75,7 +74,7 @@ struct Vaga {
 /// As empresas abertas.
 pub struct Frota {
     plano: Arc<Plano>,
-    pasta: PathBuf,
+    config: ConfigServidor,
     ociosidade: Duration,
     teto: usize,
     inicio: Instant,
@@ -85,12 +84,12 @@ pub struct Frota {
 impl Frota {
     /// Uma frota vazia sobre a pasta das bases. Todas as empresas compartilham o `plano`.
     #[must_use]
-    pub fn nova(plano: Arc<Plano>, pasta: PathBuf, ociosidade: Duration, teto: usize) -> Self {
+    pub fn nova(plano: Arc<Plano>, config: ConfigServidor) -> Self {
         Self {
             plano,
-            pasta,
-            ociosidade,
-            teto: teto.max(1),
+            ociosidade: config.ociosidade,
+            teto: config.teto_empresas.max(1),
+            config,
             inicio: Instant::now(),
             vagas: Mutex::new(HashMap::new()),
         }
@@ -134,7 +133,7 @@ impl Frota {
     }
 
     fn abrir(&self, empresa: Id) -> Resultado<EmpresaAberta> {
-        let caminho = crate::config::caminho_empresa(&self.pasta, empresa);
+        let caminho = self.config.caminho_empresa(empresa);
         // Nunca cria arquivo para um id desconhecido: só o provisionamento cria empresas.
         if !caminho.is_file() {
             return Err(Erro::novo(
@@ -144,7 +143,7 @@ impl Frota {
         }
         let inicio = Instant::now();
         let motor =
-            MotorLocal::abrir_com_plano(ConfigArmazenamento::servidor(caminho), &self.plano)?;
+            MotorLocal::abrir_com_plano(self.config.armazenamento_empresa(empresa), &self.plano)?;
         if motor.empresa() != empresa {
             return Err(Erro::novo(
                 CodigoErro::ESTADO_INVALIDO,

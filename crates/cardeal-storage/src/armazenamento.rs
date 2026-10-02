@@ -40,11 +40,18 @@ impl Armazenamento {
         }
 
         let versao_global = Arc::new(AtomicU64::new(0));
+        // Base em memória ou só leitura não tem o que replicar.
+        let replicacao = cfg
+            .replicacao
+            .clone()
+            .filter(|_| !cfg.e_memoria() && !cfg.somente_leitura)
+            .map(|r| (cfg.caminho.clone(), r));
         let (escritor, handle) = Escritor::iniciar(
             conn_escritor,
             Arc::clone(&versao_global),
             cfg.janela_lote_ms,
             cfg.maximo_lote,
+            replicacao,
         );
 
         let n_leitores = cfg.leitores.max(1);

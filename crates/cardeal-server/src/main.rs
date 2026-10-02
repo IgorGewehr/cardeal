@@ -76,6 +76,13 @@ enum Acao {
         #[arg(long, env = "CARDEAL_ENDERECO", default_value = "127.0.0.1:8080")]
         endereco: SocketAddr,
     },
+    /// Reconstrói a pasta de dados (`--dados`) a partir das réplicas contínuas — troca de
+    /// servidor ou ensaio de recuperação. Não sobrescreve nenhuma base existente.
+    Restaurar {
+        /// A pasta das réplicas (`<dados antigos>/replica`, ou trazida do R2).
+        #[arg(long)]
+        de: PathBuf,
+    },
     /// Uma rodada de backup agora (para cron ou antes de uma atualização).
     Backup {
         /// Quantas cópias de cada base guardar.
@@ -136,6 +143,20 @@ fn main() -> anyhow::Result<()> {
             servir(config, endereco, trabalhadores, backup)
         }
         Acao::Saude { endereco } => saude(endereco),
+        Acao::Restaurar { de } => {
+            let config = ConfigServidor::em(cli.dados);
+            let r = cardeal_server::restauracao::restaurar_tudo(&de, &config)
+                .map_err(|e| anyhow::anyhow!(e.mensagem))?;
+            println!("{} bases restauradas", r.restauradas);
+            for (base, motivo) in &r.falhas {
+                eprintln!("FALHOU {base}: {motivo}");
+            }
+            if r.falhas.is_empty() {
+                Ok(())
+            } else {
+                anyhow::bail!("{} bases não puderam ser restauradas", r.falhas.len())
+            }
+        }
         Acao::Backup { reter } => {
             let config = ConfigServidor::em(cli.dados);
             let r = cardeal_server::backup::executar(&config, reter)

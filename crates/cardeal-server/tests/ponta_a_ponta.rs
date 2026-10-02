@@ -1037,3 +1037,53 @@ async fn lista_grande_sai_comprimida_e_resposta_pequena_nao() {
     assert!(pequena.cabecalhos.get(header::CONTENT_ENCODING).is_none());
     pequena.valor::<mod_empresa::EmpresaResumo>();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn servidor_novo_restaurado_da_replica_continua_de_onde_o_velho_parou() {
+    let a = ambiente(Duration::from_secs(600));
+    let t = token(&a.app, "ana@x.com").await;
+    for nome in ["Antes do desastre", "Último commit confirmado"] {
+        comando(
+            &a.app,
+            &t,
+            a.empresa_ana,
+            "clientes.criar_pessoa.v1",
+            &criar_pessoa(nome),
+            Id::novo(),
+        )
+        .await
+        .valor::<mod_clientes::PessoaCadastrada>();
+    }
+
+    // O servidor velho continua de pé (o disco "morreu" sem aviso, sem fechamento limpo).
+    let novo = tempfile::tempdir().unwrap();
+    let config_novo = ConfigServidor::em(novo.path().join("dados"));
+    let replica = a.servidor.config().pasta_replica();
+    let rel = tokio::task::spawn_blocking(move || {
+        cardeal_server::restauracao::restaurar_tudo(&replica, &config_novo)
+    })
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(rel.falhas.is_empty(), "{:?}", rel.falhas);
+    assert_eq!(rel.restauradas, 3, "diretório + as duas empresas");
+
+    let servidor_novo = Servidor::abrir(ConfigServidor::em(novo.path().join("dados"))).unwrap();
+    let app_novo = roteador(servidor_novo);
+    let t2 = token(&app_novo, "ana@x.com").await;
+    let lista: Vec<ItemPessoa> = clientes(&app_novo, &t2, a.empresa_ana).await.valor();
+    let mut nomes: Vec<_> = lista.into_iter().map(|p| p.nome).collect();
+    nomes.sort();
+    assert_eq!(nomes, ["Antes do desastre", "Último commit confirmado"]);
+    // E o novo segue trabalhando normalmente.
+    comando(
+        &app_novo,
+        &t2,
+        a.empresa_ana,
+        "clientes.criar_pessoa.v1",
+        &criar_pessoa("Depois"),
+        Id::novo(),
+    )
+    .await
+    .valor::<mod_clientes::PessoaCadastrada>();
+}

@@ -26,6 +26,7 @@ mod http;
 mod limitador;
 mod metricas;
 pub mod provisionamento;
+pub mod restauracao;
 pub mod sessoes;
 mod token;
 
@@ -61,17 +62,13 @@ impl Servidor {
     /// # Errors
     /// Falha ao abrir/migrar o diretório.
     pub fn abrir(config: ConfigServidor) -> Resultado<Arc<Self>> {
-        let diretorio = Diretorio::abrir(&config.caminho_diretorio())?;
+        let diretorio =
+            Diretorio::abrir(&config.caminho_diretorio(), config.replicacao_diretorio())?;
         let plano = Plano::preparar(
             &cardeal_distribuicao::modulos(),
             &cardeal_distribuicao::pedido_ativacao(),
         )?;
-        let frota = Frota::nova(
-            Arc::clone(&plano),
-            config.pasta_empresas(),
-            config.ociosidade,
-            config.teto_empresas,
-        );
+        let frota = Frota::nova(Arc::clone(&plano), config.clone());
         Ok(Arc::new(Self {
             logins: tokio::sync::Semaphore::new(config.logins_simultaneos.max(1)),
             limitador: limitador::LimitadorLogin::novo(

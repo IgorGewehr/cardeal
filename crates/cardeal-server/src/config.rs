@@ -3,7 +3,8 @@
 //! ```text
 //! <dados>/diretorio.db          contas, empresas, vínculos, sessões
 //! <dados>/empresas/<id>.db      uma base SQLite por empresa
-//! <dados>/backup/<base>/…       snapshots zstd (ver `backup`)
+//! <dados>/backup/<base>/…       snapshots zstd de hora em hora (ver `backup`)
+//! <dados>/replica/<base>/…      replicação contínua do WAL (ver `cardeal_storage::Replicador`)
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -40,6 +41,9 @@ pub struct ConfigServidor {
     pub web: Option<PathBuf>,
     /// Token do `GET /metricas` (Prometheus). `None`: a rota não existe.
     pub token_metricas: Option<String>,
+    /// Replicação contínua do WAL de cada base (e do diretório) para `<dados>/replica`.
+    /// Ligada por padrão: perda máxima de dados = o último commit.
+    pub replicar: bool,
 }
 
 impl ConfigServidor {
@@ -58,6 +62,7 @@ impl ConfigServidor {
             retencao_idempotencia: Duration::from_secs(7 * 24 * 60 * 60),
             web: None,
             token_metricas: None,
+            replicar: true,
         }
     }
 
@@ -71,6 +76,32 @@ impl ConfigServidor {
     #[must_use]
     pub fn pasta_backup(&self) -> PathBuf {
         self.dados.join("backup")
+    }
+
+    /// A raiz das réplicas (`<dados>/replica/<base>/…`).
+    #[must_use]
+    pub fn pasta_replica(&self) -> PathBuf {
+        self.dados.join("replica")
+    }
+
+    /// A configuração de armazenamento de uma empresa: perfil de servidor + réplica.
+    #[must_use]
+    pub fn armazenamento_empresa(&self, empresa: Id) -> cardeal_storage::ConfigArmazenamento {
+        let cfg = cardeal_storage::ConfigArmazenamento::servidor(self.caminho_empresa(empresa));
+        if self.replicar {
+            cfg.com_replicacao(cardeal_storage::ConfigReplicacao::em(
+                self.pasta_replica().join(empresa.to_string()),
+            ))
+        } else {
+            cfg
+        }
+    }
+
+    /// A réplica do diretório, se a replicação está ligada.
+    #[must_use]
+    pub fn replicacao_diretorio(&self) -> Option<cardeal_storage::ConfigReplicacao> {
+        self.replicar
+            .then(|| cardeal_storage::ConfigReplicacao::em(self.pasta_replica().join("diretorio")))
     }
 
     /// A pasta das bases de empresa.

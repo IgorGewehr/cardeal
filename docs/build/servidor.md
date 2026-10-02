@@ -131,13 +131,23 @@ shell e no `ps`). Um e-mail que já tem conta ganha acesso à empresa nova sem t
   tipo (comando, consulta, sessão, estático), histograma de latência, logins recusados,
   bloqueios por IP, empresas abertas, sessões em cache e RSS do processo. Custo no caminho
   quente: dois incrementos atômicos.
-- **Backup:** o servidor tira, a cada `CARDEAL_BACKUP_MIN` (60), um snapshot de cada base
-  **que mudou** (`VACUUM INTO` numa conexão de leitura — a empresa continua operando), em
-  `/dados/backup/<base>/<carimbo UTC>.db.zst`, guardando as `CARDEAL_BACKUP_RETER` (48) mais
-  novas. O serviço `backup-r2` do compose copia a pasta para o Cloudflare R2 **cifrada no
-  cliente** (`rclone crypt`). Variáveis: `R2_ENDPOINT`, `R2_ACCESS_KEY_ID`,
-  `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_CRIPTO_SENHA` (`rclone obscure`).
-  Rodada manual: `cardeal-server backup`.
+- **Replicação contínua (perda máxima = último commit):** cada base (empresas e diretório)
+  copia, depois de cada commit e **antes** de responder, os bytes novos do WAL para
+  `/dados/replica/<base>/` (gerações = base exata + WAL de cada intervalo entre checkpoints;
+  checkpoints controlados pelo replicador). Custo medido: ~18 µs por commit (<1%). O serviço
+  `backup-r2` leva a réplica ao R2 cifrada a cada 10 s (perda máxima fora da máquina ≈ 15 s).
+  Ligada por padrão.
+- **Snapshots (segunda camada, histórico):** a cada `CARDEAL_BACKUP_MIN` (60), um
+  `VACUUM INTO` de cada base que mudou, em `/dados/backup/<base>/<carimbo>.db.zst`, guardando
+  as `CARDEAL_BACKUP_RETER` (48) mais novas — para voltar a um ponto anterior ("apaguei sem
+  querer ontem"). Rodada manual: `cardeal-server backup`.
+- **Trocar de servidor (disco morreu, VPS sumiu):**
+  1. Na máquina nova: `rclone copy cifrado:replica /dados-novo/replica`.
+  2. `cardeal-server --dados /dados-novo restaurar --de /dados-novo/replica` — reconstrói o
+     diretório e cada empresa (contiguidade conferida, `integrity_check`); nunca sobrescreve.
+  3. Subir o compose apontando para `/dados-novo` com o **mesmo** `CLOUDFLARE_TUNNEL_TOKEN`:
+     o endereço público não muda. Ensaiado no teste
+     `servidor_novo_restaurado_da_replica_continua_de_onde_o_velho_parou`.
 - **Restaurar uma empresa:** parar o servidor (ou esperar a empresa sair da memória),
   `zstd -d <cópia>.db.zst -o /dados/empresas/<id>.db`, apagar `<id>.db-wal`/`-shm` antigos,
   subir de novo. A cópia passa por `PRAGMA integrity_check` no teste de ponta a ponta.

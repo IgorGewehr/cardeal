@@ -18,6 +18,7 @@ use rusqlite::{Connection, DropBehavior, TransactionBehavior};
 
 use crate::contexto::{Confirmado, ContextoEscrita};
 use crate::erros::ErroArmazenamento;
+use crate::replicacao::{ConfigReplicacao, Replicador};
 use crate::uow::UnidadeDeTrabalho;
 
 type Resultado<T> = Result<T, ErroArmazenamento>;
@@ -77,6 +78,7 @@ impl Escritor {
         versao_global: Arc<AtomicU64>,
         janela_ms: u64,
         maximo_lote: usize,
+        replicacao: Option<(std::path::PathBuf, ConfigReplicacao)>,
     ) -> (Self, std::thread::JoinHandle<()>) {
         let (fila_tx, fila_rx) = crossbeam_channel::bounded::<Tarefa>(512);
         let metricas = Arc::new(Mutex::new(MetricasInternas::default()));
@@ -87,8 +89,16 @@ impl Escritor {
         let handle = std::thread::Builder::new()
             .name("cardeal-escritor".into())
             .spawn(move || {
+                // Na própria thread do escritor: é ela que faz os commits e os checkpoints.
+                let replicador = replicacao.map(|(db, cfg)| {
+                    Replicador::abrir(&conn, &db, cfg.clone()).unwrap_or_else(|e| {
+                        tracing::error!(erro = %e, "replicação não iniciou — nova tentativa no primeiro commit");
+                        Replicador::degradado(&db, cfg)
+                    })
+                });
                 laco(
                     conn,
+                    replicador,
                     &fila_rx,
                     &versao_global,
                     &metricas_thread,
@@ -172,6 +182,7 @@ impl Escritor {
 
 fn laco(
     mut conn: Connection,
+    mut replicador: Option<Replicador>,
     fila: &Receiver<Tarefa>,
     versao_global: &AtomicU64,
     metricas: &Mutex<MetricasInternas>,
@@ -196,16 +207,28 @@ fn laco(
                 Err(RecvTimeoutError::Timeout) => break,
             }
         }
-        processar_lote(&mut conn, lote, versao_global, metricas);
+        processar_lote(
+            &mut conn,
+            replicador.as_mut(),
+            lote,
+            versao_global,
+            metricas,
+        );
         if encerrar {
             break 'principal;
         }
     }
+    if let Some(r) = replicador.as_mut() {
+        r.fechar(&conn);
+    }
     tracing::debug!("thread do escritor encerrada");
 }
 
+/// Roda o lote numa transação e, depois do `COMMIT`, replica **antes** de responder: o que foi
+/// confirmado a quem chamou já está na réplica.
 fn processar_lote(
     conn: &mut Connection,
+    replicador: Option<&mut Replicador>,
     lote: Vec<Tarefa>,
     versao_global: &AtomicU64,
     metricas: &Mutex<MetricasInternas>,
@@ -246,6 +269,9 @@ fn processar_lote(
 
     match tx.commit() {
         Ok(()) => {
+            if let Some(r) = replicador {
+                r.apos_commit(conn);
+            }
             let versao = Versao::nova(versao_global.fetch_add(1, Ordering::SeqCst) + 1);
             {
                 let mut m = metricas.lock();

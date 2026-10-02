@@ -7,7 +7,6 @@ use cardeal_kernel::{CodigoErro, Erro, Id, Resultado};
 use std::sync::Arc;
 
 use cardeal_motor::{MotorLocal, Plano};
-use cardeal_storage::ConfigArmazenamento;
 
 use crate::autenticacao::hash_de_senha_nova;
 use crate::config::ConfigServidor;
@@ -60,10 +59,7 @@ pub fn provisionar(
     std::fs::create_dir_all(config.pasta_empresas())
         .map_err(|e| Erro::novo(CodigoErro::FALHA_DE_DISCO, e.to_string()))?;
     let usuario = {
-        let mut motor = MotorLocal::abrir_com_plano(
-            ConfigArmazenamento::servidor(config.caminho_empresa(empresa)),
-            plano,
-        )?;
+        let mut motor = MotorLocal::abrir_com_plano(config.armazenamento_empresa(empresa), plano)?;
         motor.definir_empresa_nova(empresa)?;
         motor.configurar_inicial(
             &nova.razao_social,

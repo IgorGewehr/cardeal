@@ -33,10 +33,13 @@ services:
     security_opt:
       - no-new-privileges:true
 
-  # Leva os snapshots (`/dados/backup`, gerados pelo próprio servidor a cada hora — só as
-  # bases que mudaram) ao Cloudflare R2, **cifrados no cliente** (remote `crypt` do rclone):
-  # quem tiver acesso ao bucket não lê dado de empresa nenhuma. Sem as variáveis R2_*, o
-  # serviço fica parado — o backup local continua sendo gerado.
+  # Leva ao Cloudflare R2, **cifrado no cliente** (remote `crypt` do rclone):
+  # - a réplica contínua do WAL (`/dados/replica`) a cada 10 s — só segmentos que pararam de
+  #   crescer há 5 s: perda máxima fora da máquina ≈ 15 s;
+  # - os snapshots horários (`/dados/backup`) a cada hora, como segunda camada.
+  # `copy`, nunca `sync`: um disco local corrompido não apaga a cópia remota. A limpeza do que
+  # é velho no R2 fica com uma regra de ciclo de vida do bucket (ex.: 30 dias).
+  # Sem as variáveis R2_*, o serviço fica parado — réplica e snapshots locais continuam.
   backup-r2:
     image: rclone/rclone:latest
     restart: unless-stopped
@@ -44,10 +47,16 @@ services:
     command:
       - |
         [ -z "$$RCLONE_CONFIG_R2_ACCESS_KEY_ID" ] && { echo "R2 não configurado"; exec sleep infinity; }
+        n=0
         while true; do
-          rclone copy /dados/backup cifrado: --transfers 4 --checksum --exclude "ultima-assinatura" \
-            && echo "backup enviado ao R2"
-          sleep 3600
+          rclone copy /dados/replica cifrado:replica --min-age 5s --transfers 8 -q \
+            || echo "falha ao enviar a réplica"
+          if [ $$((n % 360)) -eq 0 ]; then
+            rclone copy /dados/backup cifrado:backup --transfers 4 --exclude "ultima-assinatura" -q \
+              && echo "snapshots enviados ao R2"
+          fi
+          n=$$((n + 1))
+          sleep 10
         done
     volumes:
       - dados:/dados:ro
