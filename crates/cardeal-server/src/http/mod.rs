@@ -5,6 +5,7 @@ mod credencial;
 mod despacho;
 mod eventos;
 mod membros;
+mod organizacao;
 mod origem;
 mod resposta;
 mod sessao;
@@ -47,6 +48,7 @@ pub fn roteador(servidor: Arc<Servidor>) -> Router {
         .route("/v1/e/:empresa/sessao", get(despacho::sessao))
         .route("/v1/e/:empresa/membros", post(membros::adicionar))
         .route("/v1/e/:empresa/membros/:usuario", delete(membros::remover))
+        .route("/v1/e/:empresa/empresas", post(organizacao::adicionar))
         .layer(middleware::from_fn(exigir_protocolo))
         // Fora do `exigir_protocolo`: o `EventSource` não manda cabeçalho próprio (a versão
         // vem em `?v=`), e um GET sem efeito não precisa da defesa de CORS do cabeçalho.

@@ -109,6 +109,24 @@ pub fn trocar_senha(atual: &str, nova: &str) -> Resultado<Pedido> {
     )))
 }
 
+/// Cadastra outro CNPJ na organização da `empresa` (`POST /v1/e/{empresa}/empresas`).
+/// Não é reenviado: sem chave de idempotência, um reenvio depois de um sucesso cuja resposta
+/// se perdeu voltaria como "CNPJ já cadastrado".
+///
+/// # Errors
+/// Falha de serialização.
+pub fn adicionar_empresa(empresa: Id, razao_social: &str, cnpj: &str) -> Resultado<Pedido> {
+    let pedido = cardeal_protocol::PedidoNovaEmpresa {
+        razao_social: razao_social.to_owned(),
+        cnpj: cnpj.to_owned(),
+    };
+    Ok(sem_reenvio(base(
+        Metodo::Post,
+        cardeal_protocol::rota_empresas(empresa),
+        carga(&pedido)?,
+    )))
+}
+
 /// Põe alguém na empresa (`POST /v1/e/{empresa}/membros`).
 ///
 /// # Errors

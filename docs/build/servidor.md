@@ -85,6 +85,13 @@ A senha vai por variável de ambiente, nunca por argumento (argumento aparece no
 shell e no `ps`). Um e-mail que já tem conta ganha acesso à empresa nova sem trocar a senha —
 é assim que um contador atende várias empresas com um login só.
 
+**Filiais e outros CNPJs do mesmo dono** (ADR-0017) não são provisionados à parte: o
+administrador cadastra pelo próprio sistema (`POST /v1/e/{empresa}/empresas`, permissão
+`empresa.organizacao.gerenciar`). O CNPJ novo mora **na mesma base** da matriz, com dados
+próprios (financeiro, fiscal, estoque, OS), e quem cadastrou vira o administrador dele. Dar
+acesso a um funcionário é pôr ele como membro em cada CNPJ que ele deve ver. Provisionar à
+parte é só para organização **diferente** (outro dono, ou isolamento físico exigido).
+
 ## 6. Variáveis
 
 | Variável | Padrão | O quê |

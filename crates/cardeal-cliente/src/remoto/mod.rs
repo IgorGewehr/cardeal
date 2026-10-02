@@ -211,6 +211,23 @@ impl Remoto {
         ))
     }
 
+    /// Cadastra outro CNPJ na organização da empresa escolhida (ADR-0017); quem pede vira
+    /// administrador dele, e ele já entra na lista de [`Self::empresas`].
+    ///
+    /// # Errors
+    /// Sem permissão; CNPJ já cadastrado; sem conexão.
+    pub fn adicionar_empresa(
+        &mut self,
+        razao_social: &str,
+        cnpj: &str,
+    ) -> Resultado<EmpresaAcessivel> {
+        let empresa = self.empresa.ok_or_else(sem_empresa)?;
+        let nova: EmpresaAcessivel =
+            self.pedir(&protocolo::adicionar_empresa(empresa, razao_social, cnpj)?)?;
+        self.empresas.push(nova.clone());
+        Ok(nova)
+    }
+
     /// Troca a senha da conta. As outras sessões da conta caem; esta continua. Não é
     /// reenviado em falha de rede (uma senha atual errada repetida contaria como tentativas).
     ///

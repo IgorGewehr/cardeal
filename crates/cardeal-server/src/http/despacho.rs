@@ -50,9 +50,9 @@ pub(super) fn entrar_na_empresa(
     empresa: Id,
 ) -> Resultado<(Arc<EmpresaAberta>, Arc<SessaoLocal>)> {
     let conta = servidor.sessoes.resolver(&servidor.diretorio, token)?;
-    let usuario = conta.usuario_em(empresa)?;
-    let aberta = servidor.frota.obter(empresa)?;
-    let sessao = aberta.sessao(conta.id, usuario)?;
+    let (base, usuario) = conta.acesso_em(empresa)?;
+    let aberta = servidor.frota.obter(base)?;
+    let sessao = aberta.sessao(conta.id, empresa, usuario)?;
     Ok((aberta, sessao))
 }
 

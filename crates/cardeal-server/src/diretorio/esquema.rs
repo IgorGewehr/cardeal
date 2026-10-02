@@ -37,4 +37,8 @@ pub(super) const MIGRACOES: &[&str] = &[
         expira_em  INTEGER NOT NULL
     ) STRICT, WITHOUT ROWID;
     CREATE INDEX sessao_expira ON sessao(expira_em);",
+    // v2 — organização com vários CNPJs (ADR-0017): a base em que a empresa mora. `NULL` =
+    // a própria empresa (a matriz, que dá nome ao arquivo) — as empresas de antes ficam como
+    // estão.
+    "ALTER TABLE empresa ADD COLUMN base BLOB;",
 ];

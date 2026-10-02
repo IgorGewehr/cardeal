@@ -24,10 +24,16 @@ use parking_lot::Mutex;
 /// antes de ser remontada — uma mudança de papel vale em até este tempo.
 const VALIDADE_SESSAO_EMPRESA: Duration = Duration::from_secs(60);
 
-/// Uma empresa aberta: o motor e as sessões já montadas dos usuários dela.
+/// Uma sessão de empresa já montada e quando foi montada.
+type SessaoMontada = (Arc<SessaoLocal>, Instant);
+
+/// Uma base aberta — a organização, com a matriz e os outros CNPJs dela (ADR-0017): o motor e
+/// as sessões já montadas dos usuários.
 pub struct EmpresaAberta {
     motor: MotorLocal,
-    sessoes: Mutex<HashMap<Id, (Arc<SessaoLocal>, Instant)>>,
+    /// (sessão de conta, empresa) → sessão montada: numa organização a mesma conta tem uma
+    /// por CNPJ (ADR-0017).
+    sessoes: Mutex<HashMap<(Id, Id), SessaoMontada>>,
 }
 
 impl EmpresaAberta {
@@ -37,21 +43,23 @@ impl EmpresaAberta {
         &self.motor
     }
 
-    /// A sessão do `usuario`, aberta pela sessão de conta `sessao` (que vira o "dispositivo"
-    /// nas auditorias). Reaproveitada por [`VALIDADE_SESSAO_EMPRESA`].
+    /// A sessão do `usuario` na `empresa` (um CNPJ desta base), aberta pela sessão de conta
+    /// `sessao` (que vira o "dispositivo" nas auditorias). Reaproveitada por
+    /// [`VALIDADE_SESSAO_EMPRESA`].
     ///
     /// # Errors
-    /// `SESSAO_INVALIDA` se o usuário não existe ou foi desativado na empresa.
-    pub fn sessao(&self, sessao: Id, usuario: Id) -> Resultado<Arc<SessaoLocal>> {
-        if let Some((s, quando)) = self.sessoes.lock().get(&sessao) {
+    /// `SESSAO_INVALIDA` se o usuário não existe ou foi desativado; `SEM_PERMISSAO` se não tem
+    /// papel na empresa; `NAO_ENCONTRADO` se a empresa não é desta base.
+    pub fn sessao(&self, sessao: Id, empresa: Id, usuario: Id) -> Resultado<Arc<SessaoLocal>> {
+        if let Some((s, quando)) = self.sessoes.lock().get(&(sessao, empresa)) {
             if quando.elapsed() < VALIDADE_SESSAO_EMPRESA && s.usuario() == usuario {
                 return Ok(Arc::clone(s));
             }
         }
-        let nova = Arc::new(self.motor.sessao_do_usuario(usuario, sessao)?);
+        let nova = Arc::new(self.motor.sessao_do_usuario_em(empresa, usuario, sessao)?);
         self.sessoes
             .lock()
-            .insert(sessao, (Arc::clone(&nova), Instant::now()));
+            .insert((sessao, empresa), (Arc::clone(&nova), Instant::now()));
         Ok(nova)
     }
 }

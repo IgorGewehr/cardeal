@@ -25,8 +25,8 @@ pub struct SessaoConta {
     /// A conta.
     pub conta: Id,
     expira_em: Instante,
-    /// empresa → usuário da conta naquela empresa.
-    empresas: HashMap<Id, Id>,
+    /// empresa → (base em que ela mora, usuário da conta naquela empresa).
+    empresas: HashMap<Id, (Id, Id)>,
     carregada_em: Instant,
 }
 
@@ -37,6 +37,14 @@ impl SessaoConta {
     /// `SEM_PERMISSAO` se a conta não tem vínculo com a empresa — inclusive quando a empresa
     /// nem existe: a resposta não revela quais empresas existem.
     pub fn usuario_em(&self, empresa: Id) -> Resultado<Id> {
+        self.acesso_em(empresa).map(|(_, usuario)| usuario)
+    }
+
+    /// A base (organização) em que a `empresa` mora e o usuário da conta nela.
+    ///
+    /// # Errors
+    /// Como [`Self::usuario_em`].
+    pub fn acesso_em(&self, empresa: Id) -> Resultado<(Id, Id)> {
         self.empresas.get(&empresa).copied().ok_or_else(|| {
             Erro::novo(
                 CodigoErro::SEM_PERMISSAO,
@@ -79,7 +87,7 @@ impl Sessoes {
         let empresas = diretorio
             .vinculos(persistida.conta)?
             .into_iter()
-            .map(|v| (v.empresa, v.usuario))
+            .map(|v| (v.empresa, (v.base, v.usuario)))
             .collect();
         let s = Arc::new(SessaoConta {
             id: persistida.id,

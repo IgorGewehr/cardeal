@@ -36,6 +36,8 @@ pub struct Conta {
 pub struct Vinculo {
     /// A empresa.
     pub empresa: Id,
+    /// A base (organização) em que ela mora — o arquivo que a frota abre (ADR-0017).
+    pub base: Id,
     /// Nome da empresa, para o seletor.
     pub nome: String,
     /// O usuário da conta **dentro** da base da empresa.
@@ -302,15 +304,25 @@ impl Diretorio {
     /// # Errors
     /// Falha do SQLite.
     pub fn registrar_empresa(&self, empresa: Id, nome: &str) -> Resultado<()> {
+        self.registrar_empresa_na_base(empresa, nome, empresa)
+    }
+
+    /// Registra outro CNPJ de uma organização: a empresa mora na base `base` (ADR-0017).
+    ///
+    /// # Errors
+    /// Falha do SQLite.
+    pub fn registrar_empresa_na_base(&self, empresa: Id, nome: &str, base: Id) -> Resultado<()> {
+        let base = (base != empresa).then(|| base.em_bytes().to_vec());
         let r = self
             .conn
             .lock()
             .execute(
-                "INSERT INTO empresa (id, nome, criada_em) VALUES (?1, ?2, ?3)",
+                "INSERT INTO empresa (id, nome, criada_em, base) VALUES (?1, ?2, ?3, ?4)",
                 params![
                     empresa.em_bytes().as_slice(),
                     nome.trim(),
-                    Instante::agora().em_micros()
+                    Instante::agora().em_micros(),
+                    base
                 ],
             )
             .map(|_| ())
@@ -373,7 +385,7 @@ impl Diretorio {
         let conn = self.conn.lock();
         let mut stmt = conn
             .prepare_cached(
-                "SELECT v.empresa, e.nome, v.usuario
+                "SELECT v.empresa, e.nome, v.usuario, COALESCE(e.base, e.id)
                  FROM vinculo v JOIN empresa e ON e.id = v.empresa
                  WHERE v.conta = ?1 AND e.ativa = 1
                  ORDER BY e.nome",
@@ -385,6 +397,7 @@ impl Diretorio {
                     empresa: id_de(&r.get::<_, Vec<u8>>(0)?)?,
                     nome: r.get(1)?,
                     usuario: id_de(&r.get::<_, Vec<u8>>(2)?)?,
+                    base: id_de(&r.get::<_, Vec<u8>>(3)?)?,
                 })
             })
             .map_err(|e| falha(&e))?;

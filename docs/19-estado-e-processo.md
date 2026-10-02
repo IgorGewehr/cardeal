@@ -370,6 +370,14 @@ clientes, estoque, OS e financeiro; tempo real por SSE a partir do outbox (adend
 ADR-0016). Desktop remoto (`Remoto::acompanhar`) e navegador (`EventSource`) já reagem. 698
 testes. **Ainda não:** as telas do desktop migrarem para as `.v2` (aí as `.v1` saem).
 
+**Organização com vários CNPJs (2026-10-02, ADR-0017):** uma base = uma organização; o
+motor faz sessão por CNPJ, `adicionar_empresa` (plano de contas e admin próprios); o
+servidor mapeia empresa → base no diretório (v2) e tem `POST /v1/e/{empresa}/empresas`;
+sair de um CNPJ não tira o usuário dos outros. Também: reenvio idempotente no navegador e
+alerta de falha da réplica (`/saude` → `degradado`). **Pendente:** decidir os cadastros
+compartilhados entre CNPJs (ADR-0017, "Fora desta decisão") e as telas para criar/trocar
+de CNPJ (desktop e web).
+
 **Para decidir com o usuário:** o plano das telas assíncronas em `docs/20-cliente-web.md` §3
 (muda as telas do desktop, em uso real). **Otimizações medidas em espera:** escritor sem
 thread dedicada por empresa; fontes de reserva do egui no web (§4 do doc 20).

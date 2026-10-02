@@ -41,6 +41,12 @@ pub fn rota_membro(empresa: Id, usuario: Id) -> String {
     format!("/v1/e/{empresa}/membros/{usuario}")
 }
 
+/// Os CNPJs da organização (`POST` cadastra outro): `/v1/e/{empresa}/empresas`.
+#[must_use]
+pub fn rota_empresas(empresa: Id) -> String {
+    format!("/v1/e/{empresa}/empresas")
+}
+
 /// O fluxo de alterações da empresa (`GET`, `text/event-stream`): `/v1/e/{empresa}/eventos`.
 ///
 /// O `EventSource` do navegador não manda cabeçalhos próprios, então a versão do protocolo

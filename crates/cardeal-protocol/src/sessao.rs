@@ -90,3 +90,13 @@ pub struct MembroAdicionado {
     /// Se a conta foi criada agora (senão, era uma conta existente que ganhou o vínculo).
     pub conta_nova: bool,
 }
+
+/// Pedido de `POST /v1/e/{empresa}/empresas`: outro CNPJ na mesma organização da `empresa`
+/// (ADR-0017). Quem pede vira administrador dele.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PedidoNovaEmpresa {
+    /// Razão social.
+    pub razao_social: String,
+    /// CNPJ (com ou sem máscara).
+    pub cnpj: String,
+}

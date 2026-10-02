@@ -80,6 +80,7 @@ desktop nativo ────────┼─ HTTPS ─ Cloudflare ─ VPS: card
 | `DELETE /v1/sessao` | logout |
 | `POST /v1/e/{empresa}/cmd/{nome}` | comando; corpo = carga `postcard`; `Idempotency-Key` obrigatório |
 | `POST /v1/e/{empresa}/qry/{nome}` | consulta; corpo = carga `postcard` |
+| `POST /v1/e/{empresa}/empresas` | outro CNPJ na mesma organização (ADR-0017) |
 | `GET /v1/e/{empresa}/eventos?v=1` | tempo real (SSE): quais módulos mudaram — ver abaixo |
 | `GET /saude` | prontidão |
 

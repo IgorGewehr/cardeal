@@ -112,6 +112,35 @@ impl Comando for DesativarUsuario {
                 "você não pode desativar o próprio usuário",
             ));
         }
+        // O usuário é da organização (ADR-0017): se ele também está em outro CNPJ, sair
+        // desta empresa é perder os papéis **nela**; desativar o usuário o tiraria de todos.
+        let usuario_b = self.usuario.em_bytes();
+        let empresa_b = ctx.empresa.em_bytes();
+        let em_outra: bool = uow
+            .conexao()
+            .query_row(
+                "SELECT EXISTS (SELECT 1 FROM nucleo_usuario_papel
+                                WHERE usuario = ?1 AND empresa IS NOT NULL AND empresa <> ?2)",
+                rusqlite::params![usuario_b.as_slice(), empresa_b.as_slice()],
+                |r| r.get(0),
+            )
+            .map_err(|e| Erro::novo(CodigoErro::FALHA_INTERNA, e.to_string()))?;
+        if em_outra {
+            let n = uow
+                .conexao()
+                .execute(
+                    "DELETE FROM nucleo_usuario_papel WHERE usuario = ?1 AND empresa = ?2",
+                    rusqlite::params![usuario_b.as_slice(), empresa_b.as_slice()],
+                )
+                .map_err(|e| Erro::novo(CodigoErro::FALHA_INTERNA, e.to_string()))?;
+            if n == 0 {
+                return Err(Erro::novo(
+                    CodigoErro::NAO_ENCONTRADO,
+                    "usuário não encontrado nesta empresa",
+                ));
+            }
+            return Ok(());
+        }
         let mut repo = RepositorioAuth::novo(uow);
         let mut u = repo
             .usuario_por_id(self.usuario)
