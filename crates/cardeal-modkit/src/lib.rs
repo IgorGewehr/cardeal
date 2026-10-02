@@ -46,7 +46,7 @@ mod manifesto;
 mod permissao;
 mod registro;
 
-pub use contrato::{Comando, Consulta};
+pub use contrato::{Comando, Consulta, TETO_LISTA_COMPLETA};
 #[cfg(feature = "sqlite")]
 pub use despacho::{Ambiente, Ctx, Despachante, Modulo, Registro};
 pub use icone::Icone;

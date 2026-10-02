@@ -19,6 +19,12 @@ use cardeal_storage::UnidadeDeTrabalho;
 #[cfg(feature = "sqlite")]
 use rusqlite::Connection;
 
+/// O teto de segurança das consultas que devolvem uma lista **completa** (`LIMIT 50000` no
+/// SQL delas). Não é paginação: é a garantia de que uma lista nunca é cortada em silêncio
+/// num tamanho que uma empresa real alcança (antes eram 200–1000, e o 501º produto sumia do
+/// estoque). Listas grandes pela rede usam as consultas paginadas (`Pagina`, `.v2`).
+pub const TETO_LISTA_COMPLETA: u32 = 50_000;
+
 /// Um comando: uma intenção de mudar o estado. `docs/15-convencoes-codigo.md` §3 e §6.
 ///
 /// A macro `#[comando(...)]` (a nascer em `cardeal-protocol`) preencherá `PERMISSAO`,

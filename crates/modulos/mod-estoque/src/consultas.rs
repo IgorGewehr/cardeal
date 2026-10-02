@@ -63,7 +63,7 @@ pub fn produtos_com_saldo(
              WHERE p.empresa = ?1 AND p.ativo = 1
              GROUP BY p.id, p.nome, p.ncm, p.codigo_barras
              ORDER BY p.nome ASC
-             LIMIT 500",
+             LIMIT 50000",
         )
         .map_err(persist)?;
     let linhas = stmt
@@ -396,7 +396,7 @@ pub fn produtos_abaixo_do_ponto_pedido(
              GROUP BY p.id, p.nome, p.ponto_pedido, p.estoque_minimo
              HAVING disponivel < p.ponto_pedido
              ORDER BY p.nome ASC
-             LIMIT 500",
+             LIMIT 50000",
         )
         .map_err(persist)?;
     let linhas = stmt
@@ -449,7 +449,7 @@ pub fn movimentos_do_produto(
              FROM estoque_movimento
              WHERE produto = ?1 AND (?2 IS NULL OR origem_modulo = ?2)
              ORDER BY criado_em DESC
-             LIMIT 500",
+             LIMIT 50000",
         )
         .map_err(persist)?;
     let linhas = stmt

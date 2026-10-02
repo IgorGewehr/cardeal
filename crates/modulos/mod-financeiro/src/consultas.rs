@@ -90,7 +90,7 @@ pub fn titulos_em_aberto(
              JOIN financeiro_titulo t ON t.id = p.titulo
              WHERE t.empresa = ?1 AND t.especie = ?2 AND p.estado IN ('Aberta','Parcial')
              ORDER BY p.vencimento ASC
-             LIMIT 500",
+             LIMIT 50000",
         )
         .map_err(persist)?;
     let linhas = stmt
@@ -170,7 +170,7 @@ pub fn parcelas_no_periodo(
              JOIN financeiro_titulo t ON t.id = p.titulo
              WHERE t.empresa = ?1 AND t.especie = ?2 AND p.vencimento BETWEEN ?3 AND ?4
              ORDER BY p.vencimento ASC
-             LIMIT 1000",
+             LIMIT 50000",
         )
         .map_err(persist)?;
     let linhas = stmt
@@ -887,7 +887,7 @@ impl Consulta for ExtratoDisponivel {
                        AND rl.liquidacao BETWEEN ?2 AND ?3
                        AND (?4 IS NULL OR rp.conta = ?4)
                  ORDER BY rl.liquidacao ASC, rl.numero ASC
-                 LIMIT 1000",
+                 LIMIT 50000",
             )
             .map_err(persist)?;
         let linhas = stmt

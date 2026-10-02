@@ -1067,3 +1067,59 @@ fn peca_rapida_nasce_so_com_nome_nao_duplica_e_ganha_ncm_da_nota() {
         .unwrap();
     assert_eq!(ncm_de(a.produto), "85177099");
 }
+
+/// Regressão: a lista era cortada em 500, em silêncio — o 501º produto (em ordem alfabética)
+/// sumia do estoque e do seletor de peças da OS.
+#[test]
+fn produtos_com_saldo_nao_corta_a_lista_em_silencio() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloEstoque]).unwrap();
+    let s = sessao(empresa, &["estoque.produto.criar", "estoque.produto.ver"]);
+    let exec = |nome: &str, c: Vec<u8>| {
+        d.executar_comando(nome, &c, &s, &ambiente(empresa), arm.escritor())
+            .unwrap()
+    };
+    let grupo: GrupoProdutoCriado = postcard::from_bytes(&exec(
+        "estoque.criar_grupo_produto.v1",
+        carga(&CriarGrupoProduto {
+            codigo: "P".into(),
+            nome: "Peças".into(),
+            pai: None,
+        }),
+    ))
+    .unwrap();
+    let unidade: UnidadeCriada = postcard::from_bytes(&exec(
+        "estoque.criar_unidade.v1",
+        carga(&CriarUnidade {
+            sigla: "UN".into(),
+            nome: "Unidade".into(),
+            fracionavel: false,
+        }),
+    ))
+    .unwrap();
+    for i in 0..600 {
+        exec(
+            "estoque.criar_produto.v1",
+            carga(&CriarProduto {
+                grupo_produto: grupo.grupo_produto,
+                nome: format!("Peça {i:04}"),
+                ncm: "85076000".into(),
+                unidade_padrao: unidade.unidade,
+                codigo_barras: None,
+                detalhes_tecnicos: None,
+            }),
+        );
+    }
+    let saida = d
+        .executar_consulta(
+            "estoque.produtos_com_saldo.v1",
+            &carga(&ProdutosComSaldo),
+            &s,
+            &ambiente(empresa),
+            arm.leitor(),
+        )
+        .unwrap();
+    let itens: Vec<ItemProdutoComSaldo> = postcard::from_bytes(&saida).unwrap();
+    assert_eq!(itens.len(), 600);
+    assert_eq!(itens.last().unwrap().nome, "Peça 0599");
+}

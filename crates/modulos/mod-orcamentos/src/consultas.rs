@@ -73,7 +73,7 @@ impl Consulta for OrcamentosRecentes {
                             (SELECT COUNT(*) FROM orcamentos_item i WHERE i.orcamento = o.id)
                      FROM orcamentos_orcamento o
                      WHERE o.empresa = ?1 AND o.estado = '{}'
-                     ORDER BY o.numero DESC LIMIT 500",
+                     ORDER BY o.numero DESC LIMIT 50000",
                     estado.rotulo()
                 ),
                 true,
@@ -86,7 +86,7 @@ impl Consulta for OrcamentosRecentes {
                         (SELECT COUNT(*) FROM orcamentos_item i WHERE i.orcamento = o.id)
                  FROM orcamentos_orcamento o
                  WHERE o.empresa = ?1
-                 ORDER BY o.numero DESC LIMIT 500"
+                 ORDER BY o.numero DESC LIMIT 50000"
                     .to_owned(),
                 false,
             )

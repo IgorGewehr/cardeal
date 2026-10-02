@@ -134,7 +134,7 @@ pub fn ordens_nao_finalizadas(conexao: &Connection, empresa: Id) -> Resultado<Ve
              FROM os_ordem_servico
              WHERE empresa = ?1 AND estado NOT IN ('Faturada','Cancelada','Reprovada')
              ORDER BY numero DESC
-             LIMIT 500",
+             LIMIT 50000",
         )
         .map_err(persist)?;
     let linhas = stmt
@@ -237,7 +237,7 @@ impl Consulta for TodasAsOrdens {
                  FROM os_ordem_servico
                  WHERE empresa = ?1
                  ORDER BY numero DESC
-                 LIMIT 500",
+                 LIMIT 50000",
             )
             .map_err(persist)?;
         let linhas = stmt
@@ -444,7 +444,7 @@ impl Consulta for OrdensDoCliente {
                  FROM os_ordem_servico
                  WHERE empresa = ?1 AND cliente = ?2
                  ORDER BY numero DESC
-                 LIMIT 500",
+                 LIMIT 50000",
             )
             .map_err(persist)?;
         let linhas = stmt
@@ -504,7 +504,7 @@ pub fn ordens_aguardando_aprovacao(
              FROM os_ordem_servico
              WHERE empresa = ?1 AND estado = 'AguardandoAprovacao'
              ORDER BY numero DESC
-             LIMIT 500",
+             LIMIT 50000",
         )
         .map_err(persist)?;
     let linhas = stmt
@@ -554,7 +554,7 @@ pub fn historico_do_equipamento(
             "SELECT id, empresa, numero, cliente, equipamento, defeito_relatado, data_abertura,
                     tecnico_responsavel, estado, aprovado_por, garantia_dias, valor_total,
                     itens_orcamento, versao, previsao_entrega, numero_serie, acessorios
-             FROM os_ordem_servico WHERE cliente = ?1 ORDER BY numero DESC LIMIT 500",
+             FROM os_ordem_servico WHERE cliente = ?1 ORDER BY numero DESC LIMIT 50000",
         )
         .map_err(persist)?;
     let linhas = stmt

@@ -54,7 +54,7 @@ impl Consulta for PedidosRecentes {
                  FROM vendas_pedido p
                  WHERE p.empresa = ?1
                  ORDER BY p.data DESC, p.id DESC
-                 LIMIT 200",
+                 LIMIT 50000",
             )
             .map_err(persist)?;
         let linhas = stmt

@@ -96,7 +96,7 @@ impl Consulta for NotasRecentes {
                  FROM compras_nota_entrada n
                  WHERE n.empresa = ?1
                  ORDER BY n.data_emissao DESC, n.id DESC
-                 LIMIT 200",
+                 LIMIT 50000",
             )
             .map_err(persist)?;
         let linhas = stmt
