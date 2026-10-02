@@ -35,6 +35,9 @@ pub struct Pedido {
     pub cabecalhos: Vec<(&'static str, String)>,
     /// O corpo, em `postcard`.
     pub corpo: Vec<u8>,
+    /// Pode ser reenviado numa falha de rede. Falso para o que conta tentativas no servidor
+    /// (login, troca de senha): uma senha errada reenviada valeria por três.
+    pub reenviavel: bool,
 }
 
 /// Uma resposta recebida.
@@ -55,7 +58,13 @@ fn base(metodo: Metodo, caminho: String, corpo: Vec<u8>) -> Pedido {
             ("content-type", TIPO_POSTCARD.to_owned()),
         ],
         corpo,
+        reenviavel: true,
     }
+}
+
+fn sem_reenvio(mut p: Pedido) -> Pedido {
+    p.reenviavel = false;
+    p
 }
 
 /// Serializa uma carga em `postcard`.
@@ -71,7 +80,11 @@ pub fn carga<T: Serialize>(valor: &T) -> Resultado<Vec<u8>> {
 /// # Errors
 /// Falha de serialização.
 pub fn login(pedido: &cardeal_protocol::PedidoLogin) -> Resultado<Pedido> {
-    Ok(base(Metodo::Post, ROTA_SESSAO.to_owned(), carga(pedido)?))
+    Ok(sem_reenvio(base(
+        Metodo::Post,
+        ROTA_SESSAO.to_owned(),
+        carga(pedido)?,
+    )))
 }
 
 /// "Quem sou eu": a sessão do cookie ainda vale? (Mesma resposta do login, sem token.)
@@ -89,11 +102,11 @@ pub fn trocar_senha(atual: &str, nova: &str) -> Resultado<Pedido> {
         atual: atual.to_owned(),
         nova: nova.to_owned(),
     };
-    Ok(base(
+    Ok(sem_reenvio(base(
         Metodo::Post,
         cardeal_protocol::ROTA_SENHA.to_owned(),
         carga(&pedido)?,
-    ))
+    )))
 }
 
 /// Põe alguém na empresa (`POST /v1/e/{empresa}/membros`).

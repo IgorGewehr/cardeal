@@ -33,6 +33,7 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read as _, Seek as _, SeekFrom, Write as _};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use rusqlite::{Connection, OpenFlags};
@@ -133,6 +134,48 @@ struct Segmento {
     aberto_em: Instant,
 }
 
+/// Bases do processo com a réplica em falha agora, e falhas desde o início — para alerta.
+static BASES_EM_FALHA: AtomicU64 = AtomicU64::new(0);
+static FALHAS_TOTAL: AtomicU64 = AtomicU64::new(0);
+
+/// Como está a replicação no processo inteiro (todas as bases abertas).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SaudeReplicacao {
+    /// Bases cuja réplica está incerta **agora** (uma falha ainda não recuperada). Acima de
+    /// zero, a perda máxima numa pane dessas bases deixa de ser "o último commit".
+    pub bases_em_falha: u64,
+    /// Falhas desde que o processo subiu (inclusive as já recuperadas).
+    pub falhas_total: u64,
+}
+
+/// O estado atual da replicação no processo.
+#[must_use]
+pub fn saude_replicacao() -> SaudeReplicacao {
+    SaudeReplicacao {
+        bases_em_falha: BASES_EM_FALHA.load(Ordering::Relaxed),
+        falhas_total: FALHAS_TOTAL.load(Ordering::Relaxed),
+    }
+}
+
+/// Enquanto existe, a base conta como "em falha"; solto (recuperou, ou a base fechou),
+/// deixa de contar.
+#[derive(Debug)]
+struct Alerta;
+
+impl Alerta {
+    fn novo() -> Self {
+        FALHAS_TOTAL.fetch_add(1, Ordering::Relaxed);
+        BASES_EM_FALHA.fetch_add(1, Ordering::Relaxed);
+        Self
+    }
+}
+
+impl Drop for Alerta {
+    fn drop(&mut self) {
+        BASES_EM_FALHA.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
 /// O replicador de uma base. Dentro do `Armazenamento` vive na thread do escritor; uma base
 /// com conexão própria (o diretório do servidor) o usa direto: [`Replicador::abrir`] depois
 /// de abrir, [`Replicador::apos_commit`] depois de cada escrita, [`Replicador::fechar`] no fim.
@@ -149,6 +192,8 @@ pub struct Replicador {
     wal_desde_base: u64,
     /// Uma falha deixou a réplica incerta: a próxima chance começa uma geração nova.
     precisa_nova_geracao: bool,
+    /// Presente enquanto a réplica está em falha (ver [`saude_replicacao`]).
+    alerta: Option<Alerta>,
 }
 
 impl Replicador {
@@ -172,6 +217,7 @@ impl Replicador {
             segmento: None,
             wal_desde_base: 0,
             precisa_nova_geracao: false,
+            alerta: None,
         };
         if !checkpoint(conn)? {
             // Ninguém mais tem a base aberta neste momento; ocupado aqui é anomalia.
@@ -209,6 +255,7 @@ impl Replicador {
             segmento: None,
             wal_desde_base: 0,
             precisa_nova_geracao: true,
+            alerta: Some(Alerta::novo()),
         }
     }
 
@@ -230,6 +277,9 @@ impl Replicador {
         self.offset = 0;
         self.wal_desde_base = 0;
         self.precisa_nova_geracao = false;
+        if self.alerta.take().is_some() {
+            tracing::info!(db = %self.db.display(), "replicação recuperada");
+        }
         self.podar_geracoes();
         tracing::debug!(geracao = %self.geracao, db = %self.db.display(), "geração nova da réplica");
         Ok(())
@@ -260,6 +310,11 @@ impl Replicador {
             tracing::error!(db = %self.db.display(), erro = %e, "replicação falhou — nova geração na próxima chance");
             self.segmento = None;
             self.precisa_nova_geracao = true;
+            if self.alerta.is_none() {
+                self.alerta = Some(Alerta::novo());
+            } else {
+                FALHAS_TOTAL.fetch_add(1, Ordering::Relaxed);
+            }
         }
     }
 

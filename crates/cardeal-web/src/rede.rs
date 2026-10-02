@@ -5,6 +5,7 @@
 use std::sync::mpsc;
 
 use cardeal_cliente::remoto::protocolo::{self, Metodo, Pedido, Resposta};
+use cardeal_cliente::remoto::TENTATIVAS;
 use cardeal_kernel::{CodigoErro, Erro, Resultado};
 use js_sys::Uint8Array;
 use serde::de::DeserializeOwned;
@@ -47,15 +48,40 @@ async fn fetch(pedido: &Pedido) -> Result<Resposta, String> {
     })
 }
 
+/// Espera sem travar o quadro (um `setTimeout` como `Promise`).
+async fn esperar(ms: i32) {
+    let promessa = js_sys::Promise::new(&mut |resolver, _| {
+        if let Some(janela) = web_sys::window() {
+            let _ = janela.set_timeout_with_callback_and_timeout_and_arguments_0(&resolver, ms);
+        }
+    });
+    let _ = JsFuture::from(promessa).await;
+}
+
+/// Envia, reenviando numa falha de rede como o desktop: até [`TENTATIVAS`], 200 ms e 600 ms
+/// de recuo. É seguro para comando porque toda tentativa leva o **mesmo** pedido — a mesma
+/// chave de idempotência; se só a resposta se perdeu, o servidor devolve a original.
+async fn enviar(pedido: &Pedido) -> Resultado<Resposta> {
+    let tentativas = if pedido.reenviavel { TENTATIVAS } else { 1 };
+    let mut ultima = String::new();
+    for tentativa in 0..tentativas {
+        if tentativa > 0 {
+            esperar(200 * 3_i32.pow(tentativa - 1)).await;
+        }
+        match fetch(pedido).await {
+            Ok(r) => return Ok(r),
+            Err(e) => ultima = e,
+        }
+    }
+    Err(Erro::novo(
+        CodigoErro::SEM_CONEXAO,
+        format!("sem conexão com o servidor — verifique a internet ({ultima})"),
+    ))
+}
+
 /// Envia e interpreta. Falha de rede vira `SEM_CONEXAO` — a mesma mensagem do desktop.
 pub async fn pedir<T: DeserializeOwned>(pedido: Pedido) -> Resultado<T> {
-    let resposta = fetch(&pedido).await.map_err(|e| {
-        Erro::novo(
-            CodigoErro::SEM_CONEXAO,
-            format!("sem conexão com o servidor — verifique a internet ({e})"),
-        )
-    })?;
-    protocolo::interpretar(&resposta)
+    protocolo::interpretar(&enviar(&pedido).await?)
 }
 
 /// Um resultado que ainda vai chegar. A tela consulta [`Pendente::pronto`] a cada quadro; a
@@ -85,9 +111,9 @@ pub fn disparar_sem_corpo(ctx: &egui::Context, pedido: Pedido) -> Pendente<()> {
     let (tx, rx) = mpsc::channel();
     let ctx = ctx.clone();
     wasm_bindgen_futures::spawn_local(async move {
-        let r = match fetch(&pedido).await {
+        let r = match enviar(&pedido).await {
             Ok(resposta) => protocolo::interpretar_vazio(&resposta),
-            Err(e) => Err(Erro::novo(CodigoErro::SEM_CONEXAO, e)),
+            Err(e) => Err(e),
         };
         let _ = tx.send(r);
         ctx.request_repaint();

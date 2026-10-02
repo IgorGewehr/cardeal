@@ -83,8 +83,15 @@ pub fn roteador(servidor: Arc<Servidor>) -> Router {
         .with_state(servidor)
 }
 
+/// Sempre 200 enquanto o servidor atende — reiniciar o contêiner não conserta um disco de
+/// réplica cheio. O corpo diz se a replicação está em falha (`degradado`), para um monitor
+/// externo com palavra-chave alertar; os detalhes ficam nas métricas e no log.
 async fn saude() -> impl IntoResponse {
-    (StatusCode::OK, "ok")
+    if cardeal_storage::saude_replicacao().bases_em_falha > 0 {
+        (StatusCode::OK, "degradado")
+    } else {
+        (StatusCode::OK, "ok")
+    }
 }
 
 /// Toda chamada `/v1` declara a versão do protocolo. Além de versionar, o cabeçalho próprio

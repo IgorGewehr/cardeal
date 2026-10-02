@@ -142,6 +142,14 @@ shell e no `ps`). Um e-mail que já tem conta ganha acesso à empresa nova sem t
   checkpoints controlados pelo replicador). Custo medido: ~18 µs por commit (<1%). O serviço
   `backup-r2` leva a réplica ao R2 cifrada a cada 10 s (perda máxima fora da máquina ≈ 15 s).
   Ligada por padrão.
+- **Alerta da replicação:** se a cópia falhar (disco da réplica cheio, permissão), o servidor
+  segue atendendo, mas a perda máxima daquela base deixa de ser "o último commit". Isso
+  aparece em três lugares: `GET /saude` responde `degradado` em vez de `ok` (ainda 200 — o
+  contêiner não reinicia por isso); `cardeal_replicacao_bases_em_falha` > 0 nas métricas;
+  `ERROR replicação falhou` no log. A recuperação é sozinha (geração nova no commit seguinte
+  ao conserto) e sai no log como `replicação recuperada`. **Configure um monitor externo**
+  (UptimeRobot, Better Stack…) em `https://<domínio>/saude` com palavra-chave `ok`: ele avisa
+  tanto servidor fora do ar quanto réplica em falha.
 - **Snapshots (segunda camada, histórico):** a cada `CARDEAL_BACKUP_MIN` (60), um
   `VACUUM INTO` de cada base que mudou, em `/dados/backup/<base>/<carimbo>.db.zst`, guardando
   as `CARDEAL_BACKUP_RETER` (48) mais novas — para voltar a um ponto anterior ("apaguei sem

@@ -170,6 +170,19 @@ impl Metricas {
         let _ = writeln!(o, "cardeal_tempo_real_conexoes {conexoes_tempo_real}");
         let _ = writeln!(o, "# TYPE cardeal_sessoes_em_cache gauge");
         let _ = writeln!(o, "cardeal_sessoes_em_cache {sessoes_em_cache}");
+        let replicacao = cardeal_storage::saude_replicacao();
+        let _ = writeln!(o, "# TYPE cardeal_replicacao_bases_em_falha gauge");
+        let _ = writeln!(
+            o,
+            "cardeal_replicacao_bases_em_falha {}",
+            replicacao.bases_em_falha
+        );
+        let _ = writeln!(o, "# TYPE cardeal_replicacao_falhas_total counter");
+        let _ = writeln!(
+            o,
+            "cardeal_replicacao_falhas_total {}",
+            replicacao.falhas_total
+        );
         if let Some(rss) = memoria_residente() {
             let _ = writeln!(o, "# TYPE process_resident_memory_bytes gauge");
             let _ = writeln!(o, "process_resident_memory_bytes {rss}");

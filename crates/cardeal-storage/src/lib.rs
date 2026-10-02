@@ -58,7 +58,9 @@ pub use evento::{EventoDominio, RegistroAuditoria};
 pub use leitor::Leitor;
 pub use migracao::{ConjuntoMigracoes, Migracao, RelatorioMigracao, TipoMigracao};
 pub use nucleo::conjunto as conjunto_nucleo;
-pub use replicacao::{restaurar, ConfigReplicacao, Replicador, Restauracao};
+pub use replicacao::{
+    restaurar, saude_replicacao, ConfigReplicacao, Replicador, Restauracao, SaudeReplicacao,
+};
 pub use segredo::Segredo;
 pub use uow::{FaixaNumeracao, Trava, UnidadeDeTrabalho};
 

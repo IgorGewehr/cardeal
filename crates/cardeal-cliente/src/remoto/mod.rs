@@ -239,7 +239,8 @@ impl Remoto {
 
     fn com_retentativa(&self, pedido: &Pedido) -> Resultado<Resposta> {
         let mut ultima = String::new();
-        for tentativa in 0..TENTATIVAS {
+        let tentativas = if pedido.reenviavel { TENTATIVAS } else { 1 };
+        for tentativa in 0..tentativas {
             if tentativa > 0 {
                 espera(tentativa);
             }
