@@ -11,7 +11,9 @@ services:
     build:
       context: ../..
       dockerfile: packaging/servidor/Dockerfile
-    image: cardeal-server
+    # Construída localmente (`--build`) ou baixada pronta da CI:
+    # CARDEAL_IMAGEM=ghcr.io/<dono>/cardeal-server:<versão> docker compose ... up -d
+    image: ${CARDEAL_IMAGEM:-cardeal-server}
     restart: unless-stopped
     volumes:
       - dados:/dados
@@ -67,8 +69,10 @@ services:
     command: tunnel --no-autoupdate run
     environment:
       TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?defina o token do túnel}
+    # Só abre o túnel com o servidor respondendo (HEALTHCHECK da imagem).
     depends_on:
-      - cardeal
+      cardeal:
+        condition: service_healthy
 
 volumes:
   dados:

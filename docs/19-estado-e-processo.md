@@ -355,6 +355,14 @@ Medido: processo vazio 6,9 MB; ~0,8 MB de heap por empresa aberta; consulta quen
   backup incremental (`VACUUM INTO` + zstd + retenção, sidecar rclone cifrado para o R2);
   métricas Prometheus (`/metricas`); limite de login por IP; SIGTERM limpo.
 
+**Fechamento (2026-10-02):** troca de senha da conta (derruba as outras sessões); o
+administrador põe/tira gente da empresa com papel de fábrica (`mod-empresa` +
+`/v1/e/{empresa}/membros`); no navegador, barra lateral + Equipe + Minha conta; respostas da
+API comprimidas; `cardeal-server saude` + `HEALTHCHECK`; imagem publicada no GHCR pela CI
+(`.github/workflows/servidor.yml`); versão do wasm-bindgen sempre a do `Cargo.lock`.
+674 testes. **As telas de negócio no navegador ficaram para outro momento** (decisão do
+usuário em 2026-10-02).
+
 **Para decidir com o usuário:** o plano das telas assíncronas em `docs/20-cliente-web.md` §3
 (muda as telas do desktop, em uso real). **Otimizações medidas em espera:** escritor sem
 thread dedicada por empresa; fontes de reserva do egui no web (§4 do doc 20).

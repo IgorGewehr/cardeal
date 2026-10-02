@@ -36,6 +36,16 @@ MIMALLOC_ARENA_EAGER_COMMIT=0 cargo run --release -p cardeal-server --example ca
 
 ## 3. Subir
 
+Imagem pronta (publicada pela CI em cada tag `v*.*.*`, workflow `servidor`):
+
+```sh
+export CARDEAL_IMAGEM=ghcr.io/<dono>/cardeal-server:<versão>
+export CLOUDFLARE_TUNNEL_TOKEN=...
+docker compose -f packaging/servidor/compose.yaml up -d
+```
+
+Ou construída na própria máquina:
+
 ```sh
 export CLOUDFLARE_TUNNEL_TOKEN=...      # painel Zero Trust → Tunnels → token
 docker compose -f packaging/servidor/compose.yaml up -d --build
@@ -102,11 +112,17 @@ shell e no `ps`). Um e-mail que já tem conta ganha acesso à empresa nova sem t
 - CSRF: `SameSite=Strict` + cabeçalho obrigatório `x-cardeal-protocolo` (força preflight).
 - Respostas da API: `Cache-Control: no-store`, CSP `default-src 'none'`, HSTS, `nosniff`.
 - Falha interna nunca vaza SQL ou caminho: o cliente recebe uma referência, o log tem o resto.
+- O cliente do navegador exige HTTPS (o cookie é `Secure`): use o túnel, não `http://` na LAN.
+- Gerenciar equipe (`POST`/`DELETE /v1/e/{empresa}/membros`) e trocar senha
+  (`POST /v1/sessao/senha`, derruba as outras sessões) conferem permissão antes de tocar
+  em qualquer base.
 - Container: usuário sem privilégio, sistema de arquivos somente leitura (exceto `/dados`),
   `no-new-privileges`.
 
 ## 8. Operação
 
+- **Saúde:** `HEALTHCHECK` da imagem roda `cardeal-server saude` (o próprio binário faz o
+  `GET /saude` — a imagem não tem curl nem shell); o túnel só sobe com o servidor saudável.
 - **Desligar:** `SIGTERM` (o padrão de `docker stop`) termina as requisições em curso e fecha
   cada base com o lote final confirmado.
 - **Manutenção** (a cada minuto, sozinha): fecha empresas ociosas, poda respostas idempotentes

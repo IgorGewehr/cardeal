@@ -21,9 +21,14 @@ FROM rust:1.98-slim-bookworm AS construcao
 COPY --from=ferramentas /usr/local/cargo/bin/wasm-bindgen /usr/local/cargo/bin/wasm-opt /usr/local/cargo/bin/
 WORKDIR /src
 COPY . .
+# O `target/` em cache sobrevive entre builds, e o cargo decide o que recompilar pela data
+# dos fontes — que o COPY preserva do host. Renovar a data dos fontes do workspace garante
+# que a imagem nunca saia com um crate do projeto compilado de uma versão antiga (as
+# dependências externas continuam em cache).
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
-    cargo build --release --locked -p cardeal-server \
+    find crates xtask -type f \( -name '*.rs' -o -name 'Cargo.toml' \) -exec touch {} + \
+ && cargo build --release --locked -p cardeal-server \
  && cp target/release/cardeal-server /cardeal-server \
  && cargo run --release --locked -p xtask -- construir-web \
  && cp -r dist/web /web \
@@ -42,6 +47,10 @@ ENV MIMALLOC_ARENA_EAGER_COMMIT=0 \
     CARDEAL_WEB=/web \
     CARDEAL_ENDERECO=0.0.0.0:8080 \
     RUST_LOG=info,tower_http=warn
+
+# O próprio binário confere `/saude` (distroless não tem curl nem shell).
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD ["/usr/local/bin/cardeal-server", "saude"]
 
 VOLUME ["/dados"]
 EXPOSE 8080

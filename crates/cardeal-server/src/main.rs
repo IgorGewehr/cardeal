@@ -69,6 +69,13 @@ enum Acao {
         #[arg(long, env = "CARDEAL_METRICAS_TOKEN", hide_env_values = true)]
         metricas_token: Option<String>,
     },
+    /// Confere se o servidor local responde (`HEALTHCHECK` do Docker — a imagem distroless
+    /// não tem `curl`). Sai com código 0 se `/saude` respondeu 200.
+    Saude {
+        /// Endereço do servidor a conferir.
+        #[arg(long, env = "CARDEAL_ENDERECO", default_value = "127.0.0.1:8080")]
+        endereco: SocketAddr,
+    },
     /// Uma rodada de backup agora (para cron ou antes de uma atualização).
     Backup {
         /// Quantas cópias de cada base guardar.
@@ -104,7 +111,6 @@ fn main() -> anyhow::Result<()> {
         .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stderr()))
         .compact()
         .init();
-    alocador::configurar();
 
     let cli = Cli::parse();
     match cli.acao {
@@ -129,6 +135,7 @@ fn main() -> anyhow::Result<()> {
                 (backup_min > 0).then(|| (Duration::from_secs(backup_min * 60), backup_reter));
             servir(config, endereco, trabalhadores, backup)
         }
+        Acao::Saude { endereco } => saude(endereco),
         Acao::Backup { reter } => {
             let config = ConfigServidor::em(cli.dados);
             let r = cardeal_server::backup::executar(&config, reter)
@@ -179,6 +186,7 @@ fn servir(
     trabalhadores: usize,
     backup: Option<(Duration, usize)>,
 ) -> anyhow::Result<()> {
+    alocador::configurar();
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(trabalhadores.max(1))
         // O pool de bloqueio (SQLite, Argon2id) cresce sob demanda e encolhe sozinho depois
@@ -231,4 +239,30 @@ async fn sinal_de_desligamento() {
         () = term => {},
     }
     tracing::info!("encerrando");
+}
+
+/// `GET /saude` cru sobre TCP, com prazo curto — sem cliente HTTP, sem runtime.
+fn saude(endereco: SocketAddr) -> anyhow::Result<()> {
+    use std::io::{Read as _, Write as _};
+    // Escutando em 0.0.0.0 (container): confere pelo loopback.
+    let alvo = if endereco.ip().is_unspecified() {
+        SocketAddr::from(([127, 0, 0, 1], endereco.port()))
+    } else {
+        endereco
+    };
+    let prazo = Duration::from_secs(3);
+    let mut conexao = std::net::TcpStream::connect_timeout(&alvo, prazo)?;
+    conexao.set_read_timeout(Some(prazo))?;
+    conexao.set_write_timeout(Some(prazo))?;
+    conexao.write_all(b"GET /saude HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")?;
+    let mut resposta = String::new();
+    conexao.read_to_string(&mut resposta)?;
+    if resposta.starts_with("HTTP/1.1 200") {
+        Ok(())
+    } else {
+        anyhow::bail!(
+            "resposta inesperada: {}",
+            resposta.lines().next().unwrap_or_default()
+        )
+    }
 }

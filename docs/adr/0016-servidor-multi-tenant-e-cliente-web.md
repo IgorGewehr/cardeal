@@ -111,6 +111,21 @@ Não existe tipo de erro paralelo para a rede: é o mesmo `Erro` que a tela já 
   do comando. Uma repetição por queda de rede devolve a resposta original e não cria uma
   segunda venda.
 
+### Medido na implementação (2026-10-01/02)
+
+| Item | Orçamento | Medido |
+|---|---|---|
+| Processo vazio | < 15 MB | 6,9 MB (container em repouso: 2,5 MiB) |
+| Empresa aberta | < 4 MB | ~0,8 MB de heap (0,53 MB dentro do SQLite) |
+| Comando p99 (sem rede) | < 20 ms | consulta quente p50 70 µs / p99 80 µs |
+| Empresa fria | — | 2,0 ms (impressão do plano pula verificações) |
+| Aba do navegador | < 80 MB | ~4 MB acima de uma aba vazia (Firefox headless) |
+| Download do cliente web | ~1,5–2 MB | 1,03 MB (brotli), fontes recortadas |
+
+Medição reproduzível: `crates/cardeal-server/examples/carga.rs`. As telas de negócio no
+navegador (migração das telas do desktop para o modo assíncrono) ficaram para uma etapa
+posterior — plano em `docs/20-cliente-web.md` §3.
+
 ## Consequências
 
 ### Positivas
