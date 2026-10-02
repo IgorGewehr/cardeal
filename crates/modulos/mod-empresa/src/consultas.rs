@@ -20,8 +20,8 @@ impl Consulta for DadosDaEmpresa {
     const PERMISSAO: &'static str = "empresa.dados.ver";
 
     #[cfg(feature = "sqlite")]
-    fn executar(self, _ctx: &Ctx, c: &Connection) -> Resultado<Self::Saida> {
-        crate::sql::dados(c)
+    fn executar(self, ctx: &Ctx, c: &Connection) -> Resultado<Self::Saida> {
+        crate::sql::dados(c, ctx.empresa)
     }
 }
 
@@ -48,8 +48,8 @@ impl Consulta for UsuariosDaEmpresa {
     const PERMISSAO: &'static str = "empresa.usuarios.ver";
 
     #[cfg(feature = "sqlite")]
-    fn executar(self, _ctx: &Ctx, c: &Connection) -> Resultado<Self::Saida> {
-        crate::sql::usuarios(c)
+    fn executar(self, ctx: &Ctx, c: &Connection) -> Resultado<Self::Saida> {
+        crate::sql::usuarios(c, ctx.empresa)
     }
 }
 
@@ -62,7 +62,7 @@ impl Consulta for PapeisDaEmpresa {
     const PERMISSAO: &'static str = "empresa.usuarios.ver";
 
     #[cfg(feature = "sqlite")]
-    fn executar(self, _ctx: &Ctx, c: &Connection) -> Resultado<Self::Saida> {
-        crate::sql::papeis(c)
+    fn executar(self, ctx: &Ctx, c: &Connection) -> Resultado<Self::Saida> {
+        crate::sql::papeis(c, ctx.empresa)
     }
 }

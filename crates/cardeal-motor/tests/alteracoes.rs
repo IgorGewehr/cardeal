@@ -38,11 +38,12 @@ fn todo_comando_vira_alteracao_e_a_poda_vira_lacuna_declarada() {
         )
         .unwrap();
     let sessao = motor.autenticar("admin", "senha-forte-123").unwrap();
+    let empresa = sessao.empresa();
 
     let antes = motor.ultima_alteracao().unwrap();
     criar(&motor, &sessao, "Ana");
     criar(&motor, &sessao, "Bia");
-    let a = motor.alteracoes_desde(antes, 100).unwrap();
+    let a = motor.alteracoes_desde(empresa, antes, 100).unwrap();
     assert!(!a.lacuna);
     let comandos: Vec<_> = a
         .itens
@@ -54,9 +55,9 @@ fn todo_comando_vira_alteracao_e_a_poda_vira_lacuna_declarada() {
     assert_eq!(a.ultimo, motor.ultima_alteracao().unwrap());
 
     // Limite respeitado e continuação exata.
-    let um = motor.alteracoes_desde(antes, 1).unwrap();
+    let um = motor.alteracoes_desde(empresa, antes, 1).unwrap();
     assert_eq!(um.itens.len(), 1);
-    let resto = motor.alteracoes_desde(um.itens[0].0, 100).unwrap();
+    let resto = motor.alteracoes_desde(empresa, um.itens[0].0, 100).unwrap();
     assert_eq!(resto.itens.len(), a.itens.len() - 1);
 
     // A poda apaga tudo; o último seq sobrevive, e quem estava atrás é mandado recarregar.
@@ -68,17 +69,20 @@ fn todo_comando_vira_alteracao_e_a_poda_vira_lacuna_declarada() {
             > 0
     );
     assert_eq!(motor.ultima_alteracao().unwrap(), ultimo);
-    assert!(motor.alteracoes_desde(antes, 100).unwrap().lacuna);
-    let em_dia = motor.alteracoes_desde(ultimo, 100).unwrap();
+    assert!(motor.alteracoes_desde(empresa, antes, 100).unwrap().lacuna);
+    let em_dia = motor.alteracoes_desde(empresa, ultimo, 100).unwrap();
     assert!(!em_dia.lacuna && em_dia.itens.is_empty());
     assert!(
-        motor.alteracoes_desde(ultimo + 50, 100).unwrap().lacuna,
+        motor
+            .alteracoes_desde(empresa, ultimo + 50, 100)
+            .unwrap()
+            .lacuna,
         "adiante da base"
     );
 
     // Depois da poda, o próximo comando continua a sequência sem lacuna para quem estava em dia.
     criar(&motor, &sessao, "Caio");
-    let novo = motor.alteracoes_desde(ultimo, 100).unwrap();
+    let novo = motor.alteracoes_desde(empresa, ultimo, 100).unwrap();
     assert!(!novo.lacuna);
     assert_eq!(novo.itens.first().unwrap().0, ultimo + 1);
 }

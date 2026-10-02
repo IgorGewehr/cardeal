@@ -21,11 +21,13 @@ mod acesso;
 mod alteracoes;
 mod empresa;
 mod motor;
+mod organizacao;
 mod plano;
 
 pub use alteracoes::Alteracoes;
 pub use empresa::{EmpresaResumo, IdentidadeVisual, PapelResumo, UsuarioResumo};
 pub use motor::{MotorLocal, SessaoLocal};
+pub use organizacao::{EmpresaDaOrganizacao, PERMISSAO_ORGANIZACAO};
 pub use plano::Plano;
 
 use cardeal_kernel::{CodigoErro, Erro};

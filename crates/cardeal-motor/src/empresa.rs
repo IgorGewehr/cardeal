@@ -45,7 +45,8 @@ impl MotorLocal {
     /// # Errors
     /// Erro de leitura do armazenamento.
     pub fn empresa_resumo(&self) -> Resultado<EmpresaResumo> {
-        self.ler(sql::dados)
+        let empresa = self.empresa;
+        self.ler(move |c| sql::dados(c, empresa))
     }
 
     /// Atualiza razão social, nome fantasia e regime tributário da empresa.
@@ -63,7 +64,7 @@ impl MotorLocal {
             nome_fantasia.to_owned(),
             regime.to_owned(),
         );
-        self.gravar(move |c, _| sql::atualizar_dados(c, &r, &n, &g))
+        self.gravar(move |c, empresa| sql::atualizar_dados(c, empresa, &r, &n, &g))
     }
 
     /// A identidade visual da empresa para documentos (orçamento em PDF etc.).
@@ -124,7 +125,8 @@ impl MotorLocal {
     /// # Errors
     /// Erro de leitura do armazenamento.
     pub fn usuarios(&self) -> Resultado<Vec<UsuarioResumo>> {
-        self.ler(sql::usuarios)
+        let empresa = self.empresa;
+        self.ler(move |c| sql::usuarios(c, empresa))
     }
 
     /// Os papéis da empresa (nome, descrição, nº de permissões).
@@ -132,6 +134,7 @@ impl MotorLocal {
     /// # Errors
     /// Erro de leitura do armazenamento.
     pub fn papeis(&self) -> Resultado<Vec<PapelResumo>> {
-        self.ler(sql::papeis)
+        let empresa = self.empresa;
+        self.ler(move |c| sql::papeis(c, empresa))
     }
 }

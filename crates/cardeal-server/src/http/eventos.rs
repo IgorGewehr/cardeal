@@ -220,7 +220,7 @@ fn ler_alteracoes(servidor: &Servidor, token: &str, empresa: Id, desde: u64) -> 
     let mut ultimo = desde;
     let mut modulos = BTreeSet::new();
     loop {
-        let a = aberta.motor().alteracoes_desde(ultimo, LOTE)?;
+        let a = aberta.motor().alteracoes_desde(empresa, ultimo, LOTE)?;
         if a.lacuna {
             let e = Event::default()
                 .id(a.ultimo.to_string())

@@ -30,6 +30,12 @@ const PERMISSOES: &[Permissao] = &[
         risco: Risco::Baixo,
         requer_submodulo: None,
     },
+    Permissao {
+        chave: "empresa.organizacao.gerenciar",
+        descricao: "Cadastrar outro CNPJ (filial) na mesma organização",
+        risco: Risco::Alto,
+        requer_submodulo: None,
+    },
 ];
 
 /// O manifesto.

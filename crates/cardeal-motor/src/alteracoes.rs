@@ -37,14 +37,20 @@ impl MotorLocal {
             .map_err(erro_armazenamento)
     }
 
-    /// Até `limite` alterações depois de `desde`.
+    /// Até `limite` alterações da `empresa` depois de `desde` (o `seq` é da base inteira; numa
+    /// organização com vários CNPJs, cada um só vê as suas — ADR-0017).
     ///
     /// # Errors
     /// Falha do SQLite.
-    pub fn alteracoes_desde(&self, desde: u64, limite: usize) -> Resultado<Alteracoes> {
+    pub fn alteracoes_desde(
+        &self,
+        empresa: cardeal_kernel::Id,
+        desde: u64,
+        limite: usize,
+    ) -> Resultado<Alteracoes> {
         self.arm
             .leitor()
-            .consultar(move |c| ler(c, desde, limite).map_err(sqlite))
+            .consultar(move |c| ler(c, empresa, desde, limite).map_err(sqlite))
             .map_err(erro_armazenamento)
     }
 
@@ -97,7 +103,12 @@ fn ultimo_seq(c: &rusqlite::Connection) -> rusqlite::Result<u64> {
     Ok(n.map_or(0, como_u64))
 }
 
-fn ler(c: &rusqlite::Connection, desde: u64, limite: usize) -> rusqlite::Result<Alteracoes> {
+fn ler(
+    c: &rusqlite::Connection,
+    empresa: cardeal_kernel::Id,
+    desde: u64,
+    limite: usize,
+) -> rusqlite::Result<Alteracoes> {
     let ultimo = ultimo_seq(c)?;
     if desde > ultimo {
         // Adiante da base: o cliente veio de outra base (ou de antes de uma restauração).
@@ -122,12 +133,14 @@ fn ler(c: &rusqlite::Connection, desde: u64, limite: usize) -> rusqlite::Result<
     let desde_sql = i64::try_from(desde).unwrap_or(i64::MAX);
     let limite_sql = i64::try_from(limite).unwrap_or(i64::MAX);
     let mut stmt = c.prepare_cached(
-        "SELECT seq, tipo FROM nucleo_outbox WHERE seq > ?1 ORDER BY seq LIMIT ?2",
+        "SELECT seq, tipo FROM nucleo_outbox WHERE seq > ?1 AND empresa = ?3
+         ORDER BY seq LIMIT ?2",
     )?;
     let itens = stmt
-        .query_map([desde_sql, limite_sql], |r| {
-            Ok((como_u64(r.get::<_, i64>(0)?), r.get::<_, String>(1)?))
-        })?
+        .query_map(
+            rusqlite::params![desde_sql, limite_sql, empresa.em_bytes().as_slice()],
+            |r| Ok((como_u64(r.get::<_, i64>(0)?), r.get::<_, String>(1)?)),
+        )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(Alteracoes {
         itens,

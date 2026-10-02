@@ -29,10 +29,17 @@ pub struct MotorLocal {
 /// Uma sessão autenticada — o que uma tela guarda depois do login para chamar `executar`/
 /// `consultar`.
 pub struct SessaoLocal {
-    sessao: Sessao,
+    pub(crate) sessao: Sessao,
 }
 
 impl SessaoLocal {
+    /// A empresa (CNPJ) em que a sessão age — numa organização com vários, cada sessão é de
+    /// uma (ADR-0017).
+    #[must_use]
+    pub const fn empresa(&self) -> Id {
+        self.sessao.escopo.empresa
+    }
+
     /// O id do usuário autenticado.
     #[must_use]
     pub const fn usuario(&self) -> Id {
@@ -56,9 +63,10 @@ impl MotorLocal {
     /// Abre (criando se preciso) o arquivo local, migra o núcleo + o razão + os módulos
     /// dados, e resolve o conjunto efetivo da empresa a partir do pedido de ativação.
     ///
-    /// A empresa é lida de `nucleo_empresa` se já existir (base reaberta numa sessão
-    /// posterior) ou gerada agora — só é persistida de fato quando [`Self::configurar_inicial`]
-    /// gravar a linha. Monoposto: uma base só tem uma empresa.
+    /// A empresa principal (a matriz) é lida de `nucleo_empresa` se já existir (base reaberta
+    /// numa sessão posterior) ou gerada agora — só é persistida de fato quando
+    /// [`Self::configurar_inicial`] gravar a linha. Uma base é uma organização: pode ter
+    /// outros CNPJs ([`Self::adicionar_empresa`], ADR-0017).
     ///
     /// # Errors
     /// Erro de abertura/migração do armazenamento, ou manifesto/dependência inválida ao
@@ -102,9 +110,12 @@ impl MotorLocal {
         let empresa_persistida = arm
             .leitor()
             .consultar(|c| {
-                c.query_row("SELECT id FROM nucleo_empresa LIMIT 1", [], |r| {
-                    r.get::<_, Vec<u8>>(0)
-                })
+                // A matriz: a empresa sem `matriz` (a primeira criada, em caso de dúvida).
+                c.query_row(
+                    "SELECT id FROM nucleo_empresa ORDER BY matriz IS NOT NULL, rowid LIMIT 1",
+                    [],
+                    |r| r.get::<_, Vec<u8>>(0),
+                )
                 .optional()
                 .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
             })
@@ -118,7 +129,9 @@ impl MotorLocal {
         // "Sem permissão para ...". A cada abertura, completa esse papel com o que faltar do
         // catálogo atual dos módulos ativos (só adiciona; nunca remove).
         if !em_dia && empresa_persistida.is_some() {
-            sincronizar_papel_admin(&arm, empresa, &plano.conjunto)?;
+            for e in crate::organizacao::ids_das_empresas(&arm)? {
+                sincronizar_papel_admin(&arm, e, &plano.conjunto)?;
+            }
             // Só depois de tudo verificado — e só com empresa: uma base nova ainda passa pelo
             // primeiro acesso, e a próxima abertura precisa sincronizar o admin criado nele.
             gravar_impressao(&arm, empresa, plano.impressao)?;
@@ -299,7 +312,7 @@ impl MotorLocal {
             carga,
             chave,
             &sessao.sessao,
-            &self.ambiente,
+            &self.ambiente_de(sessao),
             self.arm.escritor(),
         )
     }
@@ -318,7 +331,7 @@ impl MotorLocal {
             nome,
             carga,
             &sessao.sessao,
-            &self.ambiente,
+            &self.ambiente_de(sessao),
             self.arm.leitor(),
         )
     }
@@ -338,7 +351,7 @@ impl MotorLocal {
             nome,
             &carga,
             &sessao.sessao,
-            &self.ambiente,
+            &self.ambiente_de(sessao),
             self.arm.escritor(),
         )?;
         postcard::from_bytes(&saida)
@@ -365,7 +378,7 @@ impl MotorLocal {
             nome,
             &carga,
             &sessao.sessao,
-            &self.ambiente,
+            &self.ambiente_de(sessao),
             self.arm.leitor(),
         )?;
         postcard::from_bytes(&saida)
@@ -373,7 +386,19 @@ impl MotorLocal {
     }
 }
 
-fn ambiente_de(empresa: Id, plano: &Plano) -> Ambiente {
+impl MotorLocal {
+    /// O ambiente da empresa da sessão — o da matriz já vem pronto; o de outro CNPJ custa um
+    /// `Arc::clone`.
+    fn ambiente_de(&self, sessao: &SessaoLocal) -> std::borrow::Cow<'_, Ambiente> {
+        if sessao.empresa() == self.empresa {
+            std::borrow::Cow::Borrowed(&self.ambiente)
+        } else {
+            std::borrow::Cow::Owned(ambiente_de(sessao.empresa(), &self.plano))
+        }
+    }
+}
+
+pub(crate) fn ambiente_de(empresa: Id, plano: &Plano) -> Ambiente {
     Ambiente::compartilhado(empresa, Arc::clone(&plano.conjunto)).com_fuso(Fuso::BRASILIA)
 }
 

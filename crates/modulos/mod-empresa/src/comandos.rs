@@ -27,9 +27,10 @@ impl Comando for AtualizarDadosEmpresa {
     const AUDITA: bool = true;
 
     #[cfg(feature = "sqlite")]
-    fn executar(self, _ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<()> {
+    fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<()> {
         crate::sql::atualizar_dados(
             uow.conexao(),
+            ctx.empresa,
             self.razao_social.trim(),
             self.nome_fantasia.trim(),
             self.regime.trim(),

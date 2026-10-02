@@ -139,8 +139,10 @@ fn papel_da_empresa(
     let existente: Option<Vec<u8>> = uow
         .conexao()
         .query_row(
-            "SELECT id FROM nucleo_papel WHERE nome = ?1 AND sistema = ?2 LIMIT 1",
-            rusqlite::params![fabrica.nome(), sistema],
+            "SELECT id FROM nucleo_papel
+             WHERE nome = ?1 AND sistema = ?2 AND (empresa = ?3 OR empresa IS NULL)
+             ORDER BY empresa IS NULL LIMIT 1",
+            rusqlite::params![fabrica.nome(), sistema, ctx.empresa.em_bytes().as_slice()],
             |r| r.get(0),
         )
         .optional()
