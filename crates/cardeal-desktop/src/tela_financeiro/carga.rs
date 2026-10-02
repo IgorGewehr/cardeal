@@ -263,7 +263,14 @@ impl EstadoTelaFinanceiro {
                 valor,
             })
             .collect();
-        itens.sort_by(|a, b| b.valor.abs().total_cmp(&a.valor.abs()));
+        // Desempate pelo nome: o `HashMap` sai em ordem aleatória a cada quadro, e duas
+        // categorias com o mesmo valor ficavam trocando de lugar sem parar no gráfico.
+        itens.sort_by(|a, b| {
+            b.valor
+                .abs()
+                .total_cmp(&a.valor.abs())
+                .then_with(|| a.rotulo.cmp(&b.rotulo))
+        });
         itens.truncate(5);
         itens
     }

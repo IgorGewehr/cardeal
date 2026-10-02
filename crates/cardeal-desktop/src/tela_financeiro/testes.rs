@@ -601,3 +601,40 @@ fn lancar_a_vista_sem_marcar_pago_fica_em_aberto_vencendo_na_data() {
     assert_eq!(p.vencimento, data);
     assert!(p.valor_baixado.e_zero());
 }
+
+#[test]
+fn categorias_empatadas_no_grafico_nao_trocam_de_lugar_a_cada_quadro() {
+    // `top_categorias` roda a cada quadro sobre um `HashMap` (ordem aleatória a cada mapa
+    // novo): sem desempate, duas categorias com o mesmo valor pulavam de posição sem parar.
+    let cat = |nome: &str| mod_financeiro::CategoriaFinanceira {
+        id: Id::novo(),
+        empresa: Id::novo(),
+        nome: nome.to_owned(),
+        especie: None,
+        ativa: true,
+    };
+    let (a, b, c) = (cat("Aluguel"), cat("Energia"), cat("Peças"));
+    let item = |categoria: Id, reais: i64| mod_financeiro::ItemTotalPorCategoria {
+        categoria: Some(categoria),
+        especie: EspecieTitulo::Pagar,
+        competencia: cardeal_kernel::Competencia::nova(2026, 9),
+        total_baixado: Dinheiro::reais(reais),
+    };
+    let estado = EstadoTelaFinanceiro {
+        analise: vec![item(b.id, 300), item(a.id, 300), item(c.id, 900)],
+        categorias: vec![a, b, c],
+        ..Default::default()
+    };
+    let ordem = || -> Vec<String> {
+        estado
+            .top_categorias()
+            .into_iter()
+            .map(|i| i.rotulo)
+            .collect()
+    };
+    let primeira = ordem();
+    assert_eq!(primeira, vec!["Peças", "Aluguel", "Energia"]);
+    for _ in 0..200 {
+        assert_eq!(ordem(), primeira, "mesmos dados, mesma ordem — sempre");
+    }
+}

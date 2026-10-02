@@ -76,7 +76,9 @@ impl EstadoTelaFinanceiro {
                 por_mes,
             })
             .collect();
-        linhas.sort_by_key(|l| std::cmp::Reverse(l.total));
+        // Desempate pelo nome: o `HashMap` sai em ordem aleatória, e categorias com o mesmo
+        // total trocariam de linha a cada recarga.
+        linhas.sort_by(|a, b| b.total.cmp(&a.total).then_with(|| a.nome.cmp(&b.nome)));
         linhas
     }
 
