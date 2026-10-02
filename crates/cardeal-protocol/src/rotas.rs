@@ -5,6 +5,9 @@ use cardeal_kernel::Id;
 /// Login (`POST`) e logout (`DELETE`).
 pub const ROTA_SESSAO: &str = "/v1/sessao";
 
+/// Troca de senha da conta (`POST`).
+pub const ROTA_SENHA: &str = "/v1/sessao/senha";
+
 /// Prontidão do servidor (`GET`), para o balanceador e o Cloudflare.
 pub const ROTA_SAUDE: &str = "/saude";
 

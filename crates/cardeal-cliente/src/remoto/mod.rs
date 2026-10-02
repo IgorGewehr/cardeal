@@ -180,6 +180,20 @@ impl Remoto {
         ))
     }
 
+    /// Troca a senha da conta. As outras sessões da conta caem; esta continua. Não é
+    /// reenviado em falha de rede (uma senha atual errada repetida contaria como tentativas).
+    ///
+    /// # Errors
+    /// Senha atual errada, nova fora da política, sem conexão.
+    pub fn trocar_senha(&self, atual: &str, nova: &str) -> Resultado<()> {
+        let pedido = protocolo::trocar_senha(atual, nova)?;
+        let resposta = self
+            .transporte
+            .enviar(&pedido, Some(&self.token))
+            .map_err(sem_conexao)?;
+        protocolo::interpretar_vazio(&resposta)
+    }
+
     /// Encerra a sessão no servidor (melhor esforço: sem rede, o token expira sozinho).
     pub fn sair(self) {
         let _ = self

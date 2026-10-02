@@ -123,3 +123,39 @@ pub fn hash_de_senha_nova(senha: &str) -> Resultado<HashDeSenha> {
         .and_then(|()| hash_senha(senha))
         .map_err(|e| Erro::de_dominio(&e).no_campo("senha"))
 }
+
+/// Troca a senha da conta dona do token: confere a atual, valida a nova, grava, e encerra as
+/// outras sessões da conta (a deste token continua). Devolve os hashes encerrados.
+/// **Bloqueante** (Argon2id ×2).
+///
+/// # Errors
+/// `SESSAO_INVALIDA`; `CREDENCIAL_INVALIDA` se a senha atual não confere; a política da nova.
+pub(crate) fn trocar_senha(
+    diretorio: &Diretorio,
+    conta: Id,
+    token: &str,
+    atual: &str,
+    nova: &str,
+) -> Resultado<Vec<token::HashToken>> {
+    let Some(registro) = diretorio.conta_por_id(conta)? else {
+        return Err(Erro::novo(
+            CodigoErro::SESSAO_INVALIDA,
+            "conta não encontrada",
+        ));
+    };
+    if !verificar_senha(atual, &registro.senha) {
+        return Err(
+            Erro::novo(CodigoErro::CREDENCIAL_INVALIDA, "a senha atual não confere")
+                .no_campo("atual"),
+        );
+    }
+    if atual == nova {
+        return Err(
+            Erro::novo(CodigoErro::ENTRADA_INVALIDA, "a senha nova é igual à atual")
+                .no_campo("nova"),
+        );
+    }
+    let hash = hash_de_senha_nova(nova).map_err(|e| e.no_campo("nova"))?;
+    diretorio.gravar_senha(conta, &hash)?;
+    diretorio.encerrar_outras_sessoes(conta, &token::hash(token))
+}

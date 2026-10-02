@@ -24,8 +24,12 @@
 mod rotas;
 mod sessao;
 
-pub use rotas::{rota_comando, rota_consulta, rota_sessao_empresa, ROTA_SAUDE, ROTA_SESSAO};
-pub use sessao::{EmpresaAcessivel, InfoSessao, PedidoLogin, RespostaLogin, TipoCliente};
+pub use rotas::{
+    rota_comando, rota_consulta, rota_sessao_empresa, ROTA_SAUDE, ROTA_SENHA, ROTA_SESSAO,
+};
+pub use sessao::{
+    EmpresaAcessivel, InfoSessao, PedidoLogin, PedidoTrocaSenha, RespostaLogin, TipoCliente,
+};
 
 use cardeal_kernel::CodigoErro;
 

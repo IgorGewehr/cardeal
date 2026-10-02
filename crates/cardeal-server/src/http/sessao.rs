@@ -109,3 +109,30 @@ pub(super) async fn atual(
     .await?;
     Ok(postcard(&resposta)?.into_response())
 }
+
+/// `POST /v1/sessao/senha`.
+pub(super) async fn trocar_senha(
+    State(servidor): State<Arc<Servidor>>,
+    headers: HeaderMap,
+    corpo: Bytes,
+) -> Result<Response, ErroHttp> {
+    let token = credencial::exigir_token(&headers)?;
+    let pedido: cardeal_protocol::PedidoTrocaSenha = ler(&corpo)?;
+    // Dois Argon2id: o mesmo semáforo do login segura o pico de memória.
+    let _licenca = servidor
+        .logins
+        .acquire()
+        .await
+        .map_err(|e| ErroHttp(Erro::novo(CodigoErro::FALHA_INTERNA, e.to_string())))?;
+    let s = Arc::clone(&servidor);
+    bloqueante(move || {
+        let sessao = s.sessoes.resolver(&s.diretorio, &token)?;
+        let encerradas =
+            autenticacao::trocar_senha(&s.diretorio, sessao.conta, &token, &pedido.atual, &pedido.nova)?;
+        s.sessoes.esquecer_hashes(&encerradas);
+        tracing::info!(conta = %sessao.conta, outras_sessoes_encerradas = encerradas.len(), "senha trocada");
+        Ok(())
+    })
+    .await?;
+    Ok(StatusCode::NO_CONTENT.into_response())
+}

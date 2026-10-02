@@ -19,7 +19,7 @@ use axum::routing::{get, post};
 use axum::Router;
 use cardeal_kernel::{CodigoErro, Erro};
 use cardeal_protocol::{
-    versao_aceita, CABECALHO_PROTOCOLO, ROTA_SAUDE, ROTA_SESSAO, TETO_CORPO_BYTES,
+    versao_aceita, CABECALHO_PROTOCOLO, ROTA_SAUDE, ROTA_SENHA, ROTA_SESSAO, TETO_CORPO_BYTES,
 };
 use tower_http::timeout::TimeoutLayer;
 
@@ -37,6 +37,7 @@ pub fn roteador(servidor: Arc<Servidor>) -> Router {
             ROTA_SESSAO,
             post(sessao::entrar).get(sessao::atual).delete(sessao::sair),
         )
+        .route(ROTA_SENHA, post(sessao::trocar_senha))
         .route("/v1/e/:empresa/cmd/:nome", post(despacho::comando))
         .route("/v1/e/:empresa/qry/:nome", post(despacho::consulta))
         .route("/v1/e/:empresa/sessao", get(despacho::sessao))

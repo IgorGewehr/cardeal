@@ -80,6 +80,22 @@ pub fn sessao_atual() -> Pedido {
     base(Metodo::Get, ROTA_SESSAO.to_owned(), Vec::new())
 }
 
+/// A troca de senha da própria conta.
+///
+/// # Errors
+/// Falha de serialização.
+pub fn trocar_senha(atual: &str, nova: &str) -> Resultado<Pedido> {
+    let pedido = cardeal_protocol::PedidoTrocaSenha {
+        atual: atual.to_owned(),
+        nova: nova.to_owned(),
+    };
+    Ok(base(
+        Metodo::Post,
+        cardeal_protocol::ROTA_SENHA.to_owned(),
+        carga(&pedido)?,
+    ))
+}
+
 /// O pedido de logout.
 #[must_use]
 pub fn logout() -> Pedido {

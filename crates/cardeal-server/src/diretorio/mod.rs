@@ -182,6 +182,71 @@ impl Diretorio {
         Ok(id)
     }
 
+    /// A conta pelo id (para conferir a senha atual numa troca).
+    ///
+    /// # Errors
+    /// Falha do SQLite.
+    pub fn conta_por_id(&self, conta: Id) -> Resultado<Option<Conta>> {
+        let email: Option<String> = self
+            .conn
+            .lock()
+            .query_row(
+                "SELECT email FROM conta WHERE id = ?1",
+                [conta.em_bytes().as_slice()],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|e| falha(&e))?;
+        match email {
+            Some(e) => self.conta_por_email(&e),
+            None => Ok(None),
+        }
+    }
+
+    /// Grava a senha nova de uma conta e zera tentativas/bloqueio.
+    ///
+    /// # Errors
+    /// Falha do SQLite.
+    pub fn gravar_senha(&self, conta: Id, senha: &HashDeSenha) -> Resultado<()> {
+        self.conn
+            .lock()
+            .execute(
+                "UPDATE conta SET senha_hash = ?2, tentativas = 0, bloqueado_ate = NULL
+                 WHERE id = ?1",
+                params![conta.em_bytes().as_slice(), senha.como_phc()],
+            )
+            .map(|_| ())
+            .map_err(|e| falha(&e))
+    }
+
+    /// Encerra todas as sessões da conta, menos a do `manter`. Devolve os hashes encerrados
+    /// (para tirar do cache).
+    ///
+    /// # Errors
+    /// Falha do SQLite.
+    pub(crate) fn encerrar_outras_sessoes(
+        &self,
+        conta: Id,
+        manter: &HashToken,
+    ) -> Resultado<Vec<HashToken>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn
+            .prepare(
+                "DELETE FROM sessao WHERE conta = ?1 AND token_hash <> ?2 RETURNING token_hash",
+            )
+            .map_err(|e| falha(&e))?;
+        let linhas = stmt
+            .query_map(
+                params![conta.em_bytes().as_slice(), manter.as_slice()],
+                |r| r.get::<_, Vec<u8>>(0),
+            )
+            .map_err(|e| falha(&e))?
+            .filter_map(Result::ok)
+            .filter_map(|v| <[u8; 32]>::try_from(v).ok())
+            .collect();
+        Ok(linhas)
+    }
+
     /// Persiste o estado de tentativas/bloqueio de uma conta.
     ///
     /// # Errors

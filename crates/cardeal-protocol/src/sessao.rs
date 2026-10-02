@@ -56,3 +56,13 @@ pub struct InfoSessao {
     /// As permissões concedidas pelos papéis dele.
     pub permissoes: Vec<String>,
 }
+
+/// `POST /v1/sessao/senha`: a própria conta troca a senha. As **outras** sessões da conta são
+/// encerradas (se a senha vazou, quem entrou com ela cai); a sessão de quem trocou continua.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PedidoTrocaSenha {
+    /// A senha atual — prova de que é a própria pessoa, não só alguém com a sessão aberta.
+    pub atual: String,
+    /// A senha nova (política: mínimo 8 caracteres, fora da lista de senhas comuns).
+    pub nova: String,
+}

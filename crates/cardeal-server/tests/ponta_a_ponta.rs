@@ -755,3 +755,80 @@ async fn sessao_atual_sobrevive_a_recarga_e_morre_no_logout() {
     let depois = chamar(&a.app, Method::GET, ROTA_SESSAO, Some(&t), &[], vec![]).await;
     assert_eq!(depois.status, StatusCode::UNAUTHORIZED);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn trocar_senha_derruba_as_outras_sessoes_e_mantem_a_atual() {
+    use cardeal_protocol::{PedidoTrocaSenha, ROTA_SENHA};
+    let a = ambiente(Duration::from_secs(600));
+    let celular = token(&a.app, "ana@x.com").await;
+    let notebook = token(&a.app, "ana@x.com").await;
+    let trocar = |atual: &str, nova: &str| {
+        postcard::to_stdvec(&PedidoTrocaSenha {
+            atual: atual.into(),
+            nova: nova.into(),
+        })
+        .unwrap()
+    };
+
+    let errada = chamar(
+        &a.app,
+        Method::POST,
+        ROTA_SENHA,
+        Some(&notebook),
+        &[],
+        trocar("chute-errado", "nova-senha-forte-9"),
+    )
+    .await;
+    assert_eq!(errada.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(errada.erro().campo.as_deref(), Some("atual"));
+
+    let curta = chamar(
+        &a.app,
+        Method::POST,
+        ROTA_SENHA,
+        Some(&notebook),
+        &[],
+        trocar(SENHA, "abc"),
+    )
+    .await;
+    assert_eq!(curta.erro().campo.as_deref(), Some("nova"));
+
+    let ok = chamar(
+        &a.app,
+        Method::POST,
+        ROTA_SENHA,
+        Some(&notebook),
+        &[],
+        trocar(SENHA, "nova-senha-forte-9"),
+    )
+    .await;
+    assert_eq!(ok.status, StatusCode::NO_CONTENT);
+
+    assert_eq!(
+        clientes(&a.app, &notebook, a.empresa_ana).await.status,
+        StatusCode::OK,
+        "quem trocou continua"
+    );
+    assert_eq!(
+        clientes(&a.app, &celular, a.empresa_ana).await.status,
+        StatusCode::UNAUTHORIZED,
+        "as outras caem"
+    );
+    assert_eq!(
+        login(&a.app, "ana@x.com", SENHA, TipoCliente::Nativo)
+            .await
+            .status,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        login(
+            &a.app,
+            "ana@x.com",
+            "nova-senha-forte-9",
+            TipoCliente::Nativo
+        )
+        .await
+        .status,
+        StatusCode::OK
+    );
+}

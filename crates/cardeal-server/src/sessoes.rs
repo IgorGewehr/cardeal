@@ -92,6 +92,14 @@ impl Sessoes {
         Ok(s)
     }
 
+    /// Esquece sessões pelo hash (encerradas em lote, ex.: troca de senha).
+    pub(crate) fn esquecer_hashes(&self, hashes: &[HashToken]) {
+        let mut cache = self.cache.write();
+        for h in hashes {
+            cache.remove(h);
+        }
+    }
+
     /// Esquece um token (logout).
     pub fn esquecer(&self, token: &str) {
         self.cache.write().remove(&token::hash(token));
