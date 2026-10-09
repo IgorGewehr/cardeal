@@ -18,10 +18,13 @@ mod criar_unidade;
 mod definir_ativo_produto;
 mod definir_ponto_pedido;
 mod editar_detalhes_tecnicos_produto;
+mod mover_grupo_produto;
+mod mover_produtos_de_grupo;
 mod registrar_aparelho_origem;
 mod registrar_entrada;
 mod registrar_entrada_com_lote;
 mod registrar_saida;
+mod renomear_grupo_produto;
 
 pub use ajustar_saldo::{AjustarSaldo, SaldoAjustado};
 pub use criar_grupo_produto::{CriarGrupoProduto, GrupoProdutoCriado};
@@ -34,10 +37,33 @@ pub use criar_unidade::{CriarUnidade, UnidadeCriada};
 pub use definir_ativo_produto::DefinirAtivoProduto;
 pub use definir_ponto_pedido::DefinirPontoPedido;
 pub use editar_detalhes_tecnicos_produto::EditarDetalhesTecnicosProduto;
+pub use mover_grupo_produto::MoverGrupoProduto;
+pub use mover_produtos_de_grupo::{MoverProdutosDeGrupo, ProdutosMovidos};
 pub use registrar_aparelho_origem::{AparelhoOrigemRegistrado, RegistrarAparelhoOrigem};
 pub use registrar_entrada::{EntradaRegistrada, RegistrarEntrada};
 pub use registrar_entrada_com_lote::{EntradaComLoteRegistrada, RegistrarEntradaComLote};
 pub use registrar_saida::{RegistrarSaida, SaidaRegistrada};
+pub use renomear_grupo_produto::RenomearGrupoProduto;
+
+/// Traduz uma recusa da árvore de grupos para o erro do despacho.
+#[cfg(feature = "sqlite")]
+pub(crate) fn erro_de_hierarquia(e: crate::hierarquia::ErroHierarquia) -> Erro {
+    use crate::hierarquia::{nome_do_nivel, ErroHierarquia as E, NIVEL_MAXIMO};
+    match e {
+        E::GrupoInexistente => Erro::nao_encontrado("grupo de produto"),
+        E::ProfundidadeExcedida { nivel_resultante } => Erro::novo(
+            cardeal_kernel::CodigoErro::REGRA_VIOLADA,
+            format!(
+                "a estrutura aceita no máximo {NIVEL_MAXIMO} níveis (até {}); isto chegaria ao nível {nivel_resultante}",
+                nome_do_nivel(NIVEL_MAXIMO)
+            ),
+        ),
+        E::Ciclo => Erro::novo(
+            cardeal_kernel::CodigoErro::REGRA_VIOLADA,
+            "um grupo não pode ficar dentro de si mesmo nem de um subgrupo seu",
+        ),
+    }
+}
 
 use cardeal_kernel::{Data, Id, Preco, Quantidade};
 #[cfg(feature = "sqlite")]

@@ -7,13 +7,14 @@ use cardeal_storage::ConjuntoMigracoes;
 
 use crate::comandos::{
     AjustarSaldo, CriarGrupoProduto, CriarLocal, CriarProduto, CriarUnidade, DefinirAtivoProduto,
-    DefinirPontoPedido, EditarDetalhesTecnicosProduto, RegistrarAparelhoOrigem, RegistrarEntrada,
-    RegistrarEntradaComLote, RegistrarSaida,
+    DefinirPontoPedido, EditarDetalhesTecnicosProduto, MoverGrupoProduto, MoverProdutosDeGrupo,
+    RegistrarAparelhoOrigem, RegistrarEntrada, RegistrarEntradaComLote, RegistrarSaida,
+    RenomearGrupoProduto,
 };
 use crate::consultas::{
-    DetalheDoLotePorCodigo, GruposProduto, Locais, LotesDisponiveisDoProduto, MovimentosDoProduto,
-    ProdutoPorCodigoBarras, ProdutoPorId, ProdutosAbaixoDoPontoPedido, ProdutosComSaldo,
-    SaldoDisponivelDoProduto, Unidades,
+    ArvoreGruposProduto, DetalheDoLotePorCodigo, GruposProduto, Locais, LotesDisponiveisDoProduto,
+    MovimentosDoProduto, ProdutoPorCodigoBarras, ProdutoPorId, ProdutosAbaixoDoPontoPedido,
+    ProdutosComSaldo, SaldoDisponivelDoProduto, Unidades,
 };
 use crate::manifesto::MANIFESTO;
 use crate::migracoes;
@@ -33,6 +34,9 @@ impl Modulo for ModuloEstoque {
     fn registrar(&self, registro: &mut Registro) -> Resultado<()> {
         registro
             .comando::<CriarGrupoProduto>("estoque.criar_grupo_produto.v1")
+            .comando::<RenomearGrupoProduto>("estoque.renomear_grupo_produto.v1")
+            .comando::<MoverGrupoProduto>("estoque.mover_grupo_produto.v1")
+            .comando::<MoverProdutosDeGrupo>("estoque.mover_produtos_de_grupo.v1")
             .comando::<CriarUnidade>("estoque.criar_unidade.v1")
             .comando::<CriarProduto>("estoque.criar_produto.v1")
             .comando::<crate::comandos::CriarPecaRapida>("estoque.criar_peca_rapida.v1")
@@ -53,6 +57,7 @@ impl Modulo for ModuloEstoque {
             .consulta::<ProdutosAbaixoDoPontoPedido>("estoque.produtos_abaixo_do_ponto_pedido.v1")
             .consulta::<MovimentosDoProduto>("estoque.movimentos_do_produto.v1")
             .consulta::<GruposProduto>("estoque.grupos_produto.v1")
+            .consulta::<ArvoreGruposProduto>("estoque.arvore_grupos_produto.v1")
             .consulta::<Unidades>("estoque.unidades.v1")
             .consulta::<Locais>("estoque.locais.v1")
             .consulta::<DetalheDoLotePorCodigo>("estoque.detalhe_do_lote_por_codigo.v1")

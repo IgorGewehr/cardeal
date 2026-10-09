@@ -63,6 +63,7 @@ mod comandos;
 mod consultas;
 mod erros;
 pub mod eventos;
+pub mod hierarquia;
 mod inventario;
 mod listagem;
 mod manifesto;
@@ -93,17 +94,20 @@ pub use comandos::{
     TipoLocal, UnidadeCriada,
 };
 pub use comandos::{CriarPecaRapida, PecaRapidaCriada};
+pub use comandos::{
+    MoverGrupoProduto, MoverProdutosDeGrupo, ProdutosMovidos, RenomearGrupoProduto,
+};
 #[cfg(feature = "sqlite")]
 pub use consultas::{
     melhor_local_de_saida, movimentos_do_produto, produtos_abaixo_do_ponto_pedido,
     saldo_disponivel_do_produto,
 };
 pub use consultas::{
-    AparelhoOrigemResumo, DetalheDoLotePorCodigo, DetalheLote, GruposProduto,
+    AparelhoOrigemResumo, ArvoreGruposProduto, DetalheDoLotePorCodigo, DetalheLote, GruposProduto,
     ItemAbaixoDoPontoPedido, ItemGrupoProduto, ItemLocal, ItemLoteDisponivel, ItemProdutoComSaldo,
-    ItemUnidade, Locais, LotesDisponiveisDoProduto, MovimentosDoProduto, ProdutoPorCodigoBarras,
-    ProdutoPorId, ProdutosAbaixoDoPontoPedido, ProdutosComSaldo, SaldoDisponivelDoProduto,
-    Unidades,
+    ItemUnidade, Locais, LotesDisponiveisDoProduto, MovimentosDoProduto, NoArvoreGrupo,
+    ProdutoPorCodigoBarras, ProdutoPorId, ProdutosAbaixoDoPontoPedido, ProdutosComSaldo,
+    SaldoDisponivelDoProduto, Unidades,
 };
 pub use erros::ErroEstoque;
 pub use inventario::{AjusteInventario, ContagemItem, EstadoInventario, Inventario};

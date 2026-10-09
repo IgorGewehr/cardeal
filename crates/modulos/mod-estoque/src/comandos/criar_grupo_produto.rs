@@ -1,5 +1,5 @@
-//! Cadastra um grupo de produto — fatia mínima: hierarquia por `pai`, sem perfil tributário
-//! ainda (ver `src/lib.rs`).
+//! Cadastra um grupo de produto na estrutura mercadológica (até quatro níveis:
+//! Grupo › Subgrupo › Categoria › Subcategoria — ver [`crate::hierarquia`]).
 
 use cardeal_kernel::Id;
 #[cfg(feature = "sqlite")]
@@ -48,14 +48,12 @@ impl Comando for CriarGrupoProduto {
                 "código e nome do grupo são obrigatórios",
             ));
         }
+        let mut repo = RepositorioEstoque::novo(uow);
+        crate::hierarquia::Arvore::de_nos(&repo.nos_dos_grupos(ctx.organizacao)?)
+            .validar_novo_filho(self.pai)
+            .map_err(crate::comandos::erro_de_hierarquia)?;
         let id = Id::novo();
-        RepositorioEstoque::novo(uow).inserir_grupo_produto(
-            ctx.organizacao,
-            id,
-            codigo,
-            nome,
-            self.pai,
-        )?;
+        repo.inserir_grupo_produto(ctx.organizacao, id, codigo, nome, self.pai)?;
         Ok(GrupoProdutoCriado { grupo_produto: id })
     }
 }

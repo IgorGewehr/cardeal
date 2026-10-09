@@ -107,6 +107,106 @@ impl<'a, 'b> RepositorioEstoque<'a, 'b> {
         Ok(())
     }
 
+    /// Todos os nós (id, pai) da árvore de grupos da empresa — o insumo de
+    /// [`crate::hierarquia::Arvore`].
+    ///
+    /// # Errors
+    /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+    pub fn nos_dos_grupos(&self, empresa: Id) -> Resultado<Vec<crate::hierarquia::NoGrupo>> {
+        let mut stmt = self
+            .conn()
+            .prepare("SELECT id, pai FROM estoque_grupo_produto WHERE empresa = ?1")
+            .map_err(persist)?;
+        let linhas = stmt
+            .query_map([blob(empresa)], |r| {
+                Ok(crate::hierarquia::NoGrupo {
+                    id: id_de(r.get::<_, Vec<u8>>(0)?),
+                    pai: r.get::<_, Option<Vec<u8>>>(1)?.map(id_de),
+                })
+            })
+            .map_err(persist)?;
+        linhas
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(persist)
+    }
+
+    /// Renomeia um grupo (e, se informado, troca o código). `false` se o grupo não existe.
+    ///
+    /// # Errors
+    /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite (inclusive código duplicado).
+    pub fn renomear_grupo(
+        &mut self,
+        empresa: Id,
+        grupo: Id,
+        codigo: &str,
+        nome: &str,
+    ) -> Resultado<bool> {
+        let n = self
+            .conn()
+            .execute(
+                "UPDATE estoque_grupo_produto SET codigo = ?3, nome = ?4, versao = versao + 1
+                 WHERE empresa = ?1 AND id = ?2",
+                params![blob(empresa), blob(grupo), codigo, nome],
+            )
+            .map_err(persist)?;
+        Ok(n > 0)
+    }
+
+    /// Troca o pai de um grupo. A validação de profundidade/ciclo é do comando.
+    ///
+    /// # Errors
+    /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+    pub fn mover_grupo(&mut self, empresa: Id, grupo: Id, novo_pai: Option<Id>) -> Resultado<()> {
+        self.conn()
+            .execute(
+                "UPDATE estoque_grupo_produto SET pai = ?3, versao = versao + 1
+                 WHERE empresa = ?1 AND id = ?2",
+                params![blob(empresa), blob(grupo), blob_opt(novo_pai)],
+            )
+            .map_err(persist)?;
+        Ok(())
+    }
+
+    /// Passa os produtos para outro grupo; devolve quantos mudaram.
+    ///
+    /// # Errors
+    /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+    pub fn mover_produtos_de_grupo(
+        &mut self,
+        empresa: Id,
+        produtos: &[Id],
+        grupo: Id,
+    ) -> Resultado<usize> {
+        let mut total = 0;
+        for p in produtos {
+            total += self
+                .conn()
+                .execute(
+                    "UPDATE estoque_produto SET grupo_produto = ?3, versao = versao + 1
+                     WHERE empresa = ?1 AND id = ?2 AND grupo_produto <> ?3",
+                    params![blob(empresa), blob(*p), blob(grupo)],
+                )
+                .map_err(persist)?;
+        }
+        Ok(total)
+    }
+
+    /// O grupo existe na empresa?
+    ///
+    /// # Errors
+    /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+    pub fn grupo_existe(&self, empresa: Id, grupo: Id) -> Resultado<bool> {
+        self.conn()
+            .query_row(
+                "SELECT 1 FROM estoque_grupo_produto WHERE empresa = ?1 AND id = ?2",
+                params![blob(empresa), blob(grupo)],
+                |_| Ok(()),
+            )
+            .optional()
+            .map(|o| o.is_some())
+            .map_err(persist)
+    }
+
     /// Cria uma unidade de medida.
     ///
     /// # Errors

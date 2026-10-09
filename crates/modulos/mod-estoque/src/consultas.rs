@@ -212,6 +212,114 @@ impl Consulta for GruposProduto {
     }
 }
 
+/// Um nó da estrutura mercadológica, com o nível e as contagens de produtos ativos.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NoArvoreGrupo {
+    /// O grupo.
+    pub id: Id,
+    /// O código curto.
+    pub codigo: String,
+    /// O nome.
+    pub nome: String,
+    /// O pai; `None` na raiz.
+    pub pai: Option<Id>,
+    /// O nível (1 = Grupo … 4 = Subcategoria).
+    pub nivel: u8,
+    /// Produtos ativos diretamente neste grupo.
+    pub produtos_diretos: u32,
+    /// Produtos ativos neste grupo e em todos os descendentes.
+    pub produtos_na_subarvore: u32,
+}
+
+/// A árvore inteira de grupos, em ordem de exibição (pré-ordem, irmãos por nome) — a tela
+/// só percorre a lista e indenta por `nivel`.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct ArvoreGruposProduto;
+
+impl Consulta for ArvoreGruposProduto {
+    type Saida = Vec<NoArvoreGrupo>;
+    const PERMISSAO: &'static str = "estoque.produto.ver";
+
+    #[cfg(feature = "sqlite")]
+    fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        use std::collections::HashMap;
+
+        use crate::hierarquia::{Arvore, NoGrupo};
+
+        let mut stmt = conexao
+            .prepare(
+                "SELECT id, codigo, nome, pai FROM estoque_grupo_produto
+                 WHERE empresa = ?1 ORDER BY nome ASC, id ASC",
+            )
+            .map_err(persist)?;
+        let grupos = stmt
+            .query_map([blob(ctx.organizacao)], |r| {
+                Ok((
+                    id_de(r.get::<_, Vec<u8>>(0)?),
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, Option<Vec<u8>>>(3)?.map(id_de),
+                ))
+            })
+            .map_err(persist)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(persist)?;
+
+        let mut stmt = conexao
+            .prepare(
+                "SELECT grupo_produto, COUNT(*) FROM estoque_produto
+                 WHERE empresa = ?1 AND ativo = 1 GROUP BY grupo_produto",
+            )
+            .map_err(persist)?;
+        let diretos: HashMap<Id, u32> = stmt
+            .query_map([blob(ctx.organizacao)], |r| {
+                Ok((
+                    id_de(r.get::<_, Vec<u8>>(0)?),
+                    u32::try_from(r.get::<_, i64>(1)?).unwrap_or(u32::MAX),
+                ))
+            })
+            .map_err(persist)?
+            .collect::<rusqlite::Result<_>>()
+            .map_err(persist)?;
+
+        let nos: Vec<NoGrupo> = grupos
+            .iter()
+            .map(|(id, _, _, pai)| NoGrupo { id: *id, pai: *pai })
+            .collect();
+        let arvore = Arvore::de_nos(&nos);
+
+        let mut saida = Vec::with_capacity(grupos.len());
+        // Pré-ordem: raízes (e órfãos, por segurança) primeiro, cada uma seguida dos filhos.
+        let conhecidos: std::collections::HashSet<Id> = grupos.iter().map(|g| g.0).collect();
+        let mut pilha: Vec<&(Id, String, String, Option<Id>)> = grupos
+            .iter()
+            .rev()
+            .filter(|g| g.3.is_none_or(|p| !conhecidos.contains(&p)))
+            .collect();
+        while let Some((id, codigo, nome, pai)) = pilha.pop().map(|g| (g.0, &g.1, &g.2, g.3)) {
+            let desc = arvore.descendentes(id);
+            let na_subarvore = diretos.get(&id).copied().unwrap_or(0)
+                + desc
+                    .iter()
+                    .map(|d| diretos.get(d).copied().unwrap_or(0))
+                    .sum::<u32>();
+            saida.push(NoArvoreGrupo {
+                id,
+                codigo: codigo.clone(),
+                nome: nome.clone(),
+                pai,
+                nivel: arvore.nivel(id).unwrap_or(1),
+                produtos_diretos: diretos.get(&id).copied().unwrap_or(0),
+                produtos_na_subarvore: na_subarvore,
+            });
+            for filho in grupos.iter().rev().filter(|g| g.3 == Some(id)) {
+                pilha.push(filho);
+            }
+        }
+        Ok(saida)
+    }
+}
+
 /// Uma unidade de medida — o suficiente para popular um seletor.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ItemUnidade {
