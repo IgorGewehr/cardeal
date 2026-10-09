@@ -658,3 +658,62 @@ fn aba_resultado_apura_o_mes_pelo_razao_e_navega_entre_meses() {
     estado.carregar_dre(&t.motor, &t.sessao);
     assert_eq!(estado.dre.expect("DRE").atual.lucro_liquido, Dinheiro::ZERO);
 }
+
+#[test]
+fn aba_cobranca_lista_quem_esta_devendo_com_o_atraso() {
+    let t = motor_de_teste();
+    let cliente: mod_clientes::PessoaCadastrada = t
+        .motor
+        .executar(
+            &t.sessao,
+            "clientes.criar_pessoa.v1",
+            &CriarPessoa {
+                tipo: TipoPessoa::Fisica,
+                nome: "Maria Souza".to_owned(),
+                nome_fantasia: None,
+                papel_inicial: Papel::Cliente,
+                documento_tipo: None,
+                documento_numero: None,
+                data_nascimento: None,
+                endereco: None,
+                contato: None,
+            },
+        )
+        .expect("cliente");
+    let vencido = Data::hoje(Fuso::BRASILIA).mais_dias(-40);
+    let _: mod_financeiro::TituloAReceberLancado = t
+        .motor
+        .executar(
+            &t.sessao,
+            "financeiro.lancar_titulo_a_receber.v1",
+            &LancarTituloAReceber {
+                cliente: Some(cliente.pessoa),
+                valor_total: Dinheiro::reais(300),
+                emissao: vencido.mais_dias(-30),
+                parcelas: 1,
+                primeiro_vencimento: vencido,
+                intervalo_dias: 0,
+                observacao: None,
+                categoria: None,
+                quitado_agora: None,
+            },
+        )
+        .expect("título");
+
+    let mut estado = EstadoTelaFinanceiro {
+        aba: Aba::Cobranca,
+        ..Default::default()
+    };
+    estado.carregar(&t.motor, &t.sessao);
+    assert!(estado.erro.is_none(), "{:?}", estado.erro);
+    let aging = estado.aging.clone().expect("aging");
+    assert_eq!(aging.vencido_mais_de_30, Dinheiro::reais(300));
+    assert_eq!(aging.devedores.len(), 1);
+    assert_eq!(estado.nome_devedor(&aging.devedores[0]), "Maria Souza");
+    assert!(mensagem("Maria Souza", &aging.devedores[0]).contains("R$ 300,00"));
+
+    // A chave "a quem eu devo" troca de consulta (nada a pagar lançado).
+    estado.cobranca_pagar = true;
+    estado.carregar_cobranca(&t.motor, &t.sessao);
+    assert!(estado.aging.expect("aging").total_aberto.e_zero());
+}

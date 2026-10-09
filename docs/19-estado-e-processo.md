@@ -404,6 +404,8 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
 - **UI:** componente novo `ArvoreHierarquia` (+ galeria); `tela_estoque` virou diretório com as abas
   **Estrutura** e **Preços**; `tela_financeiro` ganhou a aba **Resultado (DRE)**. Cenas de captura
   `estoque-estrutura`, `estoque-precos`, `financeiro-dre`.
+- **Cobrança** (`mod-financeiro::aging`): aging dos recebíveis e pagáveis, taxa de inadimplência e lista
+  de devedores com WhatsApp pronto — aba **Cobrança** (cena `financeiro-cobranca`).
 - **Preço sugerido → tabela de preço:** `vendas.aplicar_precos_sugeridos.v1` (botão "Aplicar à tabela de
   preço…" na aba Preços) cria/atualiza a regra permanente do produto, com arredondamento para cima
   (,90 ou real inteiro); `mod_estoque::sugerir_precos` é a porta que `mod-vendas` usa.

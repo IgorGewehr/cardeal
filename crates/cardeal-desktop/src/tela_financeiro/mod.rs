@@ -6,6 +6,7 @@
 mod baixa;
 mod cadastro_rapido;
 mod carga;
+mod cobranca;
 mod contas;
 mod custos;
 mod dre;
@@ -35,6 +36,7 @@ use cardeal_ui::organisms::{
     GraficoBarrasHorizontais, LayoutTela, Notificacao, Ordenacao, Painel, SerieBarras,
 };
 use cardeal_ui::tokens::{Espaco, TemaUi};
+use cobranca::*;
 use contas::*;
 use custos::*;
 use dre::*;
@@ -63,6 +65,7 @@ enum Aba {
     Receber,
     Pagar,
     Custos,
+    Cobranca,
     Resultado,
     Fluxo,
     Bancos,
@@ -361,6 +364,9 @@ pub struct EstadoTelaFinanceiro {
     custos_receitas: bool,
     custos_meses: u8,
     /// Aba Resultado (DRE): o mês escolhido (`None` = o atual) e o comparativo carregado.
+    /// Aba Cobrança: o aging carregado e se está olhando o a pagar.
+    aging: Option<mod_financeiro::aging::Aging>,
+    cobranca_pagar: bool,
     dre_mes: Option<Competencia>,
     dre: Option<mod_financeiro::ComparativoDre>,
     projecao: Vec<mod_financeiro::ItemProjecaoCategoria>,
@@ -471,6 +477,7 @@ pub fn mostrar(
                 Aba::Fluxo => painel_fluxo(ui, motor, sessao, estado),
                 Aba::Bancos => painel_bancos(ui, estado),
                 Aba::Custos => painel_custos(ui, motor, sessao, estado),
+                Aba::Cobranca => painel_cobranca(ui, motor, sessao, estado),
                 Aba::Resultado => painel_dre(ui, motor, sessao, estado),
                 _ => lista(ui, motor, sessao, estado),
             }
@@ -574,6 +581,7 @@ fn abas(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTe
         (Aba::Receber, "A receber"),
         (Aba::Pagar, "A pagar"),
         (Aba::Custos, "Custos por categoria"),
+        (Aba::Cobranca, "Cobrança"),
         (Aba::Resultado, "Resultado (DRE)"),
         (Aba::Fluxo, "Fluxo de caixa"),
         (Aba::Bancos, "Contas bancárias"),
@@ -641,6 +649,7 @@ impl EstadoTelaFinanceiro {
             "financeiro" => {}
             "financeiro-custos" => self.aba = Aba::Custos,
             "financeiro-dre" => self.aba = Aba::Resultado,
+            "financeiro-cobranca" => self.aba = Aba::Cobranca,
             "financeiro-pagar" => self.aba = Aba::Pagar,
             "financeiro-fluxo" => self.aba = Aba::Fluxo,
             "financeiro-bancos" => self.aba = Aba::Bancos,

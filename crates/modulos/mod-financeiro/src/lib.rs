@@ -65,6 +65,7 @@
 // Ver a mesma justificativa em cardeal-kernel: Erro carrega Detalhes de propósito.
 #![allow(clippy::result_large_err)]
 
+pub mod aging;
 mod baixa;
 mod caixa;
 mod categoria;
@@ -89,6 +90,7 @@ mod recorrencia;
 mod repositorio;
 mod titulo;
 
+pub use aging::{AgingAPagar, AgingAReceber};
 pub use baixa::{PlanoBaixa, SituacaoParcela};
 pub use caixa::{
     AberturaCaixa, Caixa, ContasCaixa, EstadoSessao, FechamentoCaixa, MovimentoCaixa, SessaoCaixa,
