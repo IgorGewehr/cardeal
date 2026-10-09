@@ -65,6 +65,9 @@ impl EstadoTelaFinanceiro {
         if self.aba == Aba::Custos {
             self.carregar_custos(motor, sessao);
         }
+        if self.aba == Aba::Resultado {
+            self.carregar_dre(motor, sessao);
+        }
         if matches!(self.aba, Aba::Fluxo | Aba::Bancos) {
             self.carregar_fluxo(motor, sessao);
         }

@@ -8,6 +8,7 @@ mod cadastro_rapido;
 mod carga;
 mod contas;
 mod custos;
+mod dre;
 mod fluxo;
 mod lancar;
 mod pessoal;
@@ -36,6 +37,7 @@ use cardeal_ui::organisms::{
 use cardeal_ui::tokens::{Espaco, TemaUi};
 use contas::*;
 use custos::*;
+use dre::*;
 use eframe::egui;
 use fluxo::*;
 use lancar::*;
@@ -61,6 +63,7 @@ enum Aba {
     Receber,
     Pagar,
     Custos,
+    Resultado,
     Fluxo,
     Bancos,
 }
@@ -357,6 +360,9 @@ pub struct EstadoTelaFinanceiro {
     /// Aba Custos: receitas em vez de custos, quantos meses, e a projeção carregada.
     custos_receitas: bool,
     custos_meses: u8,
+    /// Aba Resultado (DRE): o mês escolhido (`None` = o atual) e o comparativo carregado.
+    dre_mes: Option<Competencia>,
+    dre: Option<mod_financeiro::ComparativoDre>,
     projecao: Vec<mod_financeiro::ItemProjecaoCategoria>,
     ordenacao: Ordenacao,
     nomes: HashMap<Id, String>,
@@ -465,6 +471,7 @@ pub fn mostrar(
                 Aba::Fluxo => painel_fluxo(ui, motor, sessao, estado),
                 Aba::Bancos => painel_bancos(ui, estado),
                 Aba::Custos => painel_custos(ui, motor, sessao, estado),
+                Aba::Resultado => painel_dre(ui, motor, sessao, estado),
                 _ => lista(ui, motor, sessao, estado),
             }
         },
@@ -567,6 +574,7 @@ fn abas(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTe
         (Aba::Receber, "A receber"),
         (Aba::Pagar, "A pagar"),
         (Aba::Custos, "Custos por categoria"),
+        (Aba::Resultado, "Resultado (DRE)"),
         (Aba::Fluxo, "Fluxo de caixa"),
         (Aba::Bancos, "Contas bancárias"),
     ])
@@ -632,6 +640,7 @@ impl EstadoTelaFinanceiro {
         match cena {
             "financeiro" => {}
             "financeiro-custos" => self.aba = Aba::Custos,
+            "financeiro-dre" => self.aba = Aba::Resultado,
             "financeiro-pagar" => self.aba = Aba::Pagar,
             "financeiro-fluxo" => self.aba = Aba::Fluxo,
             "financeiro-bancos" => self.aba = Aba::Bancos,

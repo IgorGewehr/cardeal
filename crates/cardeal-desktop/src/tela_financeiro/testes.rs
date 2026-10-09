@@ -638,3 +638,23 @@ fn categorias_empatadas_no_grafico_nao_trocam_de_lugar_a_cada_quadro() {
         assert_eq!(ordem(), primeira, "mesmos dados, mesma ordem — sempre");
     }
 }
+
+#[test]
+fn aba_resultado_apura_o_mes_pelo_razao_e_navega_entre_meses() {
+    let t = motor_de_teste();
+    lancar_a_receber(&t.motor, &t.sessao, 250);
+    let mut estado = EstadoTelaFinanceiro {
+        aba: Aba::Resultado,
+        ..Default::default()
+    };
+    estado.carregar(&t.motor, &t.sessao);
+    assert!(estado.erro.is_none(), "{:?}", estado.erro);
+    let cmp = estado.dre.clone().expect("DRE carregada");
+    assert_eq!(cmp.atual.lucro_liquido, Dinheiro::reais(250));
+    assert_eq!(cmp.mes_anterior.lucro_liquido, Dinheiro::ZERO);
+
+    // Mês passado: nada lançado.
+    estado.dre_mes = Some(estado.mes_dre().anterior());
+    estado.carregar_dre(&t.motor, &t.sessao);
+    assert_eq!(estado.dre.expect("DRE").atual.lucro_liquido, Dinheiro::ZERO);
+}
