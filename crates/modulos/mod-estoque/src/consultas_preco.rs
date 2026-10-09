@@ -117,15 +117,35 @@ impl Consulta for PrecosSugeridosDoGrupo {
 
     #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
-        let base = BaseDePreco::carregar(conexao, ctx)?;
-        let grupos = self.grupo.map(|g| {
-            let mut todos = base.arvore.descendentes(g);
-            todos.push(g);
-            todos
-        });
-        let linhas = linha_do_produto(conexao, ctx, None, grupos.as_deref())?;
-        Ok(linhas.iter().map(|l| base.sugerir(l, None)).collect())
+        sugerir_precos(conexao, ctx, self.grupo, None)
     }
+}
+
+/// O preço sugerido dos produtos ativos do recorte: a subárvore de `grupo` (ou o catálogo
+/// todo) e, se informado, só os `produtos` listados. É a porta pública que outro módulo chama
+/// (`vendas.AplicarPrecosSugeridos`) sem ler as tabelas de estoque.
+///
+/// # Errors
+/// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite ou do Razão.
+#[cfg(feature = "sqlite")]
+pub fn sugerir_precos(
+    conexao: &Connection,
+    ctx: &Ctx,
+    grupo: Option<Id>,
+    produtos: Option<&[Id]>,
+) -> Resultado<Vec<SugestaoDePreco>> {
+    let base = BaseDePreco::carregar(conexao, ctx)?;
+    let grupos = grupo.map(|g| {
+        let mut todos = base.arvore.descendentes(g);
+        todos.push(g);
+        todos
+    });
+    let linhas = linha_do_produto(conexao, ctx, None, grupos.as_deref())?;
+    Ok(linhas
+        .iter()
+        .filter(|l| produtos.is_none_or(|p| p.contains(&l.id)))
+        .map(|l| base.sugerir(l, None))
+        .collect())
 }
 
 #[cfg(feature = "sqlite")]

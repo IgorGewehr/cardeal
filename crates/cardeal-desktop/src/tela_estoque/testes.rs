@@ -3,6 +3,7 @@
 use super::*;
 use crate::testes_comum::motor_de_teste;
 use cardeal_kernel::Percentual;
+use mod_estoque::precificacao::ArredondamentoDePreco;
 use mod_estoque::{DefinirMargemDoGrupo, DefinirParametrosPreco, ParametrosPreco};
 
 fn grupo(m: &Motor, s: &Sessao, codigo: &str, pai: Option<Id>) -> Id {
@@ -84,9 +85,9 @@ fn arvore_mostra_niveis_herda_margem_e_so_oferece_destinos_que_cabem() {
     assert!(de_a.contains(&x));
 }
 
-#[test]
-fn aba_precos_calcula_pelo_regime_e_valida_o_formulario() {
-    let t = motor_de_teste();
+/// MEI com 25% de custo operacional, grupo com 15% de margem e a Coca 2L a R$ 50 de custo:
+/// 50 ÷ (1 − 0,25 − 0,15) = R$ 83,33.
+fn cenario_de_preco(t: &crate::testes_comum::MotorDeTeste) -> Id {
     let g = grupo(&t.motor, &t.sessao, "BEB", None);
     t.motor
         .executar(
@@ -160,6 +161,13 @@ fn aba_precos_calcula_pelo_regime_e_valida_o_formulario() {
         )
         .expect("entrada");
 
+    prod.produto
+}
+
+#[test]
+fn aba_precos_calcula_pelo_regime_e_valida_o_formulario() {
+    let t = motor_de_teste();
+    cenario_de_preco(&t);
     let mut estado = EstadoTelaEstoque {
         aba: AbaEstoque::Precos,
         ..Default::default()
@@ -178,4 +186,57 @@ fn aba_precos_calcula_pelo_regime_e_valida_o_formulario() {
     // Texto que não é número vira mensagem com o nome do campo.
     estado.prc.comissao = "abc".into();
     assert!(estado.prc.montar().unwrap_err().contains("Comissão"));
+}
+
+#[test]
+fn aplicar_preco_sugerido_cria_a_regra_na_tabela_de_vendas() {
+    use mod_vendas::{CriarTabelaPreco, RegrasDaTabela, TabelaPrecoCriada, TipoTabela};
+    let t = motor_de_teste();
+    let produto = cenario_de_preco(&t);
+    let tabela: TabelaPrecoCriada = t
+        .motor
+        .executar(
+            &t.sessao,
+            "vendas.criar_tabela_preco.v1",
+            &CriarTabelaPreco {
+                nome: "Balcão".into(),
+                tipo: TipoTabela::Venda,
+                vigente_de: cardeal_kernel::Data::hoje(Fuso::BRASILIA).mais_dias(-1),
+                vigente_ate: None,
+            },
+        )
+        .expect("tabela");
+
+    let mut estado = EstadoTelaEstoque {
+        aba: AbaEstoque::Precos,
+        ..Default::default()
+    };
+    estado.carregar(&t.motor, &t.sessao);
+    estado.prc.abrir_aplicar(&t.motor, &t.sessao);
+    assert_eq!(
+        estado.prc.tabela,
+        Some(tabela.tabela_preco),
+        "já vem escolhida"
+    );
+    estado.prc.arredondamento = ArredondamentoDePreco::FinalNoventa;
+    precos::aplicar(
+        &egui::Context::default(),
+        &t.motor,
+        &t.sessao,
+        &mut estado,
+        vec![produto],
+    );
+
+    let regras: Vec<mod_vendas::RegraPreco> = t
+        .motor
+        .consultar(
+            &t.sessao,
+            "vendas.regras_da_tabela.v1",
+            &RegrasDaTabela {
+                tabela: tabela.tabela_preco,
+            },
+        )
+        .expect("regras");
+    assert_eq!(regras.len(), 1);
+    assert_eq!(regras[0].preco, Preco::centavos(8_390));
 }

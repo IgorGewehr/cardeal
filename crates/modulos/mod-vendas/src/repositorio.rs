@@ -220,6 +220,44 @@ impl<'a, 'b> RepositorioVendas<'a, 'b> {
         Ok(())
     }
 
+    /// A regra permanente (sem faixa de quantidade nem período) de um produto numa tabela —
+    /// a que o preço sugerido mantém atualizada. `Ok(None)` = ainda não existe.
+    ///
+    /// # Errors
+    /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+    pub fn regra_permanente_do_produto(
+        &self,
+        tabela_preco: Id,
+        produto: Id,
+    ) -> Resultado<Option<Id>> {
+        self.conn()
+            .query_row(
+                "SELECT id FROM vendas_regra_preco
+                 WHERE tabela_preco = ?1 AND produto = ?2
+                   AND quantidade_minima IS NULL AND periodo_de IS NULL AND periodo_ate IS NULL
+                 ORDER BY id DESC LIMIT 1",
+                params![blob(tabela_preco), blob(produto)],
+                |r| r.get::<_, Vec<u8>>(0),
+            )
+            .optional()
+            .map(|o| o.map(id_de))
+            .map_err(persist)
+    }
+
+    /// Troca o preço de uma regra existente.
+    ///
+    /// # Errors
+    /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+    pub fn atualizar_preco_da_regra(&mut self, regra: Id, preco: Preco) -> Resultado<()> {
+        self.conn()
+            .execute(
+                "UPDATE vendas_regra_preco SET preco = ?2 WHERE id = ?1",
+                params![blob(regra), preco.unidades_internas()],
+            )
+            .map_err(persist)?;
+        Ok(())
+    }
+
     /// Todas as regras de uma tabela de preço.
     ///
     /// # Errors

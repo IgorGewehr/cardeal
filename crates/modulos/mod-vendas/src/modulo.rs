@@ -29,6 +29,9 @@ impl Modulo for ModuloVendas {
         registro
             .comando::<CriarTabelaPreco>("vendas.criar_tabela_preco.v1")
             .comando::<CriarRegraPreco>("vendas.criar_regra_preco.v1")
+            .comando::<crate::comandos::AplicarPrecosSugeridos>(
+                "vendas.aplicar_precos_sugeridos.v1",
+            )
             .comando::<CriarPedido>("vendas.criar_pedido.v1")
             .comando::<AdicionarItemPedido>("vendas.adicionar_item_pedido.v1")
             .comando::<ConfirmarPedido>("vendas.confirmar_pedido.v1")

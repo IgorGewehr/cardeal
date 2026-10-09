@@ -54,6 +54,8 @@ enum Dlg {
     Editar(usize),
     /// Repor estoque de um item do radar (índice em `estado.radar`).
     Repor(usize),
+    /// Aplicar os preços sugeridos da aba Preços a uma tabela de preço.
+    AplicarPrecos,
 }
 
 /// O estado local da tela.
@@ -252,6 +254,7 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
         Dlg::Ver(i) => dialogo_ver(ui.ctx(), motor, sessao, estado, i),
         Dlg::Editar(i) => dialogo_editar(ui.ctx(), motor, sessao, estado, i),
         Dlg::Repor(i) => dialogo_repor(ui.ctx(), motor, sessao, estado, i),
+        Dlg::AplicarPrecos => precos::dialogo_aplicar(ui.ctx(), motor, sessao, estado),
     }
 
     if let Some((produto, nome)) = estado.confirmar_exclusao.clone() {

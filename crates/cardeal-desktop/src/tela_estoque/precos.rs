@@ -6,10 +6,13 @@ use super::*;
 use cardeal_kernel::{Dinheiro, Percentual};
 use cardeal_ui::atoms::ValorDinheiro;
 use cardeal_ui::molecules::Abas;
-use mod_estoque::precificacao::{AnexoSimples, RegimeImposto};
+use mod_estoque::precificacao::{AnexoSimples, ArredondamentoDePreco, RegimeImposto};
 use mod_estoque::{
     DefinirParametrosPreco, OrigemMargem, ParametrosDePreco, ParametrosPreco,
     PrecosSugeridosDoGrupo, SugestaoDePreco,
+};
+use mod_vendas::{
+    AplicarPrecosSugeridos, PrecosAplicados, TabelaPreco, TabelasDePreco, TipoTabela,
 };
 
 /// Regime em edição (sem os dados que dependem dele).
@@ -28,6 +31,10 @@ pub(super) struct EstadoPrecos {
     pub(super) sugestoes: Vec<SugestaoDePreco>,
     grupo: Option<Id>,
     busca: String,
+    // Diálogo "aplicar à tabela de preço".
+    tabelas: Vec<TabelaPreco>,
+    pub(super) tabela: Option<Id>,
+    pub(super) arredondamento: ArredondamentoDePreco,
     // Formulário de parâmetros.
     regime: Regime,
     anexo: u8,
@@ -122,6 +129,21 @@ impl EstadoPrecos {
             margem_minima: le("Margem mínima", &self.margem_minima)?,
             preco_obrigatorio: self.obrigatorio,
         })
+    }
+
+    pub(super) fn abrir_aplicar(&mut self, motor: &Motor, sessao: &Sessao) {
+        if let Ok(t) = motor.consultar(sessao, "vendas.tabelas_de_preco.v1", &TabelasDePreco) {
+            self.tabelas = t
+                .into_iter()
+                .filter(|t| t.tipo != TipoTabela::Promocional)
+                .collect();
+        }
+        if self
+            .tabela
+            .is_none_or(|id| !self.tabelas.iter().any(|t| t.id == id))
+        {
+            self.tabela = self.tabelas.first().map(|t| t.id);
+        }
     }
 
     fn filtradas(&self) -> Vec<&SugestaoDePreco> {
@@ -276,6 +298,7 @@ fn parametros(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Es
 
 fn tabela(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTelaEstoque) {
     let mut recarregar = false;
+    let mut abrir_aplicar = false;
     let ops: Vec<(Id, String)> = estado.est.nos_para_seletor().into_iter().collect();
     BarraFiltros::nova(&mut estado.prc.busca)
         .marcador("Buscar produto")
@@ -290,7 +313,19 @@ fn tabela(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estado
                 recarregar = true;
             }
         })
+        .acao(|ui| {
+            if ui
+                .add(Botao::primario("Aplicar à tabela de preço…"))
+                .clicked()
+            {
+                abrir_aplicar = true;
+            }
+        })
         .mostrar(ui);
+    if abrir_aplicar {
+        estado.prc.abrir_aplicar(motor, sessao);
+        estado.dlg = Dlg::AplicarPrecos;
+    }
     if recarregar {
         estado.prc.carregar(motor, sessao);
     }
@@ -352,5 +387,128 @@ fn celula(ui: &mut egui::Ui, v: Option<Dinheiro>) {
         None => {
             ui.add(Rotulo::interface("—").cor(ui.cores().texto_fraco));
         }
+    }
+}
+
+/// O diálogo que leva os preços sugeridos da lista (já filtrada) para uma tabela de preço.
+pub(super) fn dialogo_aplicar(
+    ctx: &egui::Context,
+    motor: &Motor,
+    sessao: &Sessao,
+    estado: &mut EstadoTelaEstoque,
+) {
+    let prontos: Vec<Id> = estado
+        .prc
+        .filtradas()
+        .iter()
+        .filter(|s| s.sugerido.is_some())
+        .map(|s| s.produto)
+        .collect();
+    let sem_preco = estado.prc.filtradas().len() - prontos.len();
+
+    let fechar = Dialogo::nova("Aplicar preços sugeridos")
+        .largura(560.0)
+        .mostrar(
+            ctx,
+            estado,
+            |ui, estado| {
+                ui.add(Rotulo::apoio(format!(
+                    "{} produto(s) da lista atual receberão o preço sugerido{}. Quem já tem preço \
+                     nesta tabela é atualizado; pedidos já feitos não mudam (o preço é \
+                     congelado no item).",
+                    prontos.len(),
+                    if sem_preco > 0 {
+                        format!(" ({sem_preco} ficam de fora por falta de custo ou margem)")
+                    } else {
+                        String::new()
+                    }
+                )));
+                ui.add_space(Espaco::E12);
+                if estado.prc.tabelas.is_empty() {
+                    ui.add(Rotulo::interface(
+                        "Não há tabela de preço de venda ou atacado. Crie uma em Vendas › Tabelas de preço.",
+                    ));
+                    return;
+                }
+                let ops: Vec<(Id, String)> = estado
+                    .prc
+                    .tabelas
+                    .iter()
+                    .map(|t| (t.id, t.nome.clone()))
+                    .collect();
+                SeletorOpcao::novo("Tabela de preço", &mut estado.prc.tabela)
+                    .opcoes(ops)
+                    .mostrar(ui);
+                ui.add_space(Espaco::E12);
+                ui.add(Rotulo::campo("Preço de prateleira"));
+                if let Some(a) = Abas::nova(&[
+                    (ArredondamentoDePreco::Nenhum, "Como calculado"),
+                    (ArredondamentoDePreco::FinalNoventa, "Terminar em ,90"),
+                    (ArredondamentoDePreco::InteiroAcima, "Real inteiro"),
+                ])
+                .selecionada(estado.prc.arredondamento)
+                .id_salt("prc-arred")
+                .mostrar(ui)
+                {
+                    estado.prc.arredondamento = a;
+                }
+                ui.add(Rotulo::apoio(
+                    "O arredondamento sempre sobe, para a margem nunca ficar abaixo da calculada.",
+                ));
+            },
+            |ui, estado| {
+                if ui.add(Botao::secundario("Cancelar")).clicked() {
+                    estado.dlg = Dlg::Fechado;
+                }
+                let pode = estado.prc.tabela.is_some() && !prontos.is_empty();
+                if ui
+                    .add_enabled(pode, Botao::primario("Aplicar preços"))
+                    .clicked()
+                {
+                    aplicar(ui.ctx(), motor, sessao, estado, prontos.clone());
+                }
+            },
+        );
+    if fechar {
+        estado.dlg = Dlg::Fechado;
+    }
+}
+
+pub(super) fn aplicar(
+    ctx: &egui::Context,
+    motor: &Motor,
+    sessao: &Sessao,
+    estado: &mut EstadoTelaEstoque,
+    produtos: Vec<Id>,
+) {
+    let Some(tabela) = estado.prc.tabela else {
+        return;
+    };
+    match motor.executar(
+        sessao,
+        "vendas.aplicar_precos_sugeridos.v1",
+        &AplicarPrecosSugeridos {
+            tabela_preco: tabela,
+            produtos,
+            arredondamento: estado.prc.arredondamento,
+        },
+    ) {
+        Ok(r) => {
+            let r: PrecosAplicados = r;
+            estado.dlg = Dlg::Fechado;
+            let ignorados = if r.ignorados.is_empty() {
+                String::new()
+            } else {
+                format!(", {} de fora", r.ignorados.len())
+            };
+            notificar(
+                ctx,
+                Notificacao::sucesso(format!(
+                    "{} preço(s) criado(s), {} atualizado(s){ignorados}",
+                    r.criadas, r.atualizadas
+                )),
+            );
+        }
+        Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
     }
 }

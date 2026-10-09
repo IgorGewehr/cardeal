@@ -207,6 +207,38 @@ pub fn margem_do_preco(preco: Dinheiro, custo: Dinheiro, c: &Componentes) -> Opt
     ))
 }
 
+/// Como arredondar o preço sugerido para o preço de prateleira. Sempre **para cima**, para
+/// nunca ficar abaixo da margem calculada.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ArredondamentoDePreco {
+    /// O preço calculado, ao centavo.
+    #[default]
+    Nenhum,
+    /// Termina em ,90 (R$ 96,86 → R$ 96,90; R$ 96,91 → R$ 97,90).
+    FinalNoventa,
+    /// Próximo real inteiro (R$ 96,10 → R$ 97,00; R$ 97,00 fica).
+    InteiroAcima,
+}
+
+/// Arredonda o preço de prateleira conforme o modo.
+#[must_use]
+pub fn arredondar_preco(preco: Dinheiro, modo: ArredondamentoDePreco) -> Dinheiro {
+    let c = preco.em_centavos();
+    let novo = match modo {
+        ArredondamentoDePreco::Nenhum => c,
+        ArredondamentoDePreco::InteiroAcima => (c + 99) / 100 * 100,
+        ArredondamentoDePreco::FinalNoventa => {
+            let reais = c / 100;
+            if c % 100 <= 90 {
+                reais * 100 + 90
+            } else {
+                (reais + 1) * 100 + 90
+            }
+        }
+    };
+    Dinheiro::centavos(novo)
+}
+
 // ───────────────────────────── carga tributária ─────────────────────────────
 
 /// Os anexos do Simples Nacional.
@@ -425,6 +457,23 @@ mod testes {
             .unwrap()
             .preco;
         assert!(b > a);
+    }
+
+    #[test]
+    fn arredondamento_de_prateleira_sobe_e_nunca_desce() {
+        use ArredondamentoDePreco::{FinalNoventa, InteiroAcima, Nenhum};
+        let c = Dinheiro::centavos;
+        assert_eq!(arredondar_preco(c(9_686), Nenhum), c(9_686));
+        assert_eq!(arredondar_preco(c(9_686), FinalNoventa), c(9_690));
+        assert_eq!(arredondar_preco(c(9_690), FinalNoventa), c(9_690));
+        assert_eq!(arredondar_preco(c(9_691), FinalNoventa), c(9_790));
+        assert_eq!(arredondar_preco(c(9_610), InteiroAcima), c(9_700));
+        assert_eq!(arredondar_preco(c(9_700), InteiroAcima), c(9_700));
+        for centavos in [1, 99, 100, 1_234, 9_999] {
+            for modo in [Nenhum, FinalNoventa, InteiroAcima] {
+                assert!(arredondar_preco(c(centavos), modo) >= c(centavos));
+            }
+        }
     }
 
     #[test]

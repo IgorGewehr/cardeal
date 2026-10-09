@@ -116,6 +116,8 @@ pub use consultas::{
     ProdutoPorCodigoBarras, ProdutoPorId, ProdutosAbaixoDoPontoPedido, ProdutosComSaldo,
     SaldoDisponivelDoProduto, Unidades,
 };
+#[cfg(feature = "sqlite")]
+pub use consultas_preco::sugerir_precos;
 pub use consultas_preco::{
     OrigemMargem, ParametrosDePreco, PrecoSugeridoDoProduto, PrecosSugeridosDoGrupo,
     SugestaoDePreco,

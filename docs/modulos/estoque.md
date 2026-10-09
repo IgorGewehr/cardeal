@@ -263,6 +263,7 @@ stateDiagram-v2
 | `MoverProdutosDeGrupo` ✅ (2026-10-09) | `estoque.produto.editar` | Médio | Passa vários produtos para outro grupo; tudo-ou-nada (produto inexistente desfaz o lote) | grupo/produto inexistente |
 | `DefinirMargemDoGrupo` / `DefinirMargemDoProduto` ✅ (2026-10-09) | `estoque.produto.editar` | Médio | Define ou limpa (`None` = herda) a margem líquida desejada | margem fora de 0%..100% (100% exclusive) |
 | `DefinirPerfilFiscalDoGrupo` ✅ (2026-10-09) | `estoque.tributario.editar` | Alto | ICMS-ST e monofásico do grupo (`None` herda) | — |
+| `AplicarPrecosSugeridos` ✅ (2026-10-09; **em `mod-vendas`**, `vendas.aplicar_precos_sugeridos.v1`) | `vendas.tabela_preco.editar` | Médio | Leva o preço sugerido (arredondado para cima: nenhum, final ,90 ou real inteiro) à tabela de venda/atacado: atualiza a regra permanente do produto ou cria uma; produto sem custo/margem volta em `ignorados` com o motivo. Pedidos já feitos não mudam (preço congelado no item) | tabela inexistente, promocional ou inativa |
 | `DefinirParametrosPreco` ✅ (2026-10-09) | `estoque.tributario.editar` | Alto | Grava os parâmetros de preço do CNPJ da sessão | percentual fora de 0%..100% |
 | `VincularPerfilTributario` | `estoque.tributario.editar` | Médio | Ainda não implementado | — |
 

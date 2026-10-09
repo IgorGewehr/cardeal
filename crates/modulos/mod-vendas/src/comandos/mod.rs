@@ -3,6 +3,7 @@
 //! recorrente ficam para depois (ver `src/lib.rs`).
 
 mod adicionar_item_pedido;
+mod aplicar_precos_sugeridos;
 mod cancelar_pedido;
 mod confirmar_pedido;
 mod criar_pedido;
@@ -11,6 +12,7 @@ mod criar_tabela_preco;
 mod faturar_pedido;
 
 pub use adicionar_item_pedido::{AdicionarItemPedido, ItemFoiAdicionado};
+pub use aplicar_precos_sugeridos::{AplicarPrecosSugeridos, PrecosAplicados};
 pub use cancelar_pedido::CancelarPedido;
 pub use confirmar_pedido::ConfirmarPedido;
 pub use criar_pedido::{CriarPedido, PedidoCriado};

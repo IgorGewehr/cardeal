@@ -53,9 +53,9 @@ pub mod receituario;
 mod repositorio;
 
 pub use comandos::{
-    AdicionarItemPedido, CancelarPedido, ConfirmarPedido, CriarPedido, CriarRegraPreco,
-    CriarTabelaPreco, FaturarPedido, ItemFoiAdicionado, PedidoCriado, PedidoFoiFaturado,
-    RegraPrecoCriada, TabelaPrecoCriada,
+    AdicionarItemPedido, AplicarPrecosSugeridos, CancelarPedido, ConfirmarPedido, CriarPedido,
+    CriarRegraPreco, CriarTabelaPreco, FaturarPedido, ItemFoiAdicionado, PedidoCriado,
+    PedidoFoiFaturado, PrecosAplicados, RegraPrecoCriada, TabelaPrecoCriada,
 };
 pub use comissao::{Comissao, EstadoComissao};
 pub use consultas::{ItemPedido, ItensDoPedido, PedidosRecentes, RegrasDaTabela, TabelasDePreco};

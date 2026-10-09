@@ -404,8 +404,12 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
 - **UI:** componente novo `ArvoreHierarquia` (+ galeria); `tela_estoque` virou diretório com as abas
   **Estrutura** e **Preços**; `tela_financeiro` ganhou a aba **Resultado (DRE)**. Cenas de captura
   `estoque-estrutura`, `estoque-precos`, `financeiro-dre`.
+- **Preço sugerido → tabela de preço:** `vendas.aplicar_precos_sugeridos.v1` (botão "Aplicar à tabela de
+  preço…" na aba Preços) cria/atualiza a regra permanente do produto, com arredondamento para cima
+  (,90 ou real inteiro); `mod_estoque::sugerir_precos` é a porta que `mod-vendas` usa.
 - **Dívidas conhecidas:** tabelas do Simples a conferir com o contador; a 6ª faixa e a anualização de
-  RBT12 (ver ADR-0018); o preço sugerido ainda **não** vira regra de preço em `mod-vendas`/PDV.
+  RBT12 (ver ADR-0018); o PDV/pedido ainda **não** alertam margem abaixo do mínimo nem mostram o
+  painel de margem do orçamento.
 
 ## 2. Decisão estratégica registrada: por que Rust, não C#/.NET
 
