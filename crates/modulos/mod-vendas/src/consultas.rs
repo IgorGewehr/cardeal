@@ -147,18 +147,27 @@ impl Consulta for ItensDoPedido {
 
     #[cfg(feature = "sqlite")]
     fn executar(self, _ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
-        let mut stmt = conexao
-            .prepare(
-                "SELECT id, produto, variacao, quantidade, preco_unitario, desconto_percentual,
-                        desconto_valor, total_item, reserva
-                 FROM vendas_item_pedido WHERE pedido = ?1 ORDER BY rowid",
-            )
-            .map_err(persist)?;
-        let linhas = stmt
-            .query_map([blob(self.pedido)], item_de_linha)
-            .map_err(persist)?;
-        linhas
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(persist)
+        itens_do_pedido(conexao, self.pedido)
     }
+}
+
+/// Os itens de um pedido, na ordem em que entraram.
+///
+/// # Errors
+/// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+#[cfg(feature = "sqlite")]
+pub(crate) fn itens_do_pedido(conexao: &Connection, pedido: Id) -> Resultado<Vec<ItemVenda>> {
+    let mut stmt = conexao
+        .prepare(
+            "SELECT id, produto, variacao, quantidade, preco_unitario, desconto_percentual,
+                    desconto_valor, total_item, reserva
+             FROM vendas_item_pedido WHERE pedido = ?1 ORDER BY rowid",
+        )
+        .map_err(persist)?;
+    let linhas = stmt
+        .query_map([blob(pedido)], item_de_linha)
+        .map_err(persist)?;
+    linhas
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(persist)
 }

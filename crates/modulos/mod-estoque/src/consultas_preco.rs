@@ -121,6 +121,15 @@ impl Consulta for PrecosSugeridosDoGrupo {
     }
 }
 
+/// Os parâmetros de preço do CNPJ (a porta pública para outro módulo).
+///
+/// # Errors
+/// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+#[cfg(feature = "sqlite")]
+pub fn parametros_da_empresa(conexao: &Connection, ctx: &Ctx) -> Resultado<ParametrosPreco> {
+    crate::repositorio_preco::parametros_preco(conexao, ctx.empresa)
+}
+
 /// O preço sugerido dos produtos ativos do recorte: a subárvore de `grupo` (ou o catálogo
 /// todo) e, se informado, só os `produtos` listados. É a porta pública que outro módulo chama
 /// (`vendas.AplicarPrecosSugeridos`) sem ler as tabelas de estoque.

@@ -10,9 +10,11 @@ use std::collections::HashMap;
 use cardeal_cliente::{Motor, Sessao};
 use cardeal_kernel::{Id, Percentual};
 use cardeal_modkit::Icone;
-use cardeal_ui::atoms::{Botao, Divisor, Rotulo, ValorDinheiro, ATALHO_NOVO};
+use cardeal_ui::atoms::{Botao, Divisor, Etiqueta, Rotulo, ValorDinheiro, ATALHO_NOVO};
 use cardeal_ui::molecules::{dado, Campo, EstadoVazio, SeletorOpcao};
-use cardeal_ui::organisms::{notificar, ColunaGrade, Dialogo, Grade, LayoutTela, Notificacao};
+use cardeal_ui::organisms::{
+    notificar, ColunaGrade, Dialogo, Grade, LayoutTela, Notificacao, PainelMargem,
+};
 use cardeal_ui::tokens::{Espaco, TemaUi};
 use eframe::egui;
 use mod_clientes::{ItemPessoa, Papel, PessoasPorPapel};
@@ -20,8 +22,8 @@ use mod_estoque::{ItemLocal, ItemProdutoComSaldo, Locais, ProdutosComSaldo};
 use mod_vendas::{
     AdicionarItemPedido, CancelarPedido, ConfirmarPedido, CriarPedido, CriarRegraPreco,
     CriarTabelaPreco, EstadoPedido, FaturarPedido, ItemPedido, ItemVenda, ItensDoPedido,
-    PedidoCriado, PedidosRecentes, RegraPreco, RegrasDaTabela, TabelaPreco, TabelasDePreco,
-    TipoTabela,
+    MargemDoPedido, MargemDoPedidoCalculada, PedidoCriado, PedidosRecentes, RegraPreco,
+    RegrasDaTabela, TabelaPreco, TabelasDePreco, TipoTabela,
 };
 
 #[derive(Default, PartialEq)]
@@ -43,6 +45,8 @@ pub struct EstadoTelaVendas {
     tabelas: Vec<TabelaPreco>,
     locais: Vec<ItemLocal>,
     itens_ped: Vec<ItemVenda>,
+    /// O painel de margem do pedido aberto; `None` sem permissão ou sem itens.
+    margem: Option<MargemDoPedidoCalculada>,
     regras: Vec<RegraPreco>,
     erro: Option<String>,
     dlg: Dlg,
@@ -103,7 +107,20 @@ impl EstadoTelaVendas {
                 &ItensDoPedido { pedido: id },
             )
             .unwrap_or_default();
+        self.carregar_margem(motor, sessao, id);
         self.dlg = Dlg::Ver(i);
+    }
+
+    /// A margem do pedido. Quem não tem `vendas.margem.ver` simplesmente não vê o painel.
+    fn carregar_margem(&mut self, motor: &Motor, sessao: &Sessao, pedido: Id) {
+        self.margem = motor
+            .consultar(
+                sessao,
+                "vendas.margem_do_pedido.v1",
+                &MargemDoPedido { pedido },
+            )
+            .ok()
+            .filter(|m| !m.painel.itens.is_empty());
     }
 
     fn recarregar_itens(&mut self, motor: &Motor, sessao: &Sessao, pedido: Id) {
@@ -114,6 +131,7 @@ impl EstadoTelaVendas {
                 &ItensDoPedido { pedido },
             )
             .unwrap_or_default();
+        self.carregar_margem(motor, sessao, pedido);
     }
 
     fn carregar_regras(&mut self, motor: &Motor, sessao: &Sessao, tabela: Id) {
@@ -387,7 +405,7 @@ fn dialogo_ver(
                 if estado.itens_ped.is_empty() {
                     ui.add(Rotulo::campo("Nenhum item ainda."));
                 }
-                for it in &estado.itens_ped {
+                for (n, it) in estado.itens_ped.iter().enumerate() {
                     ui.horizontal(|ui| {
                         ui.add(Rotulo::interface(format!(
                             "{} × {}",
@@ -396,8 +414,27 @@ fn dialogo_ver(
                         )));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.add(ValorDinheiro::novo(it.total_item));
+                            if let Some(m) = estado.margem.as_ref() {
+                                if m.itens_abaixo_do_minimo.contains(&n) {
+                                    ui.add(Etiqueta::atencao("margem baixa"));
+                                }
+                            }
                         });
                     });
+                }
+                if let Some(m) = &estado.margem {
+                    ui.add_space(Espaco::E12);
+                    let p = &m.painel;
+                    PainelMargem::novo(
+                        p.receita,
+                        p.custo,
+                        p.margem_bruta,
+                        p.margem_liquida,
+                        p.margem_liquida_pct,
+                    )
+                    .minimo(m.margem_minima)
+                    .itens_sem_custo(p.itens_sem_custo)
+                    .mostrar(ui);
                 }
 
                 if matches!(p.estado, EstadoPedido::Rascunho) {
@@ -737,5 +774,160 @@ fn aplicar<C: cardeal_modkit::Comando + serde::Serialize>(
             notificar(ctx, Notificacao::sucesso(sucesso.to_owned()));
         }
         Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
+    }
+}
+
+#[cfg(test)]
+mod testes {
+    use super::*;
+    use crate::testes_comum::motor_de_teste;
+    use cardeal_kernel::{Dinheiro, Fuso, Preco, Quantidade};
+    use mod_clientes::{CriarPessoa, PessoaCadastrada, TipoPessoa};
+    use mod_estoque::{
+        CriarGrupoProduto, CriarLocal, CriarProduto, CriarUnidade, GrupoProdutoCriado, LocalCriado,
+        ProdutoCriado, RegistrarEntrada, TipoLocal, UnidadeCriada,
+    };
+    use mod_vendas::{PedidoCriado, TabelaPrecoCriada};
+
+    #[test]
+    fn abrir_pedido_traz_o_painel_de_margem_com_custo_e_lucro() {
+        let t = motor_de_teste();
+        let (m, s) = (&t.motor, &t.sessao);
+        let cliente: PessoaCadastrada = m
+            .executar(
+                s,
+                "clientes.criar_pessoa.v1",
+                &CriarPessoa {
+                    tipo: TipoPessoa::Fisica,
+                    nome: "Cliente".into(),
+                    nome_fantasia: None,
+                    papel_inicial: Papel::Cliente,
+                    documento_tipo: None,
+                    documento_numero: None,
+                    data_nascimento: None,
+                    endereco: None,
+                    contato: None,
+                },
+            )
+            .expect("cliente");
+        let g: GrupoProdutoCriado = m
+            .executar(
+                s,
+                "estoque.criar_grupo_produto.v1",
+                &CriarGrupoProduto {
+                    codigo: "G".into(),
+                    nome: "Geral".into(),
+                    pai: None,
+                },
+            )
+            .expect("grupo");
+        let u: UnidadeCriada = m
+            .executar(
+                s,
+                "estoque.criar_unidade.v1",
+                &CriarUnidade {
+                    sigla: "UN".into(),
+                    nome: "Un".into(),
+                    fracionavel: false,
+                },
+            )
+            .expect("unidade");
+        let p: ProdutoCriado = m
+            .executar(
+                s,
+                "estoque.criar_produto.v1",
+                &CriarProduto {
+                    grupo_produto: g.grupo_produto,
+                    nome: "Cabo".into(),
+                    ncm: "85444200".into(),
+                    unidade_padrao: u.unidade,
+                    codigo_barras: None,
+                    detalhes_tecnicos: None,
+                },
+            )
+            .expect("produto");
+        let l: LocalCriado = m
+            .executar(
+                s,
+                "estoque.criar_local.v1",
+                &CriarLocal {
+                    nome: "Loja".into(),
+                    tipo: TipoLocal::Deposito,
+                },
+            )
+            .expect("local");
+        let _: mod_estoque::EntradaRegistrada = m
+            .executar(
+                s,
+                "estoque.registrar_entrada.v1",
+                &RegistrarEntrada {
+                    produto: p.produto,
+                    local: l.local,
+                    quantidade: Quantidade::unidades(10),
+                    custo_unitario: Preco::reais(30),
+                },
+            )
+            .expect("entrada");
+        let tabela: TabelaPrecoCriada = m
+            .executar(
+                s,
+                "vendas.criar_tabela_preco.v1",
+                &CriarTabelaPreco {
+                    nome: "Balcão".into(),
+                    tipo: TipoTabela::Venda,
+                    vigente_de: cardeal_kernel::Data::hoje(Fuso::BRASILIA).mais_dias(-1),
+                    vigente_ate: None,
+                },
+            )
+            .expect("tabela");
+        let _: mod_vendas::RegraPrecoCriada = m
+            .executar(
+                s,
+                "vendas.criar_regra_preco.v1",
+                &CriarRegraPreco {
+                    tabela_preco: tabela.tabela_preco,
+                    alvo_produto: Some(p.produto),
+                    alvo_grupo: None,
+                    quantidade_minima: None,
+                    preco: Preco::reais(100),
+                    periodo_de: None,
+                    periodo_ate: None,
+                },
+            )
+            .expect("regra");
+        let ped: PedidoCriado = m
+            .executar(
+                s,
+                "vendas.criar_pedido.v1",
+                &CriarPedido {
+                    cliente: cliente.pessoa,
+                    vendedor: s.usuario(),
+                    condicao_pagamento: Id::novo(),
+                    tabela_preco: tabela.tabela_preco,
+                    local_expedicao: l.local,
+                },
+            )
+            .expect("pedido");
+        let _: mod_vendas::ItemFoiAdicionado = m
+            .executar(
+                s,
+                "vendas.adicionar_item_pedido.v1",
+                &AdicionarItemPedido {
+                    pedido: ped.pedido,
+                    produto: p.produto,
+                    variacao: None,
+                    quantidade: Quantidade::unidades(2),
+                    desconto_percentual: Percentual::ZERO,
+                },
+            )
+            .expect("item");
+
+        let mut estado = EstadoTelaVendas::default();
+        estado.carregar(m, s);
+        estado.abrir_pedido(m, s, 0);
+        let margem = estado.margem.expect("o administrador vê a margem");
+        assert_eq!(margem.painel.receita, Dinheiro::reais(200));
+        assert_eq!(margem.painel.custo, Dinheiro::reais(60));
+        assert!(margem.painel.margem_liquida.e_positivo());
     }
 }

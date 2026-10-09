@@ -24,7 +24,7 @@
 //! As tabelas são as vigentes do Simples; **confirmar com o contador** antes de confiar nelas
 //! para um negócio real, e revisar quando a reforma tributária (IBS/CBS) entrar em vigor.
 
-use cardeal_kernel::{Arredondamento, Dinheiro, Percentual};
+use cardeal_kernel::{Arredondamento, Dinheiro, Percentual, Preco, Quantidade};
 use serde::{Deserialize, Serialize};
 
 // ───────────────────────────── markup divisor ─────────────────────────────
@@ -205,6 +205,116 @@ pub fn margem_do_preco(preco: Dinheiro, custo: Dinheiro, c: &Componentes) -> Opt
         sobra.em_centavos(),
         preco.em_centavos(),
     ))
+}
+
+// ───────────────────────────── painel de margem ─────────────────────────────
+
+/// Um item de venda/orçamento para o painel de margem.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ItemDeMargem {
+    /// O texto que identifica o item (nome do produto).
+    pub rotulo: String,
+    /// A quantidade.
+    pub quantidade: Quantidade,
+    /// O que o cliente paga pelo item, já com desconto.
+    pub receita: Dinheiro,
+    /// O custo unitário atual; `None` = produto sem custo conhecido.
+    pub custo_unitario: Option<Dinheiro>,
+    /// Tudo que incide sobre a receita: custo operacional + imposto + comissão + taxas.
+    pub encargos: Percentual,
+}
+
+/// A margem de um item.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MargemDoItem {
+    /// O texto do item.
+    pub rotulo: String,
+    /// A receita.
+    pub receita: Dinheiro,
+    /// O custo da quantidade vendida; `None` sem custo conhecido.
+    pub custo: Option<Dinheiro>,
+    /// A parte da receita que vai para operação, impostos, comissão e taxas.
+    pub encargos: Dinheiro,
+    /// Receita − custo (antes dos encargos).
+    pub margem_bruta: Option<Dinheiro>,
+    /// Receita − encargos − custo: o que sobra de lucro.
+    pub margem_liquida: Option<Dinheiro>,
+    /// A margem líquida sobre a receita.
+    pub margem_liquida_pct: Option<Percentual>,
+}
+
+/// O painel de margem de um pedido ou orçamento.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PainelDeMargem {
+    /// Os itens.
+    pub itens: Vec<MargemDoItem>,
+    /// A receita total.
+    pub receita: Dinheiro,
+    /// O custo dos itens que têm custo conhecido.
+    pub custo: Dinheiro,
+    /// Receita − custo, só dos itens com custo conhecido.
+    pub margem_bruta: Dinheiro,
+    /// O lucro líquido, só dos itens com custo conhecido.
+    pub margem_liquida: Dinheiro,
+    /// A margem líquida sobre a receita dos itens com custo conhecido.
+    pub margem_liquida_pct: Option<Percentual>,
+    /// Itens sem custo: ficam fora das margens (nunca contam como lucro de 100%).
+    pub itens_sem_custo: u32,
+}
+
+/// Calcula a margem de cada item e do conjunto.
+#[must_use]
+pub fn painel_de_margem(itens: &[ItemDeMargem]) -> PainelDeMargem {
+    let mut painel = PainelDeMargem {
+        itens: Vec::with_capacity(itens.len()),
+        receita: Dinheiro::ZERO,
+        custo: Dinheiro::ZERO,
+        margem_bruta: Dinheiro::ZERO,
+        margem_liquida: Dinheiro::ZERO,
+        margem_liquida_pct: None,
+        itens_sem_custo: 0,
+    };
+    let mut receita_com_custo = Dinheiro::ZERO;
+    for i in itens {
+        let encargos = i.receita.aplicar(i.encargos, Arredondamento::MeioAcima);
+        let custo = i.custo_unitario.map(|c| {
+            Dinheiro::de_total(
+                i.quantidade,
+                Preco::centavos(c.em_centavos()),
+                Arredondamento::MeioAcima,
+            )
+        });
+        let margem_bruta = custo.map(|c| i.receita - c);
+        let margem_liquida = custo.map(|c| i.receita - encargos - c);
+        painel.receita += i.receita;
+        match (custo, margem_bruta, margem_liquida) {
+            (Some(c), Some(b), Some(l)) => {
+                painel.custo += c;
+                painel.margem_bruta += b;
+                painel.margem_liquida += l;
+                receita_com_custo += i.receita;
+            }
+            _ => painel.itens_sem_custo += 1,
+        }
+        painel.itens.push(MargemDoItem {
+            rotulo: i.rotulo.clone(),
+            receita: i.receita,
+            custo,
+            encargos,
+            margem_bruta,
+            margem_liquida,
+            margem_liquida_pct: margem_liquida
+                .filter(|_| i.receita.e_positivo())
+                .map(|l| Percentual::da_razao(l.em_centavos(), i.receita.em_centavos())),
+        });
+    }
+    if receita_com_custo.e_positivo() {
+        painel.margem_liquida_pct = Some(Percentual::da_razao(
+            painel.margem_liquida.em_centavos(),
+            receita_com_custo.em_centavos(),
+        ));
+    }
+    painel
 }
 
 /// Como arredondar o preço sugerido para o preço de prateleira. Sempre **para cima**, para
@@ -457,6 +567,34 @@ mod testes {
             .unwrap()
             .preco;
         assert!(b > a);
+    }
+
+    #[test]
+    fn painel_de_margem_separa_bruta_de_liquida_e_nao_chama_item_sem_custo_de_lucro() {
+        let item = |rotulo: &str, q: i64, receita: i64, custo: Option<i64>| ItemDeMargem {
+            rotulo: rotulo.into(),
+            quantidade: Quantidade::unidades(q),
+            receita: Dinheiro::reais(receita),
+            custo_unitario: custo.map(Dinheiro::reais),
+            encargos: pct(33), // 25 de operação + 8 de imposto
+        };
+        let p = painel_de_margem(&[
+            item("A", 2, 200, Some(50)), // custo 100 → bruta 100, encargos 66 → líquida 34
+            item("B", 1, 100, Some(90)), // bruta 10, encargos 33 → líquida −23: prejuízo
+            item("C", 1, 80, None),      // sem custo: fora das margens
+        ]);
+        assert_eq!(p.itens[0].margem_bruta, Some(Dinheiro::reais(100)));
+        assert_eq!(p.itens[0].margem_liquida, Some(Dinheiro::reais(34)));
+        assert_eq!(p.itens[0].margem_liquida_pct.unwrap().formatar(0), "17");
+        assert_eq!(p.itens[1].margem_liquida, Some(Dinheiro::reais(-23)));
+        assert_eq!(p.itens[2].margem_liquida, None);
+        assert_eq!(p.itens_sem_custo, 1);
+        assert_eq!(p.receita, Dinheiro::reais(380));
+        assert_eq!(p.margem_bruta, Dinheiro::reais(110));
+        assert_eq!(p.margem_liquida, Dinheiro::reais(11));
+        // 11 sobre os R$ 300 que têm custo (o item C não entra).
+        assert_eq!(p.margem_liquida_pct.unwrap().formatar(1), "3,6");
+        assert_eq!(painel_de_margem(&[]).margem_liquida_pct, None);
     }
 
     #[test]

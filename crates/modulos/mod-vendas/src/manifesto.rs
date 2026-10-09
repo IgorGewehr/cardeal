@@ -112,6 +112,12 @@ const PERMISSOES: &[Permissao] = &[
         Some("orcamento"),
     ),
     perm("vendas.pedido.ver", "Consultar pedidos", Risco::Baixo, None),
+    perm(
+        "vendas.margem.ver",
+        "Ver o painel de margem (custo e lucro) do pedido",
+        Risco::Medio,
+        None,
+    ),
     perm("vendas.pedido.criar", "Criar pedido", Risco::Baixo, None),
     perm(
         "vendas.pedido.editar",

@@ -16,7 +16,7 @@ use cardeal_ui::molecules::{
 };
 use cardeal_ui::organisms::{
     notificar, ArvoreHierarquia, ColunaGrade, CondicaoPagamento, Dialogo, Gaveta, Grade, Janela,
-    Notificacao, Notificacoes, Ordenacao, Painel, SeletorPagamento,
+    Notificacao, Notificacoes, Ordenacao, Painel, PainelMargem, SeletorPagamento,
 };
 use cardeal_ui::tokens::{instalar_estilo, instalar_fontes, Espaco, Rubro, Tema, TemaUi};
 use eframe::egui;
@@ -689,6 +689,23 @@ impl eframe::App for Galeria {
                     "Árvore: ArvoreHierarquia (estrutura mercadológica, 4 níveis)",
                 ));
                 self.arvore(ui);
+
+                ui.add_space(Espaco::E24);
+                ui.add(Rotulo::titulo_secao(
+                    "PainelMargem: saudável · abaixo do mínimo · prejuízo (semáforo com texto)",
+                ));
+                for (lucro, pct) in [(3_200_i64, 32_i64), (600, 6), (-900, -9)] {
+                    PainelMargem::novo(
+                        Dinheiro::reais(10_000),
+                        Dinheiro::reais(5_000),
+                        Dinheiro::reais(5_000),
+                        Dinheiro::reais(lucro),
+                        Some(cardeal_kernel::Percentual::pontos(pct)),
+                    )
+                    .minimo(cardeal_kernel::Percentual::pontos(15))
+                    .mostrar(ui);
+                    ui.add_space(Espaco::E8);
+                }
 
                 ui.add_space(Espaco::E24);
                 ui.add(Rotulo::titulo_secao(

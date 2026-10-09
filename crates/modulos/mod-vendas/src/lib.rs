@@ -42,6 +42,7 @@ mod devolucao;
 mod erros;
 pub mod eventos;
 mod manifesto;
+mod margem;
 #[cfg(feature = "sqlite")]
 pub mod migracoes;
 #[cfg(feature = "sqlite")]
@@ -62,6 +63,7 @@ pub use consultas::{ItemPedido, ItensDoPedido, PedidosRecentes, RegrasDaTabela, 
 pub use devolucao::{Devolucao, EstadoDevolucao, ItemDevolvido, TipoDevolucao};
 pub use erros::ErroVendas;
 pub use manifesto::{manifesto, MANIFESTO};
+pub use margem::{MargemDoPedido, MargemDoPedidoCalculada};
 #[cfg(feature = "sqlite")]
 pub use modulo::ModuloVendas;
 pub use pedido::{EstadoOrcamento, EstadoPedido, ItemVenda, Orcamento, Pedido};

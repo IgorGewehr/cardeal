@@ -474,3 +474,15 @@ CREATE TABLE vendas_devolucao (
 ) STRICT;
 CREATE INDEX vendas_devolucao_estado ON vendas_devolucao(empresa, estado);
 ```
+
+## Painel de margem do pedido (2026-10-09)
+
+`vendas.margem_do_pedido.v1` (permissão `vendas.margem.ver`, risco Médio) devolve, para um pedido, a
+margem de cada item e do conjunto: receita (já com desconto), custo (custo médio atual do estoque,
+o maior entre os locais), encargos sobre a receita (custo operacional + imposto do produto +
+comissão + taxa de pagamento — os mesmos percentuais do preço sugerido, ver
+[ADR-0018](../adr/0018-formacao-de-preco-por-markup-divisor.md)), margem bruta e líquida em R$ e em %.
+Itens sem custo conhecido ficam **fora** das margens e são contados à parte: um produto sem custo
+nunca aparece como lucro de 100%. A margem mínima vem dos parâmetros de preço; abaixo dela o pedido
+e os itens aparecem sinalizados. `vendas.aplicar_precos_sugeridos.v1` leva o preço sugerido do
+estoque para uma tabela de venda/atacado (ver `docs/modulos/estoque.md` §5).

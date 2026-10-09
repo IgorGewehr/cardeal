@@ -117,7 +117,7 @@ pub use consultas::{
     SaldoDisponivelDoProduto, Unidades,
 };
 #[cfg(feature = "sqlite")]
-pub use consultas_preco::sugerir_precos;
+pub use consultas_preco::{parametros_da_empresa, sugerir_precos};
 pub use consultas_preco::{
     OrigemMargem, ParametrosDePreco, PrecoSugeridoDoProduto, PrecosSugeridosDoGrupo,
     SugestaoDePreco,

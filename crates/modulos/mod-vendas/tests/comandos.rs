@@ -24,8 +24,8 @@ use mod_estoque::{
 };
 use mod_vendas::{
     AdicionarItemPedido, CancelarPedido, ConfirmarPedido, CriarPedido, CriarRegraPreco,
-    CriarTabelaPreco, FaturarPedido, ItemFoiAdicionado, ModuloVendas, PedidoCriado,
-    PedidoFoiFaturado, RegraPrecoCriada, TabelaPrecoCriada, TipoTabela,
+    CriarTabelaPreco, FaturarPedido, ItemFoiAdicionado, MargemDoPedido, MargemDoPedidoCalculada,
+    ModuloVendas, PedidoCriado, PedidoFoiFaturado, RegraPrecoCriada, TabelaPrecoCriada, TipoTabela,
 };
 use tempfile::TempDir;
 
@@ -88,6 +88,8 @@ fn sessao_completa(empresa: Id) -> Sessao {
         "vendas.pedido.confirmar",
         "vendas.pedido.faturar",
         "vendas.pedido.cancelar",
+        "vendas.margem.ver",
+        "estoque.tributario.editar",
     ] {
         papel = papel.com_permissao(p);
     }
@@ -534,4 +536,85 @@ fn cancelar_pedido_rascunho_e_faturar_pedido_cancelado_e_recusado() {
     assert_eq!(erro.codigo, CodigoErro::ESTADO_INVALIDO);
 
     assert_eq!(conta_lancamentos(&arm, empresa), 0);
+}
+
+#[test]
+fn painel_de_margem_do_pedido_desconta_custo_e_encargos_e_avisa_abaixo_do_minimo() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloClientes, &ModuloEstoque, &ModuloVendas]).unwrap();
+    let s = sessao_completa(empresa);
+    let amb = ambiente(empresa);
+    let cen = montar_cenario(&d, &s, &amb, &arm, 100); // vende a 100, custo 30
+
+    let pedido: PedidoCriado = postcard::from_bytes(
+        &d.executar_comando(
+            "vendas.criar_pedido.v1",
+            &carga(&CriarPedido {
+                cliente: cen.cliente,
+                vendedor: Id::novo(),
+                condicao_pagamento: Id::novo(),
+                tabela_preco: cen.tabela_preco,
+                local_expedicao: cen.local,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    d.executar_comando(
+        "vendas.adicionar_item_pedido.v1",
+        &carga(&AdicionarItemPedido {
+            pedido: pedido.pedido,
+            produto: cen.produto,
+            variacao: None,
+            quantidade: Quantidade::unidades(2),
+            desconto_percentual: Percentual::ZERO,
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+
+    let margem = |d: &Despachante| -> MargemDoPedidoCalculada {
+        postcard::from_bytes(
+            &d.executar_consulta(
+                "vendas.margem_do_pedido.v1",
+                &carga(&MargemDoPedido {
+                    pedido: pedido.pedido,
+                }),
+                &s,
+                &amb,
+                arm.leitor(),
+            )
+            .unwrap(),
+        )
+        .unwrap()
+    };
+
+    // Simples Anexo I sem faturamento (4%), sem custo operacional: 200 − 8 de imposto − 60 de custo.
+    let m = margem(&d);
+    assert_eq!(m.painel.receita, Dinheiro::reais(200));
+    assert_eq!(m.painel.custo, Dinheiro::reais(60));
+    assert_eq!(m.painel.margem_bruta, Dinheiro::reais(140));
+    assert_eq!(m.painel.margem_liquida, Dinheiro::reais(132));
+    assert_eq!(m.painel.margem_liquida_pct.unwrap().formatar(0), "66");
+    assert!(!m.pedido_abaixo_do_minimo, "sem margem mínima configurada");
+
+    // Exigir 70% de margem líquida: o pedido (66%) passa a avisar.
+    let mut p = mod_estoque::ParametrosPreco::padrao_para("SimplesNacional");
+    p.margem_minima = Percentual::pontos(70);
+    d.executar_comando(
+        "estoque.definir_parametros_preco.v1",
+        &carga(&mod_estoque::DefinirParametrosPreco { parametros: p }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+    let m = margem(&d);
+    assert!(m.pedido_abaixo_do_minimo);
+    assert_eq!(m.itens_abaixo_do_minimo, vec![0]);
 }

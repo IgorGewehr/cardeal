@@ -407,14 +407,19 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
 - **DFC pelo método direto** (`mod-financeiro::dfc`, `cardeal_ledger::movimentos_de_caixa`): na mesma
   aba do DRE ("Resultado e caixa", chave DRE/DFC); o saldo final bate com o Razão. O método
   indireto não foi feito.
+- **Painel de margem do pedido** (`vendas.margem_do_pedido.v1`, permissão nova `vendas.margem.ver`):
+  receita, custo, margem bruta e líquida por item e no conjunto, descontando operação, imposto,
+  comissão e taxas (os mesmos percentuais do preço sugerido); item sem custo fica fora do cálculo
+  (nunca vira lucro de 100%); semáforo com texto no organismo novo `PainelMargem`; item abaixo da
+  margem mínima ganha a etiqueta "margem baixa". Ainda não está no orçamento de OS nem no PDV.
 - **Cobrança** (`mod-financeiro::aging`): aging dos recebíveis e pagáveis, taxa de inadimplência e lista
   de devedores com WhatsApp pronto — aba **Cobrança** (cena `financeiro-cobranca`).
 - **Preço sugerido → tabela de preço:** `vendas.aplicar_precos_sugeridos.v1` (botão "Aplicar à tabela de
   preço…" na aba Preços) cria/atualiza a regra permanente do produto, com arredondamento para cima
   (,90 ou real inteiro); `mod_estoque::sugerir_precos` é a porta que `mod-vendas` usa.
 - **Dívidas conhecidas:** tabelas do Simples a conferir com o contador; a 6ª faixa e a anualização de
-  RBT12 (ver ADR-0018); o PDV/pedido ainda **não** alertam margem abaixo do mínimo nem mostram o
-  painel de margem do orçamento.
+  RBT12 (ver ADR-0018); o PDV e o orçamento de OS ainda **não** alertam margem abaixo do mínimo
+  (só o pedido de venda mostra o painel).
 
 ## 2. Decisão estratégica registrada: por que Rust, não C#/.NET
 
