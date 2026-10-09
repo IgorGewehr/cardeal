@@ -6,6 +6,11 @@
 //! (produtos abaixo do ponto de pedido — `estoque.produtos_abaixo_do_ponto_pedido.v1`, já
 //! existia no backend mas não estava ligado a nenhuma tela).
 
+mod estrutura;
+mod precos;
+#[cfg(test)]
+mod testes;
+
 use cardeal_cliente::{Motor, Sessao};
 use cardeal_kernel::{Fuso, Id, Preco, Quantidade};
 use cardeal_modkit::Icone;
@@ -32,6 +37,8 @@ use mod_estoque::{
 enum AbaEstoque {
     #[default]
     Produtos,
+    Estrutura,
+    Precos,
     Radar,
 }
 
@@ -55,6 +62,8 @@ pub struct EstadoTelaEstoque {
     aba: AbaEstoque,
     produtos: Vec<ItemProdutoComSaldo>,
     grupos: Vec<ItemGrupoProduto>,
+    est: estrutura::EstadoEstrutura,
+    prc: precos::EstadoPrecos,
     unidades: Vec<ItemUnidade>,
     locais: Vec<ItemLocal>,
     radar: Vec<ItemAbaixoDoPontoPedido>,
@@ -110,6 +119,10 @@ impl EstadoTelaEstoque {
         if let Ok(g) = motor.consultar(sessao, "estoque.grupos_produto.v1", &GruposProduto) {
             self.grupos = g;
         }
+        self.est.carregar(motor, sessao);
+        if self.aba == AbaEstoque::Precos {
+            self.prc.carregar(motor, sessao);
+        }
         if let Ok(u) = motor.consultar(sessao, "estoque.unidades.v1", &Unidades) {
             self.unidades = u;
         }
@@ -160,6 +173,30 @@ impl EstadoTelaEstoque {
     }
 }
 
+#[cfg(feature = "demo")]
+impl EstadoTelaEstoque {
+    /// Leva a tela à cena de demonstração (`demo_app`).
+    pub fn preparar_demo(&mut self, motor: &Motor, sessao: &Sessao, cena: &str) {
+        self.aba = match cena {
+            "estoque-estrutura" => AbaEstoque::Estrutura,
+            "estoque-precos" => AbaEstoque::Precos,
+            _ => AbaEstoque::Produtos,
+        };
+        self.carregar(motor, sessao);
+        if self.aba == AbaEstoque::Estrutura {
+            if let Some(id) = self
+                .est
+                .nos
+                .iter()
+                .find(|n| n.codigo == "TELAS")
+                .map(|n| n.id)
+            {
+                self.est.selecionar(id);
+            }
+        }
+    }
+}
+
 /// Desenha a tela inteira.
 pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTelaEstoque) {
     LayoutTela::nova("Estoque").mostrar(
@@ -177,12 +214,17 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
         |ui, estado| {
             if let Some(nova) = Abas::nova(&[
                 (AbaEstoque::Produtos, "Produtos"),
+                (AbaEstoque::Estrutura, "Estrutura"),
+                (AbaEstoque::Precos, "Preços"),
                 (AbaEstoque::Radar, "Radar de reposição"),
             ])
             .selecionada(estado.aba)
             .mostrar(ui)
             {
                 estado.aba = nova;
+                if nova == AbaEstoque::Precos {
+                    estado.prc.carregar(motor, sessao);
+                }
             }
             ui.add_space(Espaco::E16);
 
@@ -197,6 +239,8 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
 
             match estado.aba {
                 AbaEstoque::Produtos => lista(ui, motor, sessao, estado),
+                AbaEstoque::Estrutura => estrutura::aba(ui, motor, sessao, estado),
+                AbaEstoque::Precos => precos::aba(ui, motor, sessao, estado),
                 AbaEstoque::Radar => radar(ui, estado),
             }
         },

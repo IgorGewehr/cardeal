@@ -1,0 +1,181 @@
+//! Testes ponta a ponta das abas Estrutura e Preços: motor real (SQLite temporário).
+
+use super::*;
+use crate::testes_comum::motor_de_teste;
+use cardeal_kernel::Percentual;
+use mod_estoque::{DefinirMargemDoGrupo, DefinirParametrosPreco, ParametrosPreco};
+
+fn grupo(m: &Motor, s: &Sessao, codigo: &str, pai: Option<Id>) -> Id {
+    let g: GrupoProdutoCriado = m
+        .executar(
+            s,
+            "estoque.criar_grupo_produto.v1",
+            &CriarGrupoProduto {
+                codigo: codigo.to_owned(),
+                nome: codigo.to_owned(),
+                pai,
+            },
+        )
+        .expect("grupo");
+    g.grupo_produto
+}
+
+#[test]
+fn arvore_mostra_niveis_herda_margem_e_so_oferece_destinos_que_cabem() {
+    let t = motor_de_teste();
+    let a = grupo(&t.motor, &t.sessao, "A", None);
+    let b = grupo(&t.motor, &t.sessao, "B", Some(a));
+    let c = grupo(&t.motor, &t.sessao, "C", Some(b));
+    let x = grupo(&t.motor, &t.sessao, "X", None);
+    let y = grupo(&t.motor, &t.sessao, "Y", Some(x));
+    t.motor
+        .executar(
+            &t.sessao,
+            "estoque.definir_margem_do_grupo.v1",
+            &DefinirMargemDoGrupo {
+                grupo: a,
+                margem: Some(Percentual::pontos(20)),
+            },
+        )
+        .expect("margem");
+
+    let mut estado = EstadoTelaEstoque::default();
+    estado.carregar(&t.motor, &t.sessao);
+    assert!(estado.erro.is_none(), "{:?}", estado.erro);
+
+    let niveis: Vec<(String, u8)> = estado
+        .est
+        .nos
+        .iter()
+        .map(|n| (n.codigo.clone(), n.nivel))
+        .collect();
+    assert_eq!(
+        niveis,
+        [
+            ("A".into(), 1),
+            ("B".into(), 2),
+            ("C".into(), 3),
+            ("X".into(), 1),
+            ("Y".into(), 2)
+        ]
+    );
+    // C não tem margem própria: herda de A, passando por B.
+    let (m, de) = estado.est.margem_herdada(c).expect("herdada");
+    assert_eq!((m, de.as_str()), (Percentual::pontos(20), "A"));
+    assert!(estado.est.margem_herdada(a).is_none());
+
+    // B (altura 2) pode ir para a raiz ou para X (nível 2); sob Y (nível 2) chegaria ao 4: cabe.
+    let nomes: Vec<String> = estado
+        .est
+        .destinos_validos(b)
+        .into_iter()
+        .map(|d| d.1)
+        .collect();
+    assert!(nomes.iter().any(|n| n.contains("primeiro nível")));
+    assert!(nomes.iter().any(|n| n.ends_with("› Y")));
+    // A (altura 3) não cabe sob Y (nível 2 → 5): fica de fora; nem dentro de si mesmo.
+    let de_a: Vec<Id> = estado
+        .est
+        .destinos_validos(a)
+        .into_iter()
+        .map(|d| d.0)
+        .collect();
+    assert!(!de_a.contains(&y) && !de_a.contains(&c) && !de_a.contains(&a));
+    assert!(de_a.contains(&x));
+}
+
+#[test]
+fn aba_precos_calcula_pelo_regime_e_valida_o_formulario() {
+    let t = motor_de_teste();
+    let g = grupo(&t.motor, &t.sessao, "BEB", None);
+    t.motor
+        .executar(
+            &t.sessao,
+            "estoque.definir_margem_do_grupo.v1",
+            &DefinirMargemDoGrupo {
+                grupo: g,
+                margem: Some(Percentual::pontos(15)),
+            },
+        )
+        .expect("margem");
+    let mut p = ParametrosPreco::padrao_para("MEI");
+    p.custo_operacional = Percentual::pontos(25);
+    p.custo_operacional_derivado = false;
+    t.motor
+        .executar(
+            &t.sessao,
+            "estoque.definir_parametros_preco.v1",
+            &DefinirParametrosPreco { parametros: p },
+        )
+        .expect("parâmetros");
+    let un: UnidadeCriada = t
+        .motor
+        .executar(
+            &t.sessao,
+            "estoque.criar_unidade.v1",
+            &CriarUnidade {
+                sigla: "UN".into(),
+                nome: "Un".into(),
+                fracionavel: false,
+            },
+        )
+        .expect("unidade");
+    let prod: ProdutoCriado = t
+        .motor
+        .executar(
+            &t.sessao,
+            "estoque.criar_produto.v1",
+            &CriarProduto {
+                grupo_produto: g,
+                nome: "Coca 2L".into(),
+                ncm: "22021000".into(),
+                unidade_padrao: un.unidade,
+                codigo_barras: None,
+                detalhes_tecnicos: None,
+            },
+        )
+        .expect("produto");
+    let loc: LocalCriado = t
+        .motor
+        .executar(
+            &t.sessao,
+            "estoque.criar_local.v1",
+            &CriarLocal {
+                nome: "Depósito".into(),
+                tipo: TipoLocal::Deposito,
+            },
+        )
+        .expect("local");
+    let _: EntradaRegistrada = t
+        .motor
+        .executar(
+            &t.sessao,
+            "estoque.registrar_entrada.v1",
+            &RegistrarEntrada {
+                produto: prod.produto,
+                local: loc.local,
+                quantidade: Quantidade::unidades(10),
+                custo_unitario: Preco::reais(50),
+            },
+        )
+        .expect("entrada");
+
+    let mut estado = EstadoTelaEstoque {
+        aba: AbaEstoque::Precos,
+        ..Default::default()
+    };
+    estado.carregar(&t.motor, &t.sessao);
+    // MEI: sem imposto; 25% + 15% de margem → 50 / 0,60 = 83,33.
+    let s = &estado.prc.sugestoes[0];
+    assert_eq!(s.nome, "Coca 2L");
+    assert_eq!(
+        s.sugerido.expect("sugerido").preco,
+        cardeal_kernel::Dinheiro::centavos(8_333)
+    );
+    // O formulário refletiu o que foi salvo.
+    assert!(estado.prc.montar().is_ok());
+
+    // Texto que não é número vira mensagem com o nome do campo.
+    estado.prc.comissao = "abc".into();
+    assert!(estado.prc.montar().unwrap_err().contains("Comissão"));
+}

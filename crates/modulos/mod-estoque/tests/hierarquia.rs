@@ -214,6 +214,7 @@ fn arvore_de_quatro_niveis_vem_em_pre_ordem_com_niveis_e_contagens() {
     assert_eq!(por_codigo("PET").produtos_na_subarvore, 1);
     assert_eq!(por_codigo("ALI").produtos_na_subarvore, 0);
     assert_eq!(por_codigo("ALI").id, alimentos);
+    assert_eq!(por_codigo("ALI").margem, None);
 }
 
 #[test]

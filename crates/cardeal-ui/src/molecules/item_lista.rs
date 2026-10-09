@@ -18,6 +18,7 @@ pub struct ItemDeLista {
     selecionado: bool,
     atalho: Option<String>,
     esmaecido: bool,
+    recuo: u8,
 }
 
 impl ItemDeLista {
@@ -29,7 +30,14 @@ impl ItemDeLista {
             selecionado: false,
             atalho: None,
             esmaecido: false,
+            recuo: 0,
         }
+    }
+
+    /// Recua o conteúdo `niveis` degraus à direita — a profundidade de uma árvore.
+    pub const fn recuo(mut self, niveis: u8) -> Self {
+        self.recuo = niveis;
+        self
     }
 
     /// Mostra uma [`Tecla`] à esquerda do título — o atalho que escolhe esta linha (`1`,
@@ -68,6 +76,7 @@ impl ItemDeLista {
 
         let fraco = ui.cores().texto_fraco;
         superficie_clicavel(ui, self.selecionado, altura, |ui| {
+            ui.add_space(f32::from(self.recuo) * Espaco::E24);
             if let Some(tecla) = self.atalho {
                 ui.add(Tecla::nova(tecla));
                 ui.add_space(Espaco::E12);

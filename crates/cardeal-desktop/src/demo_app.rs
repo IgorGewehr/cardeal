@@ -8,7 +8,7 @@
 //!
 //! Cenas: `os`, `os-detalhe`, `os-nova`, `os-faturar`, `financeiro`, `financeiro-receber`,
 //! `financeiro-baixa`, `financeiro-lancar`, `financeiro-custos`, `financeiro-pagar`, `financeiro-fluxo`, `financeiro-bancos`,
-//! `financeiro-pessoal`, `financeiro-cartoes`, `financeiro-pessoal-novo`, `login`, `login-servidor`. Sem `CARDEAL_DEMO_PNG` a janela fica aberta para mexer.
+//! `financeiro-dre`, `estoque-estrutura`, `estoque-precos`, `financeiro-pessoal`, `financeiro-cartoes`, `financeiro-pessoal-novo`, `login`, `login-servidor`. Sem `CARDEAL_DEMO_PNG` a janela fica aberta para mexer.
 
 use cardeal_cliente::{Motor, Sessao};
 use cardeal_kernel::{Data, Dinheiro, Fuso, Id, Preco, Quantidade};
@@ -133,6 +133,50 @@ pub fn semear(motor: &Motor) -> Sessao {
             },
         )
         .expect("grupo");
+    // Estrutura mercadológica de exemplo (3 níveis) com margem e perfil fiscal, e parâmetros
+    // de preço — alimentam as cenas `estoque-estrutura` e `estoque-precos`.
+    let telas: GrupoProdutoCriado = motor
+        .executar(
+            &s,
+            "estoque.criar_grupo_produto.v1",
+            &CriarGrupoProduto {
+                codigo: "TELAS".to_owned(),
+                nome: "Telas".to_owned(),
+                pai: Some(grupo.grupo_produto),
+            },
+        )
+        .expect("subgrupo");
+    let _: GrupoProdutoCriado = motor
+        .executar(
+            &s,
+            "estoque.criar_grupo_produto.v1",
+            &CriarGrupoProduto {
+                codigo: "CEL".to_owned(),
+                nome: "Celulares".to_owned(),
+                pai: Some(telas.grupo_produto),
+            },
+        )
+        .expect("categoria");
+    motor
+        .executar(
+            &s,
+            "estoque.definir_margem_do_grupo.v1",
+            &mod_estoque::DefinirMargemDoGrupo {
+                grupo: grupo.grupo_produto,
+                margem: Some(cardeal_kernel::Percentual::pontos(40)),
+            },
+        )
+        .expect("margem");
+    let mut parametros = mod_estoque::ParametrosPreco::padrao_para("SimplesNacional");
+    parametros.custo_operacional = cardeal_kernel::Percentual::pontos(20);
+    parametros.custo_operacional_derivado = false;
+    motor
+        .executar(
+            &s,
+            "estoque.definir_parametros_preco.v1",
+            &mod_estoque::DefinirParametrosPreco { parametros },
+        )
+        .expect("parâmetros de preço");
     let unidade: UnidadeCriada = motor
         .executar(
             &s,
@@ -149,7 +193,7 @@ pub fn semear(motor: &Motor) -> Sessao {
             &s,
             "estoque.criar_produto.v1",
             &CriarProduto {
-                grupo_produto: grupo.grupo_produto,
+                grupo_produto: telas.grupo_produto,
                 nome: "Tela Samsung A52 original".to_owned(),
                 ncm: "85177099".to_owned(),
                 unidade_padrao: unidade.unidade,

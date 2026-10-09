@@ -15,8 +15,8 @@ use cardeal_ui::molecules::{
     Severidade, SituacaoPasso,
 };
 use cardeal_ui::organisms::{
-    notificar, ColunaGrade, CondicaoPagamento, Dialogo, Gaveta, Grade, Janela, Notificacao,
-    Notificacoes, Ordenacao, Painel, SeletorPagamento,
+    notificar, ArvoreHierarquia, ColunaGrade, CondicaoPagamento, Dialogo, Gaveta, Grade, Janela,
+    Notificacao, Notificacoes, Ordenacao, Painel, SeletorPagamento,
 };
 use cardeal_ui::tokens::{instalar_estilo, instalar_fontes, Espaco, Rubro, Tema, TemaUi};
 use eframe::egui;
@@ -65,6 +65,9 @@ struct Galeria {
     lista_filtro: Option<u8>,
     lista_ordenacao: Ordenacao,
     lista_ultima_acao: String,
+    arvore_recolhidos: std::collections::HashSet<cardeal_kernel::Id>,
+    arvore_selecionado: Option<cardeal_kernel::Id>,
+    arvore_nos: Vec<cardeal_ui::organisms::NoArvore>,
     motivo: String,
     marcada: bool,
     item_ativo: usize,
@@ -88,6 +91,39 @@ const PRODUTOS_DEMO: [(&str, i64, &str); 4] = [
 ];
 
 impl Galeria {
+    fn arvore(&mut self, ui: &mut egui::Ui) {
+        use cardeal_ui::organisms::NoArvore;
+        if self.arvore_nos.is_empty() {
+            let no = |nivel: u8, rotulo: &str, apoio: &str, filhos: bool| NoArvore {
+                id: cardeal_kernel::Id::novo(),
+                nivel,
+                rotulo: rotulo.to_owned(),
+                apoio: Some(apoio.to_owned()),
+                tem_filhos: filhos,
+            };
+            self.arvore_nos = vec![
+                no(1, "Bebidas", "BEB · 18 produtos", true),
+                no(2, "Refrigerantes", "REF · 12 produtos", true),
+                no(3, "Garrafa PET", "PET · 7 produtos", true),
+                no(4, "2 litros", "2L · 4 produtos", false),
+                no(4, "600 ml", "600 · 3 produtos", false),
+                no(3, "Lata", "LAT · 5 produtos", false),
+                no(2, "Sucos", "SUC · 6 produtos", false),
+                no(1, "Alimentos", "ALI · 40 produtos", false),
+            ];
+        }
+        let resposta = ArvoreHierarquia::nova(&self.arvore_nos, &mut self.arvore_recolhidos)
+            .selecionado(self.arvore_selecionado)
+            .mostrar(ui, |ui, no| {
+                ui.add(Etiqueta::neutra(
+                    ["Grupo", "Subgrupo", "Categoria", "Subcategoria"][usize::from(no.nivel - 1)],
+                ));
+            });
+        if resposta.clicado.is_some() {
+            self.arvore_selecionado = resposta.clicado;
+        }
+    }
+
     /// A listagem-padrão de cadastro, do jeito que uma tela deve montá-la: só componentes,
     /// nenhum `egui` cru. É a referência para estoque, clientes e OS.
     fn listagem(&mut self, ui: &mut egui::Ui) {
@@ -647,6 +683,12 @@ impl eframe::App for Galeria {
                     "Listagem de cadastro: BarraFiltros · Grade.com_acoes · AcoesRegistro · Ordenacao",
                 ));
                 self.listagem(ui);
+
+                ui.add_space(Espaco::E24);
+                ui.add(Rotulo::titulo_secao(
+                    "Árvore: ArvoreHierarquia (estrutura mercadológica, 4 níveis)",
+                ));
+                self.arvore(ui);
 
                 ui.add_space(Espaco::E24);
                 ui.add(Rotulo::titulo_secao(

@@ -3,6 +3,7 @@
 
 mod agenda_calendario;
 mod agenda_mes;
+mod arvore_hierarquia;
 mod cartao;
 mod confirmacao;
 mod dialogo;
@@ -20,6 +21,7 @@ mod sidebar;
 
 pub use agenda_calendario::{AcaoAgenda, AgendaCalendario, BlocoAgenda, ModoCalendario, TagAgenda};
 pub use agenda_mes::AgendaMes;
+pub use arvore_hierarquia::{ArvoreHierarquia, NoArvore, RespostaArvore};
 pub use cartao::Cartao;
 pub use confirmacao::{dialogo_confirmacao, RespostaConfirmacao};
 pub use dialogo::Dialogo;

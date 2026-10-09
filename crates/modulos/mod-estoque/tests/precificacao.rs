@@ -392,11 +392,23 @@ fn precos_do_grupo_cobrem_a_subarvore() {
     c.produto_com_custo("Fora", outro, Preco::reais(30));
     let v: Vec<SugestaoDePreco> = c.consulta(
         "estoque.precos_sugeridos_do_grupo.v1",
-        &PrecosSugeridosDoGrupo { grupo: a },
+        &PrecosSugeridosDoGrupo { grupo: Some(a) },
     );
     let nomes: Vec<&str> = v.iter().map(|s| s.nome.as_str()).collect();
     assert_eq!(nomes, ["No filho", "No pai"]);
     assert!(v.iter().all(|s| s.sugerido.is_some()));
+    // Sem grupo: o catálogo inteiro, incluindo o produto sem margem (com o problema explicado).
+    let todos: Vec<SugestaoDePreco> = c.consulta(
+        "estoque.precos_sugeridos_do_grupo.v1",
+        &PrecosSugeridosDoGrupo { grupo: None },
+    );
+    assert_eq!(todos.len(), 3);
+    assert!(todos
+        .iter()
+        .find(|s| s.nome == "Fora")
+        .unwrap()
+        .problema
+        .is_some());
 }
 
 #[test]

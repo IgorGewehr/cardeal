@@ -107,8 +107,8 @@ impl Consulta for PrecoSugeridoDoProduto {
 /// a base da revisão de preços em lote.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct PrecosSugeridosDoGrupo {
-    /// O grupo (a subárvore inteira entra).
-    pub grupo: Id,
+    /// O grupo (a subárvore inteira entra); `None` = o catálogo todo.
+    pub grupo: Option<Id>,
 }
 
 impl Consulta for PrecosSugeridosDoGrupo {
@@ -118,9 +118,12 @@ impl Consulta for PrecosSugeridosDoGrupo {
     #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         let base = BaseDePreco::carregar(conexao, ctx)?;
-        let mut grupos = base.arvore.descendentes(self.grupo);
-        grupos.push(self.grupo);
-        let linhas = linha_do_produto(conexao, ctx, None, Some(&grupos))?;
+        let grupos = self.grupo.map(|g| {
+            let mut todos = base.arvore.descendentes(g);
+            todos.push(g);
+            todos
+        });
+        let linhas = linha_do_produto(conexao, ctx, None, grupos.as_deref())?;
         Ok(linhas.iter().map(|l| base.sugerir(l, None)).collect())
     }
 }

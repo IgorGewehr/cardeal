@@ -389,7 +389,10 @@ impl EstadoAutenticado {
             self.clientes.preparar_demo(motor, s);
             return;
         }
-        if cena.starts_with("financeiro") {
+        if cena.starts_with("estoque") {
+            self.area = Area::Estoque;
+            self.estoque.preparar_demo(motor, s, cena);
+        } else if cena.starts_with("financeiro") {
             self.area = Area::Financeiro;
             self.financeiro.preparar_demo(motor, s, cena);
         } else {

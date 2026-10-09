@@ -229,6 +229,12 @@ pub struct NoArvoreGrupo {
     pub produtos_diretos: u32,
     /// Produtos ativos neste grupo e em todos os descendentes.
     pub produtos_na_subarvore: u32,
+    /// A margem líquida desejada definida **neste** grupo (`None` = herda).
+    pub margem: Option<cardeal_kernel::Percentual>,
+    /// ICMS-ST definido neste grupo (`None` = herda).
+    pub icms_st: Option<bool>,
+    /// PIS/COFINS monofásico definido neste grupo (`None` = herda).
+    pub monofasico: Option<bool>,
 }
 
 /// A árvore inteira de grupos, em ordem de exibição (pré-ordem, irmãos por nome) — a tela
@@ -282,6 +288,7 @@ impl Consulta for ArvoreGruposProduto {
             .collect::<rusqlite::Result<_>>()
             .map_err(persist)?;
 
+        let perfis = crate::repositorio_preco::perfis_dos_grupos(conexao, ctx.organizacao)?;
         let nos: Vec<NoGrupo> = grupos
             .iter()
             .map(|(id, _, _, pai)| NoGrupo { id: *id, pai: *pai })
@@ -303,7 +310,11 @@ impl Consulta for ArvoreGruposProduto {
                     .iter()
                     .map(|d| diretos.get(d).copied().unwrap_or(0))
                     .sum::<u32>();
+            let do_grupo = perfis.iter().find(|p| p.id == id);
             saida.push(NoArvoreGrupo {
+                margem: do_grupo.and_then(|p| p.margem),
+                icms_st: do_grupo.and_then(|p| p.icms_st),
+                monofasico: do_grupo.and_then(|p| p.monofasico),
                 id,
                 codigo: codigo.clone(),
                 nome: nome.clone(),

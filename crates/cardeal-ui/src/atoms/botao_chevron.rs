@@ -9,6 +9,7 @@ use crate::tokens::{Raio, TemaUi};
 #[must_use]
 pub struct BotaoChevron {
     aponta_esquerda: bool,
+    para_baixo: bool,
     cor: Option<Color32>,
 }
 
@@ -17,8 +18,15 @@ impl BotaoChevron {
     pub const fn novo(aponta_esquerda: bool) -> Self {
         Self {
             aponta_esquerda,
+            para_baixo: false,
             cor: None,
         }
+    }
+
+    /// A seta aponta para baixo (`⌄`): o nó de árvore está aberto e convida a recolher.
+    pub const fn para_baixo(mut self) -> Self {
+        self.para_baixo = true;
+        self
     }
 
     /// Sobrescreve a cor do traço (o padrão é `texto_medio`).
@@ -42,6 +50,27 @@ impl Widget for BotaoChevron {
             }
             let c = rect.center();
             let (dx, dy) = (3.5_f32, 5.0_f32);
+            if self.para_baixo {
+                let traco = Stroke::new(2.0_f32, cor);
+                ui.painter().line_segment(
+                    [
+                        egui::pos2(c.x - dy, c.y - dx / 2.0),
+                        egui::pos2(c.x, c.y + dx / 2.0),
+                    ],
+                    traco,
+                );
+                ui.painter().line_segment(
+                    [
+                        egui::pos2(c.x, c.y + dx / 2.0),
+                        egui::pos2(c.x + dy, c.y - dx / 2.0),
+                    ],
+                    traco,
+                );
+                if resp.hovered() {
+                    ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+                }
+                return resp;
+            }
             let (perto, longe) = if self.aponta_esquerda {
                 (c.x + dx / 2.0, c.x - dx / 2.0)
             } else {
