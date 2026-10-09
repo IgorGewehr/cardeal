@@ -73,3 +73,24 @@ impl Consulta for DreComparativa {
         })
     }
 }
+
+/// O DFC (fluxo de caixa realizado, método direto) de um período.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct DfcDoPeriodo {
+    /// O período, inclusive nas pontas.
+    pub periodo: Periodo,
+}
+
+impl Consulta for DfcDoPeriodo {
+    type Saida = crate::dfc::Dfc;
+    const PERMISSAO: &'static str = "financeiro.dre.ver";
+
+    #[cfg(feature = "sqlite")]
+    fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        let (abertura, movimentos) =
+            cardeal_ledger::movimentos_de_caixa(conexao, ctx.empresa, self.periodo).map_err(
+                |e| Erro::novo(CodigoErro::FALHA_INTERNA, format!("financeiro/DFC: {e}")),
+            )?;
+        Ok(crate::dfc::montar(self.periodo, abertura, &movimentos))
+    }
+}

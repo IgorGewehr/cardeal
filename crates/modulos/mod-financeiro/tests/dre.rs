@@ -9,8 +9,8 @@ use cardeal_modkit::{Ambiente, Despachante, Modulo, PedidoAtivacao, RegistroModu
 use cardeal_storage::{Armazenamento, ConfigArmazenamento, ContextoEscrita, ErroArmazenamento};
 use mod_financeiro::dre::Dre;
 use mod_financeiro::{
-    ComparativoDre, DreComparativa, DreDoPeriodo, LancarTituloAPagar, LancarTituloAReceber,
-    ModuloFinanceiro, MANIFESTO,
+    BaixarPagamento, BaixarRecebimento, ComparativoDre, DfcDoPeriodo, DreComparativa, DreDoPeriodo,
+    LancarTituloAPagar, LancarTituloAReceber, MeioPagamento, ModuloFinanceiro, MANIFESTO,
 };
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -244,4 +244,136 @@ fn sem_permissao_a_dre_e_recusada() {
         c.arm.leitor(),
     );
     assert!(r.is_err());
+}
+
+fn baixar_receber(c: &Cena, s: &Sessao, parcela: Id, valor: Dinheiro) {
+    let _: mod_financeiro::RecebimentoBaixado = c.cmd(
+        s,
+        "financeiro.baixar_recebimento.v1",
+        &BaixarRecebimento {
+            parcela,
+            valor,
+            data: hoje(),
+            meio_pagamento: MeioPagamento::Dinheiro,
+            conta_destino: None,
+        },
+    );
+}
+
+#[test]
+fn dfc_so_conta_o_que_foi_realizado_e_o_saldo_final_bate_com_o_caixa() {
+    let c = cena();
+    let s = c.sessao(
+        Id::novo(),
+        &[
+            "financeiro.receber.criar",
+            "financeiro.receber.baixar",
+            "financeiro.pagar.criar",
+            "financeiro.pagar.baixar",
+            "financeiro.dre.ver",
+        ],
+    );
+    let h = hoje();
+    // Lançados: receber 1.000 e pagar 400. Só o recebimento de 600 e o pagamento de 150 saem do caixa.
+    let r: mod_financeiro::TituloAReceberLancado = c.cmd(
+        &s,
+        "financeiro.lancar_titulo_a_receber.v1",
+        &LancarTituloAReceber {
+            cliente: None,
+            valor_total: Dinheiro::reais(1_000),
+            emissao: h,
+            parcelas: 1,
+            primeiro_vencimento: h,
+            intervalo_dias: 0,
+            observacao: None,
+            categoria: None,
+            quitado_agora: None,
+        },
+    );
+    let p: mod_financeiro::TituloAPagarLancado = c.cmd(
+        &s,
+        "financeiro.lancar_titulo_a_pagar.v1",
+        &LancarTituloAPagar {
+            fornecedor: None,
+            valor_total: Dinheiro::reais(400),
+            emissao: h,
+            parcelas: 1,
+            primeiro_vencimento: h,
+            intervalo_dias: 0,
+            observacao: None,
+            categoria: None,
+            quitado_agora: None,
+        },
+    );
+    baixar_receber(&c, &s, r.parcelas[0], Dinheiro::reais(600));
+    let _: mod_financeiro::PagamentoBaixado = c.cmd(
+        &s,
+        "financeiro.baixar_pagamento.v1",
+        &BaixarPagamento {
+            parcela: p.parcelas[0],
+            valor: Dinheiro::reais(150),
+            data: h,
+            meio_pagamento: MeioPagamento::Dinheiro,
+            conta_destino: None,
+        },
+    );
+
+    let dfc: mod_financeiro::dfc::Dfc = c.consulta(
+        &s,
+        "financeiro.dfc_do_periodo.v1",
+        &DfcDoPeriodo {
+            periodo: Periodo::novo(h.inicio_do_mes(), h.fim_do_mes()),
+        },
+    );
+    let operacional = &dfc.blocos[0];
+    let valor_de = |rotulo: &str| {
+        operacional
+            .linhas
+            .iter()
+            .find(|l| l.rotulo == rotulo)
+            .map(|l| l.valor)
+    };
+    assert_eq!(
+        valor_de("Recebimentos de clientes"),
+        Some(Dinheiro::reais(600))
+    );
+    assert_eq!(
+        valor_de("Pagamentos a fornecedores"),
+        Some(Dinheiro::reais(-150))
+    );
+    assert_eq!(dfc.variacao, Dinheiro::reais(450));
+    assert_eq!(dfc.saldo_inicial, Dinheiro::ZERO);
+
+    // O fechamento é o saldo realizado das contas de caixa no Razão.
+    let saldo_razao: i64 = c
+        .arm
+        .leitor()
+        .consultar(|conn| {
+            conn.query_row(
+                "SELECT COALESCE(SUM(rp.valor),0) FROM razao_partida rp
+                 JOIN razao_conta rc ON rc.id = rp.conta
+                 JOIN razao_lancamento rl ON rl.id = rp.lancamento
+                 WHERE rc.empresa = ?1 AND rc.papel_padrao IN ('Caixa','Bancos','ValoresEmTransito')
+                   AND rl.estado IN ('Realizado','Estornado')",
+                [c.empresa.em_bytes().as_slice()],
+                |r| r.get(0),
+            )
+            .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+        })
+        .unwrap();
+    assert_eq!(dfc.saldo_final.em_centavos(), saldo_razao);
+
+    // Mês seguinte: abre com o fechamento do anterior e não tem movimento.
+    let seguinte: mod_financeiro::dfc::Dfc = c.consulta(
+        &s,
+        "financeiro.dfc_do_periodo.v1",
+        &DfcDoPeriodo {
+            periodo: Periodo::novo(
+                h.fim_do_mes().mais_dias(1),
+                h.fim_do_mes().mais_dias(1).fim_do_mes(),
+            ),
+        },
+    );
+    assert_eq!(seguinte.saldo_inicial, Dinheiro::reais(450));
+    assert_eq!(seguinte.variacao, Dinheiro::ZERO);
 }

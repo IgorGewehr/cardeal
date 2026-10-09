@@ -369,6 +369,9 @@ pub struct EstadoTelaFinanceiro {
     cobranca_pagar: bool,
     dre_mes: Option<Competencia>,
     dre: Option<mod_financeiro::ComparativoDre>,
+    dfc: Option<mod_financeiro::dfc::Dfc>,
+    /// Dentro de Resultado: `false` = DRE, `true` = DFC.
+    dre_dfc: bool,
     projecao: Vec<mod_financeiro::ItemProjecaoCategoria>,
     ordenacao: Ordenacao,
     nomes: HashMap<Id, String>,
@@ -582,7 +585,7 @@ fn abas(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTe
         (Aba::Pagar, "A pagar"),
         (Aba::Custos, "Custos por categoria"),
         (Aba::Cobranca, "Cobrança"),
-        (Aba::Resultado, "Resultado (DRE)"),
+        (Aba::Resultado, "Resultado e caixa"),
         (Aba::Fluxo, "Fluxo de caixa"),
         (Aba::Bancos, "Contas bancárias"),
     ])
@@ -650,6 +653,10 @@ impl EstadoTelaFinanceiro {
             "financeiro-custos" => self.aba = Aba::Custos,
             "financeiro-dre" => self.aba = Aba::Resultado,
             "financeiro-cobranca" => self.aba = Aba::Cobranca,
+            "financeiro-dfc" => {
+                self.aba = Aba::Resultado;
+                self.dre_dfc = true;
+            }
             "financeiro-pagar" => self.aba = Aba::Pagar,
             "financeiro-fluxo" => self.aba = Aba::Fluxo,
             "financeiro-bancos" => self.aba = Aba::Bancos,

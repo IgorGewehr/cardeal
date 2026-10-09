@@ -652,6 +652,8 @@ fn aba_resultado_apura_o_mes_pelo_razao_e_navega_entre_meses() {
     let cmp = estado.dre.clone().expect("DRE carregada");
     assert_eq!(cmp.atual.lucro_liquido, Dinheiro::reais(250));
     assert_eq!(cmp.mes_anterior.lucro_liquido, Dinheiro::ZERO);
+    // Ainda nada foi recebido: o DFC (realizado) está zerado, ao contrário da DRE (competência).
+    assert!(estado.dfc.clone().expect("DFC").variacao.e_zero());
 
     // Mês passado: nada lançado.
     estado.dre_mes = Some(estado.mes_dre().anterior());

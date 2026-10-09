@@ -4,8 +4,9 @@
 use super::*;
 use cardeal_kernel::Percentual;
 use cardeal_ui::tokens::Papel;
+use mod_financeiro::dfc::Dfc;
 use mod_financeiro::dre::{Dre, LinhaDre, TipoLinhaDre};
-use mod_financeiro::{ComparativoDre, DreComparativa};
+use mod_financeiro::{ComparativoDre, DfcDoPeriodo, DreComparativa};
 
 impl EstadoTelaFinanceiro {
     /// O mês da DRE: o escolhido ou, na primeira vez, o atual.
@@ -23,6 +24,15 @@ impl EstadoTelaFinanceiro {
             },
         );
         self.dre = self.anotar(r);
+        let mes = self.mes_dre();
+        let r = motor.consultar(
+            sessao,
+            "financeiro.dfc_do_periodo.v1",
+            &DfcDoPeriodo {
+                periodo: Periodo::novo(mes.primeiro_dia(), mes.ultimo_dia()),
+            },
+        );
+        self.dfc = self.anotar(r);
     }
 }
 
@@ -98,6 +108,25 @@ pub(super) fn painel_dre(
     }
     ui.add_space(Espaco::E12);
 
+    ui.add_space(Espaco::E8);
+    if let Some(v) = Abas::nova(&[(false, "DRE · resultado"), (true, "DFC · fluxo de caixa")])
+        .selecionada(estado.dre_dfc)
+        .id_salt("dre-visao")
+        .mostrar(ui)
+    {
+        estado.dre_dfc = v;
+    }
+    ui.add_space(Espaco::E12);
+    if estado.dre_dfc {
+        match estado.dfc.clone() {
+            Some(dfc) => tabela_dfc(ui, &dfc),
+            None => {
+                EstadoVazio::novo(Icone::Dinheiro, "Sem dados para apurar o fluxo de caixa.")
+                    .mostrar(ui);
+            }
+        }
+        return;
+    }
     let Some(cmp) = estado.dre.clone() else {
         EstadoVazio::novo(Icone::Dinheiro, "Sem dados para apurar o resultado.").mostrar(ui);
         return;
@@ -115,6 +144,70 @@ pub(super) fn painel_dre(
     )));
     ui.add_space(Espaco::E8);
     tabela(ui, &cmp);
+}
+
+/// O DFC do mês: saldo inicial, as três atividades com suas linhas, variação e saldo final.
+fn tabela_dfc(ui: &mut egui::Ui, dfc: &Dfc) {
+    ui.add(Rotulo::apoio(
+        "Só o que realmente entrou e saiu do caixa e dos bancos no mês (pela data do pagamento \
+         ou recebimento), aberto pela contrapartida. Transferências entre contas não aparecem.",
+    ));
+    ui.add_space(Espaco::E8);
+    FaixaKpi::nova(vec![
+        CartaoKpi::novo("Caixa no início", dfc.saldo_inicial).tom(Tom::Neutro),
+        CartaoKpi::novo("Variação no mês", dfc.variacao).tom(if dfc.variacao.e_negativo() {
+            Tom::Negativo
+        } else {
+            Tom::Positivo
+        }),
+        CartaoKpi::novo("Caixa no fim", dfc.saldo_final).tom(Tom::Neutro),
+    ])
+    .mostrar(ui);
+    ui.add_space(Espaco::E16);
+
+    // Linhas planas: (rotulo, valor, tipo).
+    let mut linhas: Vec<(String, Dinheiro, TipoLinhaDre)> = vec![(
+        "Caixa no início do mês".to_owned(),
+        dfc.saldo_inicial,
+        TipoLinhaDre::Resultado,
+    )];
+    for b in &dfc.blocos {
+        linhas.push((b.nome.clone(), b.total, TipoLinhaDre::Bloco));
+        for l in &b.linhas {
+            linhas.push((l.rotulo.clone(), l.valor, TipoLinhaDre::Conta));
+        }
+    }
+    linhas.push((
+        "Variação do caixa".to_owned(),
+        dfc.variacao,
+        TipoLinhaDre::Resultado,
+    ));
+    linhas.push((
+        "Caixa no fim do mês".to_owned(),
+        dfc.saldo_final,
+        TipoLinhaDre::Resultado,
+    ));
+    Grade::nova(vec![
+        ColunaGrade::nova("").largura(420.0),
+        ColunaGrade::nova("Valor").largura(180.0).numero(),
+    ])
+    .id_salt("dfc")
+    .mostrar(ui, linhas.len(), |i, row| {
+        let (rotulo, valor, tipo) = &linhas[i];
+        row.col(|ui| match tipo {
+            TipoLinhaDre::Conta => {
+                ui.add_space(Espaco::E16);
+                ui.add(Rotulo::interface(rotulo.clone()));
+            }
+            TipoLinhaDre::Bloco => {
+                ui.add(Rotulo::campo(rotulo.clone()));
+            }
+            TipoLinhaDre::Resultado => {
+                ui.add(Rotulo::novo(Papel::TituloSecao, rotulo.clone()));
+            }
+        });
+        row.col(|ui| celula_valor(ui, *valor));
+    });
 }
 
 fn kpis(ui: &mut egui::Ui, c: &ComparativoDre) {
