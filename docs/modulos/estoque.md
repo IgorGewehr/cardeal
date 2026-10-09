@@ -170,6 +170,47 @@
 | **GrupoProduto** `id`, `codigo`, `nome`, `pai`, `perfil_tributario`, `margem_sugerida` | Id/String/String/Id/Id/Percentual | sim exceto `pai` | hierárquico, como o plano de contas |
 | **PerfilTributario** `id`, `nome`, `origem_mercadoria`, `cst_icms`, `cfop_dentro_uf`, `cfop_fora_uf`, `aliquota_icms`, `reducao_base`, `mva_st`, `cst_pis`, `cst_cofins`, `aliquota_pis`, `aliquota_cofins`, `cest`, `beneficio_fiscal` | Id/String/enum(0..8)/String/String/String/Percentual/Percentual/Percentual/String/String/Percentual/Percentual/String/String | sim exceto `mva_st`, `beneficio_fiscal` | espelha [doc 10 §6](../10-modulo-fiscal.md#6-tributação); estimativa local, autoridade é a API fiscal |
 
+### Estrutura mercadológica e formação de preço (2026-10-09)
+
+**Estrutura de até quatro níveis.** `GrupoProduto.pai` já formava uma árvore; agora ela tem teto:
+Grupo (1) › Subgrupo (2) › Categoria (3) › Subcategoria (4). `hierarquia::Arvore` (domínio puro)
+recusa o 5º nível, o ciclo e o movimento que levaria a subárvore a passar do teto (conta a altura
+da subárvore, não só o nível do destino). O uso reduzido (só Grupo e Subgrupo) não é um modo à
+parte: basta não criar os níveis de baixo; habilitar a estrutura completa depois é criar filhos.
+Os grupos pertencem à **organização** (compartilhados entre os CNPJs, ADR-0017).
+
+**Margem e perfil fiscal herdados.** Três atributos opcionais no grupo, todos `NULL = herda`:
+`margem_desejada`, `icms_st`, `monofasico`. O produto tem `margem_desejada` própria. Resolução da
+margem: produto → grupo mais próximo acima → `ParametrosPreco.margem_padrao` → "ninguém definiu"
+(a consulta devolve o problema em português, nunca um número inventado). Perfil fiscal: o valor
+não-nulo do grupo mais próximo; sem nenhum, falso.
+
+**Parâmetros por CNPJ (`estoque_parametros_preco`).** Regime (`Mei` / `Simples` + anexo I–V /
+`Manual` com percentual informado), custo operacional (informado ou derivado do Razão), comissão,
+taxa de pagamento, margem padrão, margem mínima e "preço sugerido obrigatório no PDV". Sem linha
+gravada, vale o padrão do regime cadastrado em `nucleo_empresa.regime` (ver [ADR-0018](../adr/0018-formacao-de-preco-por-markup-divisor.md)).
+
+**Markup divisor** (`precificacao.rs`, aritmética exata):
+
+```text
+divisor = 100% − (custo operacional + margem líquida + imposto + comissão + taxa de pagamento)
+preço   = custo ÷ divisor            (arredondado ao centavo, meio-acima)
+mínimo  = custo ÷ (divisor + margem) (preço de empate: abaixo dele a venda dá prejuízo)
+```
+
+Soma ≥ 100% não tem preço possível: vira mensagem para o usuário, não erro. A margem do preço
+decomposto é o resto (absorve o arredondamento dos demais termos).
+
+**Carga tributária** (`precificacao::carga_sobre_venda`): MEI não tem percentual sobre a venda
+(o DAS fixo é despesa e entra no custo operacional); Simples usa a alíquota efetiva
+`(RBT12 × alíquota nominal − parcela a deduzir) ÷ RBT12` das tabelas da LC 123/2006 (RBT12 = receita
+bruta dos últimos 12 meses lida do Razão); no Anexo I, ICMS-ST e monofásico tiram a parcela
+respectiva da repartição da faixa. Presumido/Real usa o percentual informado. **Limites
+conhecidos:** acima de R$ 3,6 mi (6ª faixa) o ICMS/ISS sai do DAS e a efetiva subestima a carga —
+usar `Manual`; a dedução de ST/monofásico só existe para o Anexo I; empresa com menos de 12 meses
+usa o que existe (a regra de anualização proporcional não foi implementada). **As tabelas devem ser
+conferidas com o contador** e revisadas com a reforma tributária (IBS/CBS).
+
 ## 4. Máquinas de estado
 
 ```mermaid
@@ -198,6 +239,7 @@ stateDiagram-v2
 
 | Comando | Permissão | Risco | O que faz | Erros possíveis |
 |---|---|---|---|---|
+| `CriarGrupoProduto` ✅ | `estoque.produto.criar` | Baixo | Cria um grupo na estrutura mercadológica (até 4 níveis; recusa o 5º) | `REGRA_VIOLADA` (profundidade), `CAMPO_OBRIGATORIO` |
 | `CriarProduto` ✅ | `estoque.produto.criar` | Baixo | Cria `Produto` + unidade padrão; aceita `codigo_barras` opcional já na criação (valida dígito verificador via `Produto::com_codigo_barras`) e `detalhes_tecnicos` opcional (fabricante, MPN, categoria técnica, especificação, compatibilidade, garantia do fornecedor, localização física — 2026-09-11) | `NcmInvalido`, `GtinInvalido` |
 | `EditarDetalhesTecnicosProduto` ✅ (novo, 2026-09-11) | `estoque.produto.editar` | Baixo | Edita depois os sete campos técnicos opcionais (substitui por completo — campo não informado vira `None`); não toca nome/NCM/código de barras | — |
 | `CriarVariacao` | `estoque.produto.criar` | Baixo | Ainda não implementado | `ProdutoSemGrade` |
@@ -216,6 +258,12 @@ stateDiagram-v2
 | `RegistrarContagem` | `estoque.inventario.contar` | Baixo | Ainda não implementado (idem) | — |
 | `EncerrarInventario` | `estoque.inventario.encerrar` | Alto | Ainda não implementado (idem) | `ContagensPendentes` |
 | `DefinirPontoPedido` ✅ (novo, 2026-09-12) | `estoque.produto.editar` | Baixo | Define/limpa `ponto_pedido` e `estoque_minimo` de um produto — o gatilho que `Produto::abaixo_do_ponto`/`ProdutosAbaixoPontoPedido`/`estoque.abaixo_ponto_pedido.v1` consultam | — |
+| `RenomearGrupoProduto` ✅ (2026-10-09) | `estoque.produto.editar` | Baixo | Troca nome e código do grupo | `CAMPO_OBRIGATORIO`, código duplicado |
+| `MoverGrupoProduto` ✅ (2026-10-09) | `estoque.produto.editar` | Médio | Muda um grupo (com a subárvore) de lugar; `novo_pai: None` promove à raiz | 5º nível, ciclo, grupo inexistente |
+| `MoverProdutosDeGrupo` ✅ (2026-10-09) | `estoque.produto.editar` | Médio | Passa vários produtos para outro grupo; tudo-ou-nada (produto inexistente desfaz o lote) | grupo/produto inexistente |
+| `DefinirMargemDoGrupo` / `DefinirMargemDoProduto` ✅ (2026-10-09) | `estoque.produto.editar` | Médio | Define ou limpa (`None` = herda) a margem líquida desejada | margem fora de 0%..100% (100% exclusive) |
+| `DefinirPerfilFiscalDoGrupo` ✅ (2026-10-09) | `estoque.tributario.editar` | Alto | ICMS-ST e monofásico do grupo (`None` herda) | — |
+| `DefinirParametrosPreco` ✅ (2026-10-09) | `estoque.tributario.editar` | Alto | Grava os parâmetros de preço do CNPJ da sessão | percentual fora de 0%..100% |
 | `VincularPerfilTributario` | `estoque.tributario.editar` | Médio | Ainda não implementado | — |
 
 > **Nota (2026-09-06) — auditoria de produção:** `CriarProduto` ganhou `codigo_barras`
@@ -252,6 +300,10 @@ stateDiagram-v2
 | `SaldoDisponivelDoProduto` ✅ (novo, 2026-09-11) | `estoque.saldo.ver` | Saldo somado entre locais de **um** produto — a porta pública que outro módulo chama para cruzar dados sem ler `estoque_saldo_local` direto (`mod-os::PecasAguardandoEstoque` é o primeiro consumidor) | `estoque_saldo_local(produto)` |
 | `MovimentosDoProduto` ✅ (novo, 2026-09-12) | `estoque.movimento.ver` | Aba "Movimentação" da ficha — rastreabilidade peça↔origem (ex.: peça↔OS), opcionalmente filtrada por `origem_modulo` | `estoque_movimento_produto`/`estoque_movimento_origem` |
 | `ProdutosAbaixoPontoPedido` ✅ (novo, 2026-09-12; nome Rust `ProdutosAbaixoDoPontoPedido`) | `estoque.compra_sugerida.ver` | "Radar" do Pulso, sugestão de pedido de compra | `estoque_saldo_local` agregado por produto, comparado a `estoque_produto.ponto_pedido` |
+| `ArvoreGruposProduto` ✅ (2026-10-09) | `estoque.produto.ver` | Aba Estrutura: a árvore em pré-ordem com nível, contagem de produtos (diretos e na subárvore), margem e perfil fiscal próprios | `estoque_grupo_produto(empresa)` + contagem agrupada |
+| `ParametrosDePreco` ✅ (2026-10-09) | `estoque.produto.ver` | Parâmetros de preço do CNPJ | `estoque_parametros_preco(empresa)` |
+| `PrecoSugeridoDoProduto` ✅ (2026-10-09) | `estoque.produto.ver` | Preço sugerido e de empate com a decomposição e a origem de cada percentual; `custo` opcional recalcula (cotação de compra) | produto + grupos + `razao_*` (RBT12 e custo operacional) |
+| `PrecosSugeridosDoGrupo` ✅ (2026-10-09) | `estoque.produto.ver` | Aba Preços: a mesma conta para a subárvore de um grupo (ou o catálogo todo com `grupo: None`), carregando a base (parâmetros, árvore, Razão) uma vez só | idem |
 | `CurvaAbc` | `estoque.abc.ver` | Relatório de curva ABC | agregação de `estoque_movimento` por valor no período |
 | `LotesProximosDoVencimento` | `estoque.lote.ver` | Alerta de validade | `estoque_lote(validade)` índice parcial `WHERE estado = 'Ativo'` |
 | `EstoqueEmTransito` | `estoque.transferencia.ver` | Painel de transferências pendentes | `estoque_saldo_local(local) WHERE local = local_em_transito` |

@@ -383,6 +383,30 @@ e relatórios consolidados.
 (muda as telas do desktop, em uso real). **Otimizações medidas em espera:** escritor sem
 thread dedicada por empresa; fontes de reserva do egui no web (§4 do doc 20).
 
+### 1.12 Sessão 2026-10-09 — Hierarquia de produtos, preço por markup e DRE
+
+Origem: o spec do **lunno** (outro produto, mesma ideia de ERP para comércio/serviços) foi lido
+junto com o Cardeal; o que ele descreve de estoque, markup e financeiro e que o Cardeal não tinha
+virou esta sessão. **Fora do escopo de propósito:** tudo que o spec chama de IA (copiloto, OCR por
+WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres e Open Banking.
+
+- **Estrutura mercadológica de 4 níveis** (`mod-estoque::hierarquia`): recusa o 5º nível, ciclo e
+  movimento que estoura o teto contando a altura da subárvore. Comandos `RenomearGrupoProduto`,
+  `MoverGrupoProduto`, `MoverProdutosDeGrupo`; consulta `ArvoreGruposProduto`.
+- **Preço por markup divisor** (`mod-estoque::precificacao`, ADR-0018): margem herdada
+  produto → grupo → padrão da empresa; imposto pelo Simples (Anexos I–V, RBT12 do Razão, ST e
+  monofásico no Anexo I), MEI sem percentual, Presumido/Real informado; custo operacional
+  informado ou derivado do Razão. Migração `estoque` v6 (`estoque_parametros_preco`, margem e perfil
+  fiscal no grupo, margem no produto). Consultas `PrecoSugeridoDoProduto` (aceita custo informado),
+  `PrecosSugeridosDoGrupo`, `ParametrosDePreco`.
+- **DRE gerencial** (`mod-financeiro::dre`): lida do Razão por `cardeal_ledger::resultado_por_conta`,
+  comparativo mês × anterior × ano anterior. Propriedade testada: lucro líquido = receitas − despesas.
+- **UI:** componente novo `ArvoreHierarquia` (+ galeria); `tela_estoque` virou diretório com as abas
+  **Estrutura** e **Preços**; `tela_financeiro` ganhou a aba **Resultado (DRE)**. Cenas de captura
+  `estoque-estrutura`, `estoque-precos`, `financeiro-dre`.
+- **Dívidas conhecidas:** tabelas do Simples a conferir com o contador; a 6ª faixa e a anualização de
+  RBT12 (ver ADR-0018); o preço sugerido ainda **não** vira regra de preço em `mod-vendas`/PDV.
+
 ## 2. Decisão estratégica registrada: por que Rust, não C#/.NET
 
 Em 2026-09-02 avaliamos um projeto irmão do mesmo autor, **SistemaX** (`../sistemax`), um ERP
