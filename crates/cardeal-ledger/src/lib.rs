@@ -44,6 +44,8 @@ mod porta;
 mod razao;
 #[cfg(feature = "sqlite")]
 mod repositorio;
+#[cfg(feature = "sqlite")]
+mod resultado;
 #[cfg(test)]
 mod testkit_interno;
 
@@ -57,3 +59,5 @@ pub use porta::{InfoConta, PortaRazao};
 pub use razao::Razao;
 #[cfg(feature = "sqlite")]
 pub use repositorio::{semear_plano_padrao, RepositorioRazao};
+#[cfg(feature = "sqlite")]
+pub use resultado::{resultado_por_conta, LinhaResultado};

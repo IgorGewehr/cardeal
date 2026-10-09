@@ -76,6 +76,8 @@ impl Modulo for ModuloFinanceiro {
             .consulta::<TituloDaOrigem>("financeiro.titulo_da_origem.v1")
             .consulta::<BaixasDaParcela>("financeiro.baixas_da_parcela.v1")
             .consulta::<SituacaoDaParcela>("financeiro.situacao_da_parcela.v1")
+            .consulta::<crate::DreDoPeriodo>("financeiro.dre_do_periodo.v1")
+            .consulta::<crate::DreComparativa>("financeiro.dre_comparativa.v1")
             .consulta::<crate::projecao::ProjecaoPorCategoria>(
                 "financeiro.projecao_por_categoria.v1",
             )

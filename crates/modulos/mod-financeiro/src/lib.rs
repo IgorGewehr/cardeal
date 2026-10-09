@@ -70,6 +70,8 @@ mod caixa;
 mod categoria;
 mod comandos;
 mod consultas;
+pub mod dre;
+mod dre_consulta;
 mod erros;
 pub mod eventos;
 mod listagem;
@@ -128,6 +130,7 @@ pub use consultas::{
     TotalRecebidoNoPeriodo,
 };
 pub use consultas::{SituacaoDaParcela, SituacaoNaData};
+pub use dre_consulta::{ComparativoDre, DreComparativa, DreDoPeriodo};
 pub use erros::ErroFinanceiro;
 pub use listagem::{
     FiltroParcelas, ListarParcelasAPagar, ListarParcelasAReceber, PaginaParcelas, SituacaoParcelas,
