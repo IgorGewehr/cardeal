@@ -5,10 +5,14 @@
 //! Entram os lançamentos `Confirmado`, `Realizado` e `Estornado` (o estorno anula o
 //! original, então a soma dos dois dá zero); `Previsto` fica de fora — é intenção, não fato.
 
-use cardeal_kernel::{Dinheiro, Id, Periodo};
+#[cfg(feature = "sqlite")]
+use cardeal_kernel::Periodo;
+use cardeal_kernel::{Dinheiro, Id};
+#[cfg(feature = "sqlite")]
 use rusqlite::Connection;
 
 use crate::conta::Natureza;
+#[cfg(feature = "sqlite")]
 use crate::erros::ErroRazao;
 
 /// Uma conta de resultado com o valor do período, no sentido natural da conta: receita é
@@ -32,13 +36,16 @@ pub struct LinhaResultado {
 }
 
 /// id, código, nome, natureza e papel gravado.
+#[cfg(feature = "sqlite")]
 type ContaDeResultado = (Vec<u8>, String, String, String, Option<String>);
 
+#[cfg(feature = "sqlite")]
 #[allow(clippy::needless_pass_by_value)]
 fn persist(e: rusqlite::Error) -> ErroRazao {
     ErroRazao::FalhaDePersistencia(e.to_string())
 }
 
+#[cfg(feature = "sqlite")]
 fn natureza_de(s: &str) -> Natureza {
     if s == "Receita" {
         Natureza::Receita
@@ -47,6 +54,7 @@ fn natureza_de(s: &str) -> Natureza {
     }
 }
 
+#[cfg(feature = "sqlite")]
 /// Soma o resultado de cada conta de receita/despesa com movimento na competência do
 /// período. Contas sem movimento não aparecem. Ordenado por código.
 ///
@@ -129,4 +137,117 @@ pub fn resultado_por_conta(
     }
     saida.sort_by(|a, b| a.codigo.cmp(&b.codigo));
     Ok(saida)
+}
+
+/// O resultado resumido para a formação de preço: quanto a empresa faturou e quanto gastou
+/// para operar. O custo da mercadoria, os impostos sobre a venda, as taxas de cartão e as
+/// perdas ficam de fora das despesas — cada um tem o seu próprio termo no markup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResumoGerencial {
+    /// Vendas, serviços, aluguéis, hospedagem e receitas avulsas (não financeiras), brutas.
+    pub receita_bruta: Dinheiro,
+    /// Pessoal, administrativas, comerciais, ocupação e financeiras (e despesa sem papel).
+    pub despesas_operacionais: Dinheiro,
+}
+
+impl ResumoGerencial {
+    /// Despesas operacionais sobre a receita bruta; `None` sem faturamento.
+    #[must_use]
+    pub fn custo_operacional_percentual(&self) -> Option<cardeal_kernel::Percentual> {
+        (self.receita_bruta.e_positivo()).then(|| {
+            cardeal_kernel::Percentual::da_razao(
+                self.despesas_operacionais.em_centavos(),
+                self.receita_bruta.em_centavos(),
+            )
+        })
+    }
+}
+
+/// Resume as linhas de resultado para o preço (ver [`ResumoGerencial`]).
+#[must_use]
+pub fn resumir(linhas: &[LinhaResultado]) -> ResumoGerencial {
+    use crate::conta::PapelConta as P;
+    let n = |p: P| p.to_string();
+    let receitas = [
+        n(P::ReceitaVendas),
+        n(P::ReceitaServicos),
+        n(P::ReceitaAlugueis),
+        n(P::ReceitaHospedagem),
+        n(P::OutrasReceitas),
+    ];
+    let despesas = [
+        n(P::DespesaPessoal),
+        n(P::DespesaAdministrativa),
+        n(P::DespesaComercial),
+        n(P::Ocupacao),
+        n(P::DespesaFinanceira),
+    ];
+    let fora = [
+        n(P::Cmv),
+        n(P::CustoServico),
+        n(P::ImpostosSobreVenda),
+        n(P::TaxasCartao),
+        n(P::Perdas),
+        n(P::QuebraCaixa),
+    ];
+    let mut r = ResumoGerencial {
+        receita_bruta: Dinheiro::ZERO,
+        despesas_operacionais: Dinheiro::ZERO,
+    };
+    for l in linhas {
+        let papel = l.papel.as_deref().unwrap_or("");
+        match l.natureza {
+            Natureza::Receita if receitas.iter().any(|p| p == papel) => r.receita_bruta += l.valor,
+            Natureza::Despesa if despesas.iter().any(|p| p == papel) => {
+                r.despesas_operacionais += l.valor;
+            }
+            Natureza::Despesa if !fora.iter().any(|p| p == papel) => {
+                r.despesas_operacionais += l.valor;
+            }
+            _ => {}
+        }
+    }
+    r
+}
+
+#[cfg(test)]
+mod testes {
+    use super::*;
+    use crate::conta::PapelConta;
+
+    fn l(nat: Natureza, papel: Option<PapelConta>, reais: i64) -> LinhaResultado {
+        LinhaResultado {
+            conta: Id::novo(),
+            codigo: "x".into(),
+            nome: "x".into(),
+            natureza: nat,
+            papel: papel.map(|p| p.to_string()),
+            valor: Dinheiro::reais(reais),
+        }
+    }
+
+    #[test]
+    fn resumo_separa_operacao_de_custo_imposto_e_taxa() {
+        let r = resumir(&[
+            l(Natureza::Receita, Some(PapelConta::ReceitaVendas), 1_000),
+            l(Natureza::Receita, Some(PapelConta::ReceitaFinanceira), 50),
+            l(Natureza::Despesa, Some(PapelConta::Cmv), 600),
+            l(Natureza::Despesa, Some(PapelConta::ImpostosSobreVenda), 80),
+            l(Natureza::Despesa, Some(PapelConta::TaxasCartao), 20),
+            l(Natureza::Despesa, Some(PapelConta::DespesaPessoal), 150),
+            l(Natureza::Despesa, Some(PapelConta::Ocupacao), 50),
+            l(Natureza::Despesa, None, 10),
+        ]);
+        assert_eq!(r.receita_bruta, Dinheiro::reais(1_000));
+        assert_eq!(r.despesas_operacionais, Dinheiro::reais(210));
+        assert_eq!(r.custo_operacional_percentual().unwrap().formatar(0), "21");
+        assert_eq!(
+            ResumoGerencial {
+                receita_bruta: Dinheiro::ZERO,
+                despesas_operacionais: Dinheiro::reais(5)
+            }
+            .custo_operacional_percentual(),
+            None
+        );
+    }
 }

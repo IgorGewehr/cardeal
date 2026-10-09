@@ -163,6 +163,36 @@ const SQL_LISTA_PAGINADA: &str = r"
 CREATE INDEX estoque_produto_lista ON estoque_produto(empresa, nome, id) WHERE ativo = 1;
 ";
 
+// Migração v6 (2026-10-09): formação de preço por markup divisor. Aditiva.
+// * `margem_desejada` (grupo e produto): margem líquida em `Percentual` (1e-6 ponto);
+//   NULL = herda do grupo-pai e, no fim, do padrão da empresa.
+// * `icms_st`/`monofasico` (grupo): perfil fiscal do Simples; NULL = herda do pai.
+// * `estoque_parametros_preco`: uma linha por CNPJ (empresa) — regime, custo operacional
+//   (manual ou derivado do Razão), comissão, taxa de pagamento, margem padrão/mínima e se o
+//   preço sugerido é obrigatório no PDV. Sem linha, vale o padrão derivado de
+//   `nucleo_empresa.regime`.
+const SQL_PRECIFICACAO: &str = r"
+ALTER TABLE estoque_grupo_produto ADD COLUMN margem_desejada INTEGER;
+ALTER TABLE estoque_grupo_produto ADD COLUMN icms_st INTEGER CHECK (icms_st IN (0,1));
+ALTER TABLE estoque_grupo_produto ADD COLUMN monofasico INTEGER CHECK (monofasico IN (0,1));
+ALTER TABLE estoque_produto ADD COLUMN margem_desejada INTEGER;
+
+CREATE TABLE estoque_parametros_preco (
+    empresa                    BLOB PRIMARY KEY REFERENCES nucleo_empresa(id),
+    regime                     TEXT    NOT NULL CHECK (regime IN ('Mei','Simples','Manual')),
+    anexo                      TEXT    NOT NULL DEFAULT 'I' CHECK (anexo IN ('I','II','III','IV','V')),
+    imposto_manual             INTEGER NOT NULL DEFAULT 0,
+    custo_operacional          INTEGER NOT NULL DEFAULT 0,
+    custo_operacional_derivado INTEGER NOT NULL DEFAULT 0 CHECK (custo_operacional_derivado IN (0,1)),
+    comissao                   INTEGER NOT NULL DEFAULT 0,
+    taxa_pagamento             INTEGER NOT NULL DEFAULT 0,
+    margem_padrao              INTEGER,
+    margem_minima              INTEGER NOT NULL DEFAULT 0,
+    preco_obrigatorio          INTEGER NOT NULL DEFAULT 0 CHECK (preco_obrigatorio IN (0,1)),
+    versao                     INTEGER NOT NULL DEFAULT 1
+) STRICT;
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -192,6 +222,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 5,
         nome: "estoque_lista_paginada",
         sql: SQL_LISTA_PAGINADA,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 6,
+        nome: "estoque_precificacao",
+        sql: SQL_PRECIFICACAO,
         tipo: TipoMigracao::Esquema,
     },
 ];

@@ -61,6 +61,7 @@
 mod aparelho_origem;
 mod comandos;
 mod consultas;
+mod consultas_preco;
 mod erros;
 pub mod eventos;
 pub mod hierarquia;
@@ -71,10 +72,14 @@ mod manifesto;
 pub mod migracoes;
 #[cfg(feature = "sqlite")]
 mod modulo;
+mod parametros_preco;
+pub mod precificacao;
 mod produto;
 pub mod receituario;
 #[cfg(feature = "sqlite")]
 mod repositorio;
+#[cfg(feature = "sqlite")]
+pub(crate) mod repositorio_preco;
 mod saldo;
 
 pub use aparelho_origem::AparelhoOrigem;
@@ -95,7 +100,9 @@ pub use comandos::{
 };
 pub use comandos::{CriarPecaRapida, PecaRapidaCriada};
 pub use comandos::{
-    MoverGrupoProduto, MoverProdutosDeGrupo, ProdutosMovidos, RenomearGrupoProduto,
+    DefinirMargemDoGrupo, DefinirMargemDoProduto, DefinirParametrosPreco,
+    DefinirPerfilFiscalDoGrupo, MoverGrupoProduto, MoverProdutosDeGrupo, ProdutosMovidos,
+    RenomearGrupoProduto,
 };
 #[cfg(feature = "sqlite")]
 pub use consultas::{
@@ -109,12 +116,17 @@ pub use consultas::{
     ProdutoPorCodigoBarras, ProdutoPorId, ProdutosAbaixoDoPontoPedido, ProdutosComSaldo,
     SaldoDisponivelDoProduto, Unidades,
 };
+pub use consultas_preco::{
+    OrigemMargem, ParametrosDePreco, PrecoSugeridoDoProduto, PrecosSugeridosDoGrupo,
+    SugestaoDePreco,
+};
 pub use erros::ErroEstoque;
 pub use inventario::{AjusteInventario, ContagemItem, EstadoInventario, Inventario};
 pub use listagem::ListarProdutos;
 pub use manifesto::{manifesto, MANIFESTO};
 #[cfg(feature = "sqlite")]
 pub use modulo::ModuloEstoque;
+pub use parametros_preco::ParametrosPreco;
 pub use produto::{
     validar_gtin, Conversao, DetalhesTecnicos, EstadoLote, Lote, OrigemLote, Produto, Unidade,
     Variacao,

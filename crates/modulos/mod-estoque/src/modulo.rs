@@ -11,11 +11,16 @@ use crate::comandos::{
     RegistrarAparelhoOrigem, RegistrarEntrada, RegistrarEntradaComLote, RegistrarSaida,
     RenomearGrupoProduto,
 };
+use crate::comandos::{
+    DefinirMargemDoGrupo, DefinirMargemDoProduto, DefinirParametrosPreco,
+    DefinirPerfilFiscalDoGrupo,
+};
 use crate::consultas::{
     ArvoreGruposProduto, DetalheDoLotePorCodigo, GruposProduto, Locais, LotesDisponiveisDoProduto,
     MovimentosDoProduto, ProdutoPorCodigoBarras, ProdutoPorId, ProdutosAbaixoDoPontoPedido,
     ProdutosComSaldo, SaldoDisponivelDoProduto, Unidades,
 };
+use crate::consultas_preco::{ParametrosDePreco, PrecoSugeridoDoProduto, PrecosSugeridosDoGrupo};
 use crate::manifesto::MANIFESTO;
 use crate::migracoes;
 
@@ -37,6 +42,10 @@ impl Modulo for ModuloEstoque {
             .comando::<RenomearGrupoProduto>("estoque.renomear_grupo_produto.v1")
             .comando::<MoverGrupoProduto>("estoque.mover_grupo_produto.v1")
             .comando::<MoverProdutosDeGrupo>("estoque.mover_produtos_de_grupo.v1")
+            .comando::<DefinirMargemDoGrupo>("estoque.definir_margem_do_grupo.v1")
+            .comando::<DefinirMargemDoProduto>("estoque.definir_margem_do_produto.v1")
+            .comando::<DefinirPerfilFiscalDoGrupo>("estoque.definir_perfil_fiscal_do_grupo.v1")
+            .comando::<DefinirParametrosPreco>("estoque.definir_parametros_preco.v1")
             .comando::<CriarUnidade>("estoque.criar_unidade.v1")
             .comando::<CriarProduto>("estoque.criar_produto.v1")
             .comando::<crate::comandos::CriarPecaRapida>("estoque.criar_peca_rapida.v1")
@@ -58,6 +67,9 @@ impl Modulo for ModuloEstoque {
             .consulta::<MovimentosDoProduto>("estoque.movimentos_do_produto.v1")
             .consulta::<GruposProduto>("estoque.grupos_produto.v1")
             .consulta::<ArvoreGruposProduto>("estoque.arvore_grupos_produto.v1")
+            .consulta::<ParametrosDePreco>("estoque.parametros_de_preco.v1")
+            .consulta::<PrecoSugeridoDoProduto>("estoque.preco_sugerido_do_produto.v1")
+            .consulta::<PrecosSugeridosDoGrupo>("estoque.precos_sugeridos_do_grupo.v1")
             .consulta::<Unidades>("estoque.unidades.v1")
             .consulta::<Locais>("estoque.locais.v1")
             .consulta::<DetalheDoLotePorCodigo>("estoque.detalhe_do_lote_por_codigo.v1")

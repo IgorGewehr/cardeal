@@ -88,6 +88,22 @@ impl Arvore {
         }
     }
 
+    /// O grupo e seus ancestrais, do mais próximo à raiz — a ordem em que a herança de
+    /// margem e de perfil fiscal procura um valor.
+    #[must_use]
+    pub fn ancestrais(&self, grupo: Id) -> Vec<Id> {
+        let mut saida = Vec::new();
+        let mut atual = Some(grupo);
+        while let Some(g) = atual {
+            if saida.contains(&g) || !self.pai.contains_key(&g) {
+                break;
+            }
+            saida.push(g);
+            atual = self.pai.get(&g).copied().flatten();
+        }
+        saida
+    }
+
     /// A altura da subárvore com raiz em `grupo`: 1 para uma folha.
     #[must_use]
     pub fn altura(&self, grupo: Id) -> u8 {
@@ -246,6 +262,15 @@ mod testes {
         );
         // Promover à raiz sempre cabe.
         assert_eq!(a.validar_movimento(ids[2], None), Ok(()));
+    }
+
+    #[test]
+    fn ancestrais_vao_do_proprio_a_raiz() {
+        let (nos, ids) = cadeia(3);
+        let a = Arvore::de_nos(&nos);
+        assert_eq!(a.ancestrais(ids[2]), vec![ids[2], ids[1], ids[0]]);
+        assert_eq!(a.ancestrais(ids[0]), vec![ids[0]]);
+        assert!(a.ancestrais(Id::novo()).is_empty());
     }
 
     #[test]

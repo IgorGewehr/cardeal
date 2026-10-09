@@ -81,7 +81,7 @@ impl<'a, 'b> RepositorioEstoque<'a, 'b> {
         Self { uow }
     }
 
-    fn conn(&self) -> &Connection {
+    pub(crate) fn conn(&self) -> &Connection {
         self.uow.conexao()
     }
 

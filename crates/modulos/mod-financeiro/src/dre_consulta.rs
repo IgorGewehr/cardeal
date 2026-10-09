@@ -54,6 +54,7 @@ pub struct DreComparativa {
     pub mes: Competencia,
 }
 
+#[cfg(feature = "sqlite")]
 fn periodo_do_mes(c: Competencia) -> Periodo {
     Periodo::novo(c.primeiro_dia(), c.ultimo_dia())
 }
