@@ -19,6 +19,7 @@ fn linha(qtd: &str, preco: &str) -> Linha {
         desconto: Percentual::ZERO,
         total: Dinheiro::de_total(quantidade, preco, Arredondamento::MeioAcima),
         cancelado: false,
+        minimo: None,
     }
 }
 
@@ -554,4 +555,19 @@ fn nenhum_resultado_nao_escolhe_ninguem() {
     b.quadro(vec![texto("z"), texto("z"), texto("z")]);
     b.quadro(vec![tecla(egui::Key::Enter)]);
     assert_eq!(escolhido(&b), None);
+}
+
+#[test]
+fn linha_abaixo_do_preco_minimo_e_sinalizada_so_se_o_estoque_sabe_o_minimo() {
+    // Mínimo de R$ 80 por unidade; vende 2 a R$ 100.
+    let mut l = linha("2", "100,00");
+    assert!(!l.abaixo_do_minimo(), "sem mínimo conhecido, nada a avisar");
+    l.minimo = Some(Dinheiro::reais(80));
+    assert!(!l.abaixo_do_minimo(), "R$ 200 ≥ 2 × R$ 80");
+    // 25% de desconto → R$ 150, abaixo de 2 × R$ 80 = R$ 160.
+    l.com_desconto(Percentual::pontos(25));
+    assert!(l.abaixo_do_minimo());
+    // Item cancelado nunca avisa.
+    l.cancelado = true;
+    assert!(!l.abaixo_do_minimo());
 }

@@ -15,9 +15,25 @@ pub(super) struct Linha {
     /// Já com o desconto aplicado — o que entra no total do cupom.
     pub(super) total: Dinheiro,
     pub(super) cancelado: bool,
+    /// O preço mínimo unitário (o de empate do preço sugerido) quando o estoque sabe calculá-lo;
+    /// abaixo dele a venda dá prejuízo.
+    pub(super) minimo: Option<Dinheiro>,
 }
 
 impl Linha {
+    /// O total da linha, depois do desconto, ficou abaixo do mínimo (quantidade × preço mínimo)?
+    pub(super) fn abaixo_do_minimo(&self) -> bool {
+        !self.cancelado
+            && self.minimo.is_some_and(|m| {
+                self.total
+                    < Dinheiro::de_total(
+                        self.quantidade,
+                        Preco::centavos(m.em_centavos()),
+                        Arredondamento::MeioAcima,
+                    )
+            })
+    }
+
     /// O total antes do desconto.
     pub(super) fn bruto(&self) -> Dinheiro {
         Dinheiro::de_total(self.quantidade, self.preco, Arredondamento::MeioAcima)
@@ -161,6 +177,8 @@ pub struct EstadoTelaPdv {
     pub(super) clientes: Vec<ItemPessoa>,
     /// O cliente identificado na venda atual, com o nome para mostrar.
     pub(super) cliente: Option<(Id, String)>,
+    /// Preço mínimo por produto já consultado (`None` = o estoque não sabe: sem custo ou margem).
+    pub(super) minimos: std::collections::HashMap<Id, Option<Dinheiro>>,
     pub(super) caixa_sel: Option<Id>,
     pub(super) tabela_sel: Option<Id>,
     pub(super) local_sel: Option<Id>,
@@ -199,6 +217,7 @@ impl Default for EstadoTelaPdv {
             produtos: Vec::new(),
             clientes: Vec::new(),
             cliente: None,
+            minimos: std::collections::HashMap::new(),
             caixa_sel: None,
             tabela_sel: None,
             local_sel: None,

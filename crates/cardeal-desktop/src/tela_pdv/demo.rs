@@ -53,6 +53,7 @@ fn linha(nome: &str, codigo: &str, qtd: &str, preco: &str, pct: i64) -> Linha {
         desconto: Percentual::ZERO,
         total: Dinheiro::ZERO,
         cancelado: false,
+        minimo: None,
     };
     l.total = l.bruto();
     if pct > 0 {

@@ -441,8 +441,8 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   preço…" na aba Preços) cria/atualiza a regra permanente do produto, com arredondamento para cima
   (,90 ou real inteiro); `mod_estoque::sugerir_precos` é a porta que `mod-vendas` usa.
 - **Dívidas conhecidas:** tabelas do Simples a conferir com o contador; a 6ª faixa e a anualização de
-  RBT12 (ver ADR-0018); o PDV ainda **não** alerta margem abaixo do mínimo (o pedido de venda e o
-  orçamento de OS mostram o painel).
+  RBT12 (ver ADR-0018); o PDV só avisa preço abaixo do mínimo de empate (etiqueta "abaixo do mínimo" na linha do
+  cupom, depois do desconto); não bloqueia a venda e não é o painel de margem completo.
 
 ## 2. Decisão estratégica registrada: por que Rust, não C#/.NET
 

@@ -327,6 +327,32 @@ pub(super) fn garantir_cupom(
     }
 }
 
+/// O preço mínimo (de empate) do produto, consultado uma vez por produto e guardado. `None`
+/// quando o estoque não sabe calcular (sem custo, sem margem) ou o usuário não tem acesso.
+fn minimo_do_produto(
+    motor: &Motor,
+    sessao: &Sessao,
+    estado: &mut EstadoTelaPdv,
+    produto: Id,
+) -> Option<Dinheiro> {
+    if let Some(m) = estado.minimos.get(&produto) {
+        return *m;
+    }
+    let m = motor
+        .consultar(
+            sessao,
+            "estoque.preco_sugerido_do_produto.v1",
+            &mod_estoque::PrecoSugeridoDoProduto {
+                produto,
+                custo: None,
+            },
+        )
+        .ok()
+        .and_then(|s: mod_estoque::SugestaoDePreco| s.minimo.map(|m| m.preco));
+    estado.minimos.insert(produto, m);
+    m
+}
+
 /// Adiciona um item ao cupom. Devolve se deu certo.
 pub(super) fn adicionar(
     ctx: &egui::Context,
@@ -364,6 +390,7 @@ pub(super) fn adicionar(
             total_cupom,
         }) => {
             let total = Dinheiro::de_total(quantidade, preco_unitario, Arredondamento::MeioAcima);
+            let minimo = minimo_do_produto(motor, sessao, estado, produto);
             estado.carrinho.push(Linha {
                 item,
                 nome,
@@ -373,6 +400,7 @@ pub(super) fn adicionar(
                 desconto: Percentual::ZERO,
                 total,
                 cancelado: false,
+                minimo,
             });
             estado.linha_sel = Some(estado.carrinho.len() - 1);
             estado.total = total_cupom;

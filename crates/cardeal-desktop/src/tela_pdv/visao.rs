@@ -299,6 +299,8 @@ pub(super) fn itens(ui: &mut egui::Ui, estado: &mut EstadoTelaPdv) {
         linha.col(|ui| {
             if l.cancelado {
                 ui.add(Etiqueta::negativa("cancelado"));
+            } else if l.abaixo_do_minimo() {
+                ui.add(Etiqueta::atencao("abaixo do mínimo"));
             } else if l.desconto == Percentual::ZERO {
                 ui.add(Rotulo::campo("—"));
             } else {
