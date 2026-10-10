@@ -244,27 +244,26 @@ pub(super) fn corpo_detalhe(
     ui.horizontal(|ui| {
         ui.add(Rotulo::campo("Total"));
         ui.add(ValorDinheiro::novo(os.valor_total));
-        if !detalhe.itens_peca.is_empty() {
-            let (custo, estimado) = custo_das_pecas(detalhe, &estado.produtos);
-            let margem = os.valor_total - custo;
-            ui.add_space(Espaco::E16);
-            ui.add(Rotulo::campo(if estimado {
-                "Custo das peças (estimado)"
-            } else {
-                "Custo das peças"
-            }));
-            ui.add(ValorDinheiro::novo(custo).neutro());
-            ui.add_space(Espaco::E16);
-            ui.add(Rotulo::campo("Margem"));
-            ui.add(ValorDinheiro::novo(margem));
-            if os.valor_total.e_positivo() {
-                ui.add(Rotulo::campo(format!(
-                    "{}%",
-                    margem.em_centavos() * 100 / os.valor_total.em_centavos()
-                )));
-            }
-        }
     });
+    if let Some(m) = estado.margem_prevista.clone() {
+        ui.add_space(Espaco::E8);
+        let p = &m.painel;
+        cardeal_ui::organisms::PainelMargem::novo(
+            p.receita,
+            p.custo,
+            p.margem_bruta,
+            p.margem_liquida,
+            p.margem_liquida_pct,
+        )
+        .minimo(m.margem_minima)
+        .itens_sem_custo(p.itens_sem_custo)
+        .mostrar(ui);
+        if m.custo_estimado {
+            ui.add(Rotulo::apoio(
+                "Peça ainda não aplicada: o custo é o combinado na encomenda ou o custo médio de hoje.",
+            ));
+        }
+    }
 
     if os.estado.aceita_edicao_de_orcamento() {
         ui.add_space(Espaco::E12);

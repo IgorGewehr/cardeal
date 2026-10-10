@@ -86,6 +86,12 @@ const SUBMODULOS: &[Submodulo] = &[
 
 const PERMISSOES: &[Permissao] = &[
     perm(
+        "os.margem.ver",
+        "Ver o painel de margem (custo e lucro) da ordem de serviço",
+        Risco::Medio,
+        None,
+    ),
+    perm(
         "os.ordem.ver",
         "Consultar ordens de serviço",
         Risco::Baixo,

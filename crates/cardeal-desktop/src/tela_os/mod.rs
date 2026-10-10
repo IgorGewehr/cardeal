@@ -174,6 +174,8 @@ pub struct EstadoTelaOs {
     usuarios: Vec<UsuarioResumo>,
     identidade: Option<IdentidadeVisual>,
     detalhe: Option<DetalheOrdem>,
+    /// A margem prevista da OS aberta; `None` sem a permissão `os.margem.ver`.
+    margem_prevista: Option<mod_os::MargemPrevista>,
     apontamentos: Vec<ApontamentoDeTempo>,
     tempo_total_ordem: i64,
     titulo_gerado: Option<Titulo>,
@@ -341,6 +343,13 @@ impl EstadoTelaOs {
         ) {
             Ok(detalhe) => {
                 self.detalhe = detalhe;
+                self.margem_prevista = motor
+                    .consultar(
+                        sessao,
+                        "os.margem_prevista_da_ordem.v1",
+                        &mod_os::MargemPrevistaDaOrdem { ordem_servico: id },
+                    )
+                    .ok();
                 self.dlg = Dlg::Detalhe;
                 self.limpar_campos();
                 self.carregar_apontamentos(motor, sessao, id);

@@ -353,3 +353,52 @@ impl BaseDePreco {
         s
     }
 }
+
+/// Os percentuais que incidem sobre qualquer venda da empresa, no momento: o que o preço
+/// sugerido usa, para outros módulos (pedido, OS) calcularem margem com a mesma régua.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EncargosDaEmpresa {
+    /// Custo operacional (derivado do Razão ou informado).
+    pub custo_operacional: Percentual,
+    /// Imposto sobre a venda do regime, sem perfil fiscal especial de produto.
+    pub imposto: Percentual,
+    /// Comissão média.
+    pub comissao: Percentual,
+    /// Taxa média de pagamento.
+    pub taxa_pagamento: Percentual,
+    /// A margem líquida mínima aceita.
+    pub margem_minima: Percentual,
+}
+
+impl EncargosDaEmpresa {
+    /// A soma que incide sobre a receita.
+    #[must_use]
+    pub fn total(&self) -> Percentual {
+        self.custo_operacional + self.imposto + self.comissao + self.taxa_pagamento
+    }
+}
+
+/// Os encargos da empresa (ver [`EncargosDaEmpresa`]).
+///
+/// # Errors
+/// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite ou do Razão.
+#[cfg(feature = "sqlite")]
+pub fn encargos_da_empresa(conexao: &Connection, ctx: &Ctx) -> Resultado<EncargosDaEmpresa> {
+    use crate::precificacao::carga_sobre_venda;
+
+    let base = BaseDePreco::carregar(conexao, ctx)?;
+    let opex = match (
+        base.parametros.custo_operacional_derivado,
+        base.opex_do_razao,
+    ) {
+        (true, Some(p)) => p,
+        _ => base.parametros.custo_operacional,
+    };
+    Ok(EncargosDaEmpresa {
+        custo_operacional: opex,
+        imposto: carga_sobre_venda(base.parametros.regime, base.rbt12, PerfilFiscal::default()),
+        comissao: base.parametros.comissao,
+        taxa_pagamento: base.parametros.taxa_pagamento,
+        margem_minima: base.parametros.margem_minima,
+    })
+}

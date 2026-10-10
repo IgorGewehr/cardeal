@@ -898,3 +898,48 @@ fn margem_do_mes_soma_receita_e_custo_das_os_faturadas() {
         (cardeal_kernel::Dinheiro::ZERO, 1)
     );
 }
+
+#[test]
+fn margem_prevista_no_orcamento_conta_a_peca_ao_custo_atual_e_deixa_a_mao_de_obra_de_fora() {
+    let b = Balcao::novo(&[TODAS, &["os.margem.ver"]].concat());
+    let cliente = b.cliente("João");
+    let (produto, _) = produto_com_estoque(&b); // custo médio R$ 90
+    let os = b.abrir(cliente, "Notebook", "Tela").ordem_servico;
+    orcar_peca(&b, os, produto); // cobra R$ 200
+    let _: Id = b
+        .cmd(
+            "os.montar_orcamento.v1",
+            &MontarOrcamentoOs {
+                ordem_servico: os,
+                item: ItemOrcamentoNovo::MaoDeObra {
+                    descricao: "Troca de tela".into(),
+                    valor: cardeal_kernel::Dinheiro::reais(80),
+                    tecnico: Id::novo(),
+                    horas: None,
+                },
+            },
+        )
+        .unwrap();
+
+    let m: mod_os::MargemPrevista = b.consulta(
+        "os.margem_prevista_da_ordem.v1",
+        &mod_os::MargemPrevistaDaOrdem { ordem_servico: os },
+    );
+    // Receita das duas linhas (200 + 80); só a peça tem custo (90) e entra nas margens.
+    assert_eq!(m.painel.receita, cardeal_kernel::Dinheiro::reais(280));
+    assert_eq!(m.painel.custo, cardeal_kernel::Dinheiro::reais(90));
+    assert_eq!(
+        m.painel.itens_sem_custo, 1,
+        "a mão de obra, sem custo-hora conhecido"
+    );
+    assert!(
+        m.custo_estimado,
+        "a peça ainda não foi aplicada: custo médio de hoje"
+    );
+    // 200 de receita da peça menos 4% de imposto (Simples Anexo I sem faturamento) e 90 de custo.
+    assert_eq!(
+        m.painel.margem_liquida,
+        cardeal_kernel::Dinheiro::reais(102)
+    );
+    assert!(!m.abaixo_do_minimo);
+}

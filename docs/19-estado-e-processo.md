@@ -418,7 +418,7 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   receita, custo, margem bruta e líquida por item e no conjunto, descontando operação, imposto,
   comissão e taxas (os mesmos percentuais do preço sugerido); item sem custo fica fora do cálculo
   (nunca vira lucro de 100%); semáforo com texto no organismo novo `PainelMargem`; item abaixo da
-  margem mínima ganha a etiqueta "margem baixa". Ainda não está no orçamento de OS nem no PDV.
+  margem mínima ganha a etiqueta "margem baixa". Ainda não está no PDV.
 - **Plano de contas** (`cardeal_ledger::modelos`, `mod-financeiro::plano`, migração financeiro v7): plano
   padrão pronto + **modelos por segmento** (comércio, serviços, assistência técnica), contas novas até 5
   níveis, e **categoria → conta** (o lançamento posta na conta própria; a DRE separa aluguel de energia).
@@ -427,6 +427,10 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   giro, dinheiro parado e risco de ruptura (aba **Análise**).
 - **Score de saúde financeira** (`mod-financeiro::saude`, `financeiro.saude.v1`): cartão na Visão geral,
   cinco sinais determinísticos e explicáveis (ver a tabela em `docs/modulos/financeiro.md` §6).
+- **Margem prevista da OS** (`os.margem_prevista_da_ordem.v1`, permissão nova `os.margem.ver`): o painel
+  de margem no orçamento da OS — peças ao custo real (aplicadas), ao combinado da encomenda ou ao custo
+  médio de hoje (marcado como estimativa) e **mão de obra sem custo, fora das margens** (o custo-hora do
+  técnico ainda não existe). Substitui a linha "Margem" simples do detalhe.
 - **Conciliação bancária** (`mod-financeiro::{extrato,sugestao,conciliacao}`, migração financeiro v8): importa
   OFX/CSV, sugere o casamento por valor exato (+ data e documento), concilia/lança/ignora; aba
   **Conciliação**. **Corrigido:** o DFC e o score ignoravam contas bancárias criadas pelo usuário
@@ -437,8 +441,8 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   preço…" na aba Preços) cria/atualiza a regra permanente do produto, com arredondamento para cima
   (,90 ou real inteiro); `mod_estoque::sugerir_precos` é a porta que `mod-vendas` usa.
 - **Dívidas conhecidas:** tabelas do Simples a conferir com o contador; a 6ª faixa e a anualização de
-  RBT12 (ver ADR-0018); o PDV e o orçamento de OS ainda **não** alertam margem abaixo do mínimo
-  (só o pedido de venda mostra o painel).
+  RBT12 (ver ADR-0018); o PDV ainda **não** alerta margem abaixo do mínimo (o pedido de venda e o
+  orçamento de OS mostram o painel).
 
 ## 2. Decisão estratégica registrada: por que Rust, não C#/.NET
 

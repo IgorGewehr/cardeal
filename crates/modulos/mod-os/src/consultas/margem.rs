@@ -162,3 +162,109 @@ impl Consulta for MargemDaOrdem {
         Ok(Some(m))
     }
 }
+
+/// O painel de margem **prevista** de uma OS, ainda no orçamento: peças (ao custo real quando já
+/// aplicadas, senão ao custo médio de hoje) e a mão de obra, descontando operação, impostos,
+/// comissão e taxas com os mesmos percentuais do preço sugerido.
+///
+/// A mão de obra entra na receita mas **sem custo**: o sistema ainda não conhece o custo-hora do
+/// técnico, e contá-la como lucro de 100% inflaria a margem. Fica de fora das margens e é contada
+/// à parte (`itens_sem_custo`), como no pedido de venda.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct MargemPrevistaDaOrdem {
+    /// A ordem de serviço.
+    pub ordem_servico: Id,
+}
+
+/// O que [`MargemPrevistaDaOrdem`] devolve.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MargemPrevista {
+    /// O painel (peças com custo; mão de obra fora das margens).
+    pub painel: mod_estoque::precificacao::PainelDeMargem,
+    /// A margem mínima configurada.
+    pub margem_minima: cardeal_kernel::Percentual,
+    /// A margem líquida das peças está abaixo da mínima.
+    pub abaixo_do_minimo: bool,
+    /// Alguma peça ainda não aplicada teve o custo estimado pelo custo médio atual.
+    pub custo_estimado: bool,
+}
+
+impl Consulta for MargemPrevistaDaOrdem {
+    type Saida = MargemPrevista;
+    const PERMISSAO: &'static str = "os.margem.ver";
+
+    #[cfg(feature = "sqlite")]
+    fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        use cardeal_kernel::{Arredondamento, Dinheiro, Percentual};
+        use mod_estoque::precificacao::{painel_de_margem, ItemDeMargem};
+
+        let pecas = itens_peca_da_ordem(conexao, self.ordem_servico)?;
+        let maos = super::itens_mao_de_obra_da_ordem(conexao, self.ordem_servico)?;
+        let ids: Vec<Id> = pecas.iter().map(|p| p.produto).collect();
+        let sugestoes = mod_estoque::sugerir_precos(conexao, ctx, None, Some(&ids))?;
+        let encargos = mod_estoque::encargos_da_empresa(conexao, ctx)?;
+
+        let mut custo_estimado = false;
+        let mut itens: Vec<ItemDeMargem> = Vec::new();
+        for p in pecas.iter().filter(|p| !p.estornada) {
+            let atual = sugestoes
+                .iter()
+                .find(|s| s.produto == p.produto)
+                .map(|s| (s.nome.clone(), s.custo));
+            let custo_unitario = if p.aplicada {
+                Some(Dinheiro::de_total(
+                    cardeal_kernel::Quantidade::unidades(1),
+                    p.custo_unitario,
+                    Arredondamento::MeioAcima,
+                ))
+            } else {
+                // O combinado com o fornecedor na encomenda vale mais que o custo médio de hoje.
+                let combinado = p
+                    .encomenda
+                    .as_ref()
+                    .and_then(|e| e.custo_previsto)
+                    .map(|c| {
+                        Dinheiro::de_total(
+                            cardeal_kernel::Quantidade::unidades(1),
+                            c,
+                            Arredondamento::MeioAcima,
+                        )
+                    });
+                let c = combinado.or_else(|| atual.as_ref().and_then(|(_, c)| *c));
+                custo_estimado |= c.is_some();
+                c
+            };
+            let receita = if p.coberto_garantia {
+                Dinheiro::ZERO
+            } else {
+                Dinheiro::de_total(p.quantidade, p.preco_unitario, Arredondamento::MeioAcima)
+            };
+            itens.push(ItemDeMargem {
+                rotulo: atual.map_or_else(|| "Peça".to_owned(), |(n, _)| n),
+                quantidade: p.quantidade,
+                receita,
+                custo_unitario,
+                encargos: encargos.total(),
+            });
+        }
+        for m in &maos {
+            itens.push(ItemDeMargem {
+                rotulo: m.descricao.clone(),
+                quantidade: cardeal_kernel::Quantidade::unidades(1),
+                receita: m.valor,
+                custo_unitario: None,
+                encargos: encargos.total(),
+            });
+        }
+        let painel = painel_de_margem(&itens);
+        let abaixo = painel
+            .margem_liquida_pct
+            .is_some_and(|p: Percentual| p < encargos.margem_minima);
+        Ok(MargemPrevista {
+            painel,
+            margem_minima: encargos.margem_minima,
+            abaixo_do_minimo: abaixo,
+            custo_estimado,
+        })
+    }
+}

@@ -629,7 +629,7 @@ fn peca_nova_pelo_orcamento_vai_para_a_lista_de_compras_e_chega_pela_tela() {
 }
 
 #[test]
-fn custo_das_pecas_estima_pelo_custo_medio_ate_a_peca_ser_aplicada() {
+fn margem_prevista_estima_a_peca_pelo_custo_medio_ate_ela_ser_aplicada() {
     let mut c = cenario();
     let _: Id = c
         .motor
@@ -647,12 +647,11 @@ fn custo_das_pecas_estima_pelo_custo_medio_ate_a_peca_ser_aplicada() {
         )
         .expect("peça");
     c.estado.abrir_detalhe(&c.motor, &c.sessao, c.os);
-    let d = c.estado.detalhe.clone().expect("detalhe");
+    let m = c.estado.margem_prevista.clone().expect("painel de margem");
     // Pendente: custo médio do estoque (R$ 90) × 2, marcado como estimativa.
-    assert_eq!(
-        custo_das_pecas(&d, &c.estado.produtos),
-        (Dinheiro::reais(180), true)
-    );
+    assert_eq!(m.painel.receita, Dinheiro::reais(500));
+    assert_eq!(m.painel.custo, Dinheiro::reais(180));
+    assert!(m.custo_estimado);
 }
 
 #[test]

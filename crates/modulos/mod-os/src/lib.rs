@@ -98,7 +98,7 @@ pub use consultas::{
     TempoPorTecnicoNoPeriodo, TempoTotalDaOrdem, TodasAsOrdens, UltimoPrecoDaPeca,
 };
 pub use consultas::{ItemListaOrdem, ListarOrdens};
-pub use consultas::{MargemDaOrdem, MargemDaOrdemServico};
+pub use consultas::{MargemDaOrdem, MargemDaOrdemServico, MargemPrevista, MargemPrevistaDaOrdem};
 pub use erros::ErroOs;
 pub use execucao::{Encomenda, ItemMaoDeObra, ItemPeca};
 pub use laudo::LaudoTecnico;

@@ -69,6 +69,7 @@ impl Modulo for ModuloOs {
             .consulta::<OrdensDoCliente>("os.ordens_do_cliente.v1")
             .consulta::<MargemDasOrdensNoPeriodo>("os.margem_das_ordens_no_periodo.v1")
             .consulta::<MargemDaOrdem>("os.margem_da_ordem.v1")
+            .consulta::<crate::MargemPrevistaDaOrdem>("os.margem_prevista_da_ordem.v1")
             .consulta::<UltimoPrecoDaPeca>("os.ultimo_preco_da_peca.v1")
             .consulta::<BuscarDetalheOrdem>("os.buscar_detalhe_ordem.v1")
             .consulta::<OrdensAguardandoAprovacao>("os.ordens_aguardando_aprovacao.v1")

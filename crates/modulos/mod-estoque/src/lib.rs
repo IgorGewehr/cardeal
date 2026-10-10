@@ -133,10 +133,10 @@ pub use consultas_lote::{
     PerfilFiscalEfetivo, PreviaDaAlteracaoEmLote, ProdutoParaLote, ProdutosParaLote,
 };
 #[cfg(feature = "sqlite")]
-pub use consultas_preco::{parametros_da_empresa, sugerir_precos};
+pub use consultas_preco::{encargos_da_empresa, parametros_da_empresa, sugerir_precos};
 pub use consultas_preco::{
-    OrigemMargem, ParametrosDePreco, PrecoSugeridoDoProduto, PrecosSugeridosDoGrupo,
-    SugestaoDePreco,
+    EncargosDaEmpresa, OrigemMargem, ParametrosDePreco, PrecoSugeridoDoProduto,
+    PrecosSugeridosDoGrupo, SugestaoDePreco,
 };
 pub use erros::ErroEstoque;
 pub use inventario::{AjusteInventario, ContagemItem, EstadoInventario, Inventario};

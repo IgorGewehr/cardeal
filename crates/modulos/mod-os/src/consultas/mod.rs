@@ -25,7 +25,10 @@ use crate::repositorio::{
 mod listagem;
 mod margem;
 pub use listagem::{ItemListaOrdem, ListarOrdens};
-pub use margem::{MargemDaOrdem, MargemDaOrdemServico, MargemDasOrdens, MargemDasOrdensNoPeriodo};
+pub use margem::{
+    MargemDaOrdem, MargemDaOrdemServico, MargemDasOrdens, MargemDasOrdensNoPeriodo, MargemPrevista,
+    MargemPrevistaDaOrdem,
+};
 
 /// Busca uma ordem de serviço pelo id.
 ///
