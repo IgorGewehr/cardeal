@@ -59,9 +59,11 @@
 #![allow(clippy::result_large_err)]
 
 pub mod alteracao_em_lote;
+pub mod analise;
 mod aparelho_origem;
 mod comandos;
 mod consultas;
+mod consultas_analise;
 mod consultas_lote;
 mod consultas_preco;
 mod erros;
@@ -125,6 +127,7 @@ pub use consultas::{
     ProdutoPorCodigoBarras, ProdutoPorId, ProdutosAbaixoDoPontoPedido, ProdutosComSaldo,
     SaldoDisponivelDoProduto, Unidades,
 };
+pub use consultas_analise::AnaliseDeEstoque;
 pub use consultas_lote::{
     AlteracaoRegistrada, HistoricoDeAlteracoesEmLote, LinhaDaPrevia, PerfilFiscalDoProduto,
     PerfilFiscalEfetivo, PreviaDaAlteracaoEmLote, ProdutoParaLote, ProdutosParaLote,

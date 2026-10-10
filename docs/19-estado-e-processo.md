@@ -423,6 +423,8 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   padrão pronto + **modelos por segmento** (comércio, serviços, assistência técnica), contas novas até 5
   níveis, e **categoria → conta** (o lançamento posta na conta própria; a DRE separa aluguel de energia).
   Aba **Plano de contas** com a árvore. Faltam importação por planilha e DE/PARA contábil.
+- **Análise de estoque** (`mod-estoque::analise`): curva ABC por valor de saída, cobertura em dias,
+  giro, dinheiro parado e risco de ruptura (aba **Análise**).
 - **Cobrança** (`mod-financeiro::aging`): aging dos recebíveis e pagáveis, taxa de inadimplência e lista
   de devedores com WhatsApp pronto — aba **Cobrança** (cena `financeiro-cobranca`).
 - **Preço sugerido → tabela de preço:** `vendas.aplicar_precos_sugeridos.v1` (botão "Aplicar à tabela de

@@ -339,3 +339,22 @@ fn lote_monta_filtros_e_mudancas_fiscais_do_formulario() {
         "apagar os campos próprios é uma mudança"
     );
 }
+
+#[test]
+fn aba_analise_lista_o_produto_parado_com_o_dinheiro_que_ele_prende() {
+    let t = motor_de_teste();
+    let produto = cenario_de_preco(&t); // 10 un a R$ 50, nenhuma saída
+    let mut estado = EstadoTelaEstoque {
+        aba: AbaEstoque::Analise,
+        ..Default::default()
+    };
+    estado.analise.carregar(&t.motor, &t.sessao);
+    let i = estado
+        .analise
+        .itens
+        .iter()
+        .find(|i| i.produto == produto)
+        .expect("produto na análise");
+    assert_eq!(i.classe, mod_estoque::analise::ClasseAbc::SemGiro);
+    assert_eq!(i.valor_em_estoque, cardeal_kernel::Dinheiro::reais(500));
+}

@@ -24,6 +24,7 @@ use crate::consultas::{
     MovimentosDoProduto, ProdutoPorCodigoBarras, ProdutoPorId, ProdutosAbaixoDoPontoPedido,
     ProdutosComSaldo, SaldoDisponivelDoProduto, Unidades,
 };
+use crate::consultas_analise::AnaliseDeEstoque;
 use crate::consultas_lote::{
     HistoricoDeAlteracoesEmLote, PerfilFiscalDoProduto, PreviaDaAlteracaoEmLote, ProdutosParaLote,
 };
@@ -84,6 +85,7 @@ impl Modulo for ModuloEstoque {
             .consulta::<PrecoSugeridoDoProduto>("estoque.preco_sugerido_do_produto.v1")
             .consulta::<PrecosSugeridosDoGrupo>("estoque.precos_sugeridos_do_grupo.v1")
             .consulta::<PerfilFiscalDoProduto>("estoque.perfil_fiscal_do_produto.v1")
+            .consulta::<AnaliseDeEstoque>("estoque.analise_de_estoque.v1")
             .consulta::<ProdutosParaLote>("estoque.produtos_para_lote.v1")
             .consulta::<PreviaDaAlteracaoEmLote>("estoque.previa_da_alteracao_em_lote.v1")
             .consulta::<HistoricoDeAlteracoesEmLote>("estoque.historico_de_alteracoes_em_lote.v1")

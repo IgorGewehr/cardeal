@@ -324,6 +324,7 @@ stateDiagram-v2
 | `ParametrosDePreco` ✅ (2026-10-09) | `estoque.produto.ver` | Parâmetros de preço do CNPJ | `estoque_parametros_preco(empresa)` |
 | `PrecoSugeridoDoProduto` ✅ (2026-10-09) | `estoque.produto.ver` | Preço sugerido e de empate com a decomposição e a origem de cada percentual; `custo` opcional recalcula (cotação de compra) | produto + grupos + `razao_*` (RBT12 e custo operacional) |
 | `PrecosSugeridosDoGrupo` ✅ (2026-10-09) | `estoque.produto.ver` | Aba Preços: a mesma conta para a subárvore de um grupo (ou o catálogo todo com `grupo: None`), carregando a base (parâmetros, árvore, Razão) uma vez só | idem |
+| `AnaliseDeEstoque` ✅ (2026-10-09; substitui `CurvaAbc`) | `estoque.abc.ver` | Aba Análise: curva ABC (A até 80% do valor acumulado, B até 95%, C o resto; sem saída = sem giro) pelo **valor que saiu ao custo** na janela (30/60/90/180 dias), cobertura em dias (saldo ÷ ritmo de saída; abaixo de 7 dias = risco de ruptura) e giro | `estoque_movimento(produto, criado_em)` tipo `Saida` + `estoque_saldo_local` |
 | `CurvaAbc` | `estoque.abc.ver` | Relatório de curva ABC | agregação de `estoque_movimento` por valor no período |
 | `LotesProximosDoVencimento` | `estoque.lote.ver` | Alerta de validade | `estoque_lote(validade)` índice parcial `WHERE estado = 'Ativo'` |
 | `EstoqueEmTransito` | `estoque.transferencia.ver` | Painel de transferências pendentes | `estoque_saldo_local(local) WHERE local = local_em_transito` |
