@@ -58,9 +58,11 @@
 #![allow(clippy::module_name_repetitions, clippy::must_use_candidate)]
 #![allow(clippy::result_large_err)]
 
+pub mod alteracao_em_lote;
 mod aparelho_origem;
 mod comandos;
 mod consultas;
+mod consultas_lote;
 mod consultas_preco;
 mod erros;
 pub mod eventos;
@@ -78,6 +80,8 @@ mod produto;
 pub mod receituario;
 #[cfg(feature = "sqlite")]
 mod repositorio;
+#[cfg(feature = "sqlite")]
+pub(crate) mod repositorio_lote;
 #[cfg(feature = "sqlite")]
 pub(crate) mod repositorio_preco;
 mod saldo;
@@ -98,6 +102,9 @@ pub use comandos::{
     RegistrarEntradaComLote, RegistrarSaida, SaidaGravada, SaidaRegistrada, SaldoAjustado,
     TipoLocal, UnidadeCriada,
 };
+pub use comandos::{
+    AlteracaoAplicada, AlteracaoDesfeita, AplicarAlteracaoEmLote, DesfazerAlteracaoEmLote,
+};
 pub use comandos::{CriarPecaRapida, PecaRapidaCriada};
 pub use comandos::{
     DefinirMargemDoGrupo, DefinirMargemDoProduto, DefinirParametrosPreco,
@@ -115,6 +122,10 @@ pub use consultas::{
     ItemUnidade, Locais, LotesDisponiveisDoProduto, MovimentosDoProduto, NoArvoreGrupo,
     ProdutoPorCodigoBarras, ProdutoPorId, ProdutosAbaixoDoPontoPedido, ProdutosComSaldo,
     SaldoDisponivelDoProduto, Unidades,
+};
+pub use consultas_lote::{
+    AlteracaoRegistrada, HistoricoDeAlteracoesEmLote, LinhaDaPrevia, PreviaDaAlteracaoEmLote,
+    ProdutoParaLote, ProdutosParaLote,
 };
 #[cfg(feature = "sqlite")]
 pub use consultas_preco::{parametros_da_empresa, sugerir_precos};

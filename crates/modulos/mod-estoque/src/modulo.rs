@@ -11,6 +11,7 @@ use crate::comandos::{
     RegistrarAparelhoOrigem, RegistrarEntrada, RegistrarEntradaComLote, RegistrarSaida,
     RenomearGrupoProduto,
 };
+use crate::comandos::{AplicarAlteracaoEmLote, DesfazerAlteracaoEmLote};
 use crate::comandos::{
     DefinirMargemDoGrupo, DefinirMargemDoProduto, DefinirParametrosPreco,
     DefinirPerfilFiscalDoGrupo,
@@ -19,6 +20,9 @@ use crate::consultas::{
     ArvoreGruposProduto, DetalheDoLotePorCodigo, GruposProduto, Locais, LotesDisponiveisDoProduto,
     MovimentosDoProduto, ProdutoPorCodigoBarras, ProdutoPorId, ProdutosAbaixoDoPontoPedido,
     ProdutosComSaldo, SaldoDisponivelDoProduto, Unidades,
+};
+use crate::consultas_lote::{
+    HistoricoDeAlteracoesEmLote, PreviaDaAlteracaoEmLote, ProdutosParaLote,
 };
 use crate::consultas_preco::{ParametrosDePreco, PrecoSugeridoDoProduto, PrecosSugeridosDoGrupo};
 use crate::manifesto::MANIFESTO;
@@ -46,6 +50,8 @@ impl Modulo for ModuloEstoque {
             .comando::<DefinirMargemDoProduto>("estoque.definir_margem_do_produto.v1")
             .comando::<DefinirPerfilFiscalDoGrupo>("estoque.definir_perfil_fiscal_do_grupo.v1")
             .comando::<DefinirParametrosPreco>("estoque.definir_parametros_preco.v1")
+            .comando::<AplicarAlteracaoEmLote>("estoque.aplicar_alteracao_em_lote.v1")
+            .comando::<DesfazerAlteracaoEmLote>("estoque.desfazer_alteracao_em_lote.v1")
             .comando::<CriarUnidade>("estoque.criar_unidade.v1")
             .comando::<CriarProduto>("estoque.criar_produto.v1")
             .comando::<crate::comandos::CriarPecaRapida>("estoque.criar_peca_rapida.v1")
@@ -70,6 +76,9 @@ impl Modulo for ModuloEstoque {
             .consulta::<ParametrosDePreco>("estoque.parametros_de_preco.v1")
             .consulta::<PrecoSugeridoDoProduto>("estoque.preco_sugerido_do_produto.v1")
             .consulta::<PrecosSugeridosDoGrupo>("estoque.precos_sugeridos_do_grupo.v1")
+            .consulta::<ProdutosParaLote>("estoque.produtos_para_lote.v1")
+            .consulta::<PreviaDaAlteracaoEmLote>("estoque.previa_da_alteracao_em_lote.v1")
+            .consulta::<HistoricoDeAlteracoesEmLote>("estoque.historico_de_alteracoes_em_lote.v1")
             .consulta::<Unidades>("estoque.unidades.v1")
             .consulta::<Locais>("estoque.locais.v1")
             .consulta::<DetalheDoLotePorCodigo>("estoque.detalhe_do_lote_por_codigo.v1")

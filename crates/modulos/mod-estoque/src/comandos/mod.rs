@@ -10,6 +10,7 @@
 //! grade/lote/validade/inventário/transferência (ver `src/lib.rs`).
 
 mod ajustar_saldo;
+mod aplicar_alteracao_em_lote;
 mod criar_grupo_produto;
 mod criar_local;
 mod criar_peca_rapida;
@@ -21,6 +22,7 @@ mod definir_margem_do_produto;
 mod definir_parametros_preco;
 mod definir_perfil_fiscal_do_grupo;
 mod definir_ponto_pedido;
+mod desfazer_alteracao_em_lote;
 mod editar_detalhes_tecnicos_produto;
 mod mover_grupo_produto;
 mod mover_produtos_de_grupo;
@@ -31,6 +33,7 @@ mod registrar_saida;
 mod renomear_grupo_produto;
 
 pub use ajustar_saldo::{AjustarSaldo, SaldoAjustado};
+pub use aplicar_alteracao_em_lote::{AlteracaoAplicada, AplicarAlteracaoEmLote};
 pub use criar_grupo_produto::{CriarGrupoProduto, GrupoProdutoCriado};
 pub use criar_local::{CriarLocal, LocalCriado, TipoLocal};
 #[cfg(feature = "sqlite")]
@@ -44,6 +47,7 @@ pub use definir_margem_do_produto::DefinirMargemDoProduto;
 pub use definir_parametros_preco::DefinirParametrosPreco;
 pub use definir_perfil_fiscal_do_grupo::DefinirPerfilFiscalDoGrupo;
 pub use definir_ponto_pedido::DefinirPontoPedido;
+pub use desfazer_alteracao_em_lote::{AlteracaoDesfeita, DesfazerAlteracaoEmLote};
 pub use editar_detalhes_tecnicos_produto::EditarDetalhesTecnicosProduto;
 pub use mover_grupo_produto::MoverGrupoProduto;
 pub use mover_produtos_de_grupo::{MoverProdutosDeGrupo, ProdutosMovidos};

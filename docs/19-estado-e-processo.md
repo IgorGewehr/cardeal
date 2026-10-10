@@ -407,6 +407,10 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
 - **DFC pelo método direto** (`mod-financeiro::dfc`, `cardeal_ledger::movimentos_de_caixa`): na mesma
   aba do DRE ("Resultado e caixa", chave DRE/DFC); o saldo final bate com o Razão. O método
   indireto não foi feito.
+- **Alteração em lote** (`mod-estoque::alteracao_em_lote`, migração `estoque` v7): margem, grupo e
+  situação de vários produtos, com **prévia** do antes/depois, histórico e **desfazer a última em 24h**
+  (só restaura quem não foi editado depois; tudo-ou-nada). Aba "Alteração em lote" no Estoque, filtro
+  por grupo (subárvore) e por busca. **Campos fiscais (NCM, CEST, CFOP, alíquotas) ainda não entram.**
 - **Painel de margem do pedido** (`vendas.margem_do_pedido.v1`, permissão nova `vendas.margem.ver`):
   receita, custo, margem bruta e líquida por item e no conjunto, descontando operação, imposto,
   comissão e taxas (os mesmos percentuais do preço sugerido); item sem custo fica fora do cálculo

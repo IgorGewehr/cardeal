@@ -7,6 +7,7 @@
 //! existia no backend mas não estava ligado a nenhuma tela).
 
 mod estrutura;
+mod lote;
 mod precos;
 #[cfg(test)]
 mod testes;
@@ -39,6 +40,7 @@ enum AbaEstoque {
     Produtos,
     Estrutura,
     Precos,
+    Lote,
     Radar,
 }
 
@@ -66,6 +68,7 @@ pub struct EstadoTelaEstoque {
     grupos: Vec<ItemGrupoProduto>,
     est: estrutura::EstadoEstrutura,
     prc: precos::EstadoPrecos,
+    lote: lote::EstadoLote,
     unidades: Vec<ItemUnidade>,
     locais: Vec<ItemLocal>,
     radar: Vec<ItemAbaixoDoPontoPedido>,
@@ -218,6 +221,7 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
                 (AbaEstoque::Produtos, "Produtos"),
                 (AbaEstoque::Estrutura, "Estrutura"),
                 (AbaEstoque::Precos, "Preços"),
+                (AbaEstoque::Lote, "Alteração em lote"),
                 (AbaEstoque::Radar, "Radar de reposição"),
             ])
             .selecionada(estado.aba)
@@ -226,6 +230,9 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
                 estado.aba = nova;
                 if nova == AbaEstoque::Precos {
                     estado.prc.carregar(motor, sessao);
+                }
+                if nova == AbaEstoque::Lote {
+                    estado.lote.carregar(motor, sessao);
                 }
             }
             ui.add_space(Espaco::E16);
@@ -243,6 +250,7 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
                 AbaEstoque::Produtos => lista(ui, motor, sessao, estado),
                 AbaEstoque::Estrutura => estrutura::aba(ui, motor, sessao, estado),
                 AbaEstoque::Precos => precos::aba(ui, motor, sessao, estado),
+                AbaEstoque::Lote => lote::aba(ui, motor, sessao, estado),
                 AbaEstoque::Radar => radar(ui, estado),
             }
         },

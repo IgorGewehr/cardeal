@@ -193,6 +193,36 @@ CREATE TABLE estoque_parametros_preco (
 ) STRICT;
 ";
 
+// Migração v7 (2026-10-09): alteração em lote do catálogo com prévia e desfazer (24h). Aditiva.
+// `estoque_alteracao_lote` é o cabeçalho (quem, quando, o que mexeu, se foi desfeita) e
+// `estoque_alteracao_lote_item` guarda o antes e o depois de cada produto, para desfazer só o
+// que ainda está como a alteração deixou.
+const SQL_ALTERACAO_EM_LOTE: &str = r"
+CREATE TABLE estoque_alteracao_lote (
+    id          BLOB PRIMARY KEY,
+    empresa     BLOB    NOT NULL REFERENCES nucleo_empresa(id),
+    usuario     BLOB    NOT NULL,
+    criado_em   INTEGER NOT NULL,
+    descricao   TEXT    NOT NULL,
+    campos      TEXT    NOT NULL,
+    quantidade  INTEGER NOT NULL,
+    desfeito_em INTEGER
+) STRICT;
+CREATE INDEX estoque_alteracao_lote_recentes ON estoque_alteracao_lote(empresa, criado_em);
+
+CREATE TABLE estoque_alteracao_lote_item (
+    lote           BLOB    NOT NULL REFERENCES estoque_alteracao_lote(id),
+    produto        BLOB    NOT NULL REFERENCES estoque_produto(id),
+    antes_grupo    BLOB    NOT NULL,
+    antes_margem   INTEGER,
+    antes_ativo    INTEGER NOT NULL,
+    depois_grupo   BLOB    NOT NULL,
+    depois_margem  INTEGER,
+    depois_ativo   INTEGER NOT NULL,
+    PRIMARY KEY (lote, produto)
+) STRICT, WITHOUT ROWID;
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -228,6 +258,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 6,
         nome: "estoque_precificacao",
         sql: SQL_PRECIFICACAO,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 7,
+        nome: "estoque_alteracao_em_lote",
+        sql: SQL_ALTERACAO_EM_LOTE,
         tipo: TipoMigracao::Esquema,
     },
 ];

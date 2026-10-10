@@ -240,3 +240,68 @@ fn aplicar_preco_sugerido_cria_a_regra_na_tabela_de_vendas() {
     assert_eq!(regras.len(), 1);
     assert_eq!(regras[0].preco, Preco::centavos(8_390));
 }
+
+#[test]
+fn aba_lote_filtra_aplica_e_desfaz_pela_tela() {
+    let t = motor_de_teste();
+    let a = grupo(&t.motor, &t.sessao, "A", None);
+    let b = grupo(&t.motor, &t.sessao, "B", None);
+    let un: UnidadeCriada = t
+        .motor
+        .executar(
+            &t.sessao,
+            "estoque.criar_unidade.v1",
+            &CriarUnidade {
+                sigla: "UN".into(),
+                nome: "Un".into(),
+                fracionavel: false,
+            },
+        )
+        .expect("unidade");
+    let mut ids = Vec::new();
+    for (nome, g) in [("Coca", a), ("Guaraná", a), ("Arroz", b)] {
+        let p: ProdutoCriado = t
+            .motor
+            .executar(
+                &t.sessao,
+                "estoque.criar_produto.v1",
+                &CriarProduto {
+                    grupo_produto: g,
+                    nome: nome.into(),
+                    ncm: "22021000".into(),
+                    unidade_padrao: un.unidade,
+                    codigo_barras: None,
+                    detalhes_tecnicos: None,
+                },
+            )
+            .expect("produto");
+        ids.push(p.produto);
+    }
+    let mut estado = EstadoTelaEstoque {
+        aba: AbaEstoque::Lote,
+        ..Default::default()
+    };
+    estado.carregar(&t.motor, &t.sessao);
+    estado.lote.grupo = Some(a);
+    estado.lote.carregar(&t.motor, &t.sessao);
+    assert_eq!(estado.lote.produtos.len(), 2, "só o grupo A");
+
+    // Sem escolher o que mudar, a tela avisa em vez de chamar o motor.
+    assert!(estado.lote.alteracao().is_err());
+    estado.lote.margem_modo = 1;
+    estado.lote.margem = "abc".into();
+    assert!(estado.lote.alteracao().unwrap_err().contains("Margem"));
+    estado.lote.margem = "25".into();
+    assert!(estado.lote.alteracao().is_ok());
+
+    let marcar: Vec<Id> = estado.lote.produtos.iter().map(|p| p.produto).collect();
+    estado.lote.marcados.extend(marcar);
+    lote::aplicar(&egui::Context::default(), &t.motor, &t.sessao, &mut estado);
+    assert!(estado
+        .lote
+        .produtos
+        .iter()
+        .all(|p| p.margem == Some(Percentual::pontos(25))));
+    assert_eq!(estado.lote.historico.len(), 1);
+    assert!(estado.lote.historico[0].pode_desfazer);
+}
