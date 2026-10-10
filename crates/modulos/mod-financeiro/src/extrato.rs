@@ -168,12 +168,12 @@ fn data_csv(t: &str) -> Option<Data> {
     if partes.len() != 3 {
         return None;
     }
-    let n = |s: &str| s.trim().parse::<i32>().ok();
-    let (a, b, c) = (n(partes[0])?, n(partes[1])?, n(partes[2])?);
+    let numero = |s: &str| s.trim().parse::<i32>().ok();
+    let (p0, p1, p2) = (numero(partes[0])?, numero(partes[1])?, numero(partes[2])?);
     let (ano, mes, dia) = if partes[0].trim().len() == 4 {
-        (a, b, c)
+        (p0, p1, p2)
     } else {
-        (c, b, a)
+        (p2, p1, p0)
     };
     let ano = if ano < 100 { ano + 2000 } else { ano };
     Data::de_ymd(ano, u32::try_from(mes).ok()?, u32::try_from(dia).ok()?).ok()
