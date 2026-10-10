@@ -305,3 +305,37 @@ fn aba_lote_filtra_aplica_e_desfaz_pela_tela() {
     assert_eq!(estado.lote.historico.len(), 1);
     assert!(estado.lote.historico[0].pode_desfazer);
 }
+
+#[test]
+fn lote_monta_filtros_e_mudancas_fiscais_do_formulario() {
+    let mut l = lote::EstadoLote::default();
+    l.fabricante = "samsung".into();
+    l.ncm_prefixo = "8517".into();
+    l.situacao = 1;
+    l.so_sem_fiscal = true;
+    l.custo_min = "10,50".into();
+    let f = l.filtro().unwrap();
+    assert_eq!(f.fabricante.as_deref(), Some("samsung"));
+    assert_eq!(f.ativo, Some(true));
+    assert!(f.sem_perfil_fiscal_proprio);
+    assert_eq!(f.custo_minimo, Some(1_050));
+    l.custo_max = "abc".into();
+    assert!(l.filtro().unwrap_err().contains("Custo máximo"));
+
+    // Mudança fiscal: NCM + preencher só alguns campos.
+    l.ncm_novo = "85177099".into();
+    l.fiscal_modo = 1;
+    l.fisc.cst_icms = "500".into();
+    let a = l.alteracao().unwrap();
+    assert!(a.mexe_em_fiscal());
+    l.ncm_novo = "12".into();
+    assert!(l.alteracao().unwrap_err().contains("NCM"));
+    l.ncm_novo.clear();
+    l.fisc.cst_icms.clear();
+    assert!(l.alteracao().is_err(), "preencher sem preencher nada");
+    l.fiscal_modo = 2;
+    assert!(
+        l.alteracao().is_ok(),
+        "apagar os campos próprios é uma mudança"
+    );
+}

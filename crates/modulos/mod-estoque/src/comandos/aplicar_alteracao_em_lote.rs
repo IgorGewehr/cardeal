@@ -61,6 +61,15 @@ impl Comando for AplicarAlteracaoEmLote {
                 "no máximo {MAX_PRODUTOS} produtos por alteração; divida por grupo"
             )));
         }
+        self.alteracao
+            .validar()
+            .map_err(|m| Erro::novo(CodigoErro::ENTRADA_INVALIDA, m))?;
+        if self.alteracao.mexe_em_fiscal() && !ctx.concede("estoque.tributario.editar") {
+            return Err(Erro::novo(
+                CodigoErro::SEM_PERMISSAO,
+                "alterar NCM e campos fiscais exige a permissão de perfil tributário",
+            ));
+        }
         if let Mudanca::Definir(Some(m)) = self.alteracao.margem {
             if !m.e_fracao_valida() || m == cardeal_kernel::Percentual::CEM {
                 return Err(Erro::novo(
@@ -92,13 +101,13 @@ impl Comando for AplicarAlteracaoEmLote {
         for produto in &self.produtos {
             let p = sql::produto_do_lote(conn, ctx.organizacao, *produto)?
                 .ok_or_else(|| Erro::nao_encontrado("produto"))?;
-            let depois = self.alteracao.aplicar(p.valores);
+            let depois = self.alteracao.aplicar(&p.valores);
             if depois == p.valores {
                 sem_mudanca += 1;
                 continue;
             }
-            sql::gravar_valores(conn, ctx.organizacao, *produto, depois)?;
-            sql::inserir_item(conn, lote, *produto, p.valores, depois)?;
+            sql::gravar_valores(conn, ctx.organizacao, *produto, &depois)?;
+            sql::inserir_item(conn, lote, *produto, &p.valores, &depois)?;
             alterados += 1;
         }
         if alterados == 0 {

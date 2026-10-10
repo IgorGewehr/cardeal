@@ -5,10 +5,13 @@
 use std::collections::HashSet;
 
 use super::*;
+use cardeal_kernel::Dinheiro;
 use cardeal_kernel::Percentual;
-use cardeal_ui::atoms::Caixa;
+use cardeal_ui::atoms::{Caixa, ValorDinheiro};
 use cardeal_ui::molecules::Abas;
-use mod_estoque::alteracao_em_lote::{Alteracao, Mudanca, ValoresProduto};
+use mod_estoque::alteracao_em_lote::{
+    Alteracao, FiltroDeLote, Mudanca, MudancaFiscal, ValoresProduto,
+};
 use mod_estoque::{
     AlteracaoAplicada, AlteracaoDesfeita, AlteracaoRegistrada, AplicarAlteracaoEmLote,
     DesfazerAlteracaoEmLote, HistoricoDeAlteracoesEmLote, LinhaDaPrevia, PreviaDaAlteracaoEmLote,
@@ -30,6 +33,21 @@ pub(super) struct EstadoLote {
     ativo_modo: u8,
     previa: Option<Vec<LinhaDaPrevia>>,
     pub(super) historico: Vec<AlteracaoRegistrada>,
+    // Filtros além do grupo e do nome.
+    pub(super) fabricante: String,
+    pub(super) ncm_prefixo: String,
+    /// 0 = todos, 1 = só ativos, 2 = só inativos.
+    pub(super) situacao: u8,
+    so_sem_margem: bool,
+    pub(super) so_sem_fiscal: bool,
+    so_sem_custo: bool,
+    pub(super) custo_min: String,
+    pub(super) custo_max: String,
+    // Mudanças fiscais.
+    pub(super) ncm_novo: String,
+    /// 0 = manter, 1 = preencher os campos informados, 2 = apagar os campos próprios.
+    pub(super) fiscal_modo: u8,
+    pub(super) fisc: super::fiscal::FormFiscal,
 }
 
 impl EstadoLote {
@@ -39,7 +57,7 @@ impl EstadoLote {
             "estoque.produtos_para_lote.v1",
             &ProdutosParaLote {
                 grupo: self.grupo,
-                busca: Some(self.busca.clone()),
+                filtro: self.filtro().unwrap_or_default(),
             },
         ) {
             self.marcados
@@ -56,6 +74,39 @@ impl EstadoLote {
         self.previa = None;
     }
 
+    /// Os critérios do formulário (grupo é tratado à parte).
+    pub(super) fn filtro(&self) -> Result<FiltroDeLote, String> {
+        let texto = |t: &str| {
+            let t = t.trim();
+            (!t.is_empty()).then(|| t.to_owned())
+        };
+        let centavos = |nome: &str, t: &str| -> Result<Option<i64>, String> {
+            let t = t.trim();
+            if t.is_empty() {
+                return Ok(None);
+            }
+            Dinheiro::de_str(t)
+                .map(|d| Some(d.em_centavos()))
+                .map_err(|_| format!("{nome}: digite um valor, como 12,50"))
+        };
+        Ok(FiltroDeLote {
+            grupos: None,
+            busca: texto(&self.busca),
+            fabricante: texto(&self.fabricante),
+            ncm_prefixo: texto(&self.ncm_prefixo),
+            ativo: match self.situacao {
+                1 => Some(true),
+                2 => Some(false),
+                _ => None,
+            },
+            sem_margem_propria: self.so_sem_margem,
+            sem_perfil_fiscal_proprio: self.so_sem_fiscal,
+            custo_minimo: centavos("Custo mínimo", &self.custo_min)?,
+            custo_maximo: centavos("Custo máximo", &self.custo_max)?,
+            sem_custo: self.so_sem_custo,
+        })
+    }
+
     /// A alteração montada do formulário; erro com a mensagem para o usuário.
     pub(super) fn alteracao(&self) -> Result<Alteracao, String> {
         let margem = match self.margem_modo {
@@ -70,6 +121,15 @@ impl EstadoLote {
             2 => Mudanca::Definir(None),
             _ => Mudanca::Manter,
         };
+        let ncm = match self.ncm_novo.trim() {
+            "" => Mudanca::Manter,
+            n => Mudanca::Definir(n.to_owned()),
+        };
+        let fiscal = match self.fiscal_modo {
+            1 => MudancaFiscal::Mesclar(self.fisc.para()?),
+            2 => MudancaFiscal::Limpar,
+            _ => MudancaFiscal::Manter,
+        };
         let a = Alteracao {
             margem,
             grupo: self.grupo_destino.map_or(Mudanca::Manter, Mudanca::Definir),
@@ -78,10 +138,13 @@ impl EstadoLote {
                 2 => Mudanca::Definir(false),
                 _ => Mudanca::Manter,
             },
+            ncm,
+            fiscal,
         };
         if a.e_vazia() {
-            Err("Escolha o que mudar: margem, grupo ou situação.".to_owned())
+            Err("Escolha o que mudar: margem, grupo, situação, NCM ou dados fiscais.".to_owned())
         } else {
+            a.validar()?;
             Ok(a)
         }
     }
@@ -112,6 +175,14 @@ impl EstadoLote {
         }
         if let Mudanca::Definir(ativo) = a.ativo {
             partes.push(if ativo { "ativar" } else { "desativar" }.to_owned());
+        }
+        if let Mudanca::Definir(n) = &a.ncm {
+            partes.push(format!("NCM {n}"));
+        }
+        match a.fiscal {
+            MudancaFiscal::Mesclar(_) => partes.push("campos fiscais".to_owned()),
+            MudancaFiscal::Limpar => partes.push("campos fiscais voltam a herdar".to_owned()),
+            MudancaFiscal::Manter => {}
         }
         format!("{} em {n} produto(s)", partes.join(", "))
     }
@@ -162,6 +233,10 @@ fn escolha(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estad
     if recarregar {
         estado.lote.carregar(motor, sessao);
     }
+    ui.add_space(Espaco::E4);
+    SecaoExpansivel::nova("Mais filtros: fabricante, NCM, situação, custo…").mostrar(ui, |ui| {
+        filtros_avancados(ui, motor, sessao, estado);
+    });
     ui.add_space(Espaco::E8);
     ui.horizontal(|ui| {
         if ui
@@ -191,10 +266,14 @@ fn escolha(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estad
     let mut alternado: Option<usize> = None;
     Grade::nova(vec![
         ColunaGrade::nova("").largura(40.0),
-        ColunaGrade::nova("Produto").largura(300.0),
-        ColunaGrade::nova("Grupo").largura(220.0),
-        ColunaGrade::nova("Margem").largura(110.0),
-        ColunaGrade::nova("Situação").largura(110.0),
+        ColunaGrade::nova("Produto").largura(260.0),
+        ColunaGrade::nova("Grupo").largura(180.0),
+        ColunaGrade::nova("NCM").largura(100.0),
+        ColunaGrade::nova("Fabricante").largura(140.0),
+        ColunaGrade::nova("Custo").largura(100.0).numero(),
+        ColunaGrade::nova("Margem").largura(90.0),
+        ColunaGrade::nova("Fiscal").largura(90.0),
+        ColunaGrade::nova("Situação").largura(90.0),
     ])
     .id_salt("lote-produtos")
     .vazio("Nenhum produto neste recorte.")
@@ -217,7 +296,28 @@ fn escolha(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estad
             ui.add(Rotulo::interface(g));
         });
         row.col(|ui| {
+            ui.add(Rotulo::interface(p.ncm.clone()));
+        });
+        row.col(|ui| {
+            ui.add(Rotulo::interface(p.fabricante.clone().unwrap_or_default()));
+        });
+        row.col(|ui| match p.custo {
+            Some(c) => {
+                ui.add(ValorDinheiro::novo(c).neutro());
+            }
+            None => {
+                ui.add(Rotulo::interface("—").cor(ui.cores().texto_fraco));
+            }
+        });
+        row.col(|ui| {
             ui.add(Rotulo::interface(texto_margem(p.margem)));
+        });
+        row.col(|ui| {
+            if p.tem_perfil_fiscal_proprio {
+                ui.add(Etiqueta::info("próprio"));
+            } else {
+                ui.add(Rotulo::interface("herda").cor(ui.cores().texto_fraco));
+            }
         });
         row.col(|ui| {
             if p.ativo {
@@ -234,6 +334,64 @@ fn escolha(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estad
         }
         estado.lote.previa = None;
     }
+}
+
+fn filtros_avancados(
+    ui: &mut egui::Ui,
+    motor: &Motor,
+    sessao: &Sessao,
+    estado: &mut EstadoTelaEstoque,
+) {
+    let l = &mut estado.lote;
+    ui.columns(3, |c| {
+        c[0].add(Campo::novo("Fabricante contém", &mut l.fabricante));
+        c[1].add(Campo::novo("NCM começa com", &mut l.ncm_prefixo).marcador("2202"));
+        c[2].add(Campo::novo("Custo entre (R$)", &mut l.custo_min).marcador("mínimo"));
+    });
+    ui.add_space(Espaco::E8);
+    ui.columns(3, |c| {
+        c[0].add(Campo::novo("…e", &mut l.custo_max).marcador("máximo"));
+        c[1].add(Rotulo::campo("Situação"));
+        if let Some(v) = Abas::nova(&[(0_u8, "Todos"), (1, "Ativos"), (2, "Inativos")])
+            .selecionada(l.situacao)
+            .id_salt("lote-filtro-situacao")
+            .mostrar(&mut c[1])
+        {
+            l.situacao = v;
+        }
+    });
+    ui.add_space(Espaco::E8);
+    ui.horizontal_wrapped(|ui| {
+        ui.add(Caixa::nova(&mut l.so_sem_margem, "Só sem margem própria"));
+        ui.add(Caixa::nova(
+            &mut l.so_sem_fiscal,
+            "Só sem perfil fiscal próprio",
+        ));
+        ui.add(Caixa::nova(&mut l.so_sem_custo, "Só sem custo"));
+    });
+    ui.add_space(Espaco::E8);
+    ui.horizontal(|ui| {
+        if ui.add(Botao::secundario("Filtrar")).clicked() {
+            match estado.lote.filtro() {
+                Ok(_) => estado.lote.carregar(motor, sessao),
+                Err(m) => notificar(ui.ctx(), Notificacao::aviso(m)),
+            }
+        }
+        if ui.add(Botao::fantasma("Limpar filtros")).clicked() {
+            let l = &mut estado.lote;
+            l.fabricante.clear();
+            l.ncm_prefixo.clear();
+            l.custo_min.clear();
+            l.custo_max.clear();
+            l.situacao = 0;
+            l.so_sem_margem = false;
+            l.so_sem_fiscal = false;
+            l.so_sem_custo = false;
+            l.busca.clear();
+            l.grupo = None;
+            estado.lote.carregar(motor, sessao);
+        }
+    });
 }
 
 fn mudanca(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTelaEstoque) {
@@ -272,6 +430,34 @@ fn mudanca(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estad
         {
             estado.lote.ativo_modo = a;
             estado.lote.previa = None;
+        }
+    });
+    ui.add_space(Espaco::E8);
+    SecaoExpansivel::nova("Dados fiscais: NCM, CFOP, CST, alíquotas…").mostrar(ui, |ui| {
+        let l = &mut estado.lote;
+        ui.add(Rotulo::apoio(
+            "Exigem a permissão de perfil tributário. Em \"Preencher\", só os campos que você \
+             digitar mudam; os em branco ficam como estão.",
+        ));
+        ui.add_space(Espaco::E8);
+        ui.add(Campo::novo("Novo NCM (8 dígitos)", &mut l.ncm_novo).marcador("22021000"));
+        ui.add_space(Espaco::E8);
+        ui.add(Rotulo::campo("Campos fiscais próprios do produto"));
+        if let Some(m) = Abas::nova(&[
+            (0_u8, "Manter"),
+            (1, "Preencher"),
+            (2, "Apagar (voltar a herdar do grupo)"),
+        ])
+        .selecionada(l.fiscal_modo)
+        .id_salt("lote-fiscal")
+        .mostrar(ui)
+        {
+            l.fiscal_modo = m;
+            l.previa = None;
+        }
+        if l.fiscal_modo == 1 {
+            ui.add_space(Espaco::E8);
+            l.fisc.mostrar(ui);
         }
     });
     ui.add_space(Espaco::E12);

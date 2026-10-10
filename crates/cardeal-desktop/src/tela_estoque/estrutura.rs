@@ -29,6 +29,7 @@ pub(super) struct EstadoEstrutura {
     mover_para: Option<Id>,
     novo_codigo: String,
     novo_nome: String,
+    fisc: super::fiscal::FormFiscal,
 }
 
 fn tri(v: Option<bool>) -> u8 {
@@ -93,6 +94,7 @@ impl EstadoEstrutura {
         self.margem = n.margem.map(|m| m.formatar(2)).unwrap_or_default();
         self.st = Some(tri(n.icms_st));
         self.monofasico = Some(tri(n.monofasico));
+        self.fisc = super::fiscal::FormFiscal::de(&n.fiscal);
         self.mover_para = None;
     }
 
@@ -239,6 +241,8 @@ fn detalhe(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estad
         bloco_margem(ui, motor, sessao, estado, &no);
         ui.add(Divisor::novo());
         bloco_perfil(ui, motor, sessao, estado, &no);
+        ui.add(Divisor::novo());
+        bloco_fiscal(ui, motor, sessao, estado, &no);
         ui.add(Divisor::novo());
         bloco_mover(ui, motor, sessao, estado, &no);
         ui.add(Divisor::novo());
@@ -404,6 +408,47 @@ fn bloco_perfil(
         );
         aplicar(ui.ctx(), motor, sessao, estado, r, "Perfil fiscal salvo");
     }
+    ui.add_space(Espaco::E12);
+}
+
+fn bloco_fiscal(
+    ui: &mut egui::Ui,
+    motor: &Motor,
+    sessao: &Sessao,
+    estado: &mut EstadoTelaEstoque,
+    no: &NoArvoreGrupo,
+) {
+    SecaoExpansivel::nova("Perfil fiscal completo (origem, CST, CFOP, alíquotas, CEST)").mostrar(
+        ui,
+        |ui| {
+            ui.add(Rotulo::apoio(
+                "Vale para os produtos deste grupo e dos que estão abaixo, a menos que o produto \
+                 ou um subgrupo defina o seu. Campo em branco herda do grupo acima.",
+            ));
+            ui.add_space(Espaco::E8);
+            estado.est.fisc.mostrar(ui);
+            ui.add_space(Espaco::E8);
+            if ui
+                .add(Botao::secundario("Salvar perfil fiscal completo"))
+                .clicked()
+            {
+                match estado.est.fisc.para() {
+                    Ok(campos) => {
+                        let r = motor.executar(
+                            sessao,
+                            "estoque.definir_campos_fiscais_do_grupo.v1",
+                            &mod_estoque::DefinirCamposFiscaisDoGrupo {
+                                grupo: no.id,
+                                campos,
+                            },
+                        );
+                        aplicar(ui.ctx(), motor, sessao, estado, r, "Perfil fiscal salvo");
+                    }
+                    Err(m) => notificar(ui.ctx(), Notificacao::aviso(m)),
+                }
+            }
+        },
+    );
     ui.add_space(Espaco::E12);
 }
 

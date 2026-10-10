@@ -410,7 +410,10 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
 - **Alteração em lote** (`mod-estoque::alteracao_em_lote`, migração `estoque` v7): margem, grupo e
   situação de vários produtos, com **prévia** do antes/depois, histórico e **desfazer a última em 24h**
   (só restaura quem não foi editado depois; tudo-ou-nada). Aba "Alteração em lote" no Estoque, filtro
-  por grupo (subárvore) e por busca. **Campos fiscais (NCM, CEST, CFOP, alíquotas) ainda não entram.**
+  por qualquer critério (grupo, nome, fabricante, NCM, situação, sem margem, sem perfil fiscal, faixa de custo).
+- **Perfil fiscal completo** (`mod-estoque::fiscal`, migração v8): origem, CST/CSOSN, CFOPs, alíquotas,
+  redução de base, MVA-ST, CST PIS/COFINS, CEST, benefício — herdado produto → grupos acima; editável no
+  grupo (aba Estrutura), no produto (Editar) e em lote (junto com o NCM).
 - **Painel de margem do pedido** (`vendas.margem_do_pedido.v1`, permissão nova `vendas.margem.ver`):
   receita, custo, margem bruta e líquida por item e no conjunto, descontando operação, imposto,
   comissão e taxas (os mesmos percentuais do preço sugerido); item sem custo fica fora do cálculo

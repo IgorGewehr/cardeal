@@ -223,6 +223,18 @@ CREATE TABLE estoque_alteracao_lote_item (
 ) STRICT, WITHOUT ROWID;
 ";
 
+// Migração v8 (2026-10-09): perfil fiscal completo (origem, CST/CSOSN, CFOPs, alíquotas, MVA-ST,
+// CEST, benefício) herdado pela árvore de grupos, e NCM/perfil no antes/depois da alteração em
+// lote. O perfil é um blob `postcard` de `CamposFiscais` (nulo = herda tudo), no grupo e no produto.
+const SQL_PERFIL_FISCAL: &str = r"
+ALTER TABLE estoque_grupo_produto ADD COLUMN perfil_fiscal BLOB;
+ALTER TABLE estoque_produto ADD COLUMN perfil_fiscal BLOB;
+ALTER TABLE estoque_alteracao_lote_item ADD COLUMN antes_ncm TEXT;
+ALTER TABLE estoque_alteracao_lote_item ADD COLUMN depois_ncm TEXT;
+ALTER TABLE estoque_alteracao_lote_item ADD COLUMN antes_fiscal BLOB;
+ALTER TABLE estoque_alteracao_lote_item ADD COLUMN depois_fiscal BLOB;
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -264,6 +276,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 7,
         nome: "estoque_alteracao_em_lote",
         sql: SQL_ALTERACAO_EM_LOTE,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 8,
+        nome: "estoque_perfil_fiscal",
+        sql: SQL_PERFIL_FISCAL,
         tipo: TipoMigracao::Esquema,
     },
 ];

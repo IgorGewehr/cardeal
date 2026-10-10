@@ -235,6 +235,8 @@ pub struct NoArvoreGrupo {
     pub icms_st: Option<bool>,
     /// PIS/COFINS monofásico definido neste grupo (`None` = herda).
     pub monofasico: Option<bool>,
+    /// Os campos fiscais próprios do grupo (o resto herda).
+    pub fiscal: crate::fiscal::CamposFiscais,
 }
 
 /// A árvore inteira de grupos, em ordem de exibição (pré-ordem, irmãos por nome) — a tela
@@ -315,6 +317,7 @@ impl Consulta for ArvoreGruposProduto {
                 margem: do_grupo.and_then(|p| p.margem),
                 icms_st: do_grupo.and_then(|p| p.icms_st),
                 monofasico: do_grupo.and_then(|p| p.monofasico),
+                fiscal: do_grupo.map(|p| p.fiscal.clone()).unwrap_or_default(),
                 id,
                 codigo: codigo.clone(),
                 nome: nome.clone(),

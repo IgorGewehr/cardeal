@@ -170,6 +170,23 @@
 | **GrupoProduto** `id`, `codigo`, `nome`, `pai`, `perfil_tributario`, `margem_sugerida` | Id/String/String/Id/Id/Percentual | sim exceto `pai` | hierárquico, como o plano de contas |
 | **PerfilTributario** `id`, `nome`, `origem_mercadoria`, `cst_icms`, `cfop_dentro_uf`, `cfop_fora_uf`, `aliquota_icms`, `reducao_base`, `mva_st`, `cst_pis`, `cst_cofins`, `aliquota_pis`, `aliquota_cofins`, `cest`, `beneficio_fiscal` | Id/String/enum(0..8)/String/String/String/Percentual/Percentual/Percentual/String/String/Percentual/Percentual/String/String | sim exceto `mva_st`, `beneficio_fiscal` | espelha [doc 10 §6](../10-modulo-fiscal.md#6-tributação); estimativa local, autoridade é a API fiscal |
 
+### Perfil fiscal completo e alteração em lote por qualquer critério (2026-10-09)
+
+O produto e o grupo guardam, cada um, os **campos fiscais próprios** (`CamposFiscais`, um blob
+`postcard` em `perfil_fiscal`, migração v8): origem (0 a 8), CST/CSOSN do ICMS, CFOP de saída na UF /
+fora da UF / de entrada, alíquota de ICMS, redução de base, MVA da ST, CST e alíquota de PIS e de
+COFINS, CEST e benefício fiscal. **Cada campo é opcional e herdado**: vale o do produto, senão o do
+grupo mais próximo acima (`estoque.perfil_fiscal_do_produto.v1` devolve, campo a campo, o valor
+vigente e quem o definiu). Formatos validados (dígitos, tamanho, sentido do CFOP: 5xxx dentro da UF,
+6xxx fora, 1/2/3xxx entrada; alíquotas 0%–100%). NCM continua sendo o campo obrigatório do próprio
+produto. É a estimativa guardada para a tela; a autoridade na emissão é a API fiscal (ADR-0006).
+
+A **alteração em lote** escolhe os produtos por qualquer combinação de critérios — grupo (subárvore)
+**e/ou** nome, fabricante, prefixo de NCM, situação, sem margem própria, sem perfil fiscal próprio,
+faixa de custo, sem custo — e muda margem, grupo, situação, NCM e/ou os campos fiscais próprios
+(preencher só os informados, ou apagar para voltar a herdar). Mexer em NCM/campos fiscais exige
+`estoque.tributario.editar`, além de `estoque.produto.editar`.
+
 ### Estrutura mercadológica e formação de preço (2026-10-09)
 
 **Estrutura de até quatro níveis.** `GrupoProduto.pai` já formava uma árvore; agora ela tem teto:
@@ -265,6 +282,7 @@ stateDiagram-v2
 | `DefinirPerfilFiscalDoGrupo` ✅ (2026-10-09) | `estoque.tributario.editar` | Alto | ICMS-ST e monofásico do grupo (`None` herda) | — |
 | `AplicarPrecosSugeridos` ✅ (2026-10-09; **em `mod-vendas`**, `vendas.aplicar_precos_sugeridos.v1`) | `vendas.tabela_preco.editar` | Médio | Leva o preço sugerido (arredondado para cima: nenhum, final ,90 ou real inteiro) à tabela de venda/atacado: atualiza a regra permanente do produto ou cria uma; produto sem custo/margem volta em `ignorados` com o motivo. Pedidos já feitos não mudam (preço congelado no item) | tabela inexistente, promocional ou inativa |
 | `AplicarAlteracaoEmLote` / `DesfazerAlteracaoEmLote` ✅ (2026-10-09) | `estoque.produto.editar` | Alto | Margem, grupo e situação de até 5.000 produtos de uma vez, guardando antes e depois de cada um (`estoque_alteracao_lote*`). Tudo-ou-nada; a consulta `PreviaDaAlteracaoEmLote` mostra o resultado sem gravar; desfazer só vale para a última alteração não desfeita, em até 24h, e restaura apenas produtos ainda como a alteração os deixou | produto/grupo inexistente, margem fora de 0..100%, nada mudaria, prazo vencido, não é a última |
+| `DefinirCamposFiscaisDoGrupo` / `DefinirCamposFiscaisDoProduto` ✅ (2026-10-09) | `estoque.tributario.editar` | Alto | Grava os campos fiscais próprios (substitui; tudo em branco = herdar tudo); valida formatos | formato inválido, grupo/produto inexistente |
 | `DefinirParametrosPreco` ✅ (2026-10-09) | `estoque.tributario.editar` | Alto | Grava os parâmetros de preço do CNPJ da sessão | percentual fora de 0%..100% |
 | `VincularPerfilTributario` | `estoque.tributario.editar` | Médio | Ainda não implementado | — |
 

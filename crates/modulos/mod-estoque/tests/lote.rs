@@ -7,13 +7,18 @@ use cardeal_kernel::{CodigoErro, Erro, Id, Instante, Percentual};
 use cardeal_ledger::semear_plano_padrao;
 use cardeal_modkit::{Ambiente, Despachante, Modulo, PedidoAtivacao, RegistroModulos};
 use cardeal_storage::{Armazenamento, ConfigArmazenamento, ContextoEscrita, ErroArmazenamento};
-use mod_estoque::alteracao_em_lote::{Alteracao, Mudanca};
+use mod_estoque::alteracao_em_lote::{Alteracao, FiltroDeLote, Mudanca, MudancaFiscal};
+use mod_estoque::fiscal::CamposFiscais;
 use mod_estoque::{
     AlteracaoAplicada, AlteracaoDesfeita, AlteracaoRegistrada, AplicarAlteracaoEmLote,
     CriarGrupoProduto, CriarProduto, CriarUnidade, DefinirMargemDoProduto, DesfazerAlteracaoEmLote,
     GrupoProdutoCriado, HistoricoDeAlteracoesEmLote, LinhaDaPrevia, ModuloEstoque,
     PreviaDaAlteracaoEmLote, ProdutoCriado, ProdutoParaLote, ProdutosParaLote, UnidadeCriada,
     MANIFESTO,
+};
+use mod_estoque::{
+    DefinirCamposFiscaisDoGrupo, DefinirCamposFiscaisDoProduto, PerfilFiscalDoProduto,
+    PerfilFiscalEfetivo,
 };
 use tempfile::TempDir;
 
@@ -78,6 +83,7 @@ const PERMISSOES: &[&str] = &[
     "estoque.produto.criar",
     "estoque.produto.editar",
     "estoque.produto.ver",
+    "estoque.tributario.editar",
 ];
 
 struct Cenario {
@@ -181,10 +187,7 @@ impl Cenario {
     fn todos(&self) -> Vec<ProdutoParaLote> {
         self.consulta(
             "estoque.produtos_para_lote.v1",
-            &ProdutosParaLote {
-                grupo: None,
-                busca: None,
-            },
+            &ProdutosParaLote::default(),
         )
     }
 
@@ -414,7 +417,7 @@ fn lote_tambem_desativa_e_reativa_e_a_lista_filtra_por_grupo() {
         "estoque.produtos_para_lote.v1",
         &ProdutosParaLote {
             grupo: Some(g),
-            busca: None,
+            ..ProdutosParaLote::default()
         },
     );
     assert_eq!(
@@ -426,9 +429,224 @@ fn lote_tambem_desativa_e_reativa_e_a_lista_filtra_por_grupo() {
     let busca: Vec<ProdutoParaLote> = c.consulta(
         "estoque.produtos_para_lote.v1",
         &ProdutosParaLote {
-            grupo: None,
-            busca: Some("arr".into()),
+            filtro: FiltroDeLote {
+                busca: Some("arr".into()),
+                ..FiltroDeLote::default()
+            },
+            ..ProdutosParaLote::default()
         },
     );
     assert_eq!(busca.iter().map(|p| p.produto).collect::<Vec<_>>(), vec![b]);
+}
+
+fn fiscal(f: impl FnOnce(&mut CamposFiscais)) -> CamposFiscais {
+    let mut c = CamposFiscais::default();
+    f(&mut c);
+    c
+}
+
+#[test]
+fn perfil_fiscal_herda_do_grupo_e_o_produto_sobrescreve() {
+    let c = Cenario::novo();
+    let raiz = c.grupo("BEB");
+    let p = c.produto("Coca", raiz);
+    let _: () = c
+        .cmd(
+            "estoque.definir_campos_fiscais_do_grupo.v1",
+            &DefinirCamposFiscaisDoGrupo {
+                grupo: raiz,
+                campos: fiscal(|f| {
+                    f.origem = Some(0);
+                    f.cst_icms = Some("102".into());
+                    f.cfop_saida_dentro_uf = Some("5102".into());
+                    f.aliquota_icms = Some(Percentual::pontos(18));
+                }),
+            },
+        )
+        .unwrap();
+    let _: () = c
+        .cmd(
+            "estoque.definir_campos_fiscais_do_produto.v1",
+            &DefinirCamposFiscaisDoProduto {
+                produto: p,
+                campos: fiscal(|f| f.cfop_saida_dentro_uf = Some("5405".into())),
+            },
+        )
+        .unwrap();
+    let e: PerfilFiscalEfetivo = c.consulta(
+        "estoque.perfil_fiscal_do_produto.v1",
+        &PerfilFiscalDoProduto { produto: p },
+    );
+    let linha = |campo: &str| e.linhas.iter().find(|l| l.campo == campo).unwrap().clone();
+    assert_eq!(linha("CFOP de saída na UF").valor.as_deref(), Some("5405"));
+    assert_eq!(
+        linha("CFOP de saída na UF").origem.as_deref(),
+        Some("Produto")
+    );
+    assert_eq!(linha("CST/CSOSN do ICMS").origem.as_deref(), Some("BEB"));
+    assert_eq!(linha("Alíquota de ICMS").valor.as_deref(), Some("18,00%"));
+    assert_eq!(linha("CEST").valor, None);
+    assert_eq!(e.ncm, "22021000");
+    // Dado inválido é recusado antes de gravar.
+    let e = c
+        .cmd::<()>(
+            "estoque.definir_campos_fiscais_do_grupo.v1",
+            &DefinirCamposFiscaisDoGrupo {
+                grupo: raiz,
+                campos: fiscal(|f| f.cfop_saida_dentro_uf = Some("6102".into())),
+            },
+        )
+        .unwrap_err();
+    assert_eq!(e.codigo, CodigoErro::ENTRADA_INVALIDA);
+}
+
+#[test]
+fn lote_altera_ncm_e_campos_fiscais_com_filtros_que_nao_sao_hierarquia() {
+    let c = Cenario::novo();
+    let (g, h) = (c.grupo("BEB"), c.grupo("ALI"));
+    // Mesmo NCM em grupos diferentes: o filtro por NCM atravessa a hierarquia.
+    let (a, b, d) = (
+        c.produto("Coca", g),
+        c.produto("Suco", h),
+        c.produto("Arroz", h),
+    );
+    c.aplicar(
+        &[d],
+        Alteracao {
+            ncm: Mudanca::Definir("10063021".into()),
+            ..Alteracao::default()
+        },
+    )
+    .unwrap();
+
+    let por_ncm: Vec<ProdutoParaLote> = c.consulta(
+        "estoque.produtos_para_lote.v1",
+        &ProdutosParaLote {
+            filtro: FiltroDeLote {
+                ncm_prefixo: Some("2202".into()),
+                ..FiltroDeLote::default()
+            },
+            ..ProdutosParaLote::default()
+        },
+    );
+    let ids: Vec<Id> = por_ncm.iter().map(|p| p.produto).collect();
+    assert_eq!(ids.len(), 2);
+    assert!(ids.contains(&a) && ids.contains(&b) && !ids.contains(&d));
+
+    // Aplica CFOP/CST nesses dois (grupos diferentes), sem tocar no resto.
+    let r = c
+        .aplicar(
+            &ids,
+            Alteracao {
+                fiscal: MudancaFiscal::Mesclar(fiscal(|f| {
+                    f.cst_icms = Some("500".into());
+                    f.cfop_saida_dentro_uf = Some("5405".into());
+                })),
+                ..Alteracao::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(r.alterados, 2);
+    let proprios = |id: Id| {
+        c.consulta::<PerfilFiscalEfetivo>(
+            "estoque.perfil_fiscal_do_produto.v1",
+            &PerfilFiscalDoProduto { produto: id },
+        )
+        .proprios
+    };
+    assert_eq!(proprios(a).cst_icms.as_deref(), Some("500"));
+    assert!(proprios(d).e_vazio());
+
+    // Filtros combinados: sem perfil fiscal próprio + ativo → só o Arroz.
+    let sem: Vec<ProdutoParaLote> = c.consulta(
+        "estoque.produtos_para_lote.v1",
+        &ProdutosParaLote {
+            filtro: FiltroDeLote {
+                sem_perfil_fiscal_proprio: true,
+                ativo: Some(true),
+                ..FiltroDeLote::default()
+            },
+            ..ProdutosParaLote::default()
+        },
+    );
+    assert_eq!(sem.iter().map(|p| p.produto).collect::<Vec<_>>(), vec![d]);
+
+    // Desfazer devolve o perfil e o NCM de antes.
+    let u: AlteracaoDesfeita = c
+        .cmd(
+            "estoque.desfazer_alteracao_em_lote.v1",
+            &DesfazerAlteracaoEmLote { lote: r.lote },
+        )
+        .unwrap();
+    assert_eq!(u.restaurados, 2);
+    assert!(proprios(a).e_vazio());
+    // Limpar volta a herdar tudo.
+    c.aplicar(
+        &[a],
+        Alteracao {
+            fiscal: MudancaFiscal::Mesclar(fiscal(|f| f.cest = Some("1700100".into()))),
+            ..Alteracao::default()
+        },
+    )
+    .unwrap();
+    c.aplicar(
+        &[a],
+        Alteracao {
+            fiscal: MudancaFiscal::Limpar,
+            ..Alteracao::default()
+        },
+    )
+    .unwrap();
+    assert!(proprios(a).e_vazio());
+}
+
+#[test]
+fn lote_fiscal_exige_permissao_de_perfil_tributario_e_valida_formatos() {
+    let c = Cenario::novo();
+    let g = c.grupo("BEB");
+    let a = c.produto("Coca", g);
+    let sem = sessao(
+        c.empresa,
+        &["estoque.produto.editar", "estoque.produto.ver"],
+    );
+    let tenta = |alt: Alteracao| {
+        c.d.executar_comando(
+            "estoque.aplicar_alteracao_em_lote.v1",
+            &carga(&AplicarAlteracaoEmLote {
+                descricao: "x".into(),
+                produtos: vec![a],
+                alteracao: alt,
+            }),
+            &sem,
+            &ambiente(c.empresa),
+            c.arm.escritor(),
+        )
+    };
+    let e = tenta(Alteracao {
+        ncm: Mudanca::Definir("19059090".into()),
+        ..Alteracao::default()
+    })
+    .unwrap_err();
+    assert_eq!(e.codigo, CodigoErro::SEM_PERMISSAO);
+    // Margem continua liberada para quem edita produto.
+    assert!(tenta(margem(20)).is_ok());
+    // Com permissão, NCM de tamanho errado e CFOP de sentido errado são recusados.
+    assert!(c
+        .aplicar(
+            &[a],
+            Alteracao {
+                ncm: Mudanca::Definir("123".into()),
+                ..Alteracao::default()
+            }
+        )
+        .is_err());
+    assert!(c
+        .aplicar(
+            &[a],
+            Alteracao {
+                fiscal: MudancaFiscal::Mesclar(fiscal(|f| f.cfop_entrada = Some("5102".into()))),
+                ..Alteracao::default()
+            }
+        )
+        .is_err());
 }

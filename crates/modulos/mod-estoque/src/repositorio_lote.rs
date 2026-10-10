@@ -4,7 +4,8 @@
 use cardeal_kernel::{Id, Instante, Percentual, Resultado};
 use rusqlite::{params, Connection, OptionalExtension};
 
-use crate::alteracao_em_lote::ValoresProduto;
+use crate::alteracao_em_lote::{FiltroDeLote, ValoresProduto};
+use crate::fiscal::CamposFiscais;
 use crate::repositorio::{blob, id_de, persist};
 
 /// Um produto com o que o lote enxerga dele.
@@ -14,9 +15,16 @@ pub struct ProdutoDoLote {
     pub produto: Id,
     /// O nome.
     pub nome: String,
-    /// Grupo, margem própria e situação.
+    /// Grupo, margem própria, situação, NCM e campos fiscais próprios.
     pub valores: ValoresProduto,
+    /// O fabricante, quando cadastrado.
+    pub fabricante: Option<String>,
+    /// O maior custo médio em estoque (unidades internas de `Preco`); 0 = sem custo.
+    pub custo: i64,
 }
+
+const COLUNAS_PRODUTO: &str =
+    "id, nome, grupo_produto, margem_desejada, ativo, ncm, perfil_fiscal, fabricante";
 
 fn de_linha(r: &rusqlite::Row<'_>) -> rusqlite::Result<ProdutoDoLote> {
     Ok(ProdutoDoLote {
@@ -26,7 +34,11 @@ fn de_linha(r: &rusqlite::Row<'_>) -> rusqlite::Result<ProdutoDoLote> {
             grupo: id_de(r.get::<_, Vec<u8>>(2)?),
             margem: r.get::<_, Option<i64>>(3)?.map(Percentual::unidades),
             ativo: r.get::<_, i64>(4)? != 0,
+            ncm: r.get(5)?,
+            fiscal: CamposFiscais::de_blob(r.get::<_, Option<Vec<u8>>>(6)?.as_deref()),
         },
+        fabricante: r.get::<_, Option<String>>(7)?,
+        custo: r.get::<_, i64>(8)?,
     })
 }
 
@@ -40,8 +52,7 @@ pub fn produto_do_lote(
     produto: Id,
 ) -> Resultado<Option<ProdutoDoLote>> {
     conn.query_row(
-        "SELECT id, nome, grupo_produto, margem_desejada, ativo
-         FROM estoque_produto WHERE empresa = ?1 AND id = ?2",
+        &format!("SELECT {COLUNAS_PRODUTO}, 0 FROM estoque_produto WHERE empresa = ?1 AND id = ?2"),
         params![blob(organizacao), blob(produto)],
         de_linha,
     )
@@ -49,39 +60,57 @@ pub fn produto_do_lote(
     .map_err(persist)
 }
 
-/// Os produtos (ativos e inativos) de uma subárvore de grupos e/ou que casam com a busca.
+fn casa(f: &FiltroDeLote, p: &ProdutoDoLote) -> bool {
+    let contem = |campo: &str, termo: &Option<String>| {
+        termo
+            .as_ref()
+            .map(|t| t.trim().to_lowercase())
+            .filter(|t| !t.is_empty())
+            .is_none_or(|t| campo.to_lowercase().contains(&t))
+    };
+    let centavos = p.custo / 10_000; // `Preco` tem escala 1e-6; centavo = 1e-2
+    f.grupos
+        .as_ref()
+        .is_none_or(|g| g.contains(&p.valores.grupo))
+        && contem(&p.nome, &f.busca)
+        && contem(p.fabricante.as_deref().unwrap_or(""), &f.fabricante)
+        && f.ncm_prefixo
+            .as_ref()
+            .is_none_or(|n| p.valores.ncm.starts_with(n.trim()))
+        && f.ativo.is_none_or(|a| a == p.valores.ativo)
+        && (!f.sem_margem_propria || p.valores.margem.is_none())
+        && (!f.sem_perfil_fiscal_proprio || p.valores.fiscal.e_vazio())
+        && f.custo_minimo.is_none_or(|m| centavos >= m)
+        && f.custo_maximo.is_none_or(|m| centavos <= m)
+        && (!f.sem_custo || p.custo == 0)
+}
+
+/// Os produtos (ativos e inativos) que casam com o filtro, por nome.
 ///
 /// # Errors
 /// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
 pub fn produtos_do_lote(
     conn: &Connection,
     organizacao: Id,
-    grupos: Option<&[Id]>,
-    busca: Option<&str>,
+    empresa: Id,
+    filtro: &FiltroDeLote,
     limite: usize,
 ) -> Resultado<Vec<ProdutoDoLote>> {
     let mut stmt = conn
-        .prepare(
-            "SELECT id, nome, grupo_produto, margem_desejada, ativo
-             FROM estoque_produto WHERE empresa = ?1 ORDER BY nome ASC, id ASC",
-        )
+        .prepare(&format!(
+            "SELECT {COLUNAS_PRODUTO},
+                    COALESCE((SELECT MAX(s.custo_medio) FROM estoque_saldo_local s
+                              WHERE s.produto = estoque_produto.id AND s.empresa = ?2), 0)
+             FROM estoque_produto WHERE empresa = ?1 ORDER BY nome ASC, id ASC"
+        ))
         .map_err(persist)?;
-    let termo = busca
-        .map(|b| b.trim().to_lowercase())
-        .filter(|b| !b.is_empty());
     let linhas = stmt
-        .query_map([blob(organizacao)], de_linha)
+        .query_map(params![blob(organizacao), blob(empresa)], de_linha)
         .map_err(persist)?;
     let mut saida = Vec::new();
     for l in linhas {
         let p = l.map_err(persist)?;
-        if grupos.is_some_and(|g| !g.contains(&p.valores.grupo)) {
-            continue;
-        }
-        if termo
-            .as_ref()
-            .is_some_and(|t| !p.nome.to_lowercase().contains(t))
-        {
+        if !casa(filtro, &p) {
             continue;
         }
         saida.push(p);
@@ -100,11 +129,12 @@ pub fn gravar_valores(
     conn: &Connection,
     organizacao: Id,
     produto: Id,
-    v: ValoresProduto,
+    v: &ValoresProduto,
 ) -> Resultado<()> {
     conn.execute(
         "UPDATE estoque_produto
-         SET grupo_produto = ?3, margem_desejada = ?4, ativo = ?5, versao = versao + 1
+         SET grupo_produto = ?3, margem_desejada = ?4, ativo = ?5, ncm = ?6, perfil_fiscal = ?7,
+             versao = versao + 1
          WHERE empresa = ?1 AND id = ?2",
         params![
             blob(organizacao),
@@ -112,6 +142,8 @@ pub fn gravar_valores(
             blob(v.grupo),
             v.margem.map(Percentual::unidades_internas),
             i64::from(v.ativo),
+            v.ncm.clone(),
+            v.fiscal.para_blob(),
         ],
     )
     .map_err(persist)?;
@@ -159,14 +191,15 @@ pub fn inserir_item(
     conn: &Connection,
     lote: Id,
     produto: Id,
-    antes: ValoresProduto,
-    depois: ValoresProduto,
+    antes: &ValoresProduto,
+    depois: &ValoresProduto,
 ) -> Resultado<()> {
     conn.execute(
         "INSERT INTO estoque_alteracao_lote_item
             (lote, produto, antes_grupo, antes_margem, antes_ativo,
-             depois_grupo, depois_margem, depois_ativo)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+             depois_grupo, depois_margem, depois_ativo,
+             antes_ncm, depois_ncm, antes_fiscal, depois_fiscal)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
         params![
             blob(lote),
             blob(produto),
@@ -176,6 +209,10 @@ pub fn inserir_item(
             blob(depois.grupo),
             depois.margem.map(Percentual::unidades_internas),
             i64::from(depois.ativo),
+            antes.ncm.clone(),
+            depois.ncm.clone(),
+            antes.fiscal.para_blob(),
+            depois.fiscal.para_blob(),
         ],
     )
     .map_err(persist)?;
@@ -285,7 +322,8 @@ pub fn itens_do_lote(conn: &Connection, lote: Id) -> Resultado<Vec<ItemDoLote>> 
     let mut stmt = conn
         .prepare(
             "SELECT produto, antes_grupo, antes_margem, antes_ativo,
-                    depois_grupo, depois_margem, depois_ativo
+                    depois_grupo, depois_margem, depois_ativo,
+                    antes_ncm, depois_ncm, antes_fiscal, depois_fiscal
              FROM estoque_alteracao_lote_item WHERE lote = ?1",
         )
         .map_err(persist)?;
@@ -297,11 +335,15 @@ pub fn itens_do_lote(conn: &Connection, lote: Id) -> Resultado<Vec<ItemDoLote>> 
                     grupo: id_de(r.get::<_, Vec<u8>>(1)?),
                     margem: r.get::<_, Option<i64>>(2)?.map(Percentual::unidades),
                     ativo: r.get::<_, i64>(3)? != 0,
+                    ncm: r.get::<_, Option<String>>(7)?.unwrap_or_default(),
+                    fiscal: CamposFiscais::de_blob(r.get::<_, Option<Vec<u8>>>(9)?.as_deref()),
                 },
                 ValoresProduto {
                     grupo: id_de(r.get::<_, Vec<u8>>(4)?),
                     margem: r.get::<_, Option<i64>>(5)?.map(Percentual::unidades),
                     ativo: r.get::<_, i64>(6)? != 0,
+                    ncm: r.get::<_, Option<String>>(8)?.unwrap_or_default(),
+                    fiscal: CamposFiscais::de_blob(r.get::<_, Option<Vec<u8>>>(10)?.as_deref()),
                 },
             ))
         })

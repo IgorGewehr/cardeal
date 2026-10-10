@@ -7,6 +7,7 @@
 //! existia no backend mas não estava ligado a nenhuma tela).
 
 mod estrutura;
+mod fiscal;
 mod lote;
 mod precos;
 #[cfg(test)]
@@ -69,6 +70,9 @@ pub struct EstadoTelaEstoque {
     est: estrutura::EstadoEstrutura,
     prc: precos::EstadoPrecos,
     lote: lote::EstadoLote,
+    /// Perfil fiscal do produto aberto em "Editar": o que ele define e o vigente.
+    fisc: fiscal::FormFiscal,
+    fisc_efetivo: Vec<mod_estoque::fiscal::LinhaFiscal>,
     unidades: Vec<ItemUnidade>,
     locais: Vec<ItemLocal>,
     radar: Vec<ItemAbaixoDoPontoPedido>,
@@ -185,9 +189,13 @@ impl EstadoTelaEstoque {
         self.aba = match cena {
             "estoque-estrutura" => AbaEstoque::Estrutura,
             "estoque-precos" => AbaEstoque::Precos,
+            "estoque-lote" => AbaEstoque::Lote,
             _ => AbaEstoque::Produtos,
         };
         self.carregar(motor, sessao);
+        if self.aba == AbaEstoque::Lote {
+            self.lote.carregar(motor, sessao);
+        }
         if self.aba == AbaEstoque::Estrutura {
             if let Some(id) = self
                 .est
@@ -414,6 +422,15 @@ fn abrir_editar(motor: &Motor, sessao: &Sessao, estado: &mut EstadoTelaEstoque, 
                 .garantia_fornecedor_dias
                 .map_or_else(String::new, |d| d.to_string());
             estado.det_localizacao_fisica = p.localizacao_fisica.unwrap_or_default();
+            if let Ok(e) = motor.consultar(
+                sessao,
+                "estoque.perfil_fiscal_do_produto.v1",
+                &mod_estoque::PerfilFiscalDoProduto { produto },
+            ) {
+                let e: mod_estoque::PerfilFiscalEfetivo = e;
+                estado.fisc = fiscal::FormFiscal::de(&e.proprios);
+                estado.fisc_efetivo = e.linhas;
+            }
             estado.dlg = Dlg::Editar(indice);
         }
         Ok(None) => estado.erro = Some("Produto não encontrado.".to_owned()),
@@ -634,6 +651,22 @@ fn dialogo_editar(
                 });
                 ui.add_space(Espaco::E8);
                 bloco_detalhes_tecnicos(ui, estado);
+                ui.add_space(Espaco::E12);
+                SecaoExpansivel::nova("Perfil fiscal").mostrar(ui, |ui| {
+                    ui.add(Rotulo::apoio(
+                        "O que está em branco vale o do grupo. A tabela mostra o perfil vigente e de onde cada campo vem.",
+                    ));
+                    ui.add_space(Espaco::E8);
+                    fiscal::tabela_efetiva(ui, &estado.fisc_efetivo);
+                    ui.add_space(Espaco::E12);
+                    ui.add(Rotulo::campo("Definir neste produto"));
+                    ui.add_space(Espaco::E4);
+                    estado.fisc.mostrar(ui);
+                    ui.add_space(Espaco::E8);
+                    if ui.add(Botao::secundario("Salvar perfil fiscal")).clicked() {
+                        salvar_fiscal_do_produto(ui.ctx(), motor, sessao, estado, p.produto);
+                    }
+                });
             },
             |ui, estado| {
                 let clicou = ui.add(Botao::primario("Salvar")).clicked();
@@ -647,6 +680,40 @@ fn dialogo_editar(
         );
     if fechar {
         estado.dlg = Dlg::Fechado;
+    }
+}
+
+fn salvar_fiscal_do_produto(
+    ctx: &egui::Context,
+    motor: &Motor,
+    sessao: &Sessao,
+    estado: &mut EstadoTelaEstoque,
+    produto: Id,
+) {
+    let campos = match estado.fisc.para() {
+        Ok(c) => c,
+        Err(m) => {
+            notificar(ctx, Notificacao::aviso(m));
+            return;
+        }
+    };
+    match motor.executar(
+        sessao,
+        "estoque.definir_campos_fiscais_do_produto.v1",
+        &mod_estoque::DefinirCamposFiscaisDoProduto { produto, campos },
+    ) {
+        Ok(()) => {
+            if let Ok(e) = motor.consultar(
+                sessao,
+                "estoque.perfil_fiscal_do_produto.v1",
+                &mod_estoque::PerfilFiscalDoProduto { produto },
+            ) {
+                let e: mod_estoque::PerfilFiscalEfetivo = e;
+                estado.fisc_efetivo = e.linhas;
+            }
+            notificar(ctx, Notificacao::sucesso("Perfil fiscal salvo"));
+        }
+        Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
     }
 }
 

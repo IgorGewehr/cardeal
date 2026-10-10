@@ -58,8 +58,12 @@ impl Comando for DesfazerAlteracaoEmLote {
         let (mut restaurados, mut ignorados) = (0_u32, 0_u32);
         for (produto, antes, depois) in sql::itens_do_lote(conn, self.lote)? {
             let atual = sql::produto_do_lote(conn, ctx.organizacao, produto)?;
-            if atual.is_some_and(|a| a.valores == depois) {
-                sql::gravar_valores(conn, ctx.organizacao, produto, antes)?;
+            if let Some(a) = atual.filter(|a| a.valores == depois) {
+                let mut restaurar = antes;
+                if restaurar.ncm.is_empty() {
+                    restaurar.ncm = a.valores.ncm;
+                }
+                sql::gravar_valores(conn, ctx.organizacao, produto, &restaurar)?;
                 restaurados += 1;
             } else {
                 ignorados += 1;

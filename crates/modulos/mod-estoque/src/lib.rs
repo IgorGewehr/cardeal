@@ -66,6 +66,7 @@ mod consultas_lote;
 mod consultas_preco;
 mod erros;
 pub mod eventos;
+pub mod fiscal;
 pub mod hierarquia;
 mod inventario;
 mod listagem;
@@ -106,6 +107,7 @@ pub use comandos::{
     AlteracaoAplicada, AlteracaoDesfeita, AplicarAlteracaoEmLote, DesfazerAlteracaoEmLote,
 };
 pub use comandos::{CriarPecaRapida, PecaRapidaCriada};
+pub use comandos::{DefinirCamposFiscaisDoGrupo, DefinirCamposFiscaisDoProduto};
 pub use comandos::{
     DefinirMargemDoGrupo, DefinirMargemDoProduto, DefinirParametrosPreco,
     DefinirPerfilFiscalDoGrupo, MoverGrupoProduto, MoverProdutosDeGrupo, ProdutosMovidos,
@@ -124,8 +126,8 @@ pub use consultas::{
     SaldoDisponivelDoProduto, Unidades,
 };
 pub use consultas_lote::{
-    AlteracaoRegistrada, HistoricoDeAlteracoesEmLote, LinhaDaPrevia, PreviaDaAlteracaoEmLote,
-    ProdutoParaLote, ProdutosParaLote,
+    AlteracaoRegistrada, HistoricoDeAlteracoesEmLote, LinhaDaPrevia, PerfilFiscalDoProduto,
+    PerfilFiscalEfetivo, PreviaDaAlteracaoEmLote, ProdutoParaLote, ProdutosParaLote,
 };
 #[cfg(feature = "sqlite")]
 pub use consultas_preco::{parametros_da_empresa, sugerir_precos};

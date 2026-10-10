@@ -9,7 +9,7 @@ use cardeal_modkit::Ctx;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
-use crate::alteracao_em_lote::{Alteracao, ValoresProduto};
+use crate::alteracao_em_lote::{Alteracao, FiltroDeLote, ValoresProduto};
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::{Erro, Resultado};
 
@@ -26,16 +26,25 @@ pub struct ProdutoParaLote {
     pub margem: Option<Percentual>,
     /// Ativo.
     pub ativo: bool,
+    /// O NCM.
+    pub ncm: String,
+    /// O fabricante.
+    pub fabricante: Option<String>,
+    /// O custo médio, quando há (maior entre os locais).
+    pub custo: Option<cardeal_kernel::Dinheiro>,
+    /// Tem algum campo fiscal próprio (fora o herdado).
+    pub tem_perfil_fiscal_proprio: bool,
 }
 
-/// Os produtos para escolher: a subárvore de um grupo (ou todos) e/ou o que casa com a busca.
-/// Inclui os inativos — o lote também reativa.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Os produtos para escolher: por grupo (a subárvore inteira) **e/ou** por qualquer dos outros
+/// critérios do [`FiltroDeLote`] — fabricante, NCM, situação, sem margem, sem perfil fiscal,
+/// faixa de custo. A hierarquia é só um dos filtros. Inclui os inativos: o lote também reativa.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ProdutosParaLote {
     /// O grupo (a subárvore inteira entra); `None` = todos.
     pub grupo: Option<Id>,
-    /// Texto no nome.
-    pub busca: Option<String>,
+    /// Os demais critérios (o campo `grupos` daqui é preenchido pelo servidor a partir de `grupo`).
+    pub filtro: FiltroDeLote,
 }
 
 impl Consulta for ProdutosParaLote {
@@ -45,6 +54,7 @@ impl Consulta for ProdutosParaLote {
     #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         use crate::hierarquia::{Arvore, NoGrupo};
+        let mut filtro = self.filtro;
         let grupos = match self.grupo {
             None => None,
             Some(g) => {
@@ -61,11 +71,12 @@ impl Consulta for ProdutosParaLote {
                 Some(todos)
             }
         };
+        filtro.grupos = grupos;
         Ok(crate::repositorio_lote::produtos_do_lote(
             conexao,
             ctx.organizacao,
-            grupos.as_deref(),
-            self.busca.as_deref(),
+            ctx.empresa,
+            &filtro,
             crate::alteracao_em_lote::MAX_PRODUTOS,
         )?
         .into_iter()
@@ -75,6 +86,16 @@ impl Consulta for ProdutosParaLote {
             grupo: p.valores.grupo,
             margem: p.valores.margem,
             ativo: p.valores.ativo,
+            tem_perfil_fiscal_proprio: !p.valores.fiscal.e_vazio(),
+            ncm: p.valores.ncm,
+            fabricante: p.fabricante,
+            custo: (p.custo > 0).then(|| {
+                cardeal_kernel::Dinheiro::de_total(
+                    cardeal_kernel::Quantidade::unidades(1),
+                    cardeal_kernel::Preco::interna(p.custo),
+                    cardeal_kernel::Arredondamento::MeioAcima,
+                )
+            }),
         })
         .collect())
     }
@@ -129,8 +150,8 @@ impl Consulta for PreviaDaAlteracaoEmLote {
             saida.push(LinhaDaPrevia {
                 produto: p.produto,
                 nome: p.nome,
+                depois: self.alteracao.aplicar(&p.valores),
                 antes: p.valores,
-                depois: self.alteracao.aplicar(p.valores),
             });
         }
         Ok(saida)
@@ -190,5 +211,56 @@ impl Consulta for HistoricoDeAlteracoesEmLote {
                 desfeita_em: l.desfeito_em,
             })
             .collect())
+    }
+}
+
+/// O perfil fiscal vigente de um produto, campo a campo, com quem o definiu.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct PerfilFiscalDoProduto {
+    /// O produto.
+    pub produto: Id,
+}
+
+/// O resultado da [`PerfilFiscalDoProduto`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PerfilFiscalEfetivo {
+    /// O NCM do produto.
+    pub ncm: String,
+    /// Cada campo com o valor vigente e de onde veio (o produto ou o nome de um grupo).
+    pub linhas: Vec<crate::fiscal::LinhaFiscal>,
+    /// O que o produto define por conta própria.
+    pub proprios: crate::fiscal::CamposFiscais,
+}
+
+impl Consulta for PerfilFiscalDoProduto {
+    type Saida = PerfilFiscalEfetivo;
+    const PERMISSAO: &'static str = "estoque.produto.ver";
+
+    #[cfg(feature = "sqlite")]
+    fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        use crate::hierarquia::{Arvore, NoGrupo};
+        let p = crate::repositorio_lote::produto_do_lote(conexao, ctx.organizacao, self.produto)?
+            .ok_or_else(|| Erro::nao_encontrado("produto"))?;
+        let perfis = crate::repositorio_preco::perfis_dos_grupos(conexao, ctx.organizacao)?;
+        let arvore = Arvore::de_nos(
+            &perfis
+                .iter()
+                .map(|g| NoGrupo {
+                    id: g.id,
+                    pai: g.pai,
+                })
+                .collect::<Vec<_>>(),
+        );
+        let mut cadeia = vec![("Produto".to_owned(), p.valores.fiscal.clone())];
+        for g in arvore.ancestrais(p.valores.grupo) {
+            if let Some(g) = perfis.iter().find(|x| x.id == g) {
+                cadeia.push((g.nome.clone(), g.fiscal.clone()));
+            }
+        }
+        Ok(PerfilFiscalEfetivo {
+            ncm: p.valores.ncm,
+            linhas: crate::fiscal::efetivo(&cadeia),
+            proprios: p.valores.fiscal,
+        })
     }
 }

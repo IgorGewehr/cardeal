@@ -5,6 +5,7 @@
 use cardeal_kernel::{Id, Percentual, Resultado};
 use rusqlite::{params, Connection, OptionalExtension};
 
+use crate::fiscal::CamposFiscais;
 use crate::parametros_preco::ParametrosPreco;
 use crate::precificacao::{AnexoSimples, RegimeImposto};
 use crate::repositorio::{blob, id_de, persist};
@@ -24,6 +25,8 @@ pub struct PerfilDoGrupo {
     pub icms_st: Option<bool>,
     /// PIS/COFINS monofásico.
     pub monofasico: Option<bool>,
+    /// Os campos fiscais próprios do grupo (o que ele define; o resto herda).
+    pub fiscal: CamposFiscais,
 }
 
 fn anexo_txt(a: AnexoSimples) -> &'static str {
@@ -157,7 +160,7 @@ pub fn salvar_parametros_preco(
 pub fn perfis_dos_grupos(conn: &Connection, organizacao: Id) -> Resultado<Vec<PerfilDoGrupo>> {
     let mut stmt = conn
         .prepare(
-            "SELECT id, nome, pai, margem_desejada, icms_st, monofasico
+            "SELECT id, nome, pai, margem_desejada, icms_st, monofasico, perfil_fiscal
              FROM estoque_grupo_produto WHERE empresa = ?1",
         )
         .map_err(persist)?;
@@ -170,6 +173,7 @@ pub fn perfis_dos_grupos(conn: &Connection, organizacao: Id) -> Resultado<Vec<Pe
                 margem: pct_opt(r.get::<_, Option<i64>>(3)?),
                 icms_st: r.get::<_, Option<i64>>(4)?.map(|v| v != 0),
                 monofasico: r.get::<_, Option<i64>>(5)?.map(|v| v != 0),
+                fiscal: CamposFiscais::de_blob(r.get::<_, Option<Vec<u8>>>(6)?.as_deref()),
             })
         })
         .map_err(persist)?;
@@ -247,6 +251,46 @@ pub fn definir_margem_do_produto(
                 blob(produto),
                 margem.map(Percentual::unidades_internas)
             ],
+        )
+        .map_err(persist)?;
+    Ok(n > 0)
+}
+
+/// Define os campos fiscais próprios de um grupo (vazio = herda tudo). `false` se não existe.
+///
+/// # Errors
+/// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+pub fn definir_campos_fiscais_do_grupo(
+    conn: &Connection,
+    organizacao: Id,
+    grupo: Id,
+    campos: &CamposFiscais,
+) -> Resultado<bool> {
+    let n = conn
+        .execute(
+            "UPDATE estoque_grupo_produto SET perfil_fiscal = ?3, versao = versao + 1
+             WHERE empresa = ?1 AND id = ?2",
+            params![blob(organizacao), blob(grupo), campos.para_blob()],
+        )
+        .map_err(persist)?;
+    Ok(n > 0)
+}
+
+/// Define os campos fiscais próprios de um produto (vazio = herda tudo). `false` se não existe.
+///
+/// # Errors
+/// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+pub fn definir_campos_fiscais_do_produto(
+    conn: &Connection,
+    organizacao: Id,
+    produto: Id,
+    campos: &CamposFiscais,
+) -> Resultado<bool> {
+    let n = conn
+        .execute(
+            "UPDATE estoque_produto SET perfil_fiscal = ?3, versao = versao + 1
+             WHERE empresa = ?1 AND id = ?2",
+            params![blob(organizacao), blob(produto), campos.para_blob()],
         )
         .map_err(persist)?;
     Ok(n > 0)

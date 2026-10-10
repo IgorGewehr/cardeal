@@ -35,6 +35,7 @@ cardeal-modkit = { path = "../../cardeal-modkit", default-features = false }
 cardeal-ui = { workspace = true, optional = true }
 egui       = { workspace = true, optional = true }
 serde.workspace     = true
+postcard.workspace  = true
 rusqlite = { workspace = true, optional = true }
 thiserror.workspace = true
 smallvec.workspace  = true

@@ -7,6 +7,8 @@
 //! vence e o produto vai para a lista de ignorados.
 
 use cardeal_kernel::{Id, Instante, Percentual};
+
+use crate::fiscal::CamposFiscais;
 use serde::{Deserialize, Serialize};
 
 /// Quanto tempo depois da aplicação ainda dá para desfazer (24 horas, em microssegundos).
@@ -16,7 +18,7 @@ pub const JANELA_DESFAZER_MICROS: i64 = 24 * 60 * 60 * 1_000_000;
 pub const MAX_PRODUTOS: usize = 5_000;
 
 /// Mudar um campo ou deixá-lo como está.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum Mudanca<T> {
     /// Não mexe no campo.
     #[default]
@@ -25,16 +27,18 @@ pub enum Mudanca<T> {
     Definir(T),
 }
 
-impl<T: Copy> Mudanca<T> {
+impl<T: Clone> Mudanca<T> {
     /// O valor novo, ou o que já estava.
     #[must_use]
-    pub const fn sobre(self, atual: T) -> T {
+    pub fn sobre(&self, atual: T) -> T {
         match self {
             Self::Manter => atual,
-            Self::Definir(v) => v,
+            Self::Definir(v) => v.clone(),
         }
     }
+}
 
+impl<T> Mudanca<T> {
     /// Há mudança neste campo?
     #[must_use]
     pub const fn muda(&self) -> bool {
@@ -42,8 +46,21 @@ impl<T: Copy> Mudanca<T> {
     }
 }
 
+/// O que fazer com os campos fiscais **próprios** do produto.
+#[allow(clippy::large_enum_variant)] // uma por alteração; encaixotar só espalharia `Box`
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum MudancaFiscal {
+    /// Não mexe.
+    #[default]
+    Manter,
+    /// Preenche só os campos informados, mantendo os demais como estão.
+    Mesclar(CamposFiscais),
+    /// Apaga os campos próprios: o produto volta a herdar tudo do grupo.
+    Limpar,
+}
+
 /// O que se pode alterar em lote.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Alteracao {
     /// A margem líquida desejada do produto (`Definir(None)` = voltar a herdar do grupo).
     pub margem: Mudanca<Option<Percentual>>,
@@ -51,22 +68,63 @@ pub struct Alteracao {
     pub grupo: Mudanca<Id>,
     /// Ativo ou inativo.
     pub ativo: Mudanca<bool>,
+    /// O NCM (8 dígitos).
+    pub ncm: Mudanca<String>,
+    /// Os campos fiscais próprios.
+    pub fiscal: MudancaFiscal,
 }
 
 impl Alteracao {
     /// Não muda nada.
     #[must_use]
-    pub const fn e_vazia(&self) -> bool {
-        !self.margem.muda() && !self.grupo.muda() && !self.ativo.muda()
+    pub fn e_vazia(&self) -> bool {
+        !self.margem.muda()
+            && !self.grupo.muda()
+            && !self.ativo.muda()
+            && !self.ncm.muda()
+            && self.fiscal == MudancaFiscal::Manter
+    }
+
+    /// Mexe em dado fiscal (NCM ou campos fiscais)? Exige a permissão de perfil tributário.
+    #[must_use]
+    pub fn mexe_em_fiscal(&self) -> bool {
+        self.ncm.muda() || self.fiscal != MudancaFiscal::Manter
+    }
+
+    /// Valida o que a alteração pede (formatos fiscais, NCM).
+    ///
+    /// # Errors
+    /// Mensagem para o usuário.
+    pub fn validar(&self) -> Result<(), String> {
+        if let Mudanca::Definir(n) = &self.ncm {
+            if n.len() != 8 || !n.chars().all(|c| c.is_ascii_digit()) {
+                return Err("NCM: precisa ter 8 dígitos".to_owned());
+            }
+        }
+        if let MudancaFiscal::Mesclar(c) = &self.fiscal {
+            if c.e_vazio() {
+                return Err("Preencha ao menos um campo fiscal".to_owned());
+            }
+            c.validar()?;
+        }
+        Ok(())
     }
 
     /// Os valores do produto depois da alteração.
     #[must_use]
-    pub const fn aplicar(&self, v: ValoresProduto) -> ValoresProduto {
+    pub fn aplicar(&self, v: &ValoresProduto) -> ValoresProduto {
+        let mut fiscal = v.fiscal.clone();
+        match &self.fiscal {
+            MudancaFiscal::Manter => {}
+            MudancaFiscal::Mesclar(c) => fiscal.mesclar(c),
+            MudancaFiscal::Limpar => fiscal = CamposFiscais::default(),
+        }
         ValoresProduto {
             grupo: self.grupo.sobre(v.grupo),
             margem: self.margem.sobre(v.margem),
             ativo: self.ativo.sobre(v.ativo),
+            ncm: self.ncm.sobre(v.ncm.clone()),
+            fiscal,
         }
     }
 
@@ -83,12 +141,18 @@ impl Alteracao {
         if self.ativo.muda() {
             c.push("situação");
         }
+        if self.ncm.muda() {
+            c.push("NCM");
+        }
+        if self.fiscal != MudancaFiscal::Manter {
+            c.push("campos fiscais");
+        }
         c.join(", ")
     }
 }
 
 /// Os campos de um produto que o lote sabe mexer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ValoresProduto {
     /// O grupo.
     pub grupo: Id,
@@ -96,6 +160,36 @@ pub struct ValoresProduto {
     pub margem: Option<Percentual>,
     /// Ativo.
     pub ativo: bool,
+    /// O NCM.
+    pub ncm: String,
+    /// Os campos fiscais próprios.
+    pub fiscal: CamposFiscais,
+}
+
+/// Os critérios para escolher produtos — todos opcionais e combinados com "e". A hierarquia
+/// é só um deles.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FiltroDeLote {
+    /// Só estes grupos (a tela já expande a subárvore).
+    pub grupos: Option<Vec<Id>>,
+    /// Texto no nome.
+    pub busca: Option<String>,
+    /// Texto no fabricante.
+    pub fabricante: Option<String>,
+    /// Começa com estes dígitos de NCM.
+    pub ncm_prefixo: Option<String>,
+    /// `Some(true)` só ativos, `Some(false)` só inativos.
+    pub ativo: Option<bool>,
+    /// Só os que não têm margem própria.
+    pub sem_margem_propria: bool,
+    /// Só os que não têm nenhum campo fiscal próprio.
+    pub sem_perfil_fiscal_proprio: bool,
+    /// Custo médio mínimo, em centavos.
+    pub custo_minimo: Option<i64>,
+    /// Custo médio máximo, em centavos.
+    pub custo_maximo: Option<i64>,
+    /// Só os sem custo (nunca tiveram entrada).
+    pub sem_custo: bool,
 }
 
 /// Por que uma alteração não pode ser desfeita.
@@ -152,6 +246,8 @@ mod testes {
             grupo: Id::novo(),
             margem: Some(Percentual::pontos(10)),
             ativo: true,
+            ncm: "22021000".into(),
+            fiscal: CamposFiscais::default(),
         }
     }
 
@@ -163,7 +259,7 @@ mod testes {
             grupo: Mudanca::Definir(novo_grupo),
             ..Alteracao::default()
         };
-        let d = a.aplicar(v);
+        let d = a.aplicar(&v);
         assert_eq!(d.grupo, novo_grupo);
         assert_eq!((d.margem, d.ativo), (v.margem, v.ativo));
         assert_eq!(a.campos(), "grupo");
@@ -177,16 +273,60 @@ mod testes {
             margem: Mudanca::Definir(None),
             ..Alteracao::default()
         };
-        assert_eq!(a.aplicar(valores()).margem, None);
+        assert_eq!(a.aplicar(&valores()).margem, None);
         let b = Alteracao {
             margem: Mudanca::Definir(Some(Percentual::pontos(30))),
             ativo: Mudanca::Definir(false),
             ..Alteracao::default()
         };
-        let d = b.aplicar(valores());
+        let d = b.aplicar(&valores());
         assert_eq!(d.margem, Some(Percentual::pontos(30)));
         assert!(!d.ativo);
         assert_eq!(b.campos(), "margem, situação");
+    }
+
+    #[test]
+    fn ncm_e_campos_fiscais_mesclam_ou_limpam() {
+        let mut v = valores();
+        v.fiscal.cst_icms = Some("102".into());
+        let mescla = Alteracao {
+            ncm: Mudanca::Definir("19059090".into()),
+            fiscal: MudancaFiscal::Mesclar(CamposFiscais {
+                cfop_entrada: Some("1102".into()),
+                ..CamposFiscais::default()
+            }),
+            ..Alteracao::default()
+        };
+        assert!(mescla.validar().is_ok());
+        assert!(mescla.mexe_em_fiscal());
+        let d = mescla.aplicar(&v);
+        assert_eq!(d.ncm, "19059090");
+        assert_eq!(
+            d.fiscal.cst_icms.as_deref(),
+            Some("102"),
+            "o que não foi pedido fica"
+        );
+        assert_eq!(d.fiscal.cfop_entrada.as_deref(), Some("1102"));
+        assert_eq!(mescla.campos(), "NCM, campos fiscais");
+
+        let limpa = Alteracao {
+            fiscal: MudancaFiscal::Limpar,
+            ..Alteracao::default()
+        };
+        assert!(limpa.aplicar(&d).fiscal.e_vazio());
+        assert!(!limpa.e_vazia());
+        // NCM errado e remendo vazio são recusados antes de gravar.
+        let ncm_ruim = Alteracao {
+            ncm: Mudanca::Definir("123".into()),
+            ..Alteracao::default()
+        };
+        assert!(ncm_ruim.validar().unwrap_err().contains("NCM"));
+        let vazio = Alteracao {
+            fiscal: MudancaFiscal::Mesclar(CamposFiscais::default()),
+            ..Alteracao::default()
+        };
+        assert!(vazio.validar().is_err());
+        assert!(!Alteracao::default().mexe_em_fiscal());
     }
 
     #[test]
