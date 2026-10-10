@@ -40,6 +40,7 @@ mod erros;
 mod lancamento;
 #[cfg(feature = "sqlite")]
 pub mod migracoes;
+mod modelos;
 mod plano;
 mod porta;
 mod razao;
@@ -57,6 +58,7 @@ pub use conta::{CodigoConta, Conta, GrupoFluxo, Natureza, PapelConta, TipoConta}
 pub use contas::Contas;
 pub use erros::ErroRazao;
 pub use lancamento::{Contraparte, EstadoLancamento, Lancamento, Origem, Partida};
+pub use modelos::{contas_do_modelo, ContaDeModelo, ModeloDePlano};
 pub use plano::{plano_padrao, ContaSemente};
 pub use porta::{InfoConta, PortaRazao};
 pub use razao::Razao;

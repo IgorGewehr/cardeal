@@ -84,6 +84,7 @@ pub mod migracoes;
 #[cfg(feature = "sqlite")]
 mod modulo;
 pub mod pessoal;
+mod plano;
 mod projecao;
 pub mod receituario;
 mod recorrencia;
@@ -142,6 +143,11 @@ pub use manifesto::{manifesto, MANIFESTO};
 pub use meio_pagamento::MeioPagamento;
 #[cfg(feature = "sqlite")]
 pub use modulo::ModuloFinanceiro;
+pub use plano::{
+    AplicarModeloDePlano, CategoriasPorConta, ContaDoPlanoCriada, CriarContaDoPlano,
+    ModeloAplicado, NoPlano, PlanoDeContas, VincularCategoriaAConta,
+    NIVEL_MAXIMO as NIVEL_MAXIMO_DO_PLANO,
+};
 pub use projecao::{ItemProjecaoCategoria, ProjecaoPorCategoria};
 pub use receituario::Autoria;
 pub use recorrencia::{Periodicidade, Recorrencia, TipoValor};

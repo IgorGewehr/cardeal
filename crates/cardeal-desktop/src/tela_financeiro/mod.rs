@@ -13,6 +13,7 @@ mod dre;
 mod fluxo;
 mod lancar;
 mod pessoal;
+mod plano_contas;
 mod recorrencias;
 mod renegociar;
 #[cfg(test)]
@@ -54,6 +55,7 @@ use mod_financeiro::{
     TipoValor, TitulosAPagarEmAberto, TitulosAReceberEmAberto, TotalPagoNoPeriodo,
     TotalPorCategoriaNoPeriodo, TotalRecebidoNoPeriodo,
 };
+use plano_contas::*;
 use recorrencias::*;
 use renegociar::*;
 use visao::*;
@@ -67,6 +69,7 @@ enum Aba {
     Custos,
     Cobranca,
     Resultado,
+    Plano,
     Fluxo,
     Bancos,
 }
@@ -367,6 +370,7 @@ pub struct EstadoTelaFinanceiro {
     /// Aba Cobrança: o aging carregado e se está olhando o a pagar.
     aging: Option<mod_financeiro::aging::Aging>,
     cobranca_pagar: bool,
+    plano: plano_contas::EstadoPlano,
     dre_mes: Option<Competencia>,
     dre: Option<mod_financeiro::ComparativoDre>,
     dfc: Option<mod_financeiro::dfc::Dfc>,
@@ -482,6 +486,7 @@ pub fn mostrar(
                 Aba::Custos => painel_custos(ui, motor, sessao, estado),
                 Aba::Cobranca => painel_cobranca(ui, motor, sessao, estado),
                 Aba::Resultado => painel_dre(ui, motor, sessao, estado),
+                Aba::Plano => painel_plano(ui, motor, sessao, estado),
                 _ => lista(ui, motor, sessao, estado),
             }
         },
@@ -586,6 +591,7 @@ fn abas(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTe
         (Aba::Custos, "Custos por categoria"),
         (Aba::Cobranca, "Cobrança"),
         (Aba::Resultado, "Resultado e caixa"),
+        (Aba::Plano, "Plano de contas"),
         (Aba::Fluxo, "Fluxo de caixa"),
         (Aba::Bancos, "Contas bancárias"),
     ])
@@ -653,6 +659,7 @@ impl EstadoTelaFinanceiro {
             "financeiro-custos" => self.aba = Aba::Custos,
             "financeiro-dre" => self.aba = Aba::Resultado,
             "financeiro-cobranca" => self.aba = Aba::Cobranca,
+            "financeiro-plano" => self.aba = Aba::Plano,
             "financeiro-dfc" => {
                 self.aba = Aba::Resultado;
                 self.dre_dfc = true;

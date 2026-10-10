@@ -719,3 +719,42 @@ fn aba_cobranca_lista_quem_esta_devendo_com_o_atraso() {
     estado.carregar_cobranca(&t.motor, &t.sessao);
     assert!(estado.aging.expect("aging").total_aberto.e_zero());
 }
+
+#[test]
+fn aba_plano_carrega_a_arvore_e_o_modelo_acrescenta_contas_e_liga_categorias() {
+    let t = motor_de_teste();
+    let mut estado = EstadoTelaFinanceiro {
+        aba: Aba::Plano,
+        ..Default::default()
+    };
+    estado.carregar(&t.motor, &t.sessao);
+    assert!(estado.erro.is_none(), "{:?}", estado.erro);
+    assert!(estado.plano.nos.len() > 40, "o plano padrão já vem pronto");
+    assert!(!estado.plano.nos.iter().any(|n| n.codigo == "5.20"));
+
+    let _: u32 = t
+        .motor
+        .executar(
+            &t.sessao,
+            "financeiro.criar_categorias_sugeridas.v1",
+            &mod_financeiro::CriarCategoriasSugeridas,
+        )
+        .expect("categorias");
+    let r: mod_financeiro::ModeloAplicado = t
+        .motor
+        .executar(
+            &t.sessao,
+            "financeiro.aplicar_modelo_de_plano.v1",
+            &mod_financeiro::AplicarModeloDePlano {
+                modelo: cardeal_ledger::ModeloDePlano::Servicos,
+            },
+        )
+        .expect("modelo");
+    assert!(!r.criadas.is_empty());
+    estado.plano.carregar(&t.motor, &t.sessao);
+    assert!(estado.plano.nos.iter().any(|n| n.codigo == "5.20"));
+    assert!(
+        estado.plano.vinculos.len() >= 10,
+        "aluguel, energia, pró-labore… passaram a lançar nas contas próprias"
+    );
+}

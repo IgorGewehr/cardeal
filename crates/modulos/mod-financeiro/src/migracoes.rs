@@ -190,6 +190,13 @@ CREATE INDEX financeiro_pessoal_grupo ON financeiro_pessoal(grupo);
 ";
 
 /// A listagem paginada de parcelas ordena por `(vencimento, id)` em qualquer estado.
+// Migração v7 (2026-10-09): a categoria pode apontar uma conta do plano. Lançar um título com
+// categoria vinculada posta a receita/despesa **nessa** conta (e a DRE separa aluguel de
+// energia de pró-labore), em vez da conta genérica do papel. Nula = comportamento de sempre.
+const SQL_CATEGORIA_CONTA: &str = r"
+ALTER TABLE financeiro_categoria ADD COLUMN conta BLOB;
+";
+
 const SQL_LISTA_PAGINADA: &str = r"
 CREATE INDEX financeiro_parcela_lista ON financeiro_parcela(empresa, vencimento, id);
 ";
@@ -229,6 +236,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 6,
         nome: "financeiro_lista_paginada",
         sql: SQL_LISTA_PAGINADA,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 7,
+        nome: "financeiro_categoria_conta",
+        sql: SQL_CATEGORIA_CONTA,
         tipo: TipoMigracao::Esquema,
     },
 ];

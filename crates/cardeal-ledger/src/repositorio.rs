@@ -298,7 +298,8 @@ impl PortaRazao for RepositorioRazao<'_, '_> {
         self.conn()
             .query_row(
                 "SELECT id FROM razao_conta
-                 WHERE empresa = ?1 AND papel_padrao = ?2 AND ativa = 1 LIMIT 1",
+                 WHERE empresa = ?1 AND papel_padrao = ?2 AND ativa = 1
+                 ORDER BY LENGTH(codigo), codigo LIMIT 1",
                 rusqlite::params![blob(empresa), papel.to_string()],
                 |r| r.get::<_, Vec<u8>>(0),
             )

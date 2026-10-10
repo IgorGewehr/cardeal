@@ -342,6 +342,33 @@ impl Conta {
             versao: cardeal_kernel::Versao::INICIAL,
         })
     }
+
+    /// Como [`Conta::abrir_filha`], mas a conta nova é **sintética** (agrupadora): recebe filhas,
+    /// nunca lançamento. Sem papel e sem grupo de fluxo.
+    ///
+    /// # Errors
+    /// Os mesmos de [`Conta::abrir_filha`].
+    pub fn abrir_filha_agrupadora(
+        pai_id: Id,
+        pai: &crate::porta::InfoConta,
+        codigo: CodigoConta,
+        nome: String,
+        natureza: Natureza,
+        modulo_origem: impl Into<String>,
+    ) -> Result<Self, crate::erros::ErroRazao> {
+        let mut c = Self::abrir_filha(
+            pai_id,
+            pai,
+            codigo,
+            nome,
+            natureza,
+            None,
+            None,
+            modulo_origem,
+        )?;
+        c.tipo = TipoConta::Sintetica;
+        Ok(c)
+    }
 }
 
 #[cfg(test)]

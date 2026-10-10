@@ -402,6 +402,7 @@ stateDiagram-v2
 | `HorizonteFinanceiro` | `financeiro.projecao.ver` | Rio do Caixa (faixas comprometido/previsto) | agregação em memória sobre `ParcelasVencendo` + `Recorrencia` + estimativa |
 | `ExtratoDaConta` | `financeiro.banco.ver` | Tela de conta bancária | `financeiro_item_extrato(extrato, data)` |
 | `ItensAConciliar` | `financeiro.conciliacao.ver` | Tela de Conciliação | `financeiro_item_extrato(estado, extrato)` |
+| `PlanoDeContas` / `CategoriasPorConta` ✅ (2026-10-09) | `financeiro.plano.ver` | Aba Plano de contas: a árvore inteira em ordem numérica de código (até 5 níveis) e os pares (conta, categoria) que lançam nela | `razao_conta(empresa)` + `financeiro_categoria(conta)` |
 | `AgingAReceber` / `AgingAPagar` ✅ (2026-10-09) | `financeiro.receber.ver` / `financeiro.pagar.ver` | Aba Cobrança: o saldo em aberto por faixa de atraso (a vencer, 1–30, 31–60, 61–90, +90 dias), o total vencido, a **taxa de inadimplência** (vencido há +30 dias ÷ total em aberto) e os devedores do maior vencido para o menor, com o atraso da parcela mais antiga; WhatsApp a um clique com a mensagem de cobrança | `financeiro_parcela`/`financeiro_titulo` em aberto (`titulos_em_aberto`) |
 | `DfcDoPeriodo` ✅ (2026-10-09) | `financeiro.dre.ver` | Aba Resultado e caixa › DFC pelo método **direto**: saldo de abertura, entradas e saídas realizadas no período abertas por atividade (operacional, investimento, financiamento) e por contraparte, variação e saldo final — que bate com o saldo realizado das contas de caixa do Razão (testado). Cada contrapartida de um lançamento que mexe no caixa vira uma linha (um recebimento com juros dá "Recebimentos de clientes" e "Receitas financeiras"); transferência entre contas de caixa não tem contraparte e some. "Caixa" = papel Caixa/Bancos/ValoresEmTransito, próprio ou herdado. Data = liquidação (ou competência) | `razao_partida` × `razao_lancamento` (`cardeal_ledger::movimentos_de_caixa`) |
 | `DreDoPeriodo` / `DreComparativa` ✅ (2026-10-09; no lugar de `DreDoMes`) | `financeiro.dre.ver` | Aba Resultado: DRE de um período; comparativo mês × mês anterior × mesmo mês do ano anterior. Estrutura: receita bruta › deduções (descontos, devoluções, impostos sobre venda) › receita líquida › CMV/CSV › lucro bruto › outras receitas e despesas operacionais › EBITDA › resultado financeiro › lucro líquido. Cada linha é uma **contribuição com sinal**, então o lucro líquido é sempre receitas − despesas do Razão (propriedade testada). Conta aberta pelo usuário herda o papel da sintética; sem papel conhecido cai em "outras", nunca some. Entram `Confirmado`/`Realizado`/`Estornado` pela competência; `Previsto` não | `razao_lancamento(empresa, competencia, estado)` + `razao_partida(conta)` (`cardeal_ledger::resultado_por_conta`) |
@@ -411,6 +412,30 @@ stateDiagram-v2
 | `Categorias` ✅ | `financeiro.categoria.ver` | Seletor de categoria ao lançar título/recorrência | `financeiro_categoria(empresa, nome) WHERE ativa = 1` |
 | `TotalPorCategoriaNoPeriodo` ✅ | `financeiro.categoria.ver` | Gráfico de custo/receita por categoria e mês (churn, MRR por projeto) | agregação em memória sobre `financeiro_baixa` join `financeiro_titulo`, filtrando por `data` |
 | `TituloDaOrigem` ✅ (novo, 2026-09-11) | `financeiro.receber.ver` | Detalhe de OS (`os`)/vendas/compras faturada: "qual título isto gerou" | `financeiro_titulo(empresa, origem_modulo, origem_id)` — o par de correlação que `Titulo` já carregava desde a origem; usado por outro módulo pela consulta pública, nunca por SQL direto em `financeiro_titulo` (`docs/contratos-internos.md` §7 regra 2) |
+
+## 6.1 Plano de contas: modelos, contas novas e categoria → conta (2026-10-09)
+
+O **plano padrão** (≈ 50 contas, `cardeal_ledger::plano_padrao`) continua sendo semeado em toda
+empresa. Em cima dele:
+
+- **Modelos por segmento** (`AplicarModeloDePlano`, `financeiro.plano.editar`): Comércio, Prestação de
+  serviços e Assistência técnica/oficina acrescentam contas (aluguel, energia, água, internet,
+  pró-labore, salários, contador, marketing, sistemas, manutenção, transporte, tarifas, seguros,
+  impostos e taxas — mais as próprias do segmento: fretes e comissões; serviços recorrentes e
+  subcontratação; serviços de bancada, peças e garantia). Idempotente, só cria o que falta, nunca altera
+  conta existente; despesas a partir de `5.20`, receitas de modelo (com papel de vendas ou serviços,
+  para a DRE agrupar certo) a partir de `4.20`. Pode-se aplicar mais de um.
+- **Contas novas** (`CriarContaDoPlano`): filha de uma agrupadora, agrupadora ou que recebe lançamento,
+  até **5 níveis**; o código é o próximo livre do pai.
+- **Categoria → conta** (`VincularCategoriaAConta`, migração financeiro v7): a categoria pode apontar
+  uma conta analítica (despesa para as de pagar, receita para as de receber). Um título lançado com a
+  categoria vinculada **posta nessa conta** em vez da genérica do papel — e a DRE passa a mostrar "Aluguel",
+  "Energia"… em linhas próprias. Aplicar um modelo e criar as categorias sugeridas ligam por **nome**
+  (sem diferenciar maiúsculas). Sem vínculo, tudo como antes.
+- Resolução de conta por papel passa a ser determinística (`ORDER BY LENGTH(codigo), codigo`), para
+  contas de modelo com o mesmo papel nunca "roubarem" os lançamentos da conta base.
+- **Fora desta fatia:** importar plano de planilha, DE/PARA com o plano contábil do escritório e
+  edição/inativação de conta existente.
 
 ## 7. Receituário contábil
 

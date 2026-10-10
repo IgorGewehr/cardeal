@@ -419,6 +419,10 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   comissão e taxas (os mesmos percentuais do preço sugerido); item sem custo fica fora do cálculo
   (nunca vira lucro de 100%); semáforo com texto no organismo novo `PainelMargem`; item abaixo da
   margem mínima ganha a etiqueta "margem baixa". Ainda não está no orçamento de OS nem no PDV.
+- **Plano de contas** (`cardeal_ledger::modelos`, `mod-financeiro::plano`, migração financeiro v7): plano
+  padrão pronto + **modelos por segmento** (comércio, serviços, assistência técnica), contas novas até 5
+  níveis, e **categoria → conta** (o lançamento posta na conta própria; a DRE separa aluguel de energia).
+  Aba **Plano de contas** com a árvore. Faltam importação por planilha e DE/PARA contábil.
 - **Cobrança** (`mod-financeiro::aging`): aging dos recebíveis e pagáveis, taxa de inadimplência e lista
   de devedores com WhatsApp pronto — aba **Cobrança** (cena `financeiro-cobranca`).
 - **Preço sugerido → tabela de preço:** `vendas.aplicar_precos_sugeridos.v1` (botão "Aplicar à tabela de

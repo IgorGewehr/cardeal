@@ -267,6 +267,19 @@ const PERMISSOES: &[Permissao] = &[
         Risco::Baixo,
         None,
     ),
+    // ── plano de contas ──────────────────────────────────────────────────────
+    perm(
+        "financeiro.plano.ver",
+        "Ver o plano de contas",
+        Risco::Baixo,
+        None,
+    ),
+    perm(
+        "financeiro.plano.editar",
+        "Criar contas, aplicar modelo de plano e vincular categorias a contas",
+        Risco::Alto,
+        None,
+    ),
     // ── centro de custo ──────────────────────────────────────────────────────
     perm(
         "financeiro.centro_custo.ver",

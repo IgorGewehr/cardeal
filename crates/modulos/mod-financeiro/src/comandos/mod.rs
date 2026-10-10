@@ -186,7 +186,7 @@ pub fn lancar_titulo_comum(
     }
     let mut tcp = construtor.construir().map_err(|e| Erro::de_dominio(&e))?;
 
-    // 2. Resolver contas por papel.
+    // 2. Resolver contas por papel — a não ser que a categoria aponte uma conta do plano.
     let (conta_contraparte, conta_resultado) = {
         let repo = RepositorioRazao::novo(uow);
         let contas = Contas::nova(&repo, ctx.empresa);
@@ -198,6 +198,17 @@ pub fn lancar_titulo_comum(
                 .papel(dados.papel_resultado)
                 .map_err(|e| Erro::de_dominio(&e))?,
         )
+    };
+    let conta_resultado = match dados.categoria {
+        Some(cat) => {
+            let natureza = match dados.especie {
+                EspecieTitulo::Receber => "Receita",
+                EspecieTitulo::Pagar => "Despesa",
+            };
+            crate::plano::conta_da_categoria(uow.conexao(), ctx.empresa, cat, natureza)?
+                .unwrap_or(conta_resultado)
+        }
+        None => conta_resultado,
     };
 
     // 3. Receituário + Razão: um lançamento por parcela, vinculado a ela.

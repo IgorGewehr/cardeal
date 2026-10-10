@@ -68,6 +68,8 @@ impl Comando for CriarCategoriasSugeridas {
             RepositorioFinanceiro::novo(uow).inserir_categoria(&c)?;
             criadas += 1;
         }
+        // Quem já tem uma conta de mesmo nome no plano (modelo aplicado) passa a lançar nela.
+        crate::plano::vincular_categorias_por_nome(uow.conexao(), ctx.empresa)?;
         Ok(criadas)
     }
 }
