@@ -425,6 +425,8 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   Aba **Plano de contas** com a árvore. Faltam importação por planilha e DE/PARA contábil.
 - **Análise de estoque** (`mod-estoque::analise`): curva ABC por valor de saída, cobertura em dias,
   giro, dinheiro parado e risco de ruptura (aba **Análise**).
+- **Score de saúde financeira** (`mod-financeiro::saude`, `financeiro.saude.v1`): cartão na Visão geral,
+  cinco sinais determinísticos e explicáveis (ver a tabela em `docs/modulos/financeiro.md` §6).
 - **Cobrança** (`mod-financeiro::aging`): aging dos recebíveis e pagáveis, taxa de inadimplência e lista
   de devedores com WhatsApp pronto — aba **Cobrança** (cena `financeiro-cobranca`).
 - **Preço sugerido → tabela de preço:** `vendas.aplicar_precos_sugeridos.v1` (botão "Aplicar à tabela de

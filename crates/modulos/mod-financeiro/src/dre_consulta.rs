@@ -94,3 +94,71 @@ impl Consulta for DfcDoPeriodo {
         Ok(crate::dfc::montar(self.periodo, abertura, &movimentos))
     }
 }
+
+/// O score de saúde financeira (ver [`crate::saude`]). O giro de estoque pertence a outro módulo:
+/// quem o conhece (a tela, via `estoque.analise_de_estoque.v1`) o informa; sem ele o sinal sai
+/// do cálculo.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct SaudeFinanceira {
+    /// Giro mensal do estoque (100% = o estoque inteiro girou uma vez por mês).
+    pub giro_mensal: Option<cardeal_kernel::Percentual>,
+}
+
+impl Consulta for SaudeFinanceira {
+    type Saida = crate::saude::Saude;
+    const PERMISSAO: &'static str = "financeiro.dre.ver";
+
+    #[cfg(feature = "sqlite")]
+    fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        use crate::saude::{calcular, EntradasDeSaude};
+        use crate::titulo::EspecieTitulo;
+
+        let erro = |e: cardeal_ledger::ErroRazao| {
+            Erro::novo(CodigoErro::FALHA_INTERNA, format!("financeiro/saúde: {e}"))
+        };
+        let hoje = ctx.hoje();
+        // Caixa de hoje = o saldo de abertura de amanhã.
+        let amanha = hoje.mais_dias(1);
+        let (caixa, _) = cardeal_ledger::movimentos_de_caixa(
+            conexao,
+            ctx.empresa,
+            Periodo::novo(amanha, amanha),
+        )
+        .map_err(erro)?;
+
+        let receber =
+            crate::consultas::titulos_em_aberto(conexao, ctx.empresa, EspecieTitulo::Receber)?;
+        let pagar =
+            crate::consultas::titulos_em_aberto(conexao, ctx.empresa, EspecieTitulo::Pagar)?;
+        let ate = hoje.mais_dias(30);
+        let soma = |v: &[crate::consultas::ItemTituloEmAberto]| {
+            v.iter()
+                .filter(|p| p.vencimento <= ate)
+                .fold(cardeal_kernel::Dinheiro::ZERO, |a, p| a + p.saldo())
+        };
+        let aging = crate::aging::montar(&receber, hoje);
+
+        let linhas = cardeal_ledger::resultado_por_conta(
+            conexao,
+            ctx.empresa,
+            Periodo::novo(hoje.mais_dias(-90), hoje),
+        )
+        .map_err(erro)?;
+        let dre = crate::dre::montar(Periodo::novo(hoje.mais_dias(-90), hoje), &linhas);
+        let margem_ebitda = (!dre.receita_liquida.e_zero()).then(|| {
+            cardeal_kernel::Percentual::da_razao(
+                dre.ebitda.em_centavos(),
+                dre.receita_liquida.em_centavos(),
+            )
+        });
+
+        Ok(calcular(&EntradasDeSaude {
+            caixa,
+            a_receber_30d: soma(&receber),
+            a_pagar_30d: soma(&pagar),
+            inadimplencia: aging.taxa_de_inadimplencia(),
+            margem_ebitda,
+            giro_mensal: self.giro_mensal,
+        }))
+    }
+}

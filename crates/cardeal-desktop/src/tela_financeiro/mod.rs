@@ -16,6 +16,7 @@ mod pessoal;
 mod plano_contas;
 mod recorrencias;
 mod renegociar;
+mod saude;
 #[cfg(test)]
 mod testes;
 mod visao;
@@ -58,6 +59,7 @@ use mod_financeiro::{
 use plano_contas::*;
 use recorrencias::*;
 use renegociar::*;
+use saude::*;
 use visao::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
@@ -371,6 +373,7 @@ pub struct EstadoTelaFinanceiro {
     aging: Option<mod_financeiro::aging::Aging>,
     cobranca_pagar: bool,
     plano: plano_contas::EstadoPlano,
+    saude: Option<mod_financeiro::saude::Saude>,
     dre_mes: Option<Competencia>,
     dre: Option<mod_financeiro::ComparativoDre>,
     dfc: Option<mod_financeiro::dfc::Dfc>,

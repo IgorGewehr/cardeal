@@ -377,3 +377,116 @@ fn dfc_so_conta_o_que_foi_realizado_e_o_saldo_final_bate_com_o_caixa() {
     assert_eq!(seguinte.saldo_inicial, Dinheiro::reais(450));
     assert_eq!(seguinte.variacao, Dinheiro::ZERO);
 }
+
+#[test]
+fn saude_financeira_sai_verde_com_folga_e_vermelha_no_aperto() {
+    use mod_financeiro::saude::{Saude, Semaforo};
+    use mod_financeiro::SaudeFinanceira;
+
+    // Folga: a receber 1.000 e a pagar 400, ambos em 10 dias, sem atraso.
+    let c = cena();
+    let s = c.sessao(
+        Id::novo(),
+        &[
+            "financeiro.receber.criar",
+            "financeiro.pagar.criar",
+            "financeiro.dre.ver",
+        ],
+    );
+    let h = hoje();
+    let em_10 = h.mais_dias(10);
+    let receber = |valor: i64, venc: Data| {
+        let _: mod_financeiro::TituloAReceberLancado = c.cmd(
+            &s,
+            "financeiro.lancar_titulo_a_receber.v1",
+            &LancarTituloAReceber {
+                cliente: None,
+                valor_total: Dinheiro::reais(valor),
+                emissao: h,
+                parcelas: 1,
+                primeiro_vencimento: venc,
+                intervalo_dias: 0,
+                observacao: None,
+                categoria: None,
+                quitado_agora: None,
+            },
+        );
+    };
+    let pagar = |valor: i64, venc: Data| {
+        let _: mod_financeiro::TituloAPagarLancado = c.cmd(
+            &s,
+            "financeiro.lancar_titulo_a_pagar.v1",
+            &LancarTituloAPagar {
+                fornecedor: None,
+                valor_total: Dinheiro::reais(valor),
+                emissao: h,
+                parcelas: 1,
+                primeiro_vencimento: venc,
+                intervalo_dias: 0,
+                observacao: None,
+                categoria: None,
+                quitado_agora: None,
+            },
+        );
+    };
+    receber(1_000, em_10);
+    pagar(400, em_10);
+    let bom: Saude = c.consulta(
+        &s,
+        "financeiro.saude.v1",
+        &SaudeFinanceira { giro_mensal: None },
+    );
+    assert_eq!(bom.semaforo, Semaforo::Verde, "{bom:?}");
+    assert!(bom
+        .sinais
+        .iter()
+        .any(|x| x.nome == "Giro de estoque" && x.pontos.is_none()));
+
+    // Aperto: só contas vencidas a pagar e um recebível atrasado há mais de 30 dias.
+    let c2 = cena();
+    let s2 = c2.sessao(
+        Id::novo(),
+        &[
+            "financeiro.receber.criar",
+            "financeiro.pagar.criar",
+            "financeiro.dre.ver",
+        ],
+    );
+    let _: mod_financeiro::TituloAPagarLancado = c2.cmd(
+        &s2,
+        "financeiro.lancar_titulo_a_pagar.v1",
+        &LancarTituloAPagar {
+            fornecedor: None,
+            valor_total: Dinheiro::reais(5_000),
+            emissao: h.mais_dias(-20),
+            parcelas: 1,
+            primeiro_vencimento: h.mais_dias(-5),
+            intervalo_dias: 0,
+            observacao: None,
+            categoria: None,
+            quitado_agora: None,
+        },
+    );
+    let _: mod_financeiro::TituloAReceberLancado = c2.cmd(
+        &s2,
+        "financeiro.lancar_titulo_a_receber.v1",
+        &LancarTituloAReceber {
+            cliente: None,
+            valor_total: Dinheiro::reais(500),
+            emissao: h.mais_dias(-60),
+            parcelas: 1,
+            primeiro_vencimento: h.mais_dias(-45),
+            intervalo_dias: 0,
+            observacao: None,
+            categoria: None,
+            quitado_agora: None,
+        },
+    );
+    let ruim: Saude = c2.consulta(
+        &s2,
+        "financeiro.saude.v1",
+        &SaudeFinanceira { giro_mensal: None },
+    );
+    assert_eq!(ruim.semaforo, Semaforo::Vermelho, "{ruim:?}");
+    assert!(!ruim.puxando_para_baixo().is_empty());
+}

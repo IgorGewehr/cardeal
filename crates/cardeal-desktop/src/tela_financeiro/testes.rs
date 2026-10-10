@@ -758,3 +758,18 @@ fn aba_plano_carrega_a_arvore_e_o_modelo_acrescenta_contas_e_liga_categorias() {
         "aluguel, energia, pró-labore… passaram a lançar nas contas próprias"
     );
 }
+
+#[test]
+fn visao_geral_carrega_o_score_de_saude() {
+    let t = motor_de_teste();
+    lancar_a_receber(&t.motor, &t.sessao, 800);
+    let mut estado = EstadoTelaFinanceiro {
+        aba: Aba::Visao,
+        ..Default::default()
+    };
+    estado.carregar(&t.motor, &t.sessao);
+    assert!(estado.erro.is_none(), "{:?}", estado.erro);
+    let s = estado.saude.clone().expect("score carregado");
+    assert!(s.score <= 100);
+    assert_eq!(s.sinais.len(), 5);
+}

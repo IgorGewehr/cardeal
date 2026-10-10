@@ -59,6 +59,9 @@ impl EstadoTelaFinanceiro {
         self.carregar_categorias(motor, sessao);
         // O painel antes das parcelas: a projeção reaproveita o "em aberto" dele.
         self.carregar_dashboard(motor, sessao);
+        if self.aba == Aba::Visao {
+            self.carregar_saude(motor, sessao);
+        }
         if matches!(self.aba, Aba::Receber | Aba::Pagar) {
             self.carregar_parcelas_periodo(motor, sessao);
         }

@@ -90,6 +90,7 @@ pub mod receituario;
 mod recorrencia;
 #[cfg(feature = "sqlite")]
 mod repositorio;
+pub mod saude;
 mod titulo;
 
 pub use aging::{AgingAPagar, AgingAReceber};
@@ -134,7 +135,9 @@ pub use consultas::{
     TotalRecebidoNoPeriodo,
 };
 pub use consultas::{SituacaoDaParcela, SituacaoNaData};
-pub use dre_consulta::{ComparativoDre, DfcDoPeriodo, DreComparativa, DreDoPeriodo};
+pub use dre_consulta::{
+    ComparativoDre, DfcDoPeriodo, DreComparativa, DreDoPeriodo, SaudeFinanceira,
+};
 pub use erros::ErroFinanceiro;
 pub use listagem::{
     FiltroParcelas, ListarParcelasAPagar, ListarParcelasAReceber, PaginaParcelas, SituacaoParcelas,

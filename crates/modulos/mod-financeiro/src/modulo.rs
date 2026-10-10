@@ -83,6 +83,7 @@ impl Modulo for ModuloFinanceiro {
             .consulta::<crate::CategoriasPorConta>("financeiro.categorias_por_conta.v1")
             .consulta::<crate::AgingAReceber>("financeiro.aging_a_receber.v1")
             .consulta::<crate::AgingAPagar>("financeiro.aging_a_pagar.v1")
+            .consulta::<crate::SaudeFinanceira>("financeiro.saude.v1")
             .consulta::<crate::DfcDoPeriodo>("financeiro.dfc_do_periodo.v1")
             .consulta::<crate::DreDoPeriodo>("financeiro.dre_do_periodo.v1")
             .consulta::<crate::DreComparativa>("financeiro.dre_comparativa.v1")

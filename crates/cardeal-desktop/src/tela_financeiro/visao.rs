@@ -103,6 +103,9 @@ pub(super) fn painel_visao(
     estado: &mut EstadoTelaFinanceiro,
 ) {
     let cores = ui.cores();
+    if let Some(saude) = estado.saude.clone() {
+        cartao_saude(ui, &saude);
+    }
 
     // Faixa de KPIs — três cartões esticados pra ocupar a largura toda, em vez de flutuar
     // colados à esquerda com um vão morto do lado (pedido explícito do usuário: a Visão
