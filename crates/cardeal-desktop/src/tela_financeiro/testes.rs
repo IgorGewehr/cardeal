@@ -773,3 +773,84 @@ fn visao_geral_carrega_o_score_de_saude() {
     assert!(s.score <= 100);
     assert_eq!(s.sinais.len(), 5);
 }
+
+#[test]
+fn aba_conciliacao_importa_ofx_sugere_a_baixa_e_concilia() {
+    let t = motor_de_teste();
+    let banco: ContaBancariaCriada = t
+        .motor
+        .executar(
+            &t.sessao,
+            "financeiro.criar_conta_bancaria.v1",
+            &CriarContaBancaria {
+                nome: "Nubank".to_owned(),
+            },
+        )
+        .expect("banco");
+    let hoje = Data::hoje(Fuso::BRASILIA);
+    let parcela = lancar_a_receber(&t.motor, &t.sessao, 340);
+    let _: mod_financeiro::RecebimentoBaixado = t
+        .motor
+        .executar(
+            &t.sessao,
+            "financeiro.baixar_recebimento.v1",
+            &BaixarRecebimento {
+                parcela,
+                valor: Dinheiro::reais(340),
+                data: hoje,
+                meio_pagamento: MeioPagamento::Pix,
+                conta_destino: Some(banco.conta),
+            },
+        )
+        .expect("baixa");
+
+    let mut estado = EstadoTelaFinanceiro {
+        aba: Aba::Conciliacao,
+        ..Default::default()
+    };
+    estado.carregar(&t.motor, &t.sessao);
+    assert!(estado.erro.is_none(), "{:?}", estado.erro);
+    assert!(
+        estado
+            .conciliacao
+            .contas
+            .iter()
+            .any(|c| c.conta == banco.conta),
+        "a conta bancária aparece para escolher"
+    );
+    let d = hoje.formatar_iso().replace('-', "");
+    let ofx = format!(
+        "<OFX><STMTTRN><DTPOSTED>{d}<TRNAMT>340.00<FITID>1<MEMO>PIX RECEBIDO\n</STMTTRN></OFX>"
+    );
+    estado.conciliacao.conta = Some(banco.conta);
+    importar_texto(
+        &egui::Context::default(),
+        &t.motor,
+        &t.sessao,
+        &mut estado,
+        banco.conta,
+        "extrato.ofx",
+        &ofx,
+    );
+    assert_eq!(estado.conciliacao.itens.len(), 1);
+    let item = estado.conciliacao.itens[0].clone();
+    assert_eq!(item.sugestoes.len(), 1, "a baixa que já existe");
+    let _: () = t
+        .motor
+        .executar(
+            &t.sessao,
+            "financeiro.conciliar_item.v1",
+            &mod_financeiro::ConciliarItem {
+                item: item.id,
+                alvo: item.sugestoes[0].alvo,
+            },
+        )
+        .expect("conciliar");
+    estado.conciliacao.recarregar_itens(&t.motor, &t.sessao);
+    assert_eq!(
+        estado.conciliacao.itens[0].estado,
+        mod_financeiro::EstadoItem::Conciliado
+    );
+    // Texto em ISO-8859-1 (extratos antigos) também é lido.
+    assert_eq!(ler_texto(&[b'a', 0xE7, b'a', b'o']), "açao");
+}

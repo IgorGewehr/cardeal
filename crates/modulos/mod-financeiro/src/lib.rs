@@ -70,12 +70,14 @@ mod baixa;
 mod caixa;
 mod categoria;
 mod comandos;
+mod conciliacao;
 mod consultas;
 pub mod dfc;
 pub mod dre;
 mod dre_consulta;
 mod erros;
 pub mod eventos;
+pub mod extrato;
 mod listagem;
 mod manifesto;
 mod meio_pagamento;
@@ -91,6 +93,7 @@ mod recorrencia;
 #[cfg(feature = "sqlite")]
 mod repositorio;
 pub mod saude;
+pub mod sugestao;
 mod titulo;
 
 pub use aging::{AgingAPagar, AgingAReceber};
@@ -124,6 +127,10 @@ pub use comandos::{
 };
 pub use comandos::{CriarCategoriasSugeridas, CATEGORIAS_SUGERIDAS};
 pub use comandos::{DadosContaAvulsa, PagamentoAvulso};
+pub use conciliacao::{
+    ConciliarItem, EstadoItem, ExtratoImportado, IgnorarItemDoExtrato, ImportarExtrato,
+    ItemDoExtrato, ItensDoExtrato, LancarItemDoExtrato,
+};
 #[cfg(feature = "sqlite")]
 pub use consultas::titulo_da_origem;
 pub use consultas::{

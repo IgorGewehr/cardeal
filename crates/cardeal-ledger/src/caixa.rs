@@ -1,8 +1,8 @@
 //! Leitura dos movimentos de caixa realizados — o insumo do DFC pelo método direto.
 //!
-//! "Caixa" aqui é o que tem papel `Caixa`, `Bancos` ou `ValoresEmTransito` (a conta própria
-//! ou a sintética sob a qual ela foi aberta: as contas bancárias criadas pelo usuário herdam
-//! o papel). Só entram lançamentos `Realizado`/`Estornado`, na data de liquidação (ou na
+//! "Caixa" aqui é o que tem papel `Caixa`, `Bancos` ou `ValoresEmTransito` e toda conta aberta
+//! sob "1.1 Disponível" (as contas bancárias que o usuário cria), exceto as aplicações. Só entram
+//! lançamentos `Realizado`/`Estornado`, na data de liquidação (ou na
 //! competência, se não houver).
 
 use cardeal_kernel::{Data, Dinheiro, Id};
@@ -82,6 +82,17 @@ mod sql {
         }
     }
 
+    /// Caixa é o que tem papel `Caixa`, `Bancos` ou `ValoresEmTransito` — e qualquer conta aberta
+    /// sob "1.1 Disponível" (as contas bancárias que o usuário cria), menos as aplicações.
+    fn e_caixa(contas: &[Conta], codigo: &str) -> bool {
+        let papel = papel_efetivo(contas, codigo);
+        match papel.as_deref() {
+            Some("Caixa" | "Bancos" | "ValoresEmTransito") => true,
+            Some("Aplicacoes") => false,
+            _ => codigo.starts_with("1.1."),
+        }
+    }
+
     const DATA: &str = "COALESCE(rl.liquidacao, rl.competencia)";
 
     fn abertura(
@@ -156,12 +167,7 @@ mod sql {
         let contas = contas(conexao, &empresa_b)?;
         let caixa: Vec<Vec<u8>> = contas
             .iter()
-            .filter(|c| {
-                matches!(
-                    papel_efetivo(&contas, &c.1).as_deref(),
-                    Some("Caixa" | "Bancos" | "ValoresEmTransito")
-                )
-            })
+            .filter(|c| e_caixa(&contas, &c.1))
             .map(|c| c.0.clone())
             .collect();
         if caixa.is_empty() {

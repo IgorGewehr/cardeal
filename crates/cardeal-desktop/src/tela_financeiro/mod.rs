@@ -7,6 +7,7 @@ mod baixa;
 mod cadastro_rapido;
 mod carga;
 mod cobranca;
+mod conciliacao_banco;
 mod contas;
 mod custos;
 mod dre;
@@ -39,6 +40,7 @@ use cardeal_ui::organisms::{
 };
 use cardeal_ui::tokens::{Espaco, TemaUi};
 use cobranca::*;
+use conciliacao_banco::*;
 use contas::*;
 use custos::*;
 use dre::*;
@@ -72,6 +74,7 @@ enum Aba {
     Cobranca,
     Resultado,
     Plano,
+    Conciliacao,
     Fluxo,
     Bancos,
 }
@@ -373,6 +376,7 @@ pub struct EstadoTelaFinanceiro {
     aging: Option<mod_financeiro::aging::Aging>,
     cobranca_pagar: bool,
     plano: plano_contas::EstadoPlano,
+    conciliacao: conciliacao_banco::EstadoConciliacao,
     saude: Option<mod_financeiro::saude::Saude>,
     dre_mes: Option<Competencia>,
     dre: Option<mod_financeiro::ComparativoDre>,
@@ -490,6 +494,7 @@ pub fn mostrar(
                 Aba::Cobranca => painel_cobranca(ui, motor, sessao, estado),
                 Aba::Resultado => painel_dre(ui, motor, sessao, estado),
                 Aba::Plano => painel_plano(ui, motor, sessao, estado),
+                Aba::Conciliacao => painel_conciliacao(ui, motor, sessao, estado),
                 _ => lista(ui, motor, sessao, estado),
             }
         },
@@ -595,6 +600,7 @@ fn abas(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTe
         (Aba::Cobranca, "Cobrança"),
         (Aba::Resultado, "Resultado e caixa"),
         (Aba::Plano, "Plano de contas"),
+        (Aba::Conciliacao, "Conciliação"),
         (Aba::Fluxo, "Fluxo de caixa"),
         (Aba::Bancos, "Contas bancárias"),
     ])
@@ -663,6 +669,7 @@ impl EstadoTelaFinanceiro {
             "financeiro-dre" => self.aba = Aba::Resultado,
             "financeiro-cobranca" => self.aba = Aba::Cobranca,
             "financeiro-plano" => self.aba = Aba::Plano,
+            "financeiro-conciliacao" => self.aba = Aba::Conciliacao,
             "financeiro-dfc" => {
                 self.aba = Aba::Resultado;
                 self.dre_dfc = true;

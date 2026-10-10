@@ -427,6 +427,10 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   giro, dinheiro parado e risco de ruptura (aba **Análise**).
 - **Score de saúde financeira** (`mod-financeiro::saude`, `financeiro.saude.v1`): cartão na Visão geral,
   cinco sinais determinísticos e explicáveis (ver a tabela em `docs/modulos/financeiro.md` §6).
+- **Conciliação bancária** (`mod-financeiro::{extrato,sugestao,conciliacao}`, migração financeiro v8): importa
+  OFX/CSV, sugere o casamento por valor exato (+ data e documento), concilia/lança/ignora; aba
+  **Conciliação**. **Corrigido:** o DFC e o score ignoravam contas bancárias criadas pelo usuário
+  (agora toda conta sob "1.1 Disponível", menos aplicações, conta como caixa).
 - **Cobrança** (`mod-financeiro::aging`): aging dos recebíveis e pagáveis, taxa de inadimplência e lista
   de devedores com WhatsApp pronto — aba **Cobrança** (cena `financeiro-cobranca`).
 - **Preço sugerido → tabela de preço:** `vendas.aplicar_precos_sugeridos.v1` (botão "Aplicar à tabela de

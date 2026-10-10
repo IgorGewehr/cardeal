@@ -403,6 +403,7 @@ stateDiagram-v2
 | `ExtratoDaConta` | `financeiro.banco.ver` | Tela de conta bancária | `financeiro_item_extrato(extrato, data)` |
 | `ItensAConciliar` | `financeiro.conciliacao.ver` | Tela de Conciliação | `financeiro_item_extrato(estado, extrato)` |
 | `PlanoDeContas` / `CategoriasPorConta` ✅ (2026-10-09) | `financeiro.plano.ver` | Aba Plano de contas: a árvore inteira em ordem numérica de código (até 5 níveis) e os pares (conta, categoria) que lançam nela | `razao_conta(empresa)` + `financeiro_categoria(conta)` |
+| `ItensDoExtrato` ✅ (2026-10-09) | `financeiro.conciliacao.ver` | Aba Conciliação: as linhas do extrato importado de uma conta bancária, cada pendente com até 3 sugestões de casamento (confiança 60–100): **valor exatamente igual** a uma baixa já feita naquela conta (peso maior, só até 7 dias de distância) ou ao saldo de uma parcela em aberto de mesmo sentido (entrada ↔ a receber, saída ↔ a pagar); data próxima e número do documento no texto do título aumentam a confiança | `financeiro_item_extrato(empresa, conta, estado, data)` + parcelas em aberto + baixas × `razao_partida` |
 | `SaudeFinanceira` ✅ (2026-10-09) | `financeiro.dre.ver` | Cartão da Visão geral: score 0–100 e semáforo (≥70 verde, 40–69 amarelo, <40 vermelho) de cinco sinais ponderados — liquidez 25 (caixa + a receber em 30 dias ÷ a pagar em 30 dias; 0 pts a 0,5×, 100 a 1,5×), inadimplência 20 (0 pts a 20%), margem EBITDA dos últimos 3 meses 20 (100 pts a 15%), giro de estoque 20 (100 pts a 1× por mês; informado pela tela, pois pertence ao estoque) e fluxo projetado em 30 dias 15. Sinal sem dados sai e os pesos se reescalam: nunca premia a ausência de informação. Mostra o que mais puxa para baixo com a dica de ação | `razao_*` + parcelas em aberto (`financeiro::saude`) |
 | `AgingAReceber` / `AgingAPagar` ✅ (2026-10-09) | `financeiro.receber.ver` / `financeiro.pagar.ver` | Aba Cobrança: o saldo em aberto por faixa de atraso (a vencer, 1–30, 31–60, 61–90, +90 dias), o total vencido, a **taxa de inadimplência** (vencido há +30 dias ÷ total em aberto) e os devedores do maior vencido para o menor, com o atraso da parcela mais antiga; WhatsApp a um clique com a mensagem de cobrança | `financeiro_parcela`/`financeiro_titulo` em aberto (`titulos_em_aberto`) |
 | `DfcDoPeriodo` ✅ (2026-10-09) | `financeiro.dre.ver` | Aba Resultado e caixa › DFC pelo método **direto**: saldo de abertura, entradas e saídas realizadas no período abertas por atividade (operacional, investimento, financiamento) e por contraparte, variação e saldo final — que bate com o saldo realizado das contas de caixa do Razão (testado). Cada contrapartida de um lançamento que mexe no caixa vira uma linha (um recebimento com juros dá "Recebimentos de clientes" e "Receitas financeiras"); transferência entre contas de caixa não tem contraparte e some. "Caixa" = papel Caixa/Bancos/ValoresEmTransito, próprio ou herdado. Data = liquidação (ou competência) | `razao_partida` × `razao_lancamento` (`cardeal_ledger::movimentos_de_caixa`) |
@@ -413,6 +414,18 @@ stateDiagram-v2
 | `Categorias` ✅ | `financeiro.categoria.ver` | Seletor de categoria ao lançar título/recorrência | `financeiro_categoria(empresa, nome) WHERE ativa = 1` |
 | `TotalPorCategoriaNoPeriodo` ✅ | `financeiro.categoria.ver` | Gráfico de custo/receita por categoria e mês (churn, MRR por projeto) | agregação em memória sobre `financeiro_baixa` join `financeiro_titulo`, filtrando por `data` |
 | `TituloDaOrigem` ✅ (novo, 2026-09-11) | `financeiro.receber.ver` | Detalhe de OS (`os`)/vendas/compras faturada: "qual título isto gerou" | `financeiro_titulo(empresa, origem_modulo, origem_id)` — o par de correlação que `Titulo` já carregava desde a origem; usado por outro módulo pela consulta pública, nunca por SQL direto em `financeiro_titulo` (`docs/contratos-internos.md` §7 regra 2) |
+
+## 6.2 Conciliação bancária (2026-10-09)
+
+`ImportarExtrato` lê **OFX** (SGML 1.x e XML 2.x) ou **CSV** (`data;descrição;valor[;documento]`, com ou
+sem cabeçalho; ISO-8859-1 aceito) e grava cada linha com a identidade que o banco lhe deu (`fitid`,
+única por conta — reimportar um período que se sobrepõe não duplica). Cada linha termina em exatamente
+um destino, **sempre confirmado pelo usuário** (`financeiro.conciliacao.confirmar`):
+**conciliada** (`ConciliarItem`: com uma baixa que já existe, ou com uma parcela em aberto — e aí a baixa é
+dada na data do banco, pela conta do extrato), **lançada** (`LancarItemDoExtrato`: tarifa, rendimento, o
+que ninguém lançou — vira um título já quitado na conta do extrato, com categoria) ou **ignorada**
+(`IgnorarItemDoExtrato`, reversível). Linha conciliada não se ignora nem se concilia de novo.
+Não faz: Open Banking, CNAB, conciliação parcial (valor diferente do saldo).
 
 ## 6.1 Plano de contas: modelos, contas novas e categoria → conta (2026-10-09)
 

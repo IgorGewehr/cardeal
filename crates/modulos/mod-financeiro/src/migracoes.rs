@@ -197,6 +197,40 @@ const SQL_CATEGORIA_CONTA: &str = r"
 ALTER TABLE financeiro_categoria ADD COLUMN conta BLOB;
 ";
 
+// Migração v8 (2026-10-09): conciliação bancária. `financeiro_extrato` é o arquivo importado e
+// `financeiro_item_extrato` cada linha dele; a identidade da linha no banco (`fitid`) é única por
+// conta, então reimportar um período que se sobrepõe nunca duplica. `baixa` guarda com qual baixa
+// (já feita ou criada na conciliação) a linha foi casada.
+const SQL_CONCILIACAO: &str = r"
+CREATE TABLE financeiro_extrato (
+    id            BLOB PRIMARY KEY,
+    empresa       BLOB    NOT NULL REFERENCES nucleo_empresa(id),
+    conta         BLOB    NOT NULL,
+    arquivo       TEXT    NOT NULL,
+    formato       TEXT    NOT NULL CHECK (formato IN ('Ofx','Csv')),
+    importado_em  INTEGER NOT NULL,
+    importado_por BLOB    NOT NULL,
+    itens         INTEGER NOT NULL
+) STRICT;
+
+CREATE TABLE financeiro_item_extrato (
+    id        BLOB PRIMARY KEY,
+    extrato   BLOB    NOT NULL REFERENCES financeiro_extrato(id),
+    empresa   BLOB    NOT NULL,
+    conta     BLOB    NOT NULL,
+    fitid     TEXT    NOT NULL,
+    data      INTEGER NOT NULL,
+    descricao TEXT    NOT NULL,
+    documento TEXT,
+    valor     INTEGER NOT NULL,
+    estado    TEXT    NOT NULL CHECK (estado IN ('Pendente','Conciliado','Ignorado')),
+    baixa     BLOB,
+    UNIQUE (empresa, conta, fitid)
+) STRICT;
+CREATE INDEX financeiro_item_extrato_conta
+    ON financeiro_item_extrato(empresa, conta, estado, data);
+";
+
 const SQL_LISTA_PAGINADA: &str = r"
 CREATE INDEX financeiro_parcela_lista ON financeiro_parcela(empresa, vencimento, id);
 ";
@@ -242,6 +276,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 7,
         nome: "financeiro_categoria_conta",
         sql: SQL_CATEGORIA_CONTA,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 8,
+        nome: "financeiro_conciliacao",
+        sql: SQL_CONCILIACAO,
         tipo: TipoMigracao::Esquema,
     },
 ];
