@@ -27,6 +27,8 @@
 use cardeal_kernel::{Arredondamento, Dinheiro, Percentual, Preco, Quantidade};
 use serde::{Deserialize, Serialize};
 
+use crate::fiscal::CamposFiscais;
+
 // ───────────────────────────── markup divisor ─────────────────────────────
 
 /// Os percentuais que incidem sobre o preço de venda.
@@ -520,6 +522,66 @@ pub fn carga_sobre_venda(
     }
 }
 
+/// De onde veio o imposto aplicado a um produto.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OrigemDaCarga {
+    /// A carga do regime da empresa.
+    Regime,
+    /// Calculada dos campos fiscais do produto (herdados do grupo): ICMS, PIS e COFINS.
+    PerfilFiscalDoProduto,
+}
+
+/// A carga sobre a venda de um produto e de onde ela veio.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CargaDoProduto {
+    /// O percentual sobre a venda.
+    pub percentual: Percentual,
+    /// De onde veio.
+    pub origem: OrigemDaCarga,
+}
+
+/// A carga de um produto. MEI e Simples não mudam (o DAS é por faixa; os campos fiscais não
+/// entram no percentual). No regime manual (Presumido/Real), se o produto tem alíquota de ICMS,
+/// PIS ou COFINS, a carga é `ICMS × (100% − redução da base) + PIS + COFINS`; senão, o
+/// percentual informado. ST/MVA ainda não entram no custo.
+#[must_use]
+pub fn carga_do_produto(
+    regime: RegimeImposto,
+    rbt12: Dinheiro,
+    perfil_simples: PerfilFiscal,
+    fiscal: &CamposFiscais,
+) -> CargaDoProduto {
+    let RegimeImposto::Manual(manual) = regime else {
+        return CargaDoProduto {
+            percentual: carga_sobre_venda(regime, rbt12, perfil_simples),
+            origem: OrigemDaCarga::Regime,
+        };
+    };
+    if fiscal.aliquota_icms.is_none()
+        && fiscal.aliquota_pis.is_none()
+        && fiscal.aliquota_cofins.is_none()
+    {
+        return CargaDoProduto {
+            percentual: manual,
+            origem: OrigemDaCarga::Regime,
+        };
+    }
+    let zero = Percentual::ZERO;
+    let base = fiscal.reducao_base.unwrap_or(zero).complemento();
+    let icms = fiscal.aliquota_icms.unwrap_or(zero);
+    // Produto de dois percentuais: (a × b) ÷ 100%, exato em i128 (18% = 18_000_000).
+    let icms_sobre_base = i128::from(icms.unidades_internas())
+        * i128::from(base.unidades_internas())
+        / i128::from(Percentual::pontos(100).unidades_internas());
+    let un = icms_sobre_base
+        + i128::from(fiscal.aliquota_pis.unwrap_or(zero).unidades_internas())
+        + i128::from(fiscal.aliquota_cofins.unwrap_or(zero).unidades_internas());
+    CargaDoProduto {
+        percentual: Percentual::unidades(i64::try_from(un).unwrap_or(0)),
+        origem: OrigemDaCarga::PerfilFiscalDoProduto,
+    }
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;
@@ -775,5 +837,76 @@ mod testes {
             ),
             carga_sobre_venda(r, rbt, PerfilFiscal::default())
         );
+    }
+
+    fn fiscal(
+        icms: Option<i64>,
+        reducao: Option<Percentual>,
+        pis: i64,
+        cofins: i64,
+    ) -> CamposFiscais {
+        CamposFiscais {
+            aliquota_icms: icms.map(pct),
+            reducao_base: reducao,
+            aliquota_pis: (pis != 0).then(|| Percentual::unidades(pis)),
+            aliquota_cofins: (cofins != 0).then(|| Percentual::unidades(cofins)),
+            ..CamposFiscais::default()
+        }
+    }
+
+    fn manual(f: &CamposFiscais) -> CargaDoProduto {
+        carga_do_produto(
+            RegimeImposto::Manual(pct(11)),
+            Dinheiro::ZERO,
+            PerfilFiscal::default(),
+            f,
+        )
+    }
+
+    #[test]
+    fn manual_sem_campos_fiscais_vale_o_percentual_informado() {
+        let c = manual(&CamposFiscais::default());
+        assert_eq!(c.percentual, pct(11));
+        assert_eq!(c.origem, OrigemDaCarga::Regime);
+    }
+
+    #[test]
+    fn manual_so_icms() {
+        let c = manual(&fiscal(Some(18), None, 0, 0));
+        assert_eq!(c.percentual, pct(18));
+        assert_eq!(c.origem, OrigemDaCarga::PerfilFiscalDoProduto);
+    }
+
+    #[test]
+    fn manual_icms_com_reducao_de_base() {
+        // 18% × (100% − 33,33%) = 12,0006%
+        let c = manual(&fiscal(
+            Some(18),
+            Some(Percentual::unidades(33_330_000)),
+            0,
+            0,
+        ));
+        assert_eq!(c.percentual, Percentual::unidades(12_000_600));
+    }
+
+    #[test]
+    fn manual_icms_pis_e_cofins_somam() {
+        // 18% + 0,65% + 3% = 21,65%
+        let c = manual(&fiscal(Some(18), None, 650_000, 3_000_000));
+        assert_eq!(c.percentual, Percentual::unidades(21_650_000));
+    }
+
+    #[test]
+    fn simples_e_mei_ignoram_os_campos_fiscais() {
+        let f = fiscal(Some(18), None, 650_000, 3_000_000);
+        for r in [RegimeImposto::Mei, RegimeImposto::Simples(AnexoSimples::I)] {
+            let rbt = Dinheiro::reais(300_000);
+            let c = carga_do_produto(r, rbt, PerfilFiscal::default(), &f);
+            assert_eq!(
+                c.percentual,
+                carga_sobre_venda(r, rbt, PerfilFiscal::default())
+            );
+            assert_eq!(c.origem, OrigemDaCarga::Regime);
+        }
     }
 }

@@ -210,7 +210,7 @@ impl Consulta for MargemPrevistaDaOrdem {
             let atual = sugestoes
                 .iter()
                 .find(|s| s.produto == p.produto)
-                .map(|s| (s.nome.clone(), s.custo));
+                .map(|s| (s.nome.clone(), s.custo, s.imposto));
             let custo_unitario = if p.aplicada {
                 Some(Dinheiro::de_total(
                     cardeal_kernel::Quantidade::unidades(1),
@@ -230,7 +230,7 @@ impl Consulta for MargemPrevistaDaOrdem {
                             Arredondamento::MeioAcima,
                         )
                     });
-                let c = combinado.or_else(|| atual.as_ref().and_then(|(_, c)| *c));
+                let c = combinado.or_else(|| atual.as_ref().and_then(|(_, c, _)| *c));
                 custo_estimado |= c.is_some();
                 c
             };
@@ -239,12 +239,16 @@ impl Consulta for MargemPrevistaDaOrdem {
             } else {
                 Dinheiro::de_total(p.quantidade, p.preco_unitario, Arredondamento::MeioAcima)
             };
+            // O imposto é o do produto; o resto dos encargos é da empresa.
+            let encargos_da_peca = atual.as_ref().map_or(encargos.total(), |(_, _, imposto)| {
+                encargos.total() - encargos.imposto + *imposto
+            });
             itens.push(ItemDeMargem {
-                rotulo: atual.map_or_else(|| "Peça".to_owned(), |(n, _)| n),
+                rotulo: atual.map_or_else(|| "Peça".to_owned(), |(n, _, _)| n),
                 quantidade: p.quantidade,
                 receita,
                 custo_unitario,
-                encargos: encargos.total(),
+                encargos: encargos_da_peca,
             });
         }
         for m in &maos {

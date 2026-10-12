@@ -7,12 +7,15 @@ use cardeal_kernel::{CodigoErro, Dinheiro, Erro, Id, Instante, Percentual, Preco
 use cardeal_ledger::semear_plano_padrao;
 use cardeal_modkit::{Ambiente, Despachante, Modulo, PedidoAtivacao, RegistroModulos};
 use cardeal_storage::{Armazenamento, ConfigArmazenamento, ContextoEscrita, ErroArmazenamento};
+use mod_estoque::fiscal::CamposFiscais;
+use mod_estoque::precificacao::{OrigemDaCarga, RegimeImposto};
 use mod_estoque::{
-    CriarGrupoProduto, CriarLocal, CriarProduto, CriarUnidade, DefinirMargemDoGrupo,
-    DefinirMargemDoProduto, DefinirParametrosPreco, DefinirPerfilFiscalDoGrupo, GrupoProdutoCriado,
-    LocalCriado, ModuloEstoque, OrigemMargem, ParametrosDePreco, ParametrosPreco,
-    PrecoSugeridoDoProduto, PrecosSugeridosDoGrupo, ProdutoCriado, RegistrarEntrada,
-    SugestaoDePreco, TipoLocal, UnidadeCriada, MANIFESTO,
+    CriarGrupoProduto, CriarLocal, CriarProduto, CriarUnidade, DefinirCamposFiscaisDoGrupo,
+    DefinirCamposFiscaisDoProduto, DefinirMargemDoGrupo, DefinirMargemDoProduto,
+    DefinirParametrosPreco, DefinirPerfilFiscalDoGrupo, GrupoProdutoCriado, LocalCriado,
+    ModuloEstoque, OrigemMargem, ParametrosDePreco, ParametrosPreco, PrecoSugeridoDoProduto,
+    PrecosSugeridosDoGrupo, ProdutoCriado, RegistrarEntrada, SugestaoDePreco, TipoLocal,
+    UnidadeCriada, MANIFESTO,
 };
 use tempfile::TempDir;
 
@@ -476,4 +479,108 @@ fn sem_parametros_gravados_vale_o_regime_cadastrado() {
     // A empresa de teste é SimplesNacional → Anexo I, custo operacional derivado do Razão.
     let p: ParametrosPreco = c.consulta("estoque.parametros_de_preco.v1", &ParametrosDePreco);
     assert_eq!(p, ParametrosPreco::padrao_para("SimplesNacional"));
+}
+
+impl Cenario {
+    fn regime_manual(&self, imposto: i64) {
+        let mut p = ParametrosPreco::padrao_para("LucroPresumido");
+        p.regime = RegimeImposto::Manual(Percentual::pontos(imposto));
+        p.custo_operacional = Percentual::pontos(25);
+        p.custo_operacional_derivado = false;
+        self.cmd(
+            "estoque.definir_parametros_preco.v1",
+            &DefinirParametrosPreco { parametros: p },
+        )
+        .unwrap();
+    }
+
+    fn margem_do_grupo(&self, grupo: Id, pontos: i64) {
+        self.cmd(
+            "estoque.definir_margem_do_grupo.v1",
+            &DefinirMargemDoGrupo {
+                grupo,
+                margem: Some(Percentual::pontos(pontos)),
+            },
+        )
+        .unwrap();
+    }
+}
+
+fn icms_pis_cofins(icms: Option<i64>, pis: Option<i64>, cofins: Option<i64>) -> CamposFiscais {
+    CamposFiscais {
+        aliquota_icms: icms.map(Percentual::pontos),
+        // 0,65% = 650_000 unidades internas.
+        aliquota_pis: pis.map(Percentual::unidades),
+        aliquota_cofins: cofins.map(Percentual::pontos),
+        ..CamposFiscais::default()
+    }
+}
+
+#[test]
+fn presumido_usa_os_campos_fiscais_herdados_do_grupo_e_o_produto_sobrescreve() {
+    let c = Cenario::novo();
+    c.regime_manual(10);
+    let g = c.grupo("ELE", None);
+    c.margem_do_grupo(g, 20);
+    let p = c.produto_com_custo("Cabo", g, Preco::reais(50));
+
+    // Sem campos fiscais: o percentual manual (10%). 25 + 20 + 10 = 55 → 50 / 0,45 = 111,11.
+    let s = c.preco(p);
+    assert_eq!(s.imposto, Percentual::pontos(10));
+    assert_eq!(s.imposto_origem, OrigemDaCarga::Regime);
+    assert_eq!(s.sugerido.unwrap().preco, Dinheiro::centavos(11111));
+
+    // O grupo define ICMS 18% + PIS 0,65% + COFINS 3% = 21,65%: o produto herda.
+    // 25 + 20 + 21,65 = 66,65 → 50 / 0,3335 = 149,93.
+    c.cmd(
+        "estoque.definir_campos_fiscais_do_grupo.v1",
+        &DefinirCamposFiscaisDoGrupo {
+            grupo: g,
+            campos: icms_pis_cofins(Some(18), Some(650_000), Some(3)),
+        },
+    )
+    .unwrap();
+    let s = c.preco(p);
+    assert_eq!(s.imposto, Percentual::unidades(21_650_000));
+    assert_eq!(s.imposto_origem, OrigemDaCarga::PerfilFiscalDoProduto);
+    assert_eq!(s.sugerido.unwrap().preco, Dinheiro::centavos(14993));
+
+    // O produto sobrescreve só o ICMS (12%); PIS/COFINS continuam do grupo: 15,65%.
+    // 25 + 20 + 15,65 = 60,65 → 50 / 0,3935 = 127,06.
+    c.cmd(
+        "estoque.definir_campos_fiscais_do_produto.v1",
+        &DefinirCamposFiscaisDoProduto {
+            produto: p,
+            campos: icms_pis_cofins(Some(12), None, None),
+        },
+    )
+    .unwrap();
+    let s = c.preco(p);
+    assert_eq!(s.imposto, Percentual::unidades(15_650_000));
+    assert_eq!(s.sugerido.unwrap().preco, Dinheiro::centavos(12706));
+}
+
+#[test]
+fn simples_ignora_os_campos_fiscais_no_imposto() {
+    let c = Cenario::novo();
+    c.parametros_manuais(25);
+    let g = c.grupo("ELE", None);
+    c.margem_do_grupo(g, 20);
+    let p = c.produto_com_custo("Cabo", g, Preco::reais(50));
+    let antes = c.preco(p);
+    c.cmd(
+        "estoque.definir_campos_fiscais_do_grupo.v1",
+        &DefinirCamposFiscaisDoGrupo {
+            grupo: g,
+            campos: icms_pis_cofins(Some(18), Some(650_000), Some(3)),
+        },
+    )
+    .unwrap();
+    let depois = c.preco(p);
+    assert_eq!(depois.imposto, antes.imposto);
+    assert_eq!(depois.imposto_origem, OrigemDaCarga::Regime);
+    assert_eq!(
+        depois.sugerido.unwrap().preco,
+        antes.sugerido.unwrap().preco
+    );
 }

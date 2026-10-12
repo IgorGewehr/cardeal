@@ -37,6 +37,14 @@ e a estrutura de grupos já formava uma árvore.
 6. **Parâmetros por CNPJ**, alteráveis só com `estoque.tributario.editar` (risco Alto), como o
    spec do Lunno pede para "parâmetros de markup e tributação".
 
+### Imposto por produto no Presumido/Real (2026-10-12)
+
+No regime `Manual` (`precificacao::carga_do_produto`), se o produto (com a herança dos grupos) tem
+alíquota de ICMS, PIS ou COFINS, o imposto é `ICMS × (100% − redução de base) + PIS + COFINS`
+(campo ausente conta 0); sem nenhum deles vale o percentual do regime. MEI e Simples não mudam: o
+DAS é por faixa e os campos fiscais não entram. A sugestão informa `imposto_origem`. **Limitação:**
+ST/MVA ainda não entram no custo; o painel de margem do pedido e da OS usam o imposto do produto.
+
 ## Consequências
 
 - Quem usa o sistema vê o preço se corrigir quando o financeiro muda — o diferencial sobre digitar

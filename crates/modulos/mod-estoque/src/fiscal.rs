@@ -137,6 +137,14 @@ impl CamposFiscais {
         );
     }
 
+    /// Este perfil por cima de `base`: cada campo é o próprio se preenchido, senão o de `base`.
+    #[must_use]
+    pub fn sobre(&self, base: &Self) -> Self {
+        let mut saida = base.clone();
+        saida.mesclar(self);
+        saida
+    }
+
     /// Cada campo com o texto de exibição, na ordem da tela.
     #[must_use]
     pub fn lista(&self) -> [(&'static str, Option<String>); 14] {
@@ -173,6 +181,13 @@ impl CamposFiscais {
         blob.and_then(|b| postcard::from_bytes(b).ok())
             .unwrap_or_default()
     }
+}
+
+/// O perfil efetivo de um produto: os campos próprios por cima dos grupos, do mais próximo
+/// (primeiro de `grupos`) à raiz (último).
+#[must_use]
+pub fn perfil_do_produto(proprio: &CamposFiscais, grupos: &[&CamposFiscais]) -> CamposFiscais {
+    grupos.iter().fold(proprio.clone(), |acc, g| acc.sobre(g))
 }
 
 /// Um campo no perfil efetivo, com quem o definiu.

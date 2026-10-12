@@ -6,7 +6,9 @@ use super::*;
 use cardeal_kernel::{Dinheiro, Percentual};
 use cardeal_ui::atoms::ValorDinheiro;
 use cardeal_ui::molecules::Abas;
-use mod_estoque::precificacao::{AnexoSimples, ArredondamentoDePreco, RegimeImposto};
+use mod_estoque::precificacao::{
+    AnexoSimples, ArredondamentoDePreco, OrigemDaCarga, RegimeImposto,
+};
 use mod_estoque::{
     DefinirParametrosPreco, OrigemMargem, ParametrosDePreco, ParametrosPreco,
     PrecosSugeridosDoGrupo, SugestaoDePreco,
@@ -336,7 +338,7 @@ fn tabela(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estado
         ColunaGrade::nova("Produto").largura(240.0),
         ColunaGrade::nova("Custo").largura(100.0).numero(),
         ColunaGrade::nova("Margem").largura(150.0),
-        ColunaGrade::nova("Imposto").largura(80.0).numero(),
+        ColunaGrade::nova("Imposto").largura(150.0),
         ColunaGrade::nova("Preço mínimo").largura(120.0).numero(),
         ColunaGrade::nova("Preço sugerido").largura(130.0).numero(),
         ColunaGrade::nova("Situação").largura(260.0),
@@ -364,7 +366,12 @@ fn tabela(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estado
             }
         });
         row.col(|ui| {
-            ui.add(Rotulo::interface(format!("{}%", pct(s.imposto))));
+            ui.horizontal(|ui| {
+                ui.add(Rotulo::interface(format!("{}%", pct(s.imposto))));
+                if s.imposto_origem == OrigemDaCarga::PerfilFiscalDoProduto {
+                    ui.add(Etiqueta::info("do produto"));
+                }
+            });
         });
         row.col(|ui| celula(ui, s.minimo.map(|m| m.preco)));
         row.col(|ui| celula(ui, s.sugerido.map(|m| m.preco)));

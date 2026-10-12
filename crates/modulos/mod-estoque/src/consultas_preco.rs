@@ -12,7 +12,7 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
 use crate::parametros_preco::ParametrosPreco;
-use crate::precificacao::{Componentes, PerfilFiscal, PrecoCalculado};
+use crate::precificacao::{Componentes, OrigemDaCarga, PerfilFiscal, PrecoCalculado};
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::{CodigoErro, Erro, Periodo, Resultado};
 
@@ -68,6 +68,8 @@ pub struct SugestaoDePreco {
     pub custo_operacional_derivado: bool,
     /// O imposto sobre a venda aplicado.
     pub imposto: Percentual,
+    /// De onde veio o imposto: do regime ou dos campos fiscais do produto.
+    pub imposto_origem: OrigemDaCarga,
     /// Os percentuais usados, quando todos estavam disponíveis.
     pub componentes: Option<Componentes>,
     /// O preço sugerido.
@@ -164,6 +166,8 @@ struct LinhaProduto {
     grupo: Id,
     margem: Option<Percentual>,
     custo: Preco,
+    /// Os campos fiscais próprios do produto (vazio = herda tudo do grupo).
+    fiscal: crate::fiscal::CamposFiscais,
 }
 
 #[cfg(feature = "sqlite")]
@@ -177,6 +181,7 @@ fn linha_do_produto(
     let mut stmt = conexao
         .prepare(
             "SELECT p.id, p.nome, p.grupo_produto, p.margem_desejada,
+                    p.perfil_fiscal,
                     COALESCE((SELECT MAX(s.custo_medio) FROM estoque_saldo_local s
                               WHERE s.produto = p.id AND s.empresa = ?2), 0)
              FROM estoque_produto p
@@ -193,7 +198,10 @@ fn linha_do_produto(
                     nome: r.get(1)?,
                     grupo: id_de(r.get::<_, Vec<u8>>(2)?),
                     margem: r.get::<_, Option<i64>>(3)?.map(Percentual::unidades),
-                    custo: Preco::interna(r.get::<_, i64>(4)?),
+                    fiscal: crate::fiscal::CamposFiscais::de_blob(
+                        r.get::<_, Option<Vec<u8>>>(4)?.as_deref(),
+                    ),
+                    custo: Preco::interna(r.get::<_, i64>(5)?),
                 })
             },
         )
@@ -284,8 +292,19 @@ impl BaseDePreco {
         perfil
     }
 
+    /// Os campos fiscais do produto por cima dos de seus grupos, do mais próximo à raiz.
+    fn fiscal_efetivo(&self, l: &LinhaProduto) -> crate::fiscal::CamposFiscais {
+        let cadeia: Vec<&crate::fiscal::CamposFiscais> = self
+            .arvore
+            .ancestrais(l.grupo)
+            .into_iter()
+            .filter_map(|g| self.perfil(g).map(|p| &p.fiscal))
+            .collect();
+        crate::fiscal::perfil_do_produto(&l.fiscal, &cadeia)
+    }
+
     fn sugerir(&self, l: &LinhaProduto, custo_informado: Option<Dinheiro>) -> SugestaoDePreco {
-        use crate::precificacao::{carga_sobre_venda, preco_minimo, preco_sugerido};
+        use crate::precificacao::{carga_do_produto, preco_minimo, preco_sugerido};
         use cardeal_kernel::{Arredondamento, Quantidade};
 
         let custo = custo_informado.or_else(|| {
@@ -294,7 +313,9 @@ impl BaseDePreco {
         });
         let (margem, origem_margem) = self.margem(l.margem, l.grupo);
         let perfil_fiscal = self.perfil_fiscal(l.grupo);
-        let imposto = carga_sobre_venda(self.parametros.regime, self.rbt12, perfil_fiscal);
+        let fiscal = self.fiscal_efetivo(l);
+        let carga = carga_do_produto(self.parametros.regime, self.rbt12, perfil_fiscal, &fiscal);
+        let imposto = carga.percentual;
         let (opex, derivado) = match (
             self.parametros.custo_operacional_derivado,
             self.opex_do_razao,
@@ -314,6 +335,7 @@ impl BaseDePreco {
             custo_operacional: opex,
             custo_operacional_derivado: derivado,
             imposto,
+            imposto_origem: carga.origem,
             componentes: None,
             sugerido: None,
             minimo: None,

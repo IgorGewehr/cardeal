@@ -414,6 +414,9 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
 - **Perfil fiscal completo** (`mod-estoque::fiscal`, migração v8): origem, CST/CSOSN, CFOPs, alíquotas,
   redução de base, MVA-ST, CST PIS/COFINS, CEST, benefício — herdado produto → grupos acima; editável no
   grupo (aba Estrutura), no produto (Editar) e em lote (junto com o NCM).
+- **Imposto do preço por produto** (Presumido/Real): `carga_do_produto` usa ICMS (com redução de base),
+  PIS e COFINS do produto herdados do grupo; `SugestaoDePreco.imposto_origem` e etiqueta "do produto"
+  na grade de Preços; margem prevista da OS usa o imposto de cada peça. Simples/MEI inalterados; ST/MVA não entram.
 - **Painel de margem do pedido** (`vendas.margem_do_pedido.v1`, permissão nova `vendas.margem.ver`):
   receita, custo, margem bruta e líquida por item e no conjunto, descontando operação, imposto,
   comissão e taxas (os mesmos percentuais do preço sugerido); item sem custo fica fora do cálculo

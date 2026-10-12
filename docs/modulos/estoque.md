@@ -222,7 +222,7 @@ decomposto é o resto (absorve o arredondamento dos demais termos).
 (o DAS fixo é despesa e entra no custo operacional); Simples usa a alíquota efetiva
 `(RBT12 × alíquota nominal − parcela a deduzir) ÷ RBT12` das tabelas da LC 123/2006 (RBT12 = receita
 bruta dos últimos 12 meses lida do Razão); no Anexo I, ICMS-ST e monofásico tiram a parcela
-respectiva da repartição da faixa. Presumido/Real usa o percentual informado. **Limites
+respectiva da repartição da faixa. Presumido/Real usa o percentual informado, ou, se o produto (herdando do grupo) tem alíquota de ICMS/PIS/COFINS, `ICMS × (100% − redução de base) + PIS + COFINS` (`carga_do_produto`; ST/MVA ainda não entram). **Limites
 conhecidos:** acima de R$ 3,6 mi (6ª faixa) o ICMS/ISS sai do DAS e a efetiva subestima a carga —
 usar `Manual`; a dedução de ST/monofásico só existe para o Anexo I; empresa com menos de 12 meses
 usa o que existe (a regra de anualização proporcional não foi implementada). **As tabelas devem ser
