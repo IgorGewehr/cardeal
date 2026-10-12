@@ -3,6 +3,13 @@
 > O razão já é uma tabela fato. Este documento é sobre como transformá-la em resposta sem
 > comprometer o desempenho da operação.
 
+> **Nota de escopo (outubro de 2026):** hoje as análises (DRE, DFC, curva ABC, aging, score de saúde)
+> são **consultas determinísticas diretas** sobre o Razão e os módulos; o projetor Parquet/DuckDB abaixo
+> continua sendo o desenho-alvo para volumes maiores. Tudo que este documento chama de "previsão",
+> "anomalia" ou "pergunta em linguagem natural" é **inteligência assistida e entra por último**
+> ([roadmap, Fase 7](17-roadmap.md#fase-7--inteligência-assistida-por-último)) — o que vem antes é
+> sempre a versão por regra e limiar.
+
 ## 1. Separação OLTP / OLAP
 
 ```mermaid

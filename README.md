@@ -12,6 +12,14 @@
 
 ---
 
+## Foco atual
+
+O Cardeal está sendo direcionado a **comércio e serviços de pequeno porte**: estrutura de produtos em
+árvore, **preço por markup com a carga tributária somada**, financeiro completo (DRE, fluxo de caixa,
+conciliação, cobrança) e estoque completo. A entrega é **gradual**, uma fatia usável por vez, e a
+**inteligência artificial é a última coisa a ser implementada** — as bases já existem, mas nada
+depende dela. Veja o [roadmap](docs/17-roadmap.md) e o [estado atual](docs/19-estado-e-processo.md).
+
 ## O que é
 
 Cardeal é um ERP para o mercado brasileiro construído sobre três pilares inegociáveis:

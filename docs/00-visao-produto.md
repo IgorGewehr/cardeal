@@ -33,6 +33,19 @@ Abastece      ──┘
 Não existe rotina de "integração com o financeiro", não existe job noturno de consolidação, não existe
 divergência entre o que o PDV vendeu e o que o financeiro viu. É a mesma escrita, na mesma transação ACID.
 
+## 2.1 Foco atual: saber quanto sobra em cada venda
+
+Dentro dessa arquitetura, o foco de produto de agora é **comércio e serviços de pequeno porte** que
+precisam responder, antes de fechar cada venda: *quanto vou lucrar depois de custo, operação e
+imposto?* Por isso o centro do trabalho é a **estrutura mercadológica em árvore** (margem desejada e
+perfil fiscal herdados), o **preço por markup com a carga tributária somada** e um **financeiro
+completo** (DRE, fluxo de caixa, conciliação, cobrança). Detalhes e ordem de entrega em
+[17 — Roadmap](17-roadmap.md).
+
+A entrega é **gradual**, em fatias pequenas e usáveis. E **a inteligência artificial é a última coisa
+que implementamos**: o produto é completo sem ela, as bases para ela já existem (dados estruturados,
+regras que aprendem por correção, Razão auditável), e quando vier, só sugere — quem decide é o usuário.
+
 ## 3. Para quem
 
 Perfis de empresa suportados. Cada um é um conjunto curado de módulos — não uma versão diferente do produto.
@@ -77,6 +90,8 @@ Escopo negativo é tão importante quanto escopo positivo. Não fazemos:
   fiscal). Não fazemos apuração de lucro real, folha, nem escrituração de terceiros.
 - **Folha de pagamento / eSocial.** Integramos, não implementamos.
 - **Loja virtual.** Expomos API de catálogo e pedido; a vitrine é de terceiros.
+- **Um produto que depende de IA.** Nenhuma função essencial exige modelo de linguagem, nuvem de
+  terceiros ou conexão para uma resposta (ver o princípio 3). IA é opcional e última no roadmap.
 - **Multi-idioma / multi-país.** O domínio é o Brasil. Isso é uma escolha de foco, e ela simplifica
   radicalmente o modelo (moeda única, um sistema tributário, um calendário).
 
