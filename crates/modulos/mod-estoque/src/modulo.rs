@@ -89,6 +89,8 @@ impl Modulo for ModuloEstoque {
                 "estoque.historico_de_compras.v1",
             )
             .consulta::<AnaliseDeEstoque>("estoque.analise_de_estoque.v1")
+            .consulta::<crate::SaidasPorProdutoEOrigem>("estoque.saidas_por_produto_e_origem.v1")
+            .consulta::<crate::EncargosAtuais>("estoque.encargos_atuais.v1")
             .consulta::<ProdutosParaLote>("estoque.produtos_para_lote.v1")
             .consulta::<PreviaDaAlteracaoEmLote>("estoque.previa_da_alteracao_em_lote.v1")
             .consulta::<HistoricoDeAlteracoesEmLote>("estoque.historico_de_alteracoes_em_lote.v1")

@@ -50,6 +50,7 @@ pub mod migracoes;
 mod modulo;
 mod pedido;
 mod preco;
+mod receita;
 pub mod receituario;
 #[cfg(feature = "sqlite")]
 mod repositorio;
@@ -70,5 +71,6 @@ pub use margem::{MargemDoPedido, MargemDoPedidoCalculada};
 pub use modulo::ModuloVendas;
 pub use pedido::{EstadoOrcamento, EstadoPedido, ItemVenda, Orcamento, Pedido};
 pub use preco::{preco_vigente, AlvoRegra, RegraPreco, TabelaPreco, TipoTabela};
+pub use receita::ReceitaPorProduto;
 #[cfg(feature = "sqlite")]
 pub use repositorio::RepositorioVendas;

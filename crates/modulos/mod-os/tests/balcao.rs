@@ -943,3 +943,83 @@ fn margem_prevista_no_orcamento_conta_a_peca_ao_custo_atual_e_deixa_a_mao_de_obr
     );
     assert!(!m.abaixo_do_minimo);
 }
+
+#[test]
+fn receita_por_produto_soma_pecas_faturadas_e_garantia_rende_zero() {
+    let b = Balcao::novo(&[TODAS, &["os.faturar", "os.margem.ver"]].concat());
+    let cliente = b.cliente("João");
+    let (produto, _) = produto_com_estoque(&b);
+    let hoje = cardeal_kernel::Data::hoje(cardeal_kernel::Fuso::BRASILIA);
+    let faturar = |os: Id| {
+        let _: mod_os::OrdemServicoFaturada = b
+            .cmd(
+                "os.faturar_ordem_servico.v1",
+                &mod_os::FaturarOrdemServico {
+                    ordem_servico: os,
+                    parcelas: 1,
+                    primeiro_vencimento: hoje,
+                    intervalo_dias: 0,
+                    pago_no_ato: None,
+                },
+            )
+            .unwrap();
+    };
+    let receita = |periodo: cardeal_kernel::Periodo| -> Vec<cardeal_analytics::ReceitaDoProduto> {
+        b.consulta(
+            "os.receita_por_produto.v1",
+            &mod_os::ReceitaPorProduto { periodo },
+        )
+    };
+    let mes = cardeal_kernel::Periodo::novo(hoje.inicio_do_mes(), hoje.fim_do_mes());
+
+    let paga = b.abrir(cliente, "Notebook", "Tela").ordem_servico;
+    orcar_peca(&b, paga, produto); // cobra R$ 200
+    faturar(paga);
+    let aberta = b.abrir(cliente, "Tablet", "Bateria").ordem_servico;
+    orcar_peca(&b, aberta, produto); // não faturada: fora
+
+    let r = receita(mes);
+    assert_eq!(r.len(), 1);
+    assert_eq!(r[0].produto, produto);
+    assert_eq!(r[0].quantidade, Quantidade::unidades(1));
+    assert_eq!(r[0].receita, cardeal_kernel::Dinheiro::reais(200));
+
+    // Uma segunda OS faturada, depois marcada como garantia: a peça sai, a receita é zero.
+    let garantia = b.abrir(cliente, "Celular", "Tela").ordem_servico;
+    orcar_peca(&b, garantia, produto);
+    faturar(garantia);
+    b.arm
+        .escritor()
+        .executar(
+            ContextoEscrita::novo(b.empresa, Id::novo(), Id::novo(), Id::novo()),
+            move |uow| {
+                uow.conexao()
+                    .execute(
+                        "UPDATE os_item_peca SET coberto_garantia = 1 WHERE ordem_servico = ?1",
+                        [garantia.em_bytes().as_slice()],
+                    )
+                    .map(|_| ())
+                    .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+            },
+        )
+        .unwrap();
+    let r = receita(mes);
+    assert_eq!(r.len(), 1);
+    assert_eq!(
+        r[0].quantidade,
+        Quantidade::unidades(2),
+        "as duas peças saíram"
+    );
+    assert_eq!(
+        r[0].receita,
+        cardeal_kernel::Dinheiro::reais(200),
+        "garantia = 0"
+    );
+
+    // Mês passado: nada.
+    let passado = cardeal_kernel::Periodo::novo(
+        hoje.inicio_do_mes().mais_meses(-1),
+        hoje.inicio_do_mes().mais_dias(-1),
+    );
+    assert!(receita(passado).is_empty());
+}

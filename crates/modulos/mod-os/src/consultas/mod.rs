@@ -24,11 +24,13 @@ use crate::repositorio::{
 
 mod listagem;
 mod margem;
+mod receita;
 pub use listagem::{ItemListaOrdem, ListarOrdens};
 pub use margem::{
     MargemDaOrdem, MargemDaOrdemServico, MargemDasOrdens, MargemDasOrdensNoPeriodo, MargemPrevista,
     MargemPrevistaDaOrdem,
 };
+pub use receita::ReceitaPorProduto;
 
 /// Busca uma ordem de serviço pelo id.
 ///

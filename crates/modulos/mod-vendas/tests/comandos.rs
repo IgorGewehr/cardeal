@@ -6,11 +6,12 @@
 
 #![allow(clippy::result_large_err)] // `ErroArmazenamento` carrega detalhes de propósito
 
+use cardeal_analytics::ReceitaDoProduto;
 use cardeal_auth::{
     AutorizacoesEfetivas, EmissaoSessao, Escopo, Papel as PapelAuth, Sessao, ValorLimite,
 };
 use cardeal_kernel::{
-    CodigoErro, Data, Dinheiro, Fuso, Id, Instante, Percentual, Preco, Quantidade,
+    CodigoErro, Data, Dinheiro, Fuso, Id, Instante, Percentual, Periodo, Preco, Quantidade,
 };
 use cardeal_ledger::semear_plano_padrao;
 use cardeal_modkit::{Ambiente, Despachante, Modulo, PedidoAtivacao, RegistroModulos};
@@ -25,7 +26,8 @@ use mod_estoque::{
 use mod_vendas::{
     AdicionarItemPedido, CancelarPedido, ConfirmarPedido, CriarPedido, CriarRegraPreco,
     CriarTabelaPreco, FaturarPedido, ItemFoiAdicionado, MargemDoPedido, MargemDoPedidoCalculada,
-    ModuloVendas, PedidoCriado, PedidoFoiFaturado, RegraPrecoCriada, TabelaPrecoCriada, TipoTabela,
+    ModuloVendas, PedidoCriado, PedidoFoiFaturado, ReceitaPorProduto, RegraPrecoCriada,
+    TabelaPrecoCriada, TipoTabela,
 };
 use tempfile::TempDir;
 
@@ -617,4 +619,110 @@ fn painel_de_margem_do_pedido_desconta_custo_e_encargos_e_avisa_abaixo_do_minimo
     let m = margem(&d);
     assert!(m.pedido_abaixo_do_minimo);
     assert_eq!(m.itens_abaixo_do_minimo, vec![0]);
+}
+
+#[test]
+fn receita_por_produto_soma_so_pedidos_faturados_dentro_do_periodo() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloClientes, &ModuloEstoque, &ModuloVendas]).unwrap();
+    let s = sessao_completa(empresa);
+    let amb = ambiente(empresa);
+    let cen = montar_cenario(&d, &s, &amb, &arm, 100);
+
+    let novo_pedido = |quantidade: i64, desconto: Percentual| -> Id {
+        let pedido: PedidoCriado = postcard::from_bytes(
+            &d.executar_comando(
+                "vendas.criar_pedido.v1",
+                &carga(&CriarPedido {
+                    cliente: cen.cliente,
+                    vendedor: Id::novo(),
+                    condicao_pagamento: Id::novo(),
+                    tabela_preco: cen.tabela_preco,
+                    local_expedicao: cen.local,
+                }),
+                &s,
+                &amb,
+                arm.escritor(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        d.executar_comando(
+            "vendas.adicionar_item_pedido.v1",
+            &carga(&AdicionarItemPedido {
+                pedido: pedido.pedido,
+                produto: cen.produto,
+                variacao: None,
+                quantidade: Quantidade::unidades(quantidade),
+                desconto_percentual: desconto,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap();
+        pedido.pedido
+    };
+    let faturar = |pedido: Id| {
+        d.executar_comando(
+            "vendas.confirmar_pedido.v1",
+            &carga(&ConfirmarPedido { pedido }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap();
+        d.executar_comando(
+            "vendas.faturar_pedido.v1",
+            &carga(&FaturarPedido {
+                pedido,
+                a_vista: true,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap();
+    };
+    let receita = |periodo: Periodo| -> Vec<ReceitaDoProduto> {
+        postcard::from_bytes(
+            &d.executar_consulta(
+                "vendas.receita_por_produto.v1",
+                &carga(&ReceitaPorProduto { periodo }),
+                &s,
+                &amb,
+                arm.leitor(),
+            )
+            .unwrap(),
+        )
+        .unwrap()
+    };
+
+    let faturado_a = novo_pedido(2, Percentual::ZERO); // 200
+    let faturado_b = novo_pedido(1, Percentual::pontos(10)); // 90 (com desconto)
+    let _rascunho = novo_pedido(5, Percentual::ZERO);
+    let cancelado = novo_pedido(3, Percentual::ZERO);
+    faturar(faturado_a);
+    faturar(faturado_b);
+    d.executar_comando(
+        "vendas.cancelar_pedido.v1",
+        &carga(&CancelarPedido { pedido: cancelado }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+
+    let hoje = Data::hoje(Fuso::BRASILIA);
+    let r = receita(Periodo::novo(hoje.mais_dias(-1), hoje.mais_dias(1)));
+    assert_eq!(r.len(), 1, "um produto");
+    assert_eq!(r[0].produto, cen.produto);
+    assert_eq!(r[0].quantidade, Quantidade::unidades(3));
+    assert_eq!(
+        r[0].receita,
+        Dinheiro::reais(290),
+        "só os faturados, com desconto"
+    );
+
+    assert!(receita(Periodo::novo(hoje.mais_dias(-30), hoje.mais_dias(-10))).is_empty());
 }

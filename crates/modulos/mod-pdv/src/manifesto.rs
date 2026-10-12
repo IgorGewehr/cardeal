@@ -137,6 +137,12 @@ const PERMISSOES: &[Permissao] = &[
         None,
     ),
     perm(
+        "pdv.margem.ver",
+        "Ver a receita por produto vendida no balcão (rentabilidade)",
+        Risco::Medio,
+        None,
+    ),
+    perm(
         "pdv.tef.operar",
         "Iniciar pagamento por TEF",
         Risco::Medio,

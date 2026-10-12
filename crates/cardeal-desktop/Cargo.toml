@@ -28,6 +28,7 @@ cardeal-ui.workspace      = true
 cardeal-cliente.workspace = true
 cardeal-distribuicao.workspace = true
 cardeal-pdf.workspace     = true
+cardeal-analytics.workspace = true
 
 mod-financeiro.workspace = true
 mod-clientes.workspace   = true

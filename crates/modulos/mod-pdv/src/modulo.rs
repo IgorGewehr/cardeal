@@ -34,7 +34,8 @@ impl Modulo for ModuloPdv {
             .comando::<CancelarCupom>("pdv.cancelar_cupom.v1")
             .comando::<FinalizarVenda>("pdv.finalizar_venda.v1")
             .comando::<IdentificarCliente>("pdv.identificar_cliente.v1")
-            .consulta::<PrecoDoProduto>("pdv.preco_do_produto.v1");
+            .consulta::<PrecoDoProduto>("pdv.preco_do_produto.v1")
+            .consulta::<crate::ReceitaPorProduto>("pdv.receita_por_produto.v1");
         Ok(())
     }
 }

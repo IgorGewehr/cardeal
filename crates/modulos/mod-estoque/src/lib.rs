@@ -67,6 +67,7 @@ mod consultas_analise;
 mod consultas_compras;
 mod consultas_lote;
 mod consultas_preco;
+mod consultas_rentabilidade;
 mod erros;
 pub mod eventos;
 pub mod fiscal;
@@ -141,6 +142,7 @@ pub use consultas_preco::{
     EncargosDaEmpresa, OrigemMargem, ParametrosDePreco, PrecoSugeridoDoProduto,
     PrecosSugeridosDoGrupo, SugestaoDePreco,
 };
+pub use consultas_rentabilidade::{EncargosAtuais, SaidaDoProduto, SaidasPorProdutoEOrigem};
 pub use erros::ErroEstoque;
 pub use inventario::{AjusteInventario, ContagemItem, EstadoInventario, Inventario};
 pub use listagem::ListarProdutos;

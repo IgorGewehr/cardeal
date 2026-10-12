@@ -60,6 +60,7 @@ mod manifesto;
 pub mod migracoes;
 #[cfg(feature = "sqlite")]
 mod modulo;
+mod receita;
 pub mod receituario;
 #[cfg(feature = "sqlite")]
 mod repositorio;
@@ -76,5 +77,6 @@ pub use erros::ErroPdv;
 pub use manifesto::{manifesto, MANIFESTO};
 #[cfg(feature = "sqlite")]
 pub use modulo::ModuloPdv;
+pub use receita::ReceitaPorProduto;
 #[cfg(feature = "sqlite")]
 pub use repositorio::RepositorioPdv;

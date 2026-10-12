@@ -26,6 +26,7 @@ cardeal-kernel.workspace  = true
 cardeal-ledger = { path = "../../cardeal-ledger", default-features = false }
 cardeal-storage = { workspace = true, optional = true }
 cardeal-modkit = { path = "../../cardeal-modkit", default-features = false }
+cardeal-analytics.workspace = true
 mod-financeiro = { path = "../mod-financeiro", default-features = false }
 mod-estoque = { path = "../mod-estoque", default-features = false }
 mod-clientes = { path = "../mod-clientes", default-features = false }

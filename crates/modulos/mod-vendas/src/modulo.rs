@@ -42,7 +42,8 @@ impl Modulo for ModuloVendas {
             .consulta::<RegrasDaTabela>("vendas.regras_da_tabela.v1")
             .consulta::<ItensDoPedido>("vendas.itens_do_pedido.v1")
             .consulta::<crate::MargemDoPedido>("vendas.margem_do_pedido.v1")
-            .consulta::<crate::PrecosDefasados>("vendas.precos_defasados.v1");
+            .consulta::<crate::PrecosDefasados>("vendas.precos_defasados.v1")
+            .consulta::<crate::ReceitaPorProduto>("vendas.receita_por_produto.v1");
         Ok(())
     }
 }

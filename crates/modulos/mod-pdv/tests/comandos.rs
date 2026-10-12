@@ -6,11 +6,14 @@
 
 #![allow(clippy::result_large_err)] // `ErroArmazenamento` carrega detalhes de propósito
 
+use cardeal_analytics::ReceitaDoProduto;
 use cardeal_auth::{
     AutorizacoesEfetivas, EmissaoSessao, Escopo, Papel as PapelAuth, Sessao, ValorLimite,
 };
 use cardeal_kernel::Data;
-use cardeal_kernel::{CodigoErro, Dinheiro, Fuso, Id, Instante, Percentual, Preco, Quantidade};
+use cardeal_kernel::{
+    CodigoErro, Dinheiro, Fuso, Id, Instante, Percentual, Periodo, Preco, Quantidade,
+};
 use cardeal_ledger::semear_plano_padrao;
 use cardeal_modkit::{Ambiente, Despachante, Modulo, PedidoAtivacao, RegistroModulos};
 use cardeal_storage::{Armazenamento, ConfigArmazenamento, ContextoEscrita, ErroArmazenamento};
@@ -27,7 +30,7 @@ use mod_financeiro::{
 use mod_pdv::{
     AbrirCupom, AdicionarItem, AplicarDescontoItem, CancelarCupom, CancelarItem, CupomAberto,
     FinalizarVenda, IdentificarCliente, ItemFoiAdicionado, ModuloPdv, PagamentoInformado,
-    PrecoConsultado, PrecoDoProduto, VendaFoiFinalizada,
+    PrecoConsultado, PrecoDoProduto, ReceitaPorProduto, VendaFoiFinalizada,
 };
 use mod_vendas::{
     CriarRegraPreco, CriarTabelaPreco, ModuloVendas, RegraPrecoCriada, TabelaPrecoCriada,
@@ -99,6 +102,7 @@ fn sessao_completa(empresa: Id) -> Sessao {
         "pdv.item.cancelar",
         "pdv.cupom.cancelar",
         "pdv.preco.consultar",
+        "pdv.margem.ver",
     ] {
         papel = papel.com_permissao(p);
     }
@@ -738,4 +742,109 @@ fn identificar_cliente_no_cupom_aberto_e_recusar_depois_de_cancelado() {
     )
     .unwrap();
     assert!(identificar(Some(outro)).is_err());
+}
+
+#[test]
+fn receita_por_produto_soma_so_cupons_finalizados_sem_itens_cancelados() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[
+        &ModuloClientes,
+        &ModuloEstoque,
+        &ModuloFinanceiro,
+        &ModuloVendas,
+        &ModuloPdv,
+    ])
+    .unwrap();
+    let s = sessao_completa(empresa);
+    let amb = ambiente(empresa);
+    let cen = montar_cenario(&d, &s, &amb, &arm, empresa, 25);
+
+    let adicionar = |cupom: Id, qtd: i64| -> ItemFoiAdicionado {
+        postcard::from_bytes(
+            &d.executar_comando(
+                "pdv.adicionar_item.v1",
+                &carga(&AdicionarItem {
+                    cupom,
+                    produto: cen.produto,
+                    variacao: None,
+                    quantidade: Quantidade::unidades(qtd),
+                }),
+                &s,
+                &amb,
+                arm.escritor(),
+            )
+            .unwrap(),
+        )
+        .unwrap()
+    };
+
+    // Finalizado: 2 vendidos (50) + 1 item cancelado antes de finalizar.
+    let finalizado = abrir_cupom(&d, &s, &amb, &arm, &cen);
+    adicionar(finalizado.cupom, 2);
+    let cancelado_item = adicionar(finalizado.cupom, 1);
+    d.executar_comando(
+        "pdv.cancelar_item.v1",
+        &carga(&CancelarItem {
+            cupom: finalizado.cupom,
+            item: cancelado_item.item,
+            motivo: "cliente desistiu do item".to_string(),
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+    d.executar_comando(
+        "pdv.finalizar_venda.v1",
+        &carga(&FinalizarVenda {
+            cupom: finalizado.cupom,
+            pagamentos: vec![PagamentoInformado {
+                forma: mod_pdv::FormaPagamentoPdv::Dinheiro,
+                valor: Dinheiro::reais(50),
+            }],
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+
+    // Cupom cancelado e cupom ainda em andamento não contam.
+    let cancelado = abrir_cupom(&d, &s, &amb, &arm, &cen);
+    adicionar(cancelado.cupom, 4);
+    d.executar_comando(
+        "pdv.cancelar_cupom.v1",
+        &carga(&CancelarCupom {
+            cupom: cancelado.cupom,
+            motivo: "cliente desistiu da compra".to_string(),
+            autorizado_por: Id::novo(),
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+    let aberto = abrir_cupom(&d, &s, &amb, &arm, &cen);
+    adicionar(aberto.cupom, 7);
+
+    let receita = |periodo: Periodo| -> Vec<ReceitaDoProduto> {
+        postcard::from_bytes(
+            &d.executar_consulta(
+                "pdv.receita_por_produto.v1",
+                &carga(&ReceitaPorProduto { periodo }),
+                &s,
+                &amb,
+                arm.leitor(),
+            )
+            .unwrap(),
+        )
+        .unwrap()
+    };
+    let hoje = Data::hoje(Fuso::BRASILIA);
+    let r = receita(Periodo::novo(hoje.mais_dias(-1), hoje.mais_dias(1)));
+    assert_eq!(r.len(), 1);
+    assert_eq!(r[0].produto, cen.produto);
+    assert_eq!(r[0].quantidade, Quantidade::unidades(2));
+    assert_eq!(r[0].receita, Dinheiro::reais(50));
+    assert!(receita(Periodo::novo(hoje.mais_dias(-30), hoje.mais_dias(-10))).is_empty());
 }

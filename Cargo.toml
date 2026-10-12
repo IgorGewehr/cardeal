@@ -16,6 +16,7 @@ members = [
     "crates/cardeal-desktop",
     "crates/cardeal-web",
     "crates/cardeal-fiscal",
+    "crates/cardeal-analytics",
     "crates/cardeal-testkit",
     "crates/modulos/mod-empresa",
     "crates/modulos/mod-financeiro",
@@ -58,6 +59,7 @@ cardeal-cliente   = { path = "crates/cardeal-cliente" }
 cardeal-pdf       = { path = "crates/cardeal-pdf" }
 cardeal-ui        = { path = "crates/cardeal-ui" }
 cardeal-fiscal    = { path = "crates/cardeal-fiscal" }
+cardeal-analytics = { path = "crates/cardeal-analytics" }
 cardeal-server    = { path = "crates/cardeal-server" }
 cardeal-testkit   = { path = "crates/cardeal-testkit" }
 

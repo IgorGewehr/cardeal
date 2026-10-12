@@ -738,6 +738,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "cardeal-analytics"
+version = "0.2.0"
+dependencies = [
+ "cardeal-kernel",
+ "serde",
+]
+
+[[package]]
 name = "cardeal-auth"
 version = "0.2.0"
 dependencies = [
@@ -779,6 +787,7 @@ name = "cardeal-desktop"
 version = "0.2.0"
 dependencies = [
  "anyhow",
+ "cardeal-analytics",
  "cardeal-cliente",
  "cardeal-distribuicao",
  "cardeal-kernel",
@@ -3073,6 +3082,7 @@ dependencies = [
 name = "mod-os"
 version = "0.2.0"
 dependencies = [
+ "cardeal-analytics",
  "cardeal-auth",
  "cardeal-kernel",
  "cardeal-ledger",
@@ -3098,6 +3108,7 @@ dependencies = [
 name = "mod-pdv"
 version = "0.2.0"
 dependencies = [
+ "cardeal-analytics",
  "cardeal-auth",
  "cardeal-kernel",
  "cardeal-ledger",
@@ -3124,6 +3135,7 @@ dependencies = [
 name = "mod-vendas"
 version = "0.2.0"
 dependencies = [
+ "cardeal-analytics",
  "cardeal-auth",
  "cardeal-kernel",
  "cardeal-ledger",
