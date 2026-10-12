@@ -17,6 +17,7 @@ mod notificacoes;
 mod painel;
 mod painel_margem;
 mod paleta_comandos;
+mod seletor_em_arvore;
 mod seletor_pagamento;
 mod sidebar;
 
@@ -36,5 +37,6 @@ pub use notificacoes::{notificar, Notificacao, Notificacoes, Tom};
 pub use painel::Painel;
 pub use painel_margem::PainelMargem;
 pub use paleta_comandos::{ItemComando, PaletaComandos};
+pub use seletor_em_arvore::{caminho_do_no, filtrar_nos, EstadoSeletorArvore, SeletorEmArvore};
 pub use seletor_pagamento::{CondicaoPagamento, RespostaPagamento, SeletorPagamento};
 pub use sidebar::{GrupoSidebar, ItemSidebar, Sidebar};

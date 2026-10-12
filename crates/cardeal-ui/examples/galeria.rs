@@ -16,7 +16,7 @@ use cardeal_ui::molecules::{
 };
 use cardeal_ui::organisms::{
     notificar, ArvoreHierarquia, ColunaGrade, CondicaoPagamento, Dialogo, Gaveta, Grade, Janela,
-    Notificacao, Notificacoes, Ordenacao, Painel, PainelMargem, SeletorPagamento,
+    Notificacao, Notificacoes, Ordenacao, Painel, PainelMargem, SeletorEmArvore, SeletorPagamento,
 };
 use cardeal_ui::tokens::{instalar_estilo, instalar_fontes, Espaco, Rubro, Tema, TemaUi};
 use eframe::egui;
@@ -68,6 +68,8 @@ struct Galeria {
     arvore_recolhidos: std::collections::HashSet<cardeal_kernel::Id>,
     arvore_selecionado: Option<cardeal_kernel::Id>,
     arvore_nos: Vec<cardeal_ui::organisms::NoArvore>,
+    seletor_arvore: Option<cardeal_kernel::Id>,
+    seletor_estado: cardeal_ui::organisms::EstadoSeletorArvore,
     motivo: String,
     marcada: bool,
     item_ativo: usize,
@@ -92,6 +94,44 @@ const PRODUTOS_DEMO: [(&str, i64, &str); 4] = [
 
 impl Galeria {
     fn arvore(&mut self, ui: &mut egui::Ui) {
+        self.garantir_arvore();
+        let resposta = ArvoreHierarquia::nova(&self.arvore_nos, &mut self.arvore_recolhidos)
+            .selecionado(self.arvore_selecionado)
+            .mostrar(ui, |ui, no| {
+                ui.add(Etiqueta::neutra(
+                    ["Grupo", "Subgrupo", "Categoria", "Subcategoria"][usize::from(no.nivel - 1)],
+                ));
+            });
+        if resposta.clicado.is_some() {
+            self.arvore_selecionado = resposta.clicado;
+        }
+    }
+
+    /// O seletor em árvore do cadastro de produto: caminho no campo, painel com busca.
+    /// `GALERIA_SELETOR=1` abre o painel no primeiro quadro (para a captura).
+    fn seletor_em_arvore(&mut self, ui: &mut egui::Ui) {
+        self.garantir_arvore();
+        // Na lista de escolha o apoio (código, contagem) só pesa: nós enxutos.
+        let nos: Vec<_> = self
+            .arvore_nos
+            .iter()
+            .cloned()
+            .map(|n| cardeal_ui::organisms::NoArvore { apoio: None, ..n })
+            .collect();
+        let abrir = self.quadros == 0 && std::env::var("GALERIA_SELETOR").is_ok();
+        SeletorEmArvore::novo(
+            "Grupo do produto",
+            &mut self.seletor_arvore,
+            &nos,
+            &mut self.seletor_estado,
+        )
+        .marcador("Selecione o grupo…")
+        .opcao_vazia("Todos os grupos")
+        .abrir(abrir)
+        .mostrar(ui);
+    }
+
+    fn garantir_arvore(&mut self) {
         use cardeal_ui::organisms::NoArvore;
         if self.arvore_nos.is_empty() {
             let no = |nivel: u8, rotulo: &str, apoio: &str, filhos: bool| NoArvore {
@@ -111,16 +151,6 @@ impl Galeria {
                 no(2, "Sucos", "SUC · 6 produtos", false),
                 no(1, "Alimentos", "ALI · 40 produtos", false),
             ];
-        }
-        let resposta = ArvoreHierarquia::nova(&self.arvore_nos, &mut self.arvore_recolhidos)
-            .selecionado(self.arvore_selecionado)
-            .mostrar(ui, |ui, no| {
-                ui.add(Etiqueta::neutra(
-                    ["Grupo", "Subgrupo", "Categoria", "Subcategoria"][usize::from(no.nivel - 1)],
-                ));
-            });
-        if resposta.clicado.is_some() {
-            self.arvore_selecionado = resposta.clicado;
         }
     }
 
@@ -689,6 +719,12 @@ impl eframe::App for Galeria {
                     "Árvore: ArvoreHierarquia (estrutura mercadológica, 4 níveis)",
                 ));
                 self.arvore(ui);
+
+                ui.add_space(Espaco::E24);
+                ui.add(Rotulo::titulo_secao(
+                    "SeletorEmArvore: caminho no campo, painel com árvore e busca",
+                ));
+                self.seletor_em_arvore(ui);
 
                 ui.add_space(Espaco::E24);
                 ui.add(Rotulo::titulo_secao(

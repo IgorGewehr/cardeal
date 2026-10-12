@@ -6,7 +6,7 @@ use std::collections::HashSet;
 
 use super::*;
 use cardeal_kernel::Percentual;
-use cardeal_ui::organisms::{ArvoreHierarquia, NoArvore, Painel};
+use cardeal_ui::organisms::{ArvoreHierarquia, EstadoSeletorArvore, NoArvore, Painel};
 use mod_estoque::hierarquia::{nome_do_nivel, Arvore, NoGrupo, NIVEL_MAXIMO};
 use mod_estoque::{
     ArvoreGruposProduto, DefinirMargemDoGrupo, DefinirPerfilFiscalDoGrupo, MoverGrupoProduto,
@@ -30,6 +30,11 @@ pub(super) struct EstadoEstrutura {
     novo_codigo: String,
     novo_nome: String,
     fisc: super::fiscal::FormFiscal,
+    /// A busca/recolhidos de cada `SeletorEmArvore` da tela de estoque.
+    pub(super) sel_cadastro: EstadoSeletorArvore,
+    pub(super) sel_filtro_lote: EstadoSeletorArvore,
+    pub(super) sel_destino_lote: EstadoSeletorArvore,
+    pub(super) sel_filtro_precos: EstadoSeletorArvore,
 }
 
 fn tri(v: Option<bool>) -> u8 {
@@ -108,6 +113,25 @@ impl EstadoEstrutura {
                 self.no(g)
                     .and_then(|n| n.margem.map(|m| (m, n.nome.clone())))
             })
+    }
+
+    /// Os grupos como nós para o `SeletorEmArvore` (pré-ordem, sem texto de apoio).
+    pub(super) fn nos_arvore(&self) -> Vec<NoArvore> {
+        let mut v: Vec<NoArvore> = self
+            .nos
+            .iter()
+            .map(|n| NoArvore {
+                id: n.id,
+                nivel: n.nivel,
+                rotulo: n.nome.clone(),
+                apoio: None,
+                tem_filhos: false,
+            })
+            .collect();
+        for i in 0..v.len() {
+            v[i].tem_filhos = v.get(i + 1).is_some_and(|p| p.nivel > v[i].nivel);
+        }
+        v
     }
 
     /// Todos os grupos com o caminho completo ("Bebidas › Refrigerantes"), para seletores.

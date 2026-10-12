@@ -339,16 +339,21 @@ fn parametros(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Es
 fn tabela(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTelaEstoque) {
     let mut recarregar = false;
     let mut abrir_aplicar = false;
-    let ops: Vec<(Id, String)> = estado.est.nos_para_seletor().into_iter().collect();
+    let nos = estado.est.nos_arvore();
     BarraFiltros::nova(&mut estado.prc.busca)
         .marcador("Buscar produto")
         .filtro(|ui| {
             let antes = estado.prc.grupo;
-            SeletorOpcao::novo("Grupo", &mut estado.prc.grupo)
-                .opcoes(ops.clone())
-                .placeholder("Todos os grupos")
-                .sem_rotulo()
-                .mostrar(ui);
+            SeletorEmArvore::novo(
+                "Grupo",
+                &mut estado.prc.grupo,
+                &nos,
+                &mut estado.est.sel_filtro_precos,
+            )
+            .marcador("Todos os grupos")
+            .opcao_vazia("Todos os grupos")
+            .sem_rotulo()
+            .mostrar(ui);
             if antes != estado.prc.grupo {
                 recarregar = true;
             }

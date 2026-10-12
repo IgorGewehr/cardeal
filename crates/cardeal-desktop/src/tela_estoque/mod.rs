@@ -27,6 +27,7 @@ use cardeal_ui::molecules::{
 };
 use cardeal_ui::organisms::{
     notificar, ColunaGrade, Dialogo, Direcao, FaixaKpi, Grade, LayoutTela, Notificacao, Ordenacao,
+    SeletorEmArvore,
 };
 use cardeal_ui::tokens::{Espaco, TemaUi};
 use eframe::egui;
@@ -1127,14 +1128,15 @@ fn bloco_grupo(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
             }
         }
     } else {
-        let ops: Vec<(Id, String)> = estado
-            .grupos
-            .iter()
-            .map(|g| (g.id, g.nome.clone()))
-            .collect();
-        SeletorOpcao::novo("Grupo", &mut estado.grupo_selecionado)
-            .opcoes(ops)
-            .mostrar(ui);
+        let nos = estado.est.nos_arvore();
+        SeletorEmArvore::novo(
+            "Grupo",
+            &mut estado.grupo_selecionado,
+            &nos,
+            &mut estado.est.sel_cadastro,
+        )
+        .marcador("Selecione o grupo…")
+        .mostrar(ui);
     }
 }
 

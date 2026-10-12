@@ -28,8 +28,7 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   quem confirma é o usuário. Ver [17 — Roadmap](17-roadmap.md), Fase 7.
 - **Ordem do que vem agora** (custo de referência, histórico de compras, preços defasados e
   **rentabilidade por nível da árvore** já estão feitos; **comissão por estrutura mercadológica ainda NÃO foi
-  feita** e segue pendente): seletor em árvore
-  no cadastro e importação da estrutura por planilha → inventário/transferência → importação de produto
+  feita** e segue pendente): **seletor em árvore no cadastro (feito)** e importação da estrutura por planilha → inventário/transferência → importação de produto
   por XML (dicionário determinístico).
 - **Pendência de confiança:** as tabelas do Simples e as alíquotas precisam ser conferidas com o
   contador; ST/MVA ainda não entram no custo.
@@ -481,6 +480,11 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   encargos de `estoque.encargos_atuais.v1`; o domínio puro é o crate novo `cardeal-analytics`
   (`rentabilidade::calcular`). Produto sem custo fica fora da margem; módulo sem permissão não soma. Pendente:
   comissão por estrutura; devolução/estorno ainda não abate o custo.
+- **Seletor em árvore (2026-10-12):** componente `SeletorEmArvore` (organismo sobre `ArvoreHierarquia` +
+  molécula `CampoSelecao`): o campo mostra o caminho escolhido, o painel traz a árvore com busca incremental.
+  Usado no cadastro do produto (substitui o combo do grupo), no filtro de grupo das abas Preços e Alteração
+  em lote e no destino "Mover para o grupo" do lote. "Mover para" da aba Estrutura segue com a lista de
+  destinos válidos (precisa filtrar o que não cabe).
 - **Dívidas conhecidas:** tabelas do Simples a conferir com o contador; a 6ª faixa e a anualização de
   RBT12 (ver ADR-0018); o PDV só avisa preço abaixo do mínimo de empate (etiqueta "abaixo do mínimo" na linha do
   cupom, depois do desconto); não bloqueia a venda e não é o painel de margem completo.

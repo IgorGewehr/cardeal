@@ -213,18 +213,23 @@ pub(super) fn aba(
 fn escolha(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTelaEstoque) {
     ui.add(Rotulo::titulo_secao("1. Escolha os produtos"));
     ui.add_space(Espaco::E8);
-    let ops = estado.est.nos_para_seletor();
+    let nos = estado.est.nos_arvore();
     let mut recarregar = false;
     let antes = estado.lote.grupo;
     let busca_antes = estado.lote.busca.clone();
     BarraFiltros::nova(&mut estado.lote.busca)
         .marcador("Buscar produto")
         .filtro(|ui| {
-            SeletorOpcao::novo("Grupo", &mut estado.lote.grupo)
-                .opcoes(ops.clone())
-                .placeholder("Todos os grupos")
-                .sem_rotulo()
-                .mostrar(ui);
+            SeletorEmArvore::novo(
+                "Grupo",
+                &mut estado.lote.grupo,
+                &nos,
+                &mut estado.est.sel_filtro_lote,
+            )
+            .marcador("Todos os grupos")
+            .opcao_vazia("Todos os grupos")
+            .sem_rotulo()
+            .mostrar(ui);
         })
         .mostrar(ui);
     if antes != estado.lote.grupo || busca_antes != estado.lote.busca {
@@ -417,11 +422,16 @@ fn mudanca(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estad
     }
     ui.add_space(Espaco::E8);
     ui.columns(2, |c| {
-        let ops = estado.est.nos_para_seletor();
-        SeletorOpcao::novo("Mover para o grupo", &mut estado.lote.grupo_destino)
-            .opcoes(ops)
-            .placeholder("Manter o grupo")
-            .mostrar(&mut c[0]);
+        let nos = estado.est.nos_arvore();
+        SeletorEmArvore::novo(
+            "Mover para o grupo",
+            &mut estado.lote.grupo_destino,
+            &nos,
+            &mut estado.est.sel_destino_lote,
+        )
+        .marcador("Manter o grupo")
+        .opcao_vazia("Manter o grupo")
+        .mostrar(&mut c[0]);
         c[1].add(Rotulo::campo("Situação"));
         if let Some(a) = Abas::nova(&[(0_u8, "Manter"), (1, "Ativar"), (2, "Desativar")])
             .selecionada(estado.lote.ativo_modo)

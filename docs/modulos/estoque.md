@@ -339,6 +339,13 @@ stateDiagram-v2
 | `EstoqueEmTransito` | `estoque.transferencia.ver` | Painel de transferências pendentes | `estoque_saldo_local(local) WHERE local = local_em_transito` |
 | `PosicaoDoInventario` | `estoque.inventario.ver` | Tela de contagem em andamento | `estoque_contagem_item(inventario)` |
 
+### Escolha de grupo em árvore (2026-10-12)
+
+Onde a tela pede um grupo (cadastro do produto, filtro de grupo em Preços e Alteração em lote, destino do
+lote) usa o `SeletorEmArvore` de `cardeal-ui`: o campo mostra o caminho ("Bebidas › Sucos"), o painel traz a
+árvore expansível (os nós vêm de `EstadoEstrutura::nos_arvore`, da mesma `estoque.arvore_grupos_produto.v1`)
+com busca incremental sem acento/caixa. Nada muda no domínio: o valor continua sendo o `Id` do grupo.
+
 ### Rentabilidade por nível da estrutura (2026-10-12)
 
 Aba **Rentabilidade** (`tela_estoque/rentabilidade.rs`): "quanto cada Grupo/Subgrupo/Categoria/

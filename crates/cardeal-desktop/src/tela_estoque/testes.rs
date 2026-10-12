@@ -674,3 +674,36 @@ fn aba_rentabilidade_soma_a_venda_faturada_no_grupo_e_nos_de_cima() {
     estado.rent.selecionar(beb);
     assert_eq!(estado.rent.selecionado, None);
 }
+
+#[test]
+fn seletor_em_arvore_do_cadastro_mostra_o_caminho_e_desenha_sem_erro() {
+    let t = motor_de_teste();
+    let a = grupo(&t.motor, &t.sessao, "A", None);
+    let b = grupo(&t.motor, &t.sessao, "B", Some(a));
+    let c = grupo(&t.motor, &t.sessao, "C", Some(b));
+    let _x = grupo(&t.motor, &t.sessao, "X", None);
+
+    let mut estado = EstadoTelaEstoque::default();
+    estado.carregar(&t.motor, &t.sessao);
+    let nos = estado.est.nos_arvore();
+    assert_eq!(nos.len(), 4);
+    assert!(nos[0].tem_filhos && nos[1].tem_filhos && !nos[2].tem_filhos && !nos[3].tem_filhos);
+    assert_eq!(
+        cardeal_ui::organisms::caminho_do_no(&nos, c).as_deref(),
+        Some("A › B › C")
+    );
+
+    // O bloco do cadastro, num quadro de verdade do egui, com o grupo já escolhido.
+    estado.grupo_selecionado = Some(c);
+    let ctx = egui::Context::default();
+    cardeal_ui::tokens::instalar_fontes(&ctx);
+    cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+    for _ in 0..2 {
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                bloco_grupo(ui, &t.motor, &t.sessao, &mut estado);
+            });
+        });
+    }
+    assert_eq!(estado.grupo_selecionado, Some(c));
+}
