@@ -26,8 +26,8 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   por correção do usuário, portas substituíveis), mas **nenhuma funcionalidade depende de IA** e
   nada de IA entra antes de a versão determinística equivalente existir e estar em uso. IA só sugere;
   quem confirma é o usuário. Ver [17 — Roadmap](17-roadmap.md), Fase 7.
-- **Ordem do que vem agora:** custo de referência configurável + histórico das últimas compras → lista
-  de preços defasados (custo mudou, margem caiu) → rentabilidade por nível da árvore → seletor em árvore
+- **Ordem do que vem agora** (custo de referência, histórico de compras e preços defasados já estão
+  feitos): rentabilidade por nível da árvore → seletor em árvore
   no cadastro e importação da estrutura por planilha → inventário/transferência → importação de produto
   por XML (dicionário determinístico).
 - **Pendência de confiança:** as tabelas do Simples e as alíquotas precisam ser conferidas com o
