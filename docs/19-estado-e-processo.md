@@ -9,7 +9,31 @@
 > Mantenha-o atualizado a cada sessão de trabalho relevante. Se ele mentir sobre o estado
 > real do repositório, ele é pior que não existir.
 
-## 1. O que existe, com precisão, hoje (2026-09-05)
+## 0. Objetivo atual e regras de condução (2026-10-12)
+
+**Foco:** comércio e serviços de pequeno porte, a partir da ideia do *lunno* (sem a stack e sem a IA
+dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação e imposto:
+1. **estrutura mercadológica** em árvore (Grupo › Subgrupo › Categoria › Subcategoria), com margem e
+   perfil fiscal herdados e edição em lote;
+2. **preço por markup com a carga tributária somada** (ADR-0018);
+3. **financeiro completo** (DRE, DFC, aging/cobrança, conciliação, plano de contas, score);
+4. **estoque completo** (análise ABC, inventário, transferência, importação por XML).
+
+**Regras de condução:**
+- **Gradual.** Uma fatia usável por vez (domínio testado + tela + doc + commit/push). Nada espera uma
+  grande entrega.
+- **IA é a última coisa.** Já existem as bases (dados estruturados, Razão auditável, regras que aprendem
+  por correção do usuário, portas substituíveis), mas **nenhuma funcionalidade depende de IA** e
+  nada de IA entra antes de a versão determinística equivalente existir e estar em uso. IA só sugere;
+  quem confirma é o usuário. Ver [17 — Roadmap](17-roadmap.md), Fase 7.
+- **Ordem do que vem agora:** custo de referência configurável + histórico das últimas compras → lista
+  de preços defasados (custo mudou, margem caiu) → rentabilidade por nível da árvore → seletor em árvore
+  no cadastro e importação da estrutura por planilha → inventário/transferência → importação de produto
+  por XML (dicionário determinístico).
+- **Pendência de confiança:** as tabelas do Simples e as alíquotas precisam ser conferidas com o
+  contador; ST/MVA ainda não entram no custo.
+
+## 1. O que existe, com precisão (tabela dos crates de 2026-09-05; as sessões seguintes, abaixo, a atualizam)
 
 Todo o **workspace compila** (`cargo check --workspace`) e está formatado
 (`cargo fmt --check`) neste exato commit. Não existe estado "quebrado" no HEAD — essa é uma
