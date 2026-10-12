@@ -8,6 +8,7 @@
 
 mod analise;
 mod estrutura;
+mod estrutura_importacao;
 mod fiscal;
 mod lote;
 mod precos;
@@ -68,6 +69,8 @@ enum Dlg {
     AplicarPrecos,
     /// O histórico das últimas compras de um produto da aba Preços.
     HistoricoCompras,
+    /// Importar a estrutura mercadológica de uma planilha CSV (aba Estrutura).
+    ImportarEstrutura,
 }
 
 /// O estado local da tela.
@@ -301,6 +304,9 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
         Dlg::Repor(i) => dialogo_repor(ui.ctx(), motor, sessao, estado, i),
         Dlg::AplicarPrecos => precos::dialogo_aplicar(ui.ctx(), motor, sessao, estado),
         Dlg::HistoricoCompras => precos_historico::dialogo(ui.ctx(), estado),
+        Dlg::ImportarEstrutura => {
+            estrutura_importacao::dialogo(ui.ctx(), motor, sessao, estado);
+        }
     }
 
     if let Some((produto, nome)) = estado.confirmar_exclusao.clone() {

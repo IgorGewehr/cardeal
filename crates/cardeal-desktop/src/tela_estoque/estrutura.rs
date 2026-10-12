@@ -31,6 +31,7 @@ pub(super) struct EstadoEstrutura {
     novo_nome: String,
     fisc: super::fiscal::FormFiscal,
     /// A busca/recolhidos de cada `SeletorEmArvore` da tela de estoque.
+    pub(super) imp: super::estrutura_importacao::EstadoImportacao,
     pub(super) sel_cadastro: EstadoSeletorArvore,
     pub(super) sel_filtro_lote: EstadoSeletorArvore,
     pub(super) sel_destino_lote: EstadoSeletorArvore,
@@ -180,6 +181,11 @@ pub(super) fn aba(
          para tudo que está abaixo, até alguém definir um valor mais próximo. Para usar só \
          Grupo e Subgrupo, simplesmente não crie os níveis de baixo.",
     ));
+    ui.add_space(Espaco::E8);
+    if ui.add(Botao::secundario("Importar planilha…")).clicked() {
+        estado.est.imp.limpar();
+        estado.dlg = Dlg::ImportarEstrutura;
+    }
     ui.add_space(Espaco::E12);
     ui.columns(2, |c| {
         arvore(&mut c[0], estado);

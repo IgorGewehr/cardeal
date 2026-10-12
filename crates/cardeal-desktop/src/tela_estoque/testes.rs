@@ -707,3 +707,48 @@ fn seletor_em_arvore_do_cadastro_mostra_o_caminho_e_desenha_sem_erro() {
     }
     assert_eq!(estado.grupo_selecionado, Some(c));
 }
+
+#[test]
+fn importar_planilha_mostra_a_previa_e_so_grava_ao_confirmar() {
+    use super::estrutura_importacao::{carregar_texto, confirmar};
+    let t = motor_de_teste();
+    grupo(&t.motor, &t.sessao, "Bebidas", None);
+    let mut estado = EstadoTelaEstoque::default();
+    estado.carregar(&t.motor, &t.sessao);
+
+    // Planilha com erro: a prévia lista a linha e nada é gravado ao tentar confirmar.
+    carregar_texto(
+        &t.motor,
+        &t.sessao,
+        &mut estado.est.imp,
+        "ruim.csv",
+        "Grupo;Subgrupo\nPeças;;Telas\n".into(),
+    )
+    .expect("prévia");
+    assert!(confirmar(&t.motor, &t.sessao, &mut estado).is_err());
+    estado.carregar(&t.motor, &t.sessao);
+    assert_eq!(estado.est.nos.len(), 1);
+
+    // Planilha boa: 1 já existe (sem caixa), 3 novos.
+    carregar_texto(
+        &t.motor,
+        &t.sessao,
+        &mut estado.est.imp,
+        "boa.csv",
+        "Grupo;Subgrupo;Categoria\nBEBIDAS;Sucos\nPeças;Telas;LCD\n".into(),
+    )
+    .expect("prévia");
+    // O diálogo desenha a prévia num quadro de verdade do egui.
+    estado.dlg = Dlg::ImportarEstrutura;
+    let ctx = egui::Context::default();
+    cardeal_ui::tokens::instalar_fontes(&ctx);
+    cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+    for _ in 0..2 {
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            super::estrutura_importacao::dialogo(ctx, &t.motor, &t.sessao, &mut estado);
+        });
+    }
+    let r = confirmar(&t.motor, &t.sessao, &mut estado).expect("importa");
+    assert_eq!((r.criados, r.ja_existiam), (4, 1));
+    assert_eq!(estado.est.nos.len(), 5);
+}

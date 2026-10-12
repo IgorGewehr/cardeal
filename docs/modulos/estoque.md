@@ -263,6 +263,7 @@ stateDiagram-v2
 | Comando | Permissão | Risco | O que faz | Erros possíveis |
 |---|---|---|---|---|
 | `CriarGrupoProduto` ✅ | `estoque.produto.criar` | Baixo | Cria um grupo na estrutura mercadológica (até 4 níveis; recusa o 5º) | `REGRA_VIOLADA` (profundidade), `CAMPO_OBRIGATORIO` |
+| `ImportarEstrutura` ✅ (2026-10-12, `estoque.importar_estrutura.v1`) | `estoque.produto.criar` | Médio | Cria a estrutura mercadológica de um CSV (`Grupo;Subgrupo;Categoria;Subcategoria`, um caminho por linha), tudo ou nada, em uma transação; ignora o que já existe por nome sob o mesmo pai (sem caixa/acento) e gera os códigos | `REGRA_VIOLADA` (qualquer linha com erro, profundidade) |
 | `CriarProduto` ✅ | `estoque.produto.criar` | Baixo | Cria `Produto` + unidade padrão; aceita `codigo_barras` opcional já na criação (valida dígito verificador via `Produto::com_codigo_barras`) e `detalhes_tecnicos` opcional (fabricante, MPN, categoria técnica, especificação, compatibilidade, garantia do fornecedor, localização física — 2026-09-11) | `NcmInvalido`, `GtinInvalido` |
 | `EditarDetalhesTecnicosProduto` ✅ (novo, 2026-09-11) | `estoque.produto.editar` | Baixo | Edita depois os sete campos técnicos opcionais (substitui por completo — campo não informado vira `None`); não toca nome/NCM/código de barras | — |
 | `CriarVariacao` | `estoque.produto.criar` | Baixo | Ainda não implementado | `ProdutoSemGrade` |
@@ -345,6 +346,21 @@ Onde a tela pede um grupo (cadastro do produto, filtro de grupo em Preços e Alt
 lote) usa o `SeletorEmArvore` de `cardeal-ui`: o campo mostra o caminho ("Bebidas › Sucos"), o painel traz a
 árvore expansível (os nós vêm de `EstadoEstrutura::nos_arvore`, da mesma `estoque.arvore_grupos_produto.v1`)
 com busca incremental sem acento/caixa. Nada muda no domínio: o valor continua sendo o `Id` do grupo.
+
+### Importação da estrutura por planilha (2026-10-12)
+
+Domínio puro em `importacao_estrutura.rs`: `planejar(texto, existentes)` lê o CSV (separador `;` ou `,`,
+aspas, BOM, cabeçalho opcional se a 1ª célula for "Grupo"), compara cada caminho com a árvore atual por nome
+normalizado (sem caixa/acento/pontuação) sob o mesmo pai e devolve os nós a criar (pais antes dos filhos,
+código gerado a partir do nome — até 6 letras/números maiúsculos, com sufixo numérico se já houver), quantos
+já existiam e os erros por linha (nível vazio no meio, mais de 4 níveis). `ImportarEstrutura` refaz o plano
+dentro da transação (não confia no cliente), recusa o arquivo inteiro se houver qualquer erro e valida cada nó
+sob pai existente com as regras de `CriarGrupoProduto` (profundidade/pai). A prévia é a consulta
+`estoque.previa_importacao_estrutura.v1` (`estoque.produto.ver`), que devolve "N novos, M já existiam, K erros"
+e uma amostra de até 200 caminhos. Importar o mesmo arquivo duas vezes não cria nada na segunda. Na tela:
+aba Estrutura → "Importar planilha…" (seletor de arquivo, prévia, confirmar). Limites: só cria (não renomeia
+nem move); nome igual com grafia diferente além de caixa/acento/pontuação vira outro grupo; o código gerado
+não é editável na planilha. A importação de **produtos** por planilha segue pendente.
 
 ### Rentabilidade por nível da estrutura (2026-10-12)
 
