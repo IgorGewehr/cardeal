@@ -210,7 +210,7 @@ gravada, vale o padrão do regime cadastrado em `nucleo_empresa.regime` (ver [AD
 **Custo de referência (2026-10-12, migração `estoque` v9).** `ParametrosPreco.custo_referencia`
 escolhe o custo do preço: `CustoMedio` (padrão, o comportamento anterior), `UltimaCompra` (custo da
 entrada mais recente do produto em `estoque_movimento`) ou `MaiorDosDois`. Sem entrada registrada,
-cai no custo médio. A sugestão informa qual valeu em `custo_origem`. Escolha por função pura
+cai no custo médio. A comparação com a tabela de venda (preços defasados) está em [vendas.md](vendas.md). A sugestão informa qual valeu em `custo_origem`. Escolha por função pura
 (`CustoDeReferencia::escolher`).
 
 **Markup divisor** (`precificacao.rs`, aritmética exata):

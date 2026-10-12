@@ -38,6 +38,7 @@
 mod comandos;
 mod comissao;
 mod consultas;
+mod defasados;
 mod devolucao;
 mod erros;
 pub mod eventos;
@@ -60,6 +61,7 @@ pub use comandos::{
 };
 pub use comissao::{Comissao, EstadoComissao};
 pub use consultas::{ItemPedido, ItensDoPedido, PedidosRecentes, RegrasDaTabela, TabelasDePreco};
+pub use defasados::{classificar, PrecoDefasado, PrecosDefasados, SituacaoDoPreco};
 pub use devolucao::{Devolucao, EstadoDevolucao, ItemDevolvido, TipoDevolucao};
 pub use erros::ErroVendas;
 pub use manifesto::{manifesto, MANIFESTO};

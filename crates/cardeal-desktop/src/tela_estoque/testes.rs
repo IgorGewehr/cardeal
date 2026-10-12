@@ -422,3 +422,64 @@ fn aba_precos_muda_o_custo_de_referencia_e_abre_o_historico_de_compras() {
     assert_eq!(h.compras[0].variacao, Some(Percentual::pontos(40)));
     assert_eq!(h.media_ultimas_3, Some(cardeal_kernel::Dinheiro::reais(60)));
 }
+
+#[test]
+fn secao_de_defasados_lista_o_prejuizo_e_aplicar_leva_ao_alvo() {
+    use mod_vendas::{
+        CriarRegraPreco, CriarTabelaPreco, SituacaoDoPreco, TabelaPrecoCriada, TipoTabela,
+    };
+    let t = motor_de_teste();
+    let produto = cenario_de_preco(&t); // custo 50; empate 66,67; sugerido 83,33
+    let tabela: TabelaPrecoCriada = t
+        .motor
+        .executar(
+            &t.sessao,
+            "vendas.criar_tabela_preco.v1",
+            &CriarTabelaPreco {
+                nome: "Balcão".into(),
+                tipo: TipoTabela::Venda,
+                vigente_de: cardeal_kernel::Data::hoje(Fuso::BRASILIA).mais_dias(-1),
+                vigente_ate: None,
+            },
+        )
+        .expect("tabela");
+    let _: mod_vendas::RegraPrecoCriada = t
+        .motor
+        .executar(
+            &t.sessao,
+            "vendas.criar_regra_preco.v1",
+            &CriarRegraPreco {
+                tabela_preco: tabela.tabela_preco,
+                alvo_produto: Some(produto),
+                alvo_grupo: None,
+                quantidade_minima: None,
+                preco: Preco::reais(60),
+                periodo_de: None,
+                periodo_ate: None,
+            },
+        )
+        .expect("regra");
+
+    let mut estado = EstadoTelaEstoque {
+        aba: AbaEstoque::Precos,
+        ..Default::default()
+    };
+    estado.carregar(&t.motor, &t.sessao);
+    assert_eq!(estado.prc.def.tabela, Some(tabela.tabela_preco));
+    assert_eq!(estado.prc.def.itens.len(), 1);
+    assert_eq!(estado.prc.def.itens[0].situacao, SituacaoDoPreco::Prejuizo);
+    assert_eq!(estado.prc.def.a_corrigir(), vec![produto]);
+
+    estado.prc.arredondamento = ArredondamentoDePreco::FinalNoventa;
+    let corrigir = estado.prc.def.a_corrigir();
+    precos::aplicar_em(
+        &egui::Context::default(),
+        &t.motor,
+        &t.sessao,
+        &mut estado,
+        tabela.tabela_preco,
+        corrigir,
+    );
+    assert_eq!(estado.prc.def.itens[0].situacao, SituacaoDoPreco::NoAlvo);
+    assert!(estado.prc.def.a_corrigir().is_empty());
+}

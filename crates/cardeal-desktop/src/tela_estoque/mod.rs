@@ -11,6 +11,7 @@ mod estrutura;
 mod fiscal;
 mod lote;
 mod precos;
+mod precos_defasados;
 mod precos_historico;
 #[cfg(test)]
 mod testes;

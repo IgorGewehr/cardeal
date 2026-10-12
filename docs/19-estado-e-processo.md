@@ -470,6 +470,9 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
 - **Custo de referência + histórico de compras (2026-10-12):** parâmetro `custo_referencia` (custo médio |
   última compra | o maior dos dois; migração `estoque` v9) e consulta `estoque.historico_de_compras.v1`;
   na aba Preços, seletor no formulário e diálogo de compras ao clicar no produto.
+- **Preços defasados (2026-10-12):** `vendas.precos_defasados.v1` classifica cada preço permanente da tabela
+  (prejuízo / abaixo do alvo / no alvo / acima do alvo / sem cálculo) contra o preço que o estoque calcula
+  hoje; seção na aba Preços com "aplicar o sugerido aos defasados" e aviso ao confirmar uma compra.
 - **Dívidas conhecidas:** tabelas do Simples a conferir com o contador; a 6ª faixa e a anualização de
   RBT12 (ver ADR-0018); o PDV só avisa preço abaixo do mínimo de empate (etiqueta "abaixo do mínimo" na linha do
   cupom, depois do desconto); não bloqueia a venda e não é o painel de margem completo.

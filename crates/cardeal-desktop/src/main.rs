@@ -6,6 +6,7 @@
 //! inteira; criar/ver um item acontece num `Dialogo` (regra de UI do projeto). Telas com UI:
 //! Ordens de Serviço e Estoque; as demais mostram `tela_em_construcao` (backend já responde).
 
+mod aviso_defasados;
 #[cfg(feature = "demo")]
 mod demo_app;
 mod login;

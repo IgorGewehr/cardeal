@@ -872,6 +872,11 @@ fn confirmar(
                 "Entrada confirmada"
             };
             notificar(ctx, Notificacao::sucesso(msg));
+            // O custo mudou: avisa se algum preço de venda ficou para trás (só lembrete).
+            let defasados = crate::aviso_defasados::contar_defasados(motor, sessao);
+            if let Some(aviso) = crate::aviso_defasados::texto_do_aviso(defasados) {
+                notificar(ctx, Notificacao::aviso(aviso));
+            }
         }
         Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
     }

@@ -486,3 +486,26 @@ Itens sem custo conhecido ficam **fora** das margens e são contados à parte: u
 nunca aparece como lucro de 100%. A margem mínima vem dos parâmetros de preço; abaixo dela o pedido
 e os itens aparecem sinalizados. `vendas.aplicar_precos_sugeridos.v1` leva o preço sugerido do
 estoque para uma tabela de venda/atacado (ver `docs/modulos/estoque.md` §5).
+
+## Preços defasados (2026-10-12)
+
+`vendas.precos_defasados.v1` (permissão `vendas.tabela_preco.ver`, só leitura): para cada regra
+**permanente** de produto de uma tabela (sem faixa de quantidade e sem período; havendo mais de uma,
+vale a mais recente) compara o preço praticado com o que o estoque calcula hoje
+(`mod_estoque::sugerir_precos`, com o custo de referência configurado). Devolve produto, preço atual,
+custo, margem atual (`precificacao::margem_do_preco`), margem desejada, preço sugerido, preço mínimo e a
+`situacao`, em ordem de urgência:
+
+| Situação | Regra (função pura `classificar`) |
+|---|---|
+| `Prejuizo` | preço abaixo do preço de empate, ou margem atual negativa |
+| `AbaixoDoAlvo` | margem atual mais de 1 ponto abaixo da desejada |
+| `NoAlvo` | de desejada − 1 ponto até desejada + 5 pontos (limites inclusivos) |
+| `AcimaDoAlvo` | margem atual mais de 5 pontos acima da desejada |
+| `SemCalculo(motivo)` | sem custo ou sem margem; o motivo é o `problema` da sugestão |
+
+Na aba **Preços** do Estoque, a seção "Preços defasados" lista por tabela (Defasados / Acima do alvo /
+Todos) e o botão "Aplicar o preço sugerido aos defasados" chama `vendas.aplicar_precos_sugeridos.v1`
+só para `Prejuizo` e `AbaixoDoAlvo`. Ao **confirmar uma entrada de compra**, a tela de Compras consulta
+a primeira tabela de venda ativa e avisa quantos preços ficaram defasados (erros e falta de permissão
+são ignorados; lançar a nota não muda custo, então não avisa).

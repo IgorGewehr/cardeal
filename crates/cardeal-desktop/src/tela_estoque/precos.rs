@@ -50,6 +50,7 @@ pub(super) struct EstadoPrecos {
     margem_minima: String,
     obrigatorio: bool,
     pub(super) custo_ref: CustoDeReferencia,
+    pub(super) def: super::precos_defasados::EstadoDefasados,
     /// Histórico de compras do produto aberto no diálogo (nome e dados).
     pub(super) historico: Option<(String, mod_estoque::historico_compras::ResumoDeCompras)>,
 }
@@ -80,6 +81,8 @@ impl EstadoPrecos {
         ) {
             self.sugestoes = s;
         }
+        self.carregar_tabelas(motor, sessao);
+        self.def.carregar(motor, sessao);
     }
 
     fn preencher(&mut self, p: &ParametrosPreco) {
@@ -139,7 +142,8 @@ impl EstadoPrecos {
         })
     }
 
-    pub(super) fn abrir_aplicar(&mut self, motor: &Motor, sessao: &Sessao) {
+    /// As tabelas de venda/atacado (a promocional exige período e não recebe preço sugerido).
+    fn carregar_tabelas(&mut self, motor: &Motor, sessao: &Sessao) {
         if let Ok(t) = motor.consultar(sessao, "vendas.tabelas_de_preco.v1", &TabelasDePreco) {
             self.tabelas = t
                 .into_iter()
@@ -152,6 +156,15 @@ impl EstadoPrecos {
         {
             self.tabela = self.tabelas.first().map(|t| t.id);
         }
+        self.def.tabelas = self
+            .tabelas
+            .iter()
+            .map(|t| (t.id, t.nome.clone()))
+            .collect();
+    }
+
+    pub(super) fn abrir_aplicar(&mut self, motor: &Motor, sessao: &Sessao) {
+        self.carregar_tabelas(motor, sessao);
     }
 
     fn filtradas(&self) -> Vec<&SugestaoDePreco> {
@@ -176,6 +189,8 @@ pub(super) fn aba(
     });
     ui.add_space(Espaco::E16);
     tabela(ui, motor, sessao, estado);
+    ui.add_space(Espaco::E24);
+    super::precos_defasados::secao(ui, motor, sessao, estado);
 }
 
 fn resumo(ui: &mut egui::Ui, e: &EstadoPrecos) {
@@ -524,6 +539,18 @@ pub(super) fn aplicar(
     let Some(tabela) = estado.prc.tabela else {
         return;
     };
+    aplicar_em(ctx, motor, sessao, estado, tabela, produtos);
+}
+
+/// Aplica o preço sugerido dos `produtos` à `tabela`, com o arredondamento escolhido.
+pub(super) fn aplicar_em(
+    ctx: &egui::Context,
+    motor: &Motor,
+    sessao: &Sessao,
+    estado: &mut EstadoTelaEstoque,
+    tabela: Id,
+    produtos: Vec<Id>,
+) {
     match motor.executar(
         sessao,
         "vendas.aplicar_precos_sugeridos.v1",
@@ -536,6 +563,7 @@ pub(super) fn aplicar(
         Ok(r) => {
             let r: PrecosAplicados = r;
             estado.dlg = Dlg::Fechado;
+            estado.prc.def.carregar(motor, sessao);
             let ignorados = if r.ignorados.is_empty() {
                 String::new()
             } else {

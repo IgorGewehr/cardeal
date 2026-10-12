@@ -41,7 +41,8 @@ impl Modulo for ModuloVendas {
             .consulta::<TabelasDePreco>("vendas.tabelas_de_preco.v1")
             .consulta::<RegrasDaTabela>("vendas.regras_da_tabela.v1")
             .consulta::<ItensDoPedido>("vendas.itens_do_pedido.v1")
-            .consulta::<crate::MargemDoPedido>("vendas.margem_do_pedido.v1");
+            .consulta::<crate::MargemDoPedido>("vendas.margem_do_pedido.v1")
+            .consulta::<crate::PrecosDefasados>("vendas.precos_defasados.v1");
         Ok(())
     }
 }
