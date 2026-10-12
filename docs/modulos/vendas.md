@@ -206,6 +206,7 @@ stateDiagram-v2
 | `ComissaoDoVendedor` | `vendas.comissao.ver` | Painel do vendedor, fechamento mensal | `vendas_comissao(vendedor, competencia)` |
 | `DevolucoesPendentes` | `vendas.devolucao.ver` | Fila de aprovação | `vendas_devolucao(empresa, estado)` |
 | `HistoricoDeComprasDoCliente` | `vendas.pedido.ver` | Aba "Histórico" da ficha do cliente | `vendas_pedido(cliente, data DESC)` |
+| `ReceitaPorProduto` ✅ (2026-10-12, `vendas.receita_por_produto.v1`) | `vendas.margem.ver` | Rentabilidade por nível (aba do Estoque): receita por produto dos pedidos **faturados** com `data` no período | `vendas_pedido(empresa, estado, data)` + `vendas_item_pedido(pedido)` |
 
 ## 7. Receituário contábil
 
@@ -509,3 +510,11 @@ Todos) e o botão "Aplicar o preço sugerido aos defasados" chama `vendas.aplica
 só para `Prejuizo` e `AbaixoDoAlvo`. Ao **confirmar uma entrada de compra**, a tela de Compras consulta
 a primeira tabela de venda ativa e avisa quantos preços ficaram defasados (erros e falta de permissão
 são ignorados; lançar a nota não muda custo, então não avisa).
+
+## Receita por produto (2026-10-12)
+
+`vendas.receita_por_produto.v1` (permissão `vendas.margem.ver`, só leitura) recebe um `Periodo` e devolve
+`Vec<ReceitaDoProduto { produto, quantidade, receita }>` (tipo de `cardeal-analytics`, igual ao de `pdv` e
+`os`): soma `total_item` (já com o desconto do item) dos itens de pedidos em `Faturado` cuja `data` está no
+período. Rascunho, confirmado sem faturar e cancelado ficam de fora. Alimenta a aba Rentabilidade do
+Estoque; ver `docs/modulos/estoque.md`.

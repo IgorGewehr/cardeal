@@ -483,3 +483,194 @@ fn secao_de_defasados_lista_o_prejuizo_e_aplicar_leva_ao_alvo() {
     assert_eq!(estado.prc.def.itens[0].situacao, SituacaoDoPreco::NoAlvo);
     assert!(estado.prc.def.a_corrigir().is_empty());
 }
+
+/// Uma venda faturada de 2 Coca a R$ 100 (custo R$ 50): a receita e a margem sobem pela árvore
+/// até o grupo de cima, e o que está só em rascunho não conta.
+#[test]
+fn aba_rentabilidade_soma_a_venda_faturada_no_grupo_e_nos_de_cima() {
+    use cardeal_kernel::Dinheiro;
+    use mod_clientes::{CriarPessoa, Papel, PessoaCadastrada, TipoPessoa};
+    use mod_vendas::{
+        AdicionarItemPedido, ConfirmarPedido, CriarPedido, CriarRegraPreco, CriarTabelaPreco,
+        FaturarPedido, PedidoCriado, TabelaPrecoCriada, TipoTabela,
+    };
+
+    let t = motor_de_teste();
+    let (m, s) = (&t.motor, &t.sessao);
+    // Cria o grupo de baixo (REF dentro de BEB) e o produto nele.
+    let beb = grupo(m, s, "BEB", None);
+    let produto = {
+        let un: UnidadeCriada = m
+            .executar(
+                s,
+                "estoque.criar_unidade.v1",
+                &CriarUnidade {
+                    sigla: "UN".into(),
+                    nome: "Un".into(),
+                    fracionavel: false,
+                },
+            )
+            .expect("unidade");
+        let ref_ = grupo(m, s, "REF", Some(beb));
+        let p: ProdutoCriado = m
+            .executar(
+                s,
+                "estoque.criar_produto.v1",
+                &CriarProduto {
+                    grupo_produto: ref_,
+                    nome: "Coca 2L".into(),
+                    ncm: "22021000".into(),
+                    unidade_padrao: un.unidade,
+                    codigo_barras: None,
+                    detalhes_tecnicos: None,
+                },
+            )
+            .expect("produto");
+        let loc: LocalCriado = m
+            .executar(
+                s,
+                "estoque.criar_local.v1",
+                &CriarLocal {
+                    nome: "Loja".into(),
+                    tipo: TipoLocal::Deposito,
+                },
+            )
+            .expect("local");
+        let _: EntradaRegistrada = m
+            .executar(
+                s,
+                "estoque.registrar_entrada.v1",
+                &RegistrarEntrada {
+                    produto: p.produto,
+                    local: loc.local,
+                    quantidade: Quantidade::unidades(10),
+                    custo_unitario: Preco::reais(50),
+                },
+            )
+            .expect("entrada");
+        (p.produto, loc.local, ref_)
+    };
+    let (produto, local, ref_) = produto;
+    let cliente: PessoaCadastrada = m
+        .executar(
+            s,
+            "clientes.criar_pessoa.v1",
+            &CriarPessoa {
+                tipo: TipoPessoa::Fisica,
+                nome: "Cliente".into(),
+                nome_fantasia: None,
+                papel_inicial: Papel::Cliente,
+                documento_tipo: None,
+                documento_numero: None,
+                data_nascimento: None,
+                endereco: None,
+                contato: None,
+            },
+        )
+        .expect("cliente");
+    let tabela: TabelaPrecoCriada = m
+        .executar(
+            s,
+            "vendas.criar_tabela_preco.v1",
+            &CriarTabelaPreco {
+                nome: "Balcão".into(),
+                tipo: TipoTabela::Venda,
+                vigente_de: cardeal_kernel::Data::hoje(Fuso::BRASILIA).mais_dias(-1),
+                vigente_ate: None,
+            },
+        )
+        .expect("tabela");
+    let _: mod_vendas::RegraPrecoCriada = m
+        .executar(
+            s,
+            "vendas.criar_regra_preco.v1",
+            &CriarRegraPreco {
+                tabela_preco: tabela.tabela_preco,
+                alvo_produto: Some(produto),
+                alvo_grupo: None,
+                quantidade_minima: None,
+                preco: Preco::reais(100),
+                periodo_de: None,
+                periodo_ate: None,
+            },
+        )
+        .expect("regra");
+    let pedido = |qtd: i64| -> Id {
+        let p: PedidoCriado = m
+            .executar(
+                s,
+                "vendas.criar_pedido.v1",
+                &CriarPedido {
+                    cliente: cliente.pessoa,
+                    vendedor: s.usuario(),
+                    condicao_pagamento: Id::novo(),
+                    tabela_preco: tabela.tabela_preco,
+                    local_expedicao: local,
+                },
+            )
+            .expect("pedido");
+        let _: mod_vendas::ItemFoiAdicionado = m
+            .executar(
+                s,
+                "vendas.adicionar_item_pedido.v1",
+                &AdicionarItemPedido {
+                    pedido: p.pedido,
+                    produto,
+                    variacao: None,
+                    quantidade: Quantidade::unidades(qtd),
+                    desconto_percentual: Percentual::ZERO,
+                },
+            )
+            .expect("item");
+        p.pedido
+    };
+    let faturado = pedido(2);
+    let _rascunho = pedido(5);
+    let _: () = m
+        .executar(
+            s,
+            "vendas.confirmar_pedido.v1",
+            &ConfirmarPedido { pedido: faturado },
+        )
+        .expect("confirmar");
+    let _: mod_vendas::PedidoFoiFaturado = m
+        .executar(
+            s,
+            "vendas.faturar_pedido.v1",
+            &FaturarPedido {
+                pedido: faturado,
+                a_vista: true,
+            },
+        )
+        .expect("faturar");
+
+    let mut estado = EstadoTelaEstoque {
+        aba: AbaEstoque::Rentabilidade,
+        ..Default::default()
+    };
+    estado.rent.carregar(m, s);
+    let r = &estado.rent.resultado;
+    assert_eq!(estado.rent.origens, ["Vendas", "PDV", "OS"]);
+    assert!(estado.rent.ausentes.is_empty());
+
+    let no = |id: Id| r.nos.iter().find(|n| n.id == id).expect("nó");
+    for id in [ref_, beb] {
+        assert_eq!(no(id).receita, Dinheiro::reais(200), "só o faturado");
+        assert_eq!(no(id).custo, Dinheiro::reais(100));
+        assert_eq!(no(id).margem_bruta, Dinheiro::reais(100));
+        assert_eq!(no(id).margem_bruta_pct, Some(Percentual::pontos(50)));
+        assert_eq!(no(id).produtos, 1);
+    }
+    assert_eq!(no(beb).receita_propria, Dinheiro::ZERO, "só o filho vendeu");
+    assert_eq!(no(ref_).receita_propria, Dinheiro::reais(200));
+    assert_eq!(r.total.receita, Dinheiro::reais(200));
+    assert_eq!(r.total.itens_sem_custo, 0);
+    // A margem líquida é estimada: nunca passa da bruta.
+    assert!(r.total.margem_liquida_estimada <= r.total.margem_bruta);
+
+    // Clicar no grupo de cima mostra o produto do de baixo; um grupo sem venda, nenhum.
+    estado.rent.selecionar(beb);
+    assert_eq!(estado.rent.produtos_visiveis().len(), 1);
+    estado.rent.selecionar(beb);
+    assert_eq!(estado.rent.selecionado, None);
+}

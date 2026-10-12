@@ -168,8 +168,13 @@ stateDiagram-v2
 | `ApontamentosDaOrdem` ✅ (novo) | `os.ordem.ver` | Histórico de apontamento no detalhe da OS | `os_apontamento_tempo(ordem_servico)` |
 | `TempoTotalDaOrdem` ✅ (novo) | `os.ordem.ver` | Tempo acumulado no detalhe da OS — só soma apontamentos **encerrados** | idem |
 | `TempoPorTecnicoNoPeriodo` ✅ (novo) | `os.ordem.ver` | Produtividade por técnico (`cardeal-analytics`) | `os_apontamento_tempo(tecnico, inicio)` |
+| `ReceitaPorProduto` ✅ (2026-10-12, `os.receita_por_produto.v1`) | `os.margem.ver` | Rentabilidade por nível (aba do Estoque): receita das **peças** de OS faturadas no período (passo `Faturada`), por produto; garantia rende 0 e peça estornada fica de fora; **mão de obra não entra** (não é produto) | `os_ordem_servico(empresa, estado)` + `os_historico` + `os_item_peca(ordem_servico)` |
 | `PecasAguardandoEstoque` ✅ (novo, 2026-09-11 — auditoria de integração) | `os.ordem.ver` | Radar de "OS parada esperando peça": peça orçada, ainda não aplicada, cujo saldo disponível no estoque não cobre a quantidade pedida — cruza `os_item_peca`/`os_ordem_servico` com `mod_estoque::saldo_disponivel_do_produto` (porta pública nova, nunca lê `estoque_saldo_local` direto) | varredura de `os_item_peca(aplicada)` por ordem não finalizada, uma consulta de saldo por produto |
 | `TaxaDeReincidencia` | `os.garantia.ver` | Relatório de qualidade técnica | `os_reincidencia(ordem_anterior)` — ainda não implementada, depende de `AcionarGarantia` |
+
+`os.receita_por_produto.v1` recebe um `Periodo` e devolve `Vec<ReceitaDoProduto>` (tipo de
+`cardeal-analytics`): `preço × quantidade` das peças não estornadas das OS cujo faturamento (como em
+`MargemDasOrdensNoPeriodo`) cai no período; peça `coberto_garantia` entra com receita zero.
 
 ## 7. Receituário contábil
 

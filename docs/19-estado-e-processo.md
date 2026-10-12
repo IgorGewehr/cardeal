@@ -26,8 +26,9 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   por correção do usuário, portas substituíveis), mas **nenhuma funcionalidade depende de IA** e
   nada de IA entra antes de a versão determinística equivalente existir e estar em uso. IA só sugere;
   quem confirma é o usuário. Ver [17 — Roadmap](17-roadmap.md), Fase 7.
-- **Ordem do que vem agora** (custo de referência, histórico de compras e preços defasados já estão
-  feitos): rentabilidade por nível da árvore → seletor em árvore
+- **Ordem do que vem agora** (custo de referência, histórico de compras, preços defasados e
+  **rentabilidade por nível da árvore** já estão feitos; **comissão por estrutura mercadológica ainda NÃO foi
+  feita** e segue pendente): seletor em árvore
   no cadastro e importação da estrutura por planilha → inventário/transferência → importação de produto
   por XML (dicionário determinístico).
 - **Pendência de confiança:** as tabelas do Simples e as alíquotas precisam ser conferidas com o
@@ -473,6 +474,13 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
 - **Preços defasados (2026-10-12):** `vendas.precos_defasados.v1` classifica cada preço permanente da tabela
   (prejuízo / abaixo do alvo / no alvo / acima do alvo / sem cálculo) contra o preço que o estoque calcula
   hoje; seção na aba Preços com "aplicar o sugerido aos defasados" e aviso ao confirmar uma compra.
+- **Rentabilidade por nível da árvore (2026-10-12):** aba **Rentabilidade** no Estoque — receita, custo, margem
+  bruta e líquida **estimada** de cada Grupo/Subgrupo/Categoria/Subcategoria (subárvore e só os diretos) num período
+  (mês, 30/90 dias, ano). Receita por produto vem de `vendas|pdv|os.receita_por_produto.v1` (permissões
+  `vendas.margem.ver`, `pdv.margem.ver` — nova —, `os.margem.ver`), custo de `estoque.saidas_por_produto_e_origem.v1`,
+  encargos de `estoque.encargos_atuais.v1`; o domínio puro é o crate novo `cardeal-analytics`
+  (`rentabilidade::calcular`). Produto sem custo fica fora da margem; módulo sem permissão não soma. Pendente:
+  comissão por estrutura; devolução/estorno ainda não abate o custo.
 - **Dívidas conhecidas:** tabelas do Simples a conferir com o contador; a 6ª faixa e a anualização de
   RBT12 (ver ADR-0018); o PDV só avisa preço abaixo do mínimo de empate (etiqueta "abaixo do mínimo" na linha do
   cupom, depois do desconto); não bloqueia a venda e não é o painel de margem completo.

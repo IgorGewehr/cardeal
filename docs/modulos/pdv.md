@@ -166,6 +166,12 @@ stateDiagram-v2
 | `SaldoEstimado` | `pdv.preco.consultar` | Rodapé da tela de venda | `PortaCatalogo::saldo_disponivel`, rotulado "estimado" offline |
 | `HistoricoDeCupons` | `pdv.venda.ver` | Tela de consulta de vendas do turno | `pdv_cupom(sessao_caixa, abertura DESC)` |
 | `FaixaAtual` | `pdv.venda.ver` | Faixa de estoque do FaixaEstado (topo da tela) | `pdv_faixa_numeracao(terminal) WHERE proximo <= numero_final` |
+| `ReceitaPorProduto` ✅ (2026-10-12, `pdv.receita_por_produto.v1`) | `pdv.margem.ver` | Rentabilidade por nível (aba do Estoque): receita por produto dos cupons `Finalizado` abertos no período, sem itens cancelados | `pdv_cupom(empresa, estado, abertura)` + `pdv_item_cupom(cupom)` |
+
+`pdv.receita_por_produto.v1` recebe um `Periodo` e devolve `Vec<ReceitaDoProduto>` (tipo de
+`cardeal-analytics`): `total_item` (já com desconto) dos itens não cancelados de cupons `Finalizado`
+cuja `abertura` cai no período (dia do fuso da empresa — o cupom ainda não guarda o instante da
+finalização). Cupom em andamento ou cancelado não conta.
 
 ## 7. Receituário contábil
 
@@ -213,6 +219,7 @@ exemplo canônico do [doc 01 §3](../01-arquitetura-geral.md#3-o-caminho-de-um-c
 | `pdv.cupom.cancelar` | Cancelar cupom inteiro (`F8`) | Alto |
 | `pdv.desconto.aplicar` | Aplicar desconto (`F5`) | Médio |
 | `pdv.preco.consultar` | Consulta de preço sem abrir venda (`F10`) | Baixo |
+| `pdv.margem.ver` | Ver a receita por produto vendida no balcão (rentabilidade) | Médio |
 | `pdv.tef.operar` | Iniciar pagamento por TEF | Médio |
 
 `F12` (abrir/fechar caixa) e `F9` (sangria) usam as permissões de `financeiro` diretamente

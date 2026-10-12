@@ -332,10 +332,39 @@ stateDiagram-v2
 | `PrecoSugeridoDoProduto` ✅ (2026-10-09) | `estoque.produto.ver` | Preço sugerido e de empate com a decomposição e a origem de cada percentual; `custo` opcional recalcula (cotação de compra) | produto + grupos + `razao_*` (RBT12 e custo operacional) |
 | `PrecosSugeridosDoGrupo` ✅ (2026-10-09) | `estoque.produto.ver` | Aba Preços: a mesma conta para a subárvore de um grupo (ou o catálogo todo com `grupo: None`), carregando a base (parâmetros, árvore, Razão) uma vez só | idem |
 | `AnaliseDeEstoque` ✅ (2026-10-09; substitui `CurvaAbc`) | `estoque.abc.ver` | Aba Análise: curva ABC (A até 80% do valor acumulado, B até 95%, C o resto; sem saída = sem giro) pelo **valor que saiu ao custo** na janela (30/60/90/180 dias), cobertura em dias (saldo ÷ ritmo de saída; abaixo de 7 dias = risco de ruptura) e giro | `estoque_movimento(produto, criado_em)` tipo `Saida` + `estoque_saldo_local` |
+| `SaidasPorProdutoEOrigem` ✅ (2026-10-12, `estoque.saidas_por_produto_e_origem.v1`) | `estoque.abc.ver` | Aba Rentabilidade: o que saiu (movimentos `Saida`) no período, por produto e `origem_modulo` (`vendas`, `pdv`, `os`, `estoque`…), com a quantidade e o custo (Σ quantidade × custo gravado; sem custo gravado, o custo médio atual). O dia é o do fuso da empresa | `estoque_movimento(empresa, tipo, criado_em)` |
+| `EncargosAtuais` ✅ (2026-10-12, `estoque.encargos_atuais.v1`) | `estoque.produto.ver` | Os percentuais que incidem hoje sobre a venda (operação, imposto, comissão, taxas) e a margem líquida mínima — a régua da margem líquida **estimada** | parâmetros de preço + Razão |
 | `CurvaAbc` | `estoque.abc.ver` | Relatório de curva ABC | agregação de `estoque_movimento` por valor no período |
 | `LotesProximosDoVencimento` | `estoque.lote.ver` | Alerta de validade | `estoque_lote(validade)` índice parcial `WHERE estado = 'Ativo'` |
 | `EstoqueEmTransito` | `estoque.transferencia.ver` | Painel de transferências pendentes | `estoque_saldo_local(local) WHERE local = local_em_transito` |
 | `PosicaoDoInventario` | `estoque.inventario.ver` | Tela de contagem em andamento | `estoque_contagem_item(inventario)` |
+
+### Rentabilidade por nível da estrutura (2026-10-12)
+
+Aba **Rentabilidade** (`tela_estoque/rentabilidade.rs`): "quanto cada Grupo/Subgrupo/Categoria/
+Subcategoria vendeu, quanto custou e quanto deixou de margem" num período (Mês atual, Últimos 30/90
+dias, Ano). Quem orquestra é a tela: ela chama a consulta de **receita por produto** de cada origem
+(`vendas.receita_por_produto.v1`, `pdv.receita_por_produto.v1`, `os.receita_por_produto.v1`, todas
+devolvendo `Vec<ReceitaDoProduto>` do crate `cardeal-analytics`), `estoque.saidas_por_produto_e_origem.v1`
+(custo), `estoque.encargos_atuais.v1`, a árvore (`estoque.arvore_grupos_produto.v1`) e o mapa produto → grupo
+(`estoque.produtos_para_lote.v1`, que inclui os inativos) e entrega tudo a
+`cardeal_analytics::calcular`. **Módulo ausente ou sem permissão simplesmente não soma**; a tela lista
+as origens que entraram (e as que ficaram de fora). O custo só vale para as origens cuja receita entrou.
+
+Regras (testadas no domínio):
+- cada nó soma a **subárvore** (receita, custo, margem, participação na receita total, produtos com
+  venda) e também guarda `receita_propria`/`custo_proprio` (só os produtos diretos);
+- produto vendido **sem custo conhecido** (nenhuma saída com custo > 0) entra na receita, mas fica fora
+  da margem e é contado em "itens sem custo" — nunca vira lucro de 100%;
+- custo de produto sem receita no período é ignorado (peça aplicada em OS ainda não faturada não pesa);
+  peça em garantia entra com receita zero e o custo dela, então a margem fica negativa;
+- **margem líquida estimada** = receita com custo × (1 − encargos) − custo, com os encargos **de hoje**;
+  na árvore a etiqueta é verde na margem mínima, âmbar abaixo dela e vermelha no prejuízo.
+
+Limitações conhecidas: o custo vem das **saídas do período** e a receita do **faturamento** do período
+(pedido: data do pedido; cupom: abertura; OS: passo Faturada), então venda e baixa em meses diferentes
+desalinham um mês; devolução/estorno de saída não abate o custo; **comissão por estrutura ainda não foi
+feita** (a comissão entra só como percentual médio dos encargos).
 
 ## 7. Receituário contábil
 

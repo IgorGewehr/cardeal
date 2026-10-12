@@ -13,6 +13,7 @@ mod lote;
 mod precos;
 mod precos_defasados;
 mod precos_historico;
+mod rentabilidade;
 #[cfg(test)]
 mod testes;
 
@@ -46,6 +47,7 @@ enum AbaEstoque {
     Precos,
     Lote,
     Analise,
+    Rentabilidade,
     Radar,
 }
 
@@ -77,6 +79,7 @@ pub struct EstadoTelaEstoque {
     prc: precos::EstadoPrecos,
     lote: lote::EstadoLote,
     analise: analise::EstadoAnalise,
+    rent: rentabilidade::EstadoRentabilidade,
     /// Perfil fiscal do produto aberto em "Editar": o que ele define e o vigente.
     fisc: fiscal::FormFiscal,
     fisc_efetivo: Vec<mod_estoque::fiscal::LinhaFiscal>,
@@ -198,6 +201,7 @@ impl EstadoTelaEstoque {
             "estoque-precos" => AbaEstoque::Precos,
             "estoque-lote" => AbaEstoque::Lote,
             "estoque-analise" => AbaEstoque::Analise,
+            "estoque-rentabilidade" => AbaEstoque::Rentabilidade,
             _ => AbaEstoque::Produtos,
         };
         self.carregar(motor, sessao);
@@ -206,6 +210,9 @@ impl EstadoTelaEstoque {
         }
         if self.aba == AbaEstoque::Analise {
             self.analise.carregar(motor, sessao);
+        }
+        if self.aba == AbaEstoque::Rentabilidade {
+            self.rent.carregar(motor, sessao);
         }
         if self.aba == AbaEstoque::Estrutura {
             if let Some(id) = self
@@ -242,6 +249,7 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
                 (AbaEstoque::Precos, "Preços"),
                 (AbaEstoque::Lote, "Alteração em lote"),
                 (AbaEstoque::Analise, "Análise"),
+                (AbaEstoque::Rentabilidade, "Rentabilidade"),
                 (AbaEstoque::Radar, "Radar de reposição"),
             ])
             .selecionada(estado.aba)
@@ -256,6 +264,9 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
                 }
                 if nova == AbaEstoque::Analise {
                     estado.analise.carregar(motor, sessao);
+                }
+                if nova == AbaEstoque::Rentabilidade {
+                    estado.rent.carregar(motor, sessao);
                 }
             }
             ui.add_space(Espaco::E16);
@@ -275,6 +286,7 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
                 AbaEstoque::Precos => precos::aba(ui, motor, sessao, estado),
                 AbaEstoque::Lote => lote::aba(ui, motor, sessao, estado),
                 AbaEstoque::Analise => analise::aba(ui, motor, sessao, estado),
+                AbaEstoque::Rentabilidade => rentabilidade::aba(ui, motor, sessao, estado),
                 AbaEstoque::Radar => radar(ui, estado),
             }
         },
