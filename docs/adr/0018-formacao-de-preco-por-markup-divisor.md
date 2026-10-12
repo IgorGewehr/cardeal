@@ -45,6 +45,15 @@ alíquota de ICMS, PIS ou COFINS, o imposto é `ICMS × (100% − redução de b
 DAS é por faixa e os campos fiscais não entram. A sugestão informa `imposto_origem`. **Limitação:**
 ST/MVA ainda não entram no custo; o painel de margem do pedido e da OS usam o imposto do produto.
 
+### Custo de referência configurável (2026-10-12)
+
+O custo que entra no markup deixa de ser só o custo médio: o parâmetro `custo_referencia` (por CNPJ)
+escolhe entre custo médio (padrão, não muda nada para quem já usa), última compra e o maior dos
+dois. Por quê: com o fornecedor reajustando, o custo médio atrasa e o preço sugerido deixa a margem
+comer o reajuste; "o maior dos dois" protege sem exigir reprecificar a mão. Sem compra registrada
+cai no médio, nunca num número inventado. O histórico das últimas compras (variação e média das 3)
+sustenta a decisão na tela.
+
 ## Consequências
 
 - Quem usa o sistema vê o preço se corrigir quando o financeiro muda — o diferencial sobre digitar

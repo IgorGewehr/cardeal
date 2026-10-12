@@ -235,6 +235,13 @@ ALTER TABLE estoque_alteracao_lote_item ADD COLUMN antes_fiscal BLOB;
 ALTER TABLE estoque_alteracao_lote_item ADD COLUMN depois_fiscal BLOB;
 ";
 
+// Migração v9 (2026-10-12): qual custo alimenta o preço sugerido (médio, última compra ou o
+// maior dos dois). O padrão preserva o comportamento anterior (custo médio).
+const SQL_CUSTO_DE_REFERENCIA: &str = r"
+ALTER TABLE estoque_parametros_preco ADD COLUMN custo_referencia TEXT NOT NULL DEFAULT 'CustoMedio'
+    CHECK (custo_referencia IN ('CustoMedio','UltimaCompra','MaiorDosDois'));
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -282,6 +289,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 8,
         nome: "estoque_perfil_fiscal",
         sql: SQL_PERFIL_FISCAL,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 9,
+        nome: "estoque_custo_de_referencia",
+        sql: SQL_CUSTO_DE_REFERENCIA,
         tipo: TipoMigracao::Esquema,
     },
 ];

@@ -2,6 +2,7 @@
 //! comissão, taxas, margens) e, produto a produto, o preço sugerido pelo markup divisor — com
 //! de onde veio cada percentual e o preço de empate abaixo do qual a venda dá prejuízo.
 
+use super::precos_historico::abrir_historico;
 use super::*;
 use cardeal_kernel::{Dinheiro, Percentual};
 use cardeal_ui::atoms::ValorDinheiro;
@@ -10,7 +11,7 @@ use mod_estoque::precificacao::{
     AnexoSimples, ArredondamentoDePreco, OrigemDaCarga, RegimeImposto,
 };
 use mod_estoque::{
-    DefinirParametrosPreco, OrigemMargem, ParametrosDePreco, ParametrosPreco,
+    CustoDeReferencia, DefinirParametrosPreco, OrigemMargem, ParametrosDePreco, ParametrosPreco,
     PrecosSugeridosDoGrupo, SugestaoDePreco,
 };
 use mod_vendas::{
@@ -48,6 +49,9 @@ pub(super) struct EstadoPrecos {
     margem_padrao: String,
     margem_minima: String,
     obrigatorio: bool,
+    pub(super) custo_ref: CustoDeReferencia,
+    /// Histórico de compras do produto aberto no diálogo (nome e dados).
+    pub(super) historico: Option<(String, mod_estoque::historico_compras::ResumoDeCompras)>,
 }
 
 const ANEXOS: [AnexoSimples; 5] = [
@@ -97,6 +101,7 @@ impl EstadoPrecos {
         self.margem_padrao = p.margem_padrao.map(pct).unwrap_or_default();
         self.margem_minima = pct(p.margem_minima);
         self.obrigatorio = p.preco_obrigatorio;
+        self.custo_ref = p.custo_referencia;
     }
 
     /// Monta os parâmetros do formulário; erro com o nome do campo ruim.
@@ -130,6 +135,7 @@ impl EstadoPrecos {
             },
             margem_minima: le("Margem mínima", &self.margem_minima)?,
             preco_obrigatorio: self.obrigatorio,
+            custo_referencia: self.custo_ref,
         })
     }
 
@@ -275,6 +281,23 @@ fn parametros(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Es
         c[1].add(Campo::novo("Margem mínima (%)", &mut e.margem_minima));
     });
     ui.add_space(Espaco::E8);
+    ui.add(Rotulo::campo("Custo usado no preço"));
+    if let Some(c) = Abas::nova(&[
+        (CustoDeReferencia::CustoMedio, "Custo médio"),
+        (CustoDeReferencia::UltimaCompra, "Última compra"),
+        (CustoDeReferencia::MaiorDosDois, "O maior dos dois"),
+    ])
+    .selecionada(e.custo_ref)
+    .id_salt("prc-custo-ref")
+    .mostrar(ui)
+    {
+        e.custo_ref = c;
+    }
+    ui.add(Rotulo::apoio(
+        "Sem compra registrada, o preço usa o custo médio. \"O maior dos dois\" protege a margem \
+         quando o fornecedor reajusta.",
+    ));
+    ui.add_space(Espaco::E8);
     ui.add(cardeal_ui::atoms::Caixa::nova(
         &mut e.obrigatorio,
         "O preço sugerido é obrigatório no PDV (desligado, ele só orienta)",
@@ -334,7 +357,7 @@ fn tabela(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estado
     ui.add_space(Espaco::E8);
 
     let linhas = estado.prc.filtradas();
-    Grade::nova(vec![
+    let resposta = Grade::nova(vec![
         ColunaGrade::nova("Produto").largura(240.0),
         ColunaGrade::nova("Custo").largura(100.0).numero(),
         ColunaGrade::nova("Margem").largura(150.0),
@@ -344,6 +367,7 @@ fn tabela(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estado
         ColunaGrade::nova("Situação").largura(260.0),
     ])
     .id_salt("precos-sugeridos")
+    .selecionavel(None)
     .vazio("Nenhum produto neste recorte.")
     .mostrar(ui, linhas.len(), |i, row| {
         let s = linhas[i];
@@ -384,6 +408,15 @@ fn tabela(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estado
             }
         });
     });
+    ui.add(Rotulo::apoio(
+        "Clique num produto para ver o histórico das últimas compras.",
+    ));
+    if let Some(i) = resposta.linha_clicada {
+        let (produto, nome) = (linhas[i].produto, linhas[i].nome.clone());
+        if abrir_historico(motor, sessao, &mut estado.prc, produto, nome) {
+            estado.dlg = Dlg::HistoricoCompras;
+        }
+    }
 }
 
 fn celula(ui: &mut egui::Ui, v: Option<Dinheiro>) {

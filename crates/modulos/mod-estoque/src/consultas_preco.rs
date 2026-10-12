@@ -11,7 +11,7 @@ use cardeal_modkit::Ctx;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
-use crate::parametros_preco::ParametrosPreco;
+use crate::parametros_preco::{CustoDeReferencia, ParametrosPreco};
 use crate::precificacao::{Componentes, OrigemDaCarga, PerfilFiscal, PrecoCalculado};
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::{CodigoErro, Erro, Periodo, Resultado};
@@ -54,6 +54,8 @@ pub struct SugestaoDePreco {
     pub grupo: Id,
     /// O custo usado (informado ou o maior custo médio em estoque); `None` sem custo.
     pub custo: Option<Dinheiro>,
+    /// Qual custo valeu: o médio ou o da última compra (ver [`CustoDeReferencia`]).
+    pub custo_origem: CustoDeReferencia,
     /// A margem usada.
     pub margem: Option<Percentual>,
     /// De onde veio a margem.
@@ -166,6 +168,8 @@ struct LinhaProduto {
     grupo: Id,
     margem: Option<Percentual>,
     custo: Preco,
+    /// O custo da entrada mais recente, se houver.
+    ultima_compra: Option<Preco>,
     /// Os campos fiscais próprios do produto (vazio = herda tudo do grupo).
     fiscal: crate::fiscal::CamposFiscais,
 }
@@ -183,7 +187,11 @@ fn linha_do_produto(
             "SELECT p.id, p.nome, p.grupo_produto, p.margem_desejada,
                     p.perfil_fiscal,
                     COALESCE((SELECT MAX(s.custo_medio) FROM estoque_saldo_local s
-                              WHERE s.produto = p.id AND s.empresa = ?2), 0)
+                              WHERE s.produto = p.id AND s.empresa = ?2), 0),
+                    (SELECT m.custo_unitario FROM estoque_movimento m
+                      WHERE m.produto = p.id AND m.empresa = ?2 AND m.tipo = 'Entrada'
+                        AND m.custo_unitario IS NOT NULL AND m.custo_unitario > 0
+                      ORDER BY m.criado_em DESC, m.id DESC LIMIT 1)
              FROM estoque_produto p
              WHERE p.empresa = ?1 AND p.ativo = 1
              ORDER BY p.nome ASC, p.id ASC",
@@ -202,6 +210,7 @@ fn linha_do_produto(
                         r.get::<_, Option<Vec<u8>>>(4)?.as_deref(),
                     ),
                     custo: Preco::interna(r.get::<_, i64>(5)?),
+                    ultima_compra: r.get::<_, Option<i64>>(6)?.map(Preco::interna),
                 })
             },
         )
@@ -307,10 +316,21 @@ impl BaseDePreco {
         use crate::precificacao::{carga_do_produto, preco_minimo, preco_sugerido};
         use cardeal_kernel::{Arredondamento, Quantidade};
 
-        let custo = custo_informado.or_else(|| {
-            let c = Dinheiro::de_total(Quantidade::unidades(1), l.custo, Arredondamento::MeioAcima);
+        let em_dinheiro = |p: Preco| {
+            let c = Dinheiro::de_total(Quantidade::unidades(1), p, Arredondamento::MeioAcima);
             c.e_positivo().then_some(c)
-        });
+        };
+        let (custo_calculado, mut custo_origem) = self
+            .parametros
+            .custo_referencia
+            .escolher(em_dinheiro(l.custo), l.ultima_compra.and_then(em_dinheiro));
+        let custo = match custo_informado {
+            Some(c) => {
+                custo_origem = CustoDeReferencia::CustoMedio;
+                Some(c)
+            }
+            None => custo_calculado,
+        };
         let (margem, origem_margem) = self.margem(l.margem, l.grupo);
         let perfil_fiscal = self.perfil_fiscal(l.grupo);
         let fiscal = self.fiscal_efetivo(l);
@@ -328,6 +348,7 @@ impl BaseDePreco {
             nome: l.nome.clone(),
             grupo: l.grupo,
             custo,
+            custo_origem,
             margem,
             origem_margem,
             perfil_fiscal,

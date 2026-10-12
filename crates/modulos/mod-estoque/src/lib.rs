@@ -64,12 +64,14 @@ mod aparelho_origem;
 mod comandos;
 mod consultas;
 mod consultas_analise;
+mod consultas_compras;
 mod consultas_lote;
 mod consultas_preco;
 mod erros;
 pub mod eventos;
 pub mod fiscal;
 pub mod hierarquia;
+pub mod historico_compras;
 mod inventario;
 mod listagem;
 mod manifesto;
@@ -128,6 +130,7 @@ pub use consultas::{
     SaldoDisponivelDoProduto, Unidades,
 };
 pub use consultas_analise::AnaliseDeEstoque;
+pub use consultas_compras::HistoricoDeCompras;
 pub use consultas_lote::{
     AlteracaoRegistrada, HistoricoDeAlteracoesEmLote, LinhaDaPrevia, PerfilFiscalDoProduto,
     PerfilFiscalEfetivo, PreviaDaAlteracaoEmLote, ProdutoParaLote, ProdutosParaLote,
@@ -144,7 +147,7 @@ pub use listagem::ListarProdutos;
 pub use manifesto::{manifesto, MANIFESTO};
 #[cfg(feature = "sqlite")]
 pub use modulo::ModuloEstoque;
-pub use parametros_preco::ParametrosPreco;
+pub use parametros_preco::{CustoDeReferencia, ParametrosPreco};
 pub use produto::{
     validar_gtin, Conversao, DetalhesTecnicos, EstadoLote, Lote, OrigemLote, Produto, Unidade,
     Variacao,

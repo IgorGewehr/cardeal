@@ -85,6 +85,9 @@ impl Modulo for ModuloEstoque {
             .consulta::<PrecoSugeridoDoProduto>("estoque.preco_sugerido_do_produto.v1")
             .consulta::<PrecosSugeridosDoGrupo>("estoque.precos_sugeridos_do_grupo.v1")
             .consulta::<PerfilFiscalDoProduto>("estoque.perfil_fiscal_do_produto.v1")
+            .consulta::<crate::consultas_compras::HistoricoDeCompras>(
+                "estoque.historico_de_compras.v1",
+            )
             .consulta::<AnaliseDeEstoque>("estoque.analise_de_estoque.v1")
             .consulta::<ProdutosParaLote>("estoque.produtos_para_lote.v1")
             .consulta::<PreviaDaAlteracaoEmLote>("estoque.previa_da_alteracao_em_lote.v1")

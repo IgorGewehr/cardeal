@@ -358,3 +358,67 @@ fn aba_analise_lista_o_produto_parado_com_o_dinheiro_que_ele_prende() {
     assert_eq!(i.classe, mod_estoque::analise::ClasseAbc::SemGiro);
     assert_eq!(i.valor_em_estoque, cardeal_kernel::Dinheiro::reais(500));
 }
+
+#[test]
+fn aba_precos_muda_o_custo_de_referencia_e_abre_o_historico_de_compras() {
+    let t = motor_de_teste();
+    let produto = cenario_de_preco(&t); // 10 un a R$ 50
+    let local = t
+        .motor
+        .consultar(&t.sessao, "estoque.locais.v1", &Locais)
+        .expect("locais");
+    let _: EntradaRegistrada = t
+        .motor
+        .executar(
+            &t.sessao,
+            "estoque.registrar_entrada.v1",
+            &RegistrarEntrada {
+                produto,
+                local: local[0].id,
+                quantidade: Quantidade::unidades(10),
+                custo_unitario: Preco::reais(70),
+            },
+        )
+        .expect("segunda entrada");
+
+    let mut estado = EstadoTelaEstoque {
+        aba: AbaEstoque::Precos,
+        ..Default::default()
+    };
+    estado.carregar(&t.motor, &t.sessao);
+    assert_eq!(
+        estado.prc.sugestoes[0].custo,
+        Some(cardeal_kernel::Dinheiro::reais(60)),
+        "custo médio por padrão"
+    );
+
+    // O seletor do formulário vai para os parâmetros salvos e muda o custo do preço.
+    estado.prc.custo_ref = mod_estoque::CustoDeReferencia::UltimaCompra;
+    let p = estado.prc.montar().expect("parâmetros");
+    t.motor
+        .executar(
+            &t.sessao,
+            "estoque.definir_parametros_preco.v1",
+            &DefinirParametrosPreco { parametros: p },
+        )
+        .expect("salvar");
+    estado.prc.carregar(&t.motor, &t.sessao);
+    assert_eq!(
+        estado.prc.sugestoes[0].custo,
+        Some(cardeal_kernel::Dinheiro::reais(70))
+    );
+
+    // Clicar no produto carrega o histórico: 70 (+40% sobre 50) e 50.
+    assert!(precos_historico::abrir_historico(
+        &t.motor,
+        &t.sessao,
+        &mut estado.prc,
+        produto,
+        "Coca 2L".into()
+    ));
+    let (nome, h) = estado.prc.historico.as_ref().expect("histórico");
+    assert_eq!(nome, "Coca 2L");
+    assert_eq!(h.compras.len(), 2);
+    assert_eq!(h.compras[0].variacao, Some(Percentual::pontos(40)));
+    assert_eq!(h.media_ultimas_3, Some(cardeal_kernel::Dinheiro::reais(60)));
+}

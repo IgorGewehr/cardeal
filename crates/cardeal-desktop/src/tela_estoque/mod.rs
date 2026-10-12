@@ -11,6 +11,7 @@ mod estrutura;
 mod fiscal;
 mod lote;
 mod precos;
+mod precos_historico;
 #[cfg(test)]
 mod testes;
 
@@ -61,6 +62,8 @@ enum Dlg {
     Repor(usize),
     /// Aplicar os preços sugeridos da aba Preços a uma tabela de preço.
     AplicarPrecos,
+    /// O histórico das últimas compras de um produto da aba Preços.
+    HistoricoCompras,
 }
 
 /// O estado local da tela.
@@ -283,6 +286,7 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
         Dlg::Editar(i) => dialogo_editar(ui.ctx(), motor, sessao, estado, i),
         Dlg::Repor(i) => dialogo_repor(ui.ctx(), motor, sessao, estado, i),
         Dlg::AplicarPrecos => precos::dialogo_aplicar(ui.ctx(), motor, sessao, estado),
+        Dlg::HistoricoCompras => precos_historico::dialogo(ui.ctx(), estado),
     }
 
     if let Some((produto, nome)) = estado.confirmar_exclusao.clone() {

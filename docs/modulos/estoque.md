@@ -207,6 +207,12 @@ não-nulo do grupo mais próximo; sem nenhum, falso.
 taxa de pagamento, margem padrão, margem mínima e "preço sugerido obrigatório no PDV". Sem linha
 gravada, vale o padrão do regime cadastrado em `nucleo_empresa.regime` (ver [ADR-0018](../adr/0018-formacao-de-preco-por-markup-divisor.md)).
 
+**Custo de referência (2026-10-12, migração `estoque` v9).** `ParametrosPreco.custo_referencia`
+escolhe o custo do preço: `CustoMedio` (padrão, o comportamento anterior), `UltimaCompra` (custo da
+entrada mais recente do produto em `estoque_movimento`) ou `MaiorDosDois`. Sem entrada registrada,
+cai no custo médio. A sugestão informa qual valeu em `custo_origem`. Escolha por função pura
+(`CustoDeReferencia::escolher`).
+
 **Markup divisor** (`precificacao.rs`, aritmética exata):
 
 ```text
@@ -318,6 +324,7 @@ stateDiagram-v2
 | `SaldoPorLocal` | `estoque.saldo.ver` | Ficha do produto, PDV (consulta de preço/saldo) | `estoque_saldo_local(produto, variacao, local)` |
 | `SaldoConsolidado` | `estoque.saldo.ver` | Relatório multi-loja | agregação sobre `SaldoPorLocal` por `produto` |
 | `SaldoDisponivelDoProduto` ✅ (novo, 2026-09-11) | `estoque.saldo.ver` | Saldo somado entre locais de **um** produto — a porta pública que outro módulo chama para cruzar dados sem ler `estoque_saldo_local` direto (`mod-os::PecasAguardandoEstoque` é o primeiro consumidor) | `estoque_saldo_local(produto)` |
+| `HistoricoDeCompras` ✅ (2026-10-12, `estoque.historico_de_compras.v1`) | `estoque.produto.ver` | Até 10 entradas mais recentes com custo (data, quantidade, custo, variação sobre a compra anterior, módulo de origem) + último custo e média simples das 3 últimas; domínio puro em `historico_compras.rs`. Na aba Preços: clique no produto | `estoque_movimento_produto` |
 | `MovimentosDoProduto` ✅ (novo, 2026-09-12) | `estoque.movimento.ver` | Aba "Movimentação" da ficha — rastreabilidade peça↔origem (ex.: peça↔OS), opcionalmente filtrada por `origem_modulo` | `estoque_movimento_produto`/`estoque_movimento_origem` |
 | `ProdutosAbaixoPontoPedido` ✅ (novo, 2026-09-12; nome Rust `ProdutosAbaixoDoPontoPedido`) | `estoque.compra_sugerida.ver` | "Radar" do Pulso, sugestão de pedido de compra | `estoque_saldo_local` agregado por produto, comparado a `estoque_produto.ponto_pedido` |
 | `ArvoreGruposProduto` ✅ (2026-10-09) | `estoque.produto.ver` | Aba Estrutura: a árvore em pré-ordem com nível, contagem de produtos (diretos e na subárvore), margem e perfil fiscal próprios | `estoque_grupo_produto(empresa)` + contagem agrupada |

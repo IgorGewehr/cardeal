@@ -6,7 +6,7 @@ use cardeal_kernel::{Id, Percentual, Resultado};
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::fiscal::CamposFiscais;
-use crate::parametros_preco::ParametrosPreco;
+use crate::parametros_preco::{CustoDeReferencia, ParametrosPreco};
 use crate::precificacao::{AnexoSimples, RegimeImposto};
 use crate::repositorio::{blob, id_de, persist};
 
@@ -61,7 +61,8 @@ pub fn parametros_preco(conn: &Connection, empresa: Id) -> Resultado<ParametrosP
     let linha = conn
         .query_row(
             "SELECT regime, anexo, imposto_manual, custo_operacional, custo_operacional_derivado,
-                    comissao, taxa_pagamento, margem_padrao, margem_minima, preco_obrigatorio
+                    comissao, taxa_pagamento, margem_padrao, margem_minima, preco_obrigatorio,
+                    custo_referencia
              FROM estoque_parametros_preco WHERE empresa = ?1",
             [blob(empresa)],
             |r| {
@@ -76,6 +77,7 @@ pub fn parametros_preco(conn: &Connection, empresa: Id) -> Resultado<ParametrosP
                     r.get::<_, Option<i64>>(7)?,
                     r.get::<_, i64>(8)?,
                     r.get::<_, i64>(9)? != 0,
+                    r.get::<_, String>(10)?,
                 ))
             },
         )
@@ -108,6 +110,7 @@ pub fn parametros_preco(conn: &Connection, empresa: Id) -> Resultado<ParametrosP
         margem_padrao: pct_opt(l.7),
         margem_minima: Percentual::unidades(l.8),
         preco_obrigatorio: l.9,
+        custo_referencia: CustoDeReferencia::de_texto(&l.10),
     })
 }
 
@@ -128,13 +131,13 @@ pub fn salvar_parametros_preco(
     conn.execute(
         "INSERT INTO estoque_parametros_preco
             (empresa, regime, anexo, imposto_manual, custo_operacional, custo_operacional_derivado,
-             comissao, taxa_pagamento, margem_padrao, margem_minima, preco_obrigatorio, versao)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,1)
+             comissao, taxa_pagamento, margem_padrao, margem_minima, preco_obrigatorio, custo_referencia, versao)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,1)
          ON CONFLICT(empresa) DO UPDATE SET
             regime = ?2, anexo = ?3, imposto_manual = ?4, custo_operacional = ?5,
             custo_operacional_derivado = ?6, comissao = ?7, taxa_pagamento = ?8,
             margem_padrao = ?9, margem_minima = ?10, preco_obrigatorio = ?11,
-            versao = versao + 1",
+            custo_referencia = ?12, versao = versao + 1",
         params![
             blob(empresa),
             regime,
@@ -147,6 +150,7 @@ pub fn salvar_parametros_preco(
             p.margem_padrao.map(Percentual::unidades_internas),
             p.margem_minima.unidades_internas(),
             i64::from(p.preco_obrigatorio),
+            p.custo_referencia.texto(),
         ],
     )
     .map_err(persist)?;

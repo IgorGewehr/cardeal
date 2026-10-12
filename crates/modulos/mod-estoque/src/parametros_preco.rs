@@ -7,6 +7,66 @@ use serde::{Deserialize, Serialize};
 
 use crate::precificacao::{AnexoSimples, RegimeImposto};
 
+/// Qual custo alimenta o preço sugerido.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum CustoDeReferencia {
+    /// O custo médio móvel em estoque (o maior entre os locais).
+    #[default]
+    CustoMedio,
+    /// O custo da entrada mais recente do produto.
+    UltimaCompra,
+    /// O maior entre o custo médio e o da última compra (protege a margem quando o
+    /// fornecedor reajusta).
+    MaiorDosDois,
+}
+
+impl CustoDeReferencia {
+    /// O texto gravado no banco.
+    #[must_use]
+    pub const fn texto(self) -> &'static str {
+        match self {
+            Self::CustoMedio => "CustoMedio",
+            Self::UltimaCompra => "UltimaCompra",
+            Self::MaiorDosDois => "MaiorDosDois",
+        }
+    }
+
+    /// Lê o texto gravado; valor desconhecido vale o padrão.
+    #[must_use]
+    pub fn de_texto(t: &str) -> Self {
+        match t {
+            "UltimaCompra" => Self::UltimaCompra,
+            "MaiorDosDois" => Self::MaiorDosDois,
+            _ => Self::CustoMedio,
+        }
+    }
+
+    /// Escolhe o custo do preço. Sem custo médio (zero) ou sem entrada registrada, usa o que
+    /// existir; devolve também qual referência valeu de fato (`CustoMedio` ou `UltimaCompra`).
+    #[must_use]
+    pub fn escolher<T: Ord + Copy>(self, medio: Option<T>, ultima: Option<T>) -> (Option<T>, Self) {
+        match (self, medio, ultima) {
+            (Self::CustoMedio, Some(m), _) | (Self::MaiorDosDois, Some(m), None) => {
+                (Some(m), Self::CustoMedio)
+            }
+            (Self::UltimaCompra, _, Some(u)) | (Self::MaiorDosDois, None, Some(u)) => {
+                (Some(u), Self::UltimaCompra)
+            }
+            (Self::MaiorDosDois, Some(m), Some(u)) => {
+                if u > m {
+                    (Some(u), Self::UltimaCompra)
+                } else {
+                    (Some(m), Self::CustoMedio)
+                }
+            }
+            // Sem a referência pedida: cai no que houver.
+            (_, Some(m), None) => (Some(m), Self::CustoMedio),
+            (_, None, Some(u)) => (Some(u), Self::UltimaCompra),
+            (_, None, None) => (None, Self::CustoMedio),
+        }
+    }
+}
+
 /// Parâmetros de formação de preço da empresa.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ParametrosPreco {
@@ -28,6 +88,9 @@ pub struct ParametrosPreco {
     pub margem_minima: Percentual,
     /// O preço sugerido é obrigatório (não só orientativo) no PDV.
     pub preco_obrigatorio: bool,
+    /// Qual custo alimenta o preço (médio, última compra ou o maior dos dois).
+    #[serde(default)]
+    pub custo_referencia: CustoDeReferencia,
 }
 
 impl ParametrosPreco {
@@ -50,6 +113,7 @@ impl ParametrosPreco {
             margem_padrao: None,
             margem_minima: Percentual::ZERO,
             preco_obrigatorio: false,
+            custo_referencia: CustoDeReferencia::CustoMedio,
         }
     }
 
@@ -101,6 +165,37 @@ mod testes {
             ParametrosPreco::padrao_para("LucroPresumido").regime,
             RegimeImposto::Manual(_)
         ));
+    }
+
+    #[test]
+    fn escolha_do_custo_de_referencia() {
+        use CustoDeReferencia::{CustoMedio as M, MaiorDosDois as G, UltimaCompra as U};
+        assert_eq!(M.escolher(Some(50), Some(60)), (Some(50), M));
+        assert_eq!(U.escolher(Some(50), Some(60)), (Some(60), U));
+        assert_eq!(G.escolher(Some(50), Some(60)), (Some(60), U));
+        assert_eq!(G.escolher(Some(70), Some(60)), (Some(70), M));
+        assert_eq!(G.escolher(Some(60), Some(60)), (Some(60), M));
+        // sem entrada: cai no médio, qualquer que seja a referência
+        assert_eq!(U.escolher(Some(50), None), (Some(50), M));
+        assert_eq!(G.escolher(Some(50), None), (Some(50), M));
+        // sem custo médio mas com entrada (ex.: saldo zerado)
+        assert_eq!(M.escolher(None, Some(60)), (Some(60), U));
+        assert_eq!(G.escolher::<i64>(None, None), (None, M));
+    }
+
+    #[test]
+    fn texto_do_custo_de_referencia_ida_e_volta() {
+        for c in [
+            CustoDeReferencia::CustoMedio,
+            CustoDeReferencia::UltimaCompra,
+            CustoDeReferencia::MaiorDosDois,
+        ] {
+            assert_eq!(CustoDeReferencia::de_texto(c.texto()), c);
+        }
+        assert_eq!(
+            CustoDeReferencia::de_texto("x"),
+            CustoDeReferencia::CustoMedio
+        );
     }
 
     #[test]

@@ -8,14 +8,15 @@ use cardeal_ledger::semear_plano_padrao;
 use cardeal_modkit::{Ambiente, Despachante, Modulo, PedidoAtivacao, RegistroModulos};
 use cardeal_storage::{Armazenamento, ConfigArmazenamento, ContextoEscrita, ErroArmazenamento};
 use mod_estoque::fiscal::CamposFiscais;
+use mod_estoque::historico_compras::ResumoDeCompras;
 use mod_estoque::precificacao::{OrigemDaCarga, RegimeImposto};
 use mod_estoque::{
-    CriarGrupoProduto, CriarLocal, CriarProduto, CriarUnidade, DefinirCamposFiscaisDoGrupo,
-    DefinirCamposFiscaisDoProduto, DefinirMargemDoGrupo, DefinirMargemDoProduto,
-    DefinirParametrosPreco, DefinirPerfilFiscalDoGrupo, GrupoProdutoCriado, LocalCriado,
-    ModuloEstoque, OrigemMargem, ParametrosDePreco, ParametrosPreco, PrecoSugeridoDoProduto,
-    PrecosSugeridosDoGrupo, ProdutoCriado, RegistrarEntrada, SugestaoDePreco, TipoLocal,
-    UnidadeCriada, MANIFESTO,
+    CriarGrupoProduto, CriarLocal, CriarProduto, CriarUnidade, CustoDeReferencia,
+    DefinirCamposFiscaisDoGrupo, DefinirCamposFiscaisDoProduto, DefinirMargemDoGrupo,
+    DefinirMargemDoProduto, DefinirParametrosPreco, DefinirPerfilFiscalDoGrupo, GrupoProdutoCriado,
+    HistoricoDeCompras, LocalCriado, ModuloEstoque, OrigemMargem, ParametrosDePreco,
+    ParametrosPreco, PrecoSugeridoDoProduto, PrecosSugeridosDoGrupo, ProdutoCriado,
+    RegistrarEntrada, SugestaoDePreco, TipoLocal, UnidadeCriada, MANIFESTO,
 };
 use tempfile::TempDir;
 
@@ -583,4 +584,131 @@ fn simples_ignora_os_campos_fiscais_no_imposto() {
         depois.sugerido.unwrap().preco,
         antes.sugerido.unwrap().preco
     );
+}
+
+// ── custo de referência e histórico de compras ─────────────────────────────────────────────
+
+impl Cenario {
+    fn produto_sem_entrada(&self, nome: &str, grupo: Id) -> Id {
+        let un: Vec<mod_estoque::ItemUnidade> =
+            self.consulta("estoque.unidades.v1", &mod_estoque::Unidades);
+        let b = self
+            .cmd(
+                "estoque.criar_produto.v1",
+                &CriarProduto {
+                    grupo_produto: grupo,
+                    nome: nome.to_owned(),
+                    ncm: "22021000".into(),
+                    unidade_padrao: un[0].id,
+                    codigo_barras: None,
+                    detalhes_tecnicos: None,
+                },
+            )
+            .unwrap();
+        postcard::from_bytes::<ProdutoCriado>(&b).unwrap().produto
+    }
+
+    fn nova_entrada(&self, produto: Id, custo: Preco) {
+        let local: Vec<mod_estoque::ItemLocal> =
+            self.consulta("estoque.locais.v1", &mod_estoque::Locais);
+        self.cmd(
+            "estoque.registrar_entrada.v1",
+            &RegistrarEntrada {
+                produto,
+                local: local[0].id,
+                quantidade: Quantidade::unidades(10),
+                custo_unitario: custo,
+            },
+        )
+        .unwrap();
+    }
+
+    fn referencia(&self, r: CustoDeReferencia) {
+        let mut p: ParametrosPreco =
+            self.consulta("estoque.parametros_de_preco.v1", &ParametrosDePreco);
+        p.custo_referencia = r;
+        self.cmd(
+            "estoque.definir_parametros_preco.v1",
+            &DefinirParametrosPreco { parametros: p },
+        )
+        .unwrap();
+    }
+}
+
+#[test]
+fn o_preco_sugerido_muda_conforme_o_custo_de_referencia() {
+    let c = Cenario::novo();
+    c.parametros_manuais(0);
+    let g = c.grupo("BEB", None);
+    c.cmd(
+        "estoque.definir_margem_do_grupo.v1",
+        &DefinirMargemDoGrupo {
+            grupo: g,
+            margem: Some(Percentual::pontos(20)),
+        },
+    )
+    .unwrap();
+    // 10 un a R$ 50 e depois 10 un a R$ 70: custo médio R$ 60, última compra R$ 70.
+    let p = c.produto_com_custo("Coca 2L", g, Preco::reais(50));
+    c.nova_entrada(p, Preco::reais(70));
+
+    let padrao: ParametrosPreco = c.consulta("estoque.parametros_de_preco.v1", &ParametrosDePreco);
+    assert_eq!(padrao.custo_referencia, CustoDeReferencia::CustoMedio);
+    let medio = c.preco(p);
+    assert_eq!(medio.custo, Some(Dinheiro::reais(60)));
+    assert_eq!(medio.custo_origem, CustoDeReferencia::CustoMedio);
+
+    c.referencia(CustoDeReferencia::UltimaCompra);
+    let ultima = c.preco(p);
+    assert_eq!(ultima.custo, Some(Dinheiro::reais(70)));
+    assert_eq!(ultima.custo_origem, CustoDeReferencia::UltimaCompra);
+    assert!(ultima.sugerido.unwrap().preco > medio.sugerido.unwrap().preco);
+
+    // Maior dos dois: a última (70) vence o médio (60)...
+    c.referencia(CustoDeReferencia::MaiorDosDois);
+    let maior = c.preco(p);
+    assert_eq!(maior.custo, Some(Dinheiro::reais(70)));
+    assert_eq!(maior.custo_origem, CustoDeReferencia::UltimaCompra);
+    // ...e quando a compra mais recente é mais barata, vence o médio (65 > 60).
+    c.nova_entrada(p, Preco::reais(40));
+    let maior = c.preco(p);
+    assert_eq!(maior.custo_origem, CustoDeReferencia::CustoMedio);
+    assert!(maior.custo.unwrap() > Dinheiro::reais(40));
+}
+
+#[test]
+fn historico_de_compras_vem_do_mais_recente_com_variacao_e_media() {
+    let c = Cenario::novo();
+    let g = c.grupo("BEB", None);
+    let p = c.produto_com_custo("Coca 2L", g, Preco::reais(50));
+    c.nova_entrada(p, Preco::reais(55));
+    c.nova_entrada(p, Preco::reais(44));
+
+    let h: ResumoDeCompras = c.consulta(
+        "estoque.historico_de_compras.v1",
+        &HistoricoDeCompras { produto: p },
+    );
+    let custos: Vec<Dinheiro> = h.compras.iter().map(|x| x.custo_unitario).collect();
+    assert_eq!(
+        custos,
+        [
+            Dinheiro::reais(44),
+            Dinheiro::reais(55),
+            Dinheiro::reais(50)
+        ]
+    );
+    assert_eq!(h.compras[0].variacao, Some(Percentual::pontos(-20)));
+    assert_eq!(h.compras[1].variacao, Some(Percentual::pontos(10)));
+    assert_eq!(h.compras[2].variacao, None);
+    assert_eq!(h.ultimo_custo, Some(Dinheiro::reais(44)));
+    assert_eq!(h.media_ultimas_3, Some(Dinheiro::centavos(4_967)));
+    assert_eq!(h.compras[0].origem_modulo, "estoque");
+
+    // Produto sem compra: histórico vazio, sem erro.
+    let sem = c.produto_sem_entrada("Sem compra", g);
+    let h: ResumoDeCompras = c.consulta(
+        "estoque.historico_de_compras.v1",
+        &HistoricoDeCompras { produto: sem },
+    );
+    assert!(h.compras.is_empty() && h.ultimo_custo.is_none());
 }

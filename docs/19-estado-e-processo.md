@@ -467,6 +467,9 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
 - **Preço sugerido → tabela de preço:** `vendas.aplicar_precos_sugeridos.v1` (botão "Aplicar à tabela de
   preço…" na aba Preços) cria/atualiza a regra permanente do produto, com arredondamento para cima
   (,90 ou real inteiro); `mod_estoque::sugerir_precos` é a porta que `mod-vendas` usa.
+- **Custo de referência + histórico de compras (2026-10-12):** parâmetro `custo_referencia` (custo médio |
+  última compra | o maior dos dois; migração `estoque` v9) e consulta `estoque.historico_de_compras.v1`;
+  na aba Preços, seletor no formulário e diálogo de compras ao clicar no produto.
 - **Dívidas conhecidas:** tabelas do Simples a conferir com o contador; a 6ª faixa e a anualização de
   RBT12 (ver ADR-0018); o PDV só avisa preço abaixo do mínimo de empate (etiqueta "abaixo do mínimo" na linha do
   cupom, depois do desconto); não bloqueia a venda e não é o painel de margem completo.
