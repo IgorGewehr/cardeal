@@ -95,10 +95,7 @@ impl Produto {
         if nome.is_empty() {
             return Err(ErroEstoque::NomeVazio);
         }
-        let ncm = texto::somente_digitos(ncm);
-        if !ncm.is_empty() && ncm.len() != 8 {
-            return Err(ErroEstoque::NcmInvalido);
-        }
+        let ncm = normalizar_ncm(ncm)?;
         Ok(Self {
             id: Id::novo(),
             empresa,
@@ -178,6 +175,18 @@ impl Produto {
         self.localizacao_fisica = normalizar_opcional(detalhes.localizacao_fisica);
         self
     }
+}
+
+/// O NCM só com dígitos: vazio (pendente) ou exatamente 8 dígitos, com ou sem máscara.
+///
+/// # Errors
+/// [`ErroEstoque::NcmInvalido`].
+pub fn normalizar_ncm(ncm: &str) -> Result<String, ErroEstoque> {
+    let ncm = texto::somente_digitos(ncm);
+    if !ncm.is_empty() && ncm.len() != 8 {
+        return Err(ErroEstoque::NcmInvalido);
+    }
+    Ok(ncm)
 }
 
 /// `Some("  ")`/`Some("")` viram `None`; qualquer outro `Some` vem trimado.

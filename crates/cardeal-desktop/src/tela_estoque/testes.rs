@@ -752,3 +752,79 @@ fn importar_planilha_mostra_a_previa_e_so_grava_ao_confirmar() {
     assert_eq!((r.criados, r.ja_existiam), (4, 1));
     assert_eq!(estado.est.nos.len(), 5);
 }
+
+#[test]
+fn importar_produtos_o_modelo_entra_inteiro_e_so_ao_confirmar() {
+    use super::produtos_importacao::{carregar_texto, confirmar, MODELO};
+    let t = motor_de_teste();
+    let mut estado = EstadoTelaEstoque::default();
+    estado.carregar(&t.motor, &t.sessao);
+    if estado.locais.is_empty() {
+        let _: LocalCriado = t
+            .motor
+            .executar(
+                &t.sessao,
+                "estoque.criar_local.v1",
+                &CriarLocal {
+                    nome: "Loja".into(),
+                    tipo: TipoLocal::Loja,
+                },
+            )
+            .expect("local");
+        estado.carregar(&t.motor, &t.sessao);
+    }
+    assert_eq!(estado.locais.len(), 1, "o modelo não traz a coluna Local");
+    let antes = estado.produtos.len();
+
+    // Planilha com erro: a prévia lista a linha e confirmar não grava nada.
+    carregar_texto(
+        &t.motor,
+        &t.sessao,
+        &mut estado.imp_produtos,
+        "ruim.csv",
+        "Nome;Estoque\nCabo;3\n".into(),
+    )
+    .expect("prévia");
+    let previa = estado.imp_produtos.previa.as_ref().unwrap();
+    assert_eq!(previa.erros.len(), 1);
+    assert!(confirmar(&t.motor, &t.sessao, &mut estado).is_err());
+    estado.carregar(&t.motor, &t.sessao);
+    assert_eq!(estado.produtos.len(), antes);
+
+    // O modelo que "Baixar modelo…" salva é uma planilha válida.
+    carregar_texto(
+        &t.motor,
+        &t.sessao,
+        &mut estado.imp_produtos,
+        "modelo-produtos.csv",
+        MODELO.into(),
+    )
+    .expect("prévia");
+    let previa = estado.imp_produtos.previa.as_ref().unwrap();
+    assert!(previa.erros.is_empty(), "{:?}", previa.erros);
+    assert_eq!((previa.novos, previa.com_estoque), (2, 2));
+
+    // O diálogo desenha a prévia num quadro de verdade do egui.
+    estado.dlg = Dlg::ImportarProdutos;
+    let ctx = egui::Context::default();
+    cardeal_ui::tokens::instalar_fontes(&ctx);
+    cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+    for _ in 0..2 {
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            super::produtos_importacao::dialogo(ctx, &t.motor, &t.sessao, &mut estado);
+        });
+    }
+    let r = confirmar(&t.motor, &t.sessao, &mut estado).expect("importa");
+    assert_eq!((r.criados, r.com_estoque), (2, 2));
+    assert_eq!(estado.produtos.len(), antes + 2);
+    let refri = estado
+        .produtos
+        .iter()
+        .find(|p| p.nome == "Refrigerante Cola 2L")
+        .unwrap();
+    assert_eq!(refri.disponivel, Quantidade::unidades(24));
+    assert!(
+        estado.imp_produtos.previa.is_none(),
+        "o diálogo volta limpo"
+    );
+}

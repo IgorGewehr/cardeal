@@ -28,7 +28,8 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   quem confirma é o usuário. Ver [17 — Roadmap](17-roadmap.md), Fase 7.
 - **Ordem do que vem agora** (custo de referência, histórico de compras, preços defasados e
   **rentabilidade por nível da árvore** já estão feitos; **comissão por estrutura mercadológica ainda NÃO foi
-  feita** e segue pendente): **seletor em árvore no cadastro (feito)** e **importação da estrutura por planilha (feita)**; segue pendente a importação de *produto* por planilha → inventário/transferência → importação de produto
+  feita** e segue pendente): **seletor em árvore no cadastro (feito)**, **importação da estrutura por planilha (feita)** e **importação de
+  produto por planilha (feita, 2026-10-13)**; segue inventário/transferência → importação de produto
   por XML (dicionário determinístico).
 - **Pendência de confiança:** as tabelas do Simples e as alíquotas precisam ser conferidas com o
   contador; ST/MVA ainda não entram no custo.
@@ -488,8 +489,16 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
 - **Importação da estrutura por planilha (2026-10-12):** `mod-estoque::importacao_estrutura` (domínio puro:
   parse CSV, plano de nós novos, erros por linha, idempotente), comando `estoque.importar_estrutura.v1` (tudo
   ou nada, permissão `estoque.produto.criar`) e prévia `estoque.previa_importacao_estrutura.v1`; aba Estrutura
-  ganhou "Importar planilha…" (arquivo → prévia "N novos, M já existiam, K erros" → confirmar). Só cria; a
-  importação de produto por planilha continua pendente.
+  ganhou "Importar planilha…" (arquivo → prévia "N novos, M já existiam, K erros" → confirmar). Só cria.
+- **Importação de produtos por planilha (2026-10-13):** `mod-estoque::importacao_produtos` (domínio puro: CSV
+  com cabeçalho, colunas por nome e sinônimos, só `Nome` obrigatória; grupos que faltam pelo mesmo
+  `ResolvedorDeCaminhos` da estrutura, extraído de `importacao_estrutura`; unidades novas por sigla; estoque
+  inicial com custo e local; todos os problemas da linha numa mensagem; produto existente por GTIN ou nome
+  fica como está, logo é idempotente), comando `estoque.importar_produtos.v1` (tudo ou nada; margem/reposição
+  exigem `estoque.produto.editar` e estoque exige `estoque.movimento.entrada` via `ctx.concede`) e prévia
+  `estoque.previa_importacao_produtos.v1`. Tela: "Importar produtos…" no topo do Estoque, com "Baixar
+  modelo…". `normalizar_ncm` saiu de `Produto::novo` para a importação validar igual. Detalhes e limites em
+  `docs/modulos/estoque.md`. Testes: 15 unit + 5 integração (Despachante + SQLite) + 1 de tela.
 - **Dívidas conhecidas:** tabelas do Simples a conferir com o contador; a 6ª faixa e a anualização de
   RBT12 (ver ADR-0018); o PDV só avisa preço abaixo do mínimo de empate (etiqueta "abaixo do mínimo" na linha do
   cupom, depois do desconto); não bloqueia a venda e não é o painel de margem completo.

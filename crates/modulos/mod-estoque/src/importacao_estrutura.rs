@@ -120,12 +120,13 @@ enum Alvo {
     Novo(usize),
 }
 
-/// Uma linha lida: número no arquivo e os nomes dos níveis.
-type LinhaLida = (usize, Vec<String>);
+/// Uma linha lida: número no arquivo e as células.
+pub(crate) type LinhaLida = (usize, Vec<String>);
 
 /// Separa o texto em células: `;` ou `,` (o que aparecer mais na primeira linha com
-/// conteúdo), aspas duplas protegem o separador. Linhas em branco somem.
-fn ler_linhas(texto: &str) -> Vec<LinhaLida> {
+/// conteúdo), aspas duplas protegem o separador. Linhas em branco somem. Usado também pela
+/// importação de produtos ([`crate::importacao_produtos`]).
+pub(crate) fn ler_linhas(texto: &str) -> Vec<LinhaLida> {
     let texto = texto.trim_start_matches('\u{feff}');
     let separador = texto
         .lines()
@@ -202,6 +203,101 @@ fn codigo_base(nome: &str) -> String {
     }
 }
 
+/// Confere um caminho já sem as células vazias do fim: no máximo [`NIVEL_MAXIMO`] níveis e
+/// nenhum nível vazio no meio. Devolve a mensagem para o usuário.
+pub(crate) fn validar_caminho(cels: &[String]) -> Result<(), String> {
+    if cels.len() > usize::from(NIVEL_MAXIMO) {
+        return Err(format!(
+            "{} níveis; a estrutura aceita no máximo {NIVEL_MAXIMO} (até {})",
+            cels.len(),
+            nome_do_nivel(NIVEL_MAXIMO)
+        ));
+    }
+    if let Some(i) = cels.iter().position(String::is_empty) {
+        return Err(format!(
+            "o nível {} está vazio, mas há níveis abaixo dele",
+            nome_do_nivel(u8::try_from(i + 1).unwrap_or(1))
+        ));
+    }
+    Ok(())
+}
+
+/// Resolve caminhos contra a árvore existente, acumulando os grupos a criar — o miolo de
+/// [`planejar`], usado também pela importação de produtos para achar (ou criar) o grupo de
+/// cada produto.
+pub(crate) struct ResolvedorDeCaminhos {
+    /// (pai, chave do nome) → nó; existentes e novos na mesma tabela.
+    por_pai: HashMap<(PaiPlanejado, String), Alvo>,
+    codigos: HashSet<String>,
+    usados_existentes: HashSet<Id>,
+    nos: Vec<NoNovo>,
+}
+
+impl ResolvedorDeCaminhos {
+    pub(crate) fn novo(existentes: &[NoExistente]) -> Self {
+        let mut por_pai = HashMap::new();
+        for e in existentes {
+            let pai = e.pai.map_or(PaiPlanejado::Raiz, PaiPlanejado::Existente);
+            por_pai
+                .entry((pai, chave_busca(&e.nome)))
+                .or_insert(Alvo::Existente(e.id));
+        }
+        Self {
+            por_pai,
+            codigos: existentes.iter().map(|e| e.codigo.to_uppercase()).collect(),
+            usados_existentes: HashSet::new(),
+            nos: Vec::new(),
+        }
+    }
+
+    /// Acha ou planeja cada nível de um caminho já validado ([`validar_caminho`], não vazio)
+    /// e devolve o nó da ponta — o grupo do produto, na importação de produtos.
+    pub(crate) fn resolver(&mut self, cels: &[String]) -> PaiPlanejado {
+        let mut pai = PaiPlanejado::Raiz;
+        let mut caminho: Vec<&str> = Vec::new();
+        for (i, nome) in cels.iter().enumerate() {
+            caminho.push(nome);
+            let chave = (pai, chave_busca(nome));
+            match self.por_pai.get(&chave).copied() {
+                Some(Alvo::Existente(id)) => {
+                    self.usados_existentes.insert(id);
+                    pai = PaiPlanejado::Existente(id);
+                }
+                Some(Alvo::Novo(n)) => pai = PaiPlanejado::Novo(n),
+                None => {
+                    let base = codigo_base(nome);
+                    let mut codigo = base.clone();
+                    let mut n = 2u32;
+                    while self.codigos.contains(&codigo) {
+                        codigo = format!("{base}{n}");
+                        n += 1;
+                    }
+                    self.codigos.insert(codigo.clone());
+                    let indice = self.nos.len();
+                    self.nos.push(NoNovo {
+                        codigo,
+                        nome: nome.clone(),
+                        pai,
+                        nivel: u8::try_from(i + 1).unwrap_or(NIVEL_MAXIMO),
+                        caminho: caminho.join(" › "),
+                    });
+                    self.por_pai.insert(chave, Alvo::Novo(indice));
+                    pai = PaiPlanejado::Novo(indice);
+                }
+            }
+        }
+        pai
+    }
+
+    /// Os grupos a criar (pais antes dos filhos) e quantos existentes foram usados.
+    pub(crate) fn concluir(self) -> (Vec<NoNovo>, u32) {
+        (
+            self.nos,
+            u32::try_from(self.usados_existentes.len()).unwrap_or(u32::MAX),
+        )
+    }
+}
+
 /// Analisa a planilha contra a árvore existente.
 #[must_use]
 pub fn planejar(texto: &str, existentes: &[NoExistente]) -> Plano {
@@ -211,17 +307,7 @@ pub fn planejar(texto: &str, existentes: &[NoExistente]) -> Plano {
         linhas.remove(0);
     }
 
-    // (pai, chave do nome) → nó; existentes e novos na mesma tabela.
-    let mut por_pai: HashMap<(PaiPlanejado, String), Alvo> = HashMap::new();
-    for e in existentes {
-        let pai = e.pai.map_or(PaiPlanejado::Raiz, PaiPlanejado::Existente);
-        por_pai
-            .entry((pai, chave_busca(&e.nome)))
-            .or_insert(Alvo::Existente(e.id));
-    }
-    let mut codigos: HashSet<String> = existentes.iter().map(|e| e.codigo.to_uppercase()).collect();
-    let mut usados_existentes: HashSet<Id> = HashSet::new();
-
+    let mut resolvedor = ResolvedorDeCaminhos::novo(existentes);
     for (linha, mut cels) in linhas {
         while cels.last().is_some_and(String::is_empty) {
             cels.pop();
@@ -229,65 +315,15 @@ pub fn planejar(texto: &str, existentes: &[NoExistente]) -> Plano {
         if cels.is_empty() {
             continue; // só separadores
         }
-        if cels.len() > usize::from(NIVEL_MAXIMO) {
-            plano.erros.push(ErroDeLinha {
-                linha,
-                mensagem: format!(
-                    "{} níveis; a estrutura aceita no máximo {NIVEL_MAXIMO} (até {})",
-                    cels.len(),
-                    nome_do_nivel(NIVEL_MAXIMO)
-                ),
-            });
-            continue;
-        }
-        if let Some(i) = cels.iter().position(String::is_empty) {
-            plano.erros.push(ErroDeLinha {
-                linha,
-                mensagem: format!(
-                    "o nível {} está vazio, mas há níveis abaixo dele",
-                    nome_do_nivel(u8::try_from(i + 1).unwrap_or(1))
-                ),
-            });
+        if let Err(mensagem) = validar_caminho(&cels) {
+            plano.erros.push(ErroDeLinha { linha, mensagem });
             continue;
         }
         plano.linhas += 1;
-
         // Aqui nada mais pode falhar: a linha é válida e os efeitos valem direto.
-        let mut pai = PaiPlanejado::Raiz;
-        let mut caminho: Vec<&str> = Vec::new();
-        for (i, nome) in cels.iter().enumerate() {
-            caminho.push(nome);
-            let chave = (pai, chave_busca(nome));
-            match por_pai.get(&chave).copied() {
-                Some(Alvo::Existente(id)) => {
-                    usados_existentes.insert(id);
-                    pai = PaiPlanejado::Existente(id);
-                }
-                Some(Alvo::Novo(n)) => pai = PaiPlanejado::Novo(n),
-                None => {
-                    let base = codigo_base(nome);
-                    let mut codigo = base.clone();
-                    let mut n = 2u32;
-                    while codigos.contains(&codigo) {
-                        codigo = format!("{base}{n}");
-                        n += 1;
-                    }
-                    codigos.insert(codigo.clone());
-                    let indice = plano.nos.len();
-                    plano.nos.push(NoNovo {
-                        codigo,
-                        nome: nome.clone(),
-                        pai,
-                        nivel: u8::try_from(i + 1).unwrap_or(NIVEL_MAXIMO),
-                        caminho: caminho.join(" › "),
-                    });
-                    por_pai.insert(chave, Alvo::Novo(indice));
-                    pai = PaiPlanejado::Novo(indice);
-                }
-            }
-        }
+        resolvedor.resolver(&cels);
     }
-    plano.ja_existiam = u32::try_from(usados_existentes.len()).unwrap_or(u32::MAX);
+    (plano.nos, plano.ja_existiam) = resolvedor.concluir();
     plano
 }
 

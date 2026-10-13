@@ -14,6 +14,7 @@ mod lote;
 mod precos;
 mod precos_defasados;
 mod precos_historico;
+mod produtos_importacao;
 mod rentabilidade;
 #[cfg(test)]
 mod testes;
@@ -71,6 +72,8 @@ enum Dlg {
     HistoricoCompras,
     /// Importar a estrutura mercadológica de uma planilha CSV (aba Estrutura).
     ImportarEstrutura,
+    /// Importar produtos de uma planilha CSV ("Importar produtos…" no topo da tela).
+    ImportarProdutos,
 }
 
 /// O estado local da tela.
@@ -80,6 +83,7 @@ pub struct EstadoTelaEstoque {
     produtos: Vec<ItemProdutoComSaldo>,
     grupos: Vec<ItemGrupoProduto>,
     est: estrutura::EstadoEstrutura,
+    imp_produtos: produtos_importacao::EstadoImportacaoProdutos,
     prc: precos::EstadoPrecos,
     lote: lote::EstadoLote,
     analise: analise::EstadoAnalise,
@@ -245,6 +249,10 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
                 estado.limpar_novo();
                 estado.dlg = Dlg::Novo;
             }
+            if ui.add(Botao::secundario("Importar produtos…")).clicked() {
+                estado.imp_produtos.limpar();
+                estado.dlg = Dlg::ImportarProdutos;
+            }
         },
         |ui, estado| {
             if let Some(nova) = Abas::nova(&[
@@ -306,6 +314,9 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
         Dlg::HistoricoCompras => precos_historico::dialogo(ui.ctx(), estado),
         Dlg::ImportarEstrutura => {
             estrutura_importacao::dialogo(ui.ctx(), motor, sessao, estado);
+        }
+        Dlg::ImportarProdutos => {
+            produtos_importacao::dialogo(ui.ctx(), motor, sessao, estado);
         }
     }
 

@@ -49,6 +49,7 @@ impl Modulo for ModuloEstoque {
             .comando::<CriarGrupoProduto>("estoque.criar_grupo_produto.v1")
             .comando::<RenomearGrupoProduto>("estoque.renomear_grupo_produto.v1")
             .comando::<crate::ImportarEstrutura>("estoque.importar_estrutura.v1")
+            .comando::<crate::ImportarProdutos>("estoque.importar_produtos.v1")
             .comando::<MoverGrupoProduto>("estoque.mover_grupo_produto.v1")
             .comando::<MoverProdutosDeGrupo>("estoque.mover_produtos_de_grupo.v1")
             .comando::<DefinirMargemDoGrupo>("estoque.definir_margem_do_grupo.v1")
@@ -84,6 +85,9 @@ impl Modulo for ModuloEstoque {
             .consulta::<ArvoreGruposProduto>("estoque.arvore_grupos_produto.v1")
             .consulta::<crate::PreviaDaImportacaoDaEstrutura>(
                 "estoque.previa_importacao_estrutura.v1",
+            )
+            .consulta::<crate::PreviaDaImportacaoDeProdutos>(
+                "estoque.previa_importacao_produtos.v1",
             )
             .consulta::<ParametrosDePreco>("estoque.parametros_de_preco.v1")
             .consulta::<PrecoSugeridoDoProduto>("estoque.preco_sugerido_do_produto.v1")

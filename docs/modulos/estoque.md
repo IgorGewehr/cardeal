@@ -264,6 +264,7 @@ stateDiagram-v2
 |---|---|---|---|---|
 | `CriarGrupoProduto` ✅ | `estoque.produto.criar` | Baixo | Cria um grupo na estrutura mercadológica (até 4 níveis; recusa o 5º) | `REGRA_VIOLADA` (profundidade), `CAMPO_OBRIGATORIO` |
 | `ImportarEstrutura` ✅ (2026-10-12, `estoque.importar_estrutura.v1`) | `estoque.produto.criar` | Médio | Cria a estrutura mercadológica de um CSV (`Grupo;Subgrupo;Categoria;Subcategoria`, um caminho por linha), tudo ou nada, em uma transação; ignora o que já existe por nome sob o mesmo pai (sem caixa/acento) e gera os códigos | `REGRA_VIOLADA` (qualquer linha com erro, profundidade) |
+| `ImportarProdutos` ✅ (2026-10-13, `estoque.importar_produtos.v1`) | `estoque.produto.criar` (+ `estoque.produto.editar` se a planilha traz margem/ponto de pedido/mínimo/máximo, + `estoque.movimento.entrada` se traz estoque inicial) | Médio | Cria produtos de um CSV com cabeçalho (só `Nome` obrigatória), criando também os grupos e unidades que faltam e lançando o estoque inicial com custo; tudo ou nada, em uma transação; produto que já existe (mesmo GTIN ou, sem ele, mesmo nome) fica como está | `REGRA_VIOLADA` (qualquer linha com erro), `SEM_PERMISSAO` |
 | `CriarProduto` ✅ | `estoque.produto.criar` | Baixo | Cria `Produto` + unidade padrão; aceita `codigo_barras` opcional já na criação (valida dígito verificador via `Produto::com_codigo_barras`) e `detalhes_tecnicos` opcional (fabricante, MPN, categoria técnica, especificação, compatibilidade, garantia do fornecedor, localização física — 2026-09-11) | `NcmInvalido`, `GtinInvalido` |
 | `EditarDetalhesTecnicosProduto` ✅ (novo, 2026-09-11) | `estoque.produto.editar` | Baixo | Edita depois os sete campos técnicos opcionais (substitui por completo — campo não informado vira `None`); não toca nome/NCM/código de barras | — |
 | `CriarVariacao` | `estoque.produto.criar` | Baixo | Ainda não implementado | `ProdutoSemGrade` |
@@ -360,7 +361,50 @@ sob pai existente com as regras de `CriarGrupoProduto` (profundidade/pai). A pr�
 e uma amostra de até 200 caminhos. Importar o mesmo arquivo duas vezes não cria nada na segunda. Na tela:
 aba Estrutura → "Importar planilha…" (seletor de arquivo, prévia, confirmar). Limites: só cria (não renomeia
 nem move); nome igual com grafia diferente além de caixa/acento/pontuação vira outro grupo; o código gerado
-não é editável na planilha. A importação de **produtos** por planilha segue pendente.
+não é editável na planilha. A importação de **produtos** por planilha é a seção seguinte.
+
+### Importação de produtos por planilha (2026-10-13)
+
+Domínio puro em `importacao_produtos.rs`: `planejar(texto, existentes)` lê o CSV com o mesmo leitor da
+estrutura (`;` ou `,`, aspas, BOM), mas aqui **o cabeçalho é obrigatório** e as colunas valem pelo nome, em
+qualquer ordem, sem caixa/acento/espaço/pontuação. Só `Nome` (ou `Produto`/`Descrição`) é obrigatória:
+
+| Coluna (e sinônimos) | Vira |
+|---|---|
+| `Grupo`, `Subgrupo`, `Categoria`, `Subcategoria` (ou `Nível 1..4`) | O grupo do produto; o que falta é criado com o mesmo `ResolvedorDeCaminhos` da importação da estrutura. Sem grupo: "Sem grupo" |
+| `Unidade` (`UN`, `Und`, `Sigla`) | A unidade pela sigla; padrão `UN`. Sigla nova vira unidade nova (nome e "fracionável" vêm de uma tabela de siglas conhecidas — KG, L, M… fracionam) |
+| `Código de barras` (`EAN`, `GTIN`, `Cód. barras`) | GTIN validado pelo dígito verificador |
+| `NCM` | 8 dígitos, com ou sem máscara; vazio fica pendente |
+| `Margem` (`Margem desejada`, `Margem líquida`) | A margem própria do produto (0% a 100%, exclusive) |
+| `Ponto de pedido`, `Estoque mínimo` (`Mínimo`), `Estoque máximo` (`Máximo`) | Os parâmetros de reposição (mínimo ≤ máximo) |
+| `Fabricante` (`Marca`), `Código do fabricante` (`MPN`, `Referência`), `Localização` (`Prateleira`) | Os detalhes técnicos |
+| `Estoque` (`Estoque inicial`, `Quantidade`, `Saldo`) + `Custo` (`Custo unitário`, `Preço de custo`) + `Local` (`Depósito`) | O estoque inicial: uma entrada (`registrar_entrada_comum`) com esse custo. Sem `Local`, vale o único local do CNPJ; com mais de um, a coluna é exigida |
+
+Coluna desconhecida é ignorada e listada na prévia; coluna repetida é erro. Números no padrão brasileiro
+(`1.250,5`, `R$ 12,90`). Cada linha junta **todos** os seus problemas numa mensagem só. Estoque positivo exige
+custo > 0 e local; custo com estoque vazio/zero não tem onde ficar (o custo mora no saldo) e é ignorado, com
+aviso na prévia (`custos_sem_estoque`) em vez de erro — planilha de cliente traz custo de tudo.
+
+**Idempotência:** produto que já existe — mesmo código de barras ou, sem ele (ou sem achar), mesmo nome
+normalizado — conta como "já existia" e **fica como está** (a importação só cria; não move, não renomeia, não
+lança estoque de novo). Por isso importar o mesmo arquivo duas vezes não duplica nem produto nem estoque.
+Nome ou GTIN repetido *dentro* da planilha é erro.
+
+`ImportarProdutos` refaz o plano dentro da transação, recusa o arquivo inteiro com qualquer erro e grava na
+ordem grupos (`criar_grupos_planejados`, o mesmo da estrutura, com a validação de profundidade sob pai
+existente) → unidades → produtos (`Produto::novo` + GTIN + detalhes + ponto/mín/máx) → margem
+(`repositorio_preco::definir_margem_do_produto`) → estoque inicial. A importação **não é atalho de
+permissão**: margem e parâmetros de reposição exigem `estoque.produto.editar`, estoque inicial exige
+`estoque.movimento.entrada` (`ctx.concede`), como nos comandos que fazem isso um a um. O catálogo (grupos,
+unidades, produtos) é da organização; os locais são do CNPJ em que se age (ADR-0017). Prévia:
+`estoque.previa_importacao_produtos.v1` (`estoque.produto.ver`) — novos, já existiam, grupos novos, unidades
+novas, com estoque, erros, colunas ignoradas e uma amostra de até 200 produtos.
+
+Na tela: "Importar produtos…" no topo da tela de Estoque → escolher arquivo → prévia → Importar. "Baixar
+modelo…" salva um CSV de exemplo com todas as colunas (o mesmo modelo é testado: importa sem erro). Limites:
+não atualiza produto existente (para isso há a alteração em lote); preço de venda não entra (mora em
+`vendas`, que depende de `estoque`, e não o contrário); categoria técnica, especificação, compatibilidade e
+garantia do fornecedor não têm coluna; grade, lote e validade ficam de fora.
 
 ### Rentabilidade por nível da estrutura (2026-10-12)
 

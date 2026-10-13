@@ -75,6 +75,7 @@ pub mod fiscal;
 pub mod hierarquia;
 pub mod historico_compras;
 pub mod importacao_estrutura;
+pub mod importacao_produtos;
 mod inventario;
 mod listagem;
 mod manifesto;
@@ -120,7 +121,7 @@ pub use comandos::{
     DefinirPerfilFiscalDoGrupo, MoverGrupoProduto, MoverProdutosDeGrupo, ProdutosMovidos,
     RenomearGrupoProduto,
 };
-pub use comandos::{EstruturaImportada, ImportarEstrutura};
+pub use comandos::{EstruturaImportada, ImportarEstrutura, ImportarProdutos, ProdutosImportados};
 #[cfg(feature = "sqlite")]
 pub use consultas::{
     melhor_local_de_saida, movimentos_do_produto, produtos_abaixo_do_ponto_pedido,
@@ -135,7 +136,7 @@ pub use consultas::{
 };
 pub use consultas_analise::AnaliseDeEstoque;
 pub use consultas_compras::HistoricoDeCompras;
-pub use consultas_importacao::PreviaDaImportacaoDaEstrutura;
+pub use consultas_importacao::{PreviaDaImportacaoDaEstrutura, PreviaDaImportacaoDeProdutos};
 pub use consultas_lote::{
     AlteracaoRegistrada, HistoricoDeAlteracoesEmLote, LinhaDaPrevia, PerfilFiscalDoProduto,
     PerfilFiscalEfetivo, PreviaDaAlteracaoEmLote, ProdutoParaLote, ProdutosParaLote,
