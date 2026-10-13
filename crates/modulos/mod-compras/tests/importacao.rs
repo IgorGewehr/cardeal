@@ -851,3 +851,99 @@ fn sem_pago_no_ato_titulo_nasce_em_aberto() {
 
     assert_eq!(estado_da_parcela_da_nota(&arm, empresa, nota_id), "Aberta");
 }
+
+#[test]
+fn icms_st_ipi_e_desconto_entram_no_custo_e_o_titulo_bate_com_o_vnf() {
+    let (_dir, arm, empresa) = base();
+    let produto = cadastrar_produto(&arm, empresa, "Cerveja Lata 350ml", "22030000");
+    let local = cadastrar_local(&arm, empresa);
+    let chave = "8".repeat(44);
+    // 12 latas a R$ 5 = R$ 60, desconto R$ 6, ICMS-ST R$ 9,50 + FCP-ST R$ 1,20, IPI R$ 3,
+    // frete R$ 4,80 → vNF R$ 72,50; custo por lata = 72,50 / 12 = 6,041667.
+    let xml = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe"><NFe>
+<infNFe Id="NFe{chave}" versao="4.00">
+  <ide><nNF>31</nNF><serie>1</serie><dhEmi>2026-09-01T09:00:00-03:00</dhEmi></ide>
+  <emit><CNPJ>{CNPJ_FORNECEDOR}</CNPJ><xNome>Distribuidora Alfa LTDA</xNome></emit>
+  <det nItem="1">
+    <prod><cProd>CERV-350</cProd><xProd>CERVEJA LATA 350ML</xProd><NCM>22030000</NCM>
+      <qCom>12.0000</qCom><vUnCom>5.000000</vUnCom><vProd>60.00</vProd><vDesc>6.00</vDesc></prod>
+    <imposto>
+      <ICMS><ICMS10><vICMSST>9.50</vICMSST><vFCPST>1.20</vFCPST></ICMS10></ICMS>
+      <IPI><IPITrib><vIPI>3.00</vIPI></IPITrib></IPI>
+    </imposto>
+  </det>
+  <total><ICMSTot><vProd>60.00</vProd><vFrete>4.80</vFrete><vSeg>0.00</vSeg><vOutro>0.00</vOutro>
+    <vNF>72.50</vNF></ICMSTot></total>
+</infNFe></NFe></nfeProc>"#
+    );
+    let ctx_escrita = ContextoEscrita::novo(empresa, Id::novo(), Id::novo(), Id::novo());
+    let (nota_id, total, custo_unitario) = arm
+        .escritor()
+        .executar(ctx_escrita, move |uow| {
+            let nota_xml = cardeal_fiscal::interpretar(&xml)
+                .map_err(|e| cardeal_kernel::Erro::de_dominio(&e))
+                .map_err(cardeal_storage::ErroArmazenamento::Dominio)?;
+            let relatorio = importar_nota_da_sefaz(&nota_xml, &ctx(empresa), uow)
+                .map_err(cardeal_storage::ErroArmazenamento::Dominio)?;
+            let itens = RepositorioCompras::novo(uow)
+                .itens_da_nota(relatorio.nota_entrada)
+                .map_err(cardeal_storage::ErroArmazenamento::Dominio)?;
+            let mut item = itens[0].clone();
+            item.vincular(produto);
+            RepositorioCompras::novo(uow)
+                .atualizar_item(&item)
+                .map_err(cardeal_storage::ErroArmazenamento::Dominio)?;
+            let nota = RepositorioCompras::novo(uow)
+                .buscar_nota(relatorio.nota_entrada)
+                .map_err(cardeal_storage::ErroArmazenamento::Dominio)?
+                .expect("nota");
+            confirmar_entrada_comum(
+                relatorio.nota_entrada,
+                local,
+                true,
+                false,
+                &ctx(empresa),
+                uow,
+            )
+            .map_err(cardeal_storage::ErroArmazenamento::Dominio)?;
+            Ok((
+                relatorio.nota_entrada,
+                nota.valor_total,
+                item.custo_final_unitario(),
+            ))
+        })
+        .unwrap()
+        .valor;
+
+    // O total da nota é o vNF, e o título a pagar também.
+    assert_eq!(total, cardeal_kernel::Dinheiro::centavos(7_250));
+    let titulo: i64 = arm
+        .leitor()
+        .consultar(|c| {
+            c.query_row(
+                "SELECT valor_original FROM financeiro_titulo
+                 WHERE empresa = ?1 AND origem_modulo = 'compras' AND origem_id = ?2",
+                rusqlite::params![empresa.em_bytes().as_slice(), nota_id.em_bytes().as_slice()],
+                |r| r.get(0),
+            )
+            .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+        })
+        .unwrap();
+    assert_eq!(titulo, 7_250);
+    // E o custo que entrou no estoque tem desconto, frete, ST e IPI: 72,50 / 12.
+    assert_eq!(custo_unitario, cardeal_kernel::Preco::interna(6_041_667));
+    let custo_medio: i64 = arm
+        .leitor()
+        .consultar(|c| {
+            c.query_row(
+                "SELECT custo_medio FROM estoque_saldo_local WHERE produto = ?1",
+                [produto.em_bytes().as_slice()],
+                |r| r.get(0),
+            )
+            .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+        })
+        .unwrap();
+    assert_eq!(custo_medio, 6_041_667);
+}

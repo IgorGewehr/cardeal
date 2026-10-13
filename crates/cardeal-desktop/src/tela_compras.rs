@@ -834,6 +834,33 @@ fn linha_item_casamento(
                     "{} × {}",
                     item.quantidade, item.descricao_fornecedor
                 )));
+                // De onde vem o custo: desconto, despesas rateadas e impostos que não voltam.
+                let mut partes = Vec::new();
+                if item.valor_desconto.e_positivo() {
+                    partes.push(format!(
+                        "desconto {}",
+                        item.valor_desconto.formatar_com_simbolo()
+                    ));
+                }
+                if item.valor_rateio.e_positivo() {
+                    partes.push(format!(
+                        "frete/despesas {}",
+                        item.valor_rateio.formatar_com_simbolo()
+                    ));
+                }
+                if item.valor_impostos.e_positivo() {
+                    partes.push(format!(
+                        "ICMS-ST/IPI {}",
+                        item.valor_impostos.formatar_com_simbolo()
+                    ));
+                }
+                if !partes.is_empty() {
+                    ui.add(Rotulo::campo(format!(
+                        "{} → custo {} por unidade",
+                        partes.join(" · "),
+                        item.custo_final_unitario()
+                    )));
+                }
                 if let (EstadoCasamento::SugestaoForte, Some(produto)) =
                     (item.estado_casamento, item.produto_casado)
                 {

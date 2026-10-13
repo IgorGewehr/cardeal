@@ -33,6 +33,22 @@ pub struct ItemNfe {
     pub valor_unitario: Preco,
     /// O valor total do item (`vProd`).
     pub valor_total: Dinheiro,
+    /// O desconto do item (`det/prod/vDesc`); zero sem desconto.
+    pub valor_desconto: Dinheiro,
+    /// O ICMS de substituição tributária cobrado na nota para este item (`vICMSST` + `vFCPST`
+    /// de `det/imposto/ICMS/*`) — quem compra para revender não recupera: é custo. Não inclui o
+    /// ST **retido anteriormente** (`vICMSSTRet`), que já está embutido no preço.
+    pub valor_icms_st: Dinheiro,
+    /// O IPI do item (`det/imposto/IPI/IPITrib/vIPI`) — para o comércio, custo.
+    pub valor_ipi: Dinheiro,
+}
+
+impl ItemNfe {
+    /// O quanto o item soma no total da nota: produto − desconto + ST + IPI.
+    #[must_use]
+    pub fn valor_na_nota(&self) -> Dinheiro {
+        self.valor_total - self.valor_desconto + self.valor_icms_st + self.valor_ipi
+    }
 }
 
 /// Os campos essenciais de uma NF-e, extraídos do XML.
@@ -199,6 +215,9 @@ struct ItemParcial {
     quantidade: Option<Quantidade>,
     valor_unitario: Option<Preco>,
     valor_total: Option<Dinheiro>,
+    valor_desconto: Dinheiro,
+    valor_icms_st: Dinheiro,
+    valor_ipi: Dinheiro,
 }
 
 /// O literal que a NF-e usa em `cEAN`/`cEANTrib` para "este produto não tem código de
@@ -225,6 +244,9 @@ impl ItemParcial {
             valor_total: self
                 .valor_total
                 .ok_or_else(|| campo_ausente("det/prod/vProd"))?,
+            valor_desconto: self.valor_desconto,
+            valor_icms_st: self.valor_icms_st,
+            valor_ipi: self.valor_ipi,
         })
     }
 }
@@ -303,6 +325,19 @@ fn processar_texto(
             let v = dinheiro_de(texto, "vProd")?;
             set_item(item_atual, |i| i.valor_total = Some(v));
         }
+        [.., "prod", "vDesc"] => {
+            let v = dinheiro_de(texto, "vDesc")?;
+            set_item(item_atual, |i| i.valor_desconto = v);
+        }
+        // ST cobrado nesta nota (ICMS10/30/70/90, ICMSSN201/202/900, ICMSPart) e o FCP dele.
+        [.., "imposto", "ICMS", _, "vICMSST" | "vFCPST"] => {
+            let v = dinheiro_de(texto, "vICMSST")?;
+            set_item(item_atual, |i| i.valor_icms_st += v);
+        }
+        [.., "imposto", "IPI", "IPITrib", "vIPI"] => {
+            let v = dinheiro_de(texto, "vIPI")?;
+            set_item(item_atual, |i| i.valor_ipi = v);
+        }
         _ => {}
     }
     Ok(())
@@ -317,6 +352,46 @@ fn set_item(item_atual: &mut Option<ItemParcial>, aplicar: impl FnOnce(&mut Item
 #[cfg(test)]
 mod testes {
     use super::*;
+
+    #[test]
+    fn st_fcp_ipi_e_desconto_do_item_e_o_st_retido_fica_de_fora() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe"><NFe>
+<infNFe Id="NFe35240912345678000181550010000012341123456789" versao="4.00">
+  <ide><nNF>9</nNF><serie>1</serie><dhEmi>2024-09-12T10:00:00-03:00</dhEmi></ide>
+  <emit><CNPJ>11222333000181</CNPJ><xNome>Fornecedor</xNome></emit>
+  <det nItem="1">
+    <prod><cProd>A</cProd><xProd>CERVEJA</xProd><NCM>22030000</NCM><qCom>12</qCom>
+      <vUnCom>5.00</vUnCom><vProd>60.00</vProd><vDesc>6.00</vDesc></prod>
+    <imposto>
+      <ICMS><ICMS10><vICMS>10.80</vICMS><vICMSST>9.50</vICMSST><vFCPST>1.20</vFCPST></ICMS10></ICMS>
+      <IPI><IPITrib><vIPI>3.00</vIPI></IPITrib></IPI>
+    </imposto>
+  </det>
+  <det nItem="2">
+    <prod><cProd>B</cProd><xProd>AGUA</xProd><NCM>22011000</NCM><qCom>6</qCom>
+      <vUnCom>2.00</vUnCom><vProd>12.00</vProd></prod>
+    <imposto><ICMS><ICMS60><vICMSSTRet>1.00</vICMSSTRet></ICMS60></ICMS></imposto>
+  </det>
+  <total><ICMSTot><vProd>72.00</vProd><vST>10.70</vST><vIPI>3.00</vIPI><vDesc>6.00</vDesc>
+    <vFrete>0.00</vFrete><vSeg>0.00</vSeg><vOutro>0.00</vOutro><vNF>79.70</vNF></ICMSTot></total>
+</infNFe></NFe></nfeProc>"#;
+        let n = interpretar(xml).unwrap();
+        let a = &n.itens[0];
+        assert_eq!(a.valor_desconto, Dinheiro::reais(6));
+        assert_eq!(a.valor_icms_st, Dinheiro::centavos(1_070));
+        assert_eq!(a.valor_ipi, Dinheiro::reais(3));
+        assert_eq!(a.valor_na_nota(), Dinheiro::centavos(6_770));
+        let b = &n.itens[1];
+        assert_eq!(
+            b.valor_icms_st,
+            Dinheiro::ZERO,
+            "ST retido antes não é desta nota"
+        );
+        // Itens somados batem com o vNF.
+        let soma: Dinheiro = n.itens.iter().map(ItemNfe::valor_na_nota).sum();
+        assert_eq!(soma, n.valor_total);
+    }
 
     const XML_EXEMPLO: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <nfeProc xmlns="http://www.portalfiscal.inf.br/nfe">

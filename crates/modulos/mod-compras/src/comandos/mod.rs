@@ -140,6 +140,34 @@ pub fn importar_nota_da_sefaz(
     importar_nota_interpretada(nota_xml, ctx, uow)
 }
 
+/// O cabeçalho da nota a partir do XML. O total é o que o fornecedor cobra (o `vNF`): produtos −
+/// descontos + ICMS-ST + IPI + frete/seguro/outras despesas.
+#[cfg(feature = "sqlite")]
+fn nota_do_xml(nota_xml: &cardeal_fiscal::NotaFiscalXml, fornecedor: Id, ctx: &Ctx) -> NotaEntrada {
+    let despesas = nota_xml.valor_frete + nota_xml.valor_seguro + nota_xml.valor_outras_despesas;
+    let valor_nos_itens: Dinheiro = nota_xml
+        .itens
+        .iter()
+        .map(cardeal_fiscal::ItemNfe::valor_na_nota)
+        .sum();
+    NotaEntrada {
+        id: Id::novo(),
+        empresa: ctx.empresa,
+        fornecedor,
+        chave_acesso: Some(nota_xml.chave_acesso.como_str().to_string()),
+        numero: nota_xml.numero.clone(),
+        serie: nota_xml.serie.clone(),
+        data_emissao: nota_xml.emissao,
+        valor_produtos: nota_xml.itens.iter().map(|i| i.valor_total).sum(),
+        valor_frete: nota_xml.valor_frete,
+        valor_seguro: nota_xml.valor_seguro,
+        valor_outras_despesas: nota_xml.valor_outras_despesas,
+        valor_total: valor_nos_itens + despesas,
+        estado: EstadoNotaEntrada::AConferir,
+        versao: Versao::INICIAL,
+    }
+}
+
 /// O miolo comum de toda importação de nota por XML — chamado por
 /// [`importar_nota_da_sefaz`] (XML baixado da distribuição `DFe`, via `PortaFiscal`) e por
 /// [`ImportarNotaDeArquivoXml`](crate::ImportarNotaDeArquivoXml) (XML lido de um arquivo
@@ -183,25 +211,8 @@ pub(crate) fn importar_nota_interpretada(
     )?;
     let preferencias = RepositorioCompras::novo(uow).preferencias(ctx.empresa)?;
 
-    let valor_produtos: Dinheiro = nota_xml.itens.iter().map(|i| i.valor_total).sum();
+    let nota = nota_do_xml(nota_xml, fornecedor, ctx);
     let despesas = nota_xml.valor_frete + nota_xml.valor_seguro + nota_xml.valor_outras_despesas;
-
-    let nota = NotaEntrada {
-        id: Id::novo(),
-        empresa: ctx.empresa,
-        fornecedor,
-        chave_acesso: Some(chave.to_string()),
-        numero: nota_xml.numero.clone(),
-        serie: nota_xml.serie.clone(),
-        data_emissao: nota_xml.emissao,
-        valor_produtos,
-        valor_frete: nota_xml.valor_frete,
-        valor_seguro: nota_xml.valor_seguro,
-        valor_outras_despesas: nota_xml.valor_outras_despesas,
-        valor_total: valor_produtos + despesas,
-        estado: EstadoNotaEntrada::AConferir,
-        versao: Versao::INICIAL,
-    };
 
     let pesos: Vec<i64> = match preferencias.rateio_por {
         RateioPor::Valor => nota_xml
@@ -215,7 +226,7 @@ pub(crate) fn importar_nota_interpretada(
             .map(|i| i.quantidade.unidades_internas())
             .collect(),
     };
-    let itens = montar_itens(
+    let mut itens = montar_itens(
         nota.id,
         fornecedor,
         despesas,
@@ -233,6 +244,11 @@ pub(crate) fn importar_nota_interpretada(
         ctx,
         uow,
     )?;
+    // Desconto e impostos não recuperáveis do XML entram no custo de cada item.
+    for (item, xml) in itens.iter_mut().zip(&nota_xml.itens) {
+        item.valor_desconto = xml.valor_desconto;
+        item.valor_impostos = xml.valor_icms_st + xml.valor_ipi;
+    }
 
     {
         let mut repo = RepositorioCompras::novo(uow);
@@ -408,6 +424,8 @@ fn montar_item_casado(
         quantidade,
         valor_unitario,
         valor_rateio: rateio,
+        valor_desconto: Dinheiro::ZERO,
+        valor_impostos: Dinheiro::ZERO,
         estado_casamento: EstadoCasamento::NaoCasado,
     };
     match casar(produto_por_gtin, regra, descricao, &candidatos_ref) {

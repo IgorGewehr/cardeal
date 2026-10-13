@@ -143,6 +143,16 @@ stateDiagram-v2
 > `estoque.md`, "Padronização do nome"), o usuário corrige se quiser e escolhe o grupo. A nota
 > seguinte do mesmo item casa sozinha (pelo código de barras e pela regra aprendida).
 
+> **Nota (2026-10-13) — ICMS-ST, IPI e desconto da nota no custo:** o leitor da NF-e (`cardeal_fiscal`) passou
+> a ler, por item, `vDesc`, `vICMSST` + `vFCPST` (o ST **cobrado nesta nota**; o `vICMSSTRet` retido antes
+> fica de fora, já está no preço) e `vIPI`. O item guarda desconto e impostos (migração `compras` v4) e o custo
+> que vai para o estoque passa a ser **bruto − desconto + rateio de despesas + ICMS-ST + IPI** — impostos que
+> quem compra para revender não recupera. O total da nota passou a ser o que o fornecedor cobra (o `vNF`):
+> **antes era só produtos + despesas, e o título a pagar saía menor que o boleto** em toda nota com ST ou IPI.
+> Na conferência, cada item mostra de onde vem o custo. Fora: estimar ST pela MVA quando a nota não traz o
+> valor (compra interestadual com antecipação, compra sem nota) — depende das tabelas por UF/NCM e de
+> conferência com o contador.
+
 ## 6. Consultas
 
 | Consulta | Permissão | Uso na UI | Índice que a sustenta |

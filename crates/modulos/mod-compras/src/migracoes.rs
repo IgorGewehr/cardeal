@@ -79,6 +79,14 @@ const SQL_CODIGO_BARRAS_ITEM: &str = r"
 ALTER TABLE compras_item_nota_entrada ADD COLUMN codigo_barras TEXT;
 ";
 
+// Migração v4 (2026-10-13): o desconto do item e os impostos que a nota cobra sobre ele e quem
+// revende não recupera (ICMS-ST + FCP-ST + IPI) — entram no custo do item e no total da nota
+// (antes o total era só produtos + despesas, e o título a pagar saía menor que o boleto).
+const SQL_DESCONTO_E_IMPOSTOS_ITEM: &str = r"
+ALTER TABLE compras_item_nota_entrada ADD COLUMN valor_desconto INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE compras_item_nota_entrada ADD COLUMN valor_impostos INTEGER NOT NULL DEFAULT 0;
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -96,6 +104,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 3,
         nome: "compras_item_codigo_barras",
         sql: SQL_CODIGO_BARRAS_ITEM,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 4,
+        nome: "compras_item_desconto_e_impostos",
+        sql: SQL_DESCONTO_E_IMPOSTOS_ITEM,
         tipo: TipoMigracao::Esquema,
     },
 ];

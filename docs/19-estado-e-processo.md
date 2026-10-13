@@ -31,10 +31,12 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   planilha**, **importação de produto por planilha** e **comissão por estrutura mercadológica** (2026-10-13)
   já estão feitos — a onda 4 fechou). Onda 5: **inventário com contagem cega**, **transferência entre locais**, **produto a partir da
   nota com nome padronizado por dicionário**, **validade e perdas** e **custo-hora do técnico** feitos
-  (2026-10-13); da onda 5 resta **ST/MVA no custo** (depende de conferência com o contador). A apuração mensal
+  (2026-10-13); do **ST/MVA no custo**, a parte determinística está feita (ICMS-ST, FCP-ST, IPI e desconto do XML
+  entram no custo e no título); resta estimar ST pela MVA quando a nota não traz o valor (tabelas + contador). A apuração mensal
   da comissão do vendedor (`vendas.ApurarComissao`) continua pendente e agora tem o percentual por item pronto.
 - **Pendência de confiança:** as tabelas do Simples e as alíquotas precisam ser conferidas com o
-  contador; ST/MVA ainda não entram no custo.
+  contador; o ST/IPI **da nota** já entra no custo (2026-10-13), mas a estimativa de ST pela MVA (sem o valor na
+  nota) ainda não.
 
 ## 1. O que existe, com precisão (tabela dos crates de 2026-09-05; as sessões seguintes, abaixo, a atualizam)
 
@@ -546,6 +548,11 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   muda (a mão de obra própria é despesa de pessoal). Telas: "Custo-hora da equipe…" na OS, "Horas previstas" no
   orçamento, mão de obra no diálogo de baixa e no cartão do Financeiro. Testes: 3 de domínio + 1 de integração + 1
   de tela.
+- **ICMS-ST, IPI e desconto da nota no custo (2026-10-13):** o leitor da NF-e lê `vDesc`, `vICMSST`+`vFCPST` (não
+  o `vICMSSTRet`) e `vIPI` por item; `mod-compras` (migração v4) guarda desconto e impostos no item, o custo de
+  entrada vira bruto − desconto + rateio + ST + IPI e o total da nota passa a ser o `vNF`. **Corrige um erro real:**
+  o título a pagar saía menor que o boleto em toda nota com ST ou IPI. A conferência mostra a composição do
+  custo. Testes: 1 do leitor + 1 de integração (custo médio e título com o `vNF`).
 - **Dívidas conhecidas:** tabelas do Simples a conferir com o contador; a 6ª faixa e a anualização de
   RBT12 (ver ADR-0018); o PDV só avisa preço abaixo do mínimo de empate (etiqueta "abaixo do mínimo" na linha do
   cupom, depois do desconto); não bloqueia a venda e não é o painel de margem completo.
