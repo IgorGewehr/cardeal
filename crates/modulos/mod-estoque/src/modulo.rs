@@ -50,6 +50,11 @@ impl Modulo for ModuloEstoque {
             .comando::<RenomearGrupoProduto>("estoque.renomear_grupo_produto.v1")
             .comando::<crate::ImportarEstrutura>("estoque.importar_estrutura.v1")
             .comando::<crate::ImportarProdutos>("estoque.importar_produtos.v1")
+            .comando::<crate::CriarInventario>("estoque.criar_inventario.v1")
+            .comando::<crate::IniciarContagem>("estoque.iniciar_contagem.v1")
+            .comando::<crate::RegistrarContagem>("estoque.registrar_contagem.v1")
+            .comando::<crate::EncerrarInventario>("estoque.encerrar_inventario.v1")
+            .comando::<crate::CancelarInventario>("estoque.cancelar_inventario.v1")
             .comando::<MoverGrupoProduto>("estoque.mover_grupo_produto.v1")
             .comando::<MoverProdutosDeGrupo>("estoque.mover_produtos_de_grupo.v1")
             .comando::<DefinirMargemDoGrupo>("estoque.definir_margem_do_grupo.v1")
@@ -91,6 +96,8 @@ impl Modulo for ModuloEstoque {
             .consulta::<crate::PreviaDaImportacaoDeProdutos>(
                 "estoque.previa_importacao_produtos.v1",
             )
+            .consulta::<crate::Inventarios>("estoque.inventarios.v1")
+            .consulta::<crate::PosicaoDoInventario>("estoque.posicao_do_inventario.v1")
             .consulta::<ParametrosDePreco>("estoque.parametros_de_preco.v1")
             .consulta::<PrecoSugeridoDoProduto>("estoque.preco_sugerido_do_produto.v1")
             .consulta::<PrecosSugeridosDoGrupo>("estoque.precos_sugeridos_do_grupo.v1")

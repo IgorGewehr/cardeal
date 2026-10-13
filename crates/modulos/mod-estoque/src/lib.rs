@@ -66,6 +66,7 @@ mod consultas;
 mod consultas_analise;
 mod consultas_compras;
 mod consultas_importacao;
+mod consultas_inventario;
 mod consultas_lote;
 mod consultas_preco;
 mod consultas_rentabilidade;
@@ -89,6 +90,8 @@ mod produto;
 pub mod receituario;
 #[cfg(feature = "sqlite")]
 mod repositorio;
+#[cfg(feature = "sqlite")]
+pub(crate) mod repositorio_inventario;
 #[cfg(feature = "sqlite")]
 pub(crate) mod repositorio_lote;
 #[cfg(feature = "sqlite")]
@@ -114,6 +117,10 @@ pub use comandos::{
 pub use comandos::{
     AlteracaoAplicada, AlteracaoDesfeita, AplicarAlteracaoEmLote, DesfazerAlteracaoEmLote,
 };
+pub use comandos::{
+    CancelarInventario, ContagemIniciada, ContagemRegistrada, CriarInventario, EncerrarInventario,
+    IniciarContagem, InventarioCriado, InventarioEncerradoResumo, RegistrarContagem,
+};
 pub use comandos::{CriarPecaRapida, PecaRapidaCriada};
 pub use comandos::{DefinirCamposFiscaisDoGrupo, DefinirCamposFiscaisDoProduto};
 pub use comandos::{DefinirComissaoDoGrupo, DefinirComissaoDoProduto};
@@ -138,6 +145,9 @@ pub use consultas::{
 pub use consultas_analise::AnaliseDeEstoque;
 pub use consultas_compras::HistoricoDeCompras;
 pub use consultas_importacao::{PreviaDaImportacaoDaEstrutura, PreviaDaImportacaoDeProdutos};
+pub use consultas_inventario::{
+    Inventarios, ItemDaPosicao, PosicaoDoInventario, PosicaoInventario, ResumoInventario,
+};
 pub use consultas_lote::{
     AlteracaoRegistrada, HistoricoDeAlteracoesEmLote, LinhaDaPrevia, PerfilFiscalDoProduto,
     PerfilFiscalEfetivo, PreviaDaAlteracaoEmLote, ProdutoParaLote, ProdutosParaLote,

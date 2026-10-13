@@ -22,6 +22,8 @@ pub enum EstadoInventario {
     Conferido,
     /// Ajustes gerados, trava liberada. Terminal.
     Encerrado,
+    /// Desistência antes de encerrar: trava liberada, nenhum ajuste. Terminal.
+    Cancelado,
 }
 
 impl EstadoInventario {
@@ -34,7 +36,15 @@ impl EstadoInventario {
             Self::Congelado => "Congelado",
             Self::Conferido => "Conferido",
             Self::Encerrado => "Encerrado",
+            Self::Cancelado => "Cancelado",
         }
+    }
+
+    /// Verdadeiro enquanto o inventário não terminou (encerrado ou cancelado): um local só
+    /// pode ter um aberto por vez.
+    #[must_use]
+    pub const fn aberto(self) -> bool {
+        !matches!(self, Self::Encerrado | Self::Cancelado)
     }
 
     /// Verdadeiro se o local está travado para movimento neste estado.
@@ -134,6 +144,71 @@ impl Inventario {
         }
     }
 
+    /// `Planejado → EmContagem → Congelado` de uma vez, com a foto do saldo: os itens são
+    /// tirados e o local travado na mesma transação, para nenhum movimento entrar entre a foto
+    /// e a trava.
+    ///
+    /// # Errors
+    /// [`ErroEstoque::EstadoDeInventarioInvalido`]; [`ErroEstoque::InventarioSemItens`] sem nada
+    /// a contar.
+    pub fn abrir_contagem(
+        &mut self,
+        itens: Vec<ContagemItem>,
+        agora: Instante,
+    ) -> Result<(), ErroEstoque> {
+        self.exigir(EstadoInventario::Planejado)?;
+        if itens.is_empty() {
+            return Err(ErroEstoque::InventarioSemItens);
+        }
+        self.itens = itens;
+        self.iniciar_contagem(agora)?;
+        self.congelar()
+    }
+
+    /// Um produto achado na prateleira que não estava na lista: entra com a quantidade do
+    /// sistema de agora (o local está travado desde a foto, então é a mesma). Se o produto já
+    /// está na lista, devolve o item que existe.
+    ///
+    /// # Errors
+    /// [`ErroEstoque::EstadoDeInventarioInvalido`] fora da contagem.
+    pub fn incluir_item(&mut self, item: ContagemItem) -> Result<Id, ErroEstoque> {
+        self.exigir_contagem()?;
+        if let Some(existente) = self.item_do_produto(item.produto) {
+            return Ok(existente.id);
+        }
+        let id = item.id;
+        self.itens.push(item);
+        Ok(id)
+    }
+
+    /// O item de um produto, se está na lista.
+    #[must_use]
+    pub fn item_do_produto(&self, produto: Id) -> Option<&ContagemItem> {
+        self.itens.iter().find(|i| i.produto == produto)
+    }
+
+    /// Quantos itens já foram contados.
+    #[must_use]
+    pub fn contados(&self) -> usize {
+        self.itens.iter().filter(|i| i.contado()).count()
+    }
+
+    /// Desiste do inventário antes de encerrar: libera a trava, não gera ajuste.
+    ///
+    /// # Errors
+    /// [`ErroEstoque::EstadoDeInventarioInvalido`] se já terminou.
+    pub fn cancelar(&mut self, agora: Instante) -> Result<(), ErroEstoque> {
+        if !self.estado.aberto() || self.estado == EstadoInventario::Conferido {
+            return Err(ErroEstoque::EstadoDeInventarioInvalido {
+                atual: self.estado.rotulo(),
+                esperado: "Planejado/EmContagem/Congelado",
+            });
+        }
+        self.estado = EstadoInventario::Cancelado;
+        self.encerrado_em = Some(agora);
+        Ok(())
+    }
+
     /// `Planejado → EmContagem`.
     ///
     /// # Errors
@@ -167,15 +242,7 @@ impl Inventario {
         operador: Id,
         agora: Instante,
     ) -> Result<(), ErroEstoque> {
-        if !matches!(
-            self.estado,
-            EstadoInventario::EmContagem | EstadoInventario::Congelado
-        ) {
-            return Err(ErroEstoque::EstadoDeInventarioInvalido {
-                atual: self.estado.rotulo(),
-                esperado: "EmContagem/Congelado",
-            });
-        }
+        self.exigir_contagem()?;
         if contada.e_negativa() {
             return Err(ErroEstoque::QuantidadeInvalida);
         }
@@ -230,6 +297,20 @@ impl Inventario {
         Ok(ajustes)
     }
 
+    fn exigir_contagem(&self) -> Result<(), ErroEstoque> {
+        if matches!(
+            self.estado,
+            EstadoInventario::EmContagem | EstadoInventario::Congelado
+        ) {
+            Ok(())
+        } else {
+            Err(ErroEstoque::EstadoDeInventarioInvalido {
+                atual: self.estado.rotulo(),
+                esperado: "EmContagem/Congelado",
+            })
+        }
+    }
+
     fn exigir(&self, esperado: EstadoInventario) -> Result<(), ErroEstoque> {
         if self.estado == esperado {
             Ok(())
@@ -262,6 +343,47 @@ mod testes {
 
     fn agora() -> Instante {
         Instante::agora()
+    }
+
+    #[test]
+    fn abrir_contagem_trava_com_a_foto_e_recusa_lista_vazia() {
+        let mut vazio = Inventario::criar(Id::novo(), Id::novo(), "Loja", Id::novo(), vec![]);
+        assert_eq!(
+            vazio.abrir_contagem(vec![], agora()).unwrap_err(),
+            ErroEstoque::InventarioSemItens
+        );
+        assert_eq!(vazio.estado, EstadoInventario::Planejado);
+
+        let mut inv = Inventario::criar(Id::novo(), Id::novo(), "Loja", Id::novo(), vec![]);
+        inv.abrir_contagem(vec![item(10)], agora()).unwrap();
+        assert_eq!(inv.estado, EstadoInventario::Congelado);
+        assert!(inv.iniciado_em.is_some());
+        assert!(inv.abrir_contagem(vec![item(1)], agora()).is_err());
+    }
+
+    #[test]
+    fn item_achado_entra_uma_vez_e_cancelar_libera_sem_ajuste() {
+        let a = item(5);
+        let produto_a = a.produto;
+        let mut inv = Inventario::criar(Id::novo(), Id::novo(), "Loja", Id::novo(), vec![]);
+        inv.abrir_contagem(vec![a], agora()).unwrap();
+        let achado = item(0);
+        let id = inv.incluir_item(achado.clone()).unwrap();
+        assert_eq!(id, achado.id);
+        // O mesmo produto de novo devolve o item que já está na lista.
+        let mut repetido = item(0);
+        repetido.produto = produto_a;
+        assert_eq!(inv.incluir_item(repetido).unwrap(), inv.itens[0].id);
+        assert_eq!(inv.itens.len(), 2);
+        inv.registrar_contagem(id, Quantidade::unidades(3), Id::novo(), agora())
+            .unwrap();
+        assert_eq!(inv.contados(), 1);
+
+        inv.cancelar(agora()).unwrap();
+        assert_eq!(inv.estado, EstadoInventario::Cancelado);
+        assert!(!inv.estado.aberto() && !inv.estado.trava_o_local());
+        assert!(inv.cancelar(agora()).is_err());
+        assert!(inv.incluir_item(item(1)).is_err());
     }
 
     #[test]

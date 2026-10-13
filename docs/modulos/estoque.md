@@ -291,10 +291,11 @@ stateDiagram-v2
 | `ConfirmarRecebimentoTransferencia` | `estoque.transferencia.confirmar` | Baixo | Ainda não implementado | `TransferenciaJaConfirmada` |
 | `AjustarSaldo` ✅ | `estoque.movimento.ajustar` | Alto | Corrige o disponível de um produto/local para `nova_quantidade` (erro de digitação de contagem/entrada), fora do fluxo formal de inventário; **é o único comando de movimento desta fatia que posta no razão** (`receituario::ajuste_manual`, mesma contabilização de `ajuste_de_inventario` — D Estoque/C Outras receitas na sobra, D Perdas/C Estoque na falta), porque não há nenhum outro módulo gerando a contrapartida de uma correção manual. Corrige quantidade, não custo — reabrir/corrigir só o `custo_medio` sem mexer na quantidade fica para quando existir `EditarProduto` | `MotivoObrigatorio` (motivo com menos de 10 caracteres), `QuantidadeInvalida` (`nova_quantidade` igual à atual — nada a corrigir) |
 | `RegistrarPerda` | `estoque.movimento.perda` | Médio | Ainda não implementado | `LoteInexistente` |
-| `CriarInventario` | `estoque.inventario.criar` | Baixo | Ainda não implementado como comando — o domínio (`Inventario`, contagem cega) já existe e é testado, só falta a amarração ao despacho | — |
-| `IniciarContagem` | `estoque.inventario.contar` | Baixo | Ainda não implementado (idem) | `LocalJaEmInventario` |
-| `RegistrarContagem` | `estoque.inventario.contar` | Baixo | Ainda não implementado (idem) | — |
-| `EncerrarInventario` | `estoque.inventario.encerrar` | Alto | Ainda não implementado (idem) | `ContagensPendentes` |
+| `CriarInventario` ✅ (2026-10-13, `estoque.criar_inventario.v1`) | `estoque.inventario.criar` | Baixo | Planeja a contagem de um local (CNPJ da sessão): o local inteiro ou um grupo da estrutura com a subárvore | `LocalJaEmInventario` (um inventário aberto por local), local/grupo inexistente |
+| `IniciarContagem` ✅ (2026-10-13, `estoque.iniciar_contagem.v1`) | `estoque.inventario.contar` | Médio | Tira a foto do saldo (produtos ativos com saldo registrado no local, no recorte) e trava o local na mesma transação: `Planejado → EmContagem → Congelado` | `InventarioSemItens`, estado inválido |
+| `RegistrarContagem` ✅ (2026-10-13, `estoque.registrar_contagem.v1`) | `estoque.inventario.contar` | Baixo | A quantidade contada de um produto, **sem devolver a do sistema**; produto achado fora da lista entra com o disponível do local (o mesmo da foto, porque o local está travado); contar de novo corrige | estado inválido, produto inexistente, quantidade negativa |
+| `EncerrarInventario` ✅ (2026-10-13, `estoque.encerrar_inventario.v1`) | `estoque.inventario.encerrar` | Alto | Exige tudo contado (`Conferido`), encerra e gera um ajuste por diferença com `aplicar_delta_de_saldo` (o mesmo corpo do `AjustarSaldo`): saldo, movimento `Ajuste*` com origem `inventario` e lançamento `receituario::ajuste_de_inventario` ao custo médio (sobra → outras receitas, falta → perdas); guarda o valor por item; publica `estoque.inventario_encerrado.v1`; libera o local | `ContagensPendentes` |
+| `CancelarInventario` ✅ (2026-10-13, `estoque.cancelar_inventario.v1`; **além do spec**) | `estoque.inventario.encerrar` | Médio | Desiste antes de encerrar (estado novo `Cancelado`): libera o local, não ajusta nada — sem ele um local travado por engano ficaria travado para sempre | estado inválido (já encerrado/cancelado) |
 | `DefinirPontoPedido` ✅ (novo, 2026-09-12) | `estoque.produto.editar` | Baixo | Define/limpa `ponto_pedido` e `estoque_minimo` de um produto — o gatilho que `Produto::abaixo_do_ponto`/`ProdutosAbaixoPontoPedido`/`estoque.abaixo_ponto_pedido.v1` consultam | — |
 | `RenomearGrupoProduto` ✅ (2026-10-09) | `estoque.produto.editar` | Baixo | Troca nome e código do grupo | `CAMPO_OBRIGATORIO`, código duplicado |
 | `MoverGrupoProduto` ✅ (2026-10-09) | `estoque.produto.editar` | Médio | Muda um grupo (com a subárvore) de lugar; `novo_pai: None` promove à raiz | 5º nível, ciclo, grupo inexistente |
@@ -353,7 +354,8 @@ stateDiagram-v2
 | `CurvaAbc` | `estoque.abc.ver` | Relatório de curva ABC | agregação de `estoque_movimento` por valor no período |
 | `LotesProximosDoVencimento` | `estoque.lote.ver` | Alerta de validade | `estoque_lote(validade)` índice parcial `WHERE estado = 'Ativo'` |
 | `EstoqueEmTransito` | `estoque.transferencia.ver` | Painel de transferências pendentes | `estoque_saldo_local(local) WHERE local = local_em_transito` |
-| `PosicaoDoInventario` | `estoque.inventario.ver` | Tela de contagem em andamento | `estoque_contagem_item(inventario)` |
+| `PosicaoDoInventario` ✅ (2026-10-13, `estoque.posicao_do_inventario.v1`) | `estoque.inventario.ver` | Tela de contagem em andamento e resultado: itens com o contado; **sistema, diferença e valor do ajuste só depois de encerrado** (cega) | `estoque_contagem_item(inventario)` |
+| `Inventarios` ✅ (2026-10-13, `estoque.inventarios.v1`) | `estoque.inventario.ver` | Lista de inventários do CNPJ (estado, contados/itens, datas) | `estoque_inventario` |
 
 ### Escolha de grupo em árvore (2026-10-12)
 
@@ -376,6 +378,18 @@ e uma amostra de até 200 caminhos. Importar o mesmo arquivo duas vezes não cri
 aba Estrutura → "Importar planilha…" (seletor de arquivo, prévia, confirmar). Limites: só cria (não renomeia
 nem move); nome igual com grafia diferente além de caixa/acento/pontuação vira outro grupo; o código gerado
 não é editável na planilha. A importação de **produtos** por planilha é a seção seguinte.
+
+### Inventário com contagem cega (2026-10-13)
+
+Migração `estoque` v11: `estoque_inventario` (cabeçalho, com o recorte opcional por grupo; índice único
+parcial garante um inventário aberto por local) e `estoque_contagem_item` (foto do sistema, contado,
+divergência, quem/quando contou e, no encerramento, o valor do ajuste). O domínio `Inventario` ganhou
+`abrir_contagem` (foto + `EmContagem` + `Congelado` de uma vez, para nenhum movimento entrar entre a foto e
+a trava), `incluir_item` (produto achado), `cancelar` e o estado `Cancelado`. Grade e lote ficam de fora
+(`variacao`/`lote` sempre vazios), como no resto desta fatia do estoque. Tela: aba **Inventário** no
+Estoque — lista e "Novo inventário" à esquerda; à direita, o selecionado: iniciar (com confirmação, porque
+trava o local), contar por bipe (código de barras exato seleciona) ou busca por nome, a lista com
+"registrado/pendente" e, depois de encerrado, sistema × contado × diferença × valor com sobras e faltas.
 
 ### Importação de produtos por planilha (2026-10-13)
 
@@ -590,7 +604,12 @@ já as pressupunha e toda entrada de menu precisa de uma permissão declarada.
 3. **Reserva não é saída.** `ReservarEstoque` move quantidade de `disponivel` para `reservada` sem
    gerar `Movimento` de saída nem lançamento no razão — só o consumo real (venda finalizada, OS
    concluída) gera a saída física e o CMV.
-4. **Inventário em `Congelado` bloqueia movimento no local.** `RegistrarEntrada`/`RegistrarSaida`
+4. **Inventário em `Congelado` bloqueia movimento no local.** *(Implementado em 2026-10-13 sem
+   `nucleo_trava`: o corpo comum de entrada e de saída e o `AjustarSaldo` consultam
+   `estoque_inventario` (`repositorio_inventario::exigir_local_livre`) na mesma transação, e a
+   saída do PDV, do pedido e da OS passa pelo mesmo corpo — ou seja, **vender no local em
+   contagem também é recusado**; inventário de loja aberta se faz por seção, ou fora do
+   expediente.)* `RegistrarEntrada`/`RegistrarSaida`
    contra um local com `nucleo_trava` ativa de inventário retornam `4002 RecursoTravado` — impede
    contagem de perseguir um alvo que se move.
 5. **Contagem de inventário é cega.** `quantidade_sistema` é congelada no início e só é exposta ao

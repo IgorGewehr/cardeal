@@ -29,8 +29,9 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
 - **Ordem do que vem agora** (custo de referência, histórico de compras, preços defasados,
   **rentabilidade por nível da árvore**, **seletor em árvore no cadastro**, **importação da estrutura por
   planilha**, **importação de produto por planilha** e **comissão por estrutura mercadológica** (2026-10-13)
-  já estão feitos — a onda 4 fechou): segue a onda 5, **inventário** (contagem cega) → transferência →
-  importação de produto por XML (dicionário determinístico). A apuração mensal da comissão do vendedor
+  já estão feitos — a onda 4 fechou). Onda 5: **inventário com contagem cega feito (2026-10-13)**; segue
+  transferência entre locais → importação de produto por XML (dicionário determinístico) → validade e
+  alertas. A apuração mensal da comissão do vendedor
   (`vendas.ApurarComissao`) continua pendente e agora tem o percentual por item pronto.
 - **Pendência de confiança:** as tabelas do Simples e as alíquotas precisam ser conferidas com o
   contador; ST/MVA ainda não entram no custo.
@@ -509,6 +510,15 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   vendedor" na aba Estrutura (o bloco de percentual herdado virou genérico, `bloco_herdado`, usado também pela
   margem), campo na alteração em lote, coluna na grade de Preços e na importação. Falta a apuração da comissão
   do vendedor em `vendas`.
+- **Inventário com contagem cega (2026-10-13):** migração `estoque` v11 (`estoque_inventario`,
+  `estoque_contagem_item`), comandos `criar_inventario`/`iniciar_contagem`/`registrar_contagem`/
+  `encerrar_inventario`/`cancelar_inventario` (`.v1`) e consultas `inventarios`/`posicao_do_inventario`.
+  Iniciar tira a foto do saldo e trava o local na mesma transação; o corpo comum de entrada/saída e o
+  `AjustarSaldo` recusam movimento no local travado (`RECURSO_TRAVADO`) — **inclusive a venda**, por regra do
+  spec. Contagem cega (a posição só revela sistema/diferença/valor depois de encerrado), item achado entra na
+  hora, encerrar ajusta saldo + razão por `aplicar_delta_de_saldo` (extraído do `AjustarSaldo`, agora o corpo
+  comum dos dois). `CancelarInventario` e o estado `Cancelado` foram acrescentados ao spec. Aba **Inventário**
+  no Estoque. Testes: 2 de domínio + 4 de integração + 1 de tela.
 - **Dívidas conhecidas:** tabelas do Simples a conferir com o contador; a 6ª faixa e a anualização de
   RBT12 (ver ADR-0018); o PDV só avisa preço abaixo do mínimo de empate (etiqueta "abaixo do mínimo" na linha do
   cupom, depois do desconto); não bloqueia a venda e não é o painel de margem completo.

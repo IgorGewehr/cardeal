@@ -10,6 +10,7 @@ mod analise;
 mod estrutura;
 mod estrutura_importacao;
 mod fiscal;
+mod inventario;
 mod lote;
 mod precos;
 mod precos_defasados;
@@ -51,6 +52,7 @@ enum AbaEstoque {
     Lote,
     Analise,
     Rentabilidade,
+    Inventario,
     Radar,
 }
 
@@ -88,6 +90,7 @@ pub struct EstadoTelaEstoque {
     lote: lote::EstadoLote,
     analise: analise::EstadoAnalise,
     rent: rentabilidade::EstadoRentabilidade,
+    inv: inventario::EstadoInventarioUi,
     /// Perfil fiscal do produto aberto em "Editar": o que ele define e o vigente.
     fisc: fiscal::FormFiscal,
     fisc_efetivo: Vec<mod_estoque::fiscal::LinhaFiscal>,
@@ -262,6 +265,7 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
                 (AbaEstoque::Lote, "Alteração em lote"),
                 (AbaEstoque::Analise, "Análise"),
                 (AbaEstoque::Rentabilidade, "Rentabilidade"),
+                (AbaEstoque::Inventario, "Inventário"),
                 (AbaEstoque::Radar, "Radar de reposição"),
             ])
             .selecionada(estado.aba)
@@ -279,6 +283,9 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
                 }
                 if nova == AbaEstoque::Rentabilidade {
                     estado.rent.carregar(motor, sessao);
+                }
+                if nova == AbaEstoque::Inventario {
+                    estado.inv.carregar(motor, sessao);
                 }
             }
             ui.add_space(Espaco::E16);
@@ -299,6 +306,7 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
                 AbaEstoque::Lote => lote::aba(ui, motor, sessao, estado),
                 AbaEstoque::Analise => analise::aba(ui, motor, sessao, estado),
                 AbaEstoque::Rentabilidade => rentabilidade::aba(ui, motor, sessao, estado),
+                AbaEstoque::Inventario => inventario::aba(ui, motor, sessao, estado),
                 AbaEstoque::Radar => radar(ui, estado),
             }
         },

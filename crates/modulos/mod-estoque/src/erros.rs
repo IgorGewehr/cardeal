@@ -71,6 +71,14 @@ pub enum ErroEstoque {
         esperado: &'static str,
     },
 
+    /// Um local só pode ter um inventário aberto por vez.
+    #[error("Este local já tem um inventário em aberto: encerre ou cancele o atual antes")]
+    LocalJaEmInventario,
+
+    /// Contagem aberta sem nenhum produto para contar.
+    #[error("Não há nada para contar neste local (e grupo): nenhum produto com saldo registrado")]
+    InventarioSemItens,
+
     /// `EncerrarInventario` com itens ainda sem contagem.
     #[error("Ainda há {0} item(ns) sem contagem")]
     ContagensPendentes(usize),
@@ -122,6 +130,8 @@ impl ErroDominio for ErroEstoque {
             | Self::DescricaoDoAparelhoVazia => CodigoErro::ENTRADA_INVALIDA,
             Self::GtinInvalido => CodigoErro::DOCUMENTO_INVALIDO,
             Self::ProdutoSemGrade
+            | Self::LocalJaEmInventario
+            | Self::InventarioSemItens
             | Self::LocalIgual
             | Self::ReservaInsuficiente
             | Self::LoteDeOutroProduto => CodigoErro::REGRA_VIOLADA,

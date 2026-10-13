@@ -252,6 +252,42 @@ ALTER TABLE estoque_alteracao_lote_item ADD COLUMN antes_comissao INTEGER;
 ALTER TABLE estoque_alteracao_lote_item ADD COLUMN depois_comissao INTEGER;
 ";
 
+// Migração v11 (2026-10-13): inventário com contagem cega. Um local tem no máximo um
+// inventário aberto (índice parcial); a contagem guarda a foto do sistema, o contado e, depois
+// de encerrado, o valor do ajuste (ao custo médio).
+const SQL_INVENTARIO: &str = r"
+CREATE TABLE estoque_inventario (
+    id            BLOB PRIMARY KEY,
+    empresa       BLOB    NOT NULL,
+    local         BLOB    NOT NULL REFERENCES estoque_local(id),
+    descricao     TEXT    NOT NULL,
+    grupo         BLOB REFERENCES estoque_grupo_produto(id),
+    estado        TEXT    NOT NULL CHECK (estado IN
+                    ('Planejado','EmContagem','Congelado','Conferido','Encerrado','Cancelado')),
+    criado_por    BLOB    NOT NULL,
+    criado_em     INTEGER NOT NULL,
+    iniciado_em   INTEGER,
+    encerrado_em  INTEGER,
+    versao        INTEGER NOT NULL DEFAULT 1
+) STRICT;
+CREATE UNIQUE INDEX estoque_inventario_aberto_por_local ON estoque_inventario(local)
+    WHERE estado NOT IN ('Encerrado','Cancelado');
+CREATE INDEX estoque_inventario_recentes ON estoque_inventario(empresa, criado_em DESC);
+
+CREATE TABLE estoque_contagem_item (
+    id                  BLOB PRIMARY KEY,
+    inventario          BLOB    NOT NULL REFERENCES estoque_inventario(id),
+    produto             BLOB    NOT NULL REFERENCES estoque_produto(id),
+    quantidade_sistema  INTEGER NOT NULL,
+    quantidade_contada  INTEGER,
+    divergencia         INTEGER,
+    contado_por         BLOB,
+    contado_em          INTEGER,
+    valor_ajuste        INTEGER,
+    UNIQUE (inventario, produto)
+) STRICT;
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -311,6 +347,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 10,
         nome: "estoque_comissao_por_estrutura",
         sql: SQL_COMISSAO_POR_ESTRUTURA,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 11,
+        nome: "estoque_inventario",
+        sql: SQL_INVENTARIO,
         tipo: TipoMigracao::Esquema,
     },
 ];

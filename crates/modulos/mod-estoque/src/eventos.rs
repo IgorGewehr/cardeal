@@ -30,3 +30,24 @@ impl EventoDominio for AbaixoPontoPedido {
         Some(self.produto)
     }
 }
+
+/// Um inventário foi encerrado: os ajustes das diferenças já estão no saldo e no razão, e o
+/// local voltou a aceitar movimento (`docs/modulos/estoque.md` §8).
+#[derive(Debug, Serialize)]
+pub struct InventarioEncerrado {
+    /// O inventário.
+    pub inventario: Id,
+    /// O local contado.
+    pub local: Id,
+    /// Quantos produtos tiveram ajuste.
+    pub total_ajustes: u32,
+}
+
+#[cfg(feature = "sqlite")]
+impl EventoDominio for InventarioEncerrado {
+    const TIPO: &'static str = "estoque.inventario_encerrado.v1";
+
+    fn agregado(&self) -> Option<Id> {
+        Some(self.inventario)
+    }
+}

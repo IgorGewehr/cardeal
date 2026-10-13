@@ -29,6 +29,7 @@ mod desfazer_alteracao_em_lote;
 mod editar_detalhes_tecnicos_produto;
 mod importar_estrutura;
 mod importar_produtos;
+mod inventario;
 mod mover_grupo_produto;
 mod mover_produtos_de_grupo;
 mod registrar_aparelho_origem;
@@ -59,6 +60,10 @@ pub use desfazer_alteracao_em_lote::{AlteracaoDesfeita, DesfazerAlteracaoEmLote}
 pub use editar_detalhes_tecnicos_produto::EditarDetalhesTecnicosProduto;
 pub use importar_estrutura::{EstruturaImportada, ImportarEstrutura};
 pub use importar_produtos::{ImportarProdutos, ProdutosImportados};
+pub use inventario::{
+    CancelarInventario, ContagemIniciada, ContagemRegistrada, CriarInventario, EncerrarInventario,
+    IniciarContagem, InventarioCriado, InventarioEncerradoResumo, RegistrarContagem,
+};
 pub use mover_grupo_produto::MoverGrupoProduto;
 pub use mover_produtos_de_grupo::{MoverProdutosDeGrupo, ProdutosMovidos};
 pub use registrar_aparelho_origem::{AparelhoOrigemRegistrado, RegistrarAparelhoOrigem};
@@ -174,6 +179,8 @@ fn registrar_entrada_interna(
     ctx: &Ctx,
     uow: &mut UnidadeDeTrabalho,
 ) -> Resultado<EntradaGravada> {
+    // 0. Inventário em contagem trava o local (§11.4).
+    crate::repositorio_inventario::exigir_local_livre(uow.conexao(), dados.local)?;
     // 1. Carregar (ou criar) o saldo.
     let existente = RepositorioEstoque::novo(uow).buscar_saldo(dados.produto, dados.local)?;
     let saldo_e_novo = existente.is_none();
@@ -317,6 +324,8 @@ fn registrar_saida_interna(
     ctx: &Ctx,
     uow: &mut UnidadeDeTrabalho,
 ) -> Resultado<SaidaGravada> {
+    // 0. Inventário em contagem trava o local (§11.4).
+    crate::repositorio_inventario::exigir_local_livre(uow.conexao(), dados.local)?;
     // 1. Carregar.
     let existente = RepositorioEstoque::novo(uow).buscar_saldo(dados.produto, dados.local)?;
     let saldo_e_novo = existente.is_none();
