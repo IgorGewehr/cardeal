@@ -133,6 +133,18 @@ ALTER TABLE os_item_peca ADD COLUMN encomenda_previsao INTEGER;
 ALTER TABLE os_item_peca ADD COLUMN encomendada_em INTEGER;
 ";
 
+// Migração v9 (2026-10-13): o custo-hora da equipe técnica (o técnico é o usuário; o técnico
+// vazio guarda o padrão da oficina) — o que faltava para a mão de obra entrar nas margens.
+const SQL_CUSTO_HORA: &str = r"
+CREATE TABLE os_custo_hora (
+    empresa        BLOB    NOT NULL,
+    tecnico        BLOB    NOT NULL,
+    custo          INTEGER NOT NULL CHECK (custo > 0),
+    atualizado_em  INTEGER NOT NULL,
+    PRIMARY KEY (empresa, tecnico)
+) STRICT, WITHOUT ROWID;
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -180,6 +192,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 8,
         nome: "os_item_peca_encomenda",
         sql: SQL_ENCOMENDA,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 9,
+        nome: "os_custo_hora",
+        sql: SQL_CUSTO_HORA,
         tipo: TipoMigracao::Esquema,
     },
 ];

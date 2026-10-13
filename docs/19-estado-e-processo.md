@@ -30,9 +30,9 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   **rentabilidade por nível da árvore**, **seletor em árvore no cadastro**, **importação da estrutura por
   planilha**, **importação de produto por planilha** e **comissão por estrutura mercadológica** (2026-10-13)
   já estão feitos — a onda 4 fechou). Onda 5: **inventário com contagem cega**, **transferência entre locais**, **produto a partir da
-  nota com nome padronizado por dicionário** e **validade e perdas** feitos (2026-10-13); segue custo-hora do
-  técnico → ST/MVA no custo. A apuração mensal da comissão do vendedor (`vendas.ApurarComissao`) continua
-  pendente e agora tem o percentual por item pronto.
+  nota com nome padronizado por dicionário**, **validade e perdas** e **custo-hora do técnico** feitos
+  (2026-10-13); da onda 5 resta **ST/MVA no custo** (depende de conferência com o contador). A apuração mensal
+  da comissão do vendedor (`vendas.ApurarComissao`) continua pendente e agora tem o percentual por item pronto.
 - **Pendência de confiança:** as tabelas do Simples e as alíquotas precisam ser conferidas com o
   contador; ST/MVA ainda não entram no custo.
 
@@ -539,6 +539,13 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   lote gerado quando em branco em `registrar_entrada_com_lote`. Aba **Validade** no Estoque e cartão de alerta na
   aba Produtos. Pendentes: evento/marcação diária de `Vencido` (agendador), lote na confirmação da nota (`rastro`
   do XML) e FEFO na venda. Testes: 2 de integração + 1 de tela.
+- **Custo-hora do técnico (2026-10-13):** `mod_os::custo_hora` (tabela por técnico/usuário + padrão da oficina),
+  migração `os` v9, `os.definir_custo_hora.v1` (permissão nova `os.custo_hora.definir`) e `os.custos_hora.v1`.
+  A margem prevista da OS custeia a mão de obra (horas previstas ou apontadas × custo-hora); a margem real por OS
+  e por período desconta o tempo apontado (`custo_mao_de_obra`, `mao_de_obra_sem_custo`). Gerencial: o razão não
+  muda (a mão de obra própria é despesa de pessoal). Telas: "Custo-hora da equipe…" na OS, "Horas previstas" no
+  orçamento, mão de obra no diálogo de baixa e no cartão do Financeiro. Testes: 3 de domínio + 1 de integração + 1
+  de tela.
 - **Dívidas conhecidas:** tabelas do Simples a conferir com o contador; a 6ª faixa e a anualização de
   RBT12 (ver ADR-0018); o PDV só avisa preço abaixo do mínimo de empate (etiqueta "abaixo do mínimo" na linha do
   cupom, depois do desconto); não bloqueia a venda e não é o painel de margem completo.

@@ -9,6 +9,21 @@ pub(super) fn adicionar_mao_de_obra(
     estado: &mut EstadoTelaOs,
     os: Id,
 ) {
+    let horas = match estado.mao_de_obra_horas.trim() {
+        "" => None,
+        h => match Quantidade::de_str(h) {
+            Ok(q) if q.e_positiva() => Some(q),
+            _ => {
+                notificar(
+                    ctx,
+                    Notificacao::aviso(
+                        "Horas inválidas — use, por exemplo, 1,5 ou deixe em branco",
+                    ),
+                );
+                return;
+            }
+        },
+    };
     match estado.mao_de_obra_valor.parse::<Dinheiro>() {
         Ok(valor) => {
             let r = motor.executar(
@@ -20,7 +35,7 @@ pub(super) fn adicionar_mao_de_obra(
                         descricao: estado.mao_de_obra_descricao.clone(),
                         valor,
                         tecnico: sessao.usuario(),
-                        horas: None,
+                        horas,
                     },
                 },
             );
@@ -29,6 +44,7 @@ pub(super) fn adicionar_mao_de_obra(
                     let _: Id = id;
                     estado.mao_de_obra_descricao.clear();
                     estado.mao_de_obra_valor.clear();
+                    estado.mao_de_obra_horas.clear();
                     estado.abrir_detalhe(motor, sessao, os);
                     estado.dlg = Dlg::Detalhe;
                     notificar(ctx, Notificacao::sucesso("Mão de obra adicionada"));

@@ -128,10 +128,16 @@ pub(super) fn painel_visao(
                     Tom::Positivo
                 },
                 Some(&format!(
-                    "{} OS · receita {} · peças {}",
+                    "{} OS · receita {} · peças {} · mão de obra {}{}",
                     m.ordens,
                     m.receita.formatar_com_simbolo(),
-                    m.custo_pecas.formatar_com_simbolo()
+                    m.custo_pecas.formatar_com_simbolo(),
+                    m.custo_mao_de_obra.formatar_com_simbolo(),
+                    if m.mao_de_obra_sem_custo {
+                        " (há horas sem custo-hora)"
+                    } else {
+                        ""
+                    }
                 )),
             );
         }

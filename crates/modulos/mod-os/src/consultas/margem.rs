@@ -1,5 +1,11 @@
-//! Margem das OS: receita menos o custo das peças aplicadas — de um período (o cartão da
-//! Visão geral do Financeiro) e de uma OS só (o diálogo de baixa da parcela da OS).
+//! Margem das OS: receita menos o custo das peças aplicadas e da mão de obra apontada (horas ×
+//! custo-hora do técnico, ver [`crate::custo_hora`]) — de um período (o cartão da Visão geral do
+//! Financeiro), de uma OS só (o diálogo de baixa da parcela da OS) e a prevista no orçamento.
+
+#[cfg(feature = "sqlite")]
+use std::collections::HashMap;
+
+use crate::custo_hora::TabelaCustoHora;
 
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::Resultado;
@@ -14,10 +20,74 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "sqlite")]
 use super::{blob, id_de, itens_peca_da_ordem, persist};
 
-/// Receita, custo das peças e margem das OS faturadas num período — "quanto as OS deram de
-/// verdade no mês". A data é a do faturamento (o passo `Faturada` da linha do tempo); OS
-/// faturadas antes da linha do tempo existir ficam de fora. O custo é o das peças aplicadas e
-/// não estornadas (o mesmo CMV do lançamento de faturamento); mão de obra não tem custo aqui.
+/// O custo-hora da equipe da empresa (o padrão da oficina guarda o técnico vazio).
+///
+/// # Errors
+/// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+#[cfg(feature = "sqlite")]
+pub fn tabela_custo_hora(conexao: &Connection, empresa: Id) -> Resultado<TabelaCustoHora> {
+    let mut stmt = conexao
+        .prepare("SELECT tecnico, custo FROM os_custo_hora WHERE empresa = ?1")
+        .map_err(persist)?;
+    let linhas = stmt
+        .query_map([blob(empresa)], |r| {
+            Ok((r.get::<_, Vec<u8>>(0)?, Dinheiro::centavos(r.get(1)?)))
+        })
+        .map_err(persist)?;
+    let mut tabela = TabelaCustoHora::default();
+    for linha in linhas {
+        let (tecnico, custo) = linha.map_err(persist)?;
+        if tecnico.is_empty() {
+            tabela.padrao = Some(custo);
+        } else {
+            tabela.tecnicos.push((id_de(tecnico), custo));
+        }
+    }
+    Ok(tabela)
+}
+
+/// Os segundos apontados (encerrados) de cada técnico numa OS.
+#[cfg(feature = "sqlite")]
+fn segundos_por_tecnico(conexao: &Connection, ordem: Id) -> Resultado<HashMap<Id, i64>> {
+    let mut stmt = conexao
+        .prepare(
+            "SELECT tecnico, SUM(fim - inicio) FROM os_apontamento_tempo
+             WHERE ordem_servico = ?1 AND fim IS NOT NULL GROUP BY tecnico",
+        )
+        .map_err(persist)?;
+    let linhas = stmt
+        .query_map([blob(ordem)], |r| {
+            Ok((
+                id_de(r.get::<_, Vec<u8>>(0)?),
+                r.get::<_, i64>(1)? / 1_000_000,
+            ))
+        })
+        .map_err(persist)?;
+    linhas
+        .collect::<rusqlite::Result<HashMap<_, _>>>()
+        .map_err(persist)
+}
+
+/// O custo-hora da equipe: o padrão da oficina e o de cada técnico.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct CustosHora;
+
+impl Consulta for CustosHora {
+    type Saida = TabelaCustoHora;
+    const PERMISSAO: &'static str = "os.margem.ver";
+
+    #[cfg(feature = "sqlite")]
+    fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        tabela_custo_hora(conexao, ctx.empresa)
+    }
+}
+
+/// Receita, custo das peças e da mão de obra e margem das OS faturadas num período — "quanto
+/// as OS deram de verdade no mês". A data é a do faturamento (o passo `Faturada` da linha do
+/// tempo); OS faturadas antes da linha do tempo existir ficam de fora. O custo das peças é o
+/// das aplicadas e não estornadas (o mesmo CMV do lançamento de faturamento); o da mão de obra
+/// é o tempo apontado × custo-hora de cada técnico (técnico sem custo-hora não entra, e a
+/// consulta avisa).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct MargemDasOrdensNoPeriodo {
     /// O período (datas de faturamento).
@@ -33,13 +103,17 @@ pub struct MargemDasOrdens {
     pub receita: cardeal_kernel::Dinheiro,
     /// Soma do custo das peças aplicadas.
     pub custo_pecas: cardeal_kernel::Dinheiro,
+    /// Soma do custo da mão de obra apontada (horas × custo-hora).
+    pub custo_mao_de_obra: cardeal_kernel::Dinheiro,
+    /// Houve tempo apontado de técnico sem custo-hora (ficou fora do custo).
+    pub mao_de_obra_sem_custo: bool,
 }
 
 impl MargemDasOrdens {
-    /// Receita menos custo das peças.
+    /// Receita menos custo das peças e da mão de obra.
     #[must_use]
     pub fn margem(&self) -> cardeal_kernel::Dinheiro {
-        self.receita - self.custo_pecas
+        self.receita - self.custo_pecas - self.custo_mao_de_obra
     }
 }
 
@@ -75,6 +149,7 @@ impl Consulta for MargemDasOrdensNoPeriodo {
                 Ok((id_de(r.get::<_, Vec<u8>>(0)?), r.get::<_, i64>(1)?))
             })
             .map_err(persist)?;
+        let tabela = tabela_custo_hora(conexao, ctx.empresa)?;
         let mut m = MargemDasOrdens::default();
         for linha in linhas {
             let (id, total) = linha.map_err(persist)?;
@@ -83,6 +158,9 @@ impl Consulta for MargemDasOrdensNoPeriodo {
             for item in itens_peca_da_ordem(conexao, id)? {
                 m.custo_pecas += item.total_custo();
             }
+            let (custo, faltou) = tabela.custo_apontado(&segundos_por_tecnico(conexao, id)?);
+            m.custo_mao_de_obra += custo;
+            m.mao_de_obra_sem_custo |= faltou;
         }
         Ok(m)
     }
@@ -106,15 +184,19 @@ pub struct MargemDaOrdemServico {
     pub receita: Dinheiro,
     /// O custo das peças aplicadas.
     pub custo_pecas: Dinheiro,
+    /// O custo da mão de obra apontada (horas × custo-hora de cada técnico).
+    pub custo_mao_de_obra: Dinheiro,
+    /// Houve tempo apontado de técnico sem custo-hora (ficou fora do custo).
+    pub mao_de_obra_sem_custo: bool,
     /// Peças orçadas ainda não aplicadas (sem custo real ainda).
     pub pecas_pendentes: u32,
 }
 
 impl MargemDaOrdemServico {
-    /// Receita menos custo das peças.
+    /// Receita menos custo das peças e da mão de obra.
     #[must_use]
     pub fn margem(&self) -> Dinheiro {
-        self.receita - self.custo_pecas
+        self.receita - self.custo_pecas - self.custo_mao_de_obra
     }
 
     /// A margem em % da receita (inteiro, arredondado para baixo); `None` sem receita.
@@ -147,8 +229,13 @@ impl Consulta for MargemDaOrdem {
             numero: u64::try_from(numero).unwrap_or_default(),
             receita: Dinheiro::centavos(total),
             custo_pecas: Dinheiro::ZERO,
+            custo_mao_de_obra: Dinheiro::ZERO,
+            mao_de_obra_sem_custo: false,
             pecas_pendentes: 0,
         };
+        let tabela = tabela_custo_hora(conexao, ctx.empresa)?;
+        (m.custo_mao_de_obra, m.mao_de_obra_sem_custo) =
+            tabela.custo_apontado(&segundos_por_tecnico(conexao, self.ordem_servico)?);
         for item in itens_peca_da_ordem(conexao, self.ordem_servico)? {
             if item.estornada {
                 continue;
@@ -167,9 +254,10 @@ impl Consulta for MargemDaOrdem {
 /// aplicadas, senão ao custo médio de hoje) e a mão de obra, descontando operação, impostos,
 /// comissão e taxas com os mesmos percentuais do preço sugerido.
 ///
-/// A mão de obra entra na receita mas **sem custo**: o sistema ainda não conhece o custo-hora do
-/// técnico, e contá-la como lucro de 100% inflaria a margem. Fica de fora das margens e é contada
-/// à parte (`itens_sem_custo`), como no pedido de venda.
+/// A mão de obra custa **horas × custo-hora do técnico** (o dele, senão o padrão da oficina): as
+/// horas orçadas do item, ou, sem elas, o tempo que o técnico já apontou na OS. Sem horas ou
+/// sem custo-hora, ela entra na receita mas fica **fora das margens** (`itens_sem_custo`) —
+/// contá-la como lucro de 100% inflaria a margem.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct MargemPrevistaDaOrdem {
     /// A ordem de serviço.
@@ -256,14 +344,32 @@ impl Consulta for MargemPrevistaDaOrdem {
                 encargos: encargos_da_peca,
             });
         }
+        let tabela = tabela_custo_hora(conexao, ctx.empresa)?;
+        let apontado = segundos_por_tecnico(conexao, self.ordem_servico)?;
         for m in &maos {
-            itens.push(ItemDeMargem {
-                rotulo: m.descricao.clone(),
-                quantidade: cardeal_kernel::Quantidade::unidades(1),
-                receita: m.valor,
-                custo_unitario: None,
-                encargos: encargos.total(),
+            let horas = m.horas.filter(|h| h.e_positiva()).or_else(|| {
+                apontado
+                    .get(&m.tecnico)
+                    .map(|s| crate::custo_hora::horas_de(*s))
+                    .filter(|h| h.e_positiva())
             });
+            let item = match (horas, tabela.do_tecnico(m.tecnico)) {
+                (Some(horas), Some(custo_hora)) => ItemDeMargem {
+                    rotulo: m.descricao.clone(),
+                    quantidade: horas,
+                    receita: m.valor,
+                    custo_unitario: Some(custo_hora),
+                    encargos: encargos.total(),
+                },
+                _ => ItemDeMargem {
+                    rotulo: m.descricao.clone(),
+                    quantidade: cardeal_kernel::Quantidade::unidades(1),
+                    receita: m.valor,
+                    custo_unitario: None,
+                    encargos: encargos.total(),
+                },
+            };
+            itens.push(item);
         }
         let painel = painel_de_margem(&itens);
         let abaixo = painel
