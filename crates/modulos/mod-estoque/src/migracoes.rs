@@ -242,6 +242,16 @@ ALTER TABLE estoque_parametros_preco ADD COLUMN custo_referencia TEXT NOT NULL D
     CHECK (custo_referencia IN ('CustoMedio','UltimaCompra','MaiorDosDois'));
 ";
 
+// Migração v10 (2026-10-13): comissão de vendedor por estrutura mercadológica — o percentual
+// próprio do grupo e do produto (nulo = herda), como a margem, e o antes/depois na alteração em
+// lote. O padrão continua sendo `estoque_parametros_preco.comissao`.
+const SQL_COMISSAO_POR_ESTRUTURA: &str = r"
+ALTER TABLE estoque_grupo_produto ADD COLUMN comissao INTEGER;
+ALTER TABLE estoque_produto ADD COLUMN comissao INTEGER;
+ALTER TABLE estoque_alteracao_lote_item ADD COLUMN antes_comissao INTEGER;
+ALTER TABLE estoque_alteracao_lote_item ADD COLUMN depois_comissao INTEGER;
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -295,6 +305,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 9,
         nome: "estoque_custo_de_referencia",
         sql: SQL_CUSTO_DE_REFERENCIA,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 10,
+        nome: "estoque_comissao_por_estrutura",
+        sql: SQL_COMISSAO_POR_ESTRUTURA,
         tipo: TipoMigracao::Esquema,
     },
 ];

@@ -29,6 +29,18 @@ pub enum OrigemMargem {
     Nenhuma,
 }
 
+/// De onde veio a comissão usada no cálculo.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum OrigemComissao {
+    /// Definida no próprio produto.
+    Produto,
+    /// Herdada de um grupo (o nome do grupo que a definiu).
+    Grupo(String),
+    /// A comissão padrão da empresa (parâmetros de preço).
+    #[default]
+    Padrao,
+}
+
 /// Os parâmetros de preço da empresa da sessão.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct ParametrosDePreco;
@@ -60,6 +72,10 @@ pub struct SugestaoDePreco {
     pub margem: Option<Percentual>,
     /// De onde veio a margem.
     pub origem_margem: OrigemMargem,
+    /// A comissão de vendedor que incide sobre a venda deste produto.
+    pub comissao: Percentual,
+    /// De onde veio a comissão.
+    pub origem_comissao: OrigemComissao,
     /// O perfil fiscal herdado.
     pub perfil_fiscal: PerfilFiscal,
     /// Faturamento dos últimos 12 meses (base da faixa do Simples).
@@ -167,6 +183,8 @@ struct LinhaProduto {
     nome: String,
     grupo: Id,
     margem: Option<Percentual>,
+    /// A comissão própria do produto (vazio = herda).
+    comissao: Option<Percentual>,
     custo: Preco,
     /// O custo da entrada mais recente, se houver.
     ultima_compra: Option<Preco>,
@@ -191,7 +209,8 @@ fn linha_do_produto(
                     (SELECT m.custo_unitario FROM estoque_movimento m
                       WHERE m.produto = p.id AND m.empresa = ?2 AND m.tipo = 'Entrada'
                         AND m.custo_unitario IS NOT NULL AND m.custo_unitario > 0
-                      ORDER BY m.criado_em DESC, m.id DESC LIMIT 1)
+                      ORDER BY m.criado_em DESC, m.id DESC LIMIT 1),
+                    p.comissao
              FROM estoque_produto p
              WHERE p.empresa = ?1 AND p.ativo = 1
              ORDER BY p.nome ASC, p.id ASC",
@@ -211,6 +230,7 @@ fn linha_do_produto(
                     ),
                     custo: Preco::interna(r.get::<_, i64>(5)?),
                     ultima_compra: r.get::<_, Option<i64>>(6)?.map(Preco::interna),
+                    comissao: r.get::<_, Option<i64>>(7)?.map(Percentual::unidades),
                 })
             },
         )
@@ -287,6 +307,21 @@ impl BaseDePreco {
         }
     }
 
+    /// A comissão do produto, herdando do grupo mais próximo e, no fim, do padrão da empresa.
+    fn comissao(&self, produto: Option<Percentual>, grupo: Id) -> (Percentual, OrigemComissao) {
+        if let Some(c) = produto {
+            return (c, OrigemComissao::Produto);
+        }
+        for g in self.arvore.ancestrais(grupo) {
+            if let Some(p) = self.perfil(g) {
+                if let Some(c) = p.comissao {
+                    return (c, OrigemComissao::Grupo(p.nome.clone()));
+                }
+            }
+        }
+        (self.parametros.comissao, OrigemComissao::Padrao)
+    }
+
     fn perfil_fiscal(&self, grupo: Id) -> PerfilFiscal {
         let mut perfil = PerfilFiscal::default();
         let (mut st, mut mono) = (None, None);
@@ -332,6 +367,7 @@ impl BaseDePreco {
             None => custo_calculado,
         };
         let (margem, origem_margem) = self.margem(l.margem, l.grupo);
+        let (comissao, origem_comissao) = self.comissao(l.comissao, l.grupo);
         let perfil_fiscal = self.perfil_fiscal(l.grupo);
         let fiscal = self.fiscal_efetivo(l);
         let carga = carga_do_produto(self.parametros.regime, self.rbt12, perfil_fiscal, &fiscal);
@@ -351,6 +387,8 @@ impl BaseDePreco {
             custo_origem,
             margem,
             origem_margem,
+            comissao,
+            origem_comissao,
             perfil_fiscal,
             rbt12: self.rbt12,
             custo_operacional: opex,
@@ -379,7 +417,7 @@ impl BaseDePreco {
             custo_operacional: opex,
             margem_liquida: margem,
             imposto,
-            comissao: self.parametros.comissao,
+            comissao,
             taxa_pagamento: self.parametros.taxa_pagamento,
         };
         s.componentes = Some(componentes);
@@ -405,7 +443,8 @@ pub struct EncargosDaEmpresa {
     pub custo_operacional: Percentual,
     /// Imposto sobre a venda do regime, sem perfil fiscal especial de produto.
     pub imposto: Percentual,
-    /// Comissão média.
+    /// A comissão padrão (a de cada produto pode ser outra: ver
+    /// [`SugestaoDePreco::comissao`]).
     pub comissao: Percentual,
     /// Taxa média de pagamento.
     pub taxa_pagamento: Percentual,

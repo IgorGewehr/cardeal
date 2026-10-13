@@ -11,8 +11,8 @@ use mod_estoque::precificacao::{
     AnexoSimples, ArredondamentoDePreco, OrigemDaCarga, RegimeImposto,
 };
 use mod_estoque::{
-    CustoDeReferencia, DefinirParametrosPreco, OrigemMargem, ParametrosDePreco, ParametrosPreco,
-    PrecosSugeridosDoGrupo, SugestaoDePreco,
+    CustoDeReferencia, DefinirParametrosPreco, OrigemComissao, OrigemMargem, ParametrosDePreco,
+    ParametrosPreco, PrecosSugeridosDoGrupo, SugestaoDePreco,
 };
 use mod_vendas::{
     AplicarPrecosSugeridos, PrecosAplicados, TabelaPreco, TabelasDePreco, TipoTabela,
@@ -279,7 +279,7 @@ fn parametros(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Es
     ui.add_space(Espaco::E12);
     ui.columns(3, |c| {
         c[0].add(Campo::novo("Custo operacional (%)", &mut e.opex));
-        c[1].add(Campo::novo("Comissão média (%)", &mut e.comissao));
+        c[1].add(Campo::novo("Comissão padrão (%)", &mut e.comissao));
         c[2].add(Campo::novo("Taxa de cartão/PIX (%)", &mut e.taxa));
     });
     ui.add_space(Espaco::E8);
@@ -382,6 +382,7 @@ fn tabela(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estado
         ColunaGrade::nova("Custo").largura(100.0).numero(),
         ColunaGrade::nova("Margem").largura(150.0),
         ColunaGrade::nova("Imposto").largura(150.0),
+        ColunaGrade::nova("Comissão").largura(130.0),
         ColunaGrade::nova("Preço mínimo").largura(120.0).numero(),
         ColunaGrade::nova("Preço sugerido").largura(130.0).numero(),
         ColunaGrade::nova("Situação").largura(260.0),
@@ -416,6 +417,14 @@ fn tabela(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estado
                     ui.add(Etiqueta::info("do produto"));
                 }
             });
+        });
+        row.col(|ui| {
+            let de = match &s.origem_comissao {
+                OrigemComissao::Produto => "do produto".to_owned(),
+                OrigemComissao::Grupo(g) => format!("de {g}"),
+                OrigemComissao::Padrao => "padrão".to_owned(),
+            };
+            ui.add(Rotulo::interface(format!("{}% {de}", pct(s.comissao))));
         });
         row.col(|ui| celula(ui, s.minimo.map(|m| m.preco)));
         row.col(|ui| celula(ui, s.sugerido.map(|m| m.preco)));

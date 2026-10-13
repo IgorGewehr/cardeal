@@ -28,6 +28,9 @@ pub(super) struct EstadoLote {
     /// 0 = manter, 1 = definir, 2 = voltar a herdar.
     pub(super) margem_modo: u8,
     pub(super) margem: String,
+    /// 0 = manter, 1 = definir, 2 = voltar a herdar.
+    pub(super) comissao_modo: u8,
+    pub(super) comissao: String,
     grupo_destino: Option<Id>,
     /// 0 = manter, 1 = ativar, 2 = desativar.
     ativo_modo: u8,
@@ -121,6 +124,14 @@ impl EstadoLote {
             2 => Mudanca::Definir(None),
             _ => Mudanca::Manter,
         };
+        let comissao = match self.comissao_modo {
+            1 => Mudanca::Definir(Some(
+                Percentual::de_str(self.comissao.trim())
+                    .map_err(|_| "Comissão: digite um número, como 3 ou 2,5".to_owned())?,
+            )),
+            2 => Mudanca::Definir(None),
+            _ => Mudanca::Manter,
+        };
         let ncm = match self.ncm_novo.trim() {
             "" => Mudanca::Manter,
             n => Mudanca::Definir(n.to_owned()),
@@ -132,6 +143,7 @@ impl EstadoLote {
         };
         let a = Alteracao {
             margem,
+            comissao,
             grupo: self.grupo_destino.map_or(Mudanca::Manter, Mudanca::Definir),
             ativo: match self.ativo_modo {
                 1 => Mudanca::Definir(true),
@@ -142,7 +154,10 @@ impl EstadoLote {
             fiscal,
         };
         if a.e_vazia() {
-            Err("Escolha o que mudar: margem, grupo, situação, NCM ou dados fiscais.".to_owned())
+            Err(
+                "Escolha o que mudar: margem, comissão, grupo, situação, NCM ou dados fiscais."
+                    .to_owned(),
+            )
         } else {
             a.validar()?;
             Ok(a)
@@ -168,6 +183,11 @@ impl EstadoLote {
         match a.margem {
             Mudanca::Definir(Some(m)) => partes.push(format!("margem {}%", m.formatar(1))),
             Mudanca::Definir(None) => partes.push("margem volta a ser herdada".to_owned()),
+            Mudanca::Manter => {}
+        }
+        match a.comissao {
+            Mudanca::Definir(Some(c)) => partes.push(format!("comissão {}%", c.formatar(1))),
+            Mudanca::Definir(None) => partes.push("comissão volta a ser herdada".to_owned()),
             Mudanca::Manter => {}
         }
         if let Mudanca::Definir(g) = a.grupo {
@@ -277,6 +297,7 @@ fn escolha(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estad
         ColunaGrade::nova("Fabricante").largura(140.0),
         ColunaGrade::nova("Custo").largura(100.0).numero(),
         ColunaGrade::nova("Margem").largura(90.0),
+        ColunaGrade::nova("Comissão").largura(90.0),
         ColunaGrade::nova("Fiscal").largura(90.0),
         ColunaGrade::nova("Situação").largura(90.0),
     ])
@@ -316,6 +337,9 @@ fn escolha(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estad
         });
         row.col(|ui| {
             ui.add(Rotulo::interface(texto_margem(p.margem)));
+        });
+        row.col(|ui| {
+            ui.add(Rotulo::interface(texto_margem(p.comissao)));
         });
         row.col(|ui| {
             if p.tem_perfil_fiscal_proprio {
@@ -419,6 +443,24 @@ fn mudanca(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estad
     if l.margem_modo == 1 {
         ui.add_space(Espaco::E4);
         ui.add(Campo::novo("Nova margem (%)", &mut l.margem).marcador("ex.: 25"));
+    }
+    ui.add_space(Espaco::E8);
+    ui.add(Rotulo::campo("Comissão de vendedor"));
+    if let Some(m) = Abas::nova(&[
+        (0_u8, "Manter"),
+        (1, "Definir"),
+        (2, "Voltar a herdar do grupo"),
+    ])
+    .selecionada(l.comissao_modo)
+    .id_salt("lote-comissao")
+    .mostrar(ui)
+    {
+        l.comissao_modo = m;
+        l.previa = None;
+    }
+    if l.comissao_modo == 1 {
+        ui.add_space(Espaco::E4);
+        ui.add(Campo::novo("Nova comissão (%)", &mut l.comissao).marcador("ex.: 3"));
     }
     ui.add_space(Espaco::E8);
     ui.columns(2, |c| {
@@ -525,6 +567,13 @@ fn celula_valores(
             "margem {} → {}",
             texto_margem(antes.margem),
             texto_margem(depois.margem)
+        ));
+    }
+    if antes.comissao != depois.comissao {
+        partes.push(format!(
+            "comissão {} → {}",
+            texto_margem(antes.comissao),
+            texto_margem(depois.comissao)
         ));
     }
     if antes.grupo != depois.grupo {

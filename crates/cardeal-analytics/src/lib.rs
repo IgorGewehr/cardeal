@@ -6,6 +6,6 @@
 pub mod rentabilidade;
 
 pub use rentabilidade::{
-    calcular, CustoDoProduto, NoDaEstrutura, NoDeRentabilidade, ProdutoDaEstrutura,
-    ProdutoRentavel, ReceitaDoProduto, Rentabilidade, Totais,
+    calcular, CustoDoProduto, EncargosDaVenda, NoDaEstrutura, NoDeRentabilidade,
+    ProdutoDaEstrutura, ProdutoRentavel, ReceitaDoProduto, Rentabilidade, Totais,
 };

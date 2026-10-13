@@ -54,6 +54,8 @@ impl Modulo for ModuloEstoque {
             .comando::<MoverProdutosDeGrupo>("estoque.mover_produtos_de_grupo.v1")
             .comando::<DefinirMargemDoGrupo>("estoque.definir_margem_do_grupo.v1")
             .comando::<DefinirMargemDoProduto>("estoque.definir_margem_do_produto.v1")
+            .comando::<crate::DefinirComissaoDoGrupo>("estoque.definir_comissao_do_grupo.v1")
+            .comando::<crate::DefinirComissaoDoProduto>("estoque.definir_comissao_do_produto.v1")
             .comando::<DefinirPerfilFiscalDoGrupo>("estoque.definir_perfil_fiscal_do_grupo.v1")
             .comando::<DefinirParametrosPreco>("estoque.definir_parametros_preco.v1")
             .comando::<DefinirCamposFiscaisDoGrupo>("estoque.definir_campos_fiscais_do_grupo.v1")

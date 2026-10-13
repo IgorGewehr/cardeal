@@ -12,7 +12,10 @@
 //! - **Custo sem receita é ignorado**: só entra quem vendeu (ou foi entregue em garantia, com
 //!   receita zero) no período; uma peça aplicada em OS ainda não faturada não pesa no resultado.
 //! - **Margem líquida estimada** = receita × (1 − encargos) − custo, com os encargos atuais da
-//!   empresa (operação, imposto, comissão e taxas). É uma estimativa: usa os percentuais de hoje.
+//!   empresa (operação, imposto e taxas) e a **comissão de cada produto** (a própria, a do grupo
+//!   mais próximo ou a padrão — comissão por estrutura). É uma estimativa: usa os percentuais de
+//!   hoje. Num nó, a receita é somada por percentual de encargos e cada soma é descontada uma
+//!   vez: com a mesma comissão em tudo, o resultado é idêntico ao de um percentual único.
 //! - Divisão por zero não existe: sem receita (ou sem receita com custo) o percentual é `None`.
 
 use std::collections::HashMap;
@@ -67,6 +70,36 @@ pub struct ProdutoDaEstrutura {
     pub nome: String,
     /// O grupo (o nó mais específico).
     pub grupo: Id,
+    /// A comissão de vendedor que incide sobre a venda deste produto; `None` = a padrão.
+    pub comissao: Option<Percentual>,
+}
+
+/// Os encargos sobre a venda: o total de hoje (operação, imposto, taxas e a comissão padrão) e
+/// qual é a comissão padrão, para trocá-la pela de cada produto.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct EncargosDaVenda {
+    /// Tudo que incide sobre a receita, com a comissão padrão.
+    pub total: Percentual,
+    /// A comissão padrão contida em `total`.
+    pub comissao_padrao: Percentual,
+}
+
+impl EncargosDaVenda {
+    /// Os encargos de um produto: o total com a comissão dele no lugar da padrão.
+    #[must_use]
+    pub fn do_produto(&self, comissao: Option<Percentual>) -> Percentual {
+        comissao.map_or(self.total, |c| self.total - self.comissao_padrao + c)
+    }
+}
+
+/// Um percentual único: todos os produtos com os mesmos encargos.
+impl From<Percentual> for EncargosDaVenda {
+    fn from(total: Percentual) -> Self {
+        Self {
+            total,
+            comissao_padrao: Percentual::ZERO,
+        }
+    }
 }
 
 /// Os números de um produto no período.
@@ -169,10 +202,12 @@ pub struct Rentabilidade {
     pub total: Totais,
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Default)]
 struct Acumulado {
     receita: Dinheiro,
     receita_com_custo: Dinheiro,
+    /// A receita com custo, somada por percentual de encargos.
+    por_encargos: Vec<(Percentual, Dinheiro)>,
     custo: Dinheiro,
     receita_propria: Dinheiro,
     custo_proprio: Dinheiro,
@@ -187,10 +222,31 @@ struct Medidas {
     margem_liquida_pct: Option<Percentual>,
 }
 
-fn medidas(receita_com_custo: Dinheiro, custo: Dinheiro, encargos: Percentual) -> Medidas {
+impl Acumulado {
+    fn somar_encargos(&mut self, encargos: Percentual, receita: Dinheiro) {
+        match self.por_encargos.iter_mut().find(|(p, _)| *p == encargos) {
+            Some((_, r)) => *r += receita,
+            None => self.por_encargos.push((encargos, receita)),
+        }
+    }
+
+    fn medidas(&self) -> Medidas {
+        medidas(self.receita_com_custo, self.custo, &self.por_encargos)
+    }
+}
+
+/// `por_encargos` reparte `receita_com_custo` pelos percentuais de encargos que incidem nela.
+fn medidas(
+    receita_com_custo: Dinheiro,
+    custo: Dinheiro,
+    por_encargos: &[(Percentual, Dinheiro)],
+) -> Medidas {
     let bruta = receita_com_custo - custo;
-    let liquida =
-        receita_com_custo.aplicar(encargos.complemento(), Arredondamento::MeioAcima) - custo;
+    let liquida = por_encargos
+        .iter()
+        .map(|(p, r)| r.aplicar(p.complemento(), Arredondamento::MeioAcima))
+        .fold(Dinheiro::ZERO, |a, b| a + b)
+        - custo;
     let base = receita_com_custo.em_centavos();
     let pct = |parte: Dinheiro| (base > 0).then(|| Percentual::da_razao(parte.em_centavos(), base));
     Medidas {
@@ -203,16 +259,18 @@ fn medidas(receita_com_custo: Dinheiro, custo: Dinheiro, encargos: Percentual) -
 
 /// Junta árvore, mapa produto → grupo, receita e custo e devolve a rentabilidade.
 ///
-/// `encargos` é o total dos percentuais que incidem sobre a venda (operação, imposto, comissão,
-/// taxas) — a margem líquida é **estimada** com eles.
+/// `encargos` são os percentuais que incidem sobre a venda (operação, imposto, comissão, taxas)
+/// — a margem líquida é **estimada** com eles, trocando a comissão padrão pela de cada produto.
+/// Um `Percentual` serve quando todos os produtos têm os mesmos encargos.
 #[must_use]
 pub fn calcular(
     nos: &[NoDaEstrutura],
     produtos: &[ProdutoDaEstrutura],
     receitas: &[ReceitaDoProduto],
     custos: &[CustoDoProduto],
-    encargos: Percentual,
+    encargos: impl Into<EncargosDaVenda>,
 ) -> Rentabilidade {
+    let encargos: EncargosDaVenda = encargos.into();
     let mut vendido: HashMap<Id, (Quantidade, Dinheiro)> = HashMap::new();
     for r in receitas {
         let e = vendido
@@ -240,7 +298,8 @@ pub fn calcular(
             .filter(|c| c.e_positivo());
         let info = mapa.get(&produto);
         let grupo = info.map(|p| p.grupo).filter(|g| indice.contains_key(g));
-        let medida = custo.map(|c| medidas(receita, c, encargos));
+        let encargos_do_produto = encargos.do_produto(info.and_then(|p| p.comissao));
+        let medida = custo.map(|c| medidas(receita, c, &[(encargos_do_produto, receita)]));
         linhas.push(ProdutoRentavel {
             produto,
             nome: info.map(|p| p.nome.clone()).unwrap_or_default(),
@@ -260,6 +319,7 @@ pub fn calcular(
             match custo {
                 Some(c) => {
                     a.receita_com_custo += receita;
+                    a.somar_encargos(encargos_do_produto, receita);
                     a.custo += c;
                 }
                 None => a.sem_custo += 1,
@@ -301,7 +361,7 @@ pub fn calcular(
         .iter()
         .zip(&acum)
         .map(|(n, a)| {
-            let m = medidas(a.receita_com_custo, a.custo, encargos);
+            let m = a.medidas();
             NoDeRentabilidade {
                 id: n.id,
                 pai: n.pai,
@@ -328,7 +388,7 @@ pub fn calcular(
         })
         .collect();
 
-    let m = medidas(total.receita_com_custo, total.custo, encargos);
+    let m = total.medidas();
     Rentabilidade {
         nos: nos_saida,
         produtos: linhas,
@@ -366,6 +426,7 @@ mod testes {
             produto,
             nome: nome.to_owned(),
             grupo,
+            comissao: None,
         }
     }
 
@@ -550,6 +611,50 @@ mod testes {
         assert_eq!(a.margem_liquida_estimada, Dinheiro::reais(25));
         assert_eq!(a.margem_liquida_pct, Some(Percentual::pontos(25)));
         assert_eq!(r.total.margem_liquida_estimada, Dinheiro::reais(25));
+    }
+
+    #[test]
+    fn comissao_por_estrutura_troca_a_padrao_pela_do_produto() {
+        let mut c = cenario();
+        // Encargos de 15% com 5% de comissão padrão; o produto de B tem 10% de comissão.
+        c.produtos[2].comissao = Some(Percentual::pontos(10));
+        let encargos = EncargosDaVenda {
+            total: Percentual::pontos(15),
+            comissao_padrao: Percentual::pontos(5),
+        };
+        let r = calcular(
+            &c.nos,
+            &c.produtos,
+            &[rec(c.p_a, 1, 100), rec(c.p_b, 1, 100)],
+            &[cus(c.p_a, 1, 60), cus(c.p_b, 1, 60)],
+            encargos,
+        );
+        // A: 100 × 85% − 60 = 25. B: 100 × 80% − 60 = 20. Raiz: as duas somas.
+        assert_eq!(do_no(&r, c.a).margem_liquida_estimada, Dinheiro::reais(25));
+        assert_eq!(do_no(&r, c.b).margem_liquida_estimada, Dinheiro::reais(20));
+        assert_eq!(
+            do_no(&r, c.raiz).margem_liquida_estimada,
+            Dinheiro::reais(45)
+        );
+        assert_eq!(r.total.margem_liquida_estimada, Dinheiro::reais(45));
+        let em_b = r.produtos.iter().find(|p| p.produto == c.p_b).unwrap();
+        assert_eq!(em_b.margem_liquida_pct, Some(Percentual::pontos(20)));
+
+        // Sem comissão própria em ninguém, o resultado é o de um percentual único.
+        let c = cenario();
+        let entrada = (
+            [rec(c.p_a, 3, 333), rec(c.p_b, 7, 777)],
+            [cus(c.p_a, 3, 100), cus(c.p_b, 7, 300)],
+        );
+        let por_estrutura = calcular(&c.nos, &c.produtos, &entrada.0, &entrada.1, encargos);
+        let unico = calcular(
+            &c.nos,
+            &c.produtos,
+            &entrada.0,
+            &entrada.1,
+            Percentual::pontos(15),
+        );
+        assert_eq!(por_estrutura, unico);
     }
 
     #[test]

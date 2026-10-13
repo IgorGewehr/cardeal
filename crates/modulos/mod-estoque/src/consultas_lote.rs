@@ -24,6 +24,8 @@ pub struct ProdutoParaLote {
     pub grupo: Id,
     /// A margem própria (`None` = herda).
     pub margem: Option<Percentual>,
+    /// A comissão própria (`None` = herda).
+    pub comissao: Option<Percentual>,
     /// Ativo.
     pub ativo: bool,
     /// O NCM.
@@ -85,6 +87,7 @@ impl Consulta for ProdutosParaLote {
             nome: p.nome,
             grupo: p.valores.grupo,
             margem: p.valores.margem,
+            comissao: p.valores.comissao,
             ativo: p.valores.ativo,
             tem_perfil_fiscal_proprio: !p.valores.fiscal.e_vazio(),
             ncm: p.valores.ncm,

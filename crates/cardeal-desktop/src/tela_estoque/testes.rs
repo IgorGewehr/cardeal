@@ -828,3 +828,87 @@ fn importar_produtos_o_modelo_entra_inteiro_e_so_ao_confirmar() {
         "o diálogo volta limpo"
     );
 }
+
+#[test]
+fn comissao_do_grupo_aparece_herdada_no_subgrupo_e_na_grade_de_precos() {
+    use mod_estoque::{DefinirComissaoDoGrupo, OrigemComissao};
+    let t = motor_de_teste();
+    let a = grupo(&t.motor, &t.sessao, "A", None);
+    let b = grupo(&t.motor, &t.sessao, "B", Some(a));
+    t.motor
+        .executar(
+            &t.sessao,
+            "estoque.definir_comissao_do_grupo.v1",
+            &DefinirComissaoDoGrupo {
+                grupo: a,
+                comissao: Some(Percentual::pontos(4)),
+            },
+        )
+        .expect("comissão");
+
+    let mut estado = EstadoTelaEstoque::default();
+    estado.carregar(&t.motor, &t.sessao);
+    let (c, de) = estado.est.comissao_herdada(b).expect("herdada");
+    assert_eq!((c, de.as_str()), (Percentual::pontos(4), "A"));
+    assert!(estado.est.comissao_herdada(a).is_none());
+    estado.est.selecionar(a);
+    assert_eq!(estado.est.comissao, "4,00", "o formulário mostra a própria");
+
+    // O detalhe do grupo desenha os blocos de margem e comissão num quadro de verdade.
+    estado.aba = AbaEstoque::Estrutura;
+    let ctx = egui::Context::default();
+    cardeal_ui::tokens::instalar_fontes(&ctx);
+    cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+    for _ in 0..2 {
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                mostrar(ui, &t.motor, &t.sessao, &mut estado);
+            });
+        });
+    }
+
+    // Um produto em B herda a comissão de A no preço sugerido.
+    let un: UnidadeCriada = t
+        .motor
+        .executar(
+            &t.sessao,
+            "estoque.criar_unidade.v1",
+            &CriarUnidade {
+                sigla: "UN".into(),
+                nome: "Unidade".into(),
+                fracionavel: false,
+            },
+        )
+        .or_else(|_| {
+            let u: Vec<ItemUnidade> = t
+                .motor
+                .consultar(&t.sessao, "estoque.unidades.v1", &Unidades)
+                .expect("unidades");
+            Ok::<_, cardeal_kernel::Erro>(UnidadeCriada { unidade: u[0].id })
+        })
+        .expect("unidade");
+    let _: ProdutoCriado = t
+        .motor
+        .executar(
+            &t.sessao,
+            "estoque.criar_produto.v1",
+            &CriarProduto {
+                grupo_produto: b,
+                nome: "Produto em B".into(),
+                ncm: String::new(),
+                unidade_padrao: un.unidade,
+                codigo_barras: None,
+                detalhes_tecnicos: None,
+            },
+        )
+        .expect("produto");
+    estado.prc.carregar(&t.motor, &t.sessao);
+    let s = estado
+        .prc
+        .sugestoes
+        .iter()
+        .find(|s| s.nome == "Produto em B")
+        .expect("na grade de preços");
+    assert_eq!(s.comissao, Percentual::pontos(4));
+    assert_eq!(s.origem_comissao, OrigemComissao::Grupo("A".into()));
+}

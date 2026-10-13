@@ -202,6 +202,19 @@ margem: produto → grupo mais próximo acima → `ParametrosPreco.margem_padrao
 (a consulta devolve o problema em português, nunca um número inventado). Perfil fiscal: o valor
 não-nulo do grupo mais próximo; sem nenhum, falso.
 
+**Comissão por estrutura (2026-10-13, migração `estoque` v10).** Grupo e produto têm `comissao` própria
+(`NULL = herda`), resolvida como a margem: produto → grupo mais próximo acima →
+`ParametrosPreco.comissao` (a **comissão padrão** da empresa, que antes era "média" e valia para tudo).
+`SugestaoDePreco` traz `comissao` e `origem_comissao` (`Produto` / `Grupo(nome)` / `Padrao`), e o
+divisor do markup usa a comissão do produto. A mesma comissão vale nos painéis de margem do pedido
+(`vendas.margem_do_pedido.v1`) e da OS (`os.margem_prevista_da_ordem.v1`, imposto e comissão da peça;
+operação e taxa da empresa) e na rentabilidade por nível (abaixo). Edição: aba Estrutura ("Comissão de
+vendedor" no detalhe do grupo, com "Voltar a herdar"), alteração em lote (campo "Comissão de vendedor",
+com antes/depois e desfazer) e a coluna `Comissão` da importação de produtos. A grade de Preços mostra
+a comissão de cada produto e de onde ela vem. **Ainda não existe** a apuração da comissão do vendedor
+(`vendas.ApurarComissao`): o percentual de cada item já está definido, falta o processo mensal que o
+aplica sobre o que cada vendedor faturou.
+
 **Parâmetros por CNPJ (`estoque_parametros_preco`).** Regime (`Mei` / `Simples` + anexo I–V /
 `Manual` com percentual informado), custo operacional (informado ou derivado do Razão), comissão,
 taxa de pagamento, margem padrão, margem mínima e "preço sugerido obrigatório no PDV". Sem linha
@@ -287,6 +300,7 @@ stateDiagram-v2
 | `MoverGrupoProduto` ✅ (2026-10-09) | `estoque.produto.editar` | Médio | Muda um grupo (com a subárvore) de lugar; `novo_pai: None` promove à raiz | 5º nível, ciclo, grupo inexistente |
 | `MoverProdutosDeGrupo` ✅ (2026-10-09) | `estoque.produto.editar` | Médio | Passa vários produtos para outro grupo; tudo-ou-nada (produto inexistente desfaz o lote) | grupo/produto inexistente |
 | `DefinirMargemDoGrupo` / `DefinirMargemDoProduto` ✅ (2026-10-09) | `estoque.produto.editar` | Médio | Define ou limpa (`None` = herda) a margem líquida desejada | margem fora de 0%..100% (100% exclusive) |
+| `DefinirComissaoDoGrupo` / `DefinirComissaoDoProduto` ✅ (2026-10-13, `estoque.definir_comissao_do_grupo.v1` / `…_do_produto.v1`) | `estoque.produto.editar` | Médio | Define ou limpa (`None` = herda) a comissão de vendedor própria — comissão por estrutura | `FORA_DA_FAIXA` (fora de 0%..100%, 100% exclusive) |
 | `DefinirPerfilFiscalDoGrupo` ✅ (2026-10-09) | `estoque.tributario.editar` | Alto | ICMS-ST e monofásico do grupo (`None` herda) | — |
 | `AplicarPrecosSugeridos` ✅ (2026-10-09; **em `mod-vendas`**, `vendas.aplicar_precos_sugeridos.v1`) | `vendas.tabela_preco.editar` | Médio | Leva o preço sugerido (arredondado para cima: nenhum, final ,90 ou real inteiro) à tabela de venda/atacado: atualiza a regra permanente do produto ou cria uma; produto sem custo/margem volta em `ignorados` com o motivo. Pedidos já feitos não mudam (preço congelado no item) | tabela inexistente, promocional ou inativa |
 | `AplicarAlteracaoEmLote` / `DesfazerAlteracaoEmLote` ✅ (2026-10-09) | `estoque.produto.editar` | Alto | Margem, grupo e situação de até 5.000 produtos de uma vez, guardando antes e depois de cada um (`estoque_alteracao_lote*`). Tudo-ou-nada; a consulta `PreviaDaAlteracaoEmLote` mostra o resultado sem gravar; desfazer só vale para a última alteração não desfeita, em até 24h, e restaura apenas produtos ainda como a alteração os deixou | produto/grupo inexistente, margem fora de 0..100%, nada mudaria, prazo vencido, não é a última |
@@ -376,6 +390,7 @@ qualquer ordem, sem caixa/acento/espaço/pontuação. Só `Nome` (ou `Produto`/`
 | `Código de barras` (`EAN`, `GTIN`, `Cód. barras`) | GTIN validado pelo dígito verificador |
 | `NCM` | 8 dígitos, com ou sem máscara; vazio fica pendente |
 | `Margem` (`Margem desejada`, `Margem líquida`) | A margem própria do produto (0% a 100%, exclusive) |
+| `Comissão` (`Comissão de vendedor`) | A comissão própria do produto (0% a 100%, exclusive) — exige `estoque.produto.editar`, como a margem |
 | `Ponto de pedido`, `Estoque mínimo` (`Mínimo`), `Estoque máximo` (`Máximo`) | Os parâmetros de reposição (mínimo ≤ máximo) |
 | `Fabricante` (`Marca`), `Código do fabricante` (`MPN`, `Referência`), `Localização` (`Prateleira`) | Os detalhes técnicos |
 | `Estoque` (`Estoque inicial`, `Quantidade`, `Saldo`) + `Custo` (`Custo unitário`, `Preço de custo`) + `Local` (`Depósito`) | O estoque inicial: uma entrada (`registrar_entrada_comum`) com esse custo. Sem `Local`, vale o único local do CNPJ; com mais de um, a coluna é exigida |
@@ -430,8 +445,11 @@ Regras (testadas no domínio):
 
 Limitações conhecidas: o custo vem das **saídas do período** e a receita do **faturamento** do período
 (pedido: data do pedido; cupom: abertura; OS: passo Faturada), então venda e baixa em meses diferentes
-desalinham um mês; devolução/estorno de saída não abate o custo; **comissão por estrutura ainda não foi
-feita** (a comissão entra só como percentual médio dos encargos).
+desalinham um mês; devolução/estorno de saída não abate o custo. **Comissão por estrutura (2026-10-13):**
+a margem líquida estimada troca a comissão padrão pela de cada produto (`EncargosDaVenda::do_produto`,
+com a comissão efetiva vinda de `estoque.precos_sugeridos_do_grupo.v1`); num nó, a receita é somada por
+percentual de encargos e cada soma é descontada uma vez, então sem comissões próprias o resultado é
+idêntico ao de antes (propriedade testada).
 
 ## 7. Receituário contábil
 

@@ -17,7 +17,7 @@ use crate::comandos::importar_estrutura::{criar_grupos_planejados, id_planejado}
 #[cfg(feature = "sqlite")]
 use crate::comandos::{registrar_entrada_comum, DadosEntrada};
 #[cfg(feature = "sqlite")]
-use crate::importacao_produtos::{planejar, UnidadePlanejada};
+use crate::importacao_produtos::{planejar, ProdutoNovo, UnidadePlanejada};
 #[cfg(feature = "sqlite")]
 use crate::produto::{Produto, Unidade};
 #[cfg(feature = "sqlite")]
@@ -74,7 +74,7 @@ impl Comando for ImportarProdutos {
         if plano.define_parametros() && !ctx.concede("estoque.produto.editar") {
             return Err(Erro::novo(
                 CodigoErro::SEM_PERMISSAO,
-                "margem, ponto de pedido e estoque mínimo/máximo exigem a permissão de editar produto",
+                "margem, comissão, ponto de pedido e estoque mínimo/máximo exigem a permissão de editar produto",
             ));
         }
         if plano.tem_estoque() && !ctx.concede("estoque.movimento.entrada") {
@@ -102,52 +102,12 @@ impl Comando for ImportarProdutos {
 
         let mut com_estoque = 0u32;
         for novo in &plano.produtos {
-            // O plano só põe aqui grupo que existe ou que acabou de ser criado.
-            let grupo = id_planejado(novo.grupo, &grupos).ok_or_else(|| {
-                Erro::novo(CodigoErro::FALHA_INTERNA, "produto planejado sem grupo")
-            })?;
             let unidade = match novo.unidade {
                 UnidadePlanejada::Existente(id) => id,
                 UnidadePlanejada::Nova(i) => unidades[i],
             };
-            // As mesmas regras de `CriarProduto` (o plano já as conferiu; o domínio confere de
-            // novo, que é barato e mantém uma porta só de entrada).
-            let mut produto = Produto::novo(ctx.organizacao, grupo, &novo.nome, &novo.ncm, unidade)
-                .map_err(|e| Erro::de_dominio(&e))?;
-            if let Some(gtin) = novo.codigo_barras.as_deref() {
-                produto = produto
-                    .com_codigo_barras(gtin)
-                    .map_err(|e| Erro::de_dominio(&e))?;
-            }
-            produto = produto.com_detalhes_tecnicos(novo.detalhes.clone());
-            produto.ponto_pedido = novo.ponto_pedido;
-            produto.estoque_minimo = novo.estoque_minimo;
-            produto.estoque_maximo = novo.estoque_maximo;
-            RepositorioEstoque::novo(uow).inserir_produto(&produto)?;
-
-            if novo.margem.is_some() {
-                crate::repositorio_preco::definir_margem_do_produto(
-                    uow.conexao(),
-                    ctx.organizacao,
-                    produto.id,
-                    novo.margem,
-                )?;
-            }
-            if let Some(e) = novo.estoque {
-                registrar_entrada_comum(
-                    DadosEntrada {
-                        produto: produto.id,
-                        local: e.local,
-                        quantidade: e.quantidade,
-                        custo_unitario: e.custo_unitario,
-                        origem_modulo: "estoque",
-                        origem_id: None,
-                    },
-                    ctx,
-                    uow,
-                )?;
-                com_estoque += 1;
-            }
+            criar_produto_planejado(novo, &grupos, unidade, ctx, uow)?;
+            com_estoque += u32::from(novo.estoque.is_some());
         }
 
         Ok(ProdutosImportados {
@@ -158,4 +118,64 @@ impl Comando for ImportarProdutos {
             com_estoque,
         })
     }
+}
+
+/// Grava um produto do plano: o cadastro, margem e comissão próprias e o estoque inicial.
+#[cfg(feature = "sqlite")]
+fn criar_produto_planejado(
+    novo: &ProdutoNovo,
+    grupos: &[Id],
+    unidade: Id,
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<()> {
+    // O plano só põe aqui grupo que existe ou que acabou de ser criado.
+    let grupo = id_planejado(novo.grupo, grupos)
+        .ok_or_else(|| Erro::novo(CodigoErro::FALHA_INTERNA, "produto planejado sem grupo"))?;
+    // As mesmas regras de `CriarProduto` (o plano já as conferiu; o domínio confere de novo,
+    // que é barato e mantém uma porta só de entrada).
+    let mut produto = Produto::novo(ctx.organizacao, grupo, &novo.nome, &novo.ncm, unidade)
+        .map_err(|e| Erro::de_dominio(&e))?;
+    if let Some(gtin) = novo.codigo_barras.as_deref() {
+        produto = produto
+            .com_codigo_barras(gtin)
+            .map_err(|e| Erro::de_dominio(&e))?;
+    }
+    produto = produto.com_detalhes_tecnicos(novo.detalhes.clone());
+    produto.ponto_pedido = novo.ponto_pedido;
+    produto.estoque_minimo = novo.estoque_minimo;
+    produto.estoque_maximo = novo.estoque_maximo;
+    RepositorioEstoque::novo(uow).inserir_produto(&produto)?;
+
+    if novo.margem.is_some() {
+        crate::repositorio_preco::definir_margem_do_produto(
+            uow.conexao(),
+            ctx.organizacao,
+            produto.id,
+            novo.margem,
+        )?;
+    }
+    if novo.comissao.is_some() {
+        crate::repositorio_preco::definir_comissao_do_produto(
+            uow.conexao(),
+            ctx.organizacao,
+            produto.id,
+            novo.comissao,
+        )?;
+    }
+    if let Some(e) = novo.estoque {
+        registrar_entrada_comum(
+            DadosEntrada {
+                produto: produto.id,
+                local: e.local,
+                quantidade: e.quantidade,
+                custo_unitario: e.custo_unitario,
+                origem_modulo: "estoque",
+                origem_id: None,
+            },
+            ctx,
+            uow,
+        )?;
+    }
+    Ok(())
 }

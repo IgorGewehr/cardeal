@@ -95,6 +95,13 @@ impl std::fmt::Display for ErroPreco {
     }
 }
 
+/// Uma comissão de vendedor cabe entre 0% e 100% (exclusive: 100% da venda não deixa preço
+/// possível) — a regra do grupo, do produto, da importação e da alteração em lote.
+#[must_use]
+pub fn comissao_valida(c: Percentual) -> bool {
+    c.e_fracao_valida() && c != Percentual::CEM
+}
+
 /// O divisor (como percentual, `52%` = 0,52). Erro se a soma chega a 100%.
 ///
 /// # Errors

@@ -8,7 +8,8 @@
 //!   ainda não existe é criado, com as mesmas regras da [importação da estrutura]
 //!   (`crate::importacao_estrutura`). Sem grupo, o produto vai para "Sem grupo".
 //! - `NCM`, `Código de barras` (GTIN validado), `Unidade` (sigla; padrão `UN`, e uma sigla
-//!   nova vira unidade nova), `Margem` (a margem líquida desejada do produto).
+//!   nova vira unidade nova), `Margem` (a margem líquida desejada do produto), `Comissão` (a
+//!   comissão de vendedor própria do produto).
 //! - `Ponto de pedido`, `Estoque mínimo`, `Estoque máximo`.
 //! - `Fabricante` (ou `Marca`), `Código do fabricante` (ou `MPN`/`Referência`), `Localização`.
 //! - `Estoque` + `Custo` (+ `Local`): o **estoque inicial**, que entra como uma entrada de
@@ -135,6 +136,8 @@ pub struct ProdutoNovo {
     pub codigo_barras: Option<String>,
     /// A margem líquida desejada própria.
     pub margem: Option<Percentual>,
+    /// A comissão de vendedor própria.
+    pub comissao: Option<Percentual>,
     /// O ponto de pedido.
     pub ponto_pedido: Option<Quantidade>,
     /// O estoque mínimo.
@@ -237,12 +240,13 @@ impl PlanoProdutos {
         }
     }
 
-    /// Verdadeiro se algum produto novo traz margem, ponto de pedido ou estoque mínimo/máximo
-    /// — parâmetros que fora da importação exigem a permissão de editar produto.
+    /// Verdadeiro se algum produto novo traz margem, comissão, ponto de pedido ou estoque
+    /// mínimo/máximo — parâmetros que fora da importação exigem a permissão de editar produto.
     #[must_use]
     pub fn define_parametros(&self) -> bool {
         self.produtos.iter().any(|p| {
             p.margem.is_some()
+                || p.comissao.is_some()
                 || p.ponto_pedido.is_some()
                 || p.estoque_minimo.is_some()
                 || p.estoque_maximo.is_some()
@@ -272,6 +276,7 @@ enum Coluna {
     CodigoBarras,
     Unidade,
     Margem,
+    Comissao,
     PontoPedido,
     EstoqueMinimo,
     EstoqueMaximo,
@@ -307,6 +312,7 @@ fn coluna_de(titulo: &str) -> Option<Coluna> {
         "codigodebarras" | "codigobarras" | "codbarras" | "ean" | "gtin" => Coluna::CodigoBarras,
         "unidade" | "un" | "und" | "sigla" => Coluna::Unidade,
         "margem" | "margemdesejada" | "margemliquida" => Coluna::Margem,
+        "comissao" | "comissaodevendedor" | "comissaovendedor" => Coluna::Comissao,
         "pontodepedido" | "pontopedido" => Coluna::PontoPedido,
         "estoqueminimo" | "minimo" => Coluna::EstoqueMinimo,
         "estoquemaximo" | "maximo" => Coluna::EstoqueMaximo,
@@ -413,6 +419,7 @@ struct LinhaLidaOk {
     ncm: String,
     codigo_barras: Option<String>,
     margem: Option<Percentual>,
+    comissao: Option<Percentual>,
     ponto_pedido: Option<Quantidade>,
     estoque_minimo: Option<Quantidade>,
     estoque_maximo: Option<Quantidade>,
@@ -434,6 +441,24 @@ fn ler_margem(texto: &str, problemas: &mut Vec<String>) -> Option<Percentual> {
         }
         Err(_) => {
             problemas.push(format!("a margem \"{texto}\" não é um percentual"));
+            None
+        }
+    }
+}
+
+/// A comissão de vendedor própria: entre 0% e 100% (exclusive).
+fn ler_comissao(texto: &str, problemas: &mut Vec<String>) -> Option<Percentual> {
+    if texto.is_empty() {
+        return None;
+    }
+    match Percentual::de_str(texto) {
+        Ok(p) if crate::precificacao::comissao_valida(p) => Some(p),
+        Ok(_) => {
+            problemas.push("a comissão precisa estar entre 0% e 100%".to_owned());
+            None
+        }
+        Err(_) => {
+            problemas.push(format!("a comissão \"{texto}\" não é um percentual"));
             None
         }
     }
@@ -546,6 +571,7 @@ fn ler_campos(
         String::new()
     });
     let margem = ler_margem(cab.celula(cels, Coluna::Margem), &mut problemas);
+    let comissao = ler_comissao(cab.celula(cels, Coluna::Comissao), &mut problemas);
     let ponto_pedido = quantidade(
         cab.celula(cels, Coluna::PontoPedido),
         "o ponto de pedido",
@@ -585,6 +611,7 @@ fn ler_campos(
         ncm,
         codigo_barras,
         margem,
+        comissao,
         ponto_pedido,
         estoque_minimo,
         estoque_maximo,
@@ -750,6 +777,7 @@ impl<'a> Planejador<'a> {
             ncm: lida.ncm,
             codigo_barras: lida.codigo_barras,
             margem: lida.margem,
+            comissao: lida.comissao,
             ponto_pedido: lida.ponto_pedido,
             estoque_minimo: lida.estoque_minimo,
             estoque_maximo: lida.estoque_maximo,
@@ -1097,6 +1125,20 @@ mod testes {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn comissao_propria_e_faixa() {
+        let p = planejar("Nome;Comissão\nA;3,5%\nB;\nC;100\n", &Existentes::default());
+        assert_eq!(p.erros.len(), 1);
+        assert_eq!(p.erros[0].linha, 4);
+        assert!(p.erros[0].mensagem.contains("comissão"));
+        assert_eq!(
+            p.produtos[0].comissao,
+            Some(Percentual::de_str("3,5").unwrap())
+        );
+        assert_eq!(p.produtos[1].comissao, None);
+        assert!(p.define_parametros());
     }
 
     #[test]

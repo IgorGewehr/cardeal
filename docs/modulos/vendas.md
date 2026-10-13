@@ -111,7 +111,7 @@
 | `vendedor` | Id | sim | |
 | `pedido` | Id | sim | |
 | `base_calculo` | Dinheiro | sim | total do pedido, líquido de devolução |
-| `percentual` | Percentual | sim | da tabela de comissão do vendedor |
+| `percentual` | Percentual | sim | da tabela de comissão do vendedor. **Nota (2026-10-13):** a comissão por estrutura de `estoque` (`SugestaoDePreco::comissao`) já define o percentual de cada produto; quando `ApurarComissao` existir, a base deve ser item a item com esse percentual, não um percentual único do pedido |
 | `valor` | Dinheiro | sim | |
 | `competencia` | Data | sim | mês de apuração |
 | `estado` | enum(`Apurada`,`Paga`,`Cancelada`) | sim | ver §4 |
@@ -481,7 +481,8 @@ CREATE INDEX vendas_devolucao_estado ON vendas_devolucao(empresa, estado);
 `vendas.margem_do_pedido.v1` (permissão `vendas.margem.ver`, risco Médio) devolve, para um pedido, a
 margem de cada item e do conjunto: receita (já com desconto), custo (custo médio atual do estoque,
 o maior entre os locais), encargos sobre a receita (custo operacional + imposto do produto +
-comissão + taxa de pagamento — os mesmos percentuais do preço sugerido, ver
+comissão do produto — própria, do grupo ou a padrão, a comissão por estrutura de `estoque` — + taxa de
+pagamento — os mesmos percentuais do preço sugerido, ver
 [ADR-0018](../adr/0018-formacao-de-preco-por-markup-divisor.md)), margem bruta e líquida em R$ e em %.
 Itens sem custo conhecido ficam **fora** das margens e são contados à parte: um produto sem custo
 nunca aparece como lucro de 100%. A margem mínima vem dos parâmetros de preço; abaixo dela o pedido

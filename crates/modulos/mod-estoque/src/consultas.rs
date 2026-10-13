@@ -231,6 +231,8 @@ pub struct NoArvoreGrupo {
     pub produtos_na_subarvore: u32,
     /// A margem líquida desejada definida **neste** grupo (`None` = herda).
     pub margem: Option<cardeal_kernel::Percentual>,
+    /// A comissão de vendedor definida **neste** grupo (`None` = herda).
+    pub comissao: Option<cardeal_kernel::Percentual>,
     /// ICMS-ST definido neste grupo (`None` = herda).
     pub icms_st: Option<bool>,
     /// PIS/COFINS monofásico definido neste grupo (`None` = herda).
@@ -315,6 +317,7 @@ impl Consulta for ArvoreGruposProduto {
             let do_grupo = perfis.iter().find(|p| p.id == id);
             saida.push(NoArvoreGrupo {
                 margem: do_grupo.and_then(|p| p.margem),
+                comissao: do_grupo.and_then(|p| p.comissao),
                 icms_st: do_grupo.and_then(|p| p.icms_st),
                 monofasico: do_grupo.and_then(|p| p.monofasico),
                 fiscal: do_grupo.map(|p| p.fiscal.clone()).unwrap_or_default(),

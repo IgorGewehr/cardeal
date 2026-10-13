@@ -11,8 +11,8 @@ use std::collections::HashSet;
 
 use super::*;
 use cardeal_analytics::{
-    calcular, CustoDoProduto, NoDaEstrutura, NoDeRentabilidade, ProdutoDaEstrutura,
-    ProdutoRentavel, ReceitaDoProduto, Rentabilidade,
+    calcular, CustoDoProduto, EncargosDaVenda, NoDaEstrutura, NoDeRentabilidade,
+    ProdutoDaEstrutura, ProdutoRentavel, ReceitaDoProduto, Rentabilidade,
 };
 use cardeal_kernel::{Data, Percentual, Periodo};
 use cardeal_ui::atoms::ValorDinheiro;
@@ -58,6 +58,8 @@ pub(super) struct EstadoRentabilidade {
     pub(super) ausentes: Vec<&'static str>,
     /// Os encargos de hoje e a margem líquida mínima.
     encargos: Percentual,
+    /// A comissão padrão contida em `encargos` (cada produto pode ter a sua).
+    comissao_padrao: Percentual,
     margem_minima: Percentual,
     /// Se o custo (estoque) foi consultado; sem ele, nada tem margem.
     custo_disponivel: bool,
@@ -94,6 +96,19 @@ impl EstadoRentabilidade {
                 nivel: n.nivel,
             })
             .collect();
+        // A comissão que vale para cada produto (própria, do grupo ou a padrão): a mesma do
+        // preço sugerido.
+        let sugestoes: Vec<mod_estoque::SugestaoDePreco> = motor
+            .consultar(
+                sessao,
+                "estoque.precos_sugeridos_do_grupo.v1",
+                &mod_estoque::PrecosSugeridosDoGrupo { grupo: None },
+            )
+            .unwrap_or_default();
+        let comissoes: std::collections::HashMap<Id, Percentual> = sugestoes
+            .into_iter()
+            .map(|s| (s.produto, s.comissao))
+            .collect();
         let produtos: Vec<ProdutoDaEstrutura> = motor
             .consultar(
                 sessao,
@@ -103,6 +118,7 @@ impl EstadoRentabilidade {
             .unwrap_or_default()
             .into_iter()
             .map(|p| ProdutoDaEstrutura {
+                comissao: comissoes.get(&p.produto).copied(),
                 produto: p.produto,
                 nome: p.nome,
                 grupo: p.grupo,
@@ -153,6 +169,7 @@ impl EstadoRentabilidade {
             .ok();
         if let Ok(e) = motor.consultar(sessao, "estoque.encargos_atuais.v1", &EncargosAtuais) {
             self.encargos = e.total();
+            self.comissao_padrao = e.comissao;
             self.margem_minima = e.margem_minima;
         }
 
@@ -188,7 +205,16 @@ impl EstadoRentabilidade {
             .flatten()
             .collect();
 
-        self.resultado = calcular(&nos, &produtos, &receitas, &custos, self.encargos);
+        self.resultado = calcular(
+            &nos,
+            &produtos,
+            &receitas,
+            &custos,
+            EncargosDaVenda {
+                total: self.encargos,
+                comissao_padrao: self.comissao_padrao,
+            },
+        );
         if self
             .selecionado
             .is_some_and(|s| !nos.iter().any(|n| n.id == s))

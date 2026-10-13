@@ -57,11 +57,9 @@ impl Consulta for MargemDoPedido {
                     quantidade: i.quantidade,
                     receita: i.total_item,
                     custo_unitario: s.and_then(|s| s.custo),
+                    // A comissão é a do produto (própria, do grupo ou a padrão).
                     encargos: s.map_or(Percentual::ZERO, |s| {
-                        s.custo_operacional
-                            + s.imposto
-                            + parametros.comissao
-                            + parametros.taxa_pagamento
+                        s.custo_operacional + s.imposto + s.comissao + parametros.taxa_pagamento
                     }),
                 }
             })

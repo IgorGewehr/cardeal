@@ -26,11 +26,12 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   por correção do usuário, portas substituíveis), mas **nenhuma funcionalidade depende de IA** e
   nada de IA entra antes de a versão determinística equivalente existir e estar em uso. IA só sugere;
   quem confirma é o usuário. Ver [17 — Roadmap](17-roadmap.md), Fase 7.
-- **Ordem do que vem agora** (custo de referência, histórico de compras, preços defasados e
-  **rentabilidade por nível da árvore** já estão feitos; **comissão por estrutura mercadológica ainda NÃO foi
-  feita** e segue pendente): **seletor em árvore no cadastro (feito)**, **importação da estrutura por planilha (feita)** e **importação de
-  produto por planilha (feita, 2026-10-13)**; segue inventário/transferência → importação de produto
-  por XML (dicionário determinístico).
+- **Ordem do que vem agora** (custo de referência, histórico de compras, preços defasados,
+  **rentabilidade por nível da árvore**, **seletor em árvore no cadastro**, **importação da estrutura por
+  planilha**, **importação de produto por planilha** e **comissão por estrutura mercadológica** (2026-10-13)
+  já estão feitos — a onda 4 fechou): segue a onda 5, **inventário** (contagem cega) → transferência →
+  importação de produto por XML (dicionário determinístico). A apuração mensal da comissão do vendedor
+  (`vendas.ApurarComissao`) continua pendente e agora tem o percentual por item pronto.
 - **Pendência de confiança:** as tabelas do Simples e as alíquotas precisam ser conferidas com o
   contador; ST/MVA ainda não entram no custo.
 
@@ -499,6 +500,15 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   `estoque.previa_importacao_produtos.v1`. Tela: "Importar produtos…" no topo do Estoque, com "Baixar
   modelo…". `normalizar_ncm` saiu de `Produto::novo` para a importação validar igual. Detalhes e limites em
   `docs/modulos/estoque.md`. Testes: 15 unit + 5 integração (Despachante + SQLite) + 1 de tela.
+- **Comissão por estrutura mercadológica (2026-10-13):** migração `estoque` v10 (`comissao` no grupo, no produto
+  e no antes/depois do lote); comandos `estoque.definir_comissao_do_grupo.v1`/`…_do_produto.v1`; herança
+  produto → grupo → `ParametrosPreco.comissao` (agora "comissão padrão") em `BaseDePreco::comissao`, com
+  `SugestaoDePreco.comissao`/`origem_comissao`. A comissão do produto entra no preço sugerido, nos painéis de
+  margem do pedido e da OS e na rentabilidade (`cardeal_analytics::EncargosDaVenda`, receita somada por
+  percentual de encargos: sem comissões próprias, resultado idêntico ao anterior). Telas: bloco "Comissão de
+  vendedor" na aba Estrutura (o bloco de percentual herdado virou genérico, `bloco_herdado`, usado também pela
+  margem), campo na alteração em lote, coluna na grade de Preços e na importação. Falta a apuração da comissão
+  do vendedor em `vendas`.
 - **Dívidas conhecidas:** tabelas do Simples a conferir com o contador; a 6ª faixa e a anualização de
   RBT12 (ver ADR-0018); o PDV só avisa preço abaixo do mínimo de empate (etiqueta "abaixo do mínimo" na linha do
   cupom, depois do desconto); não bloqueia a venda e não é o painel de margem completo.

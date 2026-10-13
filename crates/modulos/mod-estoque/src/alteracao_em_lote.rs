@@ -1,4 +1,4 @@
-//! Alteração em lote do catálogo: mudar margem, grupo e situação de muitos produtos de uma
+//! Alteração em lote do catálogo: mudar margem, comissão, grupo e situação de muitos produtos de uma
 //! vez, **vendo antes** o que muda e **podendo desfazer** (a última, por 24 horas). Domínio
 //! puro; o SQL e os comandos ficam em `repositorio_lote` e `comandos/`.
 //!
@@ -64,6 +64,8 @@ pub enum MudancaFiscal {
 pub struct Alteracao {
     /// A margem líquida desejada do produto (`Definir(None)` = voltar a herdar do grupo).
     pub margem: Mudanca<Option<Percentual>>,
+    /// A comissão de vendedor própria do produto (`Definir(None)` = voltar a herdar).
+    pub comissao: Mudanca<Option<Percentual>>,
     /// O grupo (transferência de grupo).
     pub grupo: Mudanca<Id>,
     /// Ativo ou inativo.
@@ -79,6 +81,7 @@ impl Alteracao {
     #[must_use]
     pub fn e_vazia(&self) -> bool {
         !self.margem.muda()
+            && !self.comissao.muda()
             && !self.grupo.muda()
             && !self.ativo.muda()
             && !self.ncm.muda()
@@ -96,6 +99,11 @@ impl Alteracao {
     /// # Errors
     /// Mensagem para o usuário.
     pub fn validar(&self) -> Result<(), String> {
+        if let Mudanca::Definir(Some(c)) = self.comissao {
+            if !crate::precificacao::comissao_valida(c) {
+                return Err("Comissão: precisa estar entre 0% e 100%".to_owned());
+            }
+        }
         if let Mudanca::Definir(n) = &self.ncm {
             if n.len() != 8 || !n.chars().all(|c| c.is_ascii_digit()) {
                 return Err("NCM: precisa ter 8 dígitos".to_owned());
@@ -122,6 +130,7 @@ impl Alteracao {
         ValoresProduto {
             grupo: self.grupo.sobre(v.grupo),
             margem: self.margem.sobre(v.margem),
+            comissao: self.comissao.sobre(v.comissao),
             ativo: self.ativo.sobre(v.ativo),
             ncm: self.ncm.sobre(v.ncm.clone()),
             fiscal,
@@ -134,6 +143,9 @@ impl Alteracao {
         let mut c = Vec::new();
         if self.margem.muda() {
             c.push("margem");
+        }
+        if self.comissao.muda() {
+            c.push("comissão");
         }
         if self.grupo.muda() {
             c.push("grupo");
@@ -158,6 +170,8 @@ pub struct ValoresProduto {
     pub grupo: Id,
     /// A margem própria (`None` = herda).
     pub margem: Option<Percentual>,
+    /// A comissão própria (`None` = herda).
+    pub comissao: Option<Percentual>,
     /// Ativo.
     pub ativo: bool,
     /// O NCM.
@@ -245,6 +259,7 @@ mod testes {
         ValoresProduto {
             grupo: Id::novo(),
             margem: Some(Percentual::pontos(10)),
+            comissao: None,
             ativo: true,
             ncm: "22021000".into(),
             fiscal: CamposFiscais::default(),
@@ -283,6 +298,30 @@ mod testes {
         assert_eq!(d.margem, Some(Percentual::pontos(30)));
         assert!(!d.ativo);
         assert_eq!(b.campos(), "margem, situação");
+    }
+
+    #[test]
+    fn comissao_define_limpa_e_recusa_fora_da_faixa() {
+        let a = Alteracao {
+            comissao: Mudanca::Definir(Some(Percentual::pontos(5))),
+            ..Alteracao::default()
+        };
+        assert!(a.validar().is_ok());
+        let d = a.aplicar(&valores());
+        assert_eq!(d.comissao, Some(Percentual::pontos(5)));
+        assert_eq!(d.margem, valores().margem, "a margem não muda");
+        assert_eq!(a.campos(), "comissão");
+        assert!(!a.e_vazia());
+        let volta = Alteracao {
+            comissao: Mudanca::Definir(None),
+            ..Alteracao::default()
+        };
+        assert_eq!(volta.aplicar(&d).comissao, None);
+        let ruim = Alteracao {
+            comissao: Mudanca::Definir(Some(Percentual::CEM)),
+            ..Alteracao::default()
+        };
+        assert!(ruim.validar().unwrap_err().contains("Comissão"));
     }
 
     #[test]

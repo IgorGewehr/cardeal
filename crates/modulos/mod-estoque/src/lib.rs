@@ -116,6 +116,7 @@ pub use comandos::{
 };
 pub use comandos::{CriarPecaRapida, PecaRapidaCriada};
 pub use comandos::{DefinirCamposFiscaisDoGrupo, DefinirCamposFiscaisDoProduto};
+pub use comandos::{DefinirComissaoDoGrupo, DefinirComissaoDoProduto};
 pub use comandos::{
     DefinirMargemDoGrupo, DefinirMargemDoProduto, DefinirParametrosPreco,
     DefinirPerfilFiscalDoGrupo, MoverGrupoProduto, MoverProdutosDeGrupo, ProdutosMovidos,
@@ -144,7 +145,7 @@ pub use consultas_lote::{
 #[cfg(feature = "sqlite")]
 pub use consultas_preco::{encargos_da_empresa, parametros_da_empresa, sugerir_precos};
 pub use consultas_preco::{
-    EncargosDaEmpresa, OrigemMargem, ParametrosDePreco, PrecoSugeridoDoProduto,
+    EncargosDaEmpresa, OrigemComissao, OrigemMargem, ParametrosDePreco, PrecoSugeridoDoProduto,
     PrecosSugeridosDoGrupo, SugestaoDePreco,
 };
 pub use consultas_rentabilidade::{EncargosAtuais, SaidaDoProduto, SaidasPorProdutoEOrigem};

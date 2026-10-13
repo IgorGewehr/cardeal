@@ -712,3 +712,131 @@ fn historico_de_compras_vem_do_mais_recente_com_variacao_e_media() {
     );
     assert!(h.compras.is_empty() && h.ultimo_custo.is_none());
 }
+
+impl Cenario {
+    fn comissao_padrao(&self, pontos: i64) {
+        let mut p: ParametrosPreco =
+            self.consulta("estoque.parametros_de_preco.v1", &ParametrosDePreco);
+        p.comissao = Percentual::pontos(pontos);
+        self.cmd(
+            "estoque.definir_parametros_preco.v1",
+            &DefinirParametrosPreco { parametros: p },
+        )
+        .unwrap();
+    }
+
+    fn comissao_do_grupo(&self, grupo: Id, comissao: Option<Percentual>) -> Result<Vec<u8>, Erro> {
+        self.cmd(
+            "estoque.definir_comissao_do_grupo.v1",
+            &mod_estoque::DefinirComissaoDoGrupo { grupo, comissao },
+        )
+    }
+
+    fn comissao_do_produto(&self, produto: Id, comissao: Option<Percentual>) {
+        self.cmd(
+            "estoque.definir_comissao_do_produto.v1",
+            &mod_estoque::DefinirComissaoDoProduto { produto, comissao },
+        )
+        .unwrap();
+    }
+}
+
+#[test]
+fn comissao_por_estrutura_herda_do_grupo_e_o_produto_sobrescreve() {
+    use mod_estoque::OrigemComissao;
+    let c = Cenario::novo();
+    c.parametros_manuais(25);
+    c.comissao_padrao(2);
+    let bebidas = c.grupo("BEB", None);
+    let refri = c.grupo("REF", Some(bebidas));
+    let p = c.produto_com_custo("Coca 2L", refri, Preco::reais(50));
+    c.margem_do_grupo(bebidas, 20);
+
+    // Ninguém definiu: vale a padrão. 25 + 20 + 4 + 2 = 51 → 50 / 0,49 = 102,04
+    let s = c.preco(p);
+    assert_eq!(
+        (s.comissao, s.origem_comissao.clone()),
+        (Percentual::pontos(2), OrigemComissao::Padrao)
+    );
+    assert_eq!(s.componentes.unwrap().comissao, Percentual::pontos(2));
+    assert_eq!(s.sugerido.unwrap().preco, Dinheiro::centavos(10204));
+
+    // A do grupo de cima vale para o subgrupo: 25 + 20 + 4 + 5 = 54 → 50 / 0,46 = 108,70
+    c.comissao_do_grupo(bebidas, Some(Percentual::pontos(5)))
+        .unwrap();
+    let s = c.preco(p);
+    assert_eq!(s.origem_comissao, OrigemComissao::Grupo("BEB".into()));
+    assert_eq!(s.sugerido.unwrap().preco, Dinheiro::centavos(10870));
+    let arvore: Vec<mod_estoque::NoArvoreGrupo> = c.consulta(
+        "estoque.arvore_grupos_produto.v1",
+        &mod_estoque::ArvoreGruposProduto,
+    );
+    let beb = arvore.iter().find(|n| n.id == bebidas).unwrap();
+    let ref_ = arvore.iter().find(|n| n.id == refri).unwrap();
+    assert_eq!(
+        (beb.comissao, ref_.comissao),
+        (Some(Percentual::pontos(5)), None)
+    );
+
+    // A do produto vale mais: 25 + 20 + 4 + 1 = 50 → 100,00. Limpar volta ao grupo.
+    c.comissao_do_produto(p, Some(Percentual::pontos(1)));
+    let s = c.preco(p);
+    assert_eq!(s.origem_comissao, OrigemComissao::Produto);
+    assert_eq!(s.sugerido.unwrap().preco, Dinheiro::centavos(10000));
+    c.comissao_do_produto(p, None);
+    assert_eq!(
+        c.preco(p).origem_comissao,
+        OrigemComissao::Grupo("BEB".into())
+    );
+
+    // Fora da faixa é recusado.
+    let e = c
+        .comissao_do_grupo(bebidas, Some(Percentual::CEM))
+        .unwrap_err();
+    assert_eq!(e.codigo, CodigoErro::FORA_DA_FAIXA);
+}
+
+#[test]
+fn comissao_pela_alteracao_em_lote_e_desfazer_volta_a_herdar() {
+    use mod_estoque::alteracao_em_lote::{Alteracao, Mudanca};
+    use mod_estoque::{AlteracaoAplicada, OrigemComissao};
+    let c = Cenario::novo();
+    c.parametros_manuais(25);
+    let g = c.grupo("BEB", None);
+    c.margem_do_grupo(g, 20);
+    let a = c.produto_com_custo("Coca 2L", g, Preco::reais(50));
+    let b = c.produto_com_custo("Guaraná 2L", g, Preco::reais(50));
+
+    let r: AlteracaoAplicada = postcard::from_bytes(
+        &c.cmd(
+            "estoque.aplicar_alteracao_em_lote.v1",
+            &mod_estoque::AplicarAlteracaoEmLote {
+                descricao: "Comissão dos refrigerantes".into(),
+                produtos: vec![a, b],
+                alteracao: Alteracao {
+                    comissao: Mudanca::Definir(Some(Percentual::pontos(3))),
+                    ..Alteracao::default()
+                },
+            },
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(r.alterados, 2);
+    for p in [a, b] {
+        let s = c.preco(p);
+        assert_eq!(
+            (s.comissao, s.origem_comissao),
+            (Percentual::pontos(3), OrigemComissao::Produto)
+        );
+    }
+
+    c.cmd(
+        "estoque.desfazer_alteracao_em_lote.v1",
+        &mod_estoque::DesfazerAlteracaoEmLote { lote: r.lote },
+    )
+    .unwrap();
+    for p in [a, b] {
+        assert_eq!(c.preco(p).origem_comissao, OrigemComissao::Padrao);
+    }
+}

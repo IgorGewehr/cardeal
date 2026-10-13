@@ -10,11 +10,11 @@ use mod_estoque::{ImportarProdutos, PreviaDaImportacaoDeProdutos, ProdutosImport
 
 /// O modelo que "Baixar modelo…" salva: todas as colunas conhecidas e duas linhas de exemplo.
 pub(super) const MODELO: &str = "\u{feff}Nome;Grupo;Subgrupo;Categoria;Subcategoria;Unidade;\
-Código de barras;NCM;Margem;Ponto de pedido;Estoque mínimo;Estoque máximo;Fabricante;\
+Código de barras;NCM;Margem;Comissão;Ponto de pedido;Estoque mínimo;Estoque máximo;Fabricante;\
 Código do fabricante;Localização;Estoque;Custo;Local\n\
-Refrigerante Cola 2L;Bebidas;Refrigerantes;Cola;Pet;UN;7894900011517;2202.10.00;30;12;6;48;\
+Refrigerante Cola 2L;Bebidas;Refrigerantes;Cola;Pet;UN;7894900011517;2202.10.00;30;;12;6;48;\
 Coca-Cola;;Corredor 2;24;7,49;\n\
-Arroz Parboilizado 5kg;Mercearia;Grãos;Arroz;;PCT;;1006.30.21;25;10;5;40;Kiarroz;;Corredor 4;\
+Arroz Parboilizado 5kg;Mercearia;Grãos;Arroz;;PCT;;1006.30.21;25;2;10;5;40;Kiarroz;;Corredor 4;\
 15;21,90;\n";
 
 /// A planilha escolhida e a prévia dela.
@@ -196,8 +196,8 @@ fn corpo(
     ui.add(
         Rotulo::apoio(
             "Um CSV com cabeçalho, um produto por linha. Só a coluna Nome é obrigatória; as \
-             outras (Grupo a Subcategoria, Unidade, Código de barras, NCM, Margem, Ponto de \
-             pedido, Estoque mínimo e máximo, Fabricante, Localização, Estoque, Custo e Local) \
+             outras (Grupo a Subcategoria, Unidade, Código de barras, NCM, Margem, Comissão, \
+             Ponto de pedido, Estoque mínimo e máximo, Fabricante, Localização, Estoque, Custo e Local) \
              valem pelo nome, em qualquer ordem. Grupos e unidades que faltam são criados; o \
              estoque entra com o custo informado. Produto que já existe (mesmo código de \
              barras ou nome) fica como está, e nada é gravado se alguma linha tiver erro.",
