@@ -7,12 +7,14 @@
 //! ver `docs/19-estado-e-processo.md` §1.2/§4).
 
 mod confirmar_entrada;
+mod criar_produto_do_item;
 mod definir_preferencias_compras;
 mod importar_nota_de_arquivo_xml;
 mod lancar_nota_manual;
 mod vincular_produto_manual;
 
 pub use confirmar_entrada::{ConfirmarEntrada, EntradaConfirmada};
+pub use criar_produto_do_item::{CriarProdutoDoItem, ProdutoDoItemCriado};
 pub use definir_preferencias_compras::DefinirPreferenciasCompras;
 pub use importar_nota_de_arquivo_xml::ImportarNotaDeArquivoXml;
 pub use lancar_nota_manual::{ItemNotaManual, LancarNotaManual};
@@ -401,6 +403,7 @@ fn montar_item_casado(
         produto_casado: None,
         codigo_fornecedor: codigo_fornecedor.to_string(),
         descricao_fornecedor: descricao.to_string(),
+        codigo_barras: codigo_barras.filter(|g| !g.is_empty()).map(str::to_owned),
         ncm: ncm.to_string(),
         quantidade,
         valor_unitario,

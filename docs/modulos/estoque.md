@@ -381,6 +381,26 @@ aba Estrutura → "Importar planilha…" (seletor de arquivo, prévia, confirmar
 nem move); nome igual com grafia diferente além de caixa/acento/pontuação vira outro grupo; o código gerado
 não é editável na planilha. A importação de **produtos** por planilha é a seção seguinte.
 
+### Padronização do nome e dicionário DE/PARA (2026-10-13)
+
+A versão **determinística** do "template de nomenclatura + dicionário de abreviações" do lunno (§5.6),
+sem IA. Domínio puro em `padronizacao.rs`: `sugerir_nome(descricao, dicionario)` capitaliza cada palavra
+(`COCA-COLA` → `Coca-Cola`; preposições curtas em minúsculo no meio), troca as palavras pelo dicionário
+DE/PARA da empresa (`REFRIG` → `Refrigerante`; PARA vazio tira a palavra) e normaliza o conteúdo, que vai
+para o fim (`35G` → `35gr`, `2000ML` → `2Lt`, `1500ML` → `1,5Lt`, `1000G` → `1Kg`, `500 G` → `500gr`,
+`12X350ML` → `12x350ml`). `aprender(descricao, escolhido, dicionario)` é o outro lado: só aprende pares que
+dá para explicar — a palavra escolhida **começa** com a da nota (abreviação expandida, `FERM` → `Fermento`)
+ou é a mesma sem caixa/acento (`PO` → `Pó`) e difere do que o sistema sugeriria; palavra inserida, juntada
+(`COCA COLA` → `Coca-Cola`) ou trocada por outra não ensina nada. Migração `estoque` v13
+(`estoque_dicionario_nome`, da organização); comandos `estoque.definir_termo_do_dicionario.v1`/
+`estoque.remover_termo_do_dicionario.v1` (`estoque.produto.editar`), consultas
+`estoque.dicionario_de_nomes.v1`/`estoque.sugerir_nome_do_produto.v1` (`estoque.produto.ver`) e o corpo
+comum `criar_produto_de_compra_comum` (usado por `compras.CriarProdutoDoItem`). Tela: "Dicionário de
+nomes…" no topo do Estoque (lista, acrescenta, remove e testa uma descrição). Fora desta fatia: a
+**descrição reduzida** (até 20 caracteres, PDV/cupom) e o template configurável de ordem dos elementos
+(tipo, marca, complemento) — a ordem é a da nota, com o conteúdo no fim; marca não é reconhecida sem
+modelo, então fica onde o fornecedor a pôs.
+
 ### Transferência entre locais (2026-10-13)
 
 Domínio puro em `transferencia.rs` (`Transferencia::nova`: locais diferentes, itens com quantidade positiva,

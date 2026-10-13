@@ -7,6 +7,7 @@
 //! existia no backend mas não estava ligado a nenhuma tela).
 
 mod analise;
+mod dicionario;
 mod estrutura;
 mod estrutura_importacao;
 mod fiscal;
@@ -78,6 +79,8 @@ enum Dlg {
     ImportarEstrutura,
     /// Importar produtos de uma planilha CSV ("Importar produtos…" no topo da tela).
     ImportarProdutos,
+    /// O dicionário DE/PARA de nomes de produto.
+    Dicionario,
 }
 
 /// O estado local da tela.
@@ -94,6 +97,7 @@ pub struct EstadoTelaEstoque {
     rent: rentabilidade::EstadoRentabilidade,
     inv: inventario::EstadoInventarioUi,
     transf: transferencia::EstadoTransferenciaUi,
+    dic: dicionario::EstadoDicionario,
     /// Perfil fiscal do produto aberto em "Editar": o que ele define e o vigente.
     fisc: fiscal::FormFiscal,
     fisc_efetivo: Vec<mod_estoque::fiscal::LinhaFiscal>,
@@ -259,6 +263,10 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
                 estado.imp_produtos.limpar();
                 estado.dlg = Dlg::ImportarProdutos;
             }
+            if ui.add(Botao::fantasma("Dicionário de nomes…")).clicked() {
+                estado.dic.carregar(motor, sessao);
+                estado.dlg = Dlg::Dicionario;
+            }
         },
         |ui, estado| {
             if let Some(nova) = Abas::nova(&[
@@ -334,6 +342,7 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
         Dlg::ImportarProdutos => {
             produtos_importacao::dialogo(ui.ctx(), motor, sessao, estado);
         }
+        Dlg::Dicionario => dicionario::dialogo(ui.ctx(), motor, sessao, estado),
     }
 
     if let Some((produto, nome)) = estado.confirmar_exclusao.clone() {

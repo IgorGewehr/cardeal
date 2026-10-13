@@ -26,6 +26,7 @@ mod definir_parametros_preco;
 mod definir_perfil_fiscal_do_grupo;
 mod definir_ponto_pedido;
 mod desfazer_alteracao_em_lote;
+mod dicionario;
 mod editar_detalhes_tecnicos_produto;
 mod importar_estrutura;
 mod importar_produtos;
@@ -58,6 +59,9 @@ pub use definir_parametros_preco::DefinirParametrosPreco;
 pub use definir_perfil_fiscal_do_grupo::DefinirPerfilFiscalDoGrupo;
 pub use definir_ponto_pedido::DefinirPontoPedido;
 pub use desfazer_alteracao_em_lote::{AlteracaoDesfeita, DesfazerAlteracaoEmLote};
+#[cfg(feature = "sqlite")]
+pub use dicionario::criar_produto_de_compra_comum;
+pub use dicionario::{DefinirTermoDoDicionario, ProdutoDeCompraCriado, RemoverTermoDoDicionario};
 pub use editar_detalhes_tecnicos_produto::EditarDetalhesTecnicosProduto;
 pub use importar_estrutura::{EstruturaImportada, ImportarEstrutura};
 pub use importar_produtos::{ImportarProdutos, ProdutosImportados};

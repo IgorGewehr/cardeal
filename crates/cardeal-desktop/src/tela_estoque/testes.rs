@@ -1178,3 +1178,49 @@ fn transferencia_na_tela_monta_a_lista_soma_repetido_e_grava() {
         "o total do CNPJ não muda"
     );
 }
+
+#[test]
+fn dicionario_de_nomes_adiciona_testa_e_remove() {
+    let t = motor_de_teste();
+    let mut estado = EstadoTelaEstoque::default();
+    estado.carregar(&t.motor, &t.sessao);
+    estado.dic.carregar(&t.motor, &t.sessao);
+    assert!(estado.dic.termos.is_empty());
+
+    estado.dic.de = "REFRIG".into();
+    estado.dic.para = "Refrigerante".into();
+    super::dicionario::adicionar(&t.motor, &t.sessao, &mut estado.dic).expect("adiciona");
+    estado.dic.de = "pet".into();
+    estado.dic.para = String::new();
+    super::dicionario::adicionar(&t.motor, &t.sessao, &mut estado.dic).expect("remove palavra");
+    assert_eq!(estado.dic.termos.len(), 2);
+
+    estado.dic.teste = "REFRIG COLA PET 2000ML".into();
+    super::dicionario::testar(&t.motor, &t.sessao, &mut estado.dic);
+    assert_eq!(
+        estado.dic.resultado_teste.as_deref(),
+        Some("Refrigerante Cola 2Lt")
+    );
+
+    // O diálogo desenha num quadro de verdade.
+    estado.dlg = Dlg::Dicionario;
+    let ctx = egui::Context::default();
+    cardeal_ui::tokens::instalar_fontes(&ctx);
+    cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+    for _ in 0..2 {
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            super::dicionario::dialogo(ctx, &t.motor, &t.sessao, &mut estado);
+        });
+    }
+
+    let () = t
+        .motor
+        .executar(
+            &t.sessao,
+            "estoque.remover_termo_do_dicionario.v1",
+            &mod_estoque::RemoverTermoDoDicionario { de: "pet".into() },
+        )
+        .expect("remove");
+    estado.dic.carregar(&t.motor, &t.sessao);
+    assert_eq!(estado.dic.termos.len(), 1);
+}

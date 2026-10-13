@@ -200,8 +200,8 @@ impl<'a, 'b> RepositorioCompras<'a, 'b> {
             .execute(
                 "INSERT INTO compras_item_nota_entrada
                    (id, nota_entrada, produto_casado, codigo_fornecedor, descricao_fornecedor,
-                    ncm, quantidade, valor_unitario, valor_rateio, estado_casamento)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+                    ncm, quantidade, valor_unitario, valor_rateio, estado_casamento, codigo_barras)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
                 params![
                     blob(item.id),
                     blob(item.nota_entrada),
@@ -213,6 +213,7 @@ impl<'a, 'b> RepositorioCompras<'a, 'b> {
                     item.valor_unitario.unidades_internas(),
                     item.valor_rateio.em_centavos(),
                     estado_casamento_txt(item.estado_casamento),
+                    item.codigo_barras,
                 ],
             )
             .map_err(persist)?;
@@ -249,7 +250,7 @@ impl<'a, 'b> RepositorioCompras<'a, 'b> {
             .query_row(
                 "SELECT id, nota_entrada, produto_casado, codigo_fornecedor,
                         descricao_fornecedor, ncm, quantidade, valor_unitario, valor_rateio,
-                        estado_casamento
+                        estado_casamento, codigo_barras
                  FROM compras_item_nota_entrada WHERE id = ?1",
                 [blob(id)],
                 item_de_linha,
@@ -268,7 +269,7 @@ impl<'a, 'b> RepositorioCompras<'a, 'b> {
             .prepare(
                 "SELECT id, nota_entrada, produto_casado, codigo_fornecedor,
                         descricao_fornecedor, ncm, quantidade, valor_unitario, valor_rateio,
-                        estado_casamento
+                        estado_casamento, codigo_barras
                  FROM compras_item_nota_entrada WHERE nota_entrada = ?1 ORDER BY rowid",
             )
             .map_err(persist)?;
@@ -487,5 +488,6 @@ fn item_de_linha(r: &rusqlite::Row<'_>) -> rusqlite::Result<ItemNotaEntrada> {
         valor_unitario: Preco::interna(r.get::<_, i64>(7)?),
         valor_rateio: Dinheiro::centavos(r.get::<_, i64>(8)?),
         estado_casamento: estado_casamento_de(&r.get::<_, String>(9)?),
+        codigo_barras: r.get(10)?,
     })
 }

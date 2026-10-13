@@ -73,6 +73,12 @@ const SQL_PAGO_NO_ATO: &str = r"
 ALTER TABLE compras_preferencias ADD COLUMN pago_no_ato_padrao INTEGER NOT NULL DEFAULT 0 CHECK (pago_no_ato_padrao IN (0,1));
 ";
 
+// Migração v3 (2026-10-13): o código de barras (cEAN) do item fica guardado — antes ele só
+// servia para casar e era descartado; agora o produto criado a partir do item nasce com ele.
+const SQL_CODIGO_BARRAS_ITEM: &str = r"
+ALTER TABLE compras_item_nota_entrada ADD COLUMN codigo_barras TEXT;
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -84,6 +90,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 2,
         nome: "compras_pago_no_ato",
         sql: SQL_PAGO_NO_ATO,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 3,
+        nome: "compras_item_codigo_barras",
+        sql: SQL_CODIGO_BARRAS_ITEM,
         tipo: TipoMigracao::Esquema,
     },
 ];

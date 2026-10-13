@@ -115,6 +115,8 @@ pub struct ItemNotaEntrada {
     pub codigo_fornecedor: String,
     /// A descrição, como veio do fornecedor.
     pub descricao_fornecedor: String,
+    /// O código de barras (cEAN) como veio na nota, quando veio.
+    pub codigo_barras: Option<String>,
     /// O NCM (8 dígitos).
     pub ncm: String,
     /// A quantidade.
@@ -222,6 +224,7 @@ mod testes {
             produto_casado: None,
             codigo_fornecedor: "REF-8821".to_string(),
             descricao_fornecedor: "REFRIG COLA PET 2L".to_string(),
+            codigo_barras: None,
             ncm: "22021000".to_string(),
             quantidade: Quantidade::unidades(120),
             valor_unitario: Preco::reais(4),
@@ -244,6 +247,7 @@ mod testes {
             produto_casado: None,
             codigo_fornecedor: "X".to_string(),
             descricao_fornecedor: "X".to_string(),
+            codigo_barras: None,
             ncm: "12345678".to_string(),
             quantidade: Quantidade::unidades(1),
             valor_unitario: Preco::reais(1),

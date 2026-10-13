@@ -136,7 +136,7 @@ impl Consulta for ItensDaNota {
             .prepare(
                 "SELECT id, nota_entrada, produto_casado, codigo_fornecedor,
                         descricao_fornecedor, ncm, quantidade, valor_unitario, valor_rateio,
-                        estado_casamento
+                        estado_casamento, codigo_barras
                  FROM compras_item_nota_entrada WHERE nota_entrada = ?1 ORDER BY rowid",
             )
             .map_err(persist)?;
@@ -153,6 +153,7 @@ impl Consulta for ItensDaNota {
                     valor_unitario: Preco::interna(r.get::<_, i64>(7)?),
                     valor_rateio: cardeal_kernel::Dinheiro::centavos(r.get::<_, i64>(8)?),
                     estado_casamento: casamento_de(&r.get::<_, String>(9)?),
+                    codigo_barras: r.get(10)?,
                 })
             })
             .map_err(persist)?;

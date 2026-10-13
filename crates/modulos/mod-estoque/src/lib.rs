@@ -65,6 +65,7 @@ mod comandos;
 mod consultas;
 mod consultas_analise;
 mod consultas_compras;
+mod consultas_dicionario;
 mod consultas_importacao;
 mod consultas_inventario;
 mod consultas_lote;
@@ -85,12 +86,15 @@ mod manifesto;
 pub mod migracoes;
 #[cfg(feature = "sqlite")]
 mod modulo;
+pub mod padronizacao;
 mod parametros_preco;
 pub mod precificacao;
 mod produto;
 pub mod receituario;
 #[cfg(feature = "sqlite")]
 mod repositorio;
+#[cfg(feature = "sqlite")]
+pub(crate) mod repositorio_dicionario;
 #[cfg(feature = "sqlite")]
 pub(crate) mod repositorio_inventario;
 #[cfg(feature = "sqlite")]
@@ -103,6 +107,8 @@ mod saldo;
 pub mod transferencia;
 
 pub use aparelho_origem::AparelhoOrigem;
+#[cfg(feature = "sqlite")]
+pub use comandos::criar_produto_de_compra_comum;
 #[cfg(feature = "sqlite")]
 pub use comandos::{completar_ncm_se_vazio, criar_peca_rapida_comum};
 #[cfg(feature = "sqlite")]
@@ -133,6 +139,7 @@ pub use comandos::{
     DefinirPerfilFiscalDoGrupo, MoverGrupoProduto, MoverProdutosDeGrupo, ProdutosMovidos,
     RenomearGrupoProduto,
 };
+pub use comandos::{DefinirTermoDoDicionario, ProdutoDeCompraCriado, RemoverTermoDoDicionario};
 pub use comandos::{EstruturaImportada, ImportarEstrutura, ImportarProdutos, ProdutosImportados};
 pub use comandos::{TransferenciaFeita, TransferirEntreLocais};
 #[cfg(feature = "sqlite")]
@@ -149,6 +156,7 @@ pub use consultas::{
 };
 pub use consultas_analise::AnaliseDeEstoque;
 pub use consultas_compras::HistoricoDeCompras;
+pub use consultas_dicionario::{DicionarioDeNomes, SugerirNomeDoProduto};
 pub use consultas_importacao::{PreviaDaImportacaoDaEstrutura, PreviaDaImportacaoDeProdutos};
 pub use consultas_inventario::{
     Inventarios, ItemDaPosicao, PosicaoDoInventario, PosicaoInventario, ResumoInventario,

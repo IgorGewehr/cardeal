@@ -312,6 +312,18 @@ CREATE TABLE estoque_transferencia_item (
 ) STRICT;
 ";
 
+// Migração v13 (2026-10-13): o dicionário DE/PARA de nomes de produto (padronização
+// determinística do `xProd` da nota), do catálogo da organização.
+const SQL_DICIONARIO_NOME: &str = r"
+CREATE TABLE estoque_dicionario_nome (
+    empresa        BLOB    NOT NULL,
+    de             TEXT    NOT NULL,
+    para           TEXT    NOT NULL,
+    atualizado_em  INTEGER NOT NULL,
+    PRIMARY KEY (empresa, de)
+) STRICT, WITHOUT ROWID;
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -383,6 +395,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 12,
         nome: "estoque_transferencia",
         sql: SQL_TRANSFERENCIA,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 13,
+        nome: "estoque_dicionario_nome",
+        sql: SQL_DICIONARIO_NOME,
         tipo: TipoMigracao::Esquema,
     },
 ];

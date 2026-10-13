@@ -24,17 +24,36 @@ use cardeal_ui::molecules::{
     SeletorOpcao,
 };
 use cardeal_ui::organisms::{
-    notificar, ColunaGrade, Dialogo, Direcao, Grade, LayoutTela, Notificacao, Ordenacao, Painel,
+    notificar, ColunaGrade, Dialogo, Direcao, EstadoSeletorArvore, Grade, LayoutTela, NoArvore,
+    Notificacao, Ordenacao, Painel, SeletorEmArvore,
 };
 use cardeal_ui::tokens::{Espaco, TemaUi};
 use eframe::egui;
 use mod_clientes::{Papel, PessoasPorPapel};
 use mod_compras::{
-    ConfirmarEntrada, EstadoCasamento, EstadoNotaEntrada, ImportarNotaDeArquivoXml, ItemNota,
-    ItemNotaEntrada, ItemNotaManual, ItensDaNota, LancarNotaManual, NotasRecentes,
-    VincularProdutoManual,
+    ConfirmarEntrada, CriarProdutoDoItem, EstadoCasamento, EstadoNotaEntrada,
+    ImportarNotaDeArquivoXml, ItemNota, ItemNotaEntrada, ItemNotaManual, ItensDaNota,
+    LancarNotaManual, NotasRecentes, ProdutoDoItemCriado, VincularProdutoManual,
 };
-use mod_estoque::{ItemLocal, ItemProdutoComSaldo, Locais, ProdutosComSaldo};
+use mod_estoque::{
+    ArvoreGruposProduto, ItemLocal, ItemProdutoComSaldo, Locais, ProdutosComSaldo,
+    SugerirNomeDoProduto,
+};
+
+/// O formulário "Criar produto novo" de um item não casado: o nome (começa com a sugestão
+/// padronizada pelo dicionário) e o grupo opcional.
+#[derive(Default)]
+struct FormProdutoNovo {
+    nome: String,
+    grupo: Option<Id>,
+    seletor: EstadoSeletorArvore,
+}
+
+/// O que o usuário pediu na linha de um item.
+enum AcaoItem {
+    Vincular(Id),
+    Criar,
+}
 
 #[derive(Default, PartialEq)]
 enum Dlg {
@@ -91,6 +110,10 @@ pub struct EstadoTelaCompras {
     vinc_produto: HashMap<Id, Option<Id>>,
     /// Texto digitado no `SeletorBusca` de cada item, por `item_nota`.
     busca_produto: HashMap<Id, String>,
+    /// "Criar produto novo" de cada item não casado, por `item_nota`.
+    produto_novo: HashMap<Id, FormProdutoNovo>,
+    /// A estrutura mercadológica, para escolher o grupo do produto novo.
+    grupos: Vec<NoArvore>,
     /// "Já foi pago" no diálogo de confirmar entrada — item 2 do briefing.
     pago_no_ato: bool,
     busca: String,
@@ -131,6 +154,45 @@ impl EstadoTelaCompras {
         if let Ok(l) = motor.consultar(sessao, "estoque.locais.v1", &Locais) {
             self.locais = l;
         }
+        if let Ok(nos) = motor.consultar(
+            sessao,
+            "estoque.arvore_grupos_produto.v1",
+            &ArvoreGruposProduto,
+        ) {
+            self.grupos = nos
+                .into_iter()
+                .map(|n| NoArvore {
+                    id: n.id,
+                    nivel: n.nivel,
+                    rotulo: n.nome,
+                    apoio: None,
+                    tem_filhos: false,
+                })
+                .collect();
+        }
+    }
+
+    /// O formulário do item, com o nome sugerido na primeira vez.
+    fn form_produto_novo(
+        &mut self,
+        motor: &Motor,
+        sessao: &Sessao,
+        item: &ItemNotaEntrada,
+    ) -> &mut FormProdutoNovo {
+        self.produto_novo
+            .entry(item.id)
+            .or_insert_with(|| FormProdutoNovo {
+                nome: motor
+                    .consultar(
+                        sessao,
+                        "estoque.sugerir_nome_do_produto.v1",
+                        &SugerirNomeDoProduto {
+                            descricao: item.descricao_fornecedor.clone(),
+                        },
+                    )
+                    .unwrap_or_else(|_| item.descricao_fornecedor.clone()),
+                ..FormProdutoNovo::default()
+            })
     }
 
     fn abrir_nota(&mut self, motor: &Motor, sessao: &Sessao, nota: Id) {
@@ -658,20 +720,37 @@ fn dialogo_ver(
                     .iter()
                     .map(|p| (p.produto, p.nome.clone()))
                     .collect();
-                let mut vincular: Option<(Id, Id)> = None;
+                let mut acao: Option<(Id, AcaoItem)> = None;
+                let grupos = estado.grupos.clone();
                 for it in estado.itens_nota.clone() {
                     let opcoes = opcoes_busca_produtos(&estado.produtos);
+                    if it.estado_casamento == EstadoCasamento::NaoCasado {
+                        estado.form_produto_novo(motor, sessao, &it);
+                    }
                     let busca = estado.busca_produto.entry(it.id).or_default();
                     let sel = estado.vinc_produto.entry(it.id).or_default();
-                    if let Some(produto) =
-                        linha_item_casamento(ui, &it, &nomes_produto, opcoes, busca, sel)
-                    {
-                        vincular = Some((it.id, produto));
+                    let form = estado.produto_novo.get_mut(&it.id);
+                    if let Some(a) = linha_item_casamento(
+                        ui,
+                        &it,
+                        &nomes_produto,
+                        opcoes,
+                        busca,
+                        sel,
+                        form.map(|f| (f, grupos.as_slice())),
+                    ) {
+                        acao = Some((it.id, a));
                     }
                     ui.add_space(Espaco::E8);
                 }
-                if let Some((item_nota, produto)) = vincular {
-                    vincular_item(ui.ctx(), motor, sessao, estado, n.nota, item_nota, produto);
+                match acao {
+                    Some((item_nota, AcaoItem::Vincular(produto))) => {
+                        vincular_item(ui.ctx(), motor, sessao, estado, n.nota, item_nota, produto);
+                    }
+                    Some((item_nota, AcaoItem::Criar)) => {
+                        criar_produto_do_item(ui.ctx(), motor, sessao, estado, n.nota, item_nota);
+                    }
+                    None => {}
                 }
 
                 if matches!(n.estado, EstadoNotaEntrada::Conferida) {
@@ -725,8 +804,8 @@ fn opcoes_busca_produtos(produtos: &[ItemProdutoComSaldo]) -> Vec<OpcaoBusca<Id>
 /// forte (`EstadoCasamento::SugestaoForte`, casamento ≥ `LIMIAR_SUGESTAO_FORTE` = 82%) precisa
 /// de um jeito rápido de aceitar com um clique.
 ///
-/// Devolve o produto a vincular quando alguma ação (aceitar sugestão, ou escolher e vincular)
-/// disparou neste quadro.
+/// Devolve a ação (vincular a um produto, ou criar o produto novo) quando alguma disparou neste
+/// quadro. `produto_novo` é o formulário de criar (só para item não casado) e a árvore de grupos.
 fn linha_item_casamento(
     ui: &mut egui::Ui,
     item: &ItemNotaEntrada,
@@ -734,9 +813,11 @@ fn linha_item_casamento(
     opcoes: Vec<OpcaoBusca<Id>>,
     busca: &mut String,
     selecionado: &mut Option<Id>,
-) -> Option<Id> {
+    produto_novo: Option<(&mut FormProdutoNovo, &[NoArvore])>,
+) -> Option<AcaoItem> {
     let cores = ui.cores();
     let mut vincular = None;
+    let mut criar = false;
     // O estado do casamento define o tom do painel: sem produto = vermelho, sugestão = âmbar,
     // casado = neutro.
     let painel = match item.estado_casamento {
@@ -807,11 +888,89 @@ fn linha_item_casamento(
                         vincular = *selecionado;
                     }
                 }
+                if let Some((form, grupos)) = produto_novo {
+                    ui.add_space(Espaco::E4);
+                    SecaoExpansivel::nova("Não está no catálogo? Criar produto novo").mostrar(
+                        ui,
+                        |ui| {
+                            ui.add(Rotulo::campo(
+                                "O nome vem padronizado pelo dicionário da empresa; o que você \
+                                 corrigir aqui ele aprende para a próxima nota. NCM e código de \
+                                 barras vêm da nota.",
+                            ));
+                            ui.add_space(Espaco::E4);
+                            ui.add(Campo::novo("Nome do produto", &mut form.nome));
+                            ui.add_space(Espaco::E4);
+                            SeletorEmArvore::novo(
+                                "Grupo",
+                                &mut form.grupo,
+                                grupos,
+                                &mut form.seletor,
+                            )
+                            .marcador("Sem grupo")
+                            .opcao_vazia("Sem grupo")
+                            .mostrar(ui);
+                            ui.add_space(Espaco::E4);
+                            if ui
+                                .add_enabled(
+                                    !form.nome.trim().is_empty(),
+                                    Botao::primario("Criar e vincular").pequeno(),
+                                )
+                                .clicked()
+                            {
+                                criar = true;
+                            }
+                        },
+                    );
+                }
             }
         }
     });
 
-    vincular
+    if criar {
+        return Some(AcaoItem::Criar);
+    }
+    vincular.map(AcaoItem::Vincular)
+}
+
+fn criar_produto_do_item(
+    ctx: &egui::Context,
+    motor: &Motor,
+    sessao: &Sessao,
+    estado: &mut EstadoTelaCompras,
+    nota: Id,
+    item_nota: Id,
+) {
+    let Some(form) = estado.produto_novo.get(&item_nota) else {
+        return;
+    };
+    let comando = CriarProdutoDoItem {
+        item_nota,
+        nome: form.nome.trim().to_owned(),
+        grupo: form.grupo,
+    };
+    match motor.executar::<CriarProdutoDoItem>(sessao, "compras.criar_produto_do_item.v1", &comando)
+    {
+        Ok(r) => {
+            let r: ProdutoDoItemCriado = r;
+            estado.produto_novo.remove(&item_nota);
+            estado.recarregar_itens(motor, sessao, nota);
+            estado.carregar(motor, sessao);
+            let extra = if r.termos_aprendidos > 0 {
+                format!(
+                    " — o dicionário aprendeu {} termo(s) com a sua correção",
+                    r.termos_aprendidos
+                )
+            } else {
+                String::new()
+            };
+            notificar(
+                ctx,
+                Notificacao::sucesso(format!("Produto criado e vinculado{extra}")),
+            );
+        }
+        Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
+    }
 }
 
 fn vincular_item(
@@ -879,5 +1038,88 @@ fn confirmar(
             }
         }
         Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
+    }
+}
+
+#[cfg(test)]
+mod testes {
+    use super::*;
+    use crate::testes_comum::motor_de_teste;
+
+    const XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe">
+  <NFe>
+    <infNFe Id="NFe11111111111111111111111111111111111111111111" versao="4.00">
+      <ide><nNF>12</nNF><serie>1</serie><dhEmi>2026-10-01T09:00:00-03:00</dhEmi></ide>
+      <emit><CNPJ>45543915000181</CNPJ><xNome>Atacado Beta LTDA</xNome></emit>
+      <det nItem="1">
+        <prod>
+          <cProd>FER-10</cProd>
+          <cEAN>7891000315507</cEAN>
+          <xProd>FERM BIOLOGICO SECO FLEISCHMANN 10G</xProd>
+          <NCM>21021090</NCM>
+          <qCom>24.0000</qCom>
+          <vUnCom>1.500000</vUnCom>
+          <vProd>36.00</vProd>
+        </prod>
+      </det>
+      <total><ICMSTot><vProd>36.00</vProd><vFrete>0.00</vFrete><vSeg>0.00</vSeg>
+        <vOutro>0.00</vOutro><vNF>36.00</vNF></ICMSTot></total>
+    </infNFe>
+  </NFe>
+</nfeProc>"#;
+
+    #[test]
+    fn item_nao_casado_cria_produto_com_o_nome_sugerido_e_corrigido() {
+        let t = motor_de_teste();
+        let r: mod_compras::RelatorioImportacao = t
+            .motor
+            .executar(
+                &t.sessao,
+                "compras.importar_nota_de_arquivo_xml.v1",
+                &ImportarNotaDeArquivoXml { xml: XML.into() },
+            )
+            .expect("importa");
+        let mut estado = EstadoTelaCompras::default();
+        estado.carregar(&t.motor, &t.sessao);
+        estado.abrir_nota(&t.motor, &t.sessao, r.nota_entrada);
+        assert_eq!(estado.itens_nota.len(), 1);
+        let item = estado.itens_nota[0].clone();
+        assert_eq!(item.estado_casamento, EstadoCasamento::NaoCasado);
+
+        // O diálogo desenha o item com o formulário "Criar produto novo" já sugerido.
+        let ctx = egui::Context::default();
+        cardeal_ui::tokens::instalar_fontes(&ctx);
+        cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+        for _ in 0..2 {
+            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                dialogo_ver(ctx, &t.motor, &t.sessao, &mut estado);
+            });
+        }
+        let form = estado.produto_novo.get_mut(&item.id).expect("formulário");
+        assert_eq!(form.nome, "Ferm Biologico Seco Fleischmann 10gr");
+        form.nome = "Fermento Biológico Seco Fleischmann 10gr".into();
+
+        criar_produto_do_item(
+            &ctx,
+            &t.motor,
+            &t.sessao,
+            &mut estado,
+            r.nota_entrada,
+            item.id,
+        );
+        assert_eq!(
+            estado.itens_nota[0].estado_casamento,
+            EstadoCasamento::Casado
+        );
+        assert!(estado
+            .produtos
+            .iter()
+            .any(|p| p.nome == "Fermento Biológico Seco Fleischmann 10gr"
+                && p.codigo_barras.as_deref() == Some("7891000315507")));
+        assert!(
+            estado.produto_novo.is_empty(),
+            "o formulário sai depois de criar"
+        );
     }
 }
