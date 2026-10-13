@@ -288,6 +288,30 @@ CREATE TABLE estoque_contagem_item (
 ) STRICT;
 ";
 
+// Migração v12 (2026-10-13): transferência entre locais do mesmo CNPJ — o documento, para o
+// histórico; o saldo e os movimentos `Transferencia*` são os de sempre.
+const SQL_TRANSFERENCIA: &str = r"
+CREATE TABLE estoque_transferencia (
+    id          BLOB PRIMARY KEY,
+    empresa     BLOB    NOT NULL,
+    origem      BLOB    NOT NULL REFERENCES estoque_local(id),
+    destino     BLOB    NOT NULL REFERENCES estoque_local(id),
+    observacao  TEXT,
+    criado_por  BLOB    NOT NULL,
+    criado_em   INTEGER NOT NULL,
+    CHECK (origem <> destino)
+) STRICT;
+CREATE INDEX estoque_transferencia_recentes ON estoque_transferencia(empresa, criado_em DESC);
+
+CREATE TABLE estoque_transferencia_item (
+    transferencia   BLOB    NOT NULL REFERENCES estoque_transferencia(id),
+    produto         BLOB    NOT NULL REFERENCES estoque_produto(id),
+    quantidade      INTEGER NOT NULL CHECK (quantidade > 0),
+    custo_unitario  INTEGER NOT NULL,
+    PRIMARY KEY (transferencia, produto)
+) STRICT;
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -353,6 +377,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 11,
         nome: "estoque_inventario",
         sql: SQL_INVENTARIO,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 12,
+        nome: "estoque_transferencia",
+        sql: SQL_TRANSFERENCIA,
         tipo: TipoMigracao::Esquema,
     },
 ];

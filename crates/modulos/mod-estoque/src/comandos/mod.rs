@@ -37,6 +37,7 @@ mod registrar_entrada;
 mod registrar_entrada_com_lote;
 mod registrar_saida;
 mod renomear_grupo_produto;
+mod transferir_entre_locais;
 
 pub use ajustar_saldo::{AjustarSaldo, SaldoAjustado};
 pub use aplicar_alteracao_em_lote::{AlteracaoAplicada, AplicarAlteracaoEmLote};
@@ -71,6 +72,7 @@ pub use registrar_entrada::{EntradaRegistrada, RegistrarEntrada};
 pub use registrar_entrada_com_lote::{EntradaComLoteRegistrada, RegistrarEntradaComLote};
 pub use registrar_saida::{RegistrarSaida, SaidaRegistrada};
 pub use renomear_grupo_produto::RenomearGrupoProduto;
+pub use transferir_entre_locais::{TransferenciaFeita, TransferirEntreLocais};
 
 /// Traduz uma recusa da árvore de grupos para o erro do despacho.
 #[cfg(feature = "sqlite")]

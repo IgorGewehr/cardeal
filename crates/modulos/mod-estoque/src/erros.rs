@@ -71,6 +71,28 @@ pub enum ErroEstoque {
         esperado: &'static str,
     },
 
+    /// Transferência sem nenhum produto.
+    #[error("A transferência precisa de pelo menos um produto")]
+    TransferenciaSemItens,
+
+    /// Transferir mais do que a origem tem.
+    #[error("{produto}: a origem tem {disponivel}, foram pedidos {pedido}")]
+    SaldoInsuficienteNaOrigem {
+        /// O produto.
+        produto: String,
+        /// O disponível na origem.
+        disponivel: String,
+        /// O que foi pedido.
+        pedido: String,
+    },
+
+    /// Produto com lote ativo na origem: o lote guarda o local.
+    #[error("{produto} tem peças com lote neste local: a transferência por lote ainda não existe")]
+    TransferenciaComLote {
+        /// O produto.
+        produto: String,
+    },
+
     /// Um local só pode ter um inventário aberto por vez.
     #[error("Este local já tem um inventário em aberto: encerre ou cancele o atual antes")]
     LocalJaEmInventario,
@@ -127,17 +149,19 @@ impl ErroDominio for ErroEstoque {
             | Self::MotivoObrigatorio
             | Self::CodigoLoteVazio
             | Self::AparelhoOrigemAusente
-            | Self::DescricaoDoAparelhoVazia => CodigoErro::ENTRADA_INVALIDA,
+            | Self::DescricaoDoAparelhoVazia
+            | Self::TransferenciaSemItens => CodigoErro::ENTRADA_INVALIDA,
             Self::GtinInvalido => CodigoErro::DOCUMENTO_INVALIDO,
             Self::ProdutoSemGrade
             | Self::LocalJaEmInventario
+            | Self::TransferenciaComLote { .. }
             | Self::InventarioSemItens
             | Self::LocalIgual
             | Self::ReservaInsuficiente
             | Self::LoteDeOutroProduto => CodigoErro::REGRA_VIOLADA,
-            Self::SaldoInsuficiente { .. } | Self::LoteSaldoInsuficiente { .. } => {
-                CodigoErro::ESTOQUE_INSUFICIENTE
-            }
+            Self::SaldoInsuficiente { .. }
+            | Self::LoteSaldoInsuficiente { .. }
+            | Self::SaldoInsuficienteNaOrigem { .. } => CodigoErro::ESTOQUE_INSUFICIENTE,
             Self::LocalCongelado => CodigoErro::RECURSO_TRAVADO,
             Self::EstadoDeInventarioInvalido { .. } | Self::ContagensPendentes(_) => {
                 CodigoErro::ESTADO_INVALIDO
@@ -154,6 +178,12 @@ impl ErroDominio for ErroEstoque {
                     "O disponível é {disponivel} e foram pedidos {pedido}. A venda pode seguir \
                      (o saldo negativo é registrado e sinalizado), mas confira a contagem física."
                 ),
+            )),
+            Self::TransferenciaComLote { .. } => Some(Detalhes::nova(
+                "Peça rastreada por lote",
+                "O lote guarda o local onde a peça está; mover só o saldo deixaria o código do \
+                 post-it apontando para o lugar errado. Por enquanto, dê saída da peça pelo lote \
+                 na origem e entrada com o mesmo código no destino.",
             )),
             Self::LocalCongelado => Some(Detalhes::nova(
                 "Inventário em andamento",

@@ -1059,3 +1059,122 @@ fn inventario_na_tela_e_cego_ate_encerrar_e_mostra_as_diferencas_depois() {
     );
     desenhar(&mut estado);
 }
+
+#[test]
+fn transferencia_na_tela_monta_a_lista_soma_repetido_e_grava() {
+    let t = motor_de_teste();
+    let g = grupo(&t.motor, &t.sessao, "Mercearia", None);
+    let un: UnidadeCriada = t
+        .motor
+        .executar(
+            &t.sessao,
+            "estoque.criar_unidade.v1",
+            &CriarUnidade {
+                sigla: "UN".into(),
+                nome: "Unidade".into(),
+                fracionavel: false,
+            },
+        )
+        .or_else(|_| {
+            let u: Vec<ItemUnidade> = t
+                .motor
+                .consultar(&t.sessao, "estoque.unidades.v1", &Unidades)
+                .expect("unidades");
+            Ok::<_, cardeal_kernel::Erro>(UnidadeCriada { unidade: u[0].id })
+        })
+        .expect("unidade");
+    let p: ProdutoCriado = t
+        .motor
+        .executar(
+            &t.sessao,
+            "estoque.criar_produto.v1",
+            &CriarProduto {
+                grupo_produto: g,
+                nome: "Arroz 5kg".into(),
+                ncm: String::new(),
+                unidade_padrao: un.unidade,
+                codigo_barras: None,
+                detalhes_tecnicos: None,
+            },
+        )
+        .expect("produto");
+    let local = |nome: &str, tipo| -> Id {
+        let l: LocalCriado = t
+            .motor
+            .executar(
+                &t.sessao,
+                "estoque.criar_local.v1",
+                &CriarLocal {
+                    nome: nome.into(),
+                    tipo,
+                },
+            )
+            .expect("local");
+        l.local
+    };
+    let deposito = local("Depósito", TipoLocal::Deposito);
+    let loja = local("Loja", TipoLocal::Loja);
+    let _: EntradaRegistrada = t
+        .motor
+        .executar(
+            &t.sessao,
+            "estoque.registrar_entrada.v1",
+            &RegistrarEntrada {
+                produto: p.produto,
+                local: deposito,
+                quantidade: Quantidade::unidades(10),
+                custo_unitario: Preco::reais(20),
+            },
+        )
+        .expect("entrada");
+
+    let mut estado = EstadoTelaEstoque::default();
+    estado.carregar(&t.motor, &t.sessao);
+    estado.aba = AbaEstoque::Transferencias;
+    estado.transf.carregar(&t.motor, &t.sessao);
+    estado.transf.origem = Some(deposito);
+    estado.transf.destino = Some(loja);
+    // Quantidade inválida não entra; o mesmo produto duas vezes soma.
+    estado.transf.produto = Some(p.produto);
+    estado.transf.quantidade = "0".into();
+    assert!(estado.transf.adicionar("Arroz 5kg").is_err());
+    estado.transf.quantidade = "2".into();
+    estado.transf.adicionar("Arroz 5kg").expect("adiciona");
+    estado.transf.produto = Some(p.produto);
+    estado.transf.quantidade = "1".into();
+    estado.transf.adicionar("Arroz 5kg").expect("soma");
+    assert_eq!(estado.transf.itens.len(), 1);
+    assert_eq!(estado.transf.itens[0].quantidade, Quantidade::unidades(3));
+
+    // A aba desenha num quadro de verdade, com o produto escolhido (o disponível por local).
+    estado.transf.produto = Some(p.produto);
+    let ctx = egui::Context::default();
+    cardeal_ui::tokens::instalar_fontes(&ctx);
+    cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+    for _ in 0..2 {
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                mostrar(ui, &t.motor, &t.sessao, &mut estado);
+            });
+        });
+    }
+
+    let r = super::transferencia::transferir(&t.motor, &t.sessao, &mut estado).expect("transfere");
+    assert_eq!(r.itens, 1);
+    assert_eq!(r.valor, cardeal_kernel::Dinheiro::reais(60));
+    assert!(estado.transf.itens.is_empty(), "a lista volta vazia");
+    assert_eq!(estado.transf.historico.len(), 1);
+    let disponivel: Quantidade = t
+        .motor
+        .consultar(
+            &t.sessao,
+            "estoque.saldo_disponivel_do_produto.v1",
+            &mod_estoque::SaldoDisponivelDoProduto { produto: p.produto },
+        )
+        .expect("saldo");
+    assert_eq!(
+        disponivel,
+        Quantidade::unidades(10),
+        "o total do CNPJ não muda"
+    );
+}

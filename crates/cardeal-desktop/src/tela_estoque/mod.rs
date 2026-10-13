@@ -19,6 +19,7 @@ mod produtos_importacao;
 mod rentabilidade;
 #[cfg(test)]
 mod testes;
+mod transferencia;
 
 use cardeal_cliente::{Motor, Sessao};
 use cardeal_kernel::{Fuso, Id, Preco, Quantidade};
@@ -53,6 +54,7 @@ enum AbaEstoque {
     Analise,
     Rentabilidade,
     Inventario,
+    Transferencias,
     Radar,
 }
 
@@ -91,6 +93,7 @@ pub struct EstadoTelaEstoque {
     analise: analise::EstadoAnalise,
     rent: rentabilidade::EstadoRentabilidade,
     inv: inventario::EstadoInventarioUi,
+    transf: transferencia::EstadoTransferenciaUi,
     /// Perfil fiscal do produto aberto em "Editar": o que ele define e o vigente.
     fisc: fiscal::FormFiscal,
     fisc_efetivo: Vec<mod_estoque::fiscal::LinhaFiscal>,
@@ -266,6 +269,7 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
                 (AbaEstoque::Analise, "Análise"),
                 (AbaEstoque::Rentabilidade, "Rentabilidade"),
                 (AbaEstoque::Inventario, "Inventário"),
+                (AbaEstoque::Transferencias, "Transferências"),
                 (AbaEstoque::Radar, "Radar de reposição"),
             ])
             .selecionada(estado.aba)
@@ -287,6 +291,9 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
                 if nova == AbaEstoque::Inventario {
                     estado.inv.carregar(motor, sessao);
                 }
+                if nova == AbaEstoque::Transferencias {
+                    estado.transf.carregar(motor, sessao);
+                }
             }
             ui.add_space(Espaco::E16);
 
@@ -307,6 +314,7 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
                 AbaEstoque::Analise => analise::aba(ui, motor, sessao, estado),
                 AbaEstoque::Rentabilidade => rentabilidade::aba(ui, motor, sessao, estado),
                 AbaEstoque::Inventario => inventario::aba(ui, motor, sessao, estado),
+                AbaEstoque::Transferencias => transferencia::aba(ui, motor, sessao, estado),
                 AbaEstoque::Radar => radar(ui, estado),
             }
         },

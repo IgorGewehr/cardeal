@@ -287,8 +287,8 @@ stateDiagram-v2
 | `RegistrarSaida` ✅ | `estoque.movimento.saida` | Médio | Cria `Movimento Saida`, decrementa disponível | `SaldoInsuficiente` (aviso, não bloqueia por padrão — ver regra 2) |
 | `ReservarEstoque` | (consulta síncrona de `vendas`, sem permissão de usuário direta) | Baixo | Ainda não implementado | `SaldoInsuficiente` |
 | `LiberarReserva` | idem | Baixo | Ainda não implementado | `ReservaInexistente` |
-| `TransferirEntreLocais` | `estoque.transferencia.criar` | Médio | Ainda não implementado | `LocalIgual`, `SaldoInsuficiente` |
-| `ConfirmarRecebimentoTransferencia` | `estoque.transferencia.confirmar` | Baixo | Ainda não implementado | `TransferenciaJaConfirmada` |
+| `TransferirEntreLocais` ✅ (2026-10-13, `estoque.transferir_entre_locais.v1`) | `estoque.transferencia.criar` | Médio | Vários produtos de um local para outro do mesmo CNPJ, numa transação: por item, saída na origem e entrada no destino ao custo médio da origem (o destino recalcula; sem custo conhecido só a quantidade muda), movimentos `TransferenciaSaida`/`TransferenciaEntrada` com origem `transferencia` e o documento em `estoque_transferencia*`. Produto repetido soma | `LocalIgual`, `TransferenciaSemItens`, `SaldoInsuficienteNaOrigem` (`ESTOQUE_INSUFICIENTE`, tudo ou nada), `TransferenciaComLote`, `LocalCongelado` (local em inventário) |
+| `ConfirmarRecebimentoTransferencia` | `estoque.transferencia.confirmar` | Baixo | **Adiado de propósito (2026-10-13):** entre locais do mesmo CNPJ a mercadoria muda de lugar na hora; a etapa `EmTransito` com confirmação vem com a transferência entre filiais (CNPJs), que exige NF-e de transferência (onda fiscal) | `TransferenciaJaConfirmada` |
 | `AjustarSaldo` ✅ | `estoque.movimento.ajustar` | Alto | Corrige o disponível de um produto/local para `nova_quantidade` (erro de digitação de contagem/entrada), fora do fluxo formal de inventário; **é o único comando de movimento desta fatia que posta no razão** (`receituario::ajuste_manual`, mesma contabilização de `ajuste_de_inventario` — D Estoque/C Outras receitas na sobra, D Perdas/C Estoque na falta), porque não há nenhum outro módulo gerando a contrapartida de uma correção manual. Corrige quantidade, não custo — reabrir/corrigir só o `custo_medio` sem mexer na quantidade fica para quando existir `EditarProduto` | `MotivoObrigatorio` (motivo com menos de 10 caracteres), `QuantidadeInvalida` (`nova_quantidade` igual à atual — nada a corrigir) |
 | `RegistrarPerda` | `estoque.movimento.perda` | Médio | Ainda não implementado | `LoteInexistente` |
 | `CriarInventario` ✅ (2026-10-13, `estoque.criar_inventario.v1`) | `estoque.inventario.criar` | Baixo | Planeja a contagem de um local (CNPJ da sessão): o local inteiro ou um grupo da estrutura com a subárvore | `LocalJaEmInventario` (um inventário aberto por local), local/grupo inexistente |
@@ -353,7 +353,9 @@ stateDiagram-v2
 | `EncargosAtuais` ✅ (2026-10-12, `estoque.encargos_atuais.v1`) | `estoque.produto.ver` | Os percentuais que incidem hoje sobre a venda (operação, imposto, comissão, taxas) e a margem líquida mínima — a régua da margem líquida **estimada** | parâmetros de preço + Razão |
 | `CurvaAbc` | `estoque.abc.ver` | Relatório de curva ABC | agregação de `estoque_movimento` por valor no período |
 | `LotesProximosDoVencimento` | `estoque.lote.ver` | Alerta de validade | `estoque_lote(validade)` índice parcial `WHERE estado = 'Ativo'` |
-| `EstoqueEmTransito` | `estoque.transferencia.ver` | Painel de transferências pendentes | `estoque_saldo_local(local) WHERE local = local_em_transito` |
+| `EstoqueEmTransito` | `estoque.transferencia.ver` | Painel de transferências pendentes — adiado junto com a confirmação de recebimento | `estoque_saldo_local(local) WHERE local = local_em_transito` |
+| `Transferencias` ✅ (2026-10-13, `estoque.transferencias.v1`) | `estoque.transferencia.ver` | Histórico: origem, destino, observação, itens com quantidade e valor ao custo da origem | `estoque_transferencia*` |
+| `SaldosDoProdutoPorLocal` ✅ (2026-10-13, `estoque.saldos_do_produto_por_local.v1`) | `estoque.saldo.ver` | O disponível de um produto em cada local ativo do CNPJ (o "disponível na origem" da transferência) | `estoque_local` + `estoque_saldo_local` |
 | `PosicaoDoInventario` ✅ (2026-10-13, `estoque.posicao_do_inventario.v1`) | `estoque.inventario.ver` | Tela de contagem em andamento e resultado: itens com o contado; **sistema, diferença e valor do ajuste só depois de encerrado** (cega) | `estoque_contagem_item(inventario)` |
 | `Inventarios` ✅ (2026-10-13, `estoque.inventarios.v1`) | `estoque.inventario.ver` | Lista de inventários do CNPJ (estado, contados/itens, datas) | `estoque_inventario` |
 
@@ -378,6 +380,20 @@ e uma amostra de até 200 caminhos. Importar o mesmo arquivo duas vezes não cri
 aba Estrutura → "Importar planilha…" (seletor de arquivo, prévia, confirmar). Limites: só cria (não renomeia
 nem move); nome igual com grafia diferente além de caixa/acento/pontuação vira outro grupo; o código gerado
 não é editável na planilha. A importação de **produtos** por planilha é a seção seguinte.
+
+### Transferência entre locais (2026-10-13)
+
+Domínio puro em `transferencia.rs` (`Transferencia::nova`: locais diferentes, itens com quantidade positiva,
+produto repetido soma numa linha), migração `estoque` v12 (`estoque_transferencia`, `estoque_transferencia_item`
+com o custo unitário que cada item levou) e o comando `TransferirEntreLocais`. Decisões que fogem do spec
+original: **imediata** (sem `EmTransito` nem confirmação de recebimento, que ficam para a transferência entre
+CNPJs com NF-e); **sem saldo, recusa** (diferente da venda, que segue negativa porque o mundo físico já
+aconteceu — transferir o que não existe é erro de digitação); **produto com lote ativo na origem é
+recusado** (o lote guarda o local; a transferência por lote fica para depois); **sem lançamento no razão**
+(uma conta de estoque por CNPJ). As análises (ABC, giro, rentabilidade, histórico de compras, última compra)
+filtram `Saida`/`Entrada` e por isso não enxergam a transferência como consumo nem como compra. Tela: aba
+**Transferências** no Estoque — de/para, produto com o disponível na origem e no destino, lista com remover,
+observação, e o histórico com os itens da selecionada.
 
 ### Inventário com contagem cega (2026-10-13)
 
@@ -478,7 +494,7 @@ e a sequência completa em [doc 01 §3](../01-arquitetura-geral.md#3-o-caminho-d
 | Ajuste positivo de inventário (sobra na contagem) | Estoque (1.3.01) | Sobra de inventário (4.6 Outras receitas) | Realizado |
 | Ajuste negativo de inventário (falta na contagem) | Perdas de estoque (5.x) | Estoque | Realizado |
 | Perda por vencimento/quebra | Perdas de estoque (5.x) | Estoque | Realizado |
-| Transferência entre locais da mesma empresa | Estoque — local destino | Estoque — local origem | Realizado |
+| Transferência entre locais da mesma empresa | Estoque — local destino | Estoque — local origem | **Sem lançamento (2026-10-13):** o plano de contas tem uma conta de estoque por CNPJ, não uma por local, então débito e crédito cairiam na mesma conta. A transferência fica nos movimentos; o valor por local, quando for preciso, sai deles |
 | Transferência entre empresas do grupo (filiais) | Estoque — empresa destino | Estoque — empresa origem | Realizado, com `Origem` espelhada nas duas empresas (ver [doc 05 §8](../05-nucleo-financeiro.md#8-multiempresa-e-consolidação)) |
 | Entrada avulsa sem nota de compra (doação, brinde recebido) | Estoque | Outras receitas (4.6) | Confirmado |
 | **Baixa de estoque por venda** *(lançada por `vendas`/`pdv`, não por `estoque`)* | CMV (5.1) | Estoque | igual ao lançamento da venda |

@@ -29,9 +29,9 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
 - **Ordem do que vem agora** (custo de referência, histórico de compras, preços defasados,
   **rentabilidade por nível da árvore**, **seletor em árvore no cadastro**, **importação da estrutura por
   planilha**, **importação de produto por planilha** e **comissão por estrutura mercadológica** (2026-10-13)
-  já estão feitos — a onda 4 fechou). Onda 5: **inventário com contagem cega feito (2026-10-13)**; segue
-  transferência entre locais → importação de produto por XML (dicionário determinístico) → validade e
-  alertas. A apuração mensal da comissão do vendedor
+  já estão feitos — a onda 4 fechou). Onda 5: **inventário com contagem cega** e **transferência entre locais** feitos
+  (2026-10-13); segue importação de produto por XML (dicionário determinístico) → validade e alertas →
+  ST/MVA no custo → custo-hora do técnico. A apuração mensal da comissão do vendedor
   (`vendas.ApurarComissao`) continua pendente e agora tem o percentual por item pronto.
 - **Pendência de confiança:** as tabelas do Simples e as alíquotas precisam ser conferidas com o
   contador; ST/MVA ainda não entram no custo.
@@ -519,6 +519,12 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   hora, encerrar ajusta saldo + razão por `aplicar_delta_de_saldo` (extraído do `AjustarSaldo`, agora o corpo
   comum dos dois). `CancelarInventario` e o estado `Cancelado` foram acrescentados ao spec. Aba **Inventário**
   no Estoque. Testes: 2 de domínio + 4 de integração + 1 de tela.
+- **Transferência entre locais (2026-10-13):** domínio `mod-estoque::transferencia`, migração v12, comando
+  `estoque.transferir_entre_locais.v1` (vários itens, tudo ou nada, ao custo médio da origem) e consultas
+  `estoque.transferencias.v1`/`estoque.saldos_do_produto_por_local.v1`. Imediata (a etapa em trânsito com
+  confirmação fica para a transferência entre CNPJs com NF-e), recusa sem saldo, recusa produto com lote
+  ativo na origem, sem lançamento no razão (uma conta de estoque por CNPJ). Aba **Transferências** no Estoque.
+  Testes: 2 de domínio + 3 de integração + 1 de tela.
 - **Dívidas conhecidas:** tabelas do Simples a conferir com o contador; a 6ª faixa e a anualização de
   RBT12 (ver ADR-0018); o PDV só avisa preço abaixo do mínimo de empate (etiqueta "abaixo do mínimo" na linha do
   cupom, depois do desconto); não bloqueia a venda e não é o painel de margem completo.

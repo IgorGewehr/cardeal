@@ -70,6 +70,7 @@ mod consultas_inventario;
 mod consultas_lote;
 mod consultas_preco;
 mod consultas_rentabilidade;
+mod consultas_transferencia;
 mod erros;
 pub mod eventos;
 pub mod fiscal;
@@ -96,7 +97,10 @@ pub(crate) mod repositorio_inventario;
 pub(crate) mod repositorio_lote;
 #[cfg(feature = "sqlite")]
 pub(crate) mod repositorio_preco;
+#[cfg(feature = "sqlite")]
+pub(crate) mod repositorio_transferencia;
 mod saldo;
+pub mod transferencia;
 
 pub use aparelho_origem::AparelhoOrigem;
 #[cfg(feature = "sqlite")]
@@ -130,6 +134,7 @@ pub use comandos::{
     RenomearGrupoProduto,
 };
 pub use comandos::{EstruturaImportada, ImportarEstrutura, ImportarProdutos, ProdutosImportados};
+pub use comandos::{TransferenciaFeita, TransferirEntreLocais};
 #[cfg(feature = "sqlite")]
 pub use consultas::{
     melhor_local_de_saida, movimentos_do_produto, produtos_abaixo_do_ponto_pedido,
@@ -159,6 +164,9 @@ pub use consultas_preco::{
     PrecosSugeridosDoGrupo, SugestaoDePreco,
 };
 pub use consultas_rentabilidade::{EncargosAtuais, SaidaDoProduto, SaidasPorProdutoEOrigem};
+pub use consultas_transferencia::{
+    ItemTransferido, ResumoTransferencia, SaldoNoLocal, SaldosDoProdutoPorLocal, Transferencias,
+};
 pub use erros::ErroEstoque;
 pub use inventario::{AjusteInventario, ContagemItem, EstadoInventario, Inventario};
 pub use listagem::ListarProdutos;
