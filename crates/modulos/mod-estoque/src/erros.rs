@@ -71,6 +71,15 @@ pub enum ErroEstoque {
         esperado: &'static str,
     },
 
+    /// Perda maior do que o saldo do local.
+    #[error("Perda acima do saldo: o local tem {disponivel}, foram pedidos {pedido}")]
+    PerdaAcimaDoSaldo {
+        /// O disponível no local.
+        disponivel: String,
+        /// O que foi pedido.
+        pedido: String,
+    },
+
     /// Transferência sem nenhum produto.
     #[error("A transferência precisa de pelo menos um produto")]
     TransferenciaSemItens,
@@ -161,7 +170,8 @@ impl ErroDominio for ErroEstoque {
             | Self::LoteDeOutroProduto => CodigoErro::REGRA_VIOLADA,
             Self::SaldoInsuficiente { .. }
             | Self::LoteSaldoInsuficiente { .. }
-            | Self::SaldoInsuficienteNaOrigem { .. } => CodigoErro::ESTOQUE_INSUFICIENTE,
+            | Self::SaldoInsuficienteNaOrigem { .. }
+            | Self::PerdaAcimaDoSaldo { .. } => CodigoErro::ESTOQUE_INSUFICIENTE,
             Self::LocalCongelado => CodigoErro::RECURSO_TRAVADO,
             Self::EstadoDeInventarioInvalido { .. } | Self::ContagensPendentes(_) => {
                 CodigoErro::ESTADO_INVALIDO

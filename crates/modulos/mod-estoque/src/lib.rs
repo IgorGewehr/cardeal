@@ -72,6 +72,7 @@ mod consultas_lote;
 mod consultas_preco;
 mod consultas_rentabilidade;
 mod consultas_transferencia;
+mod consultas_validade;
 mod erros;
 pub mod eventos;
 pub mod fiscal;
@@ -141,6 +142,7 @@ pub use comandos::{
 };
 pub use comandos::{DefinirTermoDoDicionario, ProdutoDeCompraCriado, RemoverTermoDoDicionario};
 pub use comandos::{EstruturaImportada, ImportarEstrutura, ImportarProdutos, ProdutosImportados};
+pub use comandos::{MotivoPerda, PerdaRegistrada, RegistrarPerda};
 pub use comandos::{TransferenciaFeita, TransferirEntreLocais};
 #[cfg(feature = "sqlite")]
 pub use consultas::{
@@ -175,6 +177,7 @@ pub use consultas_rentabilidade::{EncargosAtuais, SaidaDoProduto, SaidasPorProdu
 pub use consultas_transferencia::{
     ItemTransferido, ResumoTransferencia, SaldoNoLocal, SaldosDoProdutoPorLocal, Transferencias,
 };
+pub use consultas_validade::{LoteComValidade, LotesComValidade};
 pub use erros::ErroEstoque;
 pub use inventario::{AjusteInventario, ContagemItem, EstadoInventario, Inventario};
 pub use listagem::ListarProdutos;

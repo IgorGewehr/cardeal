@@ -290,7 +290,7 @@ stateDiagram-v2
 | `TransferirEntreLocais` ✅ (2026-10-13, `estoque.transferir_entre_locais.v1`) | `estoque.transferencia.criar` | Médio | Vários produtos de um local para outro do mesmo CNPJ, numa transação: por item, saída na origem e entrada no destino ao custo médio da origem (o destino recalcula; sem custo conhecido só a quantidade muda), movimentos `TransferenciaSaida`/`TransferenciaEntrada` com origem `transferencia` e o documento em `estoque_transferencia*`. Produto repetido soma | `LocalIgual`, `TransferenciaSemItens`, `SaldoInsuficienteNaOrigem` (`ESTOQUE_INSUFICIENTE`, tudo ou nada), `TransferenciaComLote`, `LocalCongelado` (local em inventário) |
 | `ConfirmarRecebimentoTransferencia` | `estoque.transferencia.confirmar` | Baixo | **Adiado de propósito (2026-10-13):** entre locais do mesmo CNPJ a mercadoria muda de lugar na hora; a etapa `EmTransito` com confirmação vem com a transferência entre filiais (CNPJs), que exige NF-e de transferência (onda fiscal) | `TransferenciaJaConfirmada` |
 | `AjustarSaldo` ✅ | `estoque.movimento.ajustar` | Alto | Corrige o disponível de um produto/local para `nova_quantidade` (erro de digitação de contagem/entrada), fora do fluxo formal de inventário; **é o único comando de movimento desta fatia que posta no razão** (`receituario::ajuste_manual`, mesma contabilização de `ajuste_de_inventario` — D Estoque/C Outras receitas na sobra, D Perdas/C Estoque na falta), porque não há nenhum outro módulo gerando a contrapartida de uma correção manual. Corrige quantidade, não custo — reabrir/corrigir só o `custo_medio` sem mexer na quantidade fica para quando existir `EditarProduto` | `MotivoObrigatorio` (motivo com menos de 10 caracteres), `QuantidadeInvalida` (`nova_quantidade` igual à atual — nada a corrigir) |
-| `RegistrarPerda` | `estoque.movimento.perda` | Médio | Ainda não implementado | `LoteInexistente` |
+| `RegistrarPerda` ✅ (2026-10-13, `estoque.registrar_perda.v1`) | `estoque.movimento.perda` | Médio | Baixa de perda (motivo vencimento, quebra/avaria, furto/extravio, outro + observação): sai do saldo do local e, se informado, do lote (que vira `Esgotado` quando zera); movimento `Perda`; lança D Perdas / C Estoque **ao custo médio** (como toda saída — o custo do lote é informativo) com o motivo no histórico. Não deixa saldo negativo | `LoteInexistente`, `LoteDeOutroProduto`, `LoteSaldoInsuficiente`, `PerdaAcimaDoSaldo`, `LocalCongelado` |
 | `CriarInventario` ✅ (2026-10-13, `estoque.criar_inventario.v1`) | `estoque.inventario.criar` | Baixo | Planeja a contagem de um local (CNPJ da sessão): o local inteiro ou um grupo da estrutura com a subárvore | `LocalJaEmInventario` (um inventário aberto por local), local/grupo inexistente |
 | `IniciarContagem` ✅ (2026-10-13, `estoque.iniciar_contagem.v1`) | `estoque.inventario.contar` | Médio | Tira a foto do saldo (produtos ativos com saldo registrado no local, no recorte) e trava o local na mesma transação: `Planejado → EmContagem → Congelado` | `InventarioSemItens`, estado inválido |
 | `RegistrarContagem` ✅ (2026-10-13, `estoque.registrar_contagem.v1`) | `estoque.inventario.contar` | Baixo | A quantidade contada de um produto, **sem devolver a do sistema**; produto achado fora da lista entra com o disponível do local (o mesmo da foto, porque o local está travado); contar de novo corrige | estado inválido, produto inexistente, quantidade negativa |
@@ -352,7 +352,7 @@ stateDiagram-v2
 | `SaidasPorProdutoEOrigem` ✅ (2026-10-12, `estoque.saidas_por_produto_e_origem.v1`) | `estoque.abc.ver` | Aba Rentabilidade: o que saiu (movimentos `Saida`) no período, por produto e `origem_modulo` (`vendas`, `pdv`, `os`, `estoque`…), com a quantidade e o custo (Σ quantidade × custo gravado; sem custo gravado, o custo médio atual). O dia é o do fuso da empresa | `estoque_movimento(empresa, tipo, criado_em)` |
 | `EncargosAtuais` ✅ (2026-10-12, `estoque.encargos_atuais.v1`) | `estoque.produto.ver` | Os percentuais que incidem hoje sobre a venda (operação, imposto, comissão, taxas) e a margem líquida mínima — a régua da margem líquida **estimada** | parâmetros de preço + Razão |
 | `CurvaAbc` | `estoque.abc.ver` | Relatório de curva ABC | agregação de `estoque_movimento` por valor no período |
-| `LotesProximosDoVencimento` | `estoque.lote.ver` | Alerta de validade | `estoque_lote(validade)` índice parcial `WHERE estado = 'Ativo'` |
+| `LotesComValidade` ✅ (2026-10-13, `estoque.lotes_com_validade.v1`; o `LotesProximosDoVencimento` do spec) | `estoque.lote.ver` | Alerta de validade: lotes com validade e saldo no CNPJ, os vencidos e os que vencem em até `dias` (ou todos), do mais urgente para o último, com dias restantes e o valor parado (saldo × custo do lote). O vencimento é calculado na hora contra hoje — não depende de uma tarefa diária marcar `Vencido` | `estoque_lote` + saldo do lote pelos movimentos |
 | `EstoqueEmTransito` | `estoque.transferencia.ver` | Painel de transferências pendentes — adiado junto com a confirmação de recebimento | `estoque_saldo_local(local) WHERE local = local_em_transito` |
 | `Transferencias` ✅ (2026-10-13, `estoque.transferencias.v1`) | `estoque.transferencia.ver` | Histórico: origem, destino, observação, itens com quantidade e valor ao custo da origem | `estoque_transferencia*` |
 | `SaldosDoProdutoPorLocal` ✅ (2026-10-13, `estoque.saldos_do_produto_por_local.v1`) | `estoque.saldo.ver` | O disponível de um produto em cada local ativo do CNPJ (o "disponível na origem" da transferência) | `estoque_local` + `estoque_saldo_local` |
@@ -380,6 +380,20 @@ e uma amostra de até 200 caminhos. Importar o mesmo arquivo duas vezes não cri
 aba Estrutura → "Importar planilha…" (seletor de arquivo, prévia, confirmar). Limites: só cria (não renomeia
 nem move); nome igual com grafia diferente além de caixa/acento/pontuação vira outro grupo; o código gerado
 não é editável na planilha. A importação de **produtos** por planilha é a seção seguinte.
+
+### Validade e perdas (2026-10-13)
+
+O domínio de lote com validade existia, mas nada o alimentava nem o consumia: não havia tela para entrar
+mercadoria com validade, nem consulta de vencimento, nem baixa de perda. Agora: `RegistrarEntradaComLote`
+aceita o código do lote **em branco** e gera um (`L` + validade em `ddmmaa` + sequência, único na empresa —
+mercadoria de prateleira não tem post-it); `LotesComValidade` lista vencidos e a vencer; `RegistrarPerda`
+dá a baixa. Decisão: a perda vale **custo médio**, não o custo do lote, porque toda saída (inclusive o CMV
+da venda) sai a custo médio e misturar os dois faria o saldo contábil do estoque divergir de saldo × custo
+médio. Tela: aba **Validade** no Estoque (cartões de vencidos, dinheiro parado e vencendo em 7 dias; lista
+com filtro de prazo e "Dar baixa"; "Entrada com validade") e o cartão "Lotes vencidos ou vencendo (7 dias)"
+na aba Produtos. Fora desta fatia: o evento `estoque.lote_vencido.v1` e a marcação diária `Vencido` (precisam
+do agendador), o lote/validade na confirmação da nota de compra (o `rastro` do XML) e escolher o lote na
+venda (FEFO).
 
 ### Padronização do nome e dicionário DE/PARA (2026-10-13)
 

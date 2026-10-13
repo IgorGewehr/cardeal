@@ -29,10 +29,10 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
 - **Ordem do que vem agora** (custo de referência, histórico de compras, preços defasados,
   **rentabilidade por nível da árvore**, **seletor em árvore no cadastro**, **importação da estrutura por
   planilha**, **importação de produto por planilha** e **comissão por estrutura mercadológica** (2026-10-13)
-  já estão feitos — a onda 4 fechou). Onda 5: **inventário com contagem cega**, **transferência entre locais** e **produto a
-  partir da nota com nome padronizado por dicionário** feitos (2026-10-13); segue validade e alertas →
-  custo-hora do técnico → ST/MVA no custo. A apuração mensal da comissão do vendedor
-  (`vendas.ApurarComissao`) continua pendente e agora tem o percentual por item pronto.
+  já estão feitos — a onda 4 fechou). Onda 5: **inventário com contagem cega**, **transferência entre locais**, **produto a partir da
+  nota com nome padronizado por dicionário** e **validade e perdas** feitos (2026-10-13); segue custo-hora do
+  técnico → ST/MVA no custo. A apuração mensal da comissão do vendedor (`vendas.ApurarComissao`) continua
+  pendente e agora tem o percentual por item pronto.
 - **Pendência de confiança:** as tabelas do Simples e as alíquotas precisam ser conferidas com o
   contador; ST/MVA ainda não entram no custo.
 
@@ -533,6 +533,12 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   "Criar produto novo" no item não casado da conferência e "Dicionário de nomes…" no Estoque. Falta a
   descrição reduzida (PDV) e o template configurável de ordem. Testes: 5 de domínio + 2 de integração + 2 de
   tela (o primeiro teste da tela de Compras).
+- **Validade e perdas (2026-10-13):** `estoque.registrar_perda.v1` (motivo + observação no histórico, sai do
+  lote e do saldo, esgota o lote, D Perdas / C Estoque **ao custo médio** — como toda saída; recusa perda acima
+  do saldo), `estoque.lotes_com_validade.v1` (vencidos e a vencer, vencimento calculado na hora) e código de
+  lote gerado quando em branco em `registrar_entrada_com_lote`. Aba **Validade** no Estoque e cartão de alerta na
+  aba Produtos. Pendentes: evento/marcação diária de `Vencido` (agendador), lote na confirmação da nota (`rastro`
+  do XML) e FEFO na venda. Testes: 2 de integração + 1 de tela.
 - **Dívidas conhecidas:** tabelas do Simples a conferir com o contador; a 6ª faixa e a anualização de
   RBT12 (ver ADR-0018); o PDV só avisa preço abaixo do mínimo de empate (etiqueta "abaixo do mínimo" na linha do
   cupom, depois do desconto); não bloqueia a venda e não é o painel de margem completo.

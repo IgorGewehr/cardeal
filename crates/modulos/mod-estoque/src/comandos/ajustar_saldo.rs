@@ -187,21 +187,7 @@ pub(crate) fn aplicar_delta_de_saldo(
         lote: None,
         delta,
     };
-    let contas = {
-        let repo_razao = RepositorioRazao::novo(uow);
-        let resolvedor = Contas::nova(&repo_razao, ctx.empresa);
-        ContasEstoque {
-            estoque: resolvedor
-                .papel(PapelConta::EstoqueMercadorias)
-                .map_err(|e| Erro::de_dominio(&e))?,
-            perdas: resolvedor
-                .papel(PapelConta::Perdas)
-                .map_err(|e| Erro::de_dominio(&e))?,
-            outras_receitas: resolvedor
-                .papel(PapelConta::OutrasReceitas)
-                .map_err(|e| Erro::de_dominio(&e))?,
-        }
-    };
+    let contas = contas_de_estoque(ctx, uow)?;
     let balanceado = match origem {
         OrigemDoAjuste::Manual => ajuste_manual(
             ctx.empresa,
@@ -234,5 +220,29 @@ pub(crate) fn aplicar_delta_de_saldo(
         movimento: movimento.id,
         lancamento,
         valor,
+    })
+}
+
+/// As contas que os lançamentos de estoque usam: estoque, perdas e outras receitas.
+///
+/// # Errors
+/// O razão sem alguma das três contas.
+#[cfg(feature = "sqlite")]
+pub(crate) fn contas_de_estoque(
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<ContasEstoque> {
+    let repo_razao = RepositorioRazao::novo(uow);
+    let resolvedor = Contas::nova(&repo_razao, ctx.empresa);
+    Ok(ContasEstoque {
+        estoque: resolvedor
+            .papel(PapelConta::EstoqueMercadorias)
+            .map_err(|e| Erro::de_dominio(&e))?,
+        perdas: resolvedor
+            .papel(PapelConta::Perdas)
+            .map_err(|e| Erro::de_dominio(&e))?,
+        outras_receitas: resolvedor
+            .papel(PapelConta::OutrasReceitas)
+            .map_err(|e| Erro::de_dominio(&e))?,
     })
 }

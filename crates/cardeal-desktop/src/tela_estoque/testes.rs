@@ -1224,3 +1224,100 @@ fn dicionario_de_nomes_adiciona_testa_e_remove() {
     estado.dic.carregar(&t.motor, &t.sessao);
     assert_eq!(estado.dic.termos.len(), 1);
 }
+
+#[test]
+fn validade_na_tela_entrada_alerta_e_baixa() {
+    use cardeal_kernel::{Data, Fuso};
+    let t = motor_de_teste();
+    let g = grupo(&t.motor, &t.sessao, "Laticínios", None);
+    let un: UnidadeCriada = t
+        .motor
+        .executar(
+            &t.sessao,
+            "estoque.criar_unidade.v1",
+            &CriarUnidade {
+                sigla: "UN".into(),
+                nome: "Unidade".into(),
+                fracionavel: false,
+            },
+        )
+        .or_else(|_| {
+            let u: Vec<ItemUnidade> = t
+                .motor
+                .consultar(&t.sessao, "estoque.unidades.v1", &Unidades)
+                .expect("unidades");
+            Ok::<_, cardeal_kernel::Erro>(UnidadeCriada { unidade: u[0].id })
+        })
+        .expect("unidade");
+    let p: ProdutoCriado = t
+        .motor
+        .executar(
+            &t.sessao,
+            "estoque.criar_produto.v1",
+            &CriarProduto {
+                grupo_produto: g,
+                nome: "Iogurte Natural".into(),
+                ncm: String::new(),
+                unidade_padrao: un.unidade,
+                codigo_barras: None,
+                detalhes_tecnicos: None,
+            },
+        )
+        .expect("produto");
+    let loc: LocalCriado = t
+        .motor
+        .executar(
+            &t.sessao,
+            "estoque.criar_local.v1",
+            &CriarLocal {
+                nome: "Loja".into(),
+                tipo: TipoLocal::Loja,
+            },
+        )
+        .expect("local");
+
+    let mut estado = EstadoTelaEstoque::default();
+    estado.carregar(&t.motor, &t.sessao);
+    estado.aba = AbaEstoque::Validade;
+    estado.val.carregar(&t.motor, &t.sessao);
+
+    // Entrada pela tela: validade de ontem, código em branco (gerado).
+    let ontem = Data::hoje(Fuso::BRASILIA).mais_dias(-1);
+    estado.val.ent_produto = Some(p.produto);
+    estado.val.ent_local = Some(loc.local);
+    estado.val.ent_qtd = "12".into();
+    estado.val.ent_custo = "2,50".into();
+    estado.val.ent_validade = "abc".into();
+    assert!(super::validade::registrar_entrada(&t.motor, &t.sessao, &mut estado).is_err());
+    estado.val.ent_validade = ontem.formatar();
+    super::validade::registrar_entrada(&t.motor, &t.sessao, &mut estado).expect("entrada");
+    assert_eq!(estado.val.lotes.len(), 1);
+    assert!(estado.val.lotes[0].vencido());
+    assert_eq!(
+        estado.lotes_em_alerta, 1,
+        "o alerta aparece na aba Produtos"
+    );
+
+    // A aba desenha num quadro de verdade, com a baixa aberta.
+    estado.val.abrir_baixa(0);
+    assert_eq!(
+        estado.val.baixa_motivo,
+        Some(mod_estoque::MotivoPerda::Vencimento)
+    );
+    let ctx = egui::Context::default();
+    cardeal_ui::tokens::instalar_fontes(&ctx);
+    cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+    for _ in 0..2 {
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                mostrar(ui, &t.motor, &t.sessao, &mut estado);
+            });
+        });
+    }
+
+    let r = super::validade::dar_baixa(&t.motor, &t.sessao, &mut estado).expect("baixa");
+    assert!(r.lote_esgotado);
+    assert_eq!(r.valor, cardeal_kernel::Dinheiro::reais(30));
+    assert!(estado.val.lotes.is_empty());
+    assert_eq!(estado.lotes_em_alerta, 0);
+}
