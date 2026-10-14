@@ -41,6 +41,14 @@ impl EstadoTelaFinanceiro {
             },
         );
         self.dfc_indireto = self.anotar(r);
+        let r = motor.consultar(
+            sessao,
+            "financeiro.balancete_do_periodo.v1",
+            &mod_financeiro::BalanceteDoPeriodo {
+                periodo: Periodo::novo(mes.primeiro_dia(), mes.ultimo_dia()),
+            },
+        );
+        self.balancete = self.anotar(r);
     }
 }
 
@@ -117,15 +125,28 @@ pub(super) fn painel_dre(
     ui.add_space(Espaco::E12);
 
     ui.add_space(Espaco::E8);
-    if let Some(v) = Abas::nova(&[(false, "DRE · resultado"), (true, "DFC · fluxo de caixa")])
-        .selecionada(estado.dre_dfc)
-        .id_salt("dre-visao")
-        .mostrar(ui)
+    if let Some(v) = Abas::nova(&[
+        (0_u8, "DRE · resultado"),
+        (1, "DFC · fluxo de caixa"),
+        (2, "Balancete"),
+    ])
+    .selecionada(estado.visao_resultado)
+    .id_salt("dre-visao")
+    .mostrar(ui)
     {
-        estado.dre_dfc = v;
+        estado.visao_resultado = v;
     }
     ui.add_space(Espaco::E12);
-    if estado.dre_dfc {
+    if estado.visao_resultado == 2 {
+        match &estado.balancete {
+            Some(b) => super::balancete::tabela_balancete(ui, b),
+            None => {
+                EstadoVazio::novo(Icone::Dinheiro, "Sem dados para o balancete.").mostrar(ui);
+            }
+        }
+        return;
+    }
+    if estado.visao_resultado == 1 {
         if let Some(v) = Abas::nova(&[(false, "Método direto"), (true, "Método indireto")])
             .selecionada(estado.dfc_metodo_indireto)
             .id_salt("dfc-metodo")

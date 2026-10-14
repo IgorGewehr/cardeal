@@ -4,6 +4,7 @@
 //! "+ Lançar título" e o clique numa linha abrem o `Dialogo` — ver a parcela e **dar baixa**.
 
 mod baixa;
+mod balancete;
 mod cadastro_rapido;
 mod carga;
 mod cheques;
@@ -396,8 +397,10 @@ pub struct EstadoTelaFinanceiro {
     dfc_indireto: Option<mod_financeiro::dfc::DfcIndireto>,
     /// A aba do DFC mostra o método indireto.
     dfc_metodo_indireto: bool,
-    /// Dentro de Resultado: `false` = DRE, `true` = DFC.
-    dre_dfc: bool,
+    /// Dentro de Resultado: 0 = DRE, 1 = DFC, 2 = balancete.
+    visao_resultado: u8,
+    /// O balancete do mês (aba Resultado › Balancete).
+    balancete: Option<Vec<cardeal_ledger::LinhaBalancete>>,
     projecao: Vec<mod_financeiro::ItemProjecaoCategoria>,
     ordenacao: Ordenacao,
     nomes: HashMap<Id, String>,
@@ -689,7 +692,7 @@ impl EstadoTelaFinanceiro {
             "financeiro-conciliacao" => self.aba = Aba::Conciliacao,
             "financeiro-dfc" => {
                 self.aba = Aba::Resultado;
-                self.dre_dfc = true;
+                self.visao_resultado = 1;
             }
             "financeiro-pagar" => self.aba = Aba::Pagar,
             "financeiro-fluxo" => self.aba = Aba::Fluxo,

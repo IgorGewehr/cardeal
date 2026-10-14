@@ -122,6 +122,47 @@ impl Consulta for DfcIndiretoDoPeriodo {
     }
 }
 
+/// O balancete de verificação do período (`cardeal_ledger::balancete`): saldo anterior,
+/// débitos, créditos e saldo atual de cada conta, com as agrupadoras somadas.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct BalanceteDoPeriodo {
+    /// O período, inclusive nas pontas.
+    pub periodo: Periodo,
+}
+
+impl Consulta for BalanceteDoPeriodo {
+    type Saida = Vec<cardeal_ledger::LinhaBalancete>;
+    const PERMISSAO: &'static str = "financeiro.dre.ver";
+
+    #[cfg(feature = "sqlite")]
+    fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        cardeal_ledger::balancete(conexao, ctx.empresa, self.periodo).map_err(|e| {
+            Erro::novo(
+                CodigoErro::FALHA_INTERNA,
+                format!("financeiro/balancete: {e}"),
+            )
+        })
+    }
+}
+
+/// O diário do período: cada lançamento com as partidas (`cardeal_ledger::diario`).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct DiarioDoPeriodo {
+    /// O período, inclusive nas pontas.
+    pub periodo: Periodo,
+}
+
+impl Consulta for DiarioDoPeriodo {
+    type Saida = Vec<cardeal_ledger::LancamentoDoDiario>;
+    const PERMISSAO: &'static str = "financeiro.dre.ver";
+
+    #[cfg(feature = "sqlite")]
+    fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        cardeal_ledger::diario(conexao, ctx.empresa, self.periodo)
+            .map_err(|e| Erro::novo(CodigoErro::FALHA_INTERNA, format!("financeiro/diário: {e}")))
+    }
+}
+
 /// O score de saúde financeira (ver [`crate::saude`]). O giro de estoque pertence a outro módulo:
 /// quem o conhece (a tela, via `estoque.analise_de_estoque.v1`) o informa; sem ele o sinal sai
 /// do cálculo.

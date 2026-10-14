@@ -667,7 +667,7 @@ fn aba_resultado_apura_o_mes_pelo_razao_e_navega_entre_meses() {
     let ctx = egui::Context::default();
     cardeal_ui::tokens::instalar_fontes(&ctx);
     cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
-    estado.dre_dfc = true;
+    estado.visao_resultado = 1;
     for indireto in [false, true] {
         estado.dfc_metodo_indireto = indireto;
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
@@ -676,7 +676,23 @@ fn aba_resultado_apura_o_mes_pelo_razao_e_navega_entre_meses() {
             });
         });
     }
-    estado.dre_dfc = false;
+    // O balancete do mês: a receita de 250 lançada e fechando.
+    let b = estado.balancete.clone().expect("balancete");
+    let (anterior, debitos, creditos, atual) = super::balancete::totais(&b);
+    assert!(anterior.e_zero() && atual.e_zero());
+    assert_eq!(debitos, creditos);
+    assert_eq!(debitos, Dinheiro::reais(250));
+    assert_eq!(
+        super::balancete::com_natureza(Dinheiro::reais(-250)),
+        "250,00 C"
+    );
+    estado.visao_resultado = 2;
+    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            painel_dre(ui, &t.motor, &t.sessao, &mut estado);
+        });
+    });
+    estado.visao_resultado = 0;
 
     // Mês passado: nada lançado.
     estado.dre_mes = Some(estado.mes_dre().anterior());

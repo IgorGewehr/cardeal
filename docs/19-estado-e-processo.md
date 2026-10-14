@@ -555,6 +555,11 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   receber com busca da conta em aberto, "Compensou"/"Voltou"). Fora: cheque emitido (pagar com cheque),
   repasse/endosso a fornecedor e cheque como forma de recebimento no PDV. Testes: 3 de domínio, 1 de
   integração (o ciclo inteiro, com conciliação nos dois sentidos e reapresentação) e 1 de tela.
+- **Balancete e diário (2026-10-14, onda 6):** implementados os dois previstos no contrato do Razão
+  (`docs/contratos-internos.md`) e nunca feitos — `cardeal_ledger::{balancete, diario}` e as consultas
+  `BalanceteDoPeriodo`/`DiarioDoPeriodo`. O balancete fecha por construção (competência); o resultado de anos
+  anteriores, sem encerramento no sistema, aparece no PL. Tela: "Balancete" ao lado de DRE e DFC. Base do
+  pacote do contador. Testes: 2 de unidade, 1 de integração (fechamento, ano anterior, diário) e a tela.
 - **Inventário com contagem cega (2026-10-13):** migração `estoque` v11 (`estoque_inventario`,
   `estoque_contagem_item`), comandos `criar_inventario`/`iniciar_contagem`/`registrar_contagem`/
   `encerrar_inventario`/`cancelar_inventario` (`.v1`) e consultas `inventarios`/`posicao_do_inventario`.
