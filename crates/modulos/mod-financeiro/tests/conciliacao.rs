@@ -611,3 +611,172 @@ fn saldo_do_banco_contra_o_sistema_com_a_diferenca_explicada_e_os_alertas() {
         .unwrap_err();
     assert_eq!(e.codigo, CodigoErro::ENTRADA_INVALIDA);
 }
+
+/// Um lançamento direto no Razão entre o banco do cenário e o caixa (`valor` > 0 = entrou no
+/// banco); devolve o id.
+fn movimento_no_banco(k: &Cenario, historico: &str, valor: i64) -> Id {
+    use cardeal_ledger::{
+        ConstrutorLancamento, Contas, Origem, PapelConta, Razao, RepositorioRazao,
+    };
+    let (empresa, banco) = (k.c.empresa, k.banco);
+    let historico = historico.to_owned();
+    k.c.arm
+        .escritor()
+        .executar(
+            ContextoEscrita::novo(empresa, Id::novo(), Id::novo(), Id::novo()),
+            move |uow| {
+                let erro = |e: String| ErroArmazenamento::Sqlite(e);
+                let caixa = {
+                    let repo = RepositorioRazao::novo(uow);
+                    Contas::nova(&repo, empresa)
+                        .papel(PapelConta::Caixa)
+                        .map_err(|e| erro(e.to_string()))?
+                };
+                let v = Dinheiro::reais(valor.abs());
+                let (d, c) = if valor > 0 {
+                    (banco, caixa)
+                } else {
+                    (caixa, banco)
+                };
+                let l = ConstrutorLancamento::novo(empresa, hoje(), historico)
+                    .origem(Origem::modulo("financeiro").tipo("transferencia"))
+                    .liquidacao(hoje())
+                    .criado_por(Id::novo(), Id::novo())
+                    .agora(Instante::EPOCA)
+                    .debitar(d, v)
+                    .creditar(c, v)
+                    .construir()
+                    .map_err(|e| erro(e.to_string()))?;
+                Razao::registrar(&mut RepositorioRazao::novo(uow), l)
+                    .map_err(|e| erro(e.to_string()))
+            },
+        )
+        .unwrap()
+        .valor
+}
+
+fn estornar_no_razao(k: &Cenario, lancamento: Id) {
+    use cardeal_ledger::{Razao, RepositorioRazao};
+    k.c.arm
+        .escritor()
+        .executar(
+            ContextoEscrita::novo(k.c.empresa, Id::novo(), Id::novo(), Id::novo()),
+            move |uow| {
+                Razao::estornar(
+                    &mut RepositorioRazao::novo(uow),
+                    lancamento,
+                    "lançado por engano no teste",
+                    hoje(),
+                )
+                .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+            },
+        )
+        .unwrap();
+}
+
+#[test]
+fn deposito_do_caixa_no_banco_concilia_e_estorno_so_aparece_se_o_banco_viu() {
+    use mod_financeiro::{ConferenciaDaConta, ConferenciaDasContas};
+
+    let k = montar();
+    let h = hoje();
+    let conferencia = |k: &Cenario| -> ConferenciaDaConta {
+        let todas: Vec<ConferenciaDaConta> = k.c.consulta(
+            &k.s,
+            "financeiro.conferencia_das_contas.v1",
+            &ConferenciaDasContas,
+        );
+        todas.into_iter().find(|c| c.conta == k.banco).unwrap()
+    };
+    // Levou 500 do caixa ao banco; e um lançamento de 70 feito e estornado no mesmo dia, que o
+    // banco nunca viu.
+    let deposito = movimento_no_banco(&k, "Depósito do caixa no banco", 500);
+    let engano = movimento_no_banco(&k, "Transferência por engano", 70);
+    estornar_no_razao(&k, engano);
+
+    let d = h.formatar_iso().replace('-', "");
+    let ofx = format!(
+        "<OFX><STMTTRN><DTPOSTED>{d}<TRNAMT>500.00<FITID>D1<MEMO>DEP DINHEIRO\n</STMTTRN>\
+<LEDGERBAL><BALAMT>500.00<DTASOF>{d}</LEDGERBAL></OFX>"
+    );
+    let _: ExtratoImportado = k.c.cmd(
+        &k.s,
+        "financeiro.importar_extrato.v1",
+        &ImportarExtrato {
+            conta: k.banco,
+            formato: FormatoExtrato::Ofx,
+            arquivo: "extrato.ofx".into(),
+            conteudo: ofx,
+        },
+    );
+    // O depósito está no banco e no sistema: explicado (antes, sem casar movimentos, dava −500).
+    let f = conferencia(&k).fechamento.unwrap();
+    assert_eq!(f.sistema, Dinheiro::reais(500));
+    assert_eq!(
+        f.so_no_sistema.quantidade, 1,
+        "só o depósito; o par estornado some"
+    );
+    assert_eq!(f.sem_explicacao(), Dinheiro::ZERO);
+
+    // A linha sugere o movimento e concilia com ele.
+    let linha = k.por_descricao("DEP DINHEIRO");
+    assert_eq!(linha.sugestoes.len(), 1);
+    assert_eq!(
+        linha.sugestoes[0].alvo,
+        AlvoDaConciliacao::Movimento(deposito)
+    );
+    assert!(linha.sugestoes[0].confianca >= 95);
+    let _: () = k.c.cmd(
+        &k.s,
+        "financeiro.conciliar_item.v1",
+        &ConciliarItem {
+            item: linha.id,
+            alvo: linha.sugestoes[0].alvo,
+        },
+    );
+    assert!(conferencia(&k).fechamento.unwrap().fechado());
+    // Casar o mesmo movimento de novo, noutra linha: não há outra linha, mas o movimento já
+    // não é candidato.
+    let e = k
+        .tenta(
+            "financeiro.conciliar_item.v1",
+            &ConciliarItem {
+                item: linha.id,
+                alvo: AlvoDaConciliacao::Movimento(deposito),
+            },
+        )
+        .unwrap_err();
+    assert_eq!(e.codigo, CodigoErro::ESTADO_INVALIDO);
+
+    // O depósito conciliado é estornado: a volta aparece como movimento solto (o banco também
+    // vai mostrar o estorno) e casa com a linha negativa.
+    estornar_no_razao(&k, deposito);
+    let ofx2 = format!(
+        "<OFX><STMTTRN><DTPOSTED>{d}<TRNAMT>-500.00<FITID>D2<MEMO>ESTORNO DEP\n</STMTTRN></OFX>"
+    );
+    let _: ExtratoImportado = k.c.cmd(
+        &k.s,
+        "financeiro.importar_extrato.v1",
+        &ImportarExtrato {
+            conta: k.banco,
+            formato: FormatoExtrato::Ofx,
+            arquivo: "extrato2.ofx".into(),
+            conteudo: ofx2,
+        },
+    );
+    let volta = k.por_descricao("ESTORNO DEP");
+    assert_eq!(volta.sugestoes.len(), 1, "{:?}", volta.sugestoes);
+    assert!(matches!(
+        volta.sugestoes[0].alvo,
+        AlvoDaConciliacao::Movimento(_)
+    ));
+    let _: () = k.c.cmd(
+        &k.s,
+        "financeiro.conciliar_item.v1",
+        &ConciliarItem {
+            item: volta.id,
+            alvo: volta.sugestoes[0].alvo,
+        },
+    );
+    assert_eq!(k.itens(Some(EstadoItem::Pendente)).len(), 0);
+}

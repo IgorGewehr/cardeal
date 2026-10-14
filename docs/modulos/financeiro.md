@@ -438,6 +438,15 @@ que ninguém lançou — vira um título já quitado na conta do extrato, com ca
 (`IgnorarItemDoExtrato`, reversível). Linha conciliada não se ignora nem se concilia de novo.
 Não faz: Open Banking, CNAB, conciliação parcial (valor diferente do saldo).
 
+**Casar com qualquer movimento da conta (2026-10-14).** Além de parcela e baixa, a linha do extrato casa com
+`AlvoDaConciliacao::Movimento`: um lançamento **realizado** nesta conta que não é baixa — depósito do caixa no
+banco (sangria), transferência entre contas, compensação de cheque — e que nenhuma linha conciliou
+(migração v10: `financeiro_item_extrato.lancamento`). Antes, o depósito do caixa aparecia no extrato sem ter
+com o que casar: "Lançar" contaria em dobro e "Ignorar" deixaria a conferência com diferença falsa. Um
+lançamento estornado que o banco nunca viu some junto com o estorno; se o original já foi conciliado, o
+estorno vira candidato (o banco também mostra a volta). Mesma pontuação da baixa (80 + data; nunca a mais de
+7 dias). A conferência conta esses movimentos em "só no sistema".
+
 **Conferência do saldo e alerta de pendências (2026-10-14).** O OFX passa a trazer o saldo que o banco
 informa (`LEDGERBAL`: `BALAMT` na data `DTASOF`), gravado em `financeiro_saldo_banco` (migração v9);
 para CSV (que não traz saldo) ou para conferir pelo aplicativo do banco, `InformarSaldoDoBanco`

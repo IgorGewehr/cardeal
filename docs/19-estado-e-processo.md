@@ -541,6 +541,12 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   variação do direto; a diferença de datas (competência × liquidação), se houver, vira linha visível. Tela:
   "Método direto / Método indireto" na aba DFC. Testes: 2 de unidade, 1 de integração (os dois métodos com o
   mesmo caixa e diferença zero) e a tela.
+- **Conciliação com qualquer movimento da conta (2026-10-14):** `AlvoDaConciliacao::Movimento` (lançamento
+  realizado na conta que não é baixa, sem linha conciliada; o par estornado que o banco não viu some) —
+  migração `financeiro` v10. **Corrige** o depósito do caixa no banco (sangria) e transferências, que não
+  tinham com o que casar, e a conferência do saldo, que os acusava como diferença. Preparação para os cheques
+  (a compensação é um movimento assim). Testes: 1 de unidade e 1 de integração (depósito, par estornado,
+  estorno de movimento já conciliado).
 - **Inventário com contagem cega (2026-10-13):** migração `estoque` v11 (`estoque_inventario`,
   `estoque_contagem_item`), comandos `criar_inventario`/`iniciar_contagem`/`registrar_contagem`/
   `encerrar_inventario`/`cancelar_inventario` (`.v1`) e consultas `inventarios`/`posicao_do_inventario`.

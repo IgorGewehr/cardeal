@@ -67,8 +67,9 @@ pub struct FechamentoDoSaldo {
     pub pendentes: Soma,
     /// Linhas do extrato até a data ignoradas de propósito: no banco, fora do sistema.
     pub ignoradas: Soma,
-    /// Baixas nesta conta, no período coberto pelos extratos, que nenhuma linha conciliou: estão
-    /// no sistema, o banco ainda não mostrou.
+    /// Baixas e outros movimentos nesta conta (depósito do caixa, transferência, compensação de
+    /// cheque), no período coberto pelos extratos, que nenhuma linha conciliou: estão no
+    /// sistema, o banco ainda não mostrou.
     pub so_no_sistema: Soma,
 }
 
@@ -278,7 +279,7 @@ fn fechamento(
     // Antes do primeiro extrato importado, o banco e o sistema já contam as mesmas baixas
     // (estão no saldo dos dois); só o período coberto pelos extratos pode ter baixa "só no
     // sistema".
-    let so_no_sistema = match primeira_linha {
+    let mut so_no_sistema = match primeira_linha {
         None => Soma::default(),
         Some(desde) => conexao
             .query_row(
@@ -293,6 +294,17 @@ fn fechamento(
             )
             .map_err(persist)?,
     };
+    // E os outros movimentos da conta (depósito do caixa, transferência, compensação de
+    // cheque) no mesmo período, que nenhuma linha conciliou.
+    if let Some(desde) = primeira_linha {
+        for (_, data, valor, _) in crate::conciliacao::movimentos_soltos(conexao, empresa, conta)? {
+            let dia = i64::from(data.em_dias());
+            if (desde..=ate).contains(&dia) {
+                so_no_sistema.quantidade += 1;
+                so_no_sistema.valor += valor;
+            }
+        }
+    }
     Ok(FechamentoDoSaldo {
         banco,
         sistema: Dinheiro::centavos(sistema),

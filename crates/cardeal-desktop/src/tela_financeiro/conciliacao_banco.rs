@@ -93,6 +93,12 @@ fn texto_sugestao(s: &Sugestao) -> String {
         AlvoDaConciliacao::Baixa(_) => {
             format!("Baixa de {} ({}%)", s.data.formatar_curta(), s.confianca)
         }
+        AlvoDaConciliacao::Movimento(_) => format!(
+            "{} de {} ({}%)",
+            s.texto,
+            s.data.formatar_curta(),
+            s.confianca
+        ),
         AlvoDaConciliacao::Parcela(_) => format!(
             "Parcela que vence {}{} ({}%)",
             s.data.formatar_curta(),

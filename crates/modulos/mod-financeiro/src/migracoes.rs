@@ -246,6 +246,13 @@ CREATE TABLE financeiro_saldo_banco (
 ) STRICT;
 ";
 
+// Migração v10 (2026-10-14): a linha do extrato pode casar com qualquer lançamento realizado da
+// conta, não só com uma baixa — depósito do caixa no banco, transferência, compensação de
+// cheque. `lancamento` guarda esse lançamento (a `baixa` continua para os casamentos com baixa).
+const SQL_ITEM_EXTRATO_LANCAMENTO: &str = r"
+ALTER TABLE financeiro_item_extrato ADD COLUMN lancamento BLOB;
+";
+
 const SQL_LISTA_PAGINADA: &str = r"
 CREATE INDEX financeiro_parcela_lista ON financeiro_parcela(empresa, vencimento, id);
 ";
@@ -303,6 +310,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 9,
         nome: "financeiro_saldo_banco",
         sql: SQL_SALDO_BANCO,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 10,
+        nome: "financeiro_item_extrato_lancamento",
+        sql: SQL_ITEM_EXTRATO_LANCAMENTO,
         tipo: TipoMigracao::Esquema,
     },
 ];
