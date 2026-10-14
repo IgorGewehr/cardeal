@@ -159,6 +159,7 @@ impl Comando for FaturarPedido {
             Some(tcp.titulo.id)
         };
         RepositorioVendas::novo(uow).atualizar_pedido(&pedido)?;
+        congelar_comissoes(&pedido, ctx, uow)?;
 
         // 5. Publicar.
         uow.publicar(PedidoFaturado {
@@ -174,4 +175,30 @@ impl Comando for FaturarPedido {
             valor_total: pedido.total,
         })
     }
+}
+
+/// Congela em cada item o percentual de comissão que vale agora para o produto (a comissão
+/// por estrutura do estoque: a do produto, a do grupo ou a padrão) — a apuração do mês usa
+/// este, não o de quando ela rodar.
+#[cfg(feature = "sqlite")]
+fn congelar_comissoes(
+    pedido: &crate::pedido::Pedido,
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<()> {
+    let produtos: Vec<Id> = pedido.itens.iter().map(|i| i.produto).collect();
+    let sugestoes = mod_estoque::sugerir_precos(uow.conexao(), ctx, None, Some(&produtos))?;
+    for item in &pedido.itens {
+        let comissao = sugestoes
+            .iter()
+            .find(|s| s.produto == item.produto)
+            .map(|s| s.comissao.unidades_internas());
+        uow.conexao()
+            .execute(
+                "UPDATE vendas_item_pedido SET comissao_percentual = ?2 WHERE id = ?1",
+                rusqlite::params![item.id.em_bytes().as_slice(), comissao],
+            )
+            .map_err(|e| Erro::novo(cardeal_kernel::CodigoErro::FALHA_INTERNA, e.to_string()))?;
+    }
+    Ok(())
 }

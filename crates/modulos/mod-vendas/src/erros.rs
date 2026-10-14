@@ -81,6 +81,21 @@ pub enum ErroVendas {
         /// Estado atual.
         atual: &'static str,
     },
+
+    /// O vendedor não tem comissão apurada (e não paga) no mês.
+    #[error("Este vendedor não tem comissão apurada a pagar neste mês")]
+    SemComissaoAPagar,
+
+    /// Pagamento antes da apuração ou no futuro.
+    #[error("A data do pagamento tem de ficar entre a apuração ({apurada_em}) e hoje")]
+    DataDoPagamentoInvalida {
+        /// A data da apuração, formatada.
+        apurada_em: String,
+    },
+
+    /// A conta de saída não é de caixa nem de banco.
+    #[error("Pague a comissão de uma conta de caixa ou banco (grupo 1.1 Disponível)")]
+    ContaDePagamentoInvalida,
 }
 
 impl ErroDominio for ErroVendas {
@@ -90,9 +105,12 @@ impl ErroDominio for ErroVendas {
             Self::RegraPrecoAmbigua | Self::PedidoJaFaturado | Self::QuantidadeDevolvidaExcede => {
                 CodigoErro::REGRA_VIOLADA
             }
-            Self::QuantidadeInvalida | Self::DevolucaoVazia | Self::PedidoSemItens => {
-                CodigoErro::ENTRADA_INVALIDA
-            }
+            Self::QuantidadeInvalida
+            | Self::DevolucaoVazia
+            | Self::PedidoSemItens
+            | Self::DataDoPagamentoInvalida { .. }
+            | Self::ContaDePagamentoInvalida => CodigoErro::ENTRADA_INVALIDA,
+            Self::SemComissaoAPagar => CodigoErro::REGRA_VIOLADA,
             Self::DescontoAcimaDoLimite { .. } => CodigoErro::SEM_PERMISSAO,
             Self::OrcamentoExpirado(_)
             | Self::OrcamentoEmEstadoInvalido { .. }

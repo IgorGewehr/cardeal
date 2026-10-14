@@ -38,6 +38,7 @@
 mod comandos;
 mod comissao;
 mod consultas;
+mod consultas_comissao;
 mod defasados;
 mod devolucao;
 mod erros;
@@ -54,14 +55,20 @@ mod receita;
 pub mod receituario;
 #[cfg(feature = "sqlite")]
 mod repositorio;
+#[cfg(feature = "sqlite")]
+mod repositorio_comissao;
 
 pub use comandos::{
-    AdicionarItemPedido, AplicarPrecosSugeridos, CancelarPedido, ConfirmarPedido, CriarPedido,
-    CriarRegraPreco, CriarTabelaPreco, FaturarPedido, ItemFoiAdicionado, PedidoCriado,
+    AdicionarItemPedido, AplicarPrecosSugeridos, ApurarComissoes, CancelarPedido,
+    ComissoesApuradas, ComissoesPagas, ConfirmarPedido, CriarPedido, CriarRegraPreco,
+    CriarTabelaPreco, FaturarPedido, ItemFoiAdicionado, PagarComissoes, PedidoCriado,
     PedidoFoiFaturado, PrecosAplicados, RegraPrecoCriada, TabelaPrecoCriada,
 };
 pub use comissao::{Comissao, EstadoComissao};
 pub use consultas::{ItemPedido, ItensDoPedido, PedidosRecentes, RegrasDaTabela, TabelasDePreco};
+pub use consultas_comissao::{
+    resumo_por_vendedor, ComissoesDoMes, LinhaComissao, ResumoDoVendedor,
+};
 pub use defasados::{classificar, PrecoDefasado, PrecosDefasados, SituacaoDoPreco};
 pub use devolucao::{Devolucao, EstadoDevolucao, ItemDevolvido, TipoDevolucao};
 pub use erros::ErroVendas;

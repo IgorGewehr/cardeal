@@ -58,3 +58,23 @@ impl EventoDominio for PedidoCancelado {
         Some(self.pedido)
     }
 }
+
+/// A comissão de um pedido foi apurada (lançada como despesa a pagar ao vendedor).
+#[derive(Debug, Serialize)]
+pub struct ComissaoApurada {
+    /// A comissão.
+    pub comissao: Id,
+    /// O vendedor.
+    pub vendedor: Id,
+    /// O valor.
+    pub valor: Dinheiro,
+}
+
+#[cfg(feature = "sqlite")]
+impl EventoDominio for ComissaoApurada {
+    const TIPO: &'static str = "vendas.comissao_apurada.v1";
+
+    fn agregado(&self) -> Option<Id> {
+        Some(self.comissao)
+    }
+}

@@ -72,12 +72,44 @@ CREATE TABLE vendas_item_pedido (
 CREATE INDEX vendas_item_pedido_pedido ON vendas_item_pedido(pedido);
 ";
 
-const MIGRACOES: &[Migracao] = &[Migracao {
-    versao: 1,
-    nome: "vendas_tabela_preco_e_pedido",
-    sql: SQL_TABELA_E_PEDIDO,
-    tipo: TipoMigracao::Esquema,
-}];
+// Migração v2 (2026-10-13): comissão do vendedor. O percentual de cada item é congelado no
+// faturamento (a comissão por estrutura do estoque, naquele momento); a apuração mensal grava
+// uma comissão por pedido. `competencia` é a data do lançamento da apuração (sempre dentro do
+// mês); `lancamento` é o do pagamento, como no agregado `Comissao`.
+const SQL_COMISSAO: &str = r"
+ALTER TABLE vendas_item_pedido ADD COLUMN comissao_percentual INTEGER;
+
+CREATE TABLE vendas_comissao (
+    id                    BLOB PRIMARY KEY,
+    empresa               BLOB    NOT NULL,
+    vendedor              BLOB    NOT NULL,
+    pedido                BLOB    NOT NULL UNIQUE REFERENCES vendas_pedido(id),
+    base_calculo          INTEGER NOT NULL,
+    percentual            INTEGER NOT NULL,
+    valor                 INTEGER NOT NULL,
+    competencia           INTEGER NOT NULL,
+    estado                TEXT    NOT NULL CHECK (estado IN ('Apurada','Paga','Cancelada')),
+    lancamento_apuracao   BLOB    NOT NULL,
+    lancamento            BLOB,
+    criado_em             INTEGER NOT NULL
+) STRICT;
+CREATE INDEX vendas_comissao_competencia ON vendas_comissao(empresa, competencia, vendedor);
+";
+
+const MIGRACOES: &[Migracao] = &[
+    Migracao {
+        versao: 1,
+        nome: "vendas_tabela_preco_e_pedido",
+        sql: SQL_TABELA_E_PEDIDO,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 2,
+        nome: "vendas_comissao",
+        sql: SQL_COMISSAO,
+        tipo: TipoMigracao::Esquema,
+    },
+];
 
 /// O conjunto de migrações do módulo de vendas.
 #[must_use]

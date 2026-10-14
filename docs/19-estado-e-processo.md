@@ -32,8 +32,9 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   já estão feitos — a onda 4 fechou). Onda 5: **inventário com contagem cega**, **transferência entre locais**, **produto a partir da
   nota com nome padronizado por dicionário**, **validade e perdas** e **custo-hora do técnico** feitos
   (2026-10-13); do **ST/MVA no custo**, a parte determinística está feita (ICMS-ST, FCP-ST, IPI e desconto do XML
-  entram no custo e no título); resta estimar ST pela MVA quando a nota não traz o valor (tabelas + contador). A apuração mensal
-  da comissão do vendedor (`vendas.ApurarComissao`) continua pendente e agora tem o percentual por item pronto.
+  entram no custo e no título); resta estimar ST pela MVA quando a nota não traz o valor (tabelas + contador). A **apuração e
+  o pagamento da comissão do vendedor** estão feitos (2026-10-14); fora: comissão nas vendas do PDV (o cupom
+  tem operador, não vendedor) e o ajuste por devolução (a devolução ainda não é persistida).
 - **Pendência de confiança:** as tabelas do Simples e as alíquotas precisam ser conferidas com o
   contador; o ST/IPI **da nota** já entra no custo (2026-10-13), mas a estimativa de ST pela MVA (sem o valor na
   nota) ainda não.
@@ -510,8 +511,17 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   margem do pedido e da OS e na rentabilidade (`cardeal_analytics::EncargosDaVenda`, receita somada por
   percentual de encargos: sem comissões próprias, resultado idêntico ao anterior). Telas: bloco "Comissão de
   vendedor" na aba Estrutura (o bloco de percentual herdado virou genérico, `bloco_herdado`, usado também pela
-  margem), campo na alteração em lote, coluna na grade de Preços e na importação. Falta a apuração da comissão
-  do vendedor em `vendas`.
+  margem), campo na alteração em lote, coluna na grade de Preços e na importação. A apuração veio em seguida
+  (abaixo).
+- **Apuração e pagamento da comissão do vendedor (2026-10-14):** migração `vendas` v2 (`comissao_percentual` no
+  item, congelado no `FaturarPedido`; tabela `vendas_comissao`, um registro por pedido). `ApurarComissoes`
+  (permissão nova `vendas.comissao.apurar`) é idempotente por pedido e lança D 5.42/5.5 / C 2.1.03 no fim do
+  mês da venda; `PagarComissoes` quita o apurado de um vendedor no mês num lançamento só, de caixa/banco;
+  `ComissoesDoMes` mostra apurado, pago e a **prévia** do que falta (mesmo cálculo da apuração). Evento
+  `vendas.comissao_apurada.v1`. Tela: diálogo "Comissões" na tela de Vendas (mês, KPIs, grade por vendedor,
+  apurar, pagar). Testes: 3 de domínio/resumo, 2 de integração (percentual congelado, idempotência, saldos no
+  Razão, conta do modelo Comércio, recusas do pagamento) e 1 de tela. Fora: PDV (cupom sem vendedor) e
+  ajuste por devolução.
 - **Inventário com contagem cega (2026-10-13):** migração `estoque` v11 (`estoque_inventario`,
   `estoque_contagem_item`), comandos `criar_inventario`/`iniciar_contagem`/`registrar_contagem`/
   `encerrar_inventario`/`cancelar_inventario` (`.v1`) e consultas `inventarios`/`posicao_do_inventario`.
