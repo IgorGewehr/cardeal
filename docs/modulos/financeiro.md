@@ -419,6 +419,17 @@ stateDiagram-v2
 | `TotalPorCategoriaNoPeriodo` ✅ | `financeiro.categoria.ver` | Gráfico de custo/receita por categoria e mês (churn, MRR por projeto) | agregação em memória sobre `financeiro_baixa` join `financeiro_titulo`, filtrando por `data` |
 | `TituloDaOrigem` ✅ (novo, 2026-09-11) | `financeiro.receber.ver` | Detalhe de OS (`os`)/vendas/compras faturada: "qual título isto gerou" | `financeiro_titulo(empresa, origem_modulo, origem_id)` — o par de correlação que `Titulo` já carregava desde a origem; usado por outro módulo pela consulta pública, nunca por SQL direto em `financeiro_titulo` (`docs/contratos-internos.md` §7 regra 2) |
 
+## 6.4 Pacote do contador (2026-10-14)
+
+Na aba Resultado e caixa, **"Pacote do contador…"** grava, para o mês escolhido, uma pasta `Contador AAAA-MM`
+com dois arquivos e a abre: `Relatórios AAAA-MM.pdf` (DRE comparativa, DFC direto e indireto e balancete, com o
+cabeçalho da empresa — `cardeal_pdf::gerar_relatorio`, relatório tabular genérico) e `Contabilidade AAAA-MM.xlsx`
+(as mesmas tabelas com números de verdade e o **diário** completo, uma linha por partida com débito e crédito
+separados). O `.xlsx` vem do crate novo `cardeal-planilha`: Office Open XML escrito à mão (ZIP armazenado +
+XML), sem dependência externa — dinheiro como número `#.##0,00`, datas como data, negrito, larguras e cabeçalho
+congelado; conferido no Excel (amostra) e pelo leitor de pacotes Open XML do .NET (o pacote real). "Envio" é
+manual: o usuário anexa a pasta no e-mail/WhatsApp — SMTP e o Portal do Contador (onda 8) ficam para depois.
+
 ## 6.3 Lançamento pré-preenchido pelo último da pessoa (2026-10-14)
 
 `UltimoLancamentoAReceber`/`UltimoLancamentoAPagar` (`financeiro.ultimo_lancamento_a_receber.v1`/

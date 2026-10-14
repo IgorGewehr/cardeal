@@ -1142,3 +1142,47 @@ fn aba_cheques_recebe_compensa_e_devolve() {
         });
     }
 }
+
+#[test]
+fn pacote_do_contador_grava_pdf_e_planilha_do_mes() {
+    let t = motor_de_teste();
+    lancar_a_receber(&t.motor, &t.sessao, 250);
+    let mut estado = EstadoTelaFinanceiro {
+        aba: Aba::Resultado,
+        ..Default::default()
+    };
+    estado.carregar(&t.motor, &t.sessao);
+    let dir = tempfile::tempdir().unwrap();
+    let pasta = super::pacote_contador::gravar(&t.motor, &t.sessao, &estado, dir.path())
+        .expect("gravar o pacote");
+    let mut arquivos: Vec<std::path::PathBuf> = std::fs::read_dir(&pasta)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .collect();
+    arquivos.sort();
+    assert_eq!(arquivos.len(), 2, "{arquivos:?}");
+    let xlsx = std::fs::read(&arquivos[0]).unwrap();
+    let pdf = std::fs::read(&arquivos[1]).unwrap();
+    assert!(arquivos[0].to_string_lossy().ends_with(".xlsx"));
+    assert!(pdf.starts_with(b"%PDF-1."));
+    // O `.xlsx` guarda os XMLs sem compressão: dá para conferir o conteúdo nos bytes.
+    let texto = String::from_utf8_lossy(&xlsx);
+    assert!(xlsx.starts_with(b"PK"));
+    for aba in ["DRE", "DFC direto", "DFC indireto", "Balancete", "Diário"] {
+        assert!(texto.contains(&format!("name=\"{aba}\"")), "aba {aba}");
+    }
+    assert!(
+        texto.contains("<v>250.00</v>"),
+        "a receita de 250 na planilha"
+    );
+    // Para conferir num Excel de verdade: CARDEAL_SALVAR_PACOTE=<pasta> cargo test …
+    if let Ok(destino) = std::env::var("CARDEAL_SALVAR_PACOTE") {
+        for a in &arquivos {
+            std::fs::copy(
+                a,
+                std::path::Path::new(&destino).join(a.file_name().unwrap()),
+            )
+            .unwrap();
+        }
+    }
+}

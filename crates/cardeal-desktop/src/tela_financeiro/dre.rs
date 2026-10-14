@@ -118,6 +118,8 @@ pub(super) fn painel_dre(
             estado.dre_mes = None;
             recarregar = true;
         }
+        ui.add_space(Espaco::E16);
+        super::pacote_contador::botao(ui, motor, sessao, estado);
     });
     if recarregar {
         estado.carregar_dre(motor, sessao);

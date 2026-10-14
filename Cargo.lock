@@ -794,6 +794,7 @@ dependencies = [
  "cardeal-ledger",
  "cardeal-modkit",
  "cardeal-pdf",
+ "cardeal-planilha",
  "cardeal-ui",
  "eframe",
  "egui",
@@ -922,6 +923,13 @@ dependencies = [
  "image",
  "tempfile",
  "thiserror 2.0.20",
+]
+
+[[package]]
+name = "cardeal-planilha"
+version = "0.2.0"
+dependencies = [
+ "cardeal-kernel",
 ]
 
 [[package]]

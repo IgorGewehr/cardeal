@@ -16,6 +16,7 @@ mod custos;
 mod dre;
 mod fluxo;
 mod lancar;
+mod pacote_contador;
 mod pessoal;
 mod plano_contas;
 mod recorrencias;

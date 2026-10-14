@@ -1,7 +1,7 @@
 //! # cardeal-pdf
 //!
-//! Geração dos documentos PDF do Cardeal: o **orçamento profissional** e o **comprovante de
-//! ordem de serviço** — ambos com cabeçalho com a logo e os dados da empresa, tabela de itens
+//! Geração dos documentos PDF do Cardeal: o **orçamento profissional**, o **comprovante de
+//! ordem de serviço** e o **relatório tabular** (o pacote do contador: DRE, DFC, balancete) — ambos com cabeçalho com a logo e os dados da empresa, tabela de itens
 //! paginada, quadro de totais e rodapé de aceite. Os dois documentos compartilham o mesmo
 //! motor de composição (`layout::Compositor`) — cabeçalho, tabela, totais e aceite são
 //! literalmente o mesmo código; só os blocos de identificação (cliente+assunto vs.
@@ -181,4 +181,62 @@ pub fn gerar_comprovante_os(
     gerado_em: Instante,
 ) -> Result<Vec<u8>, ErroPdf> {
     layout::gerar_os(empresa, comprovante, gerado_em)
+}
+
+/// Uma coluna de um relatório tabular.
+#[derive(Debug, Clone)]
+pub struct ColunaRelatorio {
+    /// O título no cabeçalho da tabela.
+    pub titulo: String,
+    /// O peso na largura (a página é dividida na proporção dos pesos).
+    pub peso: f32,
+    /// Alinhar à direita (números).
+    pub direita: bool,
+}
+
+/// Uma linha de um relatório tabular.
+#[derive(Debug, Clone, Default)]
+pub struct LinhaRelatorio {
+    /// Os textos de cada coluna, já formatados.
+    pub celulas: Vec<String>,
+    /// Em negrito (totais, agrupadoras).
+    pub destaque: bool,
+    /// O recuo da primeira coluna, em níveis (árvore de contas).
+    pub recuo: u8,
+}
+
+/// Uma seção: título, nota explicativa e a tabela.
+#[derive(Debug, Clone)]
+pub struct SecaoRelatorio {
+    /// O título da seção.
+    pub titulo: String,
+    /// Um parágrafo explicativo, se houver.
+    pub nota: Option<String>,
+    /// As colunas.
+    pub colunas: Vec<ColunaRelatorio>,
+    /// As linhas.
+    pub linhas: Vec<LinhaRelatorio>,
+}
+
+/// Um relatório tabular com o cabeçalho da empresa: título, subtítulo e seções.
+#[derive(Debug, Clone)]
+pub struct RelatorioPdf {
+    /// O título ("Pacote do contador").
+    pub titulo: String,
+    /// O subtítulo ("Outubro de 2026").
+    pub subtitulo: String,
+    /// As seções, na ordem.
+    pub secoes: Vec<SecaoRelatorio>,
+}
+
+/// Gera os bytes de um relatório tabular.
+///
+/// # Errors
+/// [`ErroPdf::Logo`] se `empresa.logo_png` não decodificar.
+pub fn gerar_relatorio(
+    empresa: &IdentidadeEmpresa,
+    relatorio: &RelatorioPdf,
+    gerado_em: Instante,
+) -> Result<Vec<u8>, ErroPdf> {
+    layout::gerar_relatorio(empresa, relatorio, gerado_em)
 }

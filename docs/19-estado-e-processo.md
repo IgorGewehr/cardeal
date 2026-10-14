@@ -36,8 +36,8 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   o pagamento da comissão do vendedor** estão feitos (2026-10-14); fora: comissão nas vendas do PDV (o cupom
   tem operador, não vendedor) e o ajuste por devolução (a devolução ainda não é persistida).
   Onda 6 (Financeiro 2) começou: **conciliação com alerta de pendências e saldo banco × sistema**,
-  **lançamento pré-preenchido pelo último da pessoa**, **DFC indireto** e **cheques** feitos (2026-10-14);
-  faltam régua de cobrança automática e exportação PDF/Excel com envio ao contador.
+  **lançamento pré-preenchido pelo último da pessoa**, **DFC indireto**, **cheques**, **balancete/diário** e o
+  **pacote do contador** (PDF + `.xlsx`) feitos (2026-10-14); falta a régua de cobrança automática.
 - **Pendência de confiança:** as tabelas do Simples e as alíquotas precisam ser conferidas com o
   contador; o ST/IPI **da nota** já entra no custo (2026-10-13), mas a estimativa de ST pela MVA (sem o valor na
   nota) ainda não.
@@ -560,6 +560,13 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   `BalanceteDoPeriodo`/`DiarioDoPeriodo`. O balancete fecha por construção (competência); o resultado de anos
   anteriores, sem encerramento no sistema, aparece no PL. Tela: "Balancete" ao lado de DRE e DFC. Base do
   pacote do contador. Testes: 2 de unidade, 1 de integração (fechamento, ano anterior, diário) e a tela.
+- **Pacote do contador (2026-10-14, onda 6):** crate novo `cardeal-planilha` (`.xlsx` próprio: ZIP armazenado com
+  CRC-32 + Office Open XML; dinheiro, data, negrito, larguras, cabeçalho congelado), `cardeal_pdf::gerar_relatorio`
+  (relatório tabular genérico com cabeçalho da empresa e quebra de página) e o botão "Pacote do contador…" na aba
+  Resultado (pasta `Contador AAAA-MM` com PDF de DRE/DFC/balancete e planilha com essas tabelas + diário).
+  Validação: testes do ZIP (lido de volta, CRC conferido), da planilha e do PDF; a amostra abriu no Excel
+  (abas, formato, negrito, painel congelado); o pacote real passou no `System.IO.Packaging` do .NET. Envio
+  automático (SMTP) fica para quando houver configuração de e-mail; Portal do Contador é da onda 8.
 - **Inventário com contagem cega (2026-10-13):** migração `estoque` v11 (`estoque_inventario`,
   `estoque_contagem_item`), comandos `criar_inventario`/`iniciar_contagem`/`registrar_contagem`/
   `encerrar_inventario`/`cancelar_inventario` (`.v1`) e consultas `inventarios`/`posicao_do_inventario`.
