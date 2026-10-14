@@ -1042,3 +1042,87 @@ fn escolher_o_fornecedor_preenche_o_lancamento_com_o_ultimo_dele() {
     let mut vazio = FormLancar::novo(true);
     assert!(preencher_com_o_ultimo(m, s, &mut vazio, ceee.pessoa).is_none());
 }
+
+#[test]
+fn aba_cheques_recebe_compensa_e_devolve() {
+    use mod_financeiro::cheque::EstadoCheque;
+
+    let t = motor_de_teste();
+    let (m, s) = (&t.motor, &t.sessao);
+    let banco: ContaBancariaCriada = m
+        .executar(
+            s,
+            "financeiro.criar_conta_bancaria.v1",
+            &CriarContaBancaria {
+                nome: "Sicredi".to_owned(),
+            },
+        )
+        .expect("banco");
+    let parcela = lancar_a_receber(m, s, 180);
+    let mut estado = EstadoTelaFinanceiro {
+        aba: Aba::Cheques,
+        ..Default::default()
+    };
+    estado.carregar(m, s);
+    assert!(estado.cheques.erro.is_none(), "{:?}", estado.cheques.erro);
+    assert!(estado.cheques.abertas.iter().any(|p| p.parcela == parcela));
+
+    // Recebe pelo formulário (o "bom para" em branco = à vista).
+    let hoje = Data::hoje(Fuso::BRASILIA);
+    estado.cheques.form = Some(super::cheques::FormCheque {
+        parcela: Some(parcela),
+        valor: "180,00".into(),
+        recebido_em: hoje.formatar(),
+        banco: "104".into(),
+        agencia: "0001".into(),
+        conta: "998877".into(),
+        numero: "000045".into(),
+        emitente: "Maria Souza".into(),
+        ..Default::default()
+    });
+    let r = super::cheques::registrar(m, s, &mut estado).expect("registrar");
+    assert!(r.parcela_quitada);
+    assert!(estado.cheques.form.is_none());
+    let c = estado.cheques.itens[0].cheque.clone();
+    assert!(c.pronto_para_depositar(hoje), "à vista: já pode depositar");
+
+    // Compensa no banco e depois devolve.
+    estado.cheques.acao = Some(super::cheques::AcaoCheque::Compensar {
+        cheque: c.id,
+        conta: Some(banco.conta),
+        data: hoje.formatar(),
+    });
+    super::cheques::executar_acao(m, s, &mut estado).expect("compensar");
+    assert_eq!(
+        estado.cheques.itens[0].cheque.estado,
+        EstadoCheque::Compensado
+    );
+    estado.cheques.acao = Some(super::cheques::AcaoCheque::Devolver {
+        cheque: c.id,
+        alinea: Some(11),
+        observacao: String::new(),
+    });
+    super::cheques::executar_acao(m, s, &mut estado).expect("devolver");
+    assert_eq!(
+        estado.cheques.itens[0].cheque.estado,
+        EstadoCheque::Devolvido
+    );
+    assert!(
+        estado.cheques.abertas.iter().any(|p| p.parcela == parcela),
+        "a conta voltou a ficar em aberto"
+    );
+
+    // A aba desenha, com o formulário e uma ação abertos.
+    estado.cheques.filtro = 3;
+    estado.cheques.form = Some(super::cheques::FormCheque::default());
+    let ctx = egui::Context::default();
+    cardeal_ui::tokens::instalar_fontes(&ctx);
+    cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+    for _ in 0..2 {
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                mostrar(ui, m, s, &mut estado);
+            });
+        });
+    }
+}

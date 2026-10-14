@@ -6,6 +6,7 @@
 mod baixa;
 mod cadastro_rapido;
 mod carga;
+mod cheques;
 mod cobranca;
 mod conciliacao_banco;
 mod conferencia;
@@ -76,6 +77,7 @@ enum Aba {
     Resultado,
     Plano,
     Conciliacao,
+    Cheques,
     Fluxo,
     Bancos,
 }
@@ -384,6 +386,8 @@ pub struct EstadoTelaFinanceiro {
     cobranca_pagar: bool,
     plano: plano_contas::EstadoPlano,
     conciliacao: conciliacao_banco::EstadoConciliacao,
+    /// A carteira de cheques (aba Cheques).
+    cheques: cheques::EstadoCheques,
     saude: Option<mod_financeiro::saude::Saude>,
     dre_mes: Option<Competencia>,
     dre: Option<mod_financeiro::ComparativoDre>,
@@ -506,6 +510,7 @@ pub fn mostrar(
                 Aba::Resultado => painel_dre(ui, motor, sessao, estado),
                 Aba::Plano => painel_plano(ui, motor, sessao, estado),
                 Aba::Conciliacao => painel_conciliacao(ui, motor, sessao, estado),
+                Aba::Cheques => cheques::painel_cheques(ui, motor, sessao, estado),
                 _ => lista(ui, motor, sessao, estado),
             }
         },
@@ -612,6 +617,7 @@ fn abas(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTe
         (Aba::Resultado, "Resultado e caixa"),
         (Aba::Plano, "Plano de contas"),
         (Aba::Conciliacao, "Conciliação"),
+        (Aba::Cheques, "Cheques"),
         (Aba::Fluxo, "Fluxo de caixa"),
         (Aba::Bancos, "Contas bancárias"),
     ])

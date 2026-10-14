@@ -181,3 +181,23 @@ impl EventoDominio for RecorrenciaMaterializada {
         Some(self.recorrencia)
     }
 }
+
+/// Um cheque recebido voltou: a parcela que ele pagou foi reaberta.
+#[derive(Debug, Serialize)]
+pub struct ChequeDevolvido {
+    /// O título reaberto.
+    pub titulo: Id,
+    /// O cheque.
+    pub cheque: Id,
+    /// O motivo (com a alínea, quando informada).
+    pub motivo: String,
+}
+
+#[cfg(feature = "sqlite")]
+impl EventoDominio for ChequeDevolvido {
+    const TIPO: &'static str = "financeiro.cheque_devolvido.v1";
+
+    fn agregado(&self) -> Option<Id> {
+        Some(self.titulo)
+    }
+}

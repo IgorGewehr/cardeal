@@ -36,8 +36,8 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   o pagamento da comissão do vendedor** estão feitos (2026-10-14); fora: comissão nas vendas do PDV (o cupom
   tem operador, não vendedor) e o ajuste por devolução (a devolução ainda não é persistida).
   Onda 6 (Financeiro 2) começou: **conciliação com alerta de pendências e saldo banco × sistema**,
-  **lançamento pré-preenchido pelo último da pessoa** e **DFC indireto** feitos (2026-10-14); faltam régua
-  de cobrança automática, exportação PDF/Excel e envio ao contador, e cheques.
+  **lançamento pré-preenchido pelo último da pessoa**, **DFC indireto** e **cheques** feitos (2026-10-14);
+  faltam régua de cobrança automática e exportação PDF/Excel com envio ao contador.
 - **Pendência de confiança:** as tabelas do Simples e as alíquotas precisam ser conferidas com o
   contador; o ST/IPI **da nota** já entra no custo (2026-10-13), mas a estimativa de ST pela MVA (sem o valor na
   nota) ainda não.
@@ -547,6 +547,14 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   tinham com o que casar, e a conferência do saldo, que os acusava como diferença. Preparação para os cheques
   (a compensação é um movimento assim). Testes: 1 de unidade e 1 de integração (depósito, par estornado,
   estorno de movimento já conciliado).
+- **Cheques recebidos (2026-10-14, onda 6):** `mod_financeiro::cheque` (domínio: estados `EmCarteira →
+  Compensado → Devolvido`, dados normalizados, alíneas) e `RegistrarCheque`/`CompensarCheque`/`DevolverCheque`/
+  `CarteiraDeCheques` (migração `financeiro` v11). Receber dá a baixa em Cheques a receber (1.2.03), não no
+  caixa; compensar é D Banco / C 1.2.03 e casa com o depósito na Conciliação; devolver estorna compensação e
+  baixa (a parcela reabre) e publica `financeiro.cheque_devolvido.v1`. Tela: aba **Cheques** (KPIs, filtro,
+  receber com busca da conta em aberto, "Compensou"/"Voltou"). Fora: cheque emitido (pagar com cheque),
+  repasse/endosso a fornecedor e cheque como forma de recebimento no PDV. Testes: 3 de domínio, 1 de
+  integração (o ciclo inteiro, com conciliação nos dois sentidos e reapresentação) e 1 de tela.
 - **Inventário com contagem cega (2026-10-13):** migração `estoque` v11 (`estoque_inventario`,
   `estoque_contagem_item`), comandos `criar_inventario`/`iniciar_contagem`/`registrar_contagem`/
   `encerrar_inventario`/`cancelar_inventario` (`.v1`) e consultas `inventarios`/`posicao_do_inventario`.

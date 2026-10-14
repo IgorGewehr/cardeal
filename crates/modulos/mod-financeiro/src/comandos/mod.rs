@@ -13,6 +13,7 @@ mod baixar_em_lote;
 mod baixar_pagamento;
 mod baixar_recebimento;
 mod cadastrar_caixa;
+mod cheque;
 mod conta_a_pagar_avulsa;
 mod criar_categoria;
 mod criar_categorias_sugeridas;
@@ -39,6 +40,10 @@ pub use baixar_pagamento::{BaixarPagamento, PagamentoBaixado};
 pub use baixar_recebimento::baixar_recebimento_comum;
 pub use baixar_recebimento::{BaixarRecebimento, RecebimentoBaixado};
 pub use cadastrar_caixa::{CadastrarCaixa, CaixaCadastrado};
+pub use cheque::{
+    CarteiraDeCheques, ChequeCompensado, ChequeFoiDevolvido, ChequeRegistrado, CompensarCheque,
+    DevolverCheque, ItemCheque, RegistrarCheque,
+};
 #[cfg(feature = "sqlite")]
 pub use conta_a_pagar_avulsa::lancar_conta_a_pagar_avulsa;
 pub use conta_a_pagar_avulsa::{DadosContaAvulsa, PagamentoAvulso};

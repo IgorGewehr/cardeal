@@ -119,6 +119,27 @@ pub enum ErroFinanceiro {
     /// `CriarCategoria` com nome vazio.
     #[error("A categoria precisa de um nome")]
     NomeDeCategoriaVazio,
+
+    /// O mesmo cheque (banco, agência, conta e número) já está na carteira.
+    #[error("Este cheque (banco, agência, conta e número) já está na carteira")]
+    ChequeDuplicado,
+
+    /// Operação que o estado do cheque não permite.
+    #[error("O cheque está \"{atual}\" — não dá para {operacao}")]
+    ChequeEmEstadoInvalido {
+        /// O estado atual.
+        atual: &'static str,
+        /// O que se tentou.
+        operacao: &'static str,
+    },
+
+    /// Dados do cheque incompletos ou mal formados.
+    #[error("Dados do cheque: {0}")]
+    DadosDoChequeInvalidos(&'static str),
+
+    /// Data impossível para o cheque.
+    #[error("Data do cheque: {0}")]
+    DataDoChequeInvalida(&'static str),
 }
 
 impl ErroDominio for ErroFinanceiro {
@@ -131,17 +152,21 @@ impl ErroDominio for ErroFinanceiro {
             | Self::ContaDeCaixaInvalida
             | Self::NomeDeCaixaVazio
             | Self::NomeDeCategoriaVazio
+            | Self::DadosDoChequeInvalidos(_)
+            | Self::DataDoChequeInvalida(_)
             | Self::BaixaZerada => CodigoErro::ENTRADA_INVALIDA,
             Self::ParcelaDeOutroTitulo
             | Self::SemSaldoParaRenegociar
             | Self::ValorSuperaSaldo { .. }
             | Self::QuebraExigeMotivo { .. }
             | Self::CaixaInativo
+            | Self::ChequeDuplicado
             | Self::ValorSuperaSaldoDoCaixa { .. } => CodigoErro::REGRA_VIOLADA,
             Self::ParcelaNaoBaixavel(_)
             | Self::EstadoDeSessaoInvalido { .. }
             | Self::CaixaJaAberto
             | Self::BaixaJaEstornada
+            | Self::ChequeEmEstadoInvalido { .. }
             | Self::ParcelaEncerradaNaoReverte(_) => CodigoErro::ESTADO_INVALIDO,
             Self::CaixaFechado => CodigoErro::CAIXA_FECHADO,
         }

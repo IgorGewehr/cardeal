@@ -69,6 +69,7 @@ pub mod aging;
 mod baixa;
 mod caixa;
 mod categoria;
+pub mod cheque;
 mod comandos;
 mod conciliacao;
 mod conferencia;
@@ -117,12 +118,14 @@ pub use comandos::{
 };
 pub use comandos::{
     AbrirCaixa, BaixaFoiEstornada, BaixarPagamento, BaixarRecebimento, CadastrarCaixa,
-    CaixaCadastrado, CaixaFoiAberto, CaixaFoiFechado, CategoriaCriada, ContaBancariaCriada,
-    CriarCategoria, CriarContaBancaria, CriarRecorrencia, DadosLancamentoTitulo, EstornarBaixa,
-    FecharCaixa, LancarTituloAPagar, LancarTituloAReceber, MaterializarRecorrencias,
-    PagamentoBaixado, RecebimentoBaixado, RecorrenciaCriada, RegistrarSangria, RegistrarSuprimento,
-    RenegociarTitulo, SangriaFoiRegistrada, SuprimentoFoiRegistrado, TituloAPagarLancado,
-    TituloAReceberLancado, TituloFoiRenegociado, TituloGravado,
+    CaixaCadastrado, CaixaFoiAberto, CaixaFoiFechado, CarteiraDeCheques, CategoriaCriada,
+    ChequeCompensado, ChequeFoiDevolvido, ChequeRegistrado, CompensarCheque, ContaBancariaCriada,
+    CriarCategoria, CriarContaBancaria, CriarRecorrencia, DadosLancamentoTitulo, DevolverCheque,
+    EstornarBaixa, FecharCaixa, ItemCheque, LancarTituloAPagar, LancarTituloAReceber,
+    MaterializarRecorrencias, PagamentoBaixado, RecebimentoBaixado, RecorrenciaCriada,
+    RegistrarCheque, RegistrarSangria, RegistrarSuprimento, RenegociarTitulo, SangriaFoiRegistrada,
+    SuprimentoFoiRegistrado, TituloAPagarLancado, TituloAReceberLancado, TituloFoiRenegociado,
+    TituloGravado,
 };
 pub use comandos::{
     BaixarPagamentosEmLote, BaixarRecebimentosEmLote, BaixasEmLoteFeitas, DadosBaixaEmLote,

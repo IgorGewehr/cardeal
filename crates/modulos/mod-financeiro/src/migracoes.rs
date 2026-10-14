@@ -253,6 +253,37 @@ const SQL_ITEM_EXTRATO_LANCAMENTO: &str = r"
 ALTER TABLE financeiro_item_extrato ADD COLUMN lancamento BLOB;
 ";
 
+// Migração v11 (2026-10-14): a carteira de cheques recebidos. O mesmo cheque não entra duas vezes
+// enquanto não for devolvido (devolvido por falta de fundos pode ser reapresentado).
+const SQL_CHEQUE: &str = r"
+CREATE TABLE financeiro_cheque (
+    id                     BLOB PRIMARY KEY,
+    empresa                BLOB    NOT NULL REFERENCES nucleo_empresa(id),
+    parcela                BLOB    NOT NULL REFERENCES financeiro_parcela(id),
+    baixa                  BLOB    NOT NULL REFERENCES financeiro_baixa(id),
+    banco                  TEXT    NOT NULL,
+    agencia                TEXT    NOT NULL,
+    conta                  TEXT    NOT NULL,
+    numero                 TEXT    NOT NULL,
+    emitente               TEXT    NOT NULL,
+    documento_emitente     TEXT,
+    valor                  INTEGER NOT NULL,
+    recebido_em            INTEGER NOT NULL,
+    bom_para               INTEGER NOT NULL,
+    estado                 TEXT    NOT NULL CHECK (estado IN ('EmCarteira','Compensado','Devolvido')),
+    conta_deposito         BLOB,
+    compensado_em          INTEGER,
+    lancamento_compensacao BLOB,
+    devolvido_em           INTEGER,
+    alinea                 INTEGER,
+    motivo                 TEXT,
+    criado_em              INTEGER NOT NULL
+) STRICT;
+CREATE UNIQUE INDEX financeiro_cheque_unico
+    ON financeiro_cheque(empresa, banco, agencia, conta, numero) WHERE estado <> 'Devolvido';
+CREATE INDEX financeiro_cheque_carteira ON financeiro_cheque(empresa, estado, bom_para);
+";
+
 const SQL_LISTA_PAGINADA: &str = r"
 CREATE INDEX financeiro_parcela_lista ON financeiro_parcela(empresa, vencimento, id);
 ";
@@ -316,6 +347,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 10,
         nome: "financeiro_item_extrato_lancamento",
         sql: SQL_ITEM_EXTRATO_LANCAMENTO,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 11,
+        nome: "financeiro_cheque",
+        sql: SQL_CHEQUE,
         tipo: TipoMigracao::Esquema,
     },
 ];
