@@ -62,6 +62,7 @@ impl EstadoTelaFinanceiro {
         if self.aba == Aba::Visao {
             self.carregar_saude(motor, sessao);
             self.conciliacao.carregar_conferencias(motor, sessao);
+            self.carregar_fila_cobranca(motor, sessao);
         }
         if matches!(self.aba, Aba::Receber | Aba::Pagar) {
             self.carregar_parcelas_periodo(motor, sessao);

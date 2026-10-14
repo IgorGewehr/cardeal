@@ -68,6 +68,7 @@ pub struct Campo<'a> {
     senha: bool,
     somente_leitura: bool,
     mascara: Mascara,
+    linhas: usize,
 }
 
 impl<'a> Campo<'a> {
@@ -81,6 +82,7 @@ impl<'a> Campo<'a> {
             senha: false,
             somente_leitura: false,
             mascara: Mascara::Nenhuma,
+            linhas: 1,
         }
     }
 
@@ -105,6 +107,13 @@ impl<'a> Campo<'a> {
     /// Mensagem de erro — pinta o contorno de `negativo` e mostra o texto abaixo.
     pub fn erro(mut self, erro: Option<impl Into<String>>) -> Self {
         self.erro = erro.map(Into::into);
+        self
+    }
+
+    /// Texto de várias linhas (mensagens, observações): `linhas` é a altura visível; o Enter
+    /// quebra a linha em vez de confirmar.
+    pub const fn multilinha(mut self, linhas: usize) -> Self {
+        self.linhas = if linhas < 2 { 2 } else { linhas };
         self
     }
 
@@ -154,7 +163,12 @@ impl Widget for Campo<'_> {
                         v.widgets.active.bg_stroke = egui::Stroke::new(2.0_f32, cores.negativo);
                         v.selection.stroke = egui::Stroke::new(1.0_f32, cores.negativo);
                     }
-                    let mut edicao = egui::TextEdit::singleline(self.valor)
+                    let base = if self.linhas > 1 {
+                        egui::TextEdit::multiline(self.valor).desired_rows(self.linhas)
+                    } else {
+                        egui::TextEdit::singleline(self.valor)
+                    };
+                    let mut edicao = base
                         .password(self.senha)
                         .font(Papel::Interface.font_id())
                         .text_color(cores.texto)

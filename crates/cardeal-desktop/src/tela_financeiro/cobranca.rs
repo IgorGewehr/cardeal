@@ -15,6 +15,9 @@ impl EstadoTelaFinanceiro {
             motor.consultar(sessao, "financeiro.aging_a_receber.v1", &AgingAReceber)
         };
         self.aging = self.anotar(r);
+        if !self.cobranca_pagar {
+            self.carregar_fila_cobranca(motor, sessao);
+        }
     }
 
     pub(super) fn nome_devedor(&self, d: &Devedor) -> String {
@@ -64,6 +67,11 @@ pub(super) fn painel_cobranca(
         estado.carregar_cobranca(motor, sessao);
     }
     ui.add_space(Espaco::E12);
+
+    if !estado.cobranca_pagar {
+        super::regua::secao_fila(ui, motor, sessao, estado);
+        ui.add_space(Espaco::E16);
+    }
 
     let Some(aging) = estado.aging.clone() else {
         EstadoVazio::novo(Icone::Dinheiro, "Sem dados para apurar o atraso.").mostrar(ui);

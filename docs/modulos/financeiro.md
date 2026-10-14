@@ -419,6 +419,22 @@ stateDiagram-v2
 | `TotalPorCategoriaNoPeriodo` ✅ | `financeiro.categoria.ver` | Gráfico de custo/receita por categoria e mês (churn, MRR por projeto) | agregação em memória sobre `financeiro_baixa` join `financeiro_titulo`, filtrando por `data` |
 | `TituloDaOrigem` ✅ (novo, 2026-09-11) | `financeiro.receber.ver` | Detalhe de OS (`os`)/vendas/compras faturada: "qual título isto gerou" | `financeiro_titulo(empresa, origem_modulo, origem_id)` — o par de correlação que `Titulo` já carregava desde a origem; usado por outro módulo pela consulta pública, nunca por SQL direto em `financeiro_titulo` (`docs/contratos-internos.md` §7 regra 2) |
 
+## 6.5 Régua de cobrança (2026-10-14)
+
+`mod_financeiro::regua`: as etapas da empresa (dias contados do vencimento — negativo = lembrete antes, 0 = no
+dia, positivo = atraso — com nome e modelo de mensagem com `{nome}`, `{valor}`, `{vencimento}`, `{dias}` e
+`{empresa}`); sem configuração, vale a padrão (−3, 0, 1, 7, 15, 30). `FilaDeCobranca`
+(`financeiro.fila_de_cobranca.v1`, `financeiro.receber.ver`) monta a fila de hoje a partir das parcelas a
+receber em aberto **com cliente**: para cada parcela, a etapa mais recente que já chegou e que ainda não foi
+registrada (nem uma posterior) — quem começa a usar com atraso grande cai direto na etapa atual; um item por
+cliente, na etapa mais grave entre as parcelas dele e com o total, os mais atrasados primeiro.
+`RegistrarCobranca` (`financeiro.cobranca.enviar`, nova) marca cada parcela do item como enviada ou pulada
+naquela etapa (migração v12, `financeiro_cobranca_registro`, chave parcela+etapa); `DefinirReguaDeCobranca`
+(`financeiro.cobranca.configurar`, nova) troca a régua inteira (até 12 etapas, dias de −30 a 365, sem dia
+repetido). Na tela: "Cobranças de hoje" no topo de Cobrança › Quem me deve (mensagem já escrita, WhatsApp a um
+clique que registra o envio, "Pular", editor da régua) e o aviso na Visão geral. O disparo **automático** (sem
+clique) espera uma API de WhatsApp — a fila já é o que ela vai consumir.
+
 ## 6.4 Pacote do contador (2026-10-14)
 
 Na aba Resultado e caixa, **"Pacote do contador…"** grava, para o mês escolhido, uma pasta `Contador AAAA-MM`

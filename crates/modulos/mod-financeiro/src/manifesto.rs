@@ -295,6 +295,18 @@ const PERMISSOES: &[Permissao] = &[
     ),
     // ── cobrança ─────────────────────────────────────────────────────────────
     perm(
+        "financeiro.cobranca.configurar",
+        "Configurar a régua de cobrança",
+        Risco::Medio,
+        None,
+    ),
+    perm(
+        "financeiro.cobranca.enviar",
+        "Enviar cobranças da régua",
+        Risco::Baixo,
+        None,
+    ),
+    perm(
         "financeiro.cobranca.gerar",
         "Gerar boleto/Pix de cobrança",
         Risco::Baixo,

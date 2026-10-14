@@ -60,6 +60,7 @@ struct Galeria {
     tema: Tema,
     campo: String,
     campo_erro: String,
+    campo_multilinha: String,
     busca: String,
     lista_busca: String,
     lista_filtro: Option<u8>,
@@ -484,6 +485,12 @@ impl eframe::App for Galeria {
                 ui.add(
                     Campo::novo("Campo com erro", &mut self.campo_erro)
                         .erro(Some("CNPJ inválido — 14 dígitos")),
+                );
+                ui.add_space(Espaco::E8);
+                ui.add(
+                    Campo::novo("Campo de várias linhas", &mut self.campo_multilinha)
+                        .multilinha(3)
+                        .marcador("Olá, {nome}! Passando para lembrar…"),
                 );
                 ui.add_space(Espaco::E8);
                 SeletorOpcao::novo("Seletor de opção", &mut self.opcao)

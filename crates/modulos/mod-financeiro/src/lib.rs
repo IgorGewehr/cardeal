@@ -92,6 +92,7 @@ mod plano;
 mod projecao;
 pub mod receituario;
 mod recorrencia;
+pub mod regua;
 #[cfg(feature = "sqlite")]
 mod repositorio;
 pub mod saude;
@@ -171,6 +172,10 @@ pub use plano::{
 pub use projecao::{ItemProjecaoCategoria, ProjecaoPorCategoria};
 pub use receituario::Autoria;
 pub use recorrencia::{Periodicidade, Recorrencia, TipoValor};
+pub use regua::{
+    DefinirReguaDeCobranca, EtapaRegua, FilaDeCobranca, FilaDoDia, ItemDaFila, RegistrarCobranca,
+    ReguaDeCobranca,
+};
 #[cfg(feature = "sqlite")]
 pub use repositorio::{BaixaGravada, RepositorioFinanceiro};
 pub use titulo::{

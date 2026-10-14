@@ -2210,3 +2210,129 @@ fn ultimo_lancamento_da_pessoa_e_o_manual_mais_recente_da_mesma_especie() {
     assert_eq!((u.emissao, u.parcelas), (hoje().mais_dias(-1), 1));
     assert_eq!(consultar(false), None, "a receber não se mistura");
 }
+
+/// A régua de cobrança pelo despachante: a fila de hoje sai dos títulos em aberto, o registro
+/// do envio tira o cliente da fila, e a régua da empresa substitui a padrão.
+#[test]
+fn regua_monta_a_fila_registra_o_envio_e_aceita_regua_propria() {
+    use mod_financeiro::{
+        DefinirReguaDeCobranca, EtapaRegua, FilaDoDia, RegistrarCobranca, ReguaDeCobranca,
+    };
+
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloFinanceiro]).unwrap();
+    let s = sessao(
+        empresa,
+        &[
+            "financeiro.receber.criar",
+            "financeiro.receber.ver",
+            "financeiro.cobranca.configurar",
+            "financeiro.cobranca.enviar",
+        ],
+    );
+    let lancar_com = |cliente: Option<Id>, reais: i64, vence_em: i32| -> TituloAReceberLancado {
+        let cmd = LancarTituloAReceber {
+            cliente,
+            valor_total: Dinheiro::reais(reais),
+            emissao: hoje().mais_dias(vence_em.min(0) - 10),
+            parcelas: 1,
+            primeiro_vencimento: hoje().mais_dias(vence_em),
+            intervalo_dias: 0,
+            observacao: None,
+            categoria: None,
+            quitado_agora: None,
+        };
+        postcard::from_bytes(
+            &d.executar_comando(
+                "financeiro.lancar_titulo_a_receber.v1",
+                &carga(&cmd),
+                &s,
+                &ambiente(empresa),
+                arm.escritor(),
+            )
+            .unwrap(),
+        )
+        .unwrap()
+    };
+    let (ana, beto) = (Id::novo(), Id::novo());
+    lancar_com(Some(ana), 100, -8); // 8 dias de atraso → etapa de 7
+    lancar_com(Some(beto), 80, 3); // vence em 3 → lembrete
+    lancar_com(None, 50, -20); // sem cliente: não há a quem cobrar
+    let fila = || -> FilaDoDia {
+        postcard::from_bytes(
+            &d.executar_consulta(
+                "financeiro.fila_de_cobranca.v1",
+                &carga(&mod_financeiro::FilaDeCobranca),
+                &s,
+                &ambiente(empresa),
+                arm.leitor(),
+            )
+            .unwrap(),
+        )
+        .unwrap()
+    };
+    let f = fila();
+    assert_eq!(f.empresa, "Teste");
+    assert_eq!(f.itens.len(), 2);
+    assert_eq!((f.itens[0].cliente, f.itens[0].etapa.dias), (ana, 7));
+    assert_eq!(f.itens[0].valor, Dinheiro::reais(100));
+    assert_eq!(
+        (f.itens[1].cliente, f.itens[1].etapa.nome.as_str()),
+        (beto, "Lembrete")
+    );
+
+    // Enviou para a Ana: ela sai da fila até a próxima etapa (15 dias).
+    let registrar = |parcelas: Vec<(Id, i32)>| {
+        d.executar_comando(
+            "financeiro.registrar_cobranca.v1",
+            &carga(&RegistrarCobranca {
+                parcelas,
+                pulada: false,
+            }),
+            &s,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+    };
+    registrar(f.itens[0].parcelas.clone()).unwrap();
+    let f = fila();
+    assert_eq!(f.itens.len(), 1);
+    assert_eq!(f.itens[0].cliente, beto);
+    // Parcela que não existe: recusado.
+    let e = registrar(vec![(Id::novo(), 1)]).unwrap_err();
+    assert_eq!(e.codigo, CodigoErro::NAO_ENCONTRADO);
+
+    // A empresa troca a régua por uma etapa só, aos 5 dias: a Ana (já cobrada na de 7) e o
+    // Beto (ainda não venceu) ficam fora.
+    let definir = |etapas: Vec<EtapaRegua>| {
+        d.executar_comando(
+            "financeiro.definir_regua_de_cobranca.v1",
+            &carga(&DefinirReguaDeCobranca { etapas }),
+            &s,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+    };
+    let cinco = EtapaRegua {
+        dias: 5,
+        nome: "Atraso".into(),
+        mensagem: "Olá, {nome}: {valor} em aberto.".into(),
+    };
+    definir(vec![cinco.clone()]).unwrap();
+    let regua: Vec<EtapaRegua> = postcard::from_bytes(
+        &d.executar_consulta(
+            "financeiro.regua_de_cobranca.v1",
+            &carga(&ReguaDeCobranca),
+            &s,
+            &ambiente(empresa),
+            arm.leitor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(regua, vec![cinco.clone()]);
+    assert!(fila().itens.is_empty());
+    // Duas etapas no mesmo dia: recusado, e a régua gravada continua a de antes.
+    let e = definir(vec![cinco.clone(), cinco]).unwrap_err();
+    assert_eq!(e.codigo, CodigoErro::ENTRADA_INVALIDA);
+}

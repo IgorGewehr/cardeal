@@ -20,6 +20,7 @@ mod pacote_contador;
 mod pessoal;
 mod plano_contas;
 mod recorrencias;
+mod regua;
 mod renegociar;
 mod saude;
 #[cfg(test)]
@@ -386,6 +387,10 @@ pub struct EstadoTelaFinanceiro {
     /// Aba Cobrança: o aging carregado e se está olhando o a pagar.
     aging: Option<mod_financeiro::aging::Aging>,
     cobranca_pagar: bool,
+    /// A fila de hoje da régua de cobrança.
+    fila_cobranca: Option<mod_financeiro::FilaDoDia>,
+    /// O editor da régua aberto.
+    regua_edicao: Option<Vec<regua::EtapaEmEdicao>>,
     plano: plano_contas::EstadoPlano,
     conciliacao: conciliacao_banco::EstadoConciliacao,
     /// A carteira de cheques (aba Cheques).

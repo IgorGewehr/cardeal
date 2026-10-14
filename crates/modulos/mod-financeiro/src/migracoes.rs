@@ -284,6 +284,29 @@ CREATE UNIQUE INDEX financeiro_cheque_unico
 CREATE INDEX financeiro_cheque_carteira ON financeiro_cheque(empresa, estado, bom_para);
 ";
 
+// Migração v12 (2026-10-14): a régua de cobrança (as etapas da empresa; sem etapas, vale a
+// padrão) e o registro do que já foi enviado ou pulado, por parcela e etapa — cada etapa sai uma
+// vez por parcela.
+const SQL_REGUA: &str = r"
+CREATE TABLE financeiro_regua_etapa (
+    empresa  BLOB    NOT NULL REFERENCES nucleo_empresa(id),
+    dias     INTEGER NOT NULL,
+    nome     TEXT    NOT NULL,
+    mensagem TEXT    NOT NULL,
+    PRIMARY KEY (empresa, dias)
+) STRICT;
+CREATE TABLE financeiro_cobranca_registro (
+    empresa    BLOB    NOT NULL REFERENCES nucleo_empresa(id),
+    parcela    BLOB    NOT NULL REFERENCES financeiro_parcela(id),
+    etapa_dias INTEGER NOT NULL,
+    situacao   TEXT    NOT NULL CHECK (situacao IN ('Enviada','Pulada')),
+    em         INTEGER NOT NULL,
+    por        BLOB    NOT NULL,
+    PRIMARY KEY (parcela, etapa_dias)
+) STRICT;
+CREATE INDEX financeiro_cobranca_registro_empresa ON financeiro_cobranca_registro(empresa);
+";
+
 const SQL_LISTA_PAGINADA: &str = r"
 CREATE INDEX financeiro_parcela_lista ON financeiro_parcela(empresa, vencimento, id);
 ";
@@ -353,6 +376,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 11,
         nome: "financeiro_cheque",
         sql: SQL_CHEQUE,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 12,
+        nome: "financeiro_regua_de_cobranca",
+        sql: SQL_REGUA,
         tipo: TipoMigracao::Esquema,
     },
 ];

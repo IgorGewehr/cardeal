@@ -37,7 +37,8 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   tem operador, não vendedor) e o ajuste por devolução (a devolução ainda não é persistida).
   Onda 6 (Financeiro 2) começou: **conciliação com alerta de pendências e saldo banco × sistema**,
   **lançamento pré-preenchido pelo último da pessoa**, **DFC indireto**, **cheques**, **balancete/diário** e o
-  **pacote do contador** (PDF + `.xlsx`) feitos (2026-10-14); falta a régua de cobrança automática.
+  **pacote do contador** (PDF + `.xlsx`) e a **régua de cobrança** (fila do dia com envio de um clique) feitos
+  (2026-10-14) — **a onda 6 fechou**; o disparo sem clique espera uma API de WhatsApp (decisão de produto).
 - **Pendência de confiança:** as tabelas do Simples e as alíquotas precisam ser conferidas com o
   contador; o ST/IPI **da nota** já entra no custo (2026-10-13), mas a estimativa de ST pela MVA (sem o valor na
   nota) ainda não.
@@ -567,6 +568,12 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   Validação: testes do ZIP (lido de volta, CRC conferido), da planilha e do PDF; a amostra abriu no Excel
   (abas, formato, negrito, painel congelado); o pacote real passou no `System.IO.Packaging` do .NET. Envio
   automático (SMTP) fica para quando houver configuração de e-mail; Portal do Contador é da onda 8.
+- **Régua de cobrança (2026-10-14, onda 6):** `mod_financeiro::regua` (régua padrão −3/0/1/7/15/30, etapa devida
+  por parcela uma vez só, fila agrupada por cliente na etapa mais grave, mensagem redigida), migração `financeiro`
+  v12, `ReguaDeCobranca`/`FilaDeCobranca`/`DefinirReguaDeCobranca`/`RegistrarCobranca` e duas permissões novas
+  (`financeiro.cobranca.configurar`, `.enviar`). `cardeal-ui`: `Campo::multilinha` (com exemplo na galeria).
+  Tela: "Cobranças de hoje" na aba Cobrança (WhatsApp registra o envio, "Pular", editor) e aviso na Visão geral.
+  Testes: 4 de domínio, 1 de integração e 1 de tela.
 - **Inventário com contagem cega (2026-10-13):** migração `estoque` v11 (`estoque_inventario`,
   `estoque_contagem_item`), comandos `criar_inventario`/`iniciar_contagem`/`registrar_contagem`/
   `encerrar_inventario`/`cancelar_inventario` (`.v1`) e consultas `inventarios`/`posicao_do_inventario`.

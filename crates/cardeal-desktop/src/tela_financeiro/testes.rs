@@ -1186,3 +1186,95 @@ fn pacote_do_contador_grava_pdf_e_planilha_do_mes() {
         }
     }
 }
+
+#[test]
+fn regua_de_cobranca_na_aba_cobranca_fila_registro_e_editor() {
+    let t = motor_de_teste();
+    let (m, s) = (&t.motor, &t.sessao);
+    let cliente: PessoaCadastrada = m
+        .executar(
+            s,
+            "clientes.criar_pessoa.v1",
+            &CriarPessoa {
+                tipo: TipoPessoa::Fisica,
+                nome: "Ana Paula".into(),
+                nome_fantasia: None,
+                papel_inicial: Papel::Cliente,
+                documento_tipo: None,
+                documento_numero: None,
+                data_nascimento: None,
+                endereco: None,
+                contato: None,
+            },
+        )
+        .expect("cliente");
+    let hoje = Data::hoje(Fuso::BRASILIA);
+    let _: mod_financeiro::TituloAReceberLancado = m
+        .executar(
+            s,
+            "financeiro.lancar_titulo_a_receber.v1",
+            &LancarTituloAReceber {
+                cliente: Some(cliente.pessoa),
+                valor_total: Dinheiro::reais(120),
+                emissao: hoje.mais_dias(-20),
+                parcelas: 1,
+                primeiro_vencimento: hoje.mais_dias(-1),
+                intervalo_dias: 0,
+                observacao: None,
+                categoria: None,
+                quitado_agora: None,
+            },
+        )
+        .expect("título");
+    let mut estado = EstadoTelaFinanceiro {
+        aba: Aba::Cobranca,
+        ..Default::default()
+    };
+    estado.carregar(m, s);
+    let fila = super::regua::fila(&estado).expect("fila").clone();
+    assert_eq!(fila.itens.len(), 1);
+    let item = fila.itens[0].clone();
+    assert_eq!(item.etapa.nome, "1 dia de atraso");
+    let msg = estado.mensagem_da_fila(&item);
+    assert!(
+        msg.starts_with("Olá, Ana!") && msg.contains("R$ 120,00"),
+        "{msg}"
+    );
+
+    // Pular tira a cliente da fila (sem telefone, o WhatsApp não aparece).
+    super::regua::registrar(m, s, &mut estado, &item, true).expect("pular");
+    assert!(super::regua::fila(&estado).unwrap().itens.is_empty());
+
+    // O editor: dias inválidos são recusados; a régua salva com uma etapa nova.
+    estado.regua_edicao = Some(vec![super::regua::EtapaEmEdicao {
+        dias: "dez".into(),
+        nome: "X".into(),
+        mensagem: "m".into(),
+    }]);
+    assert!(super::regua::salvar_regua(m, s, &mut estado).is_err());
+    estado.regua_edicao = Some(vec![super::regua::EtapaEmEdicao {
+        dias: "-2".into(),
+        nome: "Aviso".into(),
+        mensagem: "Olá, {nome}!".into(),
+    }]);
+    super::regua::salvar_regua(m, s, &mut estado).expect("salvar");
+    assert!(estado.regua_edicao.is_none());
+
+    // A Visão geral carrega a fila (vazia agora: a cliente foi pulada) e desenha.
+    estado.aba = Aba::Visao;
+    estado.carregar(m, s);
+    assert!(super::regua::fila(&estado).is_some());
+    // A aba desenha, com o editor aberto.
+    estado.aba = Aba::Cobranca;
+    estado.regua_edicao = Some(vec![super::regua::EtapaEmEdicao::default()]);
+    let ctx = egui::Context::default();
+    cardeal_ui::tokens::instalar_fontes(&ctx);
+    cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+    for _ in 0..2 {
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                mostrar(ui, m, s, &mut estado);
+            });
+        });
+    }
+}
