@@ -51,8 +51,8 @@ mod resultado;
 mod testkit_interno;
 
 #[cfg(feature = "sqlite")]
-pub use caixa::movimentos_de_caixa;
-pub use caixa::{ContrapartidaDeCaixa, MovimentoDeCaixa};
+pub use caixa::{movimentos_de_caixa, variacoes_patrimoniais};
+pub use caixa::{ContrapartidaDeCaixa, MovimentoDeCaixa, VariacaoPatrimonial};
 pub use construtor::{ConstrutorLancamento, LancamentoBalanceado};
 pub use conta::{CodigoConta, Conta, GrupoFluxo, Natureza, PapelConta, TipoConta};
 pub use contas::Contas;

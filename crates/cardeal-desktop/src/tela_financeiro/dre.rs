@@ -33,6 +33,14 @@ impl EstadoTelaFinanceiro {
             },
         );
         self.dfc = self.anotar(r);
+        let r = motor.consultar(
+            sessao,
+            "financeiro.dfc_indireto_do_periodo.v1",
+            &mod_financeiro::DfcIndiretoDoPeriodo {
+                periodo: Periodo::novo(mes.primeiro_dia(), mes.ultimo_dia()),
+            },
+        );
+        self.dfc_indireto = self.anotar(r);
     }
 }
 
@@ -118,9 +126,22 @@ pub(super) fn painel_dre(
     }
     ui.add_space(Espaco::E12);
     if estado.dre_dfc {
-        match estado.dfc.clone() {
-            Some(dfc) => tabela_dfc(ui, &dfc),
-            None => {
+        if let Some(v) = Abas::nova(&[(false, "Método direto"), (true, "Método indireto")])
+            .selecionada(estado.dfc_metodo_indireto)
+            .id_salt("dfc-metodo")
+            .mostrar(ui)
+        {
+            estado.dfc_metodo_indireto = v;
+        }
+        ui.add_space(Espaco::E8);
+        match (
+            estado.dfc_metodo_indireto,
+            &estado.dfc,
+            &estado.dfc_indireto,
+        ) {
+            (false, Some(dfc), _) => tabela_dfc(ui, dfc),
+            (true, _, Some(ind)) => tabela_dfc_indireto(ui, ind),
+            _ => {
                 EstadoVazio::novo(Icone::Dinheiro, "Sem dados para apurar o fluxo de caixa.")
                     .mostrar(ui);
             }
@@ -146,21 +167,69 @@ pub(super) fn painel_dre(
     tabela(ui, &cmp);
 }
 
-/// O DFC do mês: saldo inicial, as três atividades com suas linhas, variação e saldo final.
+/// O DFC do mês pelo método direto.
 fn tabela_dfc(ui: &mut egui::Ui, dfc: &Dfc) {
     ui.add(Rotulo::apoio(
         "Só o que realmente entrou e saiu do caixa e dos bancos no mês (pela data do pagamento \
          ou recebimento), aberto pela contrapartida. Transferências entre contas não aparecem.",
     ));
     ui.add_space(Espaco::E8);
+    tabela_fluxo(
+        ui,
+        "dfc",
+        dfc.saldo_inicial,
+        &dfc.blocos,
+        dfc.variacao,
+        dfc.saldo_final,
+    );
+}
+
+/// O DFC do mês pelo método indireto: do lucro líquido ao caixa.
+fn tabela_dfc_indireto(ui: &mut egui::Ui, d: &mod_financeiro::dfc::DfcIndireto) {
+    ui.add(
+        Rotulo::apoio(
+            "Do lucro líquido da DRE ao caixa: o que cresceu nos ativos (a receber, estoque) \
+             prendeu dinheiro, o que cresceu nos passivos (fornecedores, impostos) o soltou, e a \
+             depreciação volta porque não sai do caixa. Termina na mesma variação do método \
+             direto.",
+        )
+        .quebravel(),
+    );
+    if !d.diferenca_de_datas.e_zero() {
+        ui.add_space(Espaco::E4);
+        ui.add(Etiqueta::info(format!(
+            "{} de diferença de datas: lançamento com competência num mês e pagamento noutro",
+            d.diferenca_de_datas.formatar_com_simbolo()
+        )));
+    }
+    ui.add_space(Espaco::E8);
+    tabela_fluxo(
+        ui,
+        "dfc-indireto",
+        d.saldo_inicial,
+        &d.blocos,
+        d.variacao,
+        d.saldo_final,
+    );
+}
+
+/// Saldo inicial, as três atividades com suas linhas, variação e saldo final.
+fn tabela_fluxo(
+    ui: &mut egui::Ui,
+    id: &'static str,
+    saldo_inicial: Dinheiro,
+    blocos: &[mod_financeiro::dfc::BlocoDfc],
+    variacao: Dinheiro,
+    saldo_final: Dinheiro,
+) {
     FaixaKpi::nova(vec![
-        CartaoKpi::novo("Caixa no início", dfc.saldo_inicial).tom(Tom::Neutro),
-        CartaoKpi::novo("Variação no mês", dfc.variacao).tom(if dfc.variacao.e_negativo() {
+        CartaoKpi::novo("Caixa no início", saldo_inicial).tom(Tom::Neutro),
+        CartaoKpi::novo("Variação no mês", variacao).tom(if variacao.e_negativo() {
             Tom::Negativo
         } else {
             Tom::Positivo
         }),
-        CartaoKpi::novo("Caixa no fim", dfc.saldo_final).tom(Tom::Neutro),
+        CartaoKpi::novo("Caixa no fim", saldo_final).tom(Tom::Neutro),
     ])
     .mostrar(ui);
     ui.add_space(Espaco::E16);
@@ -168,10 +237,10 @@ fn tabela_dfc(ui: &mut egui::Ui, dfc: &Dfc) {
     // Linhas planas: (rotulo, valor, tipo).
     let mut linhas: Vec<(String, Dinheiro, TipoLinhaDre)> = vec![(
         "Caixa no início do mês".to_owned(),
-        dfc.saldo_inicial,
+        saldo_inicial,
         TipoLinhaDre::Resultado,
     )];
-    for b in &dfc.blocos {
+    for b in blocos {
         linhas.push((b.nome.clone(), b.total, TipoLinhaDre::Bloco));
         for l in &b.linhas {
             linhas.push((l.rotulo.clone(), l.valor, TipoLinhaDre::Conta));
@@ -179,19 +248,19 @@ fn tabela_dfc(ui: &mut egui::Ui, dfc: &Dfc) {
     }
     linhas.push((
         "Variação do caixa".to_owned(),
-        dfc.variacao,
+        variacao,
         TipoLinhaDre::Resultado,
     ));
     linhas.push((
         "Caixa no fim do mês".to_owned(),
-        dfc.saldo_final,
+        saldo_final,
         TipoLinhaDre::Resultado,
     ));
     Grade::nova(vec![
         ColunaGrade::nova("").largura(420.0),
         ColunaGrade::nova("Valor").largura(180.0).numero(),
     ])
-    .id_salt("dfc")
+    .id_salt(id)
     .mostrar(ui, linhas.len(), |i, row| {
         let (rotulo, valor, tipo) = &linhas[i];
         row.col(|ui| match tipo {

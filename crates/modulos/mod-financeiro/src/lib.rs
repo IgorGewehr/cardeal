@@ -149,7 +149,8 @@ pub use consultas::{
 };
 pub use consultas::{SituacaoDaParcela, SituacaoNaData};
 pub use dre_consulta::{
-    ComparativoDre, DfcDoPeriodo, DreComparativa, DreDoPeriodo, SaudeFinanceira,
+    ComparativoDre, DfcDoPeriodo, DfcIndiretoDoPeriodo, DreComparativa, DreDoPeriodo,
+    SaudeFinanceira,
 };
 pub use erros::ErroFinanceiro;
 pub use listagem::{

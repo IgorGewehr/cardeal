@@ -388,6 +388,10 @@ pub struct EstadoTelaFinanceiro {
     dre_mes: Option<Competencia>,
     dre: Option<mod_financeiro::ComparativoDre>,
     dfc: Option<mod_financeiro::dfc::Dfc>,
+    /// O DFC pelo método indireto (do lucro ao caixa) do mesmo mês.
+    dfc_indireto: Option<mod_financeiro::dfc::DfcIndireto>,
+    /// A aba do DFC mostra o método indireto.
+    dfc_metodo_indireto: bool,
     /// Dentro de Resultado: `false` = DRE, `true` = DFC.
     dre_dfc: bool,
     projecao: Vec<mod_financeiro::ItemProjecaoCategoria>,

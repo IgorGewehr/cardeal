@@ -1,6 +1,8 @@
 //! O DFC (demonstrativo do fluxo de caixa) pelo método direto: de onde o dinheiro entrou e
 //! para onde saiu no período, separado em atividades operacionais, de investimento e de
-//! financiamento, mais o saldo de abertura e o de fechamento do caixa.
+//! financiamento, mais o saldo de abertura e o de fechamento do caixa. E pelo método
+//! **indireto** ([`montar_indireto`]): do lucro líquido ao caixa, pelas variações das contas
+//! patrimoniais — por que o lucro não virou dinheiro (ou virou mais do que ele).
 //!
 //! Cada lançamento realizado que mexe no caixa é aberto pela contraparte: o valor que cada
 //! conta de contrapartida carrega vira entrada ou saída na linha daquela conta (um
@@ -9,7 +11,7 @@
 //! sobre os movimentos já lidos do Razão.
 
 use cardeal_kernel::{Dinheiro, Periodo};
-use cardeal_ledger::{MovimentoDeCaixa, PapelConta};
+use cardeal_ledger::{MovimentoDeCaixa, Natureza, PapelConta, VariacaoPatrimonial};
 use serde::{Deserialize, Serialize};
 
 /// Uma linha do DFC.
@@ -158,6 +160,152 @@ pub fn montar(periodo: Periodo, abertura: Dinheiro, movimentos: &[MovimentoDeCai
     }
 }
 
+/// O DFC pelo método indireto: o lucro líquido do período (o da DRE), ajustado pelas variações
+/// das contas patrimoniais fora do caixa, chega à mesma variação do caixa do método direto.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DfcIndireto {
+    /// O período.
+    pub periodo: Periodo,
+    /// O caixa no início do período.
+    pub saldo_inicial: Dinheiro,
+    /// O lucro líquido da DRE (primeira linha das operacionais).
+    pub lucro_liquido: Dinheiro,
+    /// Operacional (lucro + ajustes), investimento e financiamento, nesta ordem.
+    pub blocos: Vec<BlocoDfc>,
+    /// O que sobra quando um lançamento tem competência num período e liquidação noutro (a
+    /// DRE o conta num, o caixa no outro); zero no caso normal. Já está no bloco operacional.
+    pub diferenca_de_datas: Dinheiro,
+    /// A variação do caixa — a mesma do método direto.
+    pub variacao: Dinheiro,
+    /// O caixa no fim do período.
+    pub saldo_final: Dinheiro,
+}
+
+/// O rótulo da linha "Lucro líquido do período".
+pub const LUCRO_LIQUIDO: &str = "Lucro líquido do período";
+/// O rótulo da diferença de datas entre competência e caixa.
+pub const DIFERENCA_DE_DATAS: &str = "Diferença de datas (competência × caixa)";
+
+/// Depreciação e amortização não saem do caixa: voltam ao lucro nas operacionais.
+fn e_depreciacao(nome: &str) -> bool {
+    let n = nome.to_lowercase();
+    n.contains("deprecia") || n.contains("amortiza") || n.contains("exaust")
+}
+
+/// O bloco (0 operacional, 1 investimento, 2 financiamento) e o rótulo da variação de uma conta.
+/// Vale, nesta ordem: depreciação (operacional); o grupo de fluxo gravado na conta; o papel;
+/// o imobilizado pelo código (1.4); o resto é operacional.
+fn bloco_da_variacao(v: &VariacaoPatrimonial) -> (usize, String) {
+    if e_depreciacao(&v.nome) {
+        return (0, "Depreciação e amortização (não sai do caixa)".to_owned());
+    }
+    let papel = v.papel.as_deref().unwrap_or("");
+    let financiamento = match papel {
+        "Emprestimos" => Some("Empréstimos"),
+        "Capital" => Some("Aportes de capital"),
+        "Retiradas" => Some("Retiradas e pró-labore"),
+        "LucrosAcumulados" => Some("Lucros distribuídos"),
+        _ => None,
+    };
+    let bloco = match v.grupo_fluxo.as_deref() {
+        Some("Investimento") => 1,
+        Some("Financiamento") => 2,
+        _ if financiamento.is_some() => 2,
+        _ if papel == "Aplicacoes" || v.codigo.starts_with("1.4") => 1,
+        _ => 0,
+    };
+    let rotulo = match bloco {
+        2 => financiamento.map_or_else(|| v.nome.clone(), str::to_owned),
+        1 if papel == "Aplicacoes" => "Aplicações financeiras".to_owned(),
+        1 if v.codigo.starts_with("1.4") => "Imobilizado (compras e vendas)".to_owned(),
+        1 => v.nome.clone(),
+        _ => match papel {
+            "ClientesAReceber" | "CartoesAReceber" | "ChequesAReceber" => {
+                "(Aumento) redução de contas a receber".to_owned()
+            }
+            "EstoqueMercadorias"
+            | "EstoqueMateriaPrima"
+            | "EstoqueEmProcesso"
+            | "EstoqueAcabado" => "(Aumento) redução de estoques".to_owned(),
+            "ImpostosARecuperar" | "AdiantamentoFornecedor" => {
+                "(Aumento) redução de outros créditos".to_owned()
+            }
+            "Fornecedores" => "Aumento (redução) de fornecedores".to_owned(),
+            "ImpostosARecolher" => "Aumento (redução) de impostos a recolher".to_owned(),
+            "SalariosAPagar" => "Aumento (redução) de salários e encargos".to_owned(),
+            "AdiantamentoCliente" | "CartoesARepassar" => {
+                "Aumento (redução) de outras obrigações".to_owned()
+            }
+            _ if v.natureza == Natureza::Ativo => format!("(Aumento) redução de {}", v.nome),
+            _ => format!("Aumento (redução) de {}", v.nome),
+        },
+    };
+    (bloco, rotulo)
+}
+
+/// Monta o DFC indireto a partir do direto (o caixa: abertura, variação e fechamento), do
+/// lucro líquido da DRE e das variações patrimoniais do mesmo período. Cada variação entra com
+/// o sinal trocado: ativo que cresce prendeu dinheiro, passivo que cresce o soltou.
+#[must_use]
+pub fn montar_indireto(
+    direto: &Dfc,
+    lucro_liquido: Dinheiro,
+    variacoes: &[VariacaoPatrimonial],
+) -> DfcIndireto {
+    let mut linhas: [Vec<LinhaDfc>; 3] = [Vec::new(), Vec::new(), Vec::new()];
+    for v in variacoes {
+        let (bloco, rotulo) = bloco_da_variacao(v);
+        let valor = -v.valor;
+        if let Some(l) = linhas[bloco].iter_mut().find(|l| l.rotulo == rotulo) {
+            l.valor += valor;
+        } else {
+            linhas[bloco].push(LinhaDfc { rotulo, valor });
+        }
+    }
+    for ls in &mut linhas {
+        ls.retain(|l| !l.valor.e_zero());
+        ls.sort_by_key(|l| std::cmp::Reverse(l.valor.abs()));
+    }
+    let ajustes: Dinheiro = linhas.iter().flatten().map(|l| l.valor).sum();
+    let diferenca_de_datas = direto.variacao - lucro_liquido - ajustes;
+    linhas[0].insert(
+        0,
+        LinhaDfc {
+            rotulo: LUCRO_LIQUIDO.to_owned(),
+            valor: lucro_liquido,
+        },
+    );
+    if !diferenca_de_datas.e_zero() {
+        linhas[0].push(LinhaDfc {
+            rotulo: DIFERENCA_DE_DATAS.to_owned(),
+            valor: diferenca_de_datas,
+        });
+    }
+    let nomes = [
+        "Atividades operacionais",
+        "Atividades de investimento",
+        "Atividades de financiamento",
+    ];
+    let blocos = linhas
+        .into_iter()
+        .zip(nomes)
+        .map(|(ls, nome)| BlocoDfc {
+            nome: nome.to_owned(),
+            total: ls.iter().map(|l| l.valor).sum(),
+            linhas: ls,
+        })
+        .collect();
+    DfcIndireto {
+        periodo: direto.periodo,
+        saldo_inicial: direto.saldo_inicial,
+        lucro_liquido,
+        blocos,
+        diferenca_de_datas,
+        variacao: direto.variacao,
+        saldo_final: direto.saldo_final,
+    }
+}
+
 #[cfg(test)]
 mod testes {
     use cardeal_kernel::{Data, Id};
@@ -249,5 +397,126 @@ mod testes {
         let esperado: Dinheiro = movs.iter().map(|m| m.caixa).sum();
         assert_eq!(d.variacao, esperado);
         assert_eq!(d.saldo_final, esperado);
+    }
+
+    fn var(
+        codigo: &str,
+        nome: &str,
+        natureza: Natureza,
+        papel: Option<&str>,
+        valor: i64,
+    ) -> VariacaoPatrimonial {
+        VariacaoPatrimonial {
+            codigo: codigo.into(),
+            nome: nome.into(),
+            natureza,
+            papel: papel.map(Into::into),
+            grupo_fluxo: None,
+            valor: Dinheiro::reais(valor),
+        }
+    }
+
+    fn direto(variacao: i64) -> Dfc {
+        Dfc {
+            periodo: periodo(),
+            saldo_inicial: Dinheiro::reais(100),
+            blocos: Vec::new(),
+            variacao: Dinheiro::reais(variacao),
+            saldo_final: Dinheiro::reais(100 + variacao),
+        }
+    }
+
+    #[test]
+    fn indireto_vai_do_lucro_ao_caixa_pelas_variacoes() {
+        // Lucro de 300 (com 20 de depreciação); vendeu a prazo e o a receber subiu 250; o estoque
+        // caiu 80; fornecedores subiu 40; comprou máquina de 500; tomou empréstimo de 600 e
+        // pagou 100 de retirada. Caixa: 300 + 20 − 250 + 80 + 40 − 500 + 600 − 100 = 190.
+        let variacoes = [
+            var(
+                "1.2.01",
+                "Clientes a receber",
+                Natureza::Ativo,
+                Some("ClientesAReceber"),
+                250,
+            ),
+            var(
+                "1.3.01",
+                "Mercadorias",
+                Natureza::Ativo,
+                Some("EstoqueMercadorias"),
+                -80,
+            ),
+            var("1.4.01", "Máquinas", Natureza::Ativo, None, 500),
+            var(
+                "1.4.02",
+                "Depreciação acumulada",
+                Natureza::Ativo,
+                None,
+                -20,
+            ),
+            var(
+                "2.1.01",
+                "Fornecedores",
+                Natureza::Passivo,
+                Some("Fornecedores"),
+                -40,
+            ),
+            var(
+                "2.1.04",
+                "Empréstimos",
+                Natureza::Passivo,
+                Some("Emprestimos"),
+                -600,
+            ),
+            var(
+                "3.3",
+                "Retiradas",
+                Natureza::PatrimonioLiquido,
+                Some("Retiradas"),
+                100,
+            ),
+        ];
+        let d = montar_indireto(&direto(190), Dinheiro::reais(300), &variacoes);
+        assert_eq!(d.diferenca_de_datas, Dinheiro::ZERO);
+        let op = &d.blocos[0];
+        assert_eq!(op.linhas[0].rotulo, LUCRO_LIQUIDO);
+        assert_eq!(op.total, Dinheiro::reais(190)); // 300 + 20 − 250 + 80 + 40
+        let valor = |b: usize, rotulo: &str| {
+            d.blocos[b]
+                .linhas
+                .iter()
+                .find(|l| l.rotulo == rotulo)
+                .map(|l| l.valor)
+        };
+        assert_eq!(
+            valor(0, "(Aumento) redução de contas a receber"),
+            Some(Dinheiro::reais(-250))
+        );
+        assert_eq!(
+            valor(0, "Depreciação e amortização (não sai do caixa)"),
+            Some(Dinheiro::reais(20))
+        );
+        assert_eq!(d.blocos[1].total, Dinheiro::reais(-500));
+        assert_eq!(
+            valor(1, "Imobilizado (compras e vendas)"),
+            Some(Dinheiro::reais(-500))
+        );
+        assert_eq!(d.blocos[2].total, Dinheiro::reais(500));
+        let soma: Dinheiro = d.blocos.iter().map(|b| b.total).sum();
+        assert_eq!(soma, d.variacao);
+        assert_eq!(d.saldo_final, Dinheiro::reais(290));
+    }
+
+    #[test]
+    fn diferenca_de_datas_aparece_em_vez_de_sumir() {
+        // O caixa variou 50 a mais do que lucro + variações explicam (recebimento com
+        // competência no mês anterior): vira uma linha à vista, e o total continua o do caixa.
+        let d = montar_indireto(&direto(150), Dinheiro::reais(100), &[]);
+        assert_eq!(d.diferenca_de_datas, Dinheiro::reais(50));
+        assert_eq!(
+            d.blocos[0].linhas.last().map(|l| l.rotulo.as_str()),
+            Some(DIFERENCA_DE_DATAS)
+        );
+        assert_eq!(d.blocos[0].total, Dinheiro::reais(150));
     }
 }

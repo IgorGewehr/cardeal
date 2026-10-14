@@ -99,7 +99,7 @@ Números que o usuário consegue conferir, sem modelo estatístico por trás.
 
 - [ ] `cardeal-analytics` — projetor, Parquet, DuckDB, esquema estrela *(hoje: consultas diretas sobre o Razão)*
 - [x] Curva ABC, giro, cobertura, ruptura e encalhe (aba Análise do estoque)
-- [x] Margem prevista e real (pedido, OS), DRE, DFC, aging, score de saúde
+- [x] Margem prevista e real (pedido, OS), DRE, DFC (direto e indireto), aging, score de saúde
 - [x] Rentabilidade por nível da estrutura mercadológica, comissão por estrutura e a apuração/pagamento mensal da comissão do vendedor *(fora: comissão no PDV e ajuste por devolução)*
 - [ ] Preços defasados (custo mudou, margem caiu) e reajuste em lote
 - [ ] Cartões fixáveis no Pulso e exportações: Excel, Power BI, Parquet

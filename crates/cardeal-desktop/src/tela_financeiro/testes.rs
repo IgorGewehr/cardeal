@@ -654,6 +654,29 @@ fn aba_resultado_apura_o_mes_pelo_razao_e_navega_entre_meses() {
     assert_eq!(cmp.mes_anterior.lucro_liquido, Dinheiro::ZERO);
     // Ainda nada foi recebido: o DFC (realizado) está zerado, ao contrário da DRE (competência).
     assert!(estado.dfc.clone().expect("DFC").variacao.e_zero());
+    // O indireto explica por quê: lucro de 250 preso no a receber, mesmo caixa zerado.
+    let ind = estado.dfc_indireto.clone().expect("DFC indireto");
+    assert_eq!(ind.lucro_liquido, Dinheiro::reais(250));
+    assert!(ind.variacao.e_zero() && ind.diferenca_de_datas.e_zero());
+    assert!(ind.blocos[0]
+        .linhas
+        .iter()
+        .any(|l| l.rotulo == "(Aumento) redução de contas a receber"
+            && l.valor == Dinheiro::reais(-250)));
+    // As duas tabelas desenham.
+    let ctx = egui::Context::default();
+    cardeal_ui::tokens::instalar_fontes(&ctx);
+    cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+    estado.dre_dfc = true;
+    for indireto in [false, true] {
+        estado.dfc_metodo_indireto = indireto;
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                painel_dre(ui, &t.motor, &t.sessao, &mut estado);
+            });
+        });
+    }
+    estado.dre_dfc = false;
 
     // Mês passado: nada lançado.
     estado.dre_mes = Some(estado.mes_dre().anterior());

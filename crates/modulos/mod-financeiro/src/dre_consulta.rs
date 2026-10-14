@@ -95,6 +95,33 @@ impl Consulta for DfcDoPeriodo {
     }
 }
 
+/// O DFC pelo método indireto de um período: do lucro líquido da DRE à variação do caixa.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct DfcIndiretoDoPeriodo {
+    /// O período, inclusive nas pontas.
+    pub periodo: Periodo,
+}
+
+impl Consulta for DfcIndiretoDoPeriodo {
+    type Saida = crate::dfc::DfcIndireto;
+    const PERMISSAO: &'static str = "financeiro.dre.ver";
+
+    #[cfg(feature = "sqlite")]
+    fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        let erro = |e: cardeal_ledger::ErroRazao| {
+            Erro::novo(CodigoErro::FALHA_INTERNA, format!("financeiro/DFC: {e}"))
+        };
+        let (abertura, movimentos) =
+            cardeal_ledger::movimentos_de_caixa(conexao, ctx.empresa, self.periodo)
+                .map_err(erro)?;
+        let direto = crate::dfc::montar(self.periodo, abertura, &movimentos);
+        let lucro = apurar(conexao, ctx, self.periodo)?.lucro_liquido;
+        let variacoes = cardeal_ledger::variacoes_patrimoniais(conexao, ctx.empresa, self.periodo)
+            .map_err(erro)?;
+        Ok(crate::dfc::montar_indireto(&direto, lucro, &variacoes))
+    }
+}
+
 /// O score de saúde financeira (ver [`crate::saude`]). O giro de estoque pertence a outro módulo:
 /// quem o conhece (a tela, via `estoque.analise_de_estoque.v1`) o informa; sem ele o sinal sai
 /// do cálculo.
