@@ -3,10 +3,11 @@
 
 use std::sync::Mutex;
 
-use cardeal_kernel::{Cnpj, Erro, Resultado};
+use cardeal_kernel::{Cnpj, Erro, Resultado, Uf};
 
 use crate::chave::ChaveAcesso;
-use crate::porta::{Nsu, PortaFiscal, ResumoDfe, XmlNota};
+use crate::erros::ErroFiscal;
+use crate::porta::{ModeloFiscal, Nsu, PortaFiscal, ResumoDfe, StatusSefaz, XmlNota};
 
 /// Um adaptador fiscal em memória: o teste semeia notas com [`Self::semear`] e o código sob
 /// teste as descobre via [`PortaFiscal::distribuicao_dfe`]/[`PortaFiscal::baixar_xml`],
@@ -14,6 +15,7 @@ use crate::porta::{Nsu, PortaFiscal, ResumoDfe, XmlNota};
 #[derive(Default)]
 pub struct FiscalSimulado {
     notas: Mutex<Vec<(ResumoDfe, XmlNota)>>,
+    fora_do_ar: std::sync::atomic::AtomicBool,
 }
 
 impl FiscalSimulado {
@@ -41,6 +43,12 @@ impl FiscalSimulado {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push((resumo, XmlNota(xml.into())));
     }
+
+    /// Faz a API fiscal simulada parar de responder (ou voltar).
+    pub fn simular_fora_do_ar(&self, fora: bool) {
+        self.fora_do_ar
+            .store(fora, std::sync::atomic::Ordering::SeqCst);
+    }
 }
 
 impl PortaFiscal for FiscalSimulado {
@@ -67,6 +75,20 @@ impl PortaFiscal for FiscalSimulado {
             .map(|(_, xml)| xml.clone())
             .ok_or_else(|| Erro::nao_encontrado("XML da nota"))
     }
+
+    fn status_servico(&self, uf: Uf, modelo: ModeloFiscal) -> Resultado<StatusSefaz> {
+        if self.fora_do_ar.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(Erro::de_dominio(&ErroFiscal::ServicoIndisponivel));
+        }
+        Ok(StatusSefaz {
+            em_operacao: true,
+            codigo: "107".into(),
+            motivo: format!(
+                "Serviço em Operação (simulado, {uf}, modelo {})",
+                modelo.codigo()
+            ),
+        })
+    }
 }
 
 #[cfg(test)]
@@ -88,5 +110,15 @@ mod testes {
 
         let xml = sim.baixar_xml(&chave1).unwrap();
         assert_eq!(xml.0, "<xml1/>");
+    }
+
+    #[test]
+    fn status_em_operacao_e_fora_do_ar_sob_comando() {
+        let sim = FiscalSimulado::novo();
+        let status = sim.status_servico(Uf::Sc, ModeloFiscal::Nfce).unwrap();
+        assert!(status.em_operacao);
+        assert_eq!(status.codigo, "107");
+        sim.simular_fora_do_ar(true);
+        assert!(sim.status_servico(Uf::Sc, ModeloFiscal::Nfce).is_err());
     }
 }

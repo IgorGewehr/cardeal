@@ -15,6 +15,8 @@ Cargo.lock.bak
 /certificados/
 *.pfx
 *.p12
+# Exceção: os certificados de TESTE do cardeal-fiscal (AC fictícia, gerados por gerar.sh).
+!/crates/cardeal-fiscal/tests/dados/*.pfx
 *.pem
 *.key
 cardeal.toml

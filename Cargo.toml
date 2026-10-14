@@ -115,6 +115,16 @@ quick-xml   = "0.36"
 
 # --- segurança ---------------------------------------------------------------
 argon2      = "0.5"
+# Certificado A1 (PKCS#12) e o cofre de segredos em repouso — RustCrypto, Rust puro.
+aes         = "0.8"
+aes-gcm     = "0.10"
+cbc         = { version = "0.1", features = ["alloc"] }
+des         = "0.8"
+rc2         = "0.8"
+hmac        = "0.12"
+pbkdf2      = { version = "0.12", default-features = false, features = ["hmac"] }
+sha1        = "0.10"
+sha2        = "0.10"
 subtle      = "2"
 zeroize     = { version = "1", features = ["derive"] }
 rand        = "0.8"

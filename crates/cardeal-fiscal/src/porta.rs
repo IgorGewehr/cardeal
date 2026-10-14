@@ -11,13 +11,55 @@
 //! síncronas usam para embrulhar clientes HTTP assíncronos, sem vazar `async` para quem
 //! chama. Isso é reavaliado quando `Ctx::porta()` for implementado.
 //!
-//! O que esta versão cobre é só o suficiente para `mod-compras` puxar notas de entrada da
-//! distribuição `DFe` — o restante da trait completa do doc 10 (emitir, cancelar, SPED…) fica
-//! para quando `mod-fiscal` for implementado de verdade.
+//! O que esta versão cobre: a distribuição `DFe` que `mod-compras` usa e o status do serviço
+//! da SEFAZ; o restante da trait do doc 10 (emitir, cancelar, carta de correção…) entra com
+//! cada fatia da onda 7. O adaptador real é [`crate::ApiFiscalHttp`], cliente do `sefaz-api`.
 
-use cardeal_kernel::{Cnpj, Resultado};
+use cardeal_kernel::{Cnpj, Resultado, Uf};
+use serde::{Deserialize, Serialize};
 
 use crate::chave::ChaveAcesso;
+
+/// O modelo do documento fiscal eletrônico.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ModeloFiscal {
+    /// NF-e, modelo 55 (venda entre empresas, devolução, remessa).
+    Nfe,
+    /// NFC-e, modelo 65 (cupom do consumidor final).
+    Nfce,
+}
+
+impl ModeloFiscal {
+    /// O código do modelo ("55"/"65").
+    #[must_use]
+    pub const fn codigo(self) -> &'static str {
+        match self {
+            Self::Nfe => "55",
+            Self::Nfce => "65",
+        }
+    }
+}
+
+/// Homologação (testes, sem valor fiscal) ou produção.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum AmbienteFiscal {
+    /// Homologação — o ambiente de testes da SEFAZ. Padrão até a empresa ligar a produção.
+    #[default]
+    Homologacao,
+    /// Produção — notas com valor fiscal.
+    Producao,
+}
+
+/// A resposta da SEFAZ à consulta de status do serviço.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StatusSefaz {
+    /// Verdadeiro quando a SEFAZ respondeu "107 — Serviço em Operação".
+    pub em_operacao: bool,
+    /// O código de status (`cStat`) devolvido.
+    pub codigo: String,
+    /// O motivo (`xMotivo`) devolvido.
+    pub motivo: String,
+}
 
 /// O "próximo a buscar" na distribuição `DFe` — um cursor opaco que a SEFAZ define. `0` pede
 /// desde o início.
@@ -55,4 +97,12 @@ pub trait PortaFiscal: Send + Sync {
     /// # Errors
     /// [`crate::ErroFiscal::ServicoIndisponivel`] (só no adaptador real).
     fn baixar_xml(&self, chave: &ChaveAcesso) -> Resultado<XmlNota>;
+
+    /// Consulta se o serviço de autorização da SEFAZ da `uf` está no ar para o `modelo` — a
+    /// primeira chamada que confere, ponta a ponta, certificado, credencial e rede.
+    ///
+    /// # Errors
+    /// [`crate::ErroFiscal::ServicoIndisponivel`] se a API fiscal não responde; os erros de
+    /// credencial/certificado que ela devolver.
+    fn status_servico(&self, uf: Uf, modelo: ModeloFiscal) -> Resultado<StatusSefaz>;
 }
