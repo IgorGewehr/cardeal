@@ -79,9 +79,14 @@ endereço de exibição ainda, a gravação monta um (cabeçalho dos PDFs).
   da UF da empresa, pelo provedor, com o certificado do cofre — a conferência ponta a ponta (certificado,
   chave da API, rede). É uma consulta que fala com a rede: segura uma conexão de leitura até a resposta.
 
-Conferido em 2026-10-14 contra `emissao.tensorroot.com` com o A1 da Tensorroot (regravado): SEFAZ-SC em
-homologação respondeu **107 — Serviço em Operação** para NF-e e NFC-e
-(`cardeal-fiscal`, teste ignorado `homologacao_status_real`).
+Conferido em 2026-10-14 contra `emissao.tensorroot.com` com o A1 da Tensorroot (regravado): SEFAZ-SP (a UF
+da Tensorroot) e SEFAZ-SC em homologação responderam **107 — Serviço em Operação** para NF-e e NFC-e
+(`cardeal-fiscal`, teste ignorado `homologacao_status_real`, com `CARDEAL_TESTE_UF`).
+
+**Numeração já usada fora do Cardeal:** uma empresa que já emitiu por outro sistema (a Tensorroot, pelo
+`saas-erp`: NFC-e e NF-e série 1 até o nº 2, NFS-e até o nº 5, em produção) não pode recomeçar do 1 na mesma
+série — a SEFAZ rejeita por duplicidade. A numeração do Cardeal (próxima fatia) começa de um número inicial
+informado na configuração, por série.
 
 ## 6. Recursos injetados
 

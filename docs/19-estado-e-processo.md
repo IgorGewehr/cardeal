@@ -587,7 +587,8 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   com IBGE); crate novo `mod-fiscal` (migração v1, `InstalarCertificado`/`RemoverCertificado`/
   `DefinirAmbienteFiscal`, `SituacaoFiscal`/`StatusDaSefaz`, `ProvedorFiscal`, `porta_da_empresa`). Desktop:
   Configurações › Fiscal e o aviso do certificado na Visão geral. Conferido em homologação contra
-  `emissao.tensorroot.com` com o A1 da Tensorroot (SEFAZ-SC: 107 para NF-e e NFC-e). Decisões: ADR-0019.
+  `emissao.tensorroot.com` com o A1 da Tensorroot (SEFAZ-SP, a UF dela, e SEFAZ-SC: 107 para NF-e e NFC-e).
+  Decisões: ADR-0019.
   Testes novos: 15 em `cardeal-fiscal` (mais o de homologação real, ignorado no CI), 3 do cofre, 1 dos
   recursos, 2 de dados fiscais, 2 + 3 de `mod-fiscal` e 2 de tela.
 - **Inventário com contagem cega (2026-10-13):** migração `estoque` v11 (`estoque_inventario`,
