@@ -37,6 +37,7 @@ use rusqlite::Connection;
 use crate::contrato::{Comando, Consulta};
 use crate::manifesto::Manifesto;
 use crate::permissao::Risco;
+use crate::recursos::Recursos;
 use crate::registro::ConjuntoEfetivo;
 
 /// O contexto de execução de um comando ou consulta: quem, onde, quando — e o que a
@@ -63,9 +64,26 @@ pub struct Ctx {
     pub correlacao: Id,
     conjunto: Arc<ConjuntoEfetivo>,
     autorizacoes: Arc<AutorizacoesEfetivas>,
+    recursos: Arc<Recursos>,
 }
 
 impl Ctx {
+    /// O recurso do tipo `T` que o motor injetou (o cofre de segredos, o provedor fiscal...).
+    ///
+    /// # Errors
+    /// [`CodigoErro::ESTADO_INVALIDO`] se esta instalação não configurou o recurso.
+    pub fn recurso<T: Send + Sync + 'static>(&self) -> Resultado<Arc<T>> {
+        self.recursos.obter::<T>().ok_or_else(|| {
+            Erro::novo(
+                CodigoErro::ESTADO_INVALIDO,
+                format!(
+                    "recurso não configurado nesta instalação: {}",
+                    std::any::type_name::<T>()
+                ),
+            )
+        })
+    }
+
     /// A data corrente, no fuso da empresa.
     #[must_use]
     pub fn hoje(&self) -> Data {
@@ -251,6 +269,7 @@ pub struct Ambiente {
     organizacao: Id,
     conjunto: Arc<ConjuntoEfetivo>,
     fuso: Fuso,
+    recursos: Arc<Recursos>,
 }
 
 impl Ambiente {
@@ -263,6 +282,7 @@ impl Ambiente {
             organizacao: empresa,
             conjunto: Arc::new(conjunto),
             fuso: Fuso::BRASILIA,
+            recursos: Arc::default(),
         }
     }
 
@@ -276,6 +296,7 @@ impl Ambiente {
             organizacao: empresa,
             conjunto,
             fuso: Fuso::BRASILIA,
+            recursos: Arc::default(),
         }
     }
 
@@ -283,6 +304,13 @@ impl Ambiente {
     #[must_use]
     pub const fn com_organizacao(mut self, organizacao: Id) -> Self {
         self.organizacao = organizacao;
+        self
+    }
+
+    /// Fixa os recursos da instalação ([`Recursos`]) que os manipuladores podem pedir.
+    #[must_use]
+    pub fn com_recursos(mut self, recursos: Arc<Recursos>) -> Self {
+        self.recursos = recursos;
         self
     }
 
@@ -487,6 +515,7 @@ fn montar_ctx(sessao: &Sessao, ambiente: &Ambiente) -> Ctx {
         correlacao: Id::novo(),
         conjunto: Arc::clone(&ambiente.conjunto),
         autorizacoes: Arc::new(sessao.autorizacoes().clone()),
+        recursos: Arc::clone(&ambiente.recursos),
     }
 }
 

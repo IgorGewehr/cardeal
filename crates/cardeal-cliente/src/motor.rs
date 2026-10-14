@@ -93,6 +93,21 @@ fn so_no_local(o_que: &str) -> Erro {
 }
 
 impl Motor {
+    /// Injeta os recursos da instalação (cofre, provedor fiscal) no motor local. No remoto
+    /// não faz nada: os recursos são do servidor.
+    #[must_use]
+    #[cfg(feature = "local")]
+    pub fn com_recursos(self, recursos: cardeal_modkit::Recursos) -> Self {
+        match self {
+            Self::Local(m) => Self::Local(m.com_recursos(recursos)),
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::Remoto(r) => {
+                let _ = recursos;
+                Self::Remoto(r)
+            }
+        }
+    }
+
     /// Abre o motor local sobre um arquivo (monoposto).
     ///
     /// # Errors

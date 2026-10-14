@@ -389,6 +389,10 @@ pub struct EstadoTelaFinanceiro {
     cobranca_pagar: bool,
     /// A fila de hoje da régua de cobrança.
     fila_cobranca: Option<mod_financeiro::FilaDoDia>,
+    /// A situação fiscal (para o aviso do certificado na Visão).
+    situacao_fiscal: Option<mod_fiscal::SituacaoFiscalDaEmpresa>,
+    /// O aviso do certificado pediu para abrir Configurações › Fiscal (o `main` atende).
+    pub pedido_config_fiscal: bool,
     /// O editor da régua aberto.
     regua_edicao: Option<Vec<regua::EtapaEmEdicao>>,
     plano: plano_contas::EstadoPlano,

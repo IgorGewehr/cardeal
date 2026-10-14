@@ -20,6 +20,7 @@ members = [
     "crates/cardeal-analytics",
     "crates/cardeal-testkit",
     "crates/modulos/mod-empresa",
+    "crates/modulos/mod-fiscal",
     "crates/modulos/mod-financeiro",
     "crates/modulos/mod-clientes",
     "crates/modulos/mod-estoque",
@@ -66,6 +67,7 @@ cardeal-server    = { path = "crates/cardeal-server" }
 cardeal-testkit   = { path = "crates/cardeal-testkit" }
 
 mod-empresa      = { path = "crates/modulos/mod-empresa" }
+mod-fiscal       = { path = "crates/modulos/mod-fiscal" }
 mod-financeiro   = { path = "crates/modulos/mod-financeiro" }
 mod-clientes     = { path = "crates/modulos/mod-clientes" }
 mod-estoque      = { path = "crates/modulos/mod-estoque" }

@@ -22,6 +22,7 @@ cardeal-storage.workspace      = true
 cardeal-auth.workspace         = true
 cardeal-motor.workspace        = true
 cardeal-distribuicao.workspace = true
+cardeal-modkit.workspace       = true
 cardeal-protocol.workspace     = true
 mod-empresa.workspace          = true
 

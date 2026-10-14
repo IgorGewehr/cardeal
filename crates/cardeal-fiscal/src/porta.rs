@@ -106,3 +106,18 @@ pub trait PortaFiscal: Send + Sync {
     /// credencial/certificado que ela devolver.
     fn status_servico(&self, uf: Uf, modelo: ModeloFiscal) -> Resultado<StatusSefaz>;
 }
+
+/// Uma porta compartilhada é uma porta (o simulado de um teste, servindo várias empresas).
+impl<T: PortaFiscal + ?Sized> PortaFiscal for std::sync::Arc<T> {
+    fn distribuicao_dfe(&self, cnpj: &Cnpj, desde: Nsu) -> Resultado<Vec<ResumoDfe>> {
+        (**self).distribuicao_dfe(cnpj, desde)
+    }
+
+    fn baixar_xml(&self, chave: &ChaveAcesso) -> Resultado<XmlNota> {
+        (**self).baixar_xml(chave)
+    }
+
+    fn status_servico(&self, uf: Uf, modelo: ModeloFiscal) -> Resultado<StatusSefaz> {
+        (**self).status_servico(uf, modelo)
+    }
+}

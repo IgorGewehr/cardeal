@@ -1,4 +1,4 @@
-//! Tela de Configurações — empresa, aparência e acesso.
+//! Tela de Configurações — empresa, fiscal, aparência e acesso.
 //!
 //! `nucleo`/`auth` não são módulos de despacho; esta tela fala com o motor direto
 //! (`Motor::empresa_resumo`/`atualizar_empresa`/`usuarios`/`papeis`), como já fazem o
@@ -18,6 +18,7 @@ const REGIME_ROTULO: [&str; 4] = ["MEI", "Simples Nacional", "Lucro Presumido", 
 enum Aba {
     #[default]
     Empresa,
+    Fiscal,
     Aparencia,
     Acesso,
 }
@@ -40,11 +41,12 @@ pub struct EstadoTelaSettings {
     id_site: String,
     id_endereco: String,
     logo_tex: Option<egui::TextureHandle>,
+    fiscal: crate::tela_fiscal::EstadoFiscal,
 }
 
 impl EstadoTelaSettings {
     /// Carrega empresa, usuários e papéis.
-    pub fn carregar(&mut self, motor: &Motor, _sessao: &Sessao) {
+    pub fn carregar(&mut self, motor: &Motor, sessao: &Sessao) {
         self.erro = None;
         match motor.empresa_resumo() {
             Ok(e) => {
@@ -69,6 +71,15 @@ impl EstadoTelaSettings {
             }
             Err(e) => self.erro = Some(e.mensagem),
         }
+        if sessao.concede("fiscal.ver") {
+            self.fiscal.carregar(motor, sessao);
+        }
+    }
+
+    /// Abre direto na aba Fiscal (o aviso do certificado na Visão geral leva para cá).
+    pub fn abrir_fiscal(&mut self, motor: &Motor, sessao: &Sessao) {
+        self.aba = Aba::Fiscal;
+        self.carregar(motor, sessao);
     }
 }
 
@@ -98,6 +109,7 @@ pub fn mostrar(
             }
             match estado.aba {
                 Aba::Empresa => secao_empresa(ui, motor, sessao, estado),
+                Aba::Fiscal => crate::tela_fiscal::mostrar(ui, motor, sessao, &mut estado.fiscal),
                 Aba::Aparencia => secao_aparencia(ui, tema),
                 Aba::Acesso => secao_acesso(ui, estado),
             }
@@ -108,6 +120,7 @@ pub fn mostrar(
 fn abas(ui: &mut egui::Ui, estado: &mut EstadoTelaSettings) {
     if let Some(nova) = Abas::nova(&[
         (Aba::Empresa, "Empresa"),
+        (Aba::Fiscal, "Fiscal"),
         (Aba::Aparencia, "Aparência"),
         (Aba::Acesso, "Usuários e acesso"),
     ])

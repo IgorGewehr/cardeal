@@ -39,6 +39,10 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   **lançamento pré-preenchido pelo último da pessoa**, **DFC indireto**, **cheques**, **balancete/diário** e o
   **pacote do contador** (PDF + `.xlsx`) e a **régua de cobrança** (fila do dia com envio de um clique) feitos
   (2026-10-14) — **a onda 6 fechou**; o disparo sem clique espera uma API de WhatsApp (decisão de produto).
+  **Onda 7 (fiscal real) começou** sobre o `sefaz-api`, o motor fiscal próprio (ADR-0019): **certificado A1**
+  conferido e guardado cifrado no cofre, **dados fiscais do emitente**, **ambiente** e **status da SEFAZ**
+  feitos (2026-10-14; homologação SC respondeu 107 com o A1 real). Próximo: a NFC-e do PDV como documento
+  assíncrono (`docs/modulos/fiscal.md` §10).
 - **Pendência de confiança:** as tabelas do Simples e as alíquotas precisam ser conferidas com o
   contador; o ST/IPI **da nota** já entra no custo (2026-10-13), mas a estimativa de ST pela MVA (sem o valor na
   nota) ainda não.
@@ -574,6 +578,18 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   (`financeiro.cobranca.configurar`, `.enviar`). `cardeal-ui`: `Campo::multilinha` (com exemplo na galeria).
   Tela: "Cobranças de hoje" na aba Cobrança (WhatsApp registra o envio, "Pular", editor) e aviso na Visão geral.
   Testes: 4 de domínio, 1 de integração e 1 de tela.
+- **Configuração fiscal sobre o `sefaz-api` (2026-10-14, onda 7, fatia 1):** `cardeal-fiscal` ganhou o leitor/
+  escritor PKCS#12 em Rust puro (`ler_certificado_a1`/`preparar_certificado_a1`: PBES2 AES/3DES, PBES1
+  3DES/RC2, MAC SHA-1/2, CNPJ pela extensão ICP-Brasil; regrava os PFX com RC2, que o OpenSSL 3 do `sefaz-api`
+  recusa), o `ApiFiscalHttp` (Bearer + PFX/senha por chamada, numa thread própria) e o status do serviço na
+  porta; `cardeal-storage` ganhou o `Cofre` (AES-256-GCM, chave fora da base); `cardeal-modkit`, os
+  `Recursos` (`Ctx::recurso`, o `porta()` adiado); `mod-empresa`, os dados fiscais do emitente (IE, IM, endereço
+  com IBGE); crate novo `mod-fiscal` (migração v1, `InstalarCertificado`/`RemoverCertificado`/
+  `DefinirAmbienteFiscal`, `SituacaoFiscal`/`StatusDaSefaz`, `ProvedorFiscal`, `porta_da_empresa`). Desktop:
+  Configurações › Fiscal e o aviso do certificado na Visão geral. Conferido em homologação contra
+  `emissao.tensorroot.com` com o A1 da Tensorroot (SEFAZ-SC: 107 para NF-e e NFC-e). Decisões: ADR-0019.
+  Testes novos: 15 em `cardeal-fiscal` (mais o de homologação real, ignorado no CI), 3 do cofre, 1 dos
+  recursos, 2 de dados fiscais, 2 + 3 de `mod-fiscal` e 2 de tela.
 - **Inventário com contagem cega (2026-10-13):** migração `estoque` v11 (`estoque_inventario`,
   `estoque_contagem_item`), comandos `criar_inventario`/`iniciar_contagem`/`registrar_contagem`/
   `encerrar_inventario`/`cancelar_inventario` (`.v1`) e consultas `inventarios`/`posicao_do_inventario`.
@@ -734,9 +750,8 @@ gigante por sessão. Nenhum commit é feito sem os quatro comandos de §3.3 pass
      de XML (`interpretar`, `quick-xml`, real) e `FiscalSimulado` (double em memória — é o
      que `mod-compras` usa em teste). Falta o adaptador de verdade: certificado digital A1
      (upload, parse do PKCS#12,
-     validade — o `gestao-raiz` reconverte para 3DES no upload porque libs de assinatura
-     antigas não leem PFX moderno em AES-256; **confirmar se o `sefaz-api` do usuário
-     precisa do mesmo** antes de implementar), `PortaFiscal`/`ApiFiscalHttp` mirado no
+     validade — **resolvido em 2026-10-14**: o que o TLS do `sefaz-api` (OpenSSL 3) recusa é
+     PFX com **RC2**, não AES; o Cardeal regrava só esses na instalação), `PortaFiscal`/`ApiFiscalHttp` mirado no
      contrato real do `sefaz-api` (Bearer token, PFX+senha no corpo de cada chamada de
      emissão — o serviço não guarda certificado —, NFC-e com contingência offline real via
      `/prepare`+`/transmit`, NF-e só lote+polling sem contingência própria). Tradução

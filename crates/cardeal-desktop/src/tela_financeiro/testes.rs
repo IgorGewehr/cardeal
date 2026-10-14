@@ -1278,3 +1278,32 @@ fn regua_de_cobranca_na_aba_cobranca_fila_registro_e_editor() {
         });
     }
 }
+
+#[test]
+fn aviso_do_certificado_vencendo_na_visao_pede_a_configuracao_fiscal() {
+    let t = motor_de_teste();
+    let (m, s) = (&t.motor, &t.sessao);
+    let mut estado = EstadoTelaFinanceiro::default();
+    estado.carregar(m, s);
+    // Sem certificado instalado: nada na Visão (nem toda empresa emite).
+    assert!(estado
+        .situacao_fiscal
+        .as_ref()
+        .is_some_and(|f| f.certificado.is_none()));
+    estado.situacao_fiscal = Some(mod_fiscal::SituacaoFiscalDaEmpresa {
+        certificado: None,
+        ambiente: mod_fiscal::AmbienteFiscal::Producao,
+        pendencias: vec![mod_fiscal::PendenciaFiscal::CertificadoVencendo { dias: 9 }],
+    });
+    let ctx = egui::Context::default();
+    cardeal_ui::tokens::instalar_fontes(&ctx);
+    cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+    for _ in 0..2 {
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                mostrar(ui, m, s, &mut estado);
+            });
+        });
+    }
+    assert!(!estado.pedido_config_fiscal);
+}

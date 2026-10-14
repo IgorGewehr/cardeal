@@ -1,7 +1,8 @@
 //! # mod-empresa
 //!
-//! A própria empresa como módulo de despacho: dados cadastrais, contato, logo, identidade
-//! visual (o que vai no cabeçalho de todo PDF), usuários e papéis.
+//! A própria empresa como módulo de despacho: dados cadastrais, dados fiscais do emitente
+//! (IE, IM, endereço com código IBGE), contato, logo, identidade visual (o que vai no
+//! cabeçalho de todo PDF), usuários e papéis.
 //!
 //! As tabelas são do núcleo (`nucleo_empresa`, `nucleo_configuracao`, `nucleo_usuario`,
 //! `nucleo_papel`) — este módulo não tem migração própria. Existe para que essas operações
@@ -15,6 +16,7 @@
 
 mod comandos;
 mod consultas;
+mod fiscal;
 mod manifesto;
 mod membros;
 #[cfg(feature = "sqlite")]
@@ -26,6 +28,7 @@ mod tipos;
 pub use cardeal_auth::PapelDeFabrica;
 pub use comandos::{AtualizarDadosEmpresa, DefinirContatoEmpresa, DefinirLogoEmpresa};
 pub use consultas::{DadosDaEmpresa, IdentidadeDaEmpresa, PapeisDaEmpresa, UsuariosDaEmpresa};
+pub use fiscal::{DadosFiscais, DadosFiscaisDaEmpresa, DefinirDadosFiscaisEmpresa, EnderecoFiscal};
 pub use manifesto::{ID, MANIFESTO};
 pub use membros::{AdicionarUsuario, DesativarUsuario};
 #[cfg(feature = "sqlite")]

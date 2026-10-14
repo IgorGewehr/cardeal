@@ -40,6 +40,8 @@ mod-os.workspace         = true
 mod-orcamentos.workspace = true
 mod-agenda.workspace     = true
 mod-pdv.workspace        = true
+mod-empresa.workspace    = true
+mod-fiscal.workspace     = true
 
 eframe.workspace      = true
 egui.workspace        = true

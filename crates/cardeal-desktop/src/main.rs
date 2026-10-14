@@ -17,6 +17,7 @@ mod tela_clientes;
 mod tela_compras;
 mod tela_estoque;
 mod tela_financeiro;
+mod tela_fiscal;
 mod tela_orcamentos;
 mod tela_os;
 mod tela_pdv;
@@ -576,7 +577,8 @@ impl App {
                 &cardeal_distribuicao::modulos(),
                 &cardeal_distribuicao::pedido_ativacao(),
             )
-            .expect("abrir a base da demo");
+            .expect("abrir a base da demo")
+            .com_recursos(cardeal_distribuicao::recursos_simulados());
             let sessao = demo_app::semear(&motor);
             let cena = demo.cena.clone();
             if cena.starts_with("login") {
@@ -595,11 +597,13 @@ impl App {
             }
             return;
         }
-        match Motor::abrir(
+        let aberto = Motor::abrir(
             &caminho_da_base(),
             &cardeal_distribuicao::modulos(),
             &cardeal_distribuicao::pedido_ativacao(),
-        ) {
+        )
+        .and_then(|m| Ok(m.com_recursos(cardeal_distribuicao::recursos(&diretorio_de_dados())?)));
+        match aberto {
             Ok(motor) => {
                 let precisa_config = motor.precisa_de_configuracao_inicial().unwrap_or(true);
                 self.motor = Some(motor);
@@ -972,6 +976,11 @@ impl eframe::App for App {
                                 &estado.sessao,
                                 &mut estado.financeiro,
                             );
+                            // O aviso do certificado pediu a configuração fiscal.
+                            if std::mem::take(&mut estado.financeiro.pedido_config_fiscal) {
+                                estado.area = Area::Configuracoes;
+                                estado.settings.abrir_fiscal(motor, &estado.sessao);
+                            }
                         }
                         Area::Vendas => {
                             tela_vendas::mostrar(ui, motor, &estado.sessao, &mut estado.vendas);

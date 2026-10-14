@@ -78,7 +78,7 @@ Primeiro cliente real: um MEI ou prestador de serviços.
 - [x] `mod-vendas` — orçamento, pedido, tabela de preço, condição de pagamento
 - [x] `mod-pdv` — frente de caixa, sessão, sangria, suprimento, atalhos, impressão
 - [ ] **Modo autônomo** — posto avançado, faixas de numeração, reconciliação
-- [ ] `cardeal-fiscal` + NFC-e via API, contingência offline
+- [ ] `cardeal-fiscal` + NFC-e via API, contingência offline *(onda 7 começou: provedor = `sefaz-api`; certificado A1 no cofre, dados fiscais, ambiente e status da SEFAZ feitos — falta a emissão)*
 - [ ] Multiterminal com mTLS e pareamento por mDNS
 
 **Critério de saída:** cenário end-to-end "mercado de bairro" verde; um comércio real com 2 PDVs
@@ -87,11 +87,11 @@ operando 30 dias, incluindo pelo menos um evento de queda de rede.
 ## Fase 3 — Compras + Fiscal completo + Conciliação
 
 - [x] `mod-compras` — entrada por XML, rateio de frete, aprendizado de casamento *(cotação e pedido de compra: faltam)*
-- [ ] Distribuição DFe e manifestação do destinatário
+- [ ] Distribuição DFe e manifestação do destinatário *(depende de rotas novas no `sefaz-api`)*
 - [ ] NF-e de saída, cancelamento, carta de correção, inutilização
 - [x] Conciliação bancária — OFX e CSV, com saldo banco × sistema e alerta de pendências *(Pix e CNAB retorno: faltam)*
 - [ ] Cobrança: boleto e Pix com baixa automática
-- [ ] SPED Fiscal e Contribuições via API
+- [ ] SPED Fiscal e Contribuições *(o `sefaz-api` não gera: será gerado no Cardeal)*
 
 ## Fase 4 — Analytics (determinístico)
 

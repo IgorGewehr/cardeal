@@ -6,7 +6,7 @@ use std::sync::Arc;
 use cardeal_auth::{Papel, PoliticaSenha, RepositorioAuth, Sessao, Usuario};
 use cardeal_kernel::{ChaveIdempotencia, CodigoErro, Erro, Fuso, Id, Instante, Resultado};
 use cardeal_ledger::semear_plano_padrao;
-use cardeal_modkit::{Ambiente, Comando, Consulta, Modulo, PedidoAtivacao};
+use cardeal_modkit::{Ambiente, Comando, Consulta, Modulo, PedidoAtivacao, Recursos};
 use cardeal_storage::{Armazenamento, ConfigArmazenamento, ContextoEscrita, ErroArmazenamento};
 use rusqlite::OptionalExtension;
 use serde::de::DeserializeOwned;
@@ -24,6 +24,7 @@ pub struct MotorLocal {
     pub(crate) ambiente: Ambiente,
     pub(crate) empresa: Id,
     pub(crate) dispositivo: Id,
+    pub(crate) recursos: Arc<Recursos>,
 }
 
 /// Uma sessão autenticada — o que uma tela guarda depois do login para chamar `executar`/
@@ -143,6 +144,7 @@ impl MotorLocal {
             plano: Arc::clone(plano),
             empresa,
             dispositivo: Id::novo(),
+            recursos: Arc::default(),
         })
     }
 
@@ -263,7 +265,7 @@ impl MotorLocal {
             ));
         }
         self.empresa = empresa;
-        self.ambiente = ambiente_de(empresa, &self.plano);
+        self.ambiente = ambiente_de(empresa, &self.plano).com_recursos(Arc::clone(&self.recursos));
         Ok(())
     }
 
@@ -387,6 +389,15 @@ impl MotorLocal {
 }
 
 impl MotorLocal {
+    /// Injeta os recursos da instalação (cofre de segredos, provedor fiscal...) que os
+    /// comandos pedem com `Ctx::recurso` — quem monta o motor sabe quais são; o núcleo não.
+    #[must_use]
+    pub fn com_recursos(mut self, recursos: Recursos) -> Self {
+        self.recursos = Arc::new(recursos);
+        self.ambiente = self.ambiente.com_recursos(Arc::clone(&self.recursos));
+        self
+    }
+
     /// O ambiente da empresa da sessão — o da matriz já vem pronto; o de outro CNPJ custa um
     /// `Arc::clone`.
     fn ambiente_de(&self, sessao: &SessaoLocal) -> std::borrow::Cow<'_, Ambiente> {
@@ -394,7 +405,9 @@ impl MotorLocal {
             std::borrow::Cow::Borrowed(&self.ambiente)
         } else {
             std::borrow::Cow::Owned(
-                ambiente_de(sessao.empresa(), &self.plano).com_organizacao(self.empresa),
+                ambiente_de(sessao.empresa(), &self.plano)
+                    .com_organizacao(self.empresa)
+                    .com_recursos(Arc::clone(&self.recursos)),
             )
         }
     }

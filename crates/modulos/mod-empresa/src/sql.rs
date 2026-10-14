@@ -8,6 +8,7 @@ use base64::Engine as _;
 use cardeal_kernel::{CodigoErro, Erro, Id, Resultado};
 use rusqlite::Connection;
 
+use crate::fiscal::{DadosFiscais, EnderecoFiscal};
 use crate::tipos::{EmpresaResumo, IdentidadeVisual, PapelResumo, UsuarioResumo, TETO_LOGO_BYTES};
 
 /// O engine base64 usado para guardar a logo em `nucleo_configuracao`.
@@ -100,6 +101,61 @@ pub fn atualizar_dados(
     )
     .map(|_| ())
     .map_err(falha)
+}
+
+/// Os dados fiscais (`ie`, `im` e o endereço em JSON de `nucleo_empresa`). Um endereço que
+/// não é JSON (ou o `{}` da criação) volta vazio.
+///
+/// # Errors
+/// Falha do SQLite.
+pub fn dados_fiscais(c: &Connection, empresa: Id) -> Resultado<DadosFiscais> {
+    let (ie, im, endereco): (Option<String>, Option<String>, String) = c
+        .query_row(
+            "SELECT ie, im, endereco FROM nucleo_empresa WHERE id = ?1",
+            [empresa.em_bytes().as_slice()],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .map_err(falha)?;
+    Ok(DadosFiscais {
+        inscricao_estadual: ie.unwrap_or_default(),
+        inscricao_municipal: im.unwrap_or_default(),
+        endereco: serde_json::from_str::<EnderecoFiscal>(&endereco).unwrap_or_default(),
+    })
+}
+
+/// Grava os dados fiscais já normalizados. Sem endereço de exibição ainda, monta um a partir
+/// do endereço fiscal (é o que sai no cabeçalho dos PDFs).
+///
+/// # Errors
+/// Falha do SQLite.
+pub fn gravar_dados_fiscais(c: &Connection, empresa: Id, dados: &DadosFiscais) -> Resultado<()> {
+    let endereco = serde_json::to_string(&dados.endereco)
+        .map_err(|e| Erro::novo(CodigoErro::FALHA_INTERNA, e.to_string()))?;
+    let im = Some(dados.inscricao_municipal.as_str()).filter(|s| !s.is_empty());
+    c.execute(
+        "UPDATE nucleo_empresa SET ie = ?1, im = ?2, endereco = ?3 WHERE id = ?4",
+        rusqlite::params![
+            dados.inscricao_estadual,
+            im,
+            endereco,
+            empresa.em_bytes().as_slice()
+        ],
+    )
+    .map_err(falha)?;
+    if identidade(c, empresa)?.endereco.is_empty() {
+        let e = &dados.endereco;
+        let complemento = if e.complemento.is_empty() {
+            String::new()
+        } else {
+            format!(" - {}", e.complemento)
+        };
+        let linha = format!(
+            "{}, {}{complemento} - {}, {}/{}",
+            e.logradouro, e.numero, e.bairro, e.municipio, e.uf
+        );
+        gravar_config(c, empresa, &[("empresa.endereco_exibicao", &linha)])?;
+    }
+    Ok(())
 }
 
 /// Grava (ou atualiza) chaves de `nucleo_configuracao` da empresa.

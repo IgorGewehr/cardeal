@@ -63,6 +63,13 @@ impl EstadoTelaFinanceiro {
             self.carregar_saude(motor, sessao);
             self.conciliacao.carregar_conferencias(motor, sessao);
             self.carregar_fila_cobranca(motor, sessao);
+            self.situacao_fiscal = if sessao.concede("fiscal.ver") {
+                motor
+                    .consultar(sessao, "fiscal.situacao.v1", &mod_fiscal::SituacaoFiscal)
+                    .ok()
+            } else {
+                None
+            };
         }
         if matches!(self.aba, Aba::Receber | Aba::Pagar) {
             self.carregar_parcelas_periodo(motor, sessao);

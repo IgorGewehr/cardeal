@@ -847,8 +847,10 @@ dependencies = [
  "mod-agenda",
  "mod-clientes",
  "mod-compras",
+ "mod-empresa",
  "mod-estoque",
  "mod-financeiro",
+ "mod-fiscal",
  "mod-orcamentos",
  "mod-os",
  "mod-pdv",
@@ -865,17 +867,22 @@ dependencies = [
 name = "cardeal-distribuicao"
 version = "0.2.0"
 dependencies = [
+ "cardeal-fiscal",
+ "cardeal-kernel",
  "cardeal-modkit",
+ "cardeal-storage",
  "mod-agenda",
  "mod-clientes",
  "mod-compras",
  "mod-empresa",
  "mod-estoque",
  "mod-financeiro",
+ "mod-fiscal",
  "mod-orcamentos",
  "mod-os",
  "mod-pdv",
  "mod-vendas",
+ "tracing",
 ]
 
 [[package]]
@@ -1007,6 +1014,7 @@ dependencies = [
  "cardeal-auth",
  "cardeal-distribuicao",
  "cardeal-kernel",
+ "cardeal-modkit",
  "cardeal-motor",
  "cardeal-protocol",
  "cardeal-storage",
@@ -3104,6 +3112,7 @@ dependencies = [
  "postcard",
  "rusqlite",
  "serde",
+ "serde_json",
  "tempfile",
 ]
 
@@ -3147,6 +3156,24 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.20",
  "tracing",
+]
+
+[[package]]
+name = "mod-fiscal"
+version = "0.2.0"
+dependencies = [
+ "cardeal-auth",
+ "cardeal-fiscal",
+ "cardeal-kernel",
+ "cardeal-modkit",
+ "cardeal-storage",
+ "mod-empresa",
+ "postcard",
+ "rusqlite",
+ "serde",
+ "tempfile",
+ "thiserror 2.0.20",
+ "zeroize",
 ]
 
 [[package]]

@@ -29,7 +29,8 @@
 //! ## O que falta (ver `docs/17-roadmap.md`)
 //!
 //! `Ctx::contas()` (espera um resolvedor não-genérico em `cardeal-ledger`), o [`Registro`]
-//! para assinaturas de evento, tarefas agendadas, portas e itens do Pulso, o replay de
+//! para assinaturas de evento, tarefas agendadas e itens do Pulso (as portas chegam pelos
+//! [`Recursos`], com `Ctx::recurso`), o replay de
 //! idempotência e a auditoria automática de `Comando::AUDITA`, e a macro `#[comando(...)]`
 //! (virá com `cardeal-protocol`). As assinaturas estão em `docs/contratos-internos.md` §4.
 
@@ -45,6 +46,8 @@ mod icone;
 mod manifesto;
 mod pagina;
 mod permissao;
+#[cfg(feature = "sqlite")]
+mod recursos;
 mod registro;
 
 pub use contrato::{Comando, Consulta, TETO_LISTA_COMPLETA};
@@ -54,4 +57,6 @@ pub use icone::Icone;
 pub use manifesto::{ContaPadrao, EntradaMenu, ErroManifesto, IdModulo, Manifesto, Submodulo};
 pub use pagina::{Cursor, Pagina, PedidoPagina};
 pub use permissao::{Permissao, Risco};
+#[cfg(feature = "sqlite")]
+pub use recursos::Recursos;
 pub use registro::{ConjuntoEfetivo, ErroRegistro, PedidoAtivacao, RegistroModulos};

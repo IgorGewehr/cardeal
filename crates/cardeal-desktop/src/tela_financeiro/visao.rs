@@ -108,6 +108,7 @@ pub(super) fn painel_visao(
     }
     super::conferencia::alerta_na_visao(ui, motor, sessao, estado);
     super::regua::aviso_na_visao(ui, motor, sessao, estado);
+    aviso_do_certificado(ui, estado);
 
     // Faixa de KPIs — três cartões esticados pra ocupar a largura toda, em vez de flutuar
     // colados à esquerda com um vão morto do lado (pedido explícito do usuário: a Visão
@@ -291,4 +292,40 @@ pub(super) fn grafico_fluxo(
     GraficoBarras::novo(&eixo, &series)
         .altura(260.0)
         .mostrar(ui);
+}
+
+/// O certificado digital vencido ou perto de vencer (até 30 dias) — sem ele nenhuma nota sai.
+/// Empresa sem certificado não vê aviso aqui: nem toda empresa emite.
+fn aviso_do_certificado(ui: &mut egui::Ui, estado: &mut EstadoTelaFinanceiro) {
+    let Some(p) = estado.situacao_fiscal.as_ref().and_then(|s| {
+        s.pendencias.iter().find(|p| {
+            matches!(
+                p,
+                mod_fiscal::PendenciaFiscal::CertificadoVencido { .. }
+                    | mod_fiscal::PendenciaFiscal::CertificadoVencendo { .. }
+            )
+        })
+    }) else {
+        return;
+    };
+    let tom = if p.impede_emissao() {
+        Tom::Negativo
+    } else {
+        Tom::Atencao
+    };
+    let mensagem = p.mensagem();
+    let mut abrir = false;
+    Painel::novo().realce(tom).mostrar(ui, |ui| {
+        ui.horizontal(|ui| {
+            ui.add(Rotulo::interface(mensagem));
+            ui.add_space(Espaco::E12);
+            abrir = ui
+                .add(Botao::secundario("Abrir a configuração fiscal").pequeno())
+                .clicked();
+        });
+    });
+    ui.add_space(Espaco::E12);
+    if abrir {
+        estado.pedido_config_fiscal = true;
+    }
 }
