@@ -415,6 +415,16 @@ stateDiagram-v2
 | `TotalPorCategoriaNoPeriodo` ✅ | `financeiro.categoria.ver` | Gráfico de custo/receita por categoria e mês (churn, MRR por projeto) | agregação em memória sobre `financeiro_baixa` join `financeiro_titulo`, filtrando por `data` |
 | `TituloDaOrigem` ✅ (novo, 2026-09-11) | `financeiro.receber.ver` | Detalhe de OS (`os`)/vendas/compras faturada: "qual título isto gerou" | `financeiro_titulo(empresa, origem_modulo, origem_id)` — o par de correlação que `Titulo` já carregava desde a origem; usado por outro módulo pela consulta pública, nunca por SQL direto em `financeiro_titulo` (`docs/contratos-internos.md` §7 regra 2) |
 
+## 6.3 Lançamento pré-preenchido pelo último da pessoa (2026-10-14)
+
+`UltimoLancamentoAReceber`/`UltimoLancamentoAPagar` (`financeiro.ultimo_lancamento_a_receber.v1`/
+`…_a_pagar.v1`, com a permissão de ver a espécie) devolvem o último título **lançado à mão** (origem
+`avulso` ou recorrência; não cancelado) da pessoa: data, valor, descrição, categoria e parcelas. Título que
+veio de nota de compra, pedido ou OS não serve de modelo. No diálogo de lançamento, ao escolher o cliente ou
+fornecedor, o que estiver **em branco** (descrição, categoria, valor) vem do último, com o aviso "Preenchido
+com o último lançamento desta pessoa, de dd/mm/aaaa: …. Confira antes de lançar." — o que o usuário já
+digitou nunca é sobrescrito.
+
 ## 6.2 Conciliação bancária (2026-10-09)
 
 `ImportarExtrato` lê **OFX** (SGML 1.x e XML 2.x) ou **CSV** (`data;descrição;valor[;documento]`, com ou

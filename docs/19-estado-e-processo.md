@@ -35,9 +35,9 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   entram no custo e no título); resta estimar ST pela MVA quando a nota não traz o valor (tabelas + contador). A **apuração e
   o pagamento da comissão do vendedor** estão feitos (2026-10-14); fora: comissão nas vendas do PDV (o cupom
   tem operador, não vendedor) e o ajuste por devolução (a devolução ainda não é persistida).
-  Onda 6 (Financeiro 2) começou: **conciliação com alerta de pendências e saldo banco × sistema** feita
-  (2026-10-14); faltam régua de cobrança automática, DFC indireto, exportação PDF/Excel e envio ao contador,
-  cheques e lançamento pré-preenchido.
+  Onda 6 (Financeiro 2) começou: **conciliação com alerta de pendências e saldo banco × sistema** e
+  **lançamento pré-preenchido pelo último da pessoa** feitos (2026-10-14); faltam régua de cobrança
+  automática, DFC indireto, exportação PDF/Excel e envio ao contador, e cheques.
 - **Pendência de confiança:** as tabelas do Simples e as alíquotas precisam ser conferidas com o
   contador; o ST/IPI **da nota** já entra no custo (2026-10-13), mas a estimativa de ST pela MVA (sem o valor na
   nota) ainda não.
@@ -531,6 +531,10 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   sistema, o que sobra "sem explicação", e os alertas de pendência antiga, extrato velho e diferença). Telas:
   painel na aba Conciliação e quadro na Visão geral. Testes: 3 de unidade, 1 de integração (a diferença
   explicada passo a passo: importar, conciliar, ignorar, saldo digitado) e 1 de tela.
+- **Lançamento pré-preenchido (2026-10-14, onda 6):** `UltimoLancamentoAReceber`/`…APagar` (só títulos à mão
+  ou de recorrência); o diálogo de lançamento preenche descrição, categoria e valor em branco ao escolher a
+  pessoa, com aviso. Testes: 1 de integração (manual mais recente, título de compra fora, espécies separadas)
+  e 1 de tela (preenche o vazio, não sobrescreve o digitado).
 - **Inventário com contagem cega (2026-10-13):** migração `estoque` v11 (`estoque_inventario`,
   `estoque_contagem_item`), comandos `criar_inventario`/`iniciar_contagem`/`registrar_contagem`/
   `encerrar_inventario`/`cancelar_inventario` (`.v1`) e consultas `inventarios`/`posicao_do_inventario`.

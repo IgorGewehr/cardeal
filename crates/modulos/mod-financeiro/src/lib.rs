@@ -96,6 +96,7 @@ mod repositorio;
 pub mod saude;
 pub mod sugestao;
 mod titulo;
+mod ultimo_lancamento;
 
 pub use aging::{AgingAPagar, AgingAReceber};
 pub use baixa::{PlanoBaixa, SituacaoParcela};
@@ -172,3 +173,4 @@ pub use titulo::{
     ConstrutorTitulo, EspecieTitulo, EstadoParcela, FormaCobranca, Parcela, PoliticaJuros, Titulo,
     TituloComParcelas,
 };
+pub use ultimo_lancamento::{UltimoLancamento, UltimoLancamentoAPagar, UltimoLancamentoAReceber};

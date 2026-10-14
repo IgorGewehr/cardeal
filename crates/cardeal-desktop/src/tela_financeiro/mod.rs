@@ -321,6 +321,10 @@ struct FormLancar {
     data: String,
     categoria: Option<Id>,
     pagamento: crate::pagamento::EstadoPagamento,
+    /// A pessoa cujo último lançamento já foi consultado (para não consultar a cada quadro).
+    preenchido_para: Option<Id>,
+    /// O aviso do pré-preenchimento ("Preenchido com o último lançamento…").
+    aviso_preenchido: Option<String>,
 }
 
 impl FormLancar {
@@ -342,6 +346,8 @@ impl Default for FormLancar {
             data: Data::hoje(Fuso::BRASILIA).to_string(),
             categoria: None,
             pagamento: crate::pagamento::EstadoPagamento::novo(MeioPagamento::Pix),
+            preenchido_para: None,
+            aviso_preenchido: None,
         }
     }
 }

@@ -949,3 +949,73 @@ fn conferencia_do_saldo_le_o_ofx_aceita_saldo_digitado_e_alerta_na_visao() {
         }
     }
 }
+
+#[test]
+fn escolher_o_fornecedor_preenche_o_lancamento_com_o_ultimo_dele() {
+    let t = motor_de_teste();
+    let (m, s) = (&t.motor, &t.sessao);
+    let ceee: PessoaCadastrada = m
+        .executar(
+            s,
+            "clientes.criar_pessoa.v1",
+            &CriarPessoa {
+                tipo: TipoPessoa::Juridica,
+                nome: "Companhia de Energia".into(),
+                nome_fantasia: None,
+                papel_inicial: Papel::Fornecedor,
+                documento_tipo: None,
+                documento_numero: None,
+                data_nascimento: None,
+                endereco: None,
+                contato: None,
+            },
+        )
+        .expect("fornecedor");
+    let ontem = Data::hoje(Fuso::BRASILIA).mais_dias(-1);
+    let _: mod_financeiro::TituloAPagarLancado = m
+        .executar(
+            s,
+            "financeiro.lancar_titulo_a_pagar.v1",
+            &LancarTituloAPagar {
+                fornecedor: Some(ceee.pessoa),
+                valor_total: Dinheiro::centavos(31_240),
+                emissao: ontem,
+                parcelas: 1,
+                primeiro_vencimento: ontem,
+                intervalo_dias: 0,
+                observacao: Some("Conta de luz".into()),
+                categoria: None,
+                quitado_agora: None,
+            },
+        )
+        .expect("luz");
+
+    let mut estado = EstadoTelaFinanceiro::default();
+    estado.carregar(m, s);
+    let mut form = FormLancar::novo(false);
+    form.valor = "300,00".into(); // o que o usuário já digitou não é sobrescrito
+    form.pessoa.nenhuma = false;
+    form.pessoa.selecionada = Some(ceee.pessoa);
+    estado.dlg = Dlg::Lancar(form);
+    let ctx = egui::Context::default();
+    cardeal_ui::tokens::instalar_fontes(&ctx);
+    cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+    for _ in 0..2 {
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            dialogo_lancar(ctx, m, s, &mut estado);
+        });
+    }
+    let Dlg::Lancar(f) = &estado.dlg else {
+        panic!("o diálogo segue aberto");
+    };
+    assert_eq!(f.descricao, "Conta de luz");
+    assert_eq!(f.valor, "300,00");
+    let aviso = f.aviso_preenchido.as_deref().expect("o aviso");
+    assert!(
+        aviso.contains("descrição") && !aviso.contains("valor"),
+        "{aviso}"
+    );
+    // Sem pessoa (ou pessoa sem histórico): nada a preencher.
+    let mut vazio = FormLancar::novo(true);
+    assert!(preencher_com_o_ultimo(m, s, &mut vazio, ceee.pessoa).is_none());
+}

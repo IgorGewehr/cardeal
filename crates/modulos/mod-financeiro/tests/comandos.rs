@@ -2109,3 +2109,104 @@ fn listagem_paginada_traz_o_saldo_de_tudo_e_nao_da_pagina() {
     let unicas: std::collections::HashSet<_> = todas.iter().map(|i| i.parcela).collect();
     assert_eq!(unicas.len(), 75);
 }
+
+/// O último lançamento à mão de um fornecedor pré-preenche o próximo — o título que veio de
+/// outro módulo (uma nota de compra) não serve de modelo, e a receber não se mistura.
+#[test]
+fn ultimo_lancamento_da_pessoa_e_o_manual_mais_recente_da_mesma_especie() {
+    use mod_financeiro::{UltimoLancamento, UltimoLancamentoAPagar, UltimoLancamentoAReceber};
+
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloFinanceiro]).unwrap();
+    let s = sessao(
+        empresa,
+        &[
+            "financeiro.categoria.criar",
+            "financeiro.pagar.criar",
+            "financeiro.pagar.ver",
+            "financeiro.receber.ver",
+        ],
+    );
+    let cat: CategoriaCriada = postcard::from_bytes(
+        &d.executar_comando(
+            "financeiro.criar_categoria.v1",
+            &carga(&CriarCategoria {
+                nome: "Energia".into(),
+                especie: Some(EspecieTitulo::Pagar),
+            }),
+            &s,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let fornecedor = Id::novo();
+    let consultar = |pagar: bool| -> Option<UltimoLancamento> {
+        let bytes = if pagar {
+            d.executar_consulta(
+                "financeiro.ultimo_lancamento_a_pagar.v1",
+                &carga(&UltimoLancamentoAPagar { pessoa: fornecedor }),
+                &s,
+                &ambiente(empresa),
+                arm.leitor(),
+            )
+        } else {
+            d.executar_consulta(
+                "financeiro.ultimo_lancamento_a_receber.v1",
+                &carga(&UltimoLancamentoAReceber { pessoa: fornecedor }),
+                &s,
+                &ambiente(empresa),
+                arm.leitor(),
+            )
+        };
+        postcard::from_bytes(&bytes.unwrap()).unwrap()
+    };
+    assert_eq!(consultar(true), None, "nada lançado ainda");
+
+    let lancar_luz = |dias: i32, centavos: i64, texto: &str| {
+        d.executar_comando(
+            "financeiro.lancar_titulo_a_pagar.v1",
+            &carga(&LancarTituloAPagar {
+                fornecedor: Some(fornecedor),
+                valor_total: Dinheiro::centavos(centavos),
+                emissao: hoje().mais_dias(dias),
+                parcelas: 1,
+                primeiro_vencimento: hoje().mais_dias(dias),
+                intervalo_dias: 0,
+                observacao: Some(texto.into()),
+                categoria: Some(cat.categoria),
+                quitado_agora: None,
+            }),
+            &s,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+        .unwrap();
+    };
+    lancar_luz(-30, 31_240, "Conta de luz de setembro");
+    lancar_luz(-1, 29_810, "Conta de luz de outubro");
+    // Um título mais novo do mesmo fornecedor, mas vindo de uma nota de compra.
+    lancar_luz(0, 99_900, "NF 123");
+    arm.escritor()
+        .executar(
+            ContextoEscrita::novo(empresa, Id::novo(), Id::novo(), Id::novo()),
+            |uow| {
+                uow.conexao()
+                    .execute(
+                        "UPDATE financeiro_titulo SET origem_modulo = 'compras'
+                         WHERE valor_original = 99900",
+                        [],
+                    )
+                    .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+            },
+        )
+        .unwrap();
+
+    let u = consultar(true).expect("o de outubro");
+    assert_eq!(u.valor_total, Dinheiro::centavos(29_810));
+    assert_eq!(u.observacao.as_deref(), Some("Conta de luz de outubro"));
+    assert_eq!(u.categoria, Some(cat.categoria));
+    assert_eq!((u.emissao, u.parcelas), (hoje().mais_dias(-1), 1));
+    assert_eq!(consultar(false), None, "a receber não se mistura");
+}
