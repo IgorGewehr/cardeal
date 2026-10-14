@@ -71,6 +71,7 @@ mod caixa;
 mod categoria;
 mod comandos;
 mod conciliacao;
+mod conferencia;
 mod consultas;
 pub mod dfc;
 pub mod dre;
@@ -130,6 +131,10 @@ pub use comandos::{DadosContaAvulsa, PagamentoAvulso};
 pub use conciliacao::{
     ConciliarItem, EstadoItem, ExtratoImportado, IgnorarItemDoExtrato, ImportarExtrato,
     ItemDoExtrato, ItensDoExtrato, LancarItemDoExtrato,
+};
+pub use conferencia::{
+    ConferenciaDaConta, ConferenciaDasContas, FechamentoDoSaldo, InformarSaldoDoBanco,
+    OrigemDoSaldo, SaldoDoBanco, Soma,
 };
 #[cfg(feature = "sqlite")]
 pub use consultas::titulo_da_origem;

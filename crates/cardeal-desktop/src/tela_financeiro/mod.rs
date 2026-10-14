@@ -8,6 +8,7 @@ mod cadastro_rapido;
 mod carga;
 mod cobranca;
 mod conciliacao_banco;
+mod conferencia;
 mod contas;
 mod custos;
 mod dre;

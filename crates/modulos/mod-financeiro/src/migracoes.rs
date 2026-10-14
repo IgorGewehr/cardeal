@@ -231,6 +231,21 @@ CREATE INDEX financeiro_item_extrato_conta
     ON financeiro_item_extrato(empresa, conta, estado, data);
 ";
 
+// Migração v9 (2026-10-14): o saldo que o banco informa, por conta e data — lido do OFX
+// (`LEDGERBAL`) na importação ou digitado. É o lado "banco" da conferência banco × sistema.
+const SQL_SALDO_BANCO: &str = r"
+CREATE TABLE financeiro_saldo_banco (
+    empresa       BLOB    NOT NULL REFERENCES nucleo_empresa(id),
+    conta         BLOB    NOT NULL,
+    data          INTEGER NOT NULL,
+    saldo         INTEGER NOT NULL,
+    origem        TEXT    NOT NULL CHECK (origem IN ('Extrato','Digitado')),
+    informado_em  INTEGER NOT NULL,
+    informado_por BLOB    NOT NULL,
+    PRIMARY KEY (empresa, conta, data)
+) STRICT;
+";
+
 const SQL_LISTA_PAGINADA: &str = r"
 CREATE INDEX financeiro_parcela_lista ON financeiro_parcela(empresa, vencimento, id);
 ";
@@ -282,6 +297,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 8,
         nome: "financeiro_conciliacao",
         sql: SQL_CONCILIACAO,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 9,
+        nome: "financeiro_saldo_banco",
+        sql: SQL_SALDO_BANCO,
         tipo: TipoMigracao::Esquema,
     },
 ];

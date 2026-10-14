@@ -463,3 +463,151 @@ fn sem_permissao_de_confirmar_nada_e_casado() {
             .unwrap_err();
     assert_eq!(e.codigo, CodigoErro::SEM_PERMISSAO);
 }
+
+#[test]
+fn saldo_do_banco_contra_o_sistema_com_a_diferenca_explicada_e_os_alertas() {
+    use mod_financeiro::{
+        ConferenciaDaConta, ConferenciaDasContas, InformarSaldoDoBanco, OrigemDoSaldo,
+    };
+
+    let k = montar();
+    let h = hoje();
+    let conferencia = |k: &Cenario| -> ConferenciaDaConta {
+        let todas: Vec<ConferenciaDaConta> = k.c.consulta(
+            &k.s,
+            "financeiro.conferencia_das_contas.v1",
+            &ConferenciaDasContas,
+        );
+        todas
+            .into_iter()
+            .find(|c| c.conta == k.banco)
+            .expect("a conta")
+    };
+    // Antes de qualquer extrato: nada a conferir, nada a alertar.
+    let c = conferencia(&k);
+    assert!(c.fechamento.is_none() && c.ultima_linha.is_none());
+    assert!(c.alertas(h, 7).is_empty());
+
+    // Um recebimento de 100 já baixado no banco, no sistema.
+    let r: mod_financeiro::TituloAReceberLancado = k.c.cmd(
+        &k.s,
+        "financeiro.lancar_titulo_a_receber.v1",
+        &LancarTituloAReceber {
+            cliente: None,
+            valor_total: Dinheiro::reais(100),
+            emissao: h,
+            parcelas: 1,
+            primeiro_vencimento: h,
+            intervalo_dias: 0,
+            observacao: None,
+            categoria: None,
+            quitado_agora: None,
+        },
+    );
+    let _: mod_financeiro::RecebimentoBaixado = k.c.cmd(
+        &k.s,
+        "financeiro.baixar_recebimento.v1",
+        &BaixarRecebimento {
+            parcela: r.parcelas[0],
+            valor: Dinheiro::reais(100),
+            data: h,
+            meio_pagamento: MeioPagamento::Pix,
+            conta_destino: Some(k.banco),
+        },
+    );
+
+    // O banco: +100 (o recebimento), +200 de outro PIX, −50 de tarifa e +5 antigo, com o saldo
+    // de 255 informado no LEDGERBAL.
+    let iso = |d: Data| d.formatar_iso().replace('-', "");
+    let (d0, d1, d10) = (iso(h), iso(h.mais_dias(-1)), iso(h.mais_dias(-10)));
+    let ofx = format!(
+        "<OFX><STMTRS><BANKTRANLIST>\n\
+<STMTTRN><DTPOSTED>{d1}<TRNAMT>100.00<FITID>G1<MEMO>PIX CLIENTE\n\
+<STMTTRN><DTPOSTED>{d0}<TRNAMT>200.00<FITID>G2<MEMO>PIX OUTRO\n\
+<STMTTRN><DTPOSTED>{d0}<TRNAMT>-50.00<FITID>G3<MEMO>TARIFA\n\
+<STMTTRN><DTPOSTED>{d10}<TRNAMT>5.00<FITID>G4<MEMO>ANTIGA\n\
+</BANKTRANLIST><LEDGERBAL><BALAMT>255.00<DTASOF>{d0}</LEDGERBAL></STMTRS></OFX>"
+    );
+    let _: ExtratoImportado = k.c.cmd(
+        &k.s,
+        "financeiro.importar_extrato.v1",
+        &ImportarExtrato {
+            conta: k.banco,
+            formato: FormatoExtrato::Ofx,
+            arquivo: "extrato.ofx".into(),
+            conteudo: ofx,
+        },
+    );
+
+    // Banco 255 × sistema 100: as 4 linhas pendentes (+255) estão só no banco e a baixa de
+    // 100 está só no sistema (ainda sem linha conciliada) — nada sem explicação.
+    let f = conferencia(&k).fechamento.expect("o OFX trouxe o saldo");
+    assert_eq!(f.banco.origem, OrigemDoSaldo::Extrato);
+    assert_eq!(f.banco.saldo, Dinheiro::reais(255));
+    assert_eq!(f.sistema, Dinheiro::reais(100));
+    assert_eq!(
+        (f.pendentes.quantidade, f.pendentes.valor),
+        (4, Dinheiro::reais(255))
+    );
+    assert_eq!(f.so_no_sistema.valor, Dinheiro::reais(100));
+    assert_eq!(f.sem_explicacao(), Dinheiro::ZERO);
+
+    // Concilia o recebimento e ignora a tarifa: continua tudo explicado.
+    let cliente = k.por_descricao("PIX CLIENTE");
+    let _: () = k.c.cmd(
+        &k.s,
+        "financeiro.conciliar_item.v1",
+        &ConciliarItem {
+            item: cliente.id,
+            alvo: cliente.sugestoes[0].alvo,
+        },
+    );
+    let _: () = k.c.cmd(
+        &k.s,
+        "financeiro.ignorar_item_do_extrato.v1",
+        &IgnorarItemDoExtrato {
+            item: k.por_descricao("TARIFA").id,
+            ignorar: true,
+        },
+    );
+    let c = conferencia(&k);
+    let f = c.fechamento.unwrap();
+    assert_eq!(f.so_no_sistema.quantidade, 0);
+    assert_eq!(f.ignoradas.valor, Dinheiro::reais(-50));
+    assert_eq!(f.pendentes.valor, Dinheiro::reais(205));
+    assert_eq!(f.sem_explicacao(), Dinheiro::ZERO);
+    // A linha de 10 dias atrás vira alerta com tolerância de 7.
+    let alertas = c.alertas(h, 7);
+    assert_eq!(alertas.len(), 1, "{alertas:?}");
+    assert!(alertas[0].contains("10 dias"));
+
+    // O saldo digitado (o aplicativo do banco mostra 305) vence o do OFX na mesma data e deixa
+    // 50 sem explicação.
+    let _: () = k.c.cmd(
+        &k.s,
+        "financeiro.informar_saldo_do_banco.v1",
+        &InformarSaldoDoBanco {
+            conta: k.banco,
+            data: h,
+            saldo: Dinheiro::reais(305),
+        },
+    );
+    let c = conferencia(&k);
+    let f = c.fechamento.unwrap();
+    assert_eq!(f.banco.origem, OrigemDoSaldo::Digitado);
+    assert_eq!(f.sem_explicacao(), Dinheiro::reais(50));
+    assert!(c.alertas(h, 30)[0].contains("50,00"));
+
+    // Saldo com data futura: recusado.
+    let e = k
+        .tenta(
+            "financeiro.informar_saldo_do_banco.v1",
+            &InformarSaldoDoBanco {
+                conta: k.banco,
+                data: h.mais_dias(1),
+                saldo: Dinheiro::ZERO,
+            },
+        )
+        .unwrap_err();
+    assert_eq!(e.codigo, CodigoErro::ENTRADA_INVALIDA);
+}

@@ -279,21 +279,7 @@ impl Comando for ImportarExtrato {
         let linhas = crate::extrato::ler(self.formato, &self.conteudo)
             .map_err(|m| Erro::novo(CodigoErro::ENTRADA_INVALIDA, m))?;
         let conn = uow.conexao();
-        let ok: Option<i64> = conn
-            .query_row(
-                "SELECT 1 FROM razao_conta WHERE empresa = ?1 AND id = ?2
-                 AND natureza = 'Ativo' AND tipo = 'Analitica' AND ativa = 1",
-                params![blob(ctx.empresa), blob(self.conta)],
-                |r| r.get(0),
-            )
-            .optional()
-            .map_err(persist)?;
-        if ok.is_none() {
-            return Err(Erro::novo(
-                CodigoErro::REGRA_VIOLADA,
-                "escolha uma conta bancária ativa do plano de contas",
-            ));
-        }
+        crate::conferencia::exigir_conta_bancaria(conn, ctx.empresa, self.conta)?;
         let extrato = Id::novo();
         conn.execute(
             "INSERT INTO financeiro_extrato
@@ -344,6 +330,21 @@ impl Comando for ImportarExtrato {
             params![blob(extrato), novos],
         )
         .map_err(persist)?;
+        // O saldo que o banco informa no OFX alimenta a conferência banco × sistema.
+        if self.formato == FormatoExtrato::Ofx {
+            if let Some((data, saldo)) = crate::extrato::saldo_do_ofx(&self.conteudo) {
+                crate::conferencia::gravar_saldo(
+                    conn,
+                    ctx,
+                    self.conta,
+                    crate::conferencia::SaldoDoBanco {
+                        data,
+                        saldo,
+                        origem: crate::conferencia::OrigemDoSaldo::Extrato,
+                    },
+                )?;
+            }
+        }
         Ok(ExtratoImportado {
             extrato,
             importados: novos,

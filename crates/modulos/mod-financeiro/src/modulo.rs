@@ -81,6 +81,8 @@ impl Modulo for ModuloFinanceiro {
             .comando::<crate::IgnorarItemDoExtrato>("financeiro.ignorar_item_do_extrato.v1")
             .comando::<crate::LancarItemDoExtrato>("financeiro.lancar_item_do_extrato.v1")
             .consulta::<crate::ItensDoExtrato>("financeiro.itens_do_extrato.v1")
+            .consulta::<crate::ConferenciaDasContas>("financeiro.conferencia_das_contas.v1")
+            .comando::<crate::InformarSaldoDoBanco>("financeiro.informar_saldo_do_banco.v1")
             .comando::<crate::CriarContaDoPlano>("financeiro.criar_conta_do_plano.v1")
             .comando::<crate::AplicarModeloDePlano>("financeiro.aplicar_modelo_de_plano.v1")
             .comando::<crate::VincularCategoriaAConta>("financeiro.vincular_categoria_a_conta.v1")

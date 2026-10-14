@@ -427,6 +427,22 @@ que ninguém lançou — vira um título já quitado na conta do extrato, com ca
 (`IgnorarItemDoExtrato`, reversível). Linha conciliada não se ignora nem se concilia de novo.
 Não faz: Open Banking, CNAB, conciliação parcial (valor diferente do saldo).
 
+**Conferência do saldo e alerta de pendências (2026-10-14).** O OFX passa a trazer o saldo que o banco
+informa (`LEDGERBAL`: `BALAMT` na data `DTASOF`), gravado em `financeiro_saldo_banco` (migração v9);
+para CSV (que não traz saldo) ou para conferir pelo aplicativo do banco, `InformarSaldoDoBanco`
+(`financeiro.informar_saldo_do_banco.v1`, permissão de importar; data não pode ser futura; o mais recente
+para a mesma data vale). `ConferenciaDasContas` (`financeiro.conferencia_das_contas.v1`) põe, para cada
+conta do Disponível que não é o caixa, o último saldo do banco contra o saldo do Razão na mesma data
+(lançamentos realizados com liquidação até o fim do dia) e **explica a diferença**: linhas do extrato até a
+data ainda pendentes ou ignoradas (estão no banco, não no sistema) e baixas nesta conta que nenhuma linha
+conciliou, dentro do período coberto pelos extratos (estão no sistema; antes do primeiro extrato o saldo
+dos dois já as conta). O resto é a diferença **sem explicação** (saldo inicial não lançado, lançamento na
+conta errada, linha que falta); sem ela e sem nada esperando, a conta está **fechada**. Alertas
+(`ConferenciaDaConta::alertas`, tolerância de 7 dias na tela): linha pendente mais antiga que a
+tolerância, extrato sem importar há mais que a tolerância e diferença sem explicação. Na tela: painel
+"Saldo do banco × sistema" na aba Conciliação (com "Informar saldo…") e o quadro "Conciliação bancária"
+na Visão geral, com o atalho para a aba.
+
 ## 6.1 Plano de contas: modelos, contas novas e categoria → conta (2026-10-09)
 
 O **plano padrão** (≈ 50 contas, `cardeal_ledger::plano_padrao`) continua sendo semeado em toda

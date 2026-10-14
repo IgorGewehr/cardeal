@@ -854,3 +854,98 @@ fn aba_conciliacao_importa_ofx_sugere_a_baixa_e_concilia() {
     // Texto em ISO-8859-1 (extratos antigos) também é lido.
     assert_eq!(ler_texto(&[b'a', 0xE7, b'a', b'o']), "açao");
 }
+
+#[test]
+fn conferencia_do_saldo_le_o_ofx_aceita_saldo_digitado_e_alerta_na_visao() {
+    let t = motor_de_teste();
+    let banco: ContaBancariaCriada = t
+        .motor
+        .executar(
+            &t.sessao,
+            "financeiro.criar_conta_bancaria.v1",
+            &CriarContaBancaria {
+                nome: "Sicredi".to_owned(),
+            },
+        )
+        .expect("banco");
+    let hoje = Data::hoje(Fuso::BRASILIA);
+    let mut estado = EstadoTelaFinanceiro {
+        aba: Aba::Conciliacao,
+        ..Default::default()
+    };
+    estado.carregar(&t.motor, &t.sessao);
+    estado.conciliacao.conta = Some(banco.conta);
+    estado.conciliacao.recarregar_itens(&t.motor, &t.sessao);
+    assert!(estado
+        .conciliacao
+        .conferencia()
+        .expect("a conta")
+        .fechamento
+        .is_none());
+
+    // Uma tarifa de 20 dias atrás, nunca conciliada, e o saldo de −15 no LEDGERBAL.
+    let iso = |d: Data| d.formatar_iso().replace('-', "");
+    let ofx = format!(
+        "<OFX><STMTTRN><DTPOSTED>{}<TRNAMT>-15.00<FITID>T1<MEMO>TARIFA
+</STMTTRN><LEDGERBAL><BALAMT>-15.00<DTASOF>{}</LEDGERBAL></OFX>",
+        iso(hoje.mais_dias(-20)),
+        iso(hoje)
+    );
+    importar_texto(
+        &egui::Context::default(),
+        &t.motor,
+        &t.sessao,
+        &mut estado,
+        banco.conta,
+        "extrato.ofx",
+        &ofx,
+    );
+    let f = estado
+        .conciliacao
+        .conferencia()
+        .and_then(|c| c.fechamento)
+        .expect("o saldo do OFX");
+    assert_eq!(f.banco.saldo, Dinheiro::reais(-15));
+    assert_eq!(
+        f.sem_explicacao(),
+        Dinheiro::ZERO,
+        "a tarifa pendente explica"
+    );
+    // A tarifa parada há 20 dias vira alerta na Visão geral.
+    let alertas = estado.conciliacao.alertas(hoje);
+    assert!(
+        alertas
+            .iter()
+            .any(|a| a.starts_with("Sicredi:") && a.contains("20 dias")),
+        "{alertas:?}"
+    );
+
+    // Saldo digitado pelo formulário.
+    estado.conciliacao.saldo_form = Some((hoje.formatar(), "-25,00".to_owned()));
+    super::conferencia::informar_saldo(&t.motor, &t.sessao, &mut estado).expect("informar");
+    assert!(estado.conciliacao.saldo_form.is_none());
+    let f = estado
+        .conciliacao
+        .conferencia()
+        .and_then(|c| c.fechamento)
+        .unwrap();
+    assert_eq!(f.sem_explicacao(), Dinheiro::reais(-10));
+    // Valor ilegível: recusado sem chamar o motor.
+    estado.conciliacao.saldo_form = Some((hoje.formatar(), "abc".to_owned()));
+    assert!(super::conferencia::informar_saldo(&t.motor, &t.sessao, &mut estado).is_err());
+
+    // Os dois painéis desenham.
+    let ctx = egui::Context::default();
+    cardeal_ui::tokens::instalar_fontes(&ctx);
+    cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+    for aba in [Aba::Conciliacao, Aba::Visao] {
+        estado.aba = aba;
+        for _ in 0..2 {
+            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    mostrar(ui, &t.motor, &t.sessao, &mut estado);
+                });
+            });
+        }
+    }
+}

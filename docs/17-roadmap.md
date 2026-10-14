@@ -89,7 +89,7 @@ operando 30 dias, incluindo pelo menos um evento de queda de rede.
 - [x] `mod-compras` — entrada por XML, rateio de frete, aprendizado de casamento *(cotação e pedido de compra: faltam)*
 - [ ] Distribuição DFe e manifestação do destinatário
 - [ ] NF-e de saída, cancelamento, carta de correção, inutilização
-- [x] Conciliação bancária — OFX e CSV *(Pix e CNAB retorno: faltam)*
+- [x] Conciliação bancária — OFX e CSV, com saldo banco × sistema e alerta de pendências *(Pix e CNAB retorno: faltam)*
 - [ ] Cobrança: boleto e Pix com baixa automática
 - [ ] SPED Fiscal e Contribuições via API
 
