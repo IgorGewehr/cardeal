@@ -32,9 +32,10 @@ use mod_financeiro::{
     AbrirCaixa, CadastrarCaixa, CaixaCadastrado, CaixaFoiAberto, ModuloFinanceiro,
 };
 use mod_fiscal::{
-    ConfigurarNfce, DetalheDocumento, DocumentoFiscal, DocumentoResumo, EmitirNfceDoCupom,
-    EstadoDocumento, InstalarCertificado, ModuloFiscal, ProvedorFiscal, ReenviarDocumento,
-    ResumoDaFilaFiscal, ResumoFiscal, SituacaoFiscal, SituacaoFiscalDaEmpresa, TAREFA_TRANSMITIR,
+    CancelarNfce, ConfigurarNfce, DetalheDocumento, DocumentoFiscal, DocumentoResumo,
+    EmitirNfceDoCupom, EstadoDocumento, InstalarCertificado, InutilizarNumero, ModuloFiscal,
+    PedidoDocumento, ProvedorFiscal, ReenviarDocumento, ResumoDaFilaFiscal, ResumoFiscal,
+    SituacaoFiscal, SituacaoFiscalDaEmpresa, TAREFA_TRANSMITIR,
 };
 use mod_pdv::{
     AbrirCupom, AdicionarItem, CupomAberto, FinalizarVenda, ModuloPdv, PagamentoInformado,
@@ -136,6 +137,7 @@ impl Mundo {
             "empresa.dados.editar",
             "fiscal.ver",
             "fiscal.emitir",
+            "fiscal.cancelar",
             "fiscal.configurar",
         ] {
             papel = papel.com_permissao(p);
@@ -691,4 +693,70 @@ fn transmitir_sem_permissao_e_recusado() {
         )
         .unwrap_err();
     assert_eq!(erro.codigo, CodigoErro::SEM_PERMISSAO);
+}
+
+#[test]
+fn cancela_a_autorizada_e_inutiliza_o_numero_da_rejeitada() {
+    let m = Mundo::novo();
+    let cen = m.cenario();
+    m.configurar(1);
+    let cancelar = |doc: Id, j: &str| {
+        m.executar::<DocumentoResumo>(
+            "fiscal.cancelar_nfce.v1",
+            &CancelarNfce {
+                documento: doc,
+                justificativa: j.into(),
+            },
+        )
+    };
+
+    let a = m.emitir(m.vender(&cen, cen.produto, 1, false));
+    assert!(m.transmitir().starts_with("1 autorizada"));
+
+    // Justificativa curta é recusada na hora, com o campo marcado.
+    let erro = cancelar(a.id, "erro").unwrap_err();
+    assert_eq!(erro.campo.as_deref(), Some("justificativa"));
+    // O pedido entra na fila; outro pedido em cima é recusado.
+    let pedido = cancelar(a.id, "Venda registrada em duplicidade no caixa").unwrap();
+    assert_eq!(
+        (pedido.estado, pedido.pedido),
+        (EstadoDocumento::Autorizada, Some(PedidoDocumento::Cancelar))
+    );
+    assert!(cancelar(a.id, "Venda registrada em duplicidade no caixa").is_err());
+    let saida = m.transmitir();
+    assert!(saida.contains("1 cancelada"), "{saida}");
+    let d = m.documento(a.id).resumo;
+    assert_eq!((d.estado, d.pedido), (EstadoDocumento::Cancelada, None));
+    // Cancelada não se cancela de novo.
+    assert!(cancelar(a.id, "Venda registrada em duplicidade no caixa").is_err());
+
+    // Fora do prazo: a SEFAZ recusa; a nota continua autorizada, sem o pedido, com o motivo.
+    let b = m.emitir(m.vender(&cen, cen.produto, 1, false));
+    m.transmitir();
+    cancelar(b.id, "Cliente desistiu da compra depois de pagar").unwrap();
+    m.sim.programar(retorno(SituacaoRetorno::Rejeitado, "501"));
+    assert!(m.transmitir().contains("1 pedido(s) recusado(s)"));
+    let d = m.documento(b.id).resumo;
+    assert_eq!((d.estado, d.pedido), (EstadoDocumento::Autorizada, None));
+    assert!(d.motivo.unwrap().contains("prazo de cancelamento"));
+
+    // A rejeitada que não vai mais sair: inutiliza o número.
+    let c = m.emitir(m.vender(&cen, cen.sem_ncm, 1, false));
+    assert_eq!(c.estado, EstadoDocumento::Rejeitada);
+    let inutilizar = |doc: Id| {
+        m.executar::<DocumentoResumo>(
+            "fiscal.inutilizar_numero.v1",
+            &InutilizarNumero {
+                documento: doc,
+                justificativa: "Produto sem NCM, venda refeita em outra nota".into(),
+            },
+        )
+    };
+    assert!(inutilizar(b.id).is_err(), "autorizada não se inutiliza");
+    inutilizar(c.id).unwrap();
+    assert!(m.transmitir().contains("1 inutilizada"));
+    assert_eq!(
+        m.documento(c.id).resumo.estado,
+        EstadoDocumento::Inutilizada
+    );
 }

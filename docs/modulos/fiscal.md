@@ -1,8 +1,9 @@
 # Módulo `fiscal`
 
 > Estado: **onda 7, fatias 1 e 2** — configuração (certificado A1, dados fiscais do emitente, ambiente,
-> conexão) e a **NFC-e do PDV** como documento assíncrono (fila, transmissão em segundo plano, conferência
-> pela chave). Faltam DANFCE, contingência offline, cancelamento, NF-e, NFS-e e SPED (§11).
+> conexão), a **NFC-e do PDV** como documento assíncrono (fila, transmissão em segundo plano, conferência
+> pela chave), o **DANFCE** (cupom de 80 mm com QR Code), o **cancelamento** e a **inutilização**. Faltam
+> contingência offline, série por terminal, NF-e, NFS-e e SPED (§11).
 > Arquitetura: [ADR-0006](../adr/0006-fiscal-via-api-externa.md) (fiscal por API externa) e
 > [ADR-0019](../adr/0019-sefaz-api-como-provedor-e-cofre-do-certificado.md) (o provedor é o `sefaz-api`;
 > o certificado mora cifrado no cofre). Visão geral: [doc 10](../10-modulo-fiscal.md).
@@ -150,6 +151,22 @@ recusada só por cadastro (178, a Tensorroot saiu de SP) — o que levou à regr
 < 200. Falta a primeira **autorizada**: pede a IE do RS e o CSC de homologação da SEFAZ-RS
 (`cardeal-fiscal`, teste ignorado `homologacao_nfce_real`).
 
+**Cancelamento e inutilização são pedidos na fila** (migração v3): `CancelarNfce`
+(`fiscal.cancelar_nfce.v1`) numa autorizada e `InutilizarNumero` (`fiscal.inutilizar_numero.v1`) numa
+rejeitada que não vai mais sair (o número não vira buraco na série) — permissão nova `fiscal.cancelar`,
+justificativa de 15 a 255 caracteres. O comando só registra o pedido; a mesma tarefa da fila o leva à SEFAZ
+(sem internet, ele espera). `decidir_evento`: aceito (135/136/155, 102) → `Cancelada`/`Inutilizada`; já feito
+antes (573/218, 563/206/256) → idem; recusado (ex.: 501 fora do prazo) → a nota volta ao que era, sem o pedido,
+com o motivo; sem resposta → o pedido espera. O cancelamento **não desfaz a venda** (o PDV ainda não estorna
+venda finalizada — §11).
+
+**DANFCE** (`cardeal_pdf::gerar_danfce`): bobina de 80 mm com a altura do cupom, no leiaute do manual
+(emitente, itens, totais, pagamentos e troco, chave em 11 grupos com o endereço de consulta, consumidor,
+número/série/emissão, protocolo e o QR Code — `qrcodegen`, MIT). Em homologação, "sem valor fiscal" no topo e
+no rodapé. Montado da nota guardada + `qrCode`/`urlChave` do XML autorizado; abre no visualizador do sistema
+(de onde vai à impressora — a impressão direta ESC/POS é passo seguinte). Conferido: o QR Code renderizado
+decodifica para a URL de consulta com a chave.
+
 ## 8. Telas
 
 Configurações › **Fiscal**: pendências no topo; dados fiscais do emitente; certificado (titular, CNPJ,
@@ -166,7 +183,9 @@ número, CSC). No **PDV**, cada venda finalizada cria a nota e dispara a transmi
 cabeçalho mostra a faixa da fila ("Fiscal em dia" / "N na fila" / "N rejeitadas") e o resultado da venda, a
 situação da NFC-e (com o que corrigir, se rejeitada). Área nova **Notas fiscais** (barra lateral, grupo
 Financeiro): indicadores (na fila, conferindo, rejeitadas, autorizadas hoje), filtro, grade com
-**Reenviar** e **Detalhes** (chave, protocolo, itens com NCM/CFOP, consumidor) e **Transmitir agora**.
+**Reenviar** e **Detalhes** (chave, protocolo, itens com NCM/CFOP, consumidor; **Imprimir cupom fiscal**,
+**Cancelar NFC-e** e **Inutilizar número** com a justificativa) e **Transmitir agora**. No PDV, a venda
+autorizada ganha **Imprimir cupom fiscal**.
 
 ## 9. Permissões
 
@@ -174,6 +193,7 @@ Financeiro): indicadores (na fila, conferindo, rejeitadas, autorizadas hoje), fi
 |---|---|---|
 | `fiscal.ver` | Baixo | Situação fiscal, notas, teste de conexão |
 | `fiscal.emitir` | Médio | Criar a NFC-e da venda, reenviar, transmitir a fila |
+| `fiscal.cancelar` | Alto | Cancelar NFC-e autorizada, inutilizar número |
 | `fiscal.configurar` | Alto | Certificado, ambiente, configuração da NFC-e (CSC) |
 
 ## 10. Tabelas
@@ -184,11 +204,14 @@ Financeiro): indicadores (na fila, conferindo, rejeitadas, autorizadas hoje), fi
   (próximo número por empresa, modelo, série e ambiente); `fiscal_documento` (a nota guardada, estado,
   chave, protocolo, código e motivo, XML, tentativas e próxima tentativa; únicos por origem e por
   série+número+ambiente).
+- v3: `fiscal_documento` recriada (o SQLite não muda `CHECK`) com o estado `Inutilizada` e o pedido
+  (`pedido`, `justificativa`, `protocolo_evento`, `evento_em`).
 
 ## 11. Próximas fatias da onda 7
 
-1. **DANFCE** (cupom com QR Code; o XML autorizado traz o `infNFeSupl`) e a impressão no PDV.
-2. **Cancelamento** da NFC-e (prazo da UF) e **inutilização** de números pulados.
+1. **Primeira NFC-e autorizada no RS** (falta a IE, o endereço e o CSC de homologação da SEFAZ-RS).
+2. **Estorno da venda finalizada** no PDV (o cancelamento da NFC-e hoje não devolve estoque/dinheiro) e a
+   impressão direta na térmica (ESC/POS).
 3. **Contingência offline** (`tpEmis=9`, `prepare`/`transmit` do `sefaz-api`): exige a API alcançável — sem
    internet nenhuma, a nota espera na fila (assinar localmente seria trazer a assinatura para o Cardeal).
 4. Série por terminal (hoje uma série por empresa).

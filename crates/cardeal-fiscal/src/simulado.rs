@@ -6,7 +6,7 @@ use std::sync::Mutex;
 use cardeal_kernel::{Cnpj, Erro, Resultado, Uf};
 
 use crate::chave::ChaveAcesso;
-use crate::emissao::{Csc, Nfce, RetornoSefaz, SituacaoRetorno};
+use crate::emissao::{Csc, Nfce, PedidoInutilizacao, RetornoSefaz, SituacaoRetorno};
 use crate::erros::ErroFiscal;
 use crate::porta::{ModeloFiscal, Nsu, PortaFiscal, ResumoDfe, StatusSefaz, XmlNota};
 
@@ -171,6 +171,68 @@ impl PortaFiscal for FiscalSimulado {
             ))
     }
 
+    fn cancelar(
+        &self,
+        chave: &ChaveAcesso,
+        _protocolo: &str,
+        justificativa: &str,
+        _uf: Uf,
+    ) -> Resultado<RetornoSefaz> {
+        if self.fora_do_ar.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(Erro::de_dominio(&ErroFiscal::ServicoIndisponivel));
+        }
+        if let Some(r) = travar(&self.programados).pop_front() {
+            return Ok(r);
+        }
+        let mut emitidas = travar(&self.emitidas);
+        let Some(nota) = emitidas.get_mut(chave.como_str()) else {
+            return Ok(rejeicao(
+                "217",
+                "Rejeição: NF-e não consta na base de dados da SEFAZ",
+            ));
+        };
+        if nota.codigo == "101" {
+            return Ok(rejeicao("573", "Rejeição: Duplicidade de evento"));
+        }
+        if justificativa.chars().count() < 15 {
+            return Ok(rejeicao("400", "justificativa curta"));
+        }
+        nota.codigo = "101".into();
+        nota.motivo = "Cancelamento de NF-e homologado".into();
+        Ok(RetornoSefaz {
+            situacao: SituacaoRetorno::Autorizado,
+            codigo: "135".into(),
+            motivo: "Evento registrado e vinculado a NF-e".into(),
+            chave: Some(chave.como_str().to_string()),
+            protocolo: Some("135260000000001".into()),
+            recebido_em: None,
+            xml: None,
+            erros: Vec::new(),
+        })
+    }
+
+    fn inutilizar(&self, p: &PedidoInutilizacao) -> Resultado<RetornoSefaz> {
+        if self.fora_do_ar.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(Erro::de_dominio(&ErroFiscal::ServicoIndisponivel));
+        }
+        if let Some(r) = travar(&self.programados).pop_front() {
+            return Ok(r);
+        }
+        if p.inicio > p.fim || p.justificativa.chars().count() < 15 {
+            return Ok(rejeicao("400", "faixa ou justificativa inválida"));
+        }
+        Ok(RetornoSefaz {
+            situacao: SituacaoRetorno::Autorizado,
+            codigo: "102".into(),
+            motivo: "Inutilização de número homologado".into(),
+            chave: None,
+            protocolo: Some("102260000000001".into()),
+            recebido_em: None,
+            xml: None,
+            erros: Vec::new(),
+        })
+    }
+
     fn status_servico(&self, uf: Uf, modelo: ModeloFiscal) -> Resultado<StatusSefaz> {
         if self.fora_do_ar.load(std::sync::atomic::Ordering::SeqCst) {
             return Err(Erro::de_dominio(&ErroFiscal::ServicoIndisponivel));
@@ -183,6 +245,19 @@ impl PortaFiscal for FiscalSimulado {
                 modelo.codigo()
             ),
         })
+    }
+}
+
+fn rejeicao(codigo: &str, motivo: &str) -> RetornoSefaz {
+    RetornoSefaz {
+        situacao: SituacaoRetorno::Rejeitado,
+        codigo: codigo.into(),
+        motivo: motivo.into(),
+        chave: None,
+        protocolo: None,
+        recebido_em: None,
+        xml: None,
+        erros: Vec::new(),
     }
 }
 

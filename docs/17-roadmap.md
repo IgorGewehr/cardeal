@@ -78,7 +78,7 @@ Primeiro cliente real: um MEI ou prestador de serviços.
 - [x] `mod-vendas` — orçamento, pedido, tabela de preço, condição de pagamento
 - [x] `mod-pdv` — frente de caixa, sessão, sangria, suprimento, atalhos, impressão
 - [ ] **Modo autônomo** — posto avançado, faixas de numeração, reconciliação
-- [ ] `cardeal-fiscal` + NFC-e via API, contingência offline *(onda 7: provedor = `sefaz-api`; certificado A1 no cofre, dados fiscais, ambiente, status da SEFAZ e a NFC-e do PDV como documento assíncrono com fila e transmissão em segundo plano feitos — faltam DANFCE, cancelamento e a contingência offline)*
+- [ ] `cardeal-fiscal` + NFC-e via API, contingência offline *(onda 7: provedor = `sefaz-api`; certificado A1 no cofre, dados fiscais, ambiente, status da SEFAZ, a NFC-e do PDV como documento assíncrono com fila e transmissão em segundo plano, o DANFCE com QR Code, o cancelamento e a inutilização feitos — falta a contingência offline)*
 - [ ] Multiterminal com mTLS e pareamento por mDNS
 
 **Critério de saída:** cenário end-to-end "mercado de bairro" verde; um comércio real com 2 PDVs

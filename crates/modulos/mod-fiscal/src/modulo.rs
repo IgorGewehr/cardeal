@@ -8,8 +8,9 @@ use crate::comandos::{DefinirAmbienteFiscal, InstalarCertificado, RemoverCertifi
 use crate::consultas::{SituacaoFiscal, StatusDaSefaz};
 use crate::manifesto::MANIFESTO;
 use crate::nfce::{
-    ConfiguracaoDaNfce, ConfigurarNfce, DocumentoDaVenda, DocumentoFiscal, DocumentosFiscais,
-    EmitirNfceDoCupom, ReenviarDocumento, ResumoDaFilaFiscal, TAREFA_TRANSMITIR,
+    CancelarNfce, ConfiguracaoDaNfce, ConfigurarNfce, DocumentoDaVenda, DocumentoFiscal,
+    DocumentosFiscais, EmitirNfceDoCupom, InutilizarNumero, ReenviarDocumento, ResumoDaFilaFiscal,
+    TAREFA_TRANSMITIR,
 };
 
 /// O módulo, para registrar no [`Despachante`](cardeal_modkit::Despachante).
@@ -34,6 +35,8 @@ impl Modulo for ModuloFiscal {
             .comando::<ConfigurarNfce>("fiscal.configurar_nfce.v1")
             .comando::<EmitirNfceDoCupom>("fiscal.emitir_nfce_do_cupom.v1")
             .comando::<ReenviarDocumento>("fiscal.reenviar_documento.v1")
+            .comando::<CancelarNfce>("fiscal.cancelar_nfce.v1")
+            .comando::<InutilizarNumero>("fiscal.inutilizar_numero.v1")
             .consulta::<ConfiguracaoDaNfce>("fiscal.configuracao_nfce.v1")
             .consulta::<DocumentosFiscais>("fiscal.documentos.v1")
             .consulta::<ResumoDaFilaFiscal>("fiscal.resumo_da_fila.v1")

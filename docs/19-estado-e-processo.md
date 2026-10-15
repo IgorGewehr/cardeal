@@ -43,8 +43,9 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   conferido e guardado cifrado no cofre, **dados fiscais do emitente**, **ambiente** e **status da SEFAZ**
   feitos (2026-10-14; homologação SC respondeu 107 com o A1 real). A **NFC-e do PDV** saiu (2026-10-15):
   documento criado na venda sem rede, fila, transmissão em segundo plano (tarefa no despacho), conferência
-  pela chave antes de reemitir, área Notas fiscais. Próximo: DANFCE, cancelamento e contingência
-  (`docs/modulos/fiscal.md` §11).
+  pela chave antes de reemitir, área Notas fiscais — e o **DANFCE** (80 mm, QR Code), o **cancelamento** e a
+  **inutilização** como pedidos na fila. Próximo: a 1ª autorizada no RS (dados do usuário), estorno da venda
+  no PDV, contingência (`docs/modulos/fiscal.md` §11).
 - **Pendência de confiança:** as tabelas do Simples e as alíquotas precisam ser conferidas com o
   contador; o ST/IPI **da nota** já entra no custo (2026-10-13), mas a estimativa de ST pela MVA (sem o valor na
   nota) ainda não.
@@ -607,6 +608,13 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   do teste real: rejeições com código < 200 vinham como "erro" (agora são rejeição) e um erro do emissor
   que se repete sai da fila depois de 6 tentativas. O `sefaz-api` publicado estava fora do ar
   (Cloudflare 1033) em 2026-10-15.
+- **DANFCE, cancelamento e inutilização (2026-10-15, onda 7):** `cardeal-pdf` ganhou página de tamanho livre
+  e `gerar_danfce` (80 mm, QR Code com `qrcodegen`); o desktop monta o cupom da nota guardada + XML e abre
+  para imprimir (PDV e Notas fiscais). Porta: `cancelar`/`inutilizar` (sefaz-api e simulado). `mod-fiscal`
+  migração v3 (tabela recriada: estado `Inutilizada`, `pedido`/`justificativa`/`protocolo_evento`),
+  `CancelarNfce`/`InutilizarNumero` (permissão nova `fiscal.cancelar`) e `decidir_evento`; a mesma tarefa da
+  fila leva os pedidos. Testes: cancelamento aceito, recusado por prazo, pedido repetido, inutilização,
+  decisões dos eventos e o cupom (o QR renderizado decodifica com OpenCV).
 - **Inventário com contagem cega (2026-10-13):** migração `estoque` v11 (`estoque_inventario`,
   `estoque_contagem_item`), comandos `criar_inventario`/`iniciar_contagem`/`registrar_contagem`/
   `encerrar_inventario`/`cancelar_inventario` (`.v1`) e consultas `inventarios`/`posicao_do_inventario`.

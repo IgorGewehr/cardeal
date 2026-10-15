@@ -37,6 +37,47 @@ pub enum EstadoDocumento {
     Denegada,
     /// Cancelada.
     Cancelada,
+    /// O número foi inutilizado (a nota nunca saiu).
+    Inutilizada,
+}
+
+/// Um pedido sobre um documento, que a fila leva à SEFAZ.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum PedidoDocumento {
+    /// Cancelar a nota autorizada.
+    Cancelar,
+    /// Inutilizar o número de uma nota que nunca foi autorizada.
+    Inutilizar,
+}
+
+impl PedidoDocumento {
+    /// O texto guardado na base.
+    #[must_use]
+    pub const fn como_str(self) -> &'static str {
+        match self {
+            Self::Cancelar => "cancelar",
+            Self::Inutilizar => "inutilizar",
+        }
+    }
+
+    /// O contrário de [`Self::como_str`].
+    #[must_use]
+    pub fn de_str(s: &str) -> Option<Self> {
+        match s {
+            "cancelar" => Some(Self::Cancelar),
+            "inutilizar" => Some(Self::Inutilizar),
+            _ => None,
+        }
+    }
+
+    /// Para a tela.
+    #[must_use]
+    pub const fn rotulo(self) -> &'static str {
+        match self {
+            Self::Cancelar => "cancelamento na fila",
+            Self::Inutilizar => "inutilização na fila",
+        }
+    }
 }
 
 impl EstadoDocumento {
@@ -50,6 +91,7 @@ impl EstadoDocumento {
             Self::Rejeitada => "Rejeitada",
             Self::Denegada => "Denegada",
             Self::Cancelada => "Cancelada",
+            Self::Inutilizada => "Inutilizada",
         }
     }
 
@@ -63,6 +105,7 @@ impl EstadoDocumento {
             "Rejeitada" => Self::Rejeitada,
             "Denegada" => Self::Denegada,
             "Cancelada" => Self::Cancelada,
+            "Inutilizada" => Self::Inutilizada,
             _ => return None,
         })
     }
@@ -77,6 +120,7 @@ impl EstadoDocumento {
             Self::Rejeitada => "Rejeitada",
             Self::Denegada => "Denegada",
             Self::Cancelada => "Cancelada",
+            Self::Inutilizada => "Inutilizada",
         }
     }
 }
@@ -114,6 +158,8 @@ pub struct DocumentoResumo {
     pub criado_em: Instante,
     /// Quando foi autorizado.
     pub autorizado_em: Option<Instante>,
+    /// Um cancelamento ou inutilização esperando a fila.
+    pub pedido: Option<PedidoDocumento>,
 }
 
 /// O resumo da fila fiscal — a faixa de estado do PDV (`docs/10` §4).
@@ -178,6 +224,10 @@ pub struct Mudanca {
     pub motivo: Option<String>,
     /// Quanto esperar até a próxima tentativa (segundos); 0 = já.
     pub espera_segundos: i64,
+    /// O pedido (cancelar/inutilizar) foi resolvido — aceito ou recusado.
+    pub limpar_pedido: bool,
+    /// O protocolo do evento (cancelamento/inutilização) aceito.
+    pub protocolo_evento: Option<String>,
 }
 
 /// Depois de tantas tentativas com erro do emissor (não de rede), a nota sai da fila como
@@ -214,6 +264,8 @@ pub fn decidir(estado: EstadoDocumento, tentativas: u32, desfecho: Desfecho) -> 
         codigo: None,
         motivo: None,
         espera_segundos: 0,
+        limpar_pedido: false,
+        protocolo_evento: None,
     };
     let r = match desfecho {
         Desfecho::Indisponivel(m) => {
@@ -323,6 +375,94 @@ pub fn decidir(estado: EstadoDocumento, tentativas: u32, desfecho: Desfecho) -> 
                 ..base(EstadoDocumento::Pendente)
             },
             None => final_(EstadoDocumento::Rejeitada),
+        },
+    }
+}
+
+/// Decide o que fazer com o desfecho de um pedido (cancelar uma autorizada, inutilizar o
+/// número de uma rejeitada). Aceito, o documento muda de estado; recusado, volta ao que era,
+/// sem o pedido e com o motivo; sem resposta, o pedido espera a próxima rodada.
+#[must_use]
+pub fn decidir_evento(
+    pedido: PedidoDocumento,
+    estado: EstadoDocumento,
+    tentativas: u32,
+    desfecho: Desfecho,
+) -> Mudanca {
+    let base = Mudanca {
+        estado,
+        chave: None,
+        trocar_chave: false,
+        protocolo: None,
+        xml: None,
+        codigo: None,
+        motivo: None,
+        espera_segundos: 0,
+        limpar_pedido: false,
+        protocolo_evento: None,
+    };
+    let (aceito, ja_feito, nome) = match pedido {
+        PedidoDocumento::Cancelar => (
+            EstadoDocumento::Cancelada,
+            &["573", "218"][..],
+            "O cancelamento",
+        ),
+        PedidoDocumento::Inutilizar => (
+            EstadoDocumento::Inutilizada,
+            &["563", "206", "256"][..],
+            "A inutilização",
+        ),
+    };
+    let r = match desfecho {
+        Desfecho::Indisponivel(m) => {
+            return Mudanca {
+                motivo: Some(m),
+                espera_segundos: espera(tentativas),
+                ..base
+            }
+        }
+        Desfecho::Recusado(m) => {
+            return Mudanca {
+                motivo: Some(format!("{nome} não foi aceito: {m}")),
+                limpar_pedido: true,
+                ..base
+            }
+        }
+        Desfecho::Resposta(r) => r,
+    };
+    let codigo = Some(r.codigo.clone());
+    match r.situacao {
+        SituacaoRetorno::Autorizado => Mudanca {
+            estado: aceito,
+            codigo,
+            motivo: Some(explicar(&r.codigo, &r.motivo)),
+            limpar_pedido: true,
+            protocolo_evento: r.protocolo.clone().filter(|p| !p.is_empty()),
+            ..base
+        },
+        SituacaoRetorno::Rejeitado if ja_feito.contains(&r.codigo.as_str()) => Mudanca {
+            estado: aceito,
+            codigo,
+            motivo: Some(explicar(&r.codigo, &r.motivo)),
+            limpar_pedido: true,
+            ..base
+        },
+        SituacaoRetorno::Rejeitado | SituacaoRetorno::Denegado | SituacaoRetorno::Cancelado => {
+            Mudanca {
+                codigo,
+                motivo: Some(format!(
+                    "{nome} não foi aceito — {}",
+                    explicar(&r.codigo, &r.motivo)
+                )),
+                limpar_pedido: true,
+                ..base
+            }
+        }
+        SituacaoRetorno::Processando | SituacaoRetorno::Erro => Mudanca {
+            codigo,
+            motivo: Some(explicar(&r.codigo, &r.motivo)),
+            espera_segundos: espera(tentativas),
+            ..base
         },
     }
 }
@@ -460,6 +600,44 @@ mod testes {
         // SEFAZ paralisada: como fora do ar.
         let m = decidir(Pendente, 1, r(Rejeitado, "108", None));
         assert_eq!((m.estado, m.espera_segundos), (Pendente, 60));
+    }
+
+    #[test]
+    fn cancelamento_e_inutilizacao() {
+        use PedidoDocumento::{Cancelar, Inutilizar};
+        let m = decidir_evento(Cancelar, Autorizada, 0, r(Autorizado, "135", Some(CHAVE)));
+        assert_eq!((m.estado, m.limpar_pedido), (Cancelada, true));
+        assert_eq!(m.protocolo_evento.as_deref(), Some("143"));
+        // Já cancelada antes (duplicidade de evento): está cancelada.
+        assert_eq!(
+            decidir_evento(Cancelar, Autorizada, 0, r(Rejeitado, "573", None)).estado,
+            Cancelada
+        );
+        // Fora do prazo: continua autorizada, sem o pedido, com o motivo.
+        let prazo = decidir_evento(Cancelar, Autorizada, 0, r(Rejeitado, "501", None));
+        assert_eq!((prazo.estado, prazo.limpar_pedido), (Autorizada, true));
+        assert!(prazo
+            .motivo
+            .unwrap()
+            .starts_with("O cancelamento não foi aceito"));
+        // Sem resposta: o pedido espera.
+        let fora = decidir_evento(Cancelar, Autorizada, 2, Desfecho::Indisponivel("x".into()));
+        assert_eq!(
+            (fora.estado, fora.limpar_pedido, fora.espera_segundos),
+            (Autorizada, false, 120)
+        );
+
+        let m = decidir_evento(Inutilizar, Rejeitada, 0, r(Autorizado, "102", None));
+        assert_eq!(
+            (m.estado, m.limpar_pedido),
+            (EstadoDocumento::Inutilizada, true)
+        );
+        assert_eq!(
+            decidir_evento(Inutilizar, Rejeitada, 0, r(Rejeitado, "563", None)).estado,
+            EstadoDocumento::Inutilizada
+        );
+        let recusada = decidir_evento(Inutilizar, Rejeitada, 0, r(Rejeitado, "241", None));
+        assert_eq!((recusada.estado, recusada.limpar_pedido), (Rejeitada, true));
     }
 
     #[test]

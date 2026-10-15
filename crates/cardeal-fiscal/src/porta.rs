@@ -19,7 +19,7 @@ use cardeal_kernel::{Cnpj, Resultado, Uf};
 use serde::{Deserialize, Serialize};
 
 use crate::chave::ChaveAcesso;
-use crate::emissao::{Csc, Nfce, RetornoSefaz};
+use crate::emissao::{Csc, Nfce, PedidoInutilizacao, RetornoSefaz};
 
 /// O modelo do documento fiscal eletrônico.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -121,6 +121,25 @@ pub trait PortaFiscal: Send + Sync {
     /// # Errors
     /// Como [`Self::emitir_nfce`].
     fn consultar_documento(&self, chave: &ChaveAcesso, uf: Uf) -> Resultado<RetornoSefaz>;
+
+    /// Cancela um documento autorizado (evento 110111). Aceito vem como `Autorizado` (135,
+    /// 136, 155); recusado (prazo, por exemplo) como `Rejeitado`.
+    ///
+    /// # Errors
+    /// Como [`Self::emitir_nfce`].
+    fn cancelar(
+        &self,
+        chave: &ChaveAcesso,
+        protocolo: &str,
+        justificativa: &str,
+        uf: Uf,
+    ) -> Resultado<RetornoSefaz>;
+
+    /// Inutiliza uma faixa de números (102 = homologada, vem como `Autorizado`).
+    ///
+    /// # Errors
+    /// Como [`Self::emitir_nfce`].
+    fn inutilizar(&self, pedido: &PedidoInutilizacao) -> Resultado<RetornoSefaz>;
 }
 
 /// Uma porta compartilhada é uma porta (o simulado de um teste, servindo várias empresas).
@@ -143,5 +162,19 @@ impl<T: PortaFiscal + ?Sized> PortaFiscal for std::sync::Arc<T> {
 
     fn consultar_documento(&self, chave: &ChaveAcesso, uf: Uf) -> Resultado<RetornoSefaz> {
         (**self).consultar_documento(chave, uf)
+    }
+
+    fn cancelar(
+        &self,
+        chave: &ChaveAcesso,
+        protocolo: &str,
+        justificativa: &str,
+        uf: Uf,
+    ) -> Resultado<RetornoSefaz> {
+        (**self).cancelar(chave, protocolo, justificativa, uf)
+    }
+
+    fn inutilizar(&self, pedido: &PedidoInutilizacao) -> Resultado<RetornoSefaz> {
+        (**self).inutilizar(pedido)
     }
 }

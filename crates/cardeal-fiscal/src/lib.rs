@@ -48,8 +48,8 @@ pub use certificado::{
 pub use chave::ChaveAcesso;
 pub use emissao::{
     Consumidor, ContribuicaoItem, Crt, Csc, DocumentoConsumidor, Emitente, EnderecoEmitente,
-    IcmsItem, ImpostosItem, ItemDocumento, MeioPagamento, Nfce, PagamentoDocumento, RetornoSefaz,
-    SituacaoRetorno,
+    IcmsItem, ImpostosItem, ItemDocumento, MeioPagamento, Nfce, PagamentoDocumento,
+    PedidoInutilizacao, RetornoSefaz, SituacaoRetorno,
 };
 pub use erros::ErroFiscal;
 pub use nfe::{interpretar, ItemNfe, NotaFiscalXml};

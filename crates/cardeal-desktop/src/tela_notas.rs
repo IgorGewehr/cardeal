@@ -6,15 +6,16 @@ use cardeal_cliente::{Motor, Sessao};
 use cardeal_kernel::{Fuso, Id};
 use cardeal_modkit::Icone;
 use cardeal_ui::atoms::{Botao, Etiqueta, Rotulo, Tom, ValorDinheiro};
-use cardeal_ui::molecules::{dado, Abas, CartaoKpi, EstadoVazio};
+use cardeal_ui::molecules::{dado, Abas, Campo, CartaoKpi, EstadoVazio};
 use cardeal_ui::organisms::{
     notificar, ColunaGrade, FaixaKpi, Grade, LayoutTela, Notificacao, Painel,
 };
 use cardeal_ui::tokens::{Espaco, TemaUi};
 use eframe::egui;
 use mod_fiscal::{
-    AmbienteFiscal, DetalheDocumento, DocumentoFiscal, DocumentoResumo, DocumentosFiscais,
-    EstadoDocumento, ReenviarDocumento, ResumoDaFilaFiscal, ResumoFiscal,
+    AmbienteFiscal, CancelarNfce, DetalheDocumento, DocumentoFiscal, DocumentoResumo,
+    DocumentosFiscais, EstadoDocumento, InutilizarNumero, PedidoDocumento, ReenviarDocumento,
+    ResumoDaFilaFiscal, ResumoFiscal,
 };
 
 use crate::fiscal_fundo;
@@ -43,6 +44,48 @@ pub struct EstadoNotas {
     pub erro: Option<String>,
     /// A geração da transmissão em segundo plano que esta lista já mostra.
     pub geracao_vista: u64,
+    /// O cancelamento/inutilização sendo pedido no detalhe: o pedido e a justificativa.
+    pub pedindo: Option<(PedidoDocumento, String)>,
+}
+
+/// Pede o cancelamento (autorizada) ou a inutilização (rejeitada) do documento e dispara a
+/// transmissão.
+///
+/// # Errors
+/// O erro do comando (justificativa curta, estado errado, pedido repetido).
+pub fn pedir(
+    ctx: &egui::Context,
+    motor: &Motor,
+    sessao: &Sessao,
+    estado: &mut EstadoNotas,
+    documento: Id,
+    pedido: PedidoDocumento,
+    justificativa: &str,
+) -> Result<DocumentoResumo, String> {
+    let justificativa = justificativa.trim().to_owned();
+    let r: Result<DocumentoResumo, _> = match pedido {
+        PedidoDocumento::Cancelar => motor.executar(
+            sessao,
+            "fiscal.cancelar_nfce.v1",
+            &CancelarNfce {
+                documento,
+                justificativa,
+            },
+        ),
+        PedidoDocumento::Inutilizar => motor.executar(
+            sessao,
+            "fiscal.inutilizar_numero.v1",
+            &InutilizarNumero {
+                documento,
+                justificativa,
+            },
+        ),
+    };
+    let d = r.map_err(|e| e.mensagem)?;
+    estado.pedindo = None;
+    fiscal_fundo::disparar(ctx, motor, sessao);
+    estado.carregar(motor, sessao);
+    Ok(d)
 }
 
 impl EstadoNotas {
@@ -126,7 +169,7 @@ fn etiqueta(d: &DocumentoResumo) -> Etiqueta {
         EstadoDocumento::Autorizada => Etiqueta::positiva(rotulo),
         EstadoDocumento::Pendente | EstadoDocumento::Incerta => Etiqueta::info(rotulo),
         EstadoDocumento::Rejeitada | EstadoDocumento::Denegada => Etiqueta::negativa(rotulo),
-        EstadoDocumento::Cancelada => Etiqueta::neutra(rotulo),
+        EstadoDocumento::Cancelada | EstadoDocumento::Inutilizada => Etiqueta::neutra(rotulo),
     }
 }
 
@@ -226,6 +269,9 @@ fn grade(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoN
         row.col(|ui| {
             ui.horizontal(|ui| {
                 ui.add(etiqueta(d));
+                if let Some(p) = d.pedido {
+                    ui.add(Etiqueta::atencao(p.rotulo()));
+                }
                 if d.ambiente == AmbienteFiscal::Homologacao {
                     ui.add(Etiqueta::neutra("teste"));
                 }
@@ -276,9 +322,15 @@ fn grade(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoN
 }
 
 fn detalhe(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoNotas) {
-    let Some(d) = &estado.detalhe else { return };
+    let Some(d) = estado.detalhe.clone() else {
+        return;
+    };
+    let pode_cancelar = sessao.concede("fiscal.cancelar") && d.resumo.pedido.is_none();
     let mut fechar = false;
     let mut imprimir = None;
+    let mut abrir_pedido = None;
+    let mut confirmar = false;
+    let mut desistir = false;
     ui.add_space(Espaco::E12);
     Painel::novo()
         .titulo(format!("NFC-e {}-{}", d.resumo.serie, d.resumo.numero))
@@ -334,17 +386,90 @@ fn detalhe(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estad
                 }
                 ui.add_space(Espaco::E8);
             }
+            if let Some(p) = d.resumo.pedido {
+                ui.add(Etiqueta::atencao(p.rotulo()).com_ponto());
+                ui.add_space(Espaco::E8);
+            }
+            if let Some((pedido, justificativa)) = estado.pedindo.as_mut() {
+                Painel::novo().realce(Tom::Atencao).mostrar(ui, |ui| {
+                    ui.add(Rotulo::interface(match pedido {
+                        PedidoDocumento::Cancelar => {
+                            "Cancelar esta NFC-e na SEFAZ (em geral até 30 minutos depois de autorizada). A venda em si não é desfeita aqui."
+                        }
+                        PedidoDocumento::Inutilizar => {
+                            "Inutilizar o número desta nota, que não vai mais ser enviada — sem isso ele fica como um buraco na série."
+                        }
+                    }).quebravel());
+                    ui.add_space(Espaco::E8);
+                    ui.add(
+                        Campo::novo("Justificativa (15 a 255 caracteres)", justificativa)
+                            .multilinha(2),
+                    );
+                    ui.add_space(Espaco::E8);
+                    ui.horizontal(|ui| {
+                        confirmar = ui
+                            .add(Botao::destrutivo(match pedido {
+                                PedidoDocumento::Cancelar => "Confirmar cancelamento",
+                                PedidoDocumento::Inutilizar => "Confirmar inutilização",
+                            }))
+                            .clicked();
+                        desistir = ui.add(Botao::fantasma("Desistir")).clicked();
+                    });
+                });
+                ui.add_space(Espaco::E8);
+            }
             ui.horizontal(|ui| {
                 if d.resumo.estado == EstadoDocumento::Autorizada
                     && ui.add(Botao::secundario("Imprimir cupom fiscal")).clicked()
                 {
                     imprimir = Some(d.resumo.id);
                 }
+                if pode_cancelar && estado.pedindo.is_none() {
+                    if d.resumo.estado == EstadoDocumento::Autorizada
+                        && ui.add(Botao::fantasma("Cancelar NFC-e")).clicked()
+                    {
+                        abrir_pedido = Some(PedidoDocumento::Cancelar);
+                    }
+                    if d.resumo.estado == EstadoDocumento::Rejeitada
+                        && ui.add(Botao::fantasma("Inutilizar número")).clicked()
+                    {
+                        abrir_pedido = Some(PedidoDocumento::Inutilizar);
+                    }
+                }
                 fechar = ui.add(Botao::fantasma("Fechar")).clicked();
             });
         });
+    if let Some(p) = abrir_pedido {
+        estado.pedindo = Some((p, String::new()));
+    }
+    if desistir {
+        estado.pedindo = None;
+    }
+    if confirmar {
+        if let Some((pedido, justificativa)) = estado.pedindo.clone() {
+            match pedir(
+                ui.ctx(),
+                motor,
+                sessao,
+                estado,
+                d.resumo.id,
+                pedido,
+                &justificativa,
+            ) {
+                Ok(_) => notificar(
+                    ui.ctx(),
+                    Notificacao::sucesso(match pedido {
+                        PedidoDocumento::Cancelar => "Cancelamento na fila",
+                        PedidoDocumento::Inutilizar => "Inutilização na fila",
+                    }),
+                ),
+                Err(e) => notificar(ui.ctx(), Notificacao::erro(e)),
+            }
+        }
+    }
     if fechar {
         estado.detalhe = None;
+        estado.pedindo = None;
     }
     if let Some(id) = imprimir {
         match crate::danfce::imprimir(motor, sessao, id) {
@@ -379,6 +504,7 @@ mod testes {
             tentativas: 0,
             criado_em: cardeal_kernel::Instante::agora(),
             autorizado_em: None,
+            pedido: None,
         }
     }
 
@@ -435,5 +561,45 @@ mod testes {
 
         // Reenviar um documento que não existe dá erro, sem quebrar a tela.
         assert!(reenviar(&ctx, m, s, &mut estado, Id::novo()).is_err());
+    }
+
+    #[test]
+    fn detalhe_com_cancelamento_aberto_e_pedido_invalido() {
+        let t = motor_de_teste();
+        let (m, s) = (&t.motor, &t.sessao);
+        let mut estado = EstadoNotas::default();
+        estado.carregar(m, s);
+        estado.detalhe = Some(DetalheDocumento {
+            resumo: documento(EstadoDocumento::Autorizada, 9),
+            nota: None,
+            xml: None,
+        });
+        estado.pedindo = Some((
+            PedidoDocumento::Cancelar,
+            "Cliente desistiu da compra".into(),
+        ));
+        let ctx = egui::Context::default();
+        cardeal_ui::tokens::instalar_fontes(&ctx);
+        cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+        for _ in 0..2 {
+            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    detalhe(ui, m, s, &mut estado);
+                });
+            });
+        }
+        // O documento não existe na base: o pedido volta com erro e o formulário fica aberto.
+        let id = estado.detalhe.as_ref().unwrap().resumo.id;
+        assert!(pedir(
+            &ctx,
+            m,
+            s,
+            &mut estado,
+            id,
+            PedidoDocumento::Cancelar,
+            "Cliente desistiu da compra"
+        )
+        .is_err());
+        assert!(estado.pedindo.is_some());
     }
 }

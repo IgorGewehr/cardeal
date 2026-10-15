@@ -4,7 +4,7 @@ use cardeal_fiscal::{AmbienteFiscal, ModeloFiscal};
 use cardeal_kernel::{CodigoErro, Dinheiro, Erro, Id, Instante, Resultado};
 use rusqlite::{params, Connection, OptionalExtension, Row};
 
-use crate::documento::{DocumentoResumo, EstadoDocumento, Mudanca, ResumoFiscal};
+use crate::documento::{DocumentoResumo, EstadoDocumento, Mudanca, PedidoDocumento, ResumoFiscal};
 
 #[allow(clippy::needless_pass_by_value)]
 fn falha(e: rusqlite::Error) -> Erro {
@@ -208,7 +208,7 @@ pub(crate) fn inserir_documento(c: &Connection, d: &NovoDocumento<'_>) -> Result
 
 const COLUNAS: &str =
     "id, modelo, serie, numero, ambiente, estado, total, chave, protocolo, codigo,
-                       motivo, origem_id, tentativas, criado_em, autorizado_em";
+                       motivo, origem_id, tentativas, criado_em, autorizado_em, pedido";
 
 fn resumo_de(r: &Row<'_>) -> rusqlite::Result<DocumentoResumo> {
     Ok(DocumentoResumo {
@@ -236,6 +236,10 @@ fn resumo_de(r: &Row<'_>) -> rusqlite::Result<DocumentoResumo> {
         tentativas: r.get(12)?,
         criado_em: Instante::de_micros(r.get(13)?),
         autorizado_em: r.get::<_, Option<i64>>(14)?.map(Instante::de_micros),
+        pedido: r
+            .get::<_, Option<String>>(15)?
+            .as_deref()
+            .and_then(PedidoDocumento::de_str),
     })
 }
 
@@ -285,9 +289,9 @@ pub(crate) fn documento(
         |r| {
             Ok(DocumentoGuardado {
                 resumo: resumo_de(r)?,
-                nota: r.get(15)?,
-                xml: r.get(16)?,
-                origem_modulo: r.get(17)?,
+                nota: r.get(16)?,
+                xml: r.get(17)?,
+                origem_modulo: r.get(18)?,
             })
         },
     )
@@ -328,6 +332,12 @@ pub(crate) fn documentos(
 pub(crate) struct NaFila {
     pub id: Id,
     pub ambiente: AmbienteFiscal,
+    pub pedido: Option<PedidoDocumento>,
+    pub justificativa: Option<String>,
+    pub protocolo: Option<String>,
+    pub serie: u32,
+    pub numero: u64,
+    pub criado_em: Instante,
     pub estado: EstadoDocumento,
     pub tentativas: u32,
     pub chave: Option<String>,
@@ -343,8 +353,11 @@ pub(crate) fn fila(
 ) -> Resultado<Vec<NaFila>> {
     let mut stmt = c
         .prepare(
-            "SELECT id, estado, tentativas, chave, nota, ambiente FROM fiscal_documento
-             WHERE empresa = ?1 AND estado IN ('Pendente','Incerta') AND proxima_tentativa <= ?2
+            "SELECT id, estado, tentativas, chave, nota, ambiente, pedido, justificativa, protocolo,
+                    serie, numero, criado_em
+             FROM fiscal_documento
+             WHERE empresa = ?1 AND (estado IN ('Pendente','Incerta') OR pedido IS NOT NULL)
+               AND proxima_tentativa <= ?2
              ORDER BY criado_em LIMIT ?3",
         )
         .map_err(falha)?;
@@ -364,6 +377,15 @@ pub(crate) fn fila(
                     } else {
                         AmbienteFiscal::Homologacao
                     },
+                    pedido: r
+                        .get::<_, Option<String>>(6)?
+                        .as_deref()
+                        .and_then(PedidoDocumento::de_str),
+                    justificativa: r.get(7)?,
+                    protocolo: r.get(8)?,
+                    serie: r.get(9)?,
+                    numero: u64::try_from(r.get::<_, i64>(10)?).unwrap_or(0),
+                    criado_em: Instante::de_micros(r.get(11)?),
                 })
             },
         )
@@ -396,7 +418,10 @@ pub(crate) fn aplicar_mudanca(
            tentativas = tentativas + 1,
            proxima_tentativa = ?11,
            autorizado_em = COALESCE(?12, autorizado_em),
-           atualizado_em = ?13
+           atualizado_em = ?13,
+           pedido = CASE WHEN ?14 THEN NULL ELSE pedido END,
+           protocolo_evento = COALESCE(?15, protocolo_evento),
+           evento_em = CASE WHEN ?15 IS NULL THEN evento_em ELSE ?13 END
          WHERE empresa = ?1 AND id = ?2 AND estado = ?3",
         params![
             empresa.em_bytes().as_slice(),
@@ -412,6 +437,36 @@ pub(crate) fn aplicar_mudanca(
             proxima,
             autorizado,
             agora.em_micros(),
+            m.limpar_pedido,
+            m.protocolo_evento,
+        ],
+    )
+    .map(|n| n > 0)
+    .map_err(falha)
+}
+
+/// Registra um pedido (cancelar/inutilizar) num documento que está em `estado_exigido` e sem
+/// pedido. Devolve se registrou.
+pub(crate) fn pedir(
+    c: &Connection,
+    empresa: Id,
+    id: Id,
+    pedido: PedidoDocumento,
+    justificativa: &str,
+    estado_exigido: EstadoDocumento,
+    agora: Instante,
+) -> Resultado<bool> {
+    c.execute(
+        "UPDATE fiscal_documento SET pedido = ?3, justificativa = ?4, tentativas = 0,
+           proxima_tentativa = 0, atualizado_em = ?5
+         WHERE empresa = ?1 AND id = ?2 AND estado = ?6 AND pedido IS NULL",
+        params![
+            empresa.em_bytes().as_slice(),
+            id.em_bytes().as_slice(),
+            pedido.como_str(),
+            justificativa,
+            agora.em_micros(),
+            estado_exigido.como_str()
         ],
     )
     .map(|n| n > 0)

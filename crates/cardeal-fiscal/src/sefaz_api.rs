@@ -19,7 +19,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::chave::ChaveAcesso;
-use crate::emissao::{Csc, ItemDocumento, Nfce, RetornoSefaz, SituacaoRetorno};
+use crate::emissao::{Csc, ItemDocumento, Nfce, PedidoInutilizacao, RetornoSefaz, SituacaoRetorno};
 use crate::erros::ErroFiscal;
 use crate::porta::{
     AmbienteFiscal, ModeloFiscal, Nsu, PortaFiscal, ResumoDfe, StatusSefaz, XmlNota,
@@ -447,6 +447,41 @@ impl PortaFiscal for ApiFiscalHttp {
         corpo.insert("chaveAcesso".into(), Value::from(chave.como_str()));
         corpo.insert("ufEmitente".into(), Value::from(uf.sigla()));
         self.postar("/nfe/consultar", &Value::Object(corpo))
+            .map(RespostaSefazApi::em_retorno)
+            .map_err(|e| Erro::de_dominio(&e))
+    }
+
+    fn cancelar(
+        &self,
+        chave: &ChaveAcesso,
+        protocolo: &str,
+        justificativa: &str,
+        uf: Uf,
+    ) -> Resultado<RetornoSefaz> {
+        let mut corpo = self.corpo_base();
+        corpo.insert("chaveAcesso".into(), Value::from(chave.como_str()));
+        corpo.insert("protocolo".into(), Value::from(protocolo));
+        corpo.insert("justificativa".into(), Value::from(justificativa));
+        corpo.insert("ufEmitente".into(), Value::from(uf.sigla()));
+        self.postar("/nfe/cancelar", &Value::Object(corpo))
+            .map(RespostaSefazApi::em_retorno)
+            .map_err(|e| Erro::de_dominio(&e))
+    }
+
+    fn inutilizar(&self, p: &PedidoInutilizacao) -> Resultado<RetornoSefaz> {
+        let mut corpo = self.corpo_base();
+        corpo.insert("cnpj".into(), Value::from(p.cnpj.sem_mascara()));
+        corpo.insert("modelo".into(), Value::from(p.modelo.codigo()));
+        corpo.insert("serie".into(), Value::from(p.serie.to_string()));
+        corpo.insert("numeroInicial".into(), Value::from(p.inicio));
+        corpo.insert("numeroFinal".into(), Value::from(p.fim));
+        corpo.insert("ano".into(), Value::from(format!("{:02}", p.ano % 100)));
+        corpo.insert(
+            "justificativa".into(),
+            Value::from(p.justificativa.as_str()),
+        );
+        corpo.insert("ufEmitente".into(), Value::from(p.uf.sigla()));
+        self.postar("/nfe/inutilizar", &Value::Object(corpo))
             .map(RespostaSefazApi::em_retorno)
             .map_err(|e| Erro::de_dominio(&e))
     }

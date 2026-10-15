@@ -262,6 +262,27 @@ pub struct Csc {
     pub token: Segredo<String>,
 }
 
+/// O pedido de inutilização de uma faixa de números que nunca vão ser usados.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PedidoInutilizacao {
+    /// O CNPJ do emitente.
+    pub cnpj: Cnpj,
+    /// NF-e ou NFC-e.
+    pub modelo: crate::porta::ModeloFiscal,
+    /// A série.
+    pub serie: u32,
+    /// O primeiro número.
+    pub inicio: u64,
+    /// O último número.
+    pub fim: u64,
+    /// O ano (dois dígitos) em que os números seriam usados.
+    pub ano: u16,
+    /// A justificativa (15 a 255 caracteres).
+    pub justificativa: String,
+    /// A UF do emitente.
+    pub uf: Uf,
+}
+
 /// Como a SEFAZ (ou o provedor) respondeu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SituacaoRetorno {

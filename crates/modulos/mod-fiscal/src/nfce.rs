@@ -134,6 +134,63 @@ impl Comando for ReenviarDocumento {
     }
 }
 
+/// Pede o cancelamento de uma NFC-e autorizada. A fila leva à SEFAZ (que aceita dentro do
+/// prazo da UF — em geral 30 minutos para a NFC-e); recusado, a nota continua autorizada com o
+/// motivo. A venda em si não é desfeita aqui.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CancelarNfce {
+    /// O documento (autorizado).
+    pub documento: Id,
+    /// A justificativa (15 a 255 caracteres).
+    pub justificativa: String,
+}
+
+impl Comando for CancelarNfce {
+    type Saida = DocumentoResumo;
+    const PERMISSAO: &'static str = "fiscal.cancelar";
+    const RISCO: Risco = Risco::Alto;
+    const AUDITA: bool = true;
+
+    #[cfg(feature = "sqlite")]
+    fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<DocumentoResumo> {
+        sqlite::pedir(
+            ctx,
+            uow,
+            self.documento,
+            crate::documento::PedidoDocumento::Cancelar,
+            &self.justificativa,
+        )
+    }
+}
+
+/// Pede a inutilização do número de uma NFC-e rejeitada que não vai mais ser enviada — sem
+/// isso, o número fica como um buraco na série.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InutilizarNumero {
+    /// O documento (rejeitado).
+    pub documento: Id,
+    /// A justificativa (15 a 255 caracteres).
+    pub justificativa: String,
+}
+
+impl Comando for InutilizarNumero {
+    type Saida = DocumentoResumo;
+    const PERMISSAO: &'static str = "fiscal.cancelar";
+    const RISCO: Risco = Risco::Alto;
+    const AUDITA: bool = true;
+
+    #[cfg(feature = "sqlite")]
+    fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<DocumentoResumo> {
+        sqlite::pedir(
+            ctx,
+            uow,
+            self.documento,
+            crate::documento::PedidoDocumento::Inutilizar,
+            &self.justificativa,
+        )
+    }
+}
+
 /// Os documentos fiscais, os mais novos primeiro (até 500).
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct DocumentosFiscais {
@@ -227,6 +284,7 @@ pub const TAREFA_TRANSMITIR: &str = "fiscal.transmitir_pendentes";
 #[cfg(feature = "sqlite")]
 pub(crate) mod sqlite {
     use std::collections::{HashMap, HashSet};
+    use std::fmt::Write as _;
     use std::sync::Mutex;
 
     use cardeal_fiscal::{
@@ -239,7 +297,9 @@ pub(crate) mod sqlite {
     use rusqlite::Connection;
 
     use super::{ConfiguracaoNfce, ConfigurarNfce};
-    use crate::documento::{decidir, Desfecho, DocumentoResumo, EstadoDocumento};
+    use crate::documento::{
+        decidir, decidir_evento, Desfecho, DocumentoResumo, EstadoDocumento, PedidoDocumento,
+    };
     use crate::montagem::{marcar_homologacao, montar_nfce, DadosDaVenda, ItemDaVenda};
     use crate::sql_documento as sqld;
 
@@ -616,6 +676,61 @@ pub(crate) mod sqlite {
             .ok_or_else(|| Erro::nao_encontrado("documento fiscal"))
     }
 
+    pub(super) fn pedir(
+        ctx: &Ctx,
+        uow: &mut UnidadeDeTrabalho,
+        documento: Id,
+        pedido: PedidoDocumento,
+        justificativa: &str,
+    ) -> Resultado<DocumentoResumo> {
+        let justificativa = justificativa.trim();
+        let n = justificativa.chars().count();
+        if !(15..=255).contains(&n) {
+            return Err(Erro::novo(
+                CodigoErro::VALOR_INVALIDO,
+                "A justificativa precisa ter de 15 a 255 caracteres",
+            )
+            .no_campo("justificativa"));
+        }
+        let c = uow.conexao();
+        let guardado = sqld::documento(c, ctx.empresa, documento)?
+            .ok_or_else(|| Erro::nao_encontrado("documento fiscal"))?;
+        let resumo = guardado.resumo;
+        let exigido = match pedido {
+            PedidoDocumento::Cancelar => EstadoDocumento::Autorizada,
+            PedidoDocumento::Inutilizar => EstadoDocumento::Rejeitada,
+        };
+        if resumo.estado != exigido {
+            return Err(Erro::novo(
+                CodigoErro::ESTADO_INVALIDO,
+                match pedido {
+                    PedidoDocumento::Cancelar => "Só NFC-e autorizada é cancelada",
+                    PedidoDocumento::Inutilizar => {
+                        "Só o número de uma NFC-e rejeitada (que nunca foi autorizada) é inutilizado"
+                    }
+                },
+            ));
+        }
+        if let Some(p) = resumo.pedido {
+            return Err(Erro::novo(
+                CodigoErro::ESTADO_INVALIDO,
+                format!("Já há um pedido para esta nota: {}", p.rotulo()),
+            ));
+        }
+        sqld::pedir(
+            c,
+            ctx.empresa,
+            documento,
+            pedido,
+            justificativa,
+            exigido,
+            ctx.agora,
+        )?;
+        sqld::documento(c, ctx.empresa, documento)?
+            .map(|d| d.resumo)
+            .ok_or_else(|| Erro::nao_encontrado("documento fiscal"))
+    }
+
     /// As empresas com transmissão em andamento neste processo — duas tarefas ao mesmo tempo
     /// emitiriam a mesma nota duas vezes.
     static EM_ANDAMENTO: Mutex<Option<HashSet<Id>>> = Mutex::new(None);
@@ -694,32 +809,36 @@ pub(crate) mod sqlite {
             let uf = mod_empresa::sql::dados_fiscais(c, empresa)?.uf();
             Ok((portas, csc, uf))
         })?;
+        let cnpj = t.ler(|c| {
+            Ok(cardeal_kernel::Cnpj::novo(&mod_empresa::sql::dados(c, empresa)?.cnpj).ok())
+        })?;
+        let mut eventos = (0_u32, 0_u32, 0_u32); // cancelados, inutilizados, recusados
         let mut contagem: HashMap<EstadoDocumento, u32> = HashMap::new();
         for doc in fila {
             let Some(porta) = portas.get(&doc.ambiente) else {
                 continue;
             };
-            let desfecho = match (doc.estado, &doc.nota, &doc.chave, &csc, uf) {
-                (EstadoDocumento::Pendente, Some(blob), _, Some(csc), _) => {
-                    match postcard::from_bytes::<Nfce>(blob) {
-                        Ok(nota) => desfecho(porta.emitir_nfce(&nota, csc)),
-                        Err(e) => Desfecho::Recusado(format!("a nota guardada está ilegível: {e}")),
-                    }
+            let desfecho = match doc.pedido {
+                Some(pedido) => {
+                    desfecho_do_pedido(porta.as_ref(), pedido, &doc, uf, cnpj, t.ctx.fuso)
                 }
-                (EstadoDocumento::Pendente, _, _, None, _) => Desfecho::Recusado(
-                    "o CSC da NFC-e não está cadastrado (Configurações › Fiscal)".into(),
-                ),
-                (EstadoDocumento::Incerta, _, Some(chave), _, Some(uf)) => {
-                    match ChaveAcesso::nova(chave) {
-                        Ok(chave) => desfecho(porta.consultar_documento(&chave, uf)),
-                        Err(e) => Desfecho::Recusado(e.to_string()),
-                    }
-                }
-                _ => Desfecho::Recusado("documento sem nota ou chave para transmitir".into()),
+                None => desfecho_da_emissao(porta.as_ref(), &doc, csc.as_ref(), uf),
             };
             let parar = matches!(desfecho, Desfecho::Indisponivel(_));
-            let mudanca = decidir(doc.estado, doc.tentativas, desfecho);
-            *contagem.entry(mudanca.estado).or_default() += 1;
+            let mudanca = if let Some(pedido) = doc.pedido {
+                let m = decidir_evento(pedido, doc.estado, doc.tentativas, desfecho);
+                match m.estado {
+                    EstadoDocumento::Cancelada => eventos.0 += 1,
+                    EstadoDocumento::Inutilizada => eventos.1 += 1,
+                    _ if m.limpar_pedido => eventos.2 += 1,
+                    _ => {}
+                }
+                m
+            } else {
+                let m = decidir(doc.estado, doc.tentativas, desfecho);
+                *contagem.entry(m.estado).or_default() += 1;
+                m
+            };
             let (id, estado_lido) = (doc.id, doc.estado);
             t.escrever(move |uow| {
                 sqld::aplicar_mudanca(
@@ -736,12 +855,93 @@ pub(crate) mod sqlite {
             }
         }
         let n = |e| contagem.get(&e).copied().unwrap_or(0);
-        Ok(format!(
+        let mut resumo = format!(
             "{} autorizada(s), {} rejeitada(s), {} na fila",
             n(EstadoDocumento::Autorizada),
             n(EstadoDocumento::Rejeitada) + n(EstadoDocumento::Denegada),
             n(EstadoDocumento::Pendente) + n(EstadoDocumento::Incerta)
-        ))
+        );
+        let (cancelados, inutilizados, recusados) = eventos;
+        if cancelados + inutilizados + recusados > 0 {
+            let _ = write!(
+                resumo,
+                "; {cancelados} cancelada(s), {inutilizados} inutilizada(s), {recusados} pedido(s) recusado(s)"
+            );
+        }
+        Ok(resumo)
+    }
+
+    /// Emite (pendente) ou consulta (incerta) um documento.
+    fn desfecho_da_emissao(
+        porta: &dyn PortaFiscal,
+        doc: &sqld::NaFila,
+        csc: Option<&Csc>,
+        uf: Option<Uf>,
+    ) -> Desfecho {
+        match (doc.estado, &doc.nota, &doc.chave, csc, uf) {
+            (EstadoDocumento::Pendente, Some(blob), _, Some(csc), _) => {
+                match postcard::from_bytes::<Nfce>(blob) {
+                    Ok(nota) => desfecho(porta.emitir_nfce(&nota, csc)),
+                    Err(e) => Desfecho::Recusado(format!("a nota guardada está ilegível: {e}")),
+                }
+            }
+            (EstadoDocumento::Pendente, _, _, None, _) => Desfecho::Recusado(
+                "o CSC da NFC-e não está cadastrado (Configurações › Fiscal)".into(),
+            ),
+            (EstadoDocumento::Incerta, _, Some(chave), _, Some(uf)) => {
+                match ChaveAcesso::nova(chave) {
+                    Ok(chave) => desfecho(porta.consultar_documento(&chave, uf)),
+                    Err(e) => Desfecho::Recusado(e.to_string()),
+                }
+            }
+            _ => Desfecho::Recusado("documento sem nota ou chave para transmitir".into()),
+        }
+    }
+
+    /// Leva um pedido (cancelar/inutilizar) à porta.
+    fn desfecho_do_pedido(
+        porta: &dyn PortaFiscal,
+        pedido: PedidoDocumento,
+        doc: &sqld::NaFila,
+        uf: Option<Uf>,
+        cnpj: Option<cardeal_kernel::Cnpj>,
+        fuso: cardeal_kernel::Fuso,
+    ) -> Desfecho {
+        let (Some(justificativa), Some(uf)) = (doc.justificativa.as_deref(), uf) else {
+            return Desfecho::Recusado("faltam a justificativa ou a UF da empresa".into());
+        };
+        match pedido {
+            PedidoDocumento::Cancelar => {
+                let (Some(chave), Some(protocolo)) =
+                    (doc.chave.as_deref(), doc.protocolo.as_deref())
+                else {
+                    return Desfecho::Recusado(
+                        "a nota não tem chave e protocolo para cancelar".into(),
+                    );
+                };
+                match ChaveAcesso::nova(chave) {
+                    Ok(chave) => desfecho(porta.cancelar(&chave, protocolo, justificativa, uf)),
+                    Err(e) => Desfecho::Recusado(e.to_string()),
+                }
+            }
+            PedidoDocumento::Inutilizar => {
+                let Some(cnpj) = cnpj else {
+                    return Desfecho::Recusado("o CNPJ da empresa é inválido".into());
+                };
+                let ano =
+                    u16::try_from(doc.criado_em.data(fuso).ano().rem_euclid(100)).unwrap_or(0);
+                desfecho(porta.inutilizar(&cardeal_fiscal::PedidoInutilizacao {
+                    cnpj,
+                    modelo: MODELO,
+                    serie: doc.serie,
+                    inicio: doc.numero,
+                    fim: doc.numero,
+                    ano,
+                    justificativa: justificativa.to_string(),
+                    uf,
+                }))
+            }
+        }
     }
 
     fn desfecho(r: Resultado<cardeal_fiscal::RetornoSefaz>) -> Desfecho {

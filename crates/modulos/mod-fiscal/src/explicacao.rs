@@ -7,7 +7,12 @@ pub fn explicar(codigo: &str, motivo: &str) -> String {
     let motivo = motivo.trim();
     let dica = match codigo {
         "100" | "150" => return "Autorizada".to_string(),
-        "101" | "151" | "155" => return "Cancelada na SEFAZ".to_string(),
+        "101" | "151" | "135" | "136" => return "Cancelada na SEFAZ".to_string(),
+        "155" => return "Cancelada na SEFAZ (fora do prazo, homologado)".to_string(),
+        "102" => return "Número inutilizado na SEFAZ".to_string(),
+        "501" => "o prazo de cancelamento já passou",
+        "573" | "218" => "o cancelamento já estava registrado",
+        "563" | "206" | "256" => "o número já estava inutilizado",
         "217" => "a SEFAZ não tem esta nota — ela vai ser emitida de novo",
         "108" | "109" => "a SEFAZ está fora do ar — a nota fica na fila e é enviada sozinha",
         "204" | "539" => "este número já tem nota na SEFAZ — conferindo qual",

@@ -25,6 +25,12 @@ const PERMISSOES: &[Permissao] = &[
         requer_submodulo: None,
     },
     Permissao {
+        chave: "fiscal.cancelar",
+        descricao: "Cancelar NFC-e autorizada e inutilizar números que não vão ser usados",
+        risco: Risco::Alto,
+        requer_submodulo: None,
+    },
+    Permissao {
         chave: "fiscal.configurar",
         descricao:
             "Instalar o certificado digital e trocar o ambiente fiscal (homologação/produção)",

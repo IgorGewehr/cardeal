@@ -75,6 +75,56 @@ CREATE INDEX fiscal_documento_fila ON fiscal_documento(empresa, proxima_tentativ
 CREATE INDEX fiscal_documento_criado ON fiscal_documento(empresa, criado_em);
 ";
 
+/// v3: cancelamento e inutilização como **pedidos** que a fila leva à SEFAZ (`pedido`,
+/// `justificativa`, `protocolo_evento`, `evento_em`) e o estado `Inutilizada`. O SQLite não
+/// muda um `CHECK`: a tabela é recriada com os dados.
+const SQL_V3: &str = "
+CREATE TABLE fiscal_documento_v3 (
+    id                BLOB PRIMARY KEY,
+    empresa           BLOB    NOT NULL REFERENCES nucleo_empresa(id),
+    modelo            TEXT    NOT NULL CHECK (modelo IN ('55','65')),
+    serie             INTEGER NOT NULL,
+    numero            INTEGER NOT NULL,
+    ambiente          TEXT    NOT NULL CHECK (ambiente IN ('homologacao','producao')),
+    origem_modulo     TEXT    NOT NULL,
+    origem_id         BLOB    NOT NULL,
+    estado            TEXT    NOT NULL CHECK (estado IN
+                          ('Pendente','Incerta','Autorizada','Rejeitada','Denegada','Cancelada',
+                           'Inutilizada')),
+    total             INTEGER NOT NULL,
+    nota              BLOB,
+    chave             TEXT,
+    protocolo         TEXT,
+    codigo            TEXT,
+    motivo            TEXT,
+    xml               TEXT,
+    tentativas        INTEGER NOT NULL DEFAULT 0,
+    proxima_tentativa INTEGER NOT NULL DEFAULT 0,
+    criado_em         INTEGER NOT NULL,
+    atualizado_em     INTEGER NOT NULL,
+    autorizado_em     INTEGER,
+    pedido            TEXT    CHECK (pedido IN ('cancelar','inutilizar')),
+    justificativa     TEXT,
+    protocolo_evento  TEXT,
+    evento_em         INTEGER,
+    UNIQUE (empresa, origem_modulo, origem_id),
+    UNIQUE (empresa, modelo, serie, ambiente, numero)
+) STRICT;
+INSERT INTO fiscal_documento_v3
+    (id, empresa, modelo, serie, numero, ambiente, origem_modulo, origem_id, estado, total, nota,
+     chave, protocolo, codigo, motivo, xml, tentativas, proxima_tentativa, criado_em,
+     atualizado_em, autorizado_em)
+SELECT id, empresa, modelo, serie, numero, ambiente, origem_modulo, origem_id, estado, total, nota,
+       chave, protocolo, codigo, motivo, xml, tentativas, proxima_tentativa, criado_em,
+       atualizado_em, autorizado_em
+FROM fiscal_documento;
+DROP TABLE fiscal_documento;
+ALTER TABLE fiscal_documento_v3 RENAME TO fiscal_documento;
+CREATE INDEX fiscal_documento_fila ON fiscal_documento(empresa, proxima_tentativa)
+    WHERE estado IN ('Pendente','Incerta') OR pedido IS NOT NULL;
+CREATE INDEX fiscal_documento_criado ON fiscal_documento(empresa, criado_em);
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -86,6 +136,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 2,
         nome: "fiscal_nfce_documento_e_serie",
         sql: SQL_V2,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 3,
+        nome: "fiscal_cancelamento_e_inutilizacao",
+        sql: SQL_V3,
         tipo: TipoMigracao::Esquema,
     },
 ];

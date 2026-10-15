@@ -232,6 +232,7 @@ mod testes {
                 tentativas: 1,
                 criado_em: Instante::agora(),
                 autorizado_em: Some(Instante::agora()),
+                pedido: None,
             },
             nota: Some(nota),
             xml: Some(format!(
