@@ -99,8 +99,15 @@ O que eles têm e o Cardeal não, com o que aprenderam:
 
    O `cardeal_fiscal::interpretar` não lê o destinatário nem o `finNFe`, então hoje o XML de uma
    venda nossa entraria como compra, com estoque e título a pagar.
-3. **Cancelar título** lançado errado (sem baixa; estorna o lançamento e bloqueia baixas futuras) e
-   **alterar o vencimento** de uma parcela em aberto (§4).
+3. ~~**Cancelar título** lançado errado e **alterar o vencimento** de uma parcela em aberto (§4).~~
+   **Feito (2026-10-15).** Diferente de lá:
+   - lá a conta é excluída de vez (até a já paga, estornando o saldo) e o valor é editável mesmo com
+     recebimento parcial;
+   - aqui cancelar é estornar (nada some), só vale para a conta lançada no financeiro e exige estornar
+     as baixas antes;
+   - o valor não se edita: corrigir valor é cancelar e lançar de novo.
+
+   Mantida a lição deles: conta cancelada não se baixa.
 4. **Saldo inicial** de cada conta e **transferência entre contas**, com a desativação de conta (§4).
 5. **Comprovante não fiscal** em 80 e 58 mm, com reimpressão; o DANFCE também em 58 mm (§3).
 6. **Venda a receber no PDV**: crediário, boleto e cheque, gerando o título com vencimento e

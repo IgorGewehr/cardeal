@@ -3,7 +3,7 @@
 //! Todos implementam [`ErroDominio`](cardeal_kernel::ErroDominio) — é o que a UI usa para
 //! transformar a falha em conversa (`docs/09-protocolo-api.md` §3), não em stack trace.
 
-use cardeal_kernel::{AcaoSugerida, CodigoErro, Detalhes, Dinheiro, ErroDominio};
+use cardeal_kernel::{AcaoSugerida, CodigoErro, Data, Detalhes, Dinheiro, ErroDominio};
 
 use crate::titulo::EstadoParcela;
 
@@ -56,6 +56,27 @@ pub enum ErroFinanceiro {
     /// A renegociação foi pedida sobre um título sem saldo em aberto.
     #[error("Não há saldo em aberto para renegociar")]
     SemSaldoParaRenegociar,
+
+    /// O título já foi cancelado.
+    #[error("Este título já foi cancelado")]
+    TituloJaCancelado,
+
+    /// O título nasceu de outro módulo (compra, venda, OS, renegociação): cancelá-lo só no
+    /// financeiro deixaria estoque e contabilidade desencontrados.
+    #[error("Este título veio {0}: desfaça por lá, não pelo financeiro")]
+    TituloDeOutraOrigem(&'static str),
+
+    /// O título tem baixa (recebimento ou pagamento) ainda válida, ou parcela renegociada.
+    #[error("Este título já tem {0}: estorne antes de cancelar")]
+    TituloComMovimento(&'static str),
+
+    /// O motivo do cancelamento vai ao histórico do estorno: ao menos 10 caracteres.
+    #[error("Explique o motivo do cancelamento (ao menos 10 caracteres)")]
+    MotivoDoCancelamentoCurto,
+
+    /// O novo vencimento cai antes da emissão do título.
+    #[error("O vencimento não pode ser antes da emissão ({0})")]
+    VencimentoAntesDaEmissao(Data),
 
     /// A quebra de caixa no fechamento passou da tolerância e nenhum motivo foi informado.
     #[error("A quebra de {quebra} passa da tolerância — informe o motivo")]
@@ -154,9 +175,13 @@ impl ErroDominio for ErroFinanceiro {
             | Self::NomeDeCategoriaVazio
             | Self::DadosDoChequeInvalidos(_)
             | Self::DataDoChequeInvalida(_)
-            | Self::BaixaZerada => CodigoErro::ENTRADA_INVALIDA,
+            | Self::BaixaZerada
+            | Self::MotivoDoCancelamentoCurto
+            | Self::VencimentoAntesDaEmissao(_) => CodigoErro::ENTRADA_INVALIDA,
             Self::ParcelaDeOutroTitulo
             | Self::SemSaldoParaRenegociar
+            | Self::TituloDeOutraOrigem(_)
+            | Self::TituloComMovimento(_)
             | Self::ValorSuperaSaldo { .. }
             | Self::QuebraExigeMotivo { .. }
             | Self::CaixaInativo
@@ -166,6 +191,7 @@ impl ErroDominio for ErroFinanceiro {
             | Self::EstadoDeSessaoInvalido { .. }
             | Self::CaixaJaAberto
             | Self::BaixaJaEstornada
+            | Self::TituloJaCancelado
             | Self::ChequeEmEstadoInvalido { .. }
             | Self::ParcelaEncerradaNaoReverte(_) => CodigoErro::ESTADO_INVALIDO,
             Self::CaixaFechado => CodigoErro::CAIXA_FECHADO,

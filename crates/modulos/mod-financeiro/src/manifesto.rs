@@ -178,6 +178,19 @@ const PERMISSOES: &[Permissao] = &[
         Risco::Alto,
         Some("receber"),
     ),
+    // ── títulos (receber e pagar) ───────────────────────────────────────────
+    perm(
+        "financeiro.titulo.cancelar",
+        "Cancelar título lançado errado (estorna o lançamento das parcelas)",
+        Risco::Alto,
+        None,
+    ),
+    perm(
+        "financeiro.titulo.editar",
+        "Alterar o vencimento de uma parcela em aberto",
+        Risco::Medio,
+        None,
+    ),
     // ── pagar ────────────────────────────────────────────────────────────────
     perm(
         "financeiro.pagar.ver",
@@ -481,6 +494,8 @@ const CONTAS_REQUERIDAS: &[ContaPadrao] = &[
 ];
 
 const EVENTOS_PUBLICADOS: &[&str] = &[
+    "financeiro.titulo_cancelado.v1",
+    "financeiro.vencimento_alterado.v1",
     "financeiro.caixa_aberto.v1",
     "financeiro.caixa_fechado.v1",
     "financeiro.sangria_registrada.v1",

@@ -522,6 +522,22 @@ impl<'a, 'b> RepositorioFinanceiro<'a, 'b> {
         Ok(())
     }
 
+    /// Muda o vencimento de uma parcela (`AlterarVencimento`). A parcela é a fonte do
+    /// vencimento para listas, aging, projeção e régua; o lançamento `Confirmado` do Razão não se
+    /// edita.
+    ///
+    /// # Errors
+    /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+    pub fn atualizar_vencimento(&mut self, p: &Parcela) -> Resultado<()> {
+        self.conn()
+            .execute(
+                "UPDATE financeiro_parcela SET vencimento = ?2, versao = ?3 WHERE id = ?1",
+                params![blob(p.id), dias(p.vencimento), versao_i64(p.versao)],
+            )
+            .map_err(persist)?;
+        Ok(())
+    }
+
     /// Regrava um título já cancelado (`Titulo::cancelar`) — nunca apaga a linha
     /// (`Titulo::esta_cancelado`).
     ///

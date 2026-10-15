@@ -118,15 +118,15 @@ pub use comandos::{
     materializar_recorrencias_pendentes,
 };
 pub use comandos::{
-    AbrirCaixa, BaixaFoiEstornada, BaixarPagamento, BaixarRecebimento, CadastrarCaixa,
-    CaixaCadastrado, CaixaFoiAberto, CaixaFoiFechado, CarteiraDeCheques, CategoriaCriada,
-    ChequeCompensado, ChequeFoiDevolvido, ChequeRegistrado, CompensarCheque, ContaBancariaCriada,
-    CriarCategoria, CriarContaBancaria, CriarRecorrencia, DadosLancamentoTitulo, DevolverCheque,
-    EstornarBaixa, FecharCaixa, ItemCheque, LancarTituloAPagar, LancarTituloAReceber,
-    MaterializarRecorrencias, PagamentoBaixado, RecebimentoBaixado, RecorrenciaCriada,
-    RegistrarCheque, RegistrarSangria, RegistrarSuprimento, RenegociarTitulo, SangriaFoiRegistrada,
-    SuprimentoFoiRegistrado, TituloAPagarLancado, TituloAReceberLancado, TituloFoiRenegociado,
-    TituloGravado,
+    AbrirCaixa, AlterarVencimento, BaixaFoiEstornada, BaixarPagamento, BaixarRecebimento,
+    CadastrarCaixa, CaixaCadastrado, CaixaFoiAberto, CaixaFoiFechado, CancelarTitulo,
+    CarteiraDeCheques, CategoriaCriada, ChequeCompensado, ChequeFoiDevolvido, ChequeRegistrado,
+    CompensarCheque, ContaBancariaCriada, CriarCategoria, CriarContaBancaria, CriarRecorrencia,
+    DadosLancamentoTitulo, DevolverCheque, EstornarBaixa, FecharCaixa, ItemCheque,
+    LancarTituloAPagar, LancarTituloAReceber, MaterializarRecorrencias, PagamentoBaixado,
+    RecebimentoBaixado, RecorrenciaCriada, RegistrarCheque, RegistrarSangria, RegistrarSuprimento,
+    RenegociarTitulo, SangriaFoiRegistrada, SuprimentoFoiRegistrado, TituloAPagarLancado,
+    TituloAReceberLancado, TituloFoiCancelado, TituloFoiRenegociado, TituloGravado,
 };
 pub use comandos::{
     BaixarPagamentosEmLote, BaixarRecebimentosEmLote, BaixasEmLoteFeitas, DadosBaixaEmLote,

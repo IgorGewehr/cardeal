@@ -45,8 +45,8 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   documento criado na venda sem rede, fila, transmissão em segundo plano (tarefa no despacho), conferência
   pela chave antes de reemitir, área Notas fiscais — e o **DANFCE** (80 mm, QR Code), o **cancelamento** e a
   **inutilização** como pedidos na fila, e o **estorno da venda** no PDV com a NFC-e anulada pela fila.
-  Próximo: o backlog do `docs/21-licoes-do-gestao-raiz.md` §5 (cancelar título, saldo inicial e
-  transferência…); a 1ª autorizada no RS espera os dados do usuário.
+  Próximo: o backlog do `docs/21-licoes-do-gestao-raiz.md` §5 (saldo inicial e transferência entre
+  contas, comprovante não fiscal…); a 1ª autorizada no RS espera os dados do usuário.
 - **Pendência de confiança:** as tabelas do Simples e as alíquotas precisam ser conferidas com o
   contador; o ST/IPI **da nota** já entra no custo (2026-10-13), mas a estimativa de ST pela MVA (sem o valor na
   nota) ainda não.
@@ -630,6 +630,12 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   destinatário, devolução de cliente e nota de entrada do emitente (importação por arquivo: erro com
   o motivo; varredura da SEFAZ: pula). CFOP fora de venda deixa aviso na nota (`compras` v5,
   `alerta`) e impede a confirmação automática.
+- **Cancelar conta e alterar vencimento (2026-10-15, item 3 do doc 21):** `financeiro.cancelar_titulo.v1`
+  (permissão nova `financeiro.titulo.cancelar`) estorna o `Confirmado` de cada parcela e marca
+  título/parcelas cancelados — só para título avulso ou de recorrência e sem baixa válida;
+  `financeiro.alterar_vencimento.v1` (`financeiro.titulo.editar`) muda o vencimento de parcela em
+  aberto de qualquer origem. No diálogo da parcela, seções "Alterar vencimento" e "Cancelar esta conta"
+  (com a explicação de onde desfazer quando a conta veio de outro módulo).
 - **Inventário com contagem cega (2026-10-13):** migração `estoque` v11 (`estoque_inventario`,
   `estoque_contagem_item`), comandos `criar_inventario`/`iniciar_contagem`/`registrar_contagem`/
   `encerrar_inventario`/`cancelar_inventario` (`.v1`) e consultas `inventarios`/`posicao_do_inventario`.

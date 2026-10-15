@@ -10,16 +10,17 @@ use cardeal_ledger::{semear_plano_padrao, Contas, Contraparte, PapelConta, Repos
 use cardeal_modkit::{Ambiente, Ctx, Despachante, Modulo, PedidoAtivacao, RegistroModulos};
 use cardeal_storage::{Armazenamento, ConfigArmazenamento, ContextoEscrita, ErroArmazenamento};
 use mod_financeiro::{
-    materializar_recorrencias_pendentes, AbrirCaixa, BaixarPagamento, BaixarRecebimento,
-    CadastrarCaixa, CaixaFoiAberto, CaixaFoiFechado, CategoriaCriada, CategoriaFinanceira,
-    Categorias, ConstrutorTitulo, CriarCategoria, CriarContaBancaria, CriarRecorrencia,
-    EspecieTitulo, EstornarBaixa, ExtratoDisponivel, FecharCaixa, ItemTituloEmAberto,
-    ItemTotalPorCategoria, LancarTituloAPagar, LancarTituloAReceber, MeioPagamento,
-    ModuloFinanceiro, PagamentoBaixado, ParcelasAReceberNoPeriodo, Periodicidade, PoliticaJuros,
-    QuitadoAgora, RecebimentoBaixado, RecorrenciaCriada, RegistrarSangria, RegistrarSuprimento,
-    RenegociarTitulo, RepositorioFinanceiro, SangriaFoiRegistrada, SuprimentoFoiRegistrado,
-    TipoValor, TituloAPagarLancado, TituloAReceberLancado, TituloDaOrigem, TitulosAReceberEmAberto,
-    TotalPorCategoriaNoPeriodo, TotalRecebidoNoPeriodo, MANIFESTO,
+    lancar_titulo_comum, materializar_recorrencias_pendentes, AbrirCaixa, AlterarVencimento,
+    BaixarPagamento, BaixarRecebimento, CadastrarCaixa, CaixaFoiAberto, CaixaFoiFechado,
+    CancelarTitulo, CategoriaCriada, CategoriaFinanceira, Categorias, ConstrutorTitulo,
+    CriarCategoria, CriarContaBancaria, CriarRecorrencia, DadosLancamentoTitulo, EspecieTitulo,
+    EstornarBaixa, ExtratoDisponivel, FecharCaixa, ItemTituloEmAberto, ItemTotalPorCategoria,
+    LancarTituloAPagar, LancarTituloAReceber, MeioPagamento, ModuloFinanceiro, PagamentoBaixado,
+    ParcelasAReceberNoPeriodo, Periodicidade, PoliticaJuros, QuitadoAgora, RecebimentoBaixado,
+    RecorrenciaCriada, RegistrarSangria, RegistrarSuprimento, RenegociarTitulo,
+    RepositorioFinanceiro, SangriaFoiRegistrada, SuprimentoFoiRegistrado, TipoValor,
+    TituloAPagarLancado, TituloAReceberLancado, TituloDaOrigem, TituloFoiCancelado,
+    TitulosAReceberEmAberto, TotalPorCategoriaNoPeriodo, TotalRecebidoNoPeriodo, MANIFESTO,
 };
 use serde::Serialize;
 use tempfile::TempDir;
@@ -2335,4 +2336,279 @@ fn regua_monta_a_fila_registra_o_envio_e_aceita_regua_propria() {
     // Duas etapas no mesmo dia: recusado, e a régua gravada continua a de antes.
     let e = definir(vec![cinco.clone(), cinco]).unwrap_err();
     assert_eq!(e.codigo, CodigoErro::ENTRADA_INVALIDA);
+}
+
+/// Quantas contas do Razão ficaram com saldo diferente de zero, somando todas as partidas.
+fn contas_com_saldo(arm: &Armazenamento, empresa: Id) -> i64 {
+    arm.leitor()
+        .consultar(|c| {
+            c.query_row(
+                "SELECT COUNT(*) FROM (
+                   SELECT rp.conta, SUM(rp.valor) s FROM razao_partida rp
+                   JOIN razao_lancamento rl ON rl.id = rp.lancamento
+                   WHERE rl.empresa = ?1 GROUP BY rp.conta HAVING s <> 0)",
+                [empresa.em_bytes().as_slice()],
+                |r| r.get(0),
+            )
+            .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+        })
+        .unwrap()
+}
+
+fn cancelar(
+    d: &Despachante,
+    arm: &Armazenamento,
+    empresa: Id,
+    s: &Sessao,
+    titulo: Id,
+    motivo: &str,
+) -> Result<TituloFoiCancelado, cardeal_kernel::Erro> {
+    d.executar_comando(
+        "financeiro.cancelar_titulo.v1",
+        &carga(&CancelarTitulo {
+            titulo,
+            motivo: motivo.to_string(),
+        }),
+        s,
+        &ambiente(empresa),
+        arm.escritor(),
+    )
+    .map(|b| postcard::from_bytes(&b).unwrap())
+}
+
+#[test]
+fn cancelar_titulo_lancado_errado_estorna_tudo_e_trava_a_baixa() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloFinanceiro]).unwrap();
+    let s = sessao(
+        empresa,
+        &[
+            "financeiro.receber.criar",
+            "financeiro.receber.baixar",
+            "financeiro.titulo.cancelar",
+        ],
+    );
+    let titulo = lancar(&d, &arm, empresa, &s, Dinheiro::reais(90), 3);
+
+    let curto = cancelar(&d, &arm, empresa, &s, titulo.titulo, "errei").unwrap_err();
+    assert_eq!(curto.codigo, CodigoErro::ENTRADA_INVALIDA);
+    let sem = sessao(empresa, &["financeiro.receber.criar"]);
+    let negado = cancelar(
+        &d,
+        &arm,
+        empresa,
+        &sem,
+        titulo.titulo,
+        "Lançado em duplicidade",
+    )
+    .unwrap_err();
+    assert_eq!(negado.codigo, CodigoErro::SEM_PERMISSAO);
+
+    let feito = cancelar(
+        &d,
+        &arm,
+        empresa,
+        &s,
+        titulo.titulo,
+        "Lançado em duplicidade",
+    )
+    .unwrap();
+    assert_eq!((feito.parcelas, feito.valor), (3, Dinheiro::reais(90)));
+    // Três lançamentos e três estornos: o Razão volta a zero em toda conta.
+    assert_eq!(conta_lancamentos(&arm, empresa), 6);
+    assert_eq!(contas_com_saldo(&arm, empresa), 0);
+
+    // Parcela cancelada não aceita baixa (não "ressuscita" a receita).
+    let baixa = d
+        .executar_comando(
+            "financeiro.baixar_recebimento.v1",
+            &carga(&BaixarRecebimento {
+                parcela: titulo.parcelas[0],
+                valor: Dinheiro::reais(30),
+                data: hoje(),
+                meio_pagamento: MeioPagamento::Dinheiro,
+                conta_destino: None,
+            }),
+            &s,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+        .unwrap_err();
+    assert_eq!(baixa.codigo, CodigoErro::ESTADO_INVALIDO);
+    assert_eq!(
+        cancelar(
+            &d,
+            &arm,
+            empresa,
+            &s,
+            titulo.titulo,
+            "Lançado em duplicidade"
+        )
+        .unwrap_err()
+        .codigo,
+        CodigoErro::ESTADO_INVALIDO
+    );
+}
+
+#[test]
+fn cancelar_titulo_com_baixa_exige_estornar_antes() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloFinanceiro]).unwrap();
+    let s = sessao(
+        empresa,
+        &[
+            "financeiro.receber.criar",
+            "financeiro.receber.baixar",
+            "financeiro.receber.estornar",
+            "financeiro.titulo.cancelar",
+        ],
+    );
+    let titulo = lancar(&d, &arm, empresa, &s, Dinheiro::reais(100), 1);
+    let baixada: RecebimentoBaixado = postcard::from_bytes(
+        &d.executar_comando(
+            "financeiro.baixar_recebimento.v1",
+            &carga(&BaixarRecebimento {
+                parcela: titulo.parcelas[0],
+                valor: Dinheiro::reais(40),
+                data: hoje(),
+                meio_pagamento: MeioPagamento::Dinheiro,
+                conta_destino: None,
+            }),
+            &s,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let erro = cancelar(
+        &d,
+        &arm,
+        empresa,
+        &s,
+        titulo.titulo,
+        "Cliente nunca existiu",
+    )
+    .unwrap_err();
+    assert_eq!(erro.codigo, CodigoErro::REGRA_VIOLADA);
+    assert!(erro.mensagem.contains("estorne"), "{}", erro.mensagem);
+
+    d.executar_comando(
+        "financeiro.estornar_baixa.v1",
+        &carga(&EstornarBaixa {
+            baixa: baixada.baixa,
+            motivo: "Recebimento lançado por engano".to_string(),
+        }),
+        &s,
+        &ambiente(empresa),
+        arm.escritor(),
+    )
+    .unwrap();
+    cancelar(
+        &d,
+        &arm,
+        empresa,
+        &s,
+        titulo.titulo,
+        "Cliente nunca existiu",
+    )
+    .unwrap();
+    assert_eq!(contas_com_saldo(&arm, empresa), 0);
+}
+
+/// Um título "de compra" lançado pelo corpo comum, como o `mod-compras` faz.
+fn titulo_de_compra(arm: &Armazenamento, empresa: Id) -> (Id, Id) {
+    let ctx_escrita = ContextoEscrita::novo(empresa, Id::novo(), Id::novo(), Id::novo());
+    let gravado = arm
+        .escritor()
+        .executar(ctx_escrita, move |uow| {
+            lancar_titulo_comum(
+                DadosLancamentoTitulo {
+                    especie: EspecieTitulo::Pagar,
+                    contraparte: None,
+                    valor_total: Dinheiro::reais(500),
+                    emissao: hoje(),
+                    parcelas: 1,
+                    primeiro_vencimento: hoje().mais_dias(30),
+                    intervalo_dias: 30,
+                    observacao: None,
+                    categoria: None,
+                    origem_modulo: "compras",
+                    origem_id: Some(Id::novo()),
+                    papel_contraparte: PapelConta::Fornecedores,
+                    papel_resultado: PapelConta::EstoqueMercadorias,
+                },
+                &ctx_direto(empresa),
+                uow,
+            )
+            .map_err(liga_erro)
+        })
+        .unwrap()
+        .valor;
+    (gravado.titulo, gravado.parcelas[0])
+}
+
+#[test]
+fn titulo_de_compra_nao_se_cancela_pelo_financeiro_mas_o_vencimento_muda() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloFinanceiro]).unwrap();
+    let s = sessao(
+        empresa,
+        &["financeiro.titulo.cancelar", "financeiro.titulo.editar"],
+    );
+    let (titulo, parcela) = titulo_de_compra(&arm, empresa);
+    let erro = cancelar(&d, &arm, empresa, &s, titulo, "Nota lançada em duplicidade").unwrap_err();
+    assert_eq!(erro.codigo, CodigoErro::REGRA_VIOLADA);
+    assert!(
+        erro.mensagem.contains("nota de compra"),
+        "{}",
+        erro.mensagem
+    );
+
+    let alterar = |vencimento: Data| {
+        d.executar_comando(
+            "financeiro.alterar_vencimento.v1",
+            &carga(&AlterarVencimento {
+                parcela,
+                vencimento,
+            }),
+            &s,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+    };
+    // O fornecedor prorrogou: vale para título de qualquer origem.
+    alterar(hoje().mais_dias(45)).unwrap();
+    let vencimento: i64 = arm
+        .leitor()
+        .consultar(|c| {
+            c.query_row(
+                "SELECT vencimento FROM financeiro_parcela WHERE id = ?1",
+                [parcela.em_bytes().as_slice()],
+                |r| r.get(0),
+            )
+            .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+        })
+        .unwrap();
+    assert_eq!(vencimento, i64::from(hoje().mais_dias(45).em_dias()));
+    // Antes da emissão, não.
+    assert_eq!(
+        alterar(hoje().mais_dias(-1)).unwrap_err().codigo,
+        CodigoErro::ENTRADA_INVALIDA
+    );
+    // Sem a permissão, não.
+    let sem = sessao(empresa, &["financeiro.titulo.cancelar"]);
+    let negado = d
+        .executar_comando(
+            "financeiro.alterar_vencimento.v1",
+            &carga(&AlterarVencimento {
+                parcela,
+                vencimento: hoje().mais_dias(60),
+            }),
+            &sem,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+        .unwrap_err();
+    assert_eq!(negado.codigo, CodigoErro::SEM_PERMISSAO);
 }

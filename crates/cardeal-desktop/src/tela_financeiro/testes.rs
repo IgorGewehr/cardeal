@@ -58,6 +58,7 @@ fn baixa_vai_para_a_parcela_aberta_mesmo_se_a_lista_mudar_de_ordem() {
         situacao: None,
         valor_sugerido: String::new(),
         renegociar: FormRenegociar::default(),
+        ajuste: FormAjuste::default(),
     };
     estado.parcelas.reverse();
 
@@ -393,6 +394,7 @@ fn baixa_de_parcela_vencida_sugere_o_total_com_multa() {
         situacao: None,
         valor_sugerido: String::new(),
         renegociar: FormRenegociar::default(),
+        ajuste: FormAjuste::default(),
     };
     atualizar_situacao(&t.motor, &t.sessao, &mut estado, p.parcela);
     let Dlg::Baixar {
@@ -1306,4 +1308,69 @@ fn aviso_do_certificado_vencendo_na_visao_pede_a_configuracao_fiscal() {
         });
     }
     assert!(!estado.pedido_config_fiscal);
+}
+
+#[test]
+fn dialogo_da_parcela_com_ajustes_desenha_e_a_conta_cancelada_sai_como_cancelada() {
+    let t = motor_de_teste();
+    let parcela = lancar_a_receber(&t.motor, &t.sessao, 120);
+    let mut estado = EstadoTelaFinanceiro {
+        aba: Aba::Receber,
+        ..Default::default()
+    };
+    estado.carregar(&t.motor, &t.sessao);
+    let p = estado
+        .parcelas
+        .iter()
+        .find(|p| p.parcela == parcela)
+        .cloned()
+        .expect("parcela");
+    estado.dlg = Dlg::Baixar {
+        parcela,
+        valor: p.saldo().formatar(),
+        data: Data::hoje(Fuso::BRASILIA).to_string(),
+        pagamento: crate::pagamento::EstadoPagamento::novo(MeioPagamento::Dinheiro),
+        baixas: Vec::new(),
+        baixas_carregadas: true,
+        motivo_estorno: String::new(),
+        situacao: None,
+        valor_sugerido: String::new(),
+        renegociar: FormRenegociar::default(),
+        ajuste: FormAjuste {
+            motivo: "curto".to_owned(),
+            confirmar_cancelamento: true,
+            ..FormAjuste::default()
+        },
+    };
+    let ctx = egui::Context::default();
+    cardeal_ui::tokens::instalar_fontes(&ctx);
+    cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+    for _ in 0..2 {
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            dialogo_baixar(ctx, &t.motor, &t.sessao, &mut estado);
+        });
+    }
+    // Motivo curto: avisa e não pede confirmação.
+    let Dlg::Baixar { ajuste, .. } = &estado.dlg else {
+        panic!("o diálogo continua aberto");
+    };
+    assert!(!ajuste.confirmar_cancelamento);
+
+    let _: mod_financeiro::TituloFoiCancelado = t
+        .motor
+        .executar(
+            &t.sessao,
+            "financeiro.cancelar_titulo.v1",
+            &mod_financeiro::CancelarTitulo {
+                titulo: p.titulo,
+                motivo: "Lançada em duplicidade".to_owned(),
+            },
+        )
+        .expect("cancelar");
+    estado.carregar(&t.motor, &t.sessao);
+    assert!(estado
+        .parcelas
+        .iter()
+        .filter(|x| x.parcela == parcela)
+        .all(|x| x.estado == EstadoParcela::Cancelada));
 }

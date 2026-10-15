@@ -327,6 +327,7 @@ pub(super) fn lista(
                 situacao: None,
                 valor_sugerido: String::new(),
                 renegociar: FormRenegociar::default(),
+                ajuste: FormAjuste::default(),
             };
         }
     }

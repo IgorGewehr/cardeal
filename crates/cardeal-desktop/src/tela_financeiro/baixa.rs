@@ -151,6 +151,9 @@ pub(super) fn dialogo_baixar(
                         secao_renegociar(ui, renegociar, p.saldo());
                     }
                 }
+                if let Dlg::Baixar { ajuste, .. } = &mut estado.dlg {
+                    secoes_ajuste(ui, sessao, ajuste, &p);
+                }
 
                 let Dlg::Baixar { baixas, .. } = &estado.dlg else {
                     return;
@@ -197,6 +200,7 @@ pub(super) fn dialogo_baixar(
             },
         );
     confirmar_renegociacao(ctx, motor, sessao, estado, p.titulo);
+    confirmar_ajustes(ctx, motor, sessao, estado, &p);
     if fechar {
         estado.dlg = Dlg::Fechado;
     }

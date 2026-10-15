@@ -6,10 +6,10 @@ use cardeal_modkit::{Manifesto, Modulo, Registro};
 use cardeal_storage::ConjuntoMigracoes;
 
 use crate::comandos::{
-    AbrirCaixa, BaixarPagamento, BaixarRecebimento, CadastrarCaixa, CriarCategoria,
-    CriarContaBancaria, CriarRecorrencia, EstornarBaixa, FecharCaixa, LancarTituloAPagar,
-    LancarTituloAReceber, MaterializarRecorrencias, RegistrarSangria, RegistrarSuprimento,
-    RenegociarTitulo,
+    AbrirCaixa, AlterarVencimento, BaixarPagamento, BaixarRecebimento, CadastrarCaixa,
+    CancelarTitulo, CriarCategoria, CriarContaBancaria, CriarRecorrencia, EstornarBaixa,
+    FecharCaixa, LancarTituloAPagar, LancarTituloAReceber, MaterializarRecorrencias,
+    RegistrarSangria, RegistrarSuprimento, RenegociarTitulo,
 };
 use crate::comandos::{BaixarPagamentosEmLote, BaixarRecebimentosEmLote};
 use crate::consultas::SituacaoDaParcela;
@@ -50,6 +50,8 @@ impl Modulo for ModuloFinanceiro {
             .comando::<FecharCaixa>("financeiro.fechar_caixa.v1")
             .comando::<EstornarBaixa>("financeiro.estornar_baixa.v1")
             .comando::<RenegociarTitulo>("financeiro.renegociar_titulo.v1")
+            .comando::<CancelarTitulo>("financeiro.cancelar_titulo.v1")
+            .comando::<AlterarVencimento>("financeiro.alterar_vencimento.v1")
             .comando::<CriarContaBancaria>("financeiro.criar_conta_bancaria.v1")
             .comando::<CriarCategoria>("financeiro.criar_categoria.v1")
             .comando::<crate::comandos::CriarCategoriasSugeridas>(

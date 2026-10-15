@@ -342,6 +342,8 @@ stateDiagram-v2
 > vem depois.
 | `EstornarBaixa` ✅ | `financeiro.receber.estornar` | Alto | Estorna o lançamento `Realizado` (`Razao::estornar`), reabre a parcela (`Parcial` ou `Aberta` conforme sobra saldo baixado) | `BaixaJaEstornada` |
 | `RenegociarTitulo` ✅ | `financeiro.receber.renegociar` | Alto | Marca as parcelas em aberto como `Renegociada`, cria um `Titulo` novo com o saldo consolidado e as condições novas — **sem** lançamento novo (ver nota abaixo) | `SemSaldoParaRenegociar` |
+| `CancelarTitulo` ✅ (2026-10-15, `financeiro.cancelar_titulo.v1`) | `financeiro.titulo.cancelar` | Alto | Cancela a conta lançada errado: estorna no Razão o `Confirmado` de cada parcela e marca parcelas e título como cancelados (nunca apaga). Só para título lançado **no financeiro** (avulso ou de recorrência): o que veio de compra, venda, PDV, OS ou renegociação se desfaz pela origem. Recusa título com baixa válida (estornar um recebimento de verdade é decisão à parte, `EstornarBaixa`). Motivo ≥ 10 caracteres. Parcela cancelada não aceita baixa | `TituloJaCancelado`, `TituloDeOutraOrigem`, `TituloComMovimento`, `MotivoDoCancelamentoCurto` |
+| `AlterarVencimento` ✅ (2026-10-15, `financeiro.alterar_vencimento.v1`) | `financeiro.titulo.editar` | Médio | Muda o vencimento de uma parcela `Aberta`/`Parcial`, de título de qualquer origem (o fornecedor que prorrogou). A parcela é a fonte do vencimento para listas, aging, projeção e régua; o lançamento do Razão não se edita | `ParcelaNaoBaixavel`, `VencimentoAntesDaEmissao` |
 | `CriarRecorrencia` ✅ | `financeiro.recorrencia.criar` | Médio | Grava a regra (`categoria` opcional); não gera título imediatamente | `RegraDeRecorrenciaInvalida` |
 | `MaterializarRecorrencia` ✅ | (tarefa agendada, sem permissão de usuário) | Baixo | `materializar_recorrencias_pendentes` — gera `Titulo` real quando falta `antecedencia_geracao_dias`, idempotente por `(origem_id, emissao)` | — |
 | `CriarCategoria` ✅ | `financeiro.categoria.criar` | Baixo | Cria `CategoriaFinanceira` | `NomeDeCategoriaVazio` |
@@ -584,6 +586,8 @@ que o módulo financeiro precisa cobrir em `testes/receituario.rs`.
 | `financeiro.receber.baixar` | Dar baixa em recebimento | Médio |
 | `financeiro.receber.estornar` | Estornar baixa de recebimento | Alto |
 | `financeiro.receber.renegociar` | Renegociar título a receber | Alto |
+| `financeiro.titulo.cancelar` | Cancelar título lançado errado | Alto |
+| `financeiro.titulo.editar` | Alterar o vencimento de uma parcela em aberto | Médio |
 | `financeiro.pagar.ver` | Consultar contas a pagar | Baixo |
 | `financeiro.pagar.criar` | Lançar título a pagar | Baixo |
 | `financeiro.pagar.baixar` | Dar baixa em pagamento | Médio |

@@ -76,6 +76,46 @@ impl EventoDominio for BaixaEstornada {
     }
 }
 
+/// Um título lançado errado foi cancelado (os lançamentos das parcelas estornados).
+#[derive(Debug, Serialize)]
+pub struct TituloCancelado {
+    /// O título.
+    pub titulo: Id,
+    /// O valor original.
+    pub valor: Dinheiro,
+    /// O motivo informado.
+    pub motivo: String,
+}
+
+#[cfg(feature = "sqlite")]
+impl EventoDominio for TituloCancelado {
+    const TIPO: &'static str = "financeiro.titulo_cancelado.v1";
+
+    fn agregado(&self) -> Option<Id> {
+        Some(self.titulo)
+    }
+}
+
+/// O vencimento de uma parcela em aberto mudou.
+#[derive(Debug, Serialize)]
+pub struct VencimentoAlterado {
+    /// A parcela.
+    pub parcela: Id,
+    /// O vencimento anterior.
+    pub de: cardeal_kernel::Data,
+    /// O novo.
+    pub para: cardeal_kernel::Data,
+}
+
+#[cfg(feature = "sqlite")]
+impl EventoDominio for VencimentoAlterado {
+    const TIPO: &'static str = "financeiro.vencimento_alterado.v1";
+
+    fn agregado(&self) -> Option<Id> {
+        Some(self.parcela)
+    }
+}
+
 /// O saldo em aberto de um título foi renegociado num novo título.
 #[derive(Debug, Serialize)]
 pub struct TituloRenegociado {

@@ -3,6 +3,7 @@
 //! Duas abas (a receber / a pagar), cada uma a lista inteira de parcelas em aberto.
 //! "+ Lançar título" e o clique numa linha abrem o `Dialogo` — ver a parcela e **dar baixa**.
 
+mod ajustes;
 mod baixa;
 mod balancete;
 mod cadastro_rapido;
@@ -29,6 +30,7 @@ mod visao;
 
 use std::collections::HashMap;
 
+use ajustes::*;
 use baixa::*;
 use cadastro_rapido::*;
 use cardeal_cliente::{Motor, Sessao};
@@ -149,6 +151,8 @@ enum Dlg {
         valor_sugerido: String,
         /// A renegociação do saldo (seção recolhida no mesmo diálogo).
         renegociar: FormRenegociar,
+        /// Alterar o vencimento e cancelar a conta (seções recolhidas no mesmo diálogo).
+        ajuste: FormAjuste,
     },
     /// Quitar várias parcelas selecionadas de uma vez (pelo total devido de cada uma).
     BaixarLote {
@@ -750,6 +754,7 @@ impl EstadoTelaFinanceiro {
                     situacao: None,
                     valor_sugerido: String::new(),
                     renegociar: FormRenegociar::default(),
+                    ajuste: FormAjuste::default(),
                 };
             }
         }
