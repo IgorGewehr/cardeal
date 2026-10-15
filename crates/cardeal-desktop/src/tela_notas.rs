@@ -190,7 +190,7 @@ fn corpo(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoN
     });
     ui.add_space(Espaco::E8);
     grade(ui, motor, sessao, estado);
-    detalhe(ui, estado);
+    detalhe(ui, motor, sessao, estado);
 }
 
 fn grade(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoNotas) {
@@ -275,9 +275,10 @@ fn grade(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoN
     }
 }
 
-fn detalhe(ui: &mut egui::Ui, estado: &mut EstadoNotas) {
+fn detalhe(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoNotas) {
     let Some(d) = &estado.detalhe else { return };
     let mut fechar = false;
+    let mut imprimir = None;
     ui.add_space(Espaco::E12);
     Painel::novo()
         .titulo(format!("NFC-e {}-{}", d.resumo.serie, d.resumo.numero))
@@ -333,10 +334,26 @@ fn detalhe(ui: &mut egui::Ui, estado: &mut EstadoNotas) {
                 }
                 ui.add_space(Espaco::E8);
             }
-            fechar = ui.add(Botao::fantasma("Fechar")).clicked();
+            ui.horizontal(|ui| {
+                if d.resumo.estado == EstadoDocumento::Autorizada
+                    && ui.add(Botao::secundario("Imprimir cupom fiscal")).clicked()
+                {
+                    imprimir = Some(d.resumo.id);
+                }
+                fechar = ui.add(Botao::fantasma("Fechar")).clicked();
+            });
         });
     if fechar {
         estado.detalhe = None;
+    }
+    if let Some(id) = imprimir {
+        match crate::danfce::imprimir(motor, sessao, id) {
+            Ok(_) => notificar(
+                ui.ctx(),
+                Notificacao::sucesso("Cupom fiscal aberto para imprimir"),
+            ),
+            Err(e) => notificar(ui.ctx(), Notificacao::erro(e)),
+        }
     }
 }
 

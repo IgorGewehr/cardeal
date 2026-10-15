@@ -139,9 +139,10 @@ pub(super) fn aviso_erro(ui: &mut egui::Ui, estado: &EstadoTelaPdv) {
 }
 
 /// O resultado da última venda: o troco é o que o operador precisa ver logo depois do `F2`.
-pub(super) fn resultado_venda(ui: &mut egui::Ui, estado: &EstadoTelaPdv) {
+pub(super) fn resultado_venda(ui: &mut egui::Ui, estado: &mut EstadoTelaPdv) {
     let Some(v) = estado.ultima_venda else { return };
     let positivo = ui.cores().positivo;
+    let mut imprimir = None;
     Painel::novo().realce(Tom::Positivo).mostrar(ui, |ui| {
         ui.add(Rotulo::interface(format!("Venda nº {} finalizada", v.numero)).cor(positivo));
         ui.add_space(Espaco::E8);
@@ -178,6 +179,13 @@ pub(super) fn resultado_venda(ui: &mut egui::Ui, estado: &EstadoTelaPdv) {
                     _ => Etiqueta::info(n.estado.rotulo()),
                 };
                 ui.add(etiqueta.com_ponto());
+                if n.estado == mod_fiscal::EstadoDocumento::Autorizada
+                    && ui
+                        .add(Botao::secundario("Imprimir cupom fiscal").pequeno())
+                        .clicked()
+                {
+                    imprimir = Some(n.id);
+                }
             });
             if n.estado == mod_fiscal::EstadoDocumento::Rejeitada {
                 if let Some(m) = &n.motivo {
@@ -186,6 +194,9 @@ pub(super) fn resultado_venda(ui: &mut egui::Ui, estado: &EstadoTelaPdv) {
             }
         }
     });
+    if let Some(id) = imprimir {
+        estado.pendentes.push(Acao::ImprimirNfce(id));
+    }
     ui.add_space(Espaco::E12);
 }
 

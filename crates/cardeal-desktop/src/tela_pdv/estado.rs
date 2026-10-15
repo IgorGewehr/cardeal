@@ -164,6 +164,8 @@ pub(super) enum Acao {
     EscolherCliente(Option<(Id, String)>),
     /// `Enter` no diálogo de consulta de preço.
     ConsultarPreco,
+    /// Imprimir o cupom fiscal (DANFCE) da NFC-e da última venda.
+    ImprimirNfce(Id),
 }
 
 /// Estado local da tela de PDV.

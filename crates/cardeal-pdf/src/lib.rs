@@ -32,10 +32,13 @@
     clippy::return_self_not_must_use
 )]
 
+mod danfce;
 mod documento;
 mod fonte;
 mod imagem;
 mod layout;
+
+pub use danfce::{chave_em_grupos, gerar_danfce, DanfcePdf, ItemDanfce};
 
 use cardeal_kernel::{Data, Dinheiro, Instante, Percentual, Preco, Quantidade};
 
@@ -45,6 +48,9 @@ pub enum ErroPdf {
     /// A logo cadastrada não é uma imagem PNG/JPEG válida.
     #[error("logo inválida: {0}")]
     Logo(String),
+    /// O conteúdo não cabe num QR Code.
+    #[error("QR Code: {0}")]
+    QrCode(String),
 }
 
 /// A identidade da empresa que aparece no cabeçalho e no rodapé do documento.

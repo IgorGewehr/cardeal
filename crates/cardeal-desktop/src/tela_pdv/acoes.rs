@@ -12,6 +12,13 @@ pub(super) fn aplicar(
     estado: &mut EstadoTelaPdv,
 ) {
     match acao {
+        Acao::ImprimirNfce(documento) => match crate::danfce::imprimir(motor, sessao, documento) {
+            Ok(_) => notificar(
+                ctx,
+                Notificacao::sucesso("Cupom fiscal aberto para imprimir"),
+            ),
+            Err(e) => notificar(ctx, Notificacao::erro(e)),
+        },
         Acao::Bipar => bipar(ctx, motor, sessao, estado),
         Acao::Adicionar(produto) => {
             if adicionar(ctx, motor, sessao, estado, produto, Quantidade::UM) {
