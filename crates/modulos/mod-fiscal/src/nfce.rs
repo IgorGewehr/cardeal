@@ -230,8 +230,8 @@ pub(crate) mod sqlite {
     use std::sync::Mutex;
 
     use cardeal_fiscal::{
-        ChaveAcesso, Consumidor, Crt, Csc, DocumentoConsumidor, Emitente, EnderecoEmitente,
-        MeioPagamento, ModeloFiscal, Nfce, PortaFiscal,
+        AmbienteFiscal, ChaveAcesso, Consumidor, Crt, Csc, DocumentoConsumidor, Emitente,
+        EnderecoEmitente, MeioPagamento, ModeloFiscal, Nfce, PortaFiscal,
     };
     use cardeal_kernel::{CodigoErro, Erro, Id, Instante, Resultado, Uf};
     use cardeal_modkit::{ContextoTarefa, Ctx};
@@ -240,7 +240,7 @@ pub(crate) mod sqlite {
 
     use super::{ConfiguracaoNfce, ConfigurarNfce};
     use crate::documento::{decidir, Desfecho, DocumentoResumo, EstadoDocumento};
-    use crate::montagem::{montar_nfce, DadosDaVenda, ItemDaVenda};
+    use crate::montagem::{marcar_homologacao, montar_nfce, DadosDaVenda, ItemDaVenda};
     use crate::sql_documento as sqld;
 
     pub(crate) const ORIGEM_PDV: &str = "pdv";
@@ -400,6 +400,7 @@ pub(crate) mod sqlite {
         cupom: Id,
         serie: u32,
         numero: u64,
+        ambiente: AmbienteFiscal,
     ) -> Resultado<(cardeal_kernel::Dinheiro, Result<Nfce, Vec<String>>)> {
         let cupom = mod_pdv::RepositorioPdv::novo(uow)
             .buscar_cupom(cupom)?
@@ -458,7 +459,12 @@ pub(crate) mod sqlite {
             Err(p) => Err(p),
         };
         let nota = match nota {
-            Ok(n) if problemas.is_empty() => Ok(n),
+            Ok(mut n) if problemas.is_empty() => {
+                if ambiente == AmbienteFiscal::Homologacao {
+                    marcar_homologacao(&mut n);
+                }
+                Ok(n)
+            }
             Ok(_) => Err(problemas),
             Err(mut p) => {
                 problemas.append(&mut p);
@@ -518,7 +524,7 @@ pub(crate) mod sqlite {
             )
         };
         let numero = sqld::reservar_numero(uow.conexao(), ctx.empresa, MODELO, serie, ambiente)?;
-        let (total, nota) = montar_do_cupom(ctx, uow, cupom, serie, numero)?;
+        let (total, nota) = montar_do_cupom(ctx, uow, cupom, serie, numero, ambiente)?;
         let (estado, blob, motivo) = match nota {
             Ok(n) => (
                 EstadoDocumento::Pendente,
@@ -577,7 +583,14 @@ pub(crate) mod sqlite {
                 "Origem do documento desconhecida",
             ));
         }
-        let (total, nota) = montar_do_cupom(ctx, uow, resumo.origem, resumo.serie, resumo.numero)?;
+        let (total, nota) = montar_do_cupom(
+            ctx,
+            uow,
+            resumo.origem,
+            resumo.serie,
+            resumo.numero,
+            resumo.ambiente,
+        )?;
         let (blob, motivo) = match nota {
             Ok(n) => (
                 Some(
@@ -649,6 +662,9 @@ pub(crate) mod sqlite {
         }))
     }
 
+    /// Uma porta por ambiente presente na fila.
+    type Portas = HashMap<AmbienteFiscal, Box<dyn PortaFiscal>>;
+
     /// Transmite a fila: emite os pendentes e consulta os incertos, um a um, fora de qualquer
     /// transação; grava cada resultado na hora. Para quando a API não responde (os outros
     /// esperam a próxima rodada). Devolve um resumo.
@@ -665,14 +681,24 @@ pub(crate) mod sqlite {
         if fila.is_empty() {
             return Ok("nada na fila".into());
         }
-        let (porta, csc, uf): (Box<dyn PortaFiscal>, Option<Csc>, Option<Uf>) = t.ler(|c| {
-            let porta = crate::provedor::porta_da_empresa(&t.ctx, c)?;
+        let ambientes: HashSet<AmbienteFiscal> = fila.iter().map(|d| d.ambiente).collect();
+        let (portas, csc, uf): (Portas, Option<Csc>, Option<Uf>) = t.ler(|c| {
+            let mut portas = HashMap::new();
+            for a in ambientes {
+                portas.insert(
+                    a,
+                    crate::provedor::porta_da_empresa_no_ambiente(&t.ctx, c, a)?,
+                );
+            }
             let csc = csc(&t.ctx, c)?;
             let uf = mod_empresa::sql::dados_fiscais(c, empresa)?.uf();
-            Ok((porta, csc, uf))
+            Ok((portas, csc, uf))
         })?;
         let mut contagem: HashMap<EstadoDocumento, u32> = HashMap::new();
         for doc in fila {
+            let Some(porta) = portas.get(&doc.ambiente) else {
+                continue;
+            };
             let desfecho = match (doc.estado, &doc.nota, &doc.chave, &csc, uf) {
                 (EstadoDocumento::Pendente, Some(blob), _, Some(csc), _) => {
                     match postcard::from_bytes::<Nfce>(blob) {

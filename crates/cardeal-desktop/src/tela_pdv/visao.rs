@@ -27,6 +27,19 @@ pub(super) fn cabecalho(ui: &mut egui::Ui, estado: &mut EstadoTelaPdv) {
         ("Caixa fechado", Tom::Neutro)
     };
     ui.add(Etiqueta::nova(texto, tom).com_ponto());
+    if estado.nfce_automatica {
+        if let Some(f) = &estado.fiscal {
+            ui.add_space(Espaco::E8);
+            let tom = if f.rejeitadas > 0 {
+                Tom::Negativo
+            } else if f.pendentes + f.incertas > 0 {
+                Tom::Atencao
+            } else {
+                Tom::Positivo
+            };
+            ui.add(Etiqueta::nova(f.frase(), tom).com_ponto());
+        }
+    }
     if let Some(n) = estado.cupom_numero {
         ui.add_space(Espaco::E8);
         ui.add(Etiqueta::info(format!("Cupom nº {n}")));
@@ -149,6 +162,28 @@ pub(super) fn resultado_venda(ui: &mut egui::Ui, estado: &EstadoTelaPdv) {
                 Papel::ValorDestaque,
                 v.total.formatar_com_simbolo(),
             ));
+        }
+        if let Some(n) = estado.nfce_ultima.as_ref() {
+            ui.add_space(Espaco::E8);
+            ui.horizontal(|ui| {
+                ui.add(Rotulo::campo(format!("NFC-e {}-{}", n.serie, n.numero)));
+                let etiqueta = match n.estado {
+                    mod_fiscal::EstadoDocumento::Autorizada => {
+                        Etiqueta::positiva(n.estado.rotulo())
+                    }
+                    mod_fiscal::EstadoDocumento::Rejeitada
+                    | mod_fiscal::EstadoDocumento::Denegada => {
+                        Etiqueta::negativa(n.estado.rotulo())
+                    }
+                    _ => Etiqueta::info(n.estado.rotulo()),
+                };
+                ui.add(etiqueta.com_ponto());
+            });
+            if n.estado == mod_fiscal::EstadoDocumento::Rejeitada {
+                if let Some(m) = &n.motivo {
+                    ui.add(Rotulo::apoio(m.clone()).quebravel());
+                }
+            }
         }
     });
     ui.add_space(Espaco::E12);

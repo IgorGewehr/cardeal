@@ -14,9 +14,9 @@ use mod_empresa::{
     DadosFiscais, DadosFiscaisDaEmpresa, DefinirDadosFiscaisEmpresa, EnderecoFiscal,
 };
 use mod_fiscal::{
-    AmbienteFiscal, CertificadoResumo, DefinirAmbienteFiscal, InstalarCertificado, ModeloFiscal,
-    RemoverCertificado, SituacaoFiscal, SituacaoFiscalDaEmpresa, StatusDaSefaz, StatusSefaz,
-    ALERTA_VENCIMENTO_DIAS,
+    AmbienteFiscal, CertificadoResumo, ConfiguracaoDaNfce, ConfiguracaoNfce, ConfigurarNfce,
+    DefinirAmbienteFiscal, InstalarCertificado, ModeloFiscal, RemoverCertificado, SituacaoFiscal,
+    SituacaoFiscalDaEmpresa, StatusDaSefaz, StatusSefaz, ALERTA_VENCIMENTO_DIAS,
 };
 
 const FUSO: Fuso = Fuso::BRASILIA;
@@ -86,6 +86,95 @@ pub struct EstadoFiscal {
     /// O último teste de conexão, por modelo.
     pub teste: Vec<(ModeloFiscal, Result<StatusSefaz, String>)>,
     pub erro: Option<String>,
+    /// O formulário da NFC-e.
+    pub nfce: FormNfce,
+}
+
+/// O formulário da NFC-e. O token do CSC nunca volta da base: vazio = manter o guardado.
+#[derive(Default, Clone)]
+pub struct FormNfce {
+    pub emitir: bool,
+    pub serie: String,
+    pub proximo: String,
+    pub csc_id: String,
+    pub csc_token: String,
+    pub csc_cadastrado: bool,
+    pub erro: Option<(String, String)>,
+}
+
+impl FormNfce {
+    fn de(c: &ConfiguracaoNfce) -> Self {
+        Self {
+            emitir: c.emitir_nas_vendas,
+            serie: c.serie.to_string(),
+            proximo: c.proximo_numero.to_string(),
+            csc_id: c.csc_id.clone(),
+            csc_token: String::new(),
+            csc_cadastrado: c.csc_cadastrado,
+            erro: None,
+        }
+    }
+
+    fn erro_em(&self, campo: &str) -> Option<String> {
+        self.erro
+            .as_ref()
+            .filter(|(c, _)| c == campo)
+            .map(|(_, m)| m.clone())
+    }
+}
+
+/// Grava a configuração da NFC-e do formulário.
+///
+/// # Errors
+/// Número inválido no formulário ou o erro do comando (com o campo marcado).
+pub fn salvar_nfce(motor: &Motor, sessao: &Sessao, estado: &mut EstadoFiscal) -> Result<(), Erro> {
+    let f = &mut estado.nfce;
+    let numero = |texto: &str, campo: &str, nome: &str| {
+        texto.trim().replace('.', "").parse::<u64>().map_err(|_| {
+            Erro::novo(
+                cardeal_kernel::CodigoErro::VALOR_INVALIDO,
+                format!("{nome}: só números"),
+            )
+            .no_campo(campo)
+        })
+    };
+    let resultado = numero(&f.serie, "serie", "Série")
+        .and_then(|s| {
+            u32::try_from(s).map_err(|_| {
+                Erro::novo(
+                    cardeal_kernel::CodigoErro::FORA_DA_FAIXA,
+                    "Série grande demais",
+                )
+                .no_campo("serie")
+            })
+        })
+        .and_then(|serie| {
+            Ok((
+                serie,
+                numero(&f.proximo, "proximo_numero", "Próximo número")?,
+            ))
+        })
+        .and_then(|(serie, proximo_numero)| {
+            let comando = ConfigurarNfce {
+                emitir_nas_vendas: f.emitir,
+                serie,
+                proximo_numero,
+                csc_id: f.csc_id.trim().to_string(),
+                csc_token: Some(f.csc_token.trim().to_string()).filter(|t| !t.is_empty()),
+            };
+            motor.executar(sessao, "fiscal.configurar_nfce.v1", &comando)
+        });
+    match resultado {
+        Ok(c) => {
+            estado.nfce = FormNfce::de(&c);
+            estado.carregar(motor, sessao);
+            Ok(())
+        }
+        Err(e) => {
+            estado.nfce.erro = e.campo.clone().map(|c| (c, e.mensagem.clone()));
+            Err(e)
+        }
+    }
 }
 
 impl EstadoFiscal {
@@ -99,6 +188,9 @@ impl EstadoFiscal {
         match motor.consultar(sessao, "fiscal.situacao.v1", &SituacaoFiscal) {
             Ok(s) => self.situacao = Some(s),
             Err(e) => self.erro = Some(e.mensagem),
+        }
+        if let Ok(c) = motor.consultar(sessao, "fiscal.configuracao_nfce.v1", &ConfiguracaoDaNfce) {
+            self.nfce = FormNfce::de(&c);
         }
     }
 
@@ -207,6 +299,8 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
     secao_dados(ui, motor, sessao, estado, pode_configurar);
     ui.add_space(Espaco::E16);
     secao_certificado(ui, motor, sessao, estado, pode_configurar);
+    ui.add_space(Espaco::E16);
+    secao_nfce(ui, motor, sessao, estado, pode_configurar);
     ui.add_space(Espaco::E16);
     secao_conexao(ui, motor, sessao, estado, pode_configurar);
 }
@@ -480,6 +574,87 @@ fn escolher_arquivo(ctx: &egui::Context, estado: &mut EstadoFiscal) {
     }
 }
 
+fn secao_nfce(
+    ui: &mut egui::Ui,
+    motor: &Motor,
+    sessao: &Sessao,
+    estado: &mut EstadoFiscal,
+    pode_configurar: bool,
+) {
+    let f = &mut estado.nfce;
+    let (e_serie, e_proximo, e_csc) = (
+        f.erro_em("serie"),
+        f.erro_em("proximo_numero"),
+        f.erro_em("csc_id"),
+    );
+    let mut salvar = false;
+    cartao(ui, |ui| {
+        ui.add(Rotulo::titulo_secao("NFC-e nas vendas do PDV"));
+        ui.add_space(Espaco::E4);
+        ui.add(Rotulo::apoio(
+            "Ligada, cada venda finalizada vira NFC-e na hora e vai para a SEFAZ em segundo plano — a venda não espera. Sem internet, a nota espera na fila.",
+        ));
+        ui.add_space(Espaco::E12);
+        ui.horizontal(|ui| {
+            for (valor, rotulo) in [(true, "Emitir a cada venda"), (false, "Não emitir")] {
+                let b = if f.emitir == valor {
+                    Botao::primario(rotulo).pequeno()
+                } else {
+                    Botao::fantasma(rotulo).pequeno()
+                };
+                if ui.add_enabled(pode_configurar, b).clicked() {
+                    f.emitir = valor;
+                }
+            }
+        });
+        ui.add_space(Espaco::E12);
+        ui.columns(2, |c| {
+            c[0].add(
+                Campo::novo("Série", &mut f.serie)
+                    .marcador("1")
+                    .erro(e_serie),
+            );
+            c[1].add(
+                Campo::novo("Próximo número", &mut f.proximo)
+                    .marcador("1")
+                    .erro(e_proximo),
+            );
+        });
+        ui.add_space(Espaco::E12);
+        ui.columns(2, |c| {
+            c[0].add(
+                Campo::novo("Identificador do CSC", &mut f.csc_id)
+                    .marcador("000001")
+                    .erro(e_csc),
+            );
+            c[1].add(
+                Campo::novo("Token do CSC", &mut f.csc_token)
+                    .senha(true)
+                    .marcador(if f.csc_cadastrado {
+                        "guardado — deixe em branco para manter"
+                    } else {
+                        "o código da SEFAZ"
+                    }),
+            );
+        });
+        ui.add_space(Espaco::E4);
+        ui.add(Rotulo::apoio(
+            "O CSC é gerado no portal da SEFAZ do seu estado (um para homologação, outro para produção). O token fica cifrado nesta instalação.",
+        ));
+        ui.add_space(Espaco::E16);
+        salvar = pode_configurar && ui.add(Botao::primario("Salvar NFC-e")).clicked();
+    });
+    if salvar {
+        match salvar_nfce(motor, sessao, estado) {
+            Ok(()) => notificar(
+                ui.ctx(),
+                Notificacao::sucesso("Configuração da NFC-e salva"),
+            ),
+            Err(e) => notificar(ui.ctx(), Notificacao::erro(e.mensagem)),
+        }
+    }
+}
+
 fn secao_conexao(
     ui: &mut egui::Ui,
     motor: &Motor,
@@ -633,6 +808,21 @@ mod testes {
             estado.situacao.as_ref().unwrap().ambiente,
             AmbienteFiscal::Producao
         );
+
+        // NFC-e: sem token não liga; com token, liga e guarda (o token não volta para a tela).
+        estado.nfce.emitir = true;
+        estado.nfce.csc_id = "000001".into();
+        assert!(salvar_nfce(m, s, &mut estado).is_err());
+        assert!(estado.nfce.erro_em("csc_id").is_some());
+        estado.nfce.csc_token = "TOKEN".into();
+        estado.nfce.proximo = "abc".into();
+        assert!(salvar_nfce(m, s, &mut estado).is_err());
+        assert!(estado.nfce.erro_em("proximo_numero").is_some());
+        estado.nfce.proximo = "10".into();
+        salvar_nfce(m, s, &mut estado).unwrap();
+        assert!(estado.nfce.emitir && estado.nfce.csc_cadastrado);
+        assert!(estado.nfce.csc_token.is_empty());
+        assert_eq!(estado.nfce.proximo, "10");
 
         // A aba desenha com certificado, no modo de troca e com o resultado do teste.
         testar_conexao(m, s, &mut estado);

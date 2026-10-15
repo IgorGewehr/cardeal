@@ -53,6 +53,7 @@ impl Linha {
 /// informação mais importante do momento seguinte ao `F2`).
 #[derive(Clone, Copy)]
 pub(super) struct UltimaVenda {
+    pub(super) cupom: Id,
     pub(super) numero: i64,
     pub(super) total: Dinheiro,
     pub(super) troco: Dinheiro,
@@ -204,6 +205,14 @@ pub struct EstadoTelaPdv {
     /// Devolve o foco ao campo de bipe no próximo quadro (depois de cada ação).
     pub(super) foco_entrada: bool,
     pub(super) pendentes: Vec<Acao>,
+    /// A empresa emite NFC-e a cada venda (Configurações › Fiscal).
+    pub(super) nfce_automatica: bool,
+    /// A fila fiscal, para a faixa do cabeçalho.
+    pub(super) fiscal: Option<mod_fiscal::ResumoFiscal>,
+    /// A NFC-e da última venda.
+    pub(super) nfce_ultima: Option<mod_fiscal::DocumentoResumo>,
+    /// A rodada da transmissão em segundo plano que a faixa já mostra.
+    pub(super) geracao_fiscal: u64,
 }
 
 impl Default for EstadoTelaPdv {
@@ -235,6 +244,10 @@ impl Default for EstadoTelaPdv {
             finalizar_pendente: false,
             foco_entrada: true,
             pendentes: Vec::new(),
+            nfce_automatica: false,
+            fiscal: None,
+            nfce_ultima: None,
+            geracao_fiscal: 0,
         }
     }
 }
@@ -243,6 +256,7 @@ impl EstadoTelaPdv {
     /// Carrega caixas, catálogos e produtos.
     pub fn carregar(&mut self, motor: &Motor, sessao: &Sessao) {
         self.erro = None;
+        self.carregar_fiscal(motor, sessao);
         match motor.consultar(sessao, "financeiro.caixas.v1", &Caixas) {
             Ok(c) => self.caixas = c,
             Err(e) => self.erro = Some(e.mensagem),
@@ -286,6 +300,40 @@ impl EstadoTelaPdv {
         }
         if self.local_sel.is_none() {
             self.local_sel = self.locais.first().map(|l| l.id);
+        }
+    }
+
+    /// A configuração e a fila fiscais, e a situação da NFC-e da última venda.
+    pub(super) fn carregar_fiscal(&mut self, motor: &Motor, sessao: &Sessao) {
+        self.geracao_fiscal = crate::fiscal_fundo::geracao();
+        if !sessao.concede("fiscal.ver") {
+            self.nfce_automatica = false;
+            self.fiscal = None;
+            return;
+        }
+        self.nfce_automatica = motor
+            .consultar(
+                sessao,
+                "fiscal.configuracao_nfce.v1",
+                &mod_fiscal::ConfiguracaoDaNfce,
+            )
+            .is_ok_and(|c| c.emitir_nas_vendas);
+        self.fiscal = motor
+            .consultar(
+                sessao,
+                "fiscal.resumo_da_fila.v1",
+                &mod_fiscal::ResumoDaFilaFiscal,
+            )
+            .ok();
+        if let Some(v) = self.ultima_venda {
+            self.nfce_ultima = motor
+                .consultar(
+                    sessao,
+                    "fiscal.documento_da_venda.v1",
+                    &mod_fiscal::DocumentoDaVenda { cupom: v.cupom },
+                )
+                .ok()
+                .flatten();
         }
     }
 

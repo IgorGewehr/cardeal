@@ -136,6 +136,7 @@ pub fn estado(cenario: &str) -> Option<EstadoTelaPdv> {
         }
         "concluida" => {
             e.ultima_venda = Some(UltimaVenda {
+                cupom: Id::novo(),
                 numero: 4087,
                 total: Dinheiro::reais(31),
                 troco: Dinheiro::reais(19),

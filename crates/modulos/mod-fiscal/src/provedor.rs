@@ -119,6 +119,22 @@ pub fn porta_da_empresa(
     ctx: &cardeal_modkit::Ctx,
     c: &rusqlite::Connection,
 ) -> Resultado<Box<dyn PortaFiscal>> {
+    let ambiente = crate::sql::ambiente(c, ctx.empresa)?;
+    porta_da_empresa_no_ambiente(ctx, c, ambiente)
+}
+
+/// Como [`porta_da_empresa`], num ambiente dado — o de um documento já criado (uma nota de
+/// homologação na fila continua indo para a homologação, mesmo que a empresa já tenha passado
+/// para a produção).
+///
+/// # Errors
+/// Como [`porta_da_empresa`].
+#[cfg(feature = "sqlite")]
+pub fn porta_da_empresa_no_ambiente(
+    ctx: &cardeal_modkit::Ctx,
+    c: &rusqlite::Connection,
+    ambiente: AmbienteFiscal,
+) -> Resultado<Box<dyn PortaFiscal>> {
     use cardeal_storage::{Cofre, Segredo};
 
     let selado = crate::sql::selado(c, ctx.empresa)?
@@ -133,7 +149,6 @@ pub fn porta_da_empresa(
         pfx: Segredo::novo(segredo.pfx.clone()),
         senha: Segredo::novo(segredo.senha.clone()),
     };
-    let ambiente = crate::sql::ambiente(c, ctx.empresa)?;
     ctx.recurso::<ProvedorFiscal>()?
         .porta(certificado, ambiente)
 }

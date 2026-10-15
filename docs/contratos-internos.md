@@ -507,8 +507,24 @@ impl Registro {
     pub fn novo() -> Self;
     pub fn comando<C: Comando>(&mut self, nome: &'static str) -> &mut Self;
     pub fn consulta<Q: Consulta>(&mut self, nome: &'static str) -> &mut Self;
-    // assinar / tarefa / fornecer_porta / item_pulso: adiados.
+    /// Trabalho que não cabe numa transação (ler → falar com a rede → gravar). Roda no processo
+    /// do motor, nunca pela rede (os segredos que abre não saem dali).
+    pub fn tarefa<F>(&mut self, nome: &'static str, permissao: &'static str, f: F) -> &mut Self
+        where F: Fn(&ContextoTarefa<'_>) -> Resultado<String> + Send + Sync + 'static;
+    // assinar / fornecer_porta / item_pulso / agendamento de tarefa: adiados.
 }
+
+/// O que uma tarefa recebe: o Ctx da sessão, leitura (pool) e escrita (uma transação por
+/// chamada, com a autoria da sessão).
+pub struct ContextoTarefa<'a> { pub ctx: Ctx, /* sessão, ambiente, leitor, escritor */ }
+impl ContextoTarefa<'_> {
+    pub fn ler<T>(&self, f: impl FnOnce(&Connection) -> Resultado<T>) -> Resultado<T>;
+    pub fn escrever<T, F>(&self, f: F) -> Resultado<T>
+        where F: for<'u> FnOnce(&mut UnidadeDeTrabalho<'u>) -> Resultado<T> + Send + 'static, T: Send + 'static;
+}
+// Despachante::executar_tarefa(nome, sessão, ambiente, leitor, escritor); no motor,
+// MotorLocal::executar_tarefa e MotorLocal::executor_de_tarefas (ExecutorDeTarefas: Clone + Send,
+// para rodar numa thread — Escritor e Leitor ganharam Clone barato).
 
 /// O que a empresa tem ativo, resolvido uma vez (`RegistroModulos::resolver`) e reusado.
 pub struct Ambiente { /* empresa, Arc<ConjuntoEfetivo>, fuso, Arc<Recursos> */ }

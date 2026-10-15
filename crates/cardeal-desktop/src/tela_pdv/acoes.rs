@@ -509,7 +509,7 @@ pub(super) fn pedir_finalizar(ctx: &egui::Context, estado: &mut EstadoTelaPdv) {
     estado.finalizar_pendente = true;
     notificar(
         ctx,
-        Notificacao::carregando("Emitindo NFC-e…").id(egui::Id::new("pdv-fiscal")),
+        Notificacao::carregando("Finalizando a venda…").id(egui::Id::new("pdv-fiscal")),
     );
     ctx.request_repaint();
 }
@@ -540,10 +540,14 @@ pub(super) fn finalizar(
         Ok(VendaFoiFinalizada { total, .. }) => {
             let numero = estado.cupom_numero.unwrap_or(0);
             estado.ultima_venda = Some(UltimaVenda {
+                cupom,
                 numero,
                 total,
                 troco,
             });
+            // A NFC-e: o documento nasce agora (sem rede) e a transmissão vai para o segundo
+            // plano — a venda já acabou (`docs/10` §3).
+            let nota_fiscal = emitir_nfce(ctx, motor, sessao, estado, cupom);
             estado.cupom = None;
             estado.cupom_numero = None;
             estado.cliente = None;
@@ -554,15 +558,18 @@ pub(super) fn finalizar(
             estado.erro = None;
             estado.foco_entrada = true;
             estado.carregar(motor, sessao);
-            let detalhe = if troco > Dinheiro::ZERO {
+            let mut detalhe = if troco > Dinheiro::ZERO {
                 format!(
                     "{} · troco {}",
                     total.formatar_com_simbolo(),
                     troco.formatar_com_simbolo()
                 )
             } else {
-                format!("NFC-e autorizada · {}", total.formatar_com_simbolo())
+                total.formatar_com_simbolo()
             };
+            if let Some(f) = nota_fiscal {
+                detalhe = format!("{detalhe} · {f}");
+            }
             notificar(
                 ctx,
                 Notificacao::sucesso(format!("Venda #{numero} concluída"))
@@ -571,5 +578,45 @@ pub(super) fn finalizar(
             );
         }
         Err(e) => notificar(ctx, Notificacao::erro(e.mensagem).id(fiscal)),
+    }
+}
+
+/// Cria a NFC-e da venda e dispara a transmissão em segundo plano. Devolve a frase para o
+/// aviso da venda (`None` quando a empresa não emite NFC-e nas vendas).
+pub(super) fn emitir_nfce(
+    ctx: &egui::Context,
+    motor: &Motor,
+    sessao: &Sessao,
+    estado: &mut EstadoTelaPdv,
+    cupom: Id,
+) -> Option<String> {
+    if !estado.nfce_automatica || !sessao.concede("fiscal.emitir") {
+        estado.nfce_ultima = None;
+        return None;
+    }
+    match motor.executar(
+        sessao,
+        "fiscal.emitir_nfce_do_cupom.v1",
+        &mod_fiscal::EmitirNfceDoCupom { cupom },
+    ) {
+        Ok(doc) => {
+            let frase = if doc.estado == mod_fiscal::EstadoDocumento::Pendente {
+                crate::fiscal_fundo::disparar(ctx, motor, sessao);
+                "NFC-e na fila".to_owned()
+            } else {
+                format!(
+                    "NFC-e não saiu: {}",
+                    doc.motivo
+                        .clone()
+                        .unwrap_or_else(|| doc.estado.rotulo().to_owned())
+                )
+            };
+            estado.nfce_ultima = Some(doc);
+            Some(frase)
+        }
+        Err(e) => {
+            estado.nfce_ultima = None;
+            Some(format!("NFC-e não saiu: {}", e.mensagem))
+        }
     }
 }

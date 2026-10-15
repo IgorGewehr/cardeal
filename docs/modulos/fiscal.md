@@ -1,7 +1,8 @@
 # Módulo `fiscal`
 
-> Estado: **onda 7, fatia 1 (configuração)** — certificado A1, dados fiscais do emitente, ambiente e
-> conexão com a SEFAZ. A emissão (NFC-e, NF-e, NFS-e) entra nas próximas fatias, sobre o que está aqui.
+> Estado: **onda 7, fatias 1 e 2** — configuração (certificado A1, dados fiscais do emitente, ambiente,
+> conexão) e a **NFC-e do PDV** como documento assíncrono (fila, transmissão em segundo plano, conferência
+> pela chave). Faltam DANFCE, contingência offline, cancelamento, NF-e, NFS-e e SPED (§11).
 > Arquitetura: [ADR-0006](../adr/0006-fiscal-via-api-externa.md) (fiscal por API externa) e
 > [ADR-0019](../adr/0019-sefaz-api-como-provedor-e-cofre-do-certificado.md) (o provedor é o `sefaz-api`;
 > o certificado mora cifrado no cofre). Visão geral: [doc 10](../10-modulo-fiscal.md).
@@ -101,7 +102,55 @@ por `cardeal_distribuicao::recursos(pasta)` no desktop e no servidor:
 `mod_fiscal::porta_da_empresa(ctx, conexão)` abre o certificado do cofre e devolve a `PortaFiscal` da
 empresa no ambiente configurado — é por ela que a emissão vai passar.
 
-## 7. Telas
+## 7. NFC-e das vendas (fatia 2)
+
+**Configuração** (`ConfigurarNfce`, `fiscal.configurar_nfce.v1`): emitir a cada venda do PDV, série (1 a
+889), próximo número (por série **e ambiente**; nunca abaixo do maior já usado) e o CSC — o token vai para o
+cofre (contexto `fiscal.csc/<empresa>`) e nunca volta para a tela.
+
+**O documento nasce na venda, sem rede** (`EmitirNfceDoCupom`, `fiscal.emitir_nfce_do_cupom.v1`, permissão
+nova `fiscal.emitir`): reserva o número, monta a nota a partir do cupom finalizado — itens com o produto e o
+**perfil fiscal efetivo** (`mod_estoque::produtos_para_nota`), pagamentos, o CPF/CNPJ do cliente identificado
+— e a guarda (postcard, sem segredo) em `fiscal_documento`. Faltando algo (produto sem NCM, perfil com CST
+do regime errado, certificado/CSC/dados fiscais), o documento já nasce **rejeitado** com a frase do que
+corrigir. Repetir devolve o mesmo documento. `ReenviarDocumento` remonta uma rejeitada com o **mesmo número**
+(a rejeição não o consome). Em homologação, o primeiro item sai com a descrição que a SEFAZ exige ("NOTA
+FISCAL EMITIDA EM AMBIENTE DE HOMOLOGACAO - SEM VALOR FISCAL").
+
+**Tributação** (`tributar`, pura): Simples — CSOSN 102/103/300/400/500 (sem perfil, 102), PIS/COFINS com
+valores zerados; regime normal — CST 00, 20 (base reduzida), 40, 41, 50, 60, PIS/COFINS 01/02 calculados.
+CFOP do perfil, ou 5405 para ICMS retido e 5102 para o resto; fora do 5xxx é recusado (NFC-e é interna).
+
+**A transmissão é uma tarefa** (`fiscal.transmitir_pendentes`, `cardeal_modkit::Registro::tarefa`): roda no
+processo do motor, fora de qualquer transação — lê a fila, abre certificado e CSC do cofre, fala com a API
+documento a documento e grava cada resultado na hora. No desktop ela roda numa thread (`ExecutorDeTarefas`):
+depois de cada venda e, a cada minuto, se houver nota esperando. A decisão de cada resposta é uma função
+pura (`decidir`):
+
+| Situação | Vai para |
+|---|---|
+| Autorizada (100/150) | `Autorizada` — chave, protocolo, XML |
+| Rejeitada pela SEFAZ (inclui as de código < 200, ex.: SP 178) | `Rejeitada` — corrigir e reenviar |
+| Denegada | `Denegada` (o número foi consumido) |
+| Resposta sem resultado (timeout, erro com chave) | `Incerta` — **consultar pela chave** antes de qualquer reemissão |
+| Duplicidade 539 (a chave da nota que existe vem no motivo) / 204 | `Incerta` — conferir essa chave |
+| Consulta: não consta (217) | `Pendente` — emitir de novo, já |
+| Consulta: 101/151/155 | `Cancelada` (o `sefaz-api` diz "autorizado" para o 101) |
+| API fora do ar / SEFAZ paralisada (108/109) | continua, espera 30 s → 1, 2, 4, 8 → 15 min |
+| Recusa do provedor/instalação (CNPJ, credencial, cofre) | `Rejeitada` com a mensagem |
+| Erro do emissor repetido 6 vezes | `Rejeitada` — não gira na fila para sempre |
+
+Cada documento vai ao **seu** ambiente (a nota de homologação que ficou na fila não sai em produção). Duas
+transmissões ao mesmo tempo para a mesma empresa não acontecem (trava por processo). O `cStat` vira frase
+de balcão (`explicar`: o que houve e onde corrigir).
+
+**Conferido de verdade em 2026-10-15** com o `sefaz-api` local (o publicado estava fora do ar — Cloudflare
+1033): a NFC-e montada pelo Cardeal passou por assinatura, schema e QR Code na SEFAZ-SP de homologação e foi
+recusada só por cadastro (178, a Tensorroot saiu de SP) — o que levou à regra das rejeições com código
+< 200. Falta a primeira **autorizada**: pede a IE do RS e o CSC de homologação da SEFAZ-RS
+(`cardeal-fiscal`, teste ignorado `homologacao_nfce_real`).
+
+## 8. Telas
 
 Configurações › **Fiscal**: pendências no topo; dados fiscais do emitente; certificado (titular, CNPJ,
 validade com etiqueta "válido/vence em N dias/vencido", trocar, remover, aviso quando foi regravado);
@@ -109,29 +158,41 @@ ambiente e **Testar conexão** (NF-e e NFC-e, com o código e o motivo da SEFAZ)
 certificado vencido ou a 30 dias de vencer vira aviso com atalho para esta aba (empresa sem
 certificado não vê aviso — nem toda empresa emite).
 
-O teste de conexão bloqueia a tela até a resposta (o cliente HTTP tem tempo limite). A emissão não vai
-bloquear: é assíncrona por desenho ([doc 10 §3](../10-modulo-fiscal.md)).
+O teste de conexão bloqueia a tela até a resposta (o cliente HTTP tem tempo limite). A emissão não
+bloqueia: é assíncrona por desenho ([doc 10 §3](../10-modulo-fiscal.md)).
 
-## 8. Permissões
+Também em Configurações › Fiscal, o cartão **NFC-e nas vendas do PDV** (emitir ou não, série, próximo
+número, CSC). No **PDV**, cada venda finalizada cria a nota e dispara a transmissão em segundo plano; o
+cabeçalho mostra a faixa da fila ("Fiscal em dia" / "N na fila" / "N rejeitadas") e o resultado da venda, a
+situação da NFC-e (com o que corrigir, se rejeitada). Área nova **Notas fiscais** (barra lateral, grupo
+Financeiro): indicadores (na fila, conferindo, rejeitadas, autorizadas hoje), filtro, grade com
+**Reenviar** e **Detalhes** (chave, protocolo, itens com NCM/CFOP, consumidor) e **Transmitir agora**.
+
+## 9. Permissões
 
 | Permissão | Risco | O que libera |
 |---|---|---|
-| `fiscal.ver` | Baixo | Situação fiscal e teste de conexão |
-| `fiscal.configurar` | Alto | Instalar/remover certificado, trocar o ambiente |
+| `fiscal.ver` | Baixo | Situação fiscal, notas, teste de conexão |
+| `fiscal.emitir` | Médio | Criar a NFC-e da venda, reenviar, transmitir a fila |
+| `fiscal.configurar` | Alto | Certificado, ambiente, configuração da NFC-e (CSC) |
 
-## 9. Tabelas (migração `fiscal` v1)
+## 10. Tabelas
 
-- `fiscal_certificado` — uma linha por empresa: parte pública (titular, CNPJ, certificadora, série,
-  validade, `convertido`), `selado` (o cofre), quem instalou e quando.
-- `fiscal_configuracao` — o ambiente (`homologacao`/`producao`).
+- v1: `fiscal_certificado` (uma linha por empresa: parte pública, `selado`, quem instalou) e
+  `fiscal_configuracao` (o ambiente).
+- v2: `fiscal_configuracao` ganha `emitir_nfce`, `serie_nfce`, `csc_id`, `csc_selado`; `fiscal_serie`
+  (próximo número por empresa, modelo, série e ambiente); `fiscal_documento` (a nota guardada, estado,
+  chave, protocolo, código e motivo, XML, tentativas e próxima tentativa; únicos por origem e por
+  série+número+ambiente).
 
-## 10. Próximas fatias da onda 7
+## 11. Próximas fatias da onda 7
 
-1. Documento fiscal assíncrono: numeração e séries por terminal, fila durável, consulta antes de
-   reemitir, tradução amigável do `cStat`. Primeiro a **NFC-e do PDV** (CSC por empresa, contingência
-   offline com `prepare`/`transmit`).
-2. NF-e de venda e devolução; cancelamento, CC-e, inutilização.
-3. DANFE e DANFCE em PDF (`cardeal-pdf`), com QR Code.
-4. NFS-e da OS.
-5. SPED gerado no Cardeal.
-6. DFe e manifestação — dependem de rotas novas no `sefaz-api`.
+1. **DANFCE** (cupom com QR Code; o XML autorizado traz o `infNFeSupl`) e a impressão no PDV.
+2. **Cancelamento** da NFC-e (prazo da UF) e **inutilização** de números pulados.
+3. **Contingência offline** (`tpEmis=9`, `prepare`/`transmit` do `sefaz-api`): exige a API alcançável — sem
+   internet nenhuma, a nota espera na fila (assinar localmente seria trazer a assinatura para o Cardeal).
+4. Série por terminal (hoje uma série por empresa).
+5. NF-e de venda e devolução; CC-e.
+6. NFS-e da OS.
+7. SPED gerado no Cardeal.
+8. DFe e manifestação — dependem de rotas novas no `sefaz-api`.

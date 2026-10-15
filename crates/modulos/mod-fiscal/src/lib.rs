@@ -53,14 +53,16 @@ pub use explicacao::explicar;
 pub use manifesto::{ID, MANIFESTO};
 #[cfg(feature = "sqlite")]
 pub use modulo::ModuloFiscal;
+#[cfg(feature = "sqlite")]
+pub use montagem::{marcar_homologacao, DESCRICAO_HOMOLOGACAO};
 pub use nfce::{
     ConfiguracaoDaNfce, ConfiguracaoNfce, ConfigurarNfce, DetalheDocumento, DocumentoDaVenda,
     DocumentoFiscal, DocumentosFiscais, EmitirNfceDoCupom, ReenviarDocumento, ResumoDaFilaFiscal,
     TAREFA_TRANSMITIR,
 };
-#[cfg(feature = "sqlite")]
-pub use provedor::porta_da_empresa;
 pub use provedor::ProvedorFiscal;
+#[cfg(feature = "sqlite")]
+pub use provedor::{porta_da_empresa, porta_da_empresa_no_ambiente};
 pub use tipos::{
     CertificadoResumo, PendenciaFiscal, SituacaoFiscalDaEmpresa, ALERTA_VENCIMENTO_DIAS,
 };

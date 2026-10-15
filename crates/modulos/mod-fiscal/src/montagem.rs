@@ -51,6 +51,18 @@ fn codigo_do_produto(id: Id) -> String {
     hex[hex.len().saturating_sub(12)..].to_ascii_uppercase()
 }
 
+/// O que a SEFAZ exige na descrição do primeiro item de uma NFC-e de homologação.
+pub const DESCRICAO_HOMOLOGACAO: &str =
+    "NOTA FISCAL EMITIDA EM AMBIENTE DE HOMOLOGACAO - SEM VALOR FISCAL";
+
+/// Marca a nota como de homologação (rejeição 373 sem isso): o primeiro item ganha a descrição
+/// obrigatória.
+pub fn marcar_homologacao(nota: &mut Nfce) {
+    if let Some(i) = nota.itens.first_mut() {
+        i.descricao = DESCRICAO_HOMOLOGACAO.to_string();
+    }
+}
+
 /// Monta a nota.
 ///
 /// # Errors

@@ -834,6 +834,7 @@ dependencies = [
  "cardeal-analytics",
  "cardeal-cliente",
  "cardeal-distribuicao",
+ "cardeal-fiscal",
  "cardeal-kernel",
  "cardeal-ledger",
  "cardeal-modkit",

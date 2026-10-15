@@ -553,6 +553,7 @@ fn venda_vira_nfce_autorizada_pela_fila() {
     assert!(detalhe.resumo.protocolo.is_some() && detalhe.resumo.autorizado_em.is_some());
     let nota = detalhe.nota.unwrap();
     assert_eq!(nota.itens.len(), 1);
+    assert_eq!(nota.itens[0].descricao, mod_fiscal::DESCRICAO_HOMOLOGACAO);
     assert_eq!(nota.itens[0].ncm, "39269090");
     assert_eq!(nota.itens[0].impostos.icms.csosn.as_deref(), Some("102"));
     assert_eq!(nota.emitente.endereco.uf, cardeal_kernel::Uf::Rs);

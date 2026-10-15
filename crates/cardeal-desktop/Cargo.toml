@@ -42,6 +42,7 @@ mod-agenda.workspace     = true
 mod-pdv.workspace        = true
 mod-empresa.workspace    = true
 mod-fiscal.workspace     = true
+cardeal-fiscal.workspace = true
 
 eframe.workspace      = true
 egui.workspace        = true

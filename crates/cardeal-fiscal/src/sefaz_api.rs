@@ -152,6 +152,14 @@ impl ApiFiscalHttp {
                 .join()
                 .unwrap_or(Err(ErroFiscal::ServicoIndisponivel))
         })?;
+        if status >= 400 {
+            tracing::warn!(status, corpo = %texto.chars().take(300).collect::<String>(), "sefaz-api recusou");
+            #[cfg(test)]
+            eprintln!(
+                "sefaz-api HTTP {status}: {}",
+                texto.chars().take(300).collect::<String>()
+            );
+        }
         interpretar_resposta(status, &texto)
     }
 }
@@ -173,9 +181,14 @@ pub(crate) struct RespostaSefazApi {
 
 impl RespostaSefazApi {
     /// Em [`RetornoSefaz`]. A validação do provedor ("erro" com código 400) é uma rejeição: o
-    /// número não foi usado e a nota precisa de correção.
+    /// número não foi usado e a nota precisa de correção. O `sefaz-api` também chama de "erro"
+    /// as rejeições com código abaixo de 200 (algumas UFs usam, ex.: SP 178) — pelo motivo
+    /// ("Rejeição: ...", "Uso Denegado: ...") elas voltam ao que são.
     fn em_retorno(self) -> RetornoSefaz {
+        let motivo = self.motivo_status.trim_start().to_lowercase();
         let situacao = match self.status.as_str() {
+            "erro" if motivo.starts_with("rejei") => SituacaoRetorno::Rejeitado,
+            "erro" if motivo.starts_with("uso denegado") => SituacaoRetorno::Denegado,
             "autorizado" => SituacaoRetorno::Autorizado,
             "rejeitado" => SituacaoRetorno::Rejeitado,
             "denegado" => SituacaoRetorno::Denegado,
@@ -591,6 +604,14 @@ mod testes {
         assert_eq!(r("erro", "ERR"), SituacaoRetorno::Erro);
         assert_eq!(r("processando", "TIMEOUT"), SituacaoRetorno::Processando);
         assert_eq!(r("denegado", "302"), SituacaoRetorno::Denegado);
+        // SP devolve rejeição com código abaixo de 200, que o sefaz-api chama de "erro".
+        let sp = RespostaSefazApi {
+            status: "erro".into(),
+            codigo_status: "178".into(),
+            motivo_status: "Rejeição: CNPJ do emitente não cadastrado na Receita Federal".into(),
+            ..RespostaSefazApi::default()
+        };
+        assert_eq!(sp.em_retorno().situacao, SituacaoRetorno::Rejeitado);
         let completo: RespostaSefazApi = serde_json::from_str(
             r#"{"success":true,"status":"autorizado","codigoStatus":"100","motivoStatus":"Autorizado o uso da NF-e","chaveAcesso":"43261011222333000181650010000000421100000001","protocolo":"143260000000001","xml":"<nfeProc/>"}"#,
         )
@@ -679,6 +700,73 @@ mod testes {
             let status = api.status_servico(uf, modelo).unwrap();
             eprintln!("{modelo:?}: {} {}", status.codigo, status.motivo);
             assert!(status.em_operacao, "{status:?}");
+        }
+    }
+
+    /// Uma NFC-e de homologação de verdade, contra o `sefaz-api` publicado: confere o caminho
+    /// inteiro (JSON → XML → assinatura → SEFAZ). Além das variáveis do teste de status, pede
+    /// `CARDEAL_TESTE_IE`, `CARDEAL_TESTE_IBGE`, `CARDEAL_TESTE_MUNICIPIO`, `CARDEAL_TESTE_CEP`,
+    /// `CARDEAL_TESTE_CSC_ID` e `CARDEAL_TESTE_CSC_TOKEN`. Rodar com `--ignored --nocapture`.
+    #[test]
+    #[ignore = "emite uma NFC-e de homologação de verdade"]
+    fn homologacao_nfce_real() {
+        let var = |n: &str| std::env::var(n).unwrap_or_else(|_| panic!("{n}"));
+        let config = ConfigApiFiscal::do_ambiente().expect("CARDEAL_FISCAL_TOKEN");
+        let pfx = std::fs::read(var("CARDEAL_TESTE_PFX")).unwrap();
+        let preparado =
+            crate::preparar_certificado_a1(&pfx, &var("CARDEAL_TESTE_PFX_SENHA")).unwrap();
+        let uf = Uf::de_sigla(&var("CARDEAL_TESTE_UF")).unwrap();
+        let mut nota = crate::emissao::exemplo();
+        nota.emitente.cnpj = preparado.info.cnpj.unwrap();
+        nota.emitente.razao_social = preparado.info.titular.clone();
+        nota.emitente.inscricao_estadual = var("CARDEAL_TESTE_IE");
+        nota.emitente.endereco.uf = uf;
+        nota.emitente.endereco.codigo_municipio = var("CARDEAL_TESTE_IBGE");
+        nota.emitente.endereco.municipio = var("CARDEAL_TESTE_MUNICIPIO");
+        nota.emitente.endereco.cep = var("CARDEAL_TESTE_CEP");
+        nota.consumidor = None;
+        for item in &mut nota.itens {
+            item.cest = None;
+        }
+        nota.itens[0].descricao =
+            "NOTA FISCAL EMITIDA EM AMBIENTE DE HOMOLOGACAO - SEM VALOR FISCAL".into();
+        let agora = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        nota.numero = 900_000_000 + agora % 99_999_999;
+        let csc = Csc {
+            id: var("CARDEAL_TESTE_CSC_ID"),
+            token: Segredo::novo(var("CARDEAL_TESTE_CSC_TOKEN")),
+        };
+        let api = ApiFiscalHttp::novo(
+            Arc::new(config),
+            CertificadoA1 {
+                pfx: Segredo::novo(preparado.pfx),
+                senha: Segredo::novo(var("CARDEAL_TESTE_PFX_SENHA")),
+            },
+            AmbienteFiscal::Homologacao,
+        );
+        let r = api.emitir_nfce(&nota, &csc).unwrap();
+        eprintln!(
+            "NFC-e {}: {:?} {} {} chave={:?} protocolo={:?} erros={:?}",
+            nota.numero, r.situacao, r.codigo, r.motivo, r.chave, r.protocolo, r.erros
+        );
+        // Schema (215/225) ou recusa do provedor (400) = o Cardeal montou algo errado.
+        assert!(
+            !matches!(r.codigo.as_str(), "215" | "225" | "400"),
+            "nota mal formada: {} {}",
+            r.codigo,
+            r.motivo
+        );
+        if let Some(chave) = &r.chave {
+            let consulta = api
+                .consultar_documento(&ChaveAcesso::nova(chave).unwrap(), uf)
+                .unwrap();
+            eprintln!(
+                "consulta: {:?} {} {}",
+                consulta.situacao, consulta.codigo, consulta.motivo
+            );
         }
     }
 }

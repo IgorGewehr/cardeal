@@ -98,6 +98,11 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
         finalizar(ui.ctx(), motor, sessao, estado);
     }
 
+    // Uma rodada da transmissão fiscal terminou: a faixa e a nota da última venda mudaram.
+    if estado.geracao_fiscal != crate::fiscal_fundo::geracao() {
+        estado.carregar_fiscal(motor, sessao);
+    }
+
     atalhos(ui.ctx(), estado);
     desenhar(ui, estado);
     dialogos(ui.ctx(), motor, sessao, estado);

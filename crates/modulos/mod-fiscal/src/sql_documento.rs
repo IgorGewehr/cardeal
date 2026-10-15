@@ -327,6 +327,7 @@ pub(crate) fn documentos(
 /// Um documento na fila de transmissão.
 pub(crate) struct NaFila {
     pub id: Id,
+    pub ambiente: AmbienteFiscal,
     pub estado: EstadoDocumento,
     pub tentativas: u32,
     pub chave: Option<String>,
@@ -342,7 +343,7 @@ pub(crate) fn fila(
 ) -> Resultado<Vec<NaFila>> {
     let mut stmt = c
         .prepare(
-            "SELECT id, estado, tentativas, chave, nota FROM fiscal_documento
+            "SELECT id, estado, tentativas, chave, nota, ambiente FROM fiscal_documento
              WHERE empresa = ?1 AND estado IN ('Pendente','Incerta') AND proxima_tentativa <= ?2
              ORDER BY criado_em LIMIT ?3",
         )
@@ -358,6 +359,11 @@ pub(crate) fn fila(
                     tentativas: r.get(2)?,
                     chave: r.get(3)?,
                     nota: r.get(4)?,
+                    ambiente: if r.get::<_, String>(5)? == "producao" {
+                        AmbienteFiscal::Producao
+                    } else {
+                        AmbienteFiscal::Homologacao
+                    },
                 })
             },
         )

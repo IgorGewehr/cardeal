@@ -41,8 +41,10 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   (2026-10-14) — **a onda 6 fechou**; o disparo sem clique espera uma API de WhatsApp (decisão de produto).
   **Onda 7 (fiscal real) começou** sobre o `sefaz-api`, o motor fiscal próprio (ADR-0019): **certificado A1**
   conferido e guardado cifrado no cofre, **dados fiscais do emitente**, **ambiente** e **status da SEFAZ**
-  feitos (2026-10-14; homologação SC respondeu 107 com o A1 real). Próximo: a NFC-e do PDV como documento
-  assíncrono (`docs/modulos/fiscal.md` §10).
+  feitos (2026-10-14; homologação SC respondeu 107 com o A1 real). A **NFC-e do PDV** saiu (2026-10-15):
+  documento criado na venda sem rede, fila, transmissão em segundo plano (tarefa no despacho), conferência
+  pela chave antes de reemitir, área Notas fiscais. Próximo: DANFCE, cancelamento e contingência
+  (`docs/modulos/fiscal.md` §11).
 - **Pendência de confiança:** as tabelas do Simples e as alíquotas precisam ser conferidas com o
   contador; o ST/IPI **da nota** já entra no custo (2026-10-13), mas a estimativa de ST pela MVA (sem o valor na
   nota) ainda não.
@@ -591,6 +593,20 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   Decisões: ADR-0019.
   Testes novos: 15 em `cardeal-fiscal` (mais o de homologação real, ignorado no CI), 3 do cofre, 1 dos
   recursos, 2 de dados fiscais, 2 + 3 de `mod-fiscal` e 2 de tela.
+- **NFC-e do PDV (2026-10-15, onda 7, fatia 2):** `cardeal-modkit` ganhou **tarefas** (`Registro::tarefa`,
+  `ContextoTarefa` com `ler`/`escrever`, `Despachante::executar_tarefa`; `Escritor`/`Leitor` com `Clone`
+  barato; `ExecutorDeTarefas` no motor para rodar numa thread). `cardeal-fiscal`: tipos da NFC-e e do
+  retorno, `emitir_nfce`/`consultar_documento` na porta (sefaz-api e simulado), `ChaveAcesso::montar` (DV
+  módulo 11). `mod-fiscal`: tributação pelo perfil efetivo, montagem a partir do cupom, migração v2
+  (documento, série por ambiente, CSC no cofre), `ConfigurarNfce`/`EmitirNfceDoCupom`/`ReenviarDocumento`,
+  consultas da fila, a tarefa `fiscal.transmitir_pendentes` e `decidir` (a máquina de estados, pura).
+  `mod-estoque::produtos_para_nota` e `mod-clientes::documentos_da_pessoa` públicos. Desktop: NFC-e
+  automática no PDV com faixa de estado, área **Notas fiscais**, cartão NFC-e em Configurações › Fiscal e a
+  transmissão em segundo plano (`fiscal_fundo`). Conferido na SEFAZ-SP de homologação pelo `sefaz-api`
+  local: assinatura, schema e QR passaram; recusa só de cadastro (178 — a empresa mudou para o RS). Achados
+  do teste real: rejeições com código < 200 vinham como "erro" (agora são rejeição) e um erro do emissor
+  que se repete sai da fila depois de 6 tentativas. O `sefaz-api` publicado estava fora do ar
+  (Cloudflare 1033) em 2026-10-15.
 - **Inventário com contagem cega (2026-10-13):** migração `estoque` v11 (`estoque_inventario`,
   `estoque_contagem_item`), comandos `criar_inventario`/`iniciar_contagem`/`registrar_contagem`/
   `encerrar_inventario`/`cancelar_inventario` (`.v1`) e consultas `inventarios`/`posicao_do_inventario`.

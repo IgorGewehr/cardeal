@@ -571,3 +571,19 @@ fn linha_abaixo_do_preco_minimo_e_sinalizada_so_se_o_estoque_sabe_o_minimo() {
     l.cancelado = true;
     assert!(!l.abaixo_do_minimo());
 }
+
+#[test]
+fn nfce_da_venda_so_quando_ligada_e_explica_quando_nao_sai() {
+    let t = crate::testes_comum::motor_de_teste();
+    let (m, s) = (&t.motor, &t.sessao);
+    let ctx = egui::Context::default();
+    let mut e = EstadoTelaPdv::default();
+    e.carregar(m, s);
+    assert!(!e.nfce_automatica, "desligada por padrão");
+    assert_eq!(emitir_nfce(&ctx, m, s, &mut e, Id::novo()), None);
+
+    e.nfce_automatica = true;
+    let frase = emitir_nfce(&ctx, m, s, &mut e, Id::novo()).unwrap();
+    assert!(frase.starts_with("NFC-e não saiu"), "{frase}");
+    assert!(e.nfce_ultima.is_none());
+}

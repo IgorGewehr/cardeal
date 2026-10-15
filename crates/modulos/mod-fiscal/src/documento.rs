@@ -180,6 +180,10 @@ pub struct Mudanca {
     pub espera_segundos: i64,
 }
 
+/// Depois de tantas tentativas com erro do emissor (não de rede), a nota sai da fila como
+/// rejeitada, com o motivo — um erro que se repete não se resolve sozinho.
+pub const TENTATIVAS_COM_ERRO: u32 = 6;
+
 /// A espera antes da próxima tentativa: 30 s, 1, 2, 4, 8 min... até 15 min.
 #[must_use]
 pub fn espera(tentativas: u32) -> i64 {
@@ -302,6 +306,14 @@ pub fn decidir(estado: EstadoDocumento, tentativas: u32, desfecho: Desfecho) -> 
             final_(EstadoDocumento::Rejeitada)
         }
         SituacaoRetorno::Denegado => final_(EstadoDocumento::Denegada),
+        SituacaoRetorno::Erro if tentativas + 1 >= TENTATIVAS_COM_ERRO => Mudanca {
+            motivo: Some(format!(
+                "o emissor falhou {} vezes seguidas — {}",
+                tentativas + 1,
+                explicar(&r.codigo, &r.motivo)
+            )),
+            ..final_(EstadoDocumento::Rejeitada)
+        },
         SituacaoRetorno::Processando | SituacaoRetorno::Erro => match r.chave.clone() {
             Some(chave) => incerta(Some(chave), espera(0)),
             None if r.situacao == SituacaoRetorno::Processando => Mudanca {
@@ -366,6 +378,14 @@ mod testes {
             decidir(Pendente, 0, r(Erro, "ERR", Some(CHAVE))).estado,
             Incerta
         );
+        // Erro que se repete: sai da fila como rejeitada (não gira para sempre).
+        let cansou = decidir(
+            Pendente,
+            TENTATIVAS_COM_ERRO - 1,
+            r(Erro, "ERR", Some(CHAVE)),
+        );
+        assert_eq!(cansou.estado, Rejeitada);
+        assert!(cansou.motivo.unwrap().contains("6 vezes"));
         // Erro sem chave: falhou antes de enviar — precisa de atenção.
         assert_eq!(decidir(Pendente, 0, r(Erro, "ERR", None)).estado, Rejeitada);
         // Processando sem chave: continua na fila.
