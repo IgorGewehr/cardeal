@@ -32,12 +32,16 @@
     clippy::return_self_not_must_use
 )]
 
+mod bobina;
+mod comprovante;
 mod danfce;
 mod documento;
 mod fonte;
 mod imagem;
 mod layout;
 
+pub use bobina::Bobina;
+pub use comprovante::{gerar_comprovante, ComprovantePdf, ItemComprovante};
 pub use danfce::{chave_em_grupos, gerar_danfce, DanfcePdf, ItemDanfce};
 
 use cardeal_kernel::{Data, Dinheiro, Instante, Percentual, Preco, Quantidade};

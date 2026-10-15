@@ -137,6 +137,12 @@ const PERMISSOES: &[Permissao] = &[
         None,
     ),
     perm(
+        "pdv.impressao.configurar",
+        "Configurar a impressão do PDV (bobina, comprovante automático, rodapé)",
+        Risco::Baixo,
+        None,
+    ),
+    perm(
         "pdv.preco.consultar",
         "Consulta de preço sem abrir venda (F10)",
         Risco::Baixo,

@@ -28,10 +28,12 @@ use mod_financeiro::{
     AbrirCaixa, CadastrarCaixa, CaixaCadastrado, CaixaFoiAberto, ModuloFinanceiro,
 };
 use mod_pdv::{
-    AbrirCupom, AdicionarItem, AplicarDescontoItem, CancelarCupom, CancelarItem, CupomAberto,
-    EstadoCupom, EstornarVenda, FinalizarVenda, FormaPagamentoPdv, IdentificarCliente,
-    ItemFoiAdicionado, ModuloPdv, PagamentoInformado, PrecoConsultado, PrecoDoProduto,
-    ReceitaPorProduto, VendaDoPeriodo, VendaFoiEstornada, VendaFoiFinalizada, VendasDoPeriodo,
+    AbrirCupom, AdicionarItem, AplicarDescontoItem, CancelarCupom, CancelarItem,
+    ComprovanteDaVenda, CupomAberto, DadosDoComprovante, DefinirImpressaoPdv, EstadoCupom,
+    EstornarVenda, FinalizarVenda, FormaPagamentoPdv, IdentificarCliente, ImpressaoDoPdv,
+    ImpressaoPdv, ItemFoiAdicionado, LarguraBobina, ModuloPdv, PagamentoInformado, PrecoConsultado,
+    PrecoDoProduto, ReceitaPorProduto, VendaDoPeriodo, VendaFoiEstornada, VendaFoiFinalizada,
+    VendasDoPeriodo,
 };
 use mod_vendas::{
     CriarRegraPreco, CriarTabelaPreco, ModuloVendas, RegraPrecoCriada, TabelaPrecoCriada,
@@ -106,6 +108,7 @@ fn sessao_completa(empresa: Id) -> Sessao {
         "pdv.margem.ver",
         "pdv.venda.estornar",
         "pdv.venda.ver",
+        "pdv.impressao.configurar",
     ] {
         papel = papel.com_permissao(p);
     }
@@ -1035,4 +1038,104 @@ fn estornar_venda_finalizada_devolve_estoque_e_zera_o_razao() {
         vendas[0].estorno.as_ref().map(|e| e.motivo.as_str()),
         Some("Cliente desistiu da compra")
     );
+}
+
+#[test]
+fn comprovante_traz_empresa_itens_cliente_e_a_impressao_configurada() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[
+        &ModuloClientes,
+        &ModuloEstoque,
+        &ModuloFinanceiro,
+        &ModuloVendas,
+        &ModuloPdv,
+    ])
+    .unwrap();
+    let s = sessao_completa(empresa);
+    let amb = ambiente(empresa);
+    let cen = montar_cenario(&d, &s, &amb, &arm, empresa, 25);
+    let cupom = abrir_cupom(&d, &s, &amb, &arm, &cen);
+    d.executar_comando(
+        "pdv.adicionar_item.v1",
+        &carga(&AdicionarItem {
+            cupom: cupom.cupom,
+            produto: cen.produto,
+            variacao: None,
+            quantidade: Quantidade::unidades(2),
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+    let comprovante = || -> Result<DadosDoComprovante, cardeal_kernel::Erro> {
+        d.executar_consulta(
+            "pdv.comprovante_da_venda.v1",
+            &carga(&ComprovanteDaVenda { cupom: cupom.cupom }),
+            &s,
+            &amb,
+            arm.leitor(),
+        )
+        .map(|b| postcard::from_bytes(&b).unwrap())
+    };
+    // Venda em andamento ainda não tem comprovante.
+    assert_eq!(
+        comprovante().unwrap_err().codigo,
+        CodigoErro::ESTADO_INVALIDO
+    );
+    d.executar_comando(
+        "pdv.finalizar_venda.v1",
+        &carga(&FinalizarVenda {
+            cupom: cupom.cupom,
+            pagamentos: vec![PagamentoInformado {
+                forma: FormaPagamentoPdv::Dinheiro,
+                valor: Dinheiro::reais(50),
+            }],
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+
+    let c = comprovante().unwrap();
+    assert_eq!(c.cliente.as_deref(), Some("João Silva"));
+    assert_eq!(c.itens.len(), 1);
+    assert_eq!(c.itens[0].descricao, "Capinha de celular");
+    assert_eq!(
+        (c.itens[0].unidade.as_str(), c.total),
+        ("UN", Dinheiro::reais(50))
+    );
+    assert_eq!(c.cnpj, "11.222.333/0001-81");
+    assert_eq!(c.impressao, ImpressaoPdv::default());
+
+    d.executar_comando(
+        "pdv.definir_impressao.v1",
+        &carga(&DefinirImpressaoPdv {
+            impressao: ImpressaoPdv {
+                bobina: LarguraBobina::Mm58,
+                imprimir_ao_finalizar: true,
+                rodape: Some("  Trocas em até 7 dias  ".into()),
+            },
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+    let i: ImpressaoPdv = postcard::from_bytes(
+        &d.executar_consulta(
+            "pdv.impressao.v1",
+            &carga(&ImpressaoDoPdv),
+            &s,
+            &amb,
+            arm.leitor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(i.bobina, LarguraBobina::Mm58);
+    assert!(i.imprimir_ao_finalizar);
+    assert_eq!(i.rodape.as_deref(), Some("Trocas em até 7 dias"));
+    assert_eq!(comprovante().unwrap().impressao, i);
 }

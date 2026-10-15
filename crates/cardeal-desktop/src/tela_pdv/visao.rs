@@ -143,6 +143,7 @@ pub(super) fn resultado_venda(ui: &mut egui::Ui, estado: &mut EstadoTelaPdv) {
     let Some(v) = estado.ultima_venda else { return };
     let positivo = ui.cores().positivo;
     let mut imprimir = None;
+    let mut comprovante = false;
     Painel::novo().realce(Tom::Positivo).mostrar(ui, |ui| {
         ui.add(Rotulo::interface(format!("Venda nº {} finalizada", v.numero)).cor(positivo));
         ui.add_space(Espaco::E8);
@@ -164,6 +165,10 @@ pub(super) fn resultado_venda(ui: &mut egui::Ui, estado: &mut EstadoTelaPdv) {
                 v.total.formatar_com_simbolo(),
             ));
         }
+        ui.add_space(Espaco::E8);
+        comprovante = ui
+            .add(Botao::secundario("Imprimir comprovante").pequeno())
+            .clicked();
         if let Some(n) = estado.nfce_ultima.as_ref() {
             ui.add_space(Espaco::E8);
             ui.horizontal(|ui| {
@@ -196,6 +201,13 @@ pub(super) fn resultado_venda(ui: &mut egui::Ui, estado: &mut EstadoTelaPdv) {
     });
     if let Some(id) = imprimir {
         estado.pendentes.push(Acao::ImprimirNfce(id));
+    }
+    if comprovante {
+        estado.pendentes.push(Acao::ImprimirComprovante {
+            cupom: v.cupom,
+            troco: v.troco,
+            segunda_via: false,
+        });
     }
     ui.add_space(Espaco::E12);
 }

@@ -128,7 +128,11 @@ pub fn imprimir(
             &DocumentoFiscal { documento },
         )
         .map_err(|e| e.mensagem)?;
-    let pdf = cardeal_pdf::gerar_danfce(&montar(&detalhe)?).map_err(|e| e.to_string())?;
+    let pdf = cardeal_pdf::gerar_danfce(
+        &montar(&detalhe)?,
+        crate::comprovante::bobina_configurada(motor, sessao),
+    )
+    .map_err(|e| e.to_string())?;
     let pasta = std::env::temp_dir().join("Cardeal").join("cupons");
     std::fs::create_dir_all(&pasta).map_err(|e| e.to_string())?;
     let caminho = pasta.join(format!(
@@ -259,10 +263,11 @@ mod testes {
         assert!(d.qr_code.unwrap().contains("|3|2"));
         assert_eq!(d.url_consulta, "www.sefaz.rs.gov.br/nfce/consulta");
         assert!(d.homologacao);
-        assert!(
-            cardeal_pdf::gerar_danfce(&montar(&detalhe(EstadoDocumento::Autorizada)).unwrap())
-                .is_ok()
-        );
+        assert!(cardeal_pdf::gerar_danfce(
+            &montar(&detalhe(EstadoDocumento::Autorizada)).unwrap(),
+            cardeal_pdf::Bobina::Mm58
+        )
+        .is_ok());
         assert!(montar(&detalhe(EstadoDocumento::Pendente))
             .unwrap_err()
             .contains("autorizada"));

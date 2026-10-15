@@ -145,6 +145,7 @@ itens e pagamentos.
 | `ConsultarPreco` | `pdv.preco.consultar` | Baixo | Ainda não implementado | — |
 | `IniciarPagamentoTef` | `pdv.tef.operar` | Médio | Ainda não implementado — `PortaTef` não existe | `TefIndisponivel`, `TefRecusado` |
 | `EstornarVenda` ✅ (2026-10-15, `pdv.estornar_venda.v1`) | `pdv.venda.estornar` | Alto | Desfaz uma venda `Finalizado`, numa transação só: estorna no Razão o lançamento da venda (achado pela origem `pdv/cupom`) e devolve ao estoque cada saída do cupom **ao custo em que saiu** (`mod_estoque::devolver_saidas_da_origem`, que aceita custo zero). Exige motivo (≥ 10 caracteres, vai ao histórico do estorno) e `autorizado_por`; a sessão que executa é a do supervisor. Devolve o que restituir forma por forma | `MotivoDoEstornoCurto`, `VendaJaEstornada`, `CupomEmEstadoInvalido` |
+| `DefinirImpressaoPdv` ✅ (2026-10-15, `pdv.definir_impressao.v1`) | `pdv.impressao.configurar` | Baixo | A impressão do PDV, por empresa (`pdv_preferencias`, migração v3): a bobina (80 ou 58 mm), se o comprovante sai sozinho ao finalizar a venda e o rodapé dele (até 200 caracteres). O DANFCE também sai na bobina configurada | — |
 | `FinalizarVenda` ✅ | `pdv.venda.finalizar` | Alto | `F2` — valida soma dos pagamentos = total (`validar_pagamentos`), consome estoque de verdade, monta o lançamento combinado (um débito por forma + desconto + CMV), publica evento. **Não imprime nem emite fiscal** nesta fatia | `SomaDePagamentosDivergente`, `CupomSemItens` |
 | `AbrirCaixaPdv` | `financeiro.caixa.abrir` | Baixo | Ainda não implementado como comando próprio — o front-end chama `financeiro.abrir_caixa.v1` direto (a única vantagem real de um `AbrirCaixaPdv` seria reservar `FaixaNumeracao` por lote, e esta versão simplificou a faixa para contador contínuo, sem lote) | `CaixaJaAberto` |
 | `FecharCaixaPdv` | `financeiro.caixa.fechar` | Médio | Ainda não implementado — o front-end chama `financeiro.fechar_caixa.v1` direto | `VendaEmAndamento` |
@@ -170,6 +171,8 @@ itens e pagamentos.
 | `CupomAtual` | `pdv.venda.editar` | Tela de venda | leitura em memória do diário local, não do banco |
 | `PrecoDoProduto` | `pdv.preco.consultar` | `F3`/`F10`, item bipado | `PortaCatalogo::buscar_por_codigo` (implementada por `estoque`) |
 | `SaldoEstimado` | `pdv.preco.consultar` | Rodapé da tela de venda | `PortaCatalogo::saldo_disponivel`, rotulado "estimado" offline |
+| `ComprovanteDaVenda` ✅ (2026-10-15, `pdv.comprovante_da_venda.v1`) | `pdv.venda.ver` | O comprovante de venda (não fiscal): empresa (nome, razão, CNPJ, endereço da configuração fiscal), itens não cancelados com nome e unidade, cliente, pagamentos, estorno e a impressão configurada. Montado no próprio PDV para sair também para o operador de caixa, que não vê os dados da empresa nem o cadastro de clientes | `pdv_cupom(id)` |
+| `ImpressaoDoPdv` ✅ (2026-10-15, `pdv.impressao.v1`) | `pdv.venda.editar` | A impressão configurada (padrão: 80 mm, sem comprovante automático) | `pdv_preferencias(empresa)` |
 | `VendasDoPeriodo` ✅ (2026-10-15, `pdv.vendas_do_periodo.v1`) | `pdv.venda.ver` | `F11` Vendas de hoje: cupons `Finalizado` e `Estornado` abertos no período (fuso da empresa), com pagamentos e o estorno; até 1.000 | `pdv_cupom(empresa, abertura)` (migração v2) |
 | `FaixaAtual` | `pdv.venda.ver` | Faixa de estoque do FaixaEstado (topo da tela) | `pdv_faixa_numeracao(terminal) WHERE proximo <= numero_final` |
 | `ReceitaPorProduto` ✅ (2026-10-12, `pdv.receita_por_produto.v1`) | `pdv.margem.ver` | Rentabilidade por nível (aba do Estoque): receita por produto dos cupons `Finalizado` abertos no período, sem itens cancelados | `pdv_cupom(empresa, estado, abertura)` + `pdv_item_cupom(cupom)` |
@@ -225,6 +228,7 @@ exemplo canônico do [doc 01 §3](../01-arquitetura-geral.md#3-o-caminho-de-um-c
 | `pdv.item.cancelar` | Cancelar item antes de finalizar (`F7`) | Baixo |
 | `pdv.cupom.cancelar` | Cancelar cupom inteiro (`F8`) | Alto |
 | `pdv.venda.estornar` | Estornar venda finalizada (`F11`) | Alto |
+| `pdv.impressao.configurar` | Configurar a impressão do PDV (Configurações › Impressão) | Baixo |
 | `pdv.desconto.aplicar` | Aplicar desconto (`F5`) | Médio |
 | `pdv.preco.consultar` | Consulta de preço sem abrir venda (`F10`) | Baixo |
 | `pdv.margem.ver` | Ver a receita por produto vendida no balcão (rentabilidade) | Médio |
@@ -254,6 +258,7 @@ código de barras primeiro**. O que funciona hoje, e o que **não**:
 | `F12` | ✅ Abre o caixa (quando fechado) ou fecha (quando aberto e **sem venda em andamento**). O fechamento é de **contagem cega**: o esperado só aparece depois; o motivo é exigido pelo backend só se a quebra passar de R$ 5,00, então o campo fica sempre à vista |
 | `F10` | ✅ Consulta de preço sem abrir venda (`pdv.preco_do_produto.v1`, permissão `pdv.preco.consultar`): bipa ou digita, mostra nome, código, preço vigente e saldo; continua aberto para a próxima consulta. O preço vem da **mesma função pura** que `AdicionarItem` usa, então nunca diverge do que a venda cobra |
 | `F6` | ✅ Identifica o cliente (nome ou documento; `↑↓` e `Enter`; "Sem cliente" desfaz). Antes do primeiro item só guarda e vai em `AbrirCupom`; com o cupom aberto usa `pdv.identificar_cliente.v1`, que só age em cupom em andamento. Lista os 200 primeiros clientes (teto de `PessoasPorPapel` sem busca) |
+| Comprovante | ✅ (2026-10-15) **Imprimir comprovante** no painel da última venda (com o troco) e em Vendas de hoje (2ª via, sem o troco — a reimpressão não sabe quanto o cliente deu); sai sozinho ao finalizar quando Configurações › Impressão manda. Recibo **não fiscal** (`cardeal_pdf::gerar_comprovante`), em 80 ou 58 mm, com "NÃO É DOCUMENTO FISCAL", o rodapé configurado e a marca de venda estornada |
 | `F11` | ✅ **Vendas de hoje** (2026-10-15): grade com hora, número, cliente, formas, total, situação da venda e da NFC-e. **Estornar venda** pede motivo e login/senha de um supervisor com `pdv.venda.estornar` (segunda identidade, como o `F8`); depois do estorno o PDV pede ao fiscal a anulação da NFC-e e diz o que devolver (dinheiro pelo caixa; Pix/cartão pelo banco ou maquininha). Também **Imprimir cupom fiscal** e **Anular NFC-e** (quando a anulação não pôde ser pedida na hora). A NFC-e com cancelamento recusado aparece como "cancelamento recusado", com a orientação de emitir uma devolução |
 | `F4` | ➖ Não existe de propósito: a quantidade se digita no próprio campo de bipe com o prefixo `N*` |
 

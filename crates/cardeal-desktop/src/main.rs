@@ -7,6 +7,7 @@
 //! Ordens de Serviço e Estoque; as demais mostram `tela_em_construcao` (backend já responde).
 
 mod aviso_defasados;
+mod comprovante;
 mod danfce;
 #[cfg(feature = "demo")]
 mod demo_app;

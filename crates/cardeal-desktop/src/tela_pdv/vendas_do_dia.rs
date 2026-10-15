@@ -300,6 +300,9 @@ pub(super) fn dialogo_vendas_do_dia(
             Ok(frase) => notificar(ctx, Notificacao::sucesso(frase)),
             Err(e) => notificar(ctx, Notificacao::erro(e)),
         },
+        Some(AcaoVendas::Comprovante(cupom)) => {
+            super::acoes::imprimir_comprovante(ctx, motor, sessao, cupom, Dinheiro::ZERO, true);
+        }
         Some(AcaoVendas::Imprimir(documento)) => {
             match crate::danfce::imprimir(motor, sessao, documento) {
                 Ok(_) => notificar(
@@ -345,6 +348,7 @@ enum AcaoVendas {
     ConfirmarEstorno,
     Voltar,
     Imprimir(Id),
+    Comprovante(Id),
     AnularNfce,
     Fechar,
 }
@@ -496,6 +500,11 @@ fn rodape(ui: &mut egui::Ui, v: &EstadoVendasDoDia, acao: &mut Option<AcaoVendas
         .clicked()
     {
         *acao = Some(AcaoVendas::AbrirEstorno);
+    }
+    if let Some(v) = venda {
+        if ui.add(Botao::secundario("Imprimir comprovante")).clicked() {
+            *acao = Some(AcaoVendas::Comprovante(v.cupom));
+        }
     }
     if let Some(d) = nota.filter(|d| d.estado == EstadoDocumento::Autorizada && !d.anulada) {
         if ui.add(Botao::secundario("Imprimir cupom fiscal")).clicked() {
@@ -748,5 +757,55 @@ mod testes {
             });
         }
         assert!(matches!(estado.dlg, Dlg::VendasDoDia(_)));
+    }
+
+    #[test]
+    fn comprovante_da_venda_sai_na_bobina_configurada() {
+        let t = crate::testes_comum::motor_de_teste();
+        let (m, s) = (&t.motor, &t.sessao);
+        let cupom = vender(m, s);
+        let largura = |pdf: &[u8]| -> f32 {
+            let texto = String::from_utf8_lossy(pdf);
+            let i = texto.find("/MediaBox [0 0 ").unwrap() + "/MediaBox [0 0 ".len();
+            texto[i..]
+                .split_whitespace()
+                .next()
+                .unwrap()
+                .parse()
+                .unwrap()
+        };
+
+        let pdf = std::fs::read(
+            crate::comprovante::imprimir(m, s, cupom, Dinheiro::reais(5), false).unwrap(),
+        )
+        .unwrap();
+        let texto = String::from_utf8_lossy(&pdf).into_owned();
+        assert!(texto.contains("COMPROVANTE DE VENDA"));
+        assert!(texto.contains("Troco"));
+        assert!((largura(&pdf) - 226.772).abs() < 0.01);
+
+        let r: Result<(), _> = m.executar(
+            s,
+            "pdv.definir_impressao.v1",
+            &mod_pdv::DefinirImpressaoPdv {
+                impressao: mod_pdv::ImpressaoPdv {
+                    bobina: mod_pdv::LarguraBobina::Mm58,
+                    imprimir_ao_finalizar: true,
+                    rodape: Some("Trocas em até 7 dias".into()),
+                },
+            },
+        );
+        r.unwrap();
+        let pdf =
+            std::fs::read(crate::comprovante::imprimir(m, s, cupom, Dinheiro::ZERO, true).unwrap())
+                .unwrap();
+        let texto = String::from_utf8_lossy(&pdf).into_owned();
+        assert!((largura(&pdf) - 164.409).abs() < 0.01, "58 mm");
+        assert!(texto.contains("Trocas em"));
+        assert!(!texto.contains("Troco"), "a reimpressão não sabe o troco");
+        // A tela de PDV lê a preferência.
+        let mut estado = EstadoTelaPdv::default();
+        estado.carregar(m, s);
+        assert!(estado.impressao.imprimir_ao_finalizar);
     }
 }

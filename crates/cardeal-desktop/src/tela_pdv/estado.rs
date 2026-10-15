@@ -170,6 +170,12 @@ pub(super) enum Acao {
     ConsultarPreco,
     /// Imprimir o cupom fiscal (DANFCE) da NFC-e da última venda.
     ImprimirNfce(Id),
+    /// Imprimir o comprovante (não fiscal) de uma venda — o troco só na primeira via.
+    ImprimirComprovante {
+        cupom: Id,
+        troco: Dinheiro,
+        segunda_via: bool,
+    },
 }
 
 /// Estado local da tela de PDV.
@@ -219,6 +225,8 @@ pub struct EstadoTelaPdv {
     pub(super) nfce_ultima: Option<mod_fiscal::DocumentoResumo>,
     /// A rodada da transmissão em segundo plano que a faixa já mostra.
     pub(super) geracao_fiscal: u64,
+    /// A impressão do PDV (bobina, comprovante automático, rodapé).
+    pub(super) impressao: mod_pdv::ImpressaoPdv,
 }
 
 impl Default for EstadoTelaPdv {
@@ -254,6 +262,7 @@ impl Default for EstadoTelaPdv {
             fiscal: None,
             nfce_ultima: None,
             geracao_fiscal: 0,
+            impressao: mod_pdv::ImpressaoPdv::default(),
         }
     }
 }
@@ -282,6 +291,9 @@ impl EstadoTelaPdv {
             self.resultados = ("\u{0}".to_owned(), Vec::new());
         }
 
+        if let Ok(i) = motor.consultar(sessao, "pdv.impressao.v1", &mod_pdv::ImpressaoDoPdv) {
+            self.impressao = i;
+        }
         if let Ok(c) = motor.consultar(
             sessao,
             "clientes.pessoas_por_papel.v1",

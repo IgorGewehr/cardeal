@@ -3285,6 +3285,7 @@ dependencies = [
  "cardeal-ui",
  "egui",
  "mod-clientes",
+ "mod-empresa",
  "mod-estoque",
  "mod-financeiro",
  "mod-vendas",

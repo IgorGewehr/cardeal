@@ -116,7 +116,10 @@ O que eles têm e o Cardeal não, com o que aprenderam:
 
    Diferente de lá: só o **caixa** exige saldo para transferir. Banco pode ficar negativo (cheque
    especial), e o saldo inicial também aceita negativo.
-5. **Comprovante não fiscal** em 80 e 58 mm, com reimpressão; o DANFCE também em 58 mm (§3).
+5. ~~**Comprovante não fiscal** em 80 e 58 mm, com reimpressão; o DANFCE também em 58 mm (§3).~~
+   **Feito (2026-10-15).** Lá o recibo da venda é só na tela; o que imprime é o DANFE, com as
+   escolhas de papel (80, 58 mm, A4) e de impressão automática, que trouxemos para cá. Aqui há também
+   o comprovante não fiscal impresso, com rodapé configurável, 2ª via e a marca de venda estornada.
 6. **Venda a receber no PDV**: crediário, boleto e cheque, gerando o título com vencimento e
    respeitando o limite de crédito que o cadastro já tem (§3).
 7. **Implantação por planilha**: clientes e títulos em aberto.

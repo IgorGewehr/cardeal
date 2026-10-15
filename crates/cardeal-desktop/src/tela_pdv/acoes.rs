@@ -67,6 +67,11 @@ pub(super) fn aplicar(
             },
         ),
         Acao::ConsultarPreco => consultar_preco(ctx, motor, sessao, estado),
+        Acao::ImprimirComprovante {
+            cupom,
+            troco,
+            segunda_via,
+        } => imprimir_comprovante(ctx, motor, sessao, cupom, troco, segunda_via),
         Acao::AbrirVendasDoDia => {
             match super::vendas_do_dia::EstadoVendasDoDia::carregar(motor, sessao) {
                 Ok(v) => abrir(ctx, estado, Dlg::VendasDoDia(v)),
@@ -589,8 +594,28 @@ pub(super) fn finalizar(
                     .detalhe(detalhe)
                     .id(fiscal),
             );
+            if estado.impressao.imprimir_ao_finalizar {
+                imprimir_comprovante(ctx, motor, sessao, cupom, troco, false);
+            }
         }
         Err(e) => notificar(ctx, Notificacao::erro(e.mensagem).id(fiscal)),
+    }
+}
+
+/// Abre o comprovante (não fiscal) da venda para imprimir.
+pub(super) fn imprimir_comprovante(
+    ctx: &egui::Context,
+    motor: &Motor,
+    sessao: &Sessao,
+    cupom: Id,
+    troco: Dinheiro,
+    segunda_via: bool,
+) {
+    if let Err(e) = crate::comprovante::imprimir(motor, sessao, cupom, troco, segunda_via) {
+        notificar(
+            ctx,
+            Notificacao::erro("Não foi possível abrir o comprovante").detalhe(e),
+        );
     }
 }
 

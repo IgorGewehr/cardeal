@@ -55,6 +55,7 @@ mod consultas;
 mod cupom;
 mod erros;
 pub mod eventos;
+mod impressao;
 mod manifesto;
 #[cfg(feature = "sqlite")]
 pub mod migracoes;
@@ -77,6 +78,10 @@ pub use cupom::{
     validar_pagamentos, Cupom, EstadoCupom, FormaPagamentoPdv, ItemCupom, PagamentoCupom,
 };
 pub use erros::ErroPdv;
+pub use impressao::{
+    ComprovanteDaVenda, DadosDoComprovante, DefinirImpressaoPdv, ImpressaoDoPdv, ImpressaoPdv,
+    ItemDoComprovante, LarguraBobina,
+};
 pub use manifesto::{manifesto, MANIFESTO};
 #[cfg(feature = "sqlite")]
 pub use modulo::ModuloPdv;

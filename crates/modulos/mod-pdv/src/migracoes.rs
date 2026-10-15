@@ -92,6 +92,17 @@ CREATE INDEX pdv_estorno_empresa ON pdv_estorno(empresa, estornado_em);
 CREATE INDEX pdv_cupom_empresa_abertura ON pdv_cupom(empresa, abertura);
 ";
 
+/// v3: a impressão do PDV — a bobina (80 ou 58 mm), se o comprovante sai sozinho ao finalizar
+/// a venda e o rodapé dele. Por empresa (um balcão, em geral, tem uma impressora).
+const SQL_IMPRESSAO: &str = r"
+CREATE TABLE pdv_preferencias (
+    empresa              BLOB PRIMARY KEY REFERENCES nucleo_empresa(id),
+    bobina               TEXT    NOT NULL DEFAULT '80' CHECK (bobina IN ('80','58')),
+    imprimir_comprovante INTEGER NOT NULL DEFAULT 0 CHECK (imprimir_comprovante IN (0,1)),
+    rodape               TEXT
+) STRICT;
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -103,6 +114,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 2,
         nome: "pdv_estorno_da_venda",
         sql: SQL_ESTORNO,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 3,
+        nome: "pdv_preferencias_de_impressao",
+        sql: SQL_IMPRESSAO,
         tipo: TipoMigracao::Esquema,
     },
 ];

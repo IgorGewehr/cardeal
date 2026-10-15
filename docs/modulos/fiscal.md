@@ -180,7 +180,8 @@ antes de a NFC-e existir não gera nota (o `EmitirNfceDoCupom` exige venda `Fina
 `DocumentosDasVendas` (`fiscal.documentos_das_vendas.v1`) devolve as NFC-e de várias vendas numa
 consulta, para a lista do dia.
 
-**DANFCE** (`cardeal_pdf::gerar_danfce`): bobina de 80 mm com a altura do cupom, no leiaute do manual
+**DANFCE** (`cardeal_pdf::gerar_danfce`): bobina de 80 ou 58 mm (Configurações › Impressão; no de 58 mm a
+fonte e a margem encolhem e o QR Code fica com 28 mm, acima dos 25 mm do manual) com a altura do cupom, no leiaute do manual
 (emitente, itens, totais, pagamentos e troco, chave em 11 grupos com o endereço de consulta, consumidor,
 número/série/emissão, protocolo e o QR Code — `qrcodegen`, MIT). Em homologação, "sem valor fiscal" no topo e
 no rodapé. Montado da nota guardada + `qrCode`/`urlChave` do XML autorizado; abre no visualizador do sistema

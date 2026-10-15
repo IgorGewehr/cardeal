@@ -5,8 +5,8 @@
 //! primeiro acesso e o login.
 
 use cardeal_cliente::{EmpresaResumo, IdentidadeVisual, Motor, PapelResumo, Sessao, UsuarioResumo};
-use cardeal_ui::atoms::{Botao, Rotulo};
-use cardeal_ui::molecules::{dado, Abas, Campo};
+use cardeal_ui::atoms::{Botao, Caixa, Rotulo};
+use cardeal_ui::molecules::{dado, Abas, Campo, SeletorOpcao};
 use cardeal_ui::organisms::{notificar, ColunaGrade, Grade, LayoutTela, Notificacao, Painel};
 use cardeal_ui::tokens::{Espaco, Tema, TemaUi};
 use eframe::egui;
@@ -19,6 +19,7 @@ enum Aba {
     #[default]
     Empresa,
     Fiscal,
+    Impressao,
     Aparencia,
     Acesso,
 }
@@ -42,6 +43,11 @@ pub struct EstadoTelaSettings {
     id_endereco: String,
     logo_tex: Option<egui::TextureHandle>,
     fiscal: crate::tela_fiscal::EstadoFiscal,
+    /// A impressão do PDV, como gravada (`None` = sem o PDV ou sem permissão).
+    impressao: Option<mod_pdv::ImpressaoPdv>,
+    bobina: Option<mod_pdv::LarguraBobina>,
+    imprimir_auto: bool,
+    rodape: String,
 }
 
 impl EstadoTelaSettings {
@@ -73,6 +79,14 @@ impl EstadoTelaSettings {
         }
         if sessao.concede("fiscal.ver") {
             self.fiscal.carregar(motor, sessao);
+        }
+        self.impressao = motor
+            .consultar(sessao, "pdv.impressao.v1", &mod_pdv::ImpressaoDoPdv)
+            .ok();
+        if let Some(i) = &self.impressao {
+            self.bobina = Some(i.bobina);
+            self.imprimir_auto = i.imprimir_ao_finalizar;
+            self.rodape = i.rodape.clone().unwrap_or_default();
         }
     }
 
@@ -110,6 +124,7 @@ pub fn mostrar(
             match estado.aba {
                 Aba::Empresa => secao_empresa(ui, motor, sessao, estado),
                 Aba::Fiscal => crate::tela_fiscal::mostrar(ui, motor, sessao, &mut estado.fiscal),
+                Aba::Impressao => secao_impressao(ui, motor, sessao, estado),
                 Aba::Aparencia => secao_aparencia(ui, tema),
                 Aba::Acesso => secao_acesso(ui, estado),
             }
@@ -121,6 +136,7 @@ fn abas(ui: &mut egui::Ui, estado: &mut EstadoTelaSettings) {
     if let Some(nova) = Abas::nova(&[
         (Aba::Empresa, "Empresa"),
         (Aba::Fiscal, "Fiscal"),
+        (Aba::Impressao, "Impressão"),
         (Aba::Aparencia, "Aparência"),
         (Aba::Acesso, "Usuários e acesso"),
     ])
@@ -324,6 +340,71 @@ fn garantir_textura_logo(ui: &egui::Ui, estado: &mut EstadoTelaSettings) {
         cor,
         egui::TextureOptions::LINEAR,
     ));
+}
+
+/// A impressão do PDV: a bobina, o comprovante automático e o rodapé.
+fn secao_impressao(
+    ui: &mut egui::Ui,
+    motor: &Motor,
+    sessao: &Sessao,
+    estado: &mut EstadoTelaSettings,
+) {
+    cartao(ui, |ui| {
+        ui.add(Rotulo::titulo_secao("Impressão do PDV"));
+        ui.add_space(Espaco::E8);
+        if estado.impressao.is_none() {
+            ui.add(Rotulo::campo(
+                "O PDV não está ativo para esta empresa (ou você não tem acesso a ele).",
+            ));
+            return;
+        }
+        ui.add(
+            Rotulo::apoio(
+                "O cupom fiscal (DANFCE) e o comprovante de venda saem nesta bobina. O \
+                 comprovante não é documento fiscal: serve de recibo para quem não emite NFC-e \
+                 ou quer uma via a mais.",
+            )
+            .quebravel(),
+        );
+        ui.add_space(Espaco::E12);
+        ui.columns(2, |c| {
+            SeletorOpcao::novo("Bobina", &mut estado.bobina)
+                .opcao(mod_pdv::LarguraBobina::Mm80, "80 mm (a padrão)")
+                .opcao(mod_pdv::LarguraBobina::Mm58, "58 mm (a mini)")
+                .mostrar(&mut c[0]);
+        });
+        ui.add_space(Espaco::E8);
+        ui.add(Caixa::nova(
+            &mut estado.imprimir_auto,
+            "Imprimir o comprovante ao finalizar cada venda",
+        ));
+        ui.add_space(Espaco::E8);
+        ui.add(
+            Campo::novo("Rodapé do comprovante (opcional)", &mut estado.rodape)
+                .marcador("Trocas em até 7 dias com este comprovante"),
+        );
+        ui.add_space(Espaco::E12);
+        let pode = sessao.concede("pdv.impressao.configurar");
+        if ui.add(Botao::primario("Salvar").habilitado(pode)).clicked() {
+            let impressao = mod_pdv::ImpressaoPdv {
+                bobina: estado.bobina.unwrap_or_default(),
+                imprimir_ao_finalizar: estado.imprimir_auto,
+                rodape: Some(estado.rodape.clone()),
+            };
+            let r: Result<(), _> = motor.executar(
+                sessao,
+                "pdv.definir_impressao.v1",
+                &mod_pdv::DefinirImpressaoPdv { impressao },
+            );
+            match r {
+                Ok(()) => {
+                    estado.carregar(motor, sessao);
+                    notificar(ui.ctx(), Notificacao::sucesso("Impressão salva"));
+                }
+                Err(e) => notificar(ui.ctx(), Notificacao::erro(e.mensagem)),
+            }
+        }
+    });
 }
 
 fn secao_aparencia(ui: &mut egui::Ui, tema: &mut Tema) {
