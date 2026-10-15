@@ -1,11 +1,15 @@
 # 21 — Lições do `gestao-raiz`
 
-> Comparação feita em 2026-10-15 contra o `gestao-raiz` atualizado (`main` em `4cb2c1e`, em
+> Comparação feita em 2026-10-15 contra o `gestao-raiz` atualizado (`main` em `938b532`, em
 > `Documents/Automa/gestao-raiz`). Ele é um ERP **industrial** web (Next.js + Firestore, ~185 mil
 > linhas, 33 arquivos de teste) **em produção, com usuários reais**. Ele não é modelo de arquitetura,
 > porque o Cardeal tem Razão de partidas dobradas, é offline-first e roda no desktop. O que vale ouro
 > são as **regras de negócio que só aparecem com uso real**: os comentários `BUG FIX`, `Fix N` e
-> `NUNCA` do código são a lista de armadilhas que já custaram caro a alguém.
+> `NUNCA` do código e os testes deles são a lista de armadilhas que já custaram caro a alguém.
+>
+> Feita em duas passadas. A primeira cobriu todas as áreas, a fundo só em fiscal e compras. A segunda
+> leu a fundo **PDV e Financeiro**, o centro do MVP (§3 e §4). Os outros módulos são comparados a
+> fundo logo antes de cada fatia que mexer neles.
 
 ## 1. O que cada um cobre
 
@@ -14,10 +18,10 @@
 | Fiscal | NF-e, NFC-e (síncrona, sem contingência), MDF-e, CC-e, cancelamento, DANFE, notas recebidas (DFe + manifestação) | NFC-e assíncrona com fila (offline-first), DANFCE, cancelamento, inutilização. Sem NF-e, CC-e e DFe real |
 | Compras | XML/SEFAZ, classificação da nota, custo com rateio, parcelas, estornar importação | XML de arquivo, casamento em cascata, rateio, ST/IPI no custo. Parcela única, sem estorno, sem DFe real |
 | Estoque | Matéria-prima com FEFO, embalagens, produto acabado, rastreabilidade e recall | Árvore mercadológica, markup com imposto, inventário cego, transferência, perdas e validade |
-| PDV | Venda, NFC-e, pagamento misto, **cancelar venda** (estorna tudo) | Teclado, diário do carrinho, sessão de caixa (sangria, suprimento, fechamento cego), NFC-e em fila. **Sem estorno de venda finalizada** |
+| PDV | Grade de produtos, desconto no item e no total, pagamento misto, boleto/cheque a receber, vendas do dia, **cancelar venda**, comprovante em 80/58 mm/A4 | Teclado, diário do carrinho, sessão de caixa, consulta de preço, NFC-e em fila. Ver §3 |
 | Vendas B2B | Pedido em etapas (aprovar, pagar, preparar, faturar, enviar, entregar), app do revendedor, comissão | Pedido, tabela e regra de preço, promoção, comissão apurada e paga |
 | Clientes / CRM | Cadastro, CEP → IBGE, importação, score/tier automático, interações | Pessoa única com papéis, limite de crédito, contatos e endereços. Sem score e sem importação |
-| Financeiro | Contas a pagar/receber, portadores, **transferências**, DRE, orçamento por categoria, extrato PDF (Cresol), gateways | Razão de partidas dobradas, caixa, OFX, conciliação, DFC, balancete, cheques, régua de cobrança, plano de contas. **Sem transferência entre contas** |
+| Financeiro | Portadores com saldo inicial, **transferências**, cancelar/editar/excluir título, parcelar, importar títulos, DRE mensal e anual, orçamento anual, resumo do Simples | Razão de partidas dobradas, caixa, OFX, conciliação, DFC, balancete, aging, cheques, régua, recorrências, renegociação. Ver §4 |
 | Contábil | **Fechamento do mês**: ZIP com XMLs emitidos e recebidos, DANFEs, SPED EFD e relatórios, enviado por e-mail/WhatsApp | Pacote do contador (PDF + `.xlsx`), ainda sem XMLs e sem SPED |
 | Indústria | Fórmulas, OP, MRP, PCP, rendimento, qualidade/SGQ, ANVISA, rotulagem, estabilidade, pragas | `mod-industria` ainda é spec. Fora do foco atual |
 | IA | Assistente, onboarding por chat, agente | Fora (Fase 7) |
@@ -27,19 +31,55 @@
 - **Saldo derivado por construção.** O gestao-raiz precisou de um cron noturno que recalcula o saldo
   bancário a partir dos títulos. Dois bugs vieram daí: o lançamento do PDV era apagado pelo cron e
   duplicado na conciliação do extrato. No Cardeal o saldo sai do Razão, então esse problema não existe.
+- **Pix e cartão em trânsito.** Lá a venda no Pix ou no cartão credita o banco na hora. Aqui vai para
+  *Valores em trânsito* e *Cartões a receber* até a conciliação confirmar, que é o que de fato acontece.
 - **NFC-e offline-first.** Lá a emissão é síncrona e, se falhar, o operador precisa tentar de novo.
   Aqui o documento nasce com a venda e a fila o transmite. O "pre-flight" que eles criaram (gravar a
   nota antes de chamar o gateway) é exatamente o nosso desenho.
 - **Caixa do PDV.** Lá não há sessão de caixa, sangria, suprimento nem fechamento cego.
-- **Análise.** DFC, balancete, rentabilidade por nível da árvore e ABC; os relatórios deles são básicos.
+- **Teclado no PDV.** Lá há só `/`, `F12` e `Esc`; aqui o fluxo inteiro é de teclado, com supervisor no
+  cancelamento do cupom.
+- **Análise.** DFC, balancete, aging, saúde financeira, rentabilidade por nível da árvore e ABC; os
+  relatórios deles são básicos.
+- **Não copiar:** os gateways Asaas e Pagar.me (`lib/gateway`) **não são importados por nenhum
+  arquivo**: são código morto, e a "conciliação de gateways" do manual não existe na prática.
 
-## 3. O que trazer, em ordem de prioridade para o MVP
+## 3. PDV a fundo
 
-1. **Estornar a venda finalizada no PDV.** Lá, "cancelar venda" devolve o estoque, estorna o
-   financeiro e o saldo e pede o cancelamento da NFC-e com uma justificativa automática. Se a SEFAZ
-   recusar, por exemplo por prazo, a venda fica marcada "NFC-e a cancelar" e o operador é orientado a
-   emitir uma NFC-e de devolução. No Cardeal o `CancelarNfce` já existe; falta o estorno da venda que o
-   chama.
+O que eles têm e o Cardeal não, com o que aprenderam:
+
+| O que | Como fazem lá | No Cardeal |
+|---|---|---|
+| **Cancelar venda finalizada** | Pelo histórico do dia. Devolve o estoque ao lote (se o lote está bloqueado, em quarentena ou vencido, só devolve a quantidade, sem liberar o lote), cancela as contas a receber da venda, estorna o saldo e pede o cancelamento da NFC-e com uma justificativa automática ("Cancelamento de venda PDV #XXXX a pedido do operador"). Se a SEFAZ recusar, a venda fica com o selo "NFC-e a cancelar" e o aviso indica uma NFC-e de devolução | Falta. O `CancelarNfce` já existe; falta o estorno da venda que o chama. Aqui com permissão de supervisor, como o `F8` |
+| **Vendas do dia** | Lista com os totais do dia, reimpressão, cancelamento e o selo de NFC-e pendente | Falta. Só a última venda aparece |
+| **Comprovante não fiscal** | Recibo após a venda, em 80 mm, 58 mm ou A4, com impressão automática opcional | Falta. Só há o DANFCE, e só com NFC-e autorizada. Quem não emite NFC-e (MEI vendendo a pessoa física) fica sem recibo |
+| **Venda a receber** | Boleto ou cheque na finalização vira conta a receber com vencimento em 30 dias, sem tocar no saldo. Pagamento misto pago + a receber deixa a venda "parcial" | Falta. O `FormaPagamentoPdv` só tem dinheiro, Pix, débito e crédito; a venda a prazo (fiado) estava adiada no código |
+| **Desconto no total** | Além do desconto por item | Falta: só por item (`F5`) |
+| **Busca de cliente** | Busca por nome/documento, ou nome livre | O `F6` lista os 200 primeiros clientes, sem busca |
+| **Venda em aberto** | Salva sem cobrar (não baixa estoque nem lança financeiro) e finaliza depois na tela de vendas | Falta. Baixa prioridade |
+| Idempotência da finalização | Uma chave por venda: repetir a finalização (duplo clique, nova tentativa) não duplica o financeiro | O cupom só finaliza a partir de "em andamento"; nada a fazer |
+| CPF incompleto | Recusa CPF parcial antes de finalizar | Conferir no `IdentificarCliente` |
+
+## 4. Financeiro a fundo
+
+| O que | Como fazem lá | No Cardeal |
+|---|---|---|
+| **Cancelar título lançado errado** | Conta a pagar ou a receber cancelada ou excluída; **título cancelado não pode ser baixado**, porque "ressuscitaria a venda cancelada e creditaria o saldo" (tem teste) | **Falta.** Só há `EstornarBaixa` e `RenegociarTitulo`. O spec prevê o estado `Cancelada`, mas não há comando. Lançou errado, não tem como desfazer |
+| **Corrigir título** | Editar valor e vencimento da conta em aberto | Falta. Alterar o vencimento é o caso mais comum |
+| **Saldo inicial da conta** | Por conta; alterar o saldo inicial ajusta o saldo atual pela diferença. Eles tinham duas fontes de saldo inicial, com telas divergentes, e unificaram | **Falta.** A conferência banco × sistema lista "saldo inicial não lançado" como diferença sem explicação. É o primeiro dia de qualquer cliente |
+| **Transferência entre contas** | Caixa para banco e banco para banco, os dois lados de uma vez; mesma conta e saldo insuficiente são recusados; cancelar estorna os dois lados | **Falta.** A sangria não leva o dinheiro a nenhuma conta |
+| Desativar conta | Não deixa desativar o único Caixa nem uma conta com saldo ("transfira antes") | Não há desativação de conta. Trazer junto com a transferência |
+| **Importar títulos** | Contas a pagar e a receber em lote, de planilha | Falta. É a implantação: trazer o que está em aberto no sistema antigo |
+| Parcelar título | Dividir uma conta em N parcelas mensais | O `RenegociarTitulo` já cobre, com juros e multa |
+| Conta padrão por forma de pagamento | Com troca na hora | Já existe (`conta_destino` na baixa; Pix e cartão em trânsito no PDV) |
+| **Orçamento** | Por conta do plano e por ano, com valor mensal; realizado × orçado | Falta. Média prioridade |
+| **Resumo do Simples** | Receita acumulada no ano e imposto estimado pela faixa do anexo | Falta. As tabelas já existem na precificação; precisa conferir com o contador |
+| DRE anual | 12 meses acumulados | A `DreComparativa` cobre |
+| Extrato em PDF | Leitor do extrato do Cresol (banco de um cliente real) | OFX e CSV cobrem; PDF só se um cliente pedir |
+
+## 5. O que trazer, em ordem de prioridade para o MVP
+
+1. **Estornar a venda finalizada no PDV**, com a lista das **vendas do dia** de onde ela é feita (§3).
 2. **Nunca transformar em compra uma nota que não é compra.** A função `classifyNote` deles:
    - se o emitente é a própria empresa, é saída própria;
    - se o destinatário é outro CNPJ, a nota não é nossa;
@@ -48,10 +88,15 @@
 
    O `cardeal_fiscal::interpretar` não lê o destinatário nem o `finNFe`, então hoje o XML de uma
    venda nossa entraria como compra, com estoque e título a pagar.
-3. **Transferência entre contas** (caixa para banco, banco para banco). Ela entrou lá em julho de 2026,
-   quando o Caixa virou um portador de verdade. O Cardeal não tem; a sangria não leva o dinheiro a
-   nenhuma conta.
-4. **Notas recebidas pela SEFAZ (DFe) e manifestação.** Fluxo deles (`lib/fiscal/sefaz-distribuicao.ts`):
+3. **Cancelar título** lançado errado (sem baixa; estorna o lançamento e bloqueia baixas futuras) e
+   **alterar o vencimento** de uma parcela em aberto (§4).
+4. **Saldo inicial** de cada conta e **transferência entre contas**, com a desativação de conta (§4).
+5. **Comprovante não fiscal** em 80 e 58 mm, com reimpressão; o DANFCE também em 58 mm (§3).
+6. **Venda a receber no PDV**: crediário, boleto e cheque, gerando o título com vencimento e
+   respeitando o limite de crédito que o cadastro já tem (§3).
+7. **Implantação por planilha**: clientes e títulos em aberto.
+8. **Desconto no total** e **busca de cliente** no PDV.
+9. **Notas recebidas pela SEFAZ (DFe) e manifestação.** Fluxo deles (`lib/fiscal/sefaz-distribuicao.ts`):
    - a distribuição por NSU;
    - se só vier o resumo (`resNFe`), registram a **Ciência da Operação** sozinhos e baixam o XML completo;
    - se a manifestação vier com 596 (passaram os 10 dias), salvam o resumo e pedem o XML ao fornecedor
@@ -60,24 +105,21 @@
 
    **O `sefaz-api` não tem essas rotas** (só emissão, consulta, cancelamento, CC-e, inutilização e
    status). O código é TypeScript e pode ser levado quase direto para lá (`/nfe/distribuicao` e
-   `/nfe/manifestar`). Depois disso, `verificar_notas_na_sefaz` vira uma tarefa do despacho.
-5. **Parcelas da nota de compra** (`cobr/dup`) e **nota que já entra paga**. Lá cada parcela tem um id
-   determinístico, então refazer a importação cria só o que falta. Aqui a parcela é única e vence na
-   emissão.
-6. **Estornar a entrada de uma nota** (`revertNoteImport`): desfaz lotes, estoque e conta a pagar.
-7. **Fechamento do mês para o contador com os XMLs**: emitidas, canceladas, inutilizadas e recebidas,
-   mais os DANFEs, o SPED EFD e os relatórios, num ZIP. Se faltar algum XML na base, ele é baixado da
-   SEFAZ antes. O pacote do contador do Cardeal ganha os documentos fiscais. Isso pede guardar o **XML
-   do evento de cancelamento**, que hoje só fica com o protocolo; a guarda é obrigatória por 5 anos.
-8. **Importar clientes por planilha.** Trazer a carteira de outro sistema é o primeiro dia do cliente.
-9. **Prazo de cancelamento visível**: 30 minutos para NFC-e e 24 horas para NF-e. Lá o prazo bloqueia o
-   pedido e a mensagem indica a alternativa (NFC-e de devolução ou CC-e). Aqui a SEFAZ responde 501.
-   Proposta: mostrar o tempo decorrido e avisar, sem bloquear, porque algumas UFs aceitam fora do prazo
-   (155).
-10. **Orçamento mensal por categoria** (realizado × orçado, alerta de estouro) e **score/tier de
-    cliente** (bronze, prata, ouro pelo histórico): úteis, mas depois do básico.
+   `/nfe/manifestar`). Depois disso, `verificar_notas_na_sefaz` vira uma tarefa do despacho. Mexe no
+   `sefaz-api`: só com o OK do usuário.
+10. **Compras:** parcelas da nota (`cobr/dup`; lá cada parcela tem um id determinístico, então refazer
+    a importação cria só o que falta) e **estornar a entrada** de uma nota (`revertNoteImport`).
+11. **Fechamento do mês para o contador com os XMLs**: emitidas, canceladas, inutilizadas e recebidas,
+    mais os DANFEs, o SPED EFD e os relatórios, num ZIP. Se faltar algum XML na base, ele é baixado da
+    SEFAZ antes. Isso pede guardar o **XML do evento de cancelamento**, que hoje só fica com o
+    protocolo; a guarda é obrigatória por 5 anos.
+12. **Prazo de cancelamento visível**: 30 minutos para NFC-e e 24 horas para NF-e. Lá o prazo bloqueia o
+    pedido; aqui a SEFAZ responde 501. Proposta: mostrar o tempo decorrido e avisar, sem bloquear,
+    porque algumas UFs aceitam fora do prazo (155).
+13. **Orçamento** por categoria, **resumo do Simples** e **score/tier de cliente**: úteis, mas depois do
+    básico.
 
-## 4. Checklist para a NF-e (modelo 55), quando chegar a vez
+## 6. Checklist para a NF-e (modelo 55), quando chegar a vez
 
 Cada item é uma rejeição que eles já tomaram em produção:
 
@@ -102,7 +144,7 @@ Cada item é uma rejeição que eles já tomaram em produção:
 - Se a gravação local falhar **depois** do aceite da SEFAZ, registre uma pendência de reconciliação
   com a chave e o protocolo.
 
-## 5. Já aplicado
+## 7. Já aplicado
 
 - **Pix leva o grupo `card` na NFC-e** (NT 2025.001; lá os códigos `03`, `04` e `17`). O Cardeal só o
   mandava em crédito e débito.
