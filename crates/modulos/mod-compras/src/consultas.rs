@@ -76,6 +76,8 @@ pub struct ItemNota {
     pub estado: EstadoNotaEntrada,
     /// Quantos itens a nota tem.
     pub itens: u32,
+    /// O aviso para quem confere (CFOP que não é venda), se houver.
+    pub alerta: Option<String>,
 }
 
 /// Lista as notas de entrada da empresa, mais recentes primeiro. sem corte silencioso — teto de segurança `cardeal_modkit::TETO_LISTA_COMPLETA` (a lista paginada para a rede é a `.v2`)
@@ -92,7 +94,8 @@ impl Consulta for NotasRecentes {
         let mut stmt = conexao
             .prepare(
                 "SELECT n.id, n.fornecedor, n.numero, n.serie, n.data_emissao, n.valor_total, n.estado,
-                        (SELECT COUNT(*) FROM compras_item_nota_entrada i WHERE i.nota_entrada = n.id)
+                        (SELECT COUNT(*) FROM compras_item_nota_entrada i WHERE i.nota_entrada = n.id),
+                        n.alerta
                  FROM compras_nota_entrada n
                  WHERE n.empresa = ?1
                  ORDER BY n.data_emissao DESC, n.id DESC
@@ -110,6 +113,7 @@ impl Consulta for NotasRecentes {
                     valor_total: Dinheiro::centavos(r.get::<_, i64>(5)?),
                     estado: estado_de(&r.get::<_, String>(6)?),
                     itens: r.get::<_, i64>(7)?.try_into().unwrap_or(0),
+                    alerta: r.get(8)?,
                 })
             })
             .map_err(persist)?;

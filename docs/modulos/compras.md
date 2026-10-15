@@ -231,6 +231,28 @@ pagar), `compras.entrada_a_conferir.v1`, `compras.devolucao_concluida.v1`.
    nota já confirmada.
 5. **Chave de acesso é única por empresa.** Reimportar a mesma NF-e (`ImportarNotaEntrada`) é
    idempotente — nunca duplica entrada.
+6. **Só compra vira compra** (2026-10-15, lição do `gestao-raiz`).
+   `NotaFiscalXml::classificar_para(cnpj_da_empresa)` recusa (`NaoECompra`, com o motivo):
+   - a nota **emitida pela própria empresa** (uma venda sua);
+   - a de **outro destinatário** (CNPJ ou CPF diferente);
+   - a **devolução de cliente** (`finNFe = 4`);
+   - a **nota de entrada do emitente** (`tpNF = 0` de terceiro: a mercadoria saiu da empresa para ele).
+
+   O `tpNF` não decide sozinho: a venda do fornecedor vem com `tpNF = 1`, a saída **dele**, e para nós
+   é compra. Sem destinatário no XML não há como conferir, e a nota segue. Na importação por arquivo a
+   recusa é um erro com o motivo. Na varredura da SEFAZ a nota é pulada, sem travar o lote: a
+   distribuição traz também notas em que a empresa é só transportadora ou autorizada a baixar o XML.
+7. **CFOP que não é venda passa pela conferência.** Itens com CFOP fora da família de venda de
+   mercadoria (`cfop_de_venda`: `x10x`–`x12x`, `x401`–`x405`, `x651`–`x656`) deixam um **aviso** na nota
+   (migração v5, `alerta`), e a nota com aviso nunca é confirmada sozinha. Exemplos:
+   - remessa de um aparelho para conserto (5915), que sem isso entraria no estoque com conta a pagar;
+   - bonificação (5910);
+   - consignação (5917);
+   - faturamento de entrega futura (5922), que duplicaria o estoque quando a remessa chegasse;
+   - transferência entre estabelecimentos;
+   - prestação de serviço.
+
+   A lista de compras marca "ver aviso" e a conferência mostra o texto.
 
 ## 12. Comportamento offline
 

@@ -52,6 +52,7 @@ pub use emissao::{
     PedidoInutilizacao, RetornoSefaz, SituacaoRetorno,
 };
 pub use erros::ErroFiscal;
+pub use nfe::{cfop_de_venda, descrever_cfop, ClassificacaoEntrada, FinalidadeNfe};
 pub use nfe::{interpretar, ItemNfe, NotaFiscalXml};
 pub use porta::{AmbienteFiscal, ModeloFiscal, Nsu, PortaFiscal, ResumoDfe, StatusSefaz, XmlNota};
 pub use sefaz_api::{ApiFiscalHttp, CertificadoA1, ConfigApiFiscal};

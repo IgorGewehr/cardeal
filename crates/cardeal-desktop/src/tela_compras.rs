@@ -479,8 +479,13 @@ fn lista(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoT
                 ui.add(ValorDinheiro::novo(n.valor_total));
             });
             row.col(|ui| {
-                let (rotulo, tom) = estado_nota_etiqueta(n.estado);
-                ui.add(Etiqueta::nova(rotulo, tom));
+                ui.horizontal(|ui| {
+                    let (rotulo, tom) = estado_nota_etiqueta(n.estado);
+                    ui.add(Etiqueta::nova(rotulo, tom));
+                    if n.alerta.is_some() && n.estado == EstadoNotaEntrada::AConferir {
+                        ui.add(Etiqueta::atencao("ver aviso"));
+                    }
+                });
             });
         });
 
@@ -710,6 +715,12 @@ fn dialogo_ver(
                     dado(&mut c[0], "Total", &n.valor_total.formatar_com_simbolo());
                     dado(&mut c[1], "Estado", estado_nota_etiqueta(n.estado).0);
                 });
+                if let Some(alerta) = &n.alerta {
+                    ui.add_space(Espaco::E8);
+                    Painel::novo().realce(Tom::Atencao).mostrar(ui, |ui| {
+                        ui.add(Rotulo::interface(alerta).quebravel());
+                    });
+                }
 
                 ui.add_space(Espaco::E12);
                 ui.add(Rotulo::titulo_secao("Itens e casamento"));

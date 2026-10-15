@@ -164,7 +164,45 @@ fn nota_do_xml(nota_xml: &cardeal_fiscal::NotaFiscalXml, fornecedor: Id, ctx: &C
         valor_outras_despesas: nota_xml.valor_outras_despesas,
         valor_total: valor_nos_itens + despesas,
         estado: EstadoNotaEntrada::AConferir,
+        alerta: alerta_de_cfop(nota_xml),
         versao: Versao::INICIAL,
+    }
+}
+
+/// O aviso para quem confere quando algum item tem CFOP que não é venda de mercadoria: a
+/// remessa de um aparelho para conserto, a bonificação, a consignação e o faturamento de
+/// entrega futura não podem virar estoque com conta a pagar sem alguém olhar.
+#[cfg(feature = "sqlite")]
+fn alerta_de_cfop(nota_xml: &cardeal_fiscal::NotaFiscalXml) -> Option<String> {
+    let cfops = nota_xml.cfops_fora_de_venda();
+    if cfops.is_empty() {
+        return None;
+    }
+    let lista: Vec<String> = cfops
+        .iter()
+        .map(|c| format!("CFOP {c} ({})", cardeal_fiscal::descrever_cfop(c)))
+        .collect();
+    Some(format!(
+        "Confira antes de dar entrada: {} — não é venda do fornecedor.",
+        lista.join(", ")
+    ))
+}
+
+/// Recusa o XML que não é uma compra da empresa: emitido por ela, para outro destinatário,
+/// devolução de cliente ou nota de entrada do emitente (lição do `gestao-raiz`).
+///
+/// # Errors
+/// [`ErroCompras::NaoECompra`] com o motivo.
+#[cfg(feature = "sqlite")]
+fn exigir_compra(
+    nota_xml: &cardeal_fiscal::NotaFiscalXml,
+    cnpj_empresa: &cardeal_kernel::Cnpj,
+) -> Resultado<()> {
+    match nota_xml.classificar_para(cnpj_empresa).motivo_da_recusa() {
+        None => Ok(()),
+        Some(motivo) => Err(Erro::de_dominio(&crate::erros::ErroCompras::NaoECompra(
+            motivo,
+        ))),
     }
 }
 
@@ -202,6 +240,9 @@ pub(crate) fn importar_nota_interpretada(
             titulo_pago: false,
         });
     }
+
+    let cnpj_empresa = RepositorioCompras::novo(uow).cnpj_da_empresa(ctx.empresa)?;
+    exigir_compra(nota_xml, &cnpj_empresa)?;
 
     let fornecedor = resolver_fornecedor(
         &nota_xml.fornecedor_cnpj,
@@ -263,10 +304,13 @@ pub(crate) fn importar_nota_interpretada(
         .filter(|i| i.estado_casamento != EstadoCasamento::Casado)
         .count();
 
-    if let Some(relatorio) =
-        tentar_confirmar_automaticamente(nota.id, &preferencias, itens_nao_casados, ctx, uow)?
-    {
-        return Ok(relatorio);
+    // Nota com aviso (CFOP fora de venda) sempre passa pela conferência.
+    if nota.alerta.is_none() {
+        if let Some(relatorio) =
+            tentar_confirmar_automaticamente(nota.id, &preferencias, itens_nao_casados, ctx, uow)?
+        {
+            return Ok(relatorio);
+        }
     }
 
     uow.publicar(EntradaAConferir {
@@ -466,6 +510,13 @@ pub fn verificar_notas_na_sefaz(
         let xml_bruto = porta.baixar_xml(&resumo.chave_acesso)?;
         let nota_xml =
             cardeal_fiscal::interpretar(&xml_bruto.0).map_err(|e| Erro::de_dominio(&e))?;
+        // A distribuição também traz notas em que a empresa aparece sem ser compradora
+        // (transportadora, autorizada a baixar o XML, devolução de cliente): essas ficam de
+        // fora, sem travar a varredura.
+        if nota_xml.classificar_para(&cnpj_empresa) != cardeal_fiscal::ClassificacaoEntrada::Compra
+        {
+            continue;
+        }
         relatorios.push(importar_nota_da_sefaz(&nota_xml, ctx, uow)?);
     }
 

@@ -87,6 +87,13 @@ ALTER TABLE compras_item_nota_entrada ADD COLUMN valor_desconto INTEGER NOT NULL
 ALTER TABLE compras_item_nota_entrada ADD COLUMN valor_impostos INTEGER NOT NULL DEFAULT 0;
 ";
 
+// Migração v5 (2026-10-15): o aviso de conferência da nota — CFOP de item que não é venda
+// (remessa para conserto, bonificação, consignação, entrega futura…). Nota com aviso nunca é
+// confirmada sozinha.
+const SQL_ALERTA_NOTA: &str = r"
+ALTER TABLE compras_nota_entrada ADD COLUMN alerta TEXT;
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -110,6 +117,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 4,
         nome: "compras_item_desconto_e_impostos",
         sql: SQL_DESCONTO_E_IMPOSTOS_ITEM,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 5,
+        nome: "compras_alerta_da_nota",
+        sql: SQL_ALERTA_NOTA,
         tipo: TipoMigracao::Esquema,
     },
 ];

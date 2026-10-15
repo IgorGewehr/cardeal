@@ -85,7 +85,13 @@ O que eles têm e o Cardeal não, com o que aprenderam:
    quando a tentativa pode ter chegado à SEFAZ). Melhor que lá: com supervisor, em uma transação, e
    sem marcar a venda como "NFC-e a cancelar" à mão — a nota tem a marca permanente e a fila a leva
    até o fim.
-2. **Nunca transformar em compra uma nota que não é compra.** A função `classifyNote` deles:
+2. ~~**Nunca transformar em compra uma nota que não é compra.**~~ **Feito (2026-10-15).** Mais rígido que
+   lá em dois pontos:
+   - a nota de entrada de terceiro (`tpNF = 0`) não é compra (eles aceitam);
+   - o CFOP de cada item é lido: remessa para conserto, bonificação, consignação e entrega futura deixam
+     um aviso e nunca entram sozinhas. Um ponto que não tratam e importa para a assistência técnica.
+
+   A função `classifyNote` deles:
    - se o emitente é a própria empresa, é saída própria;
    - se o destinatário é outro CNPJ, a nota não é nossa;
    - se `finNFe=4`, é devolução de cliente (entra no estoque, mas não gera conta a pagar);

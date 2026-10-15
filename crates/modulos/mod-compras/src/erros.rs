@@ -34,6 +34,10 @@ pub enum ErroCompras {
     /// Rateio de despesas com referência inválida (ex.: nota sem itens).
     #[error("Não é possível ratear despesas: a nota não tem itens")]
     ReferenciaInvalida,
+    /// O XML não é de uma compra da empresa (saída própria, outro destinatário, devolução de
+    /// cliente, nota de entrada do emitente) — nunca vira entrada de estoque com conta a pagar.
+    #[error("Esta nota não é uma compra: {0}")]
+    NaoECompra(&'static str),
 }
 
 impl ErroDominio for ErroCompras {
@@ -44,7 +48,7 @@ impl ErroDominio for ErroCompras {
                 CodigoErro::REGRA_VIOLADA
             }
             Self::EstadoDeNotaInvalido { .. } => CodigoErro::ESTADO_INVALIDO,
-            Self::ItemNaoPertenceANota => CodigoErro::ENTRADA_INVALIDA,
+            Self::ItemNaoPertenceANota | Self::NaoECompra(_) => CodigoErro::ENTRADA_INVALIDA,
         }
     }
 

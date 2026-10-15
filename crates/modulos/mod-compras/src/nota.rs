@@ -76,6 +76,9 @@ pub struct NotaEntrada {
     pub valor_total: Dinheiro,
     /// O estado atual.
     pub estado: EstadoNotaEntrada,
+    /// Um aviso para quem confere (CFOP que não é venda, por exemplo). Nota com aviso nunca é
+    /// confirmada sozinha.
+    pub alerta: Option<String>,
     /// Versão para bloqueio otimista.
     pub versao: Versao,
 }
@@ -213,6 +216,7 @@ mod testes {
             valor_outras_despesas: Dinheiro::ZERO,
             valor_total: Dinheiro::reais(3_400),
             estado: EstadoNotaEntrada::AConferir,
+            alerta: None,
             versao: Versao::INICIAL,
         }
     }

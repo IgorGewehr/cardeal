@@ -118,6 +118,7 @@ impl Comando for LancarNotaManual {
             empresa: ctx.empresa,
             fornecedor,
             chave_acesso: None,
+            alerta: None,
             numero: self.numero,
             serie: self.serie,
             data_emissao: self.data_emissao,

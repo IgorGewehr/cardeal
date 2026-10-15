@@ -119,8 +119,8 @@ impl<'a, 'b> RepositorioCompras<'a, 'b> {
                 "INSERT INTO compras_nota_entrada
                    (id, empresa, fornecedor, chave_acesso, numero, serie, data_emissao,
                     valor_produtos, valor_frete, valor_seguro, valor_outras_despesas,
-                    valor_total, estado, versao)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+                    valor_total, estado, versao, alerta)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
                 params![
                     blob(n.id),
                     blob(n.empresa),
@@ -136,6 +136,7 @@ impl<'a, 'b> RepositorioCompras<'a, 'b> {
                     n.valor_total.em_centavos(),
                     estado_nota_txt(n.estado),
                     versao_i64(n.versao),
+                    n.alerta,
                 ],
             )
             .map_err(persist)?;
@@ -165,7 +166,7 @@ impl<'a, 'b> RepositorioCompras<'a, 'b> {
             .query_row(
                 "SELECT id, empresa, fornecedor, chave_acesso, numero, serie, data_emissao,
                         valor_produtos, valor_frete, valor_seguro, valor_outras_despesas,
-                        valor_total, estado, versao
+                        valor_total, estado, versao, alerta
                  FROM compras_nota_entrada WHERE id = ?1",
                 [blob(id)],
                 nota_de_linha,
@@ -476,6 +477,7 @@ fn nota_de_linha(r: &rusqlite::Row<'_>) -> rusqlite::Result<NotaEntrada> {
         valor_total: Dinheiro::centavos(r.get::<_, i64>(11)?),
         estado: estado_nota_de(&r.get::<_, String>(12)?),
         versao: versao_de(r.get::<_, i64>(13)?),
+        alerta: r.get(14)?,
     })
 }
 
