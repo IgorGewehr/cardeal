@@ -125,6 +125,14 @@ CREATE INDEX fiscal_documento_fila ON fiscal_documento(empresa, proxima_tentativ
 CREATE INDEX fiscal_documento_criado ON fiscal_documento(empresa, criado_em);
 ";
 
+/// v4: a venda da nota foi desfeita (estorno no PDV). Marca **permanente**: a fila leva o
+/// documento ao fim certo para o estado em que ele estiver — cancela a autorizada, inutiliza
+/// a rejeitada e a que nunca saiu, confere a incerta antes. Coluna nova, sem recriar a tabela.
+const SQL_V4: &str = "
+ALTER TABLE fiscal_documento ADD COLUMN anulada INTEGER NOT NULL DEFAULT 0
+    CHECK (anulada IN (0,1));
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -142,6 +150,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 3,
         nome: "fiscal_cancelamento_e_inutilizacao",
         sql: SQL_V3,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 4,
+        nome: "fiscal_documento_anulado_pela_venda",
+        sql: SQL_V4,
         tipo: TipoMigracao::Esquema,
     },
 ];

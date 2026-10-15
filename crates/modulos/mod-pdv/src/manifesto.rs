@@ -125,6 +125,12 @@ const PERMISSOES: &[Permissao] = &[
         None,
     ),
     perm(
+        "pdv.venda.estornar",
+        "Estornar venda finalizada (devolve a mercadoria e estorna o lançamento)",
+        Risco::Alto,
+        None,
+    ),
+    perm(
         "pdv.desconto.aplicar",
         "Aplicar desconto (F5)",
         Risco::Medio,
@@ -192,6 +198,7 @@ const CONTAS_REQUERIDAS: &[ContaPadrao] = &[
 
 const EVENTOS_PUBLICADOS: &[&str] = &[
     "pdv.venda_finalizada.v1",
+    "pdv.venda_estornada.v1",
     "pdv.cupom_cancelado.v1",
     "pdv.item_cancelado.v1",
 ];

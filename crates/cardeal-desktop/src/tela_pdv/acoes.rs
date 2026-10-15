@@ -67,6 +67,12 @@ pub(super) fn aplicar(
             },
         ),
         Acao::ConsultarPreco => consultar_preco(ctx, motor, sessao, estado),
+        Acao::AbrirVendasDoDia => {
+            match super::vendas_do_dia::EstadoVendasDoDia::carregar(motor, sessao) {
+                Ok(v) => abrir(ctx, estado, Dlg::VendasDoDia(v)),
+                Err(e) => notificar(ctx, Notificacao::erro(e)),
+            }
+        }
         Acao::AbrirCliente => abrir(
             ctx,
             estado,

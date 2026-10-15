@@ -184,6 +184,7 @@ pub struct EntradaGravada {
 fn registrar_entrada_interna(
     dados: DadosEntrada,
     dados_lote: Option<DadosNovoLote>,
+    devolucao: bool,
     ctx: &Ctx,
     uow: &mut UnidadeDeTrabalho,
 ) -> Resultado<EntradaGravada> {
@@ -197,9 +198,12 @@ fn registrar_entrada_interna(
     });
 
     // 2. Validar (domínio puro): recalcula o custo médio.
-    saldo
-        .entrada(dados.quantidade, dados.custo_unitario, ctx.agora)
-        .map_err(|e| Erro::de_dominio(&e))?;
+    if devolucao {
+        saldo.devolucao(dados.quantidade, dados.custo_unitario, ctx.agora)
+    } else {
+        saldo.entrada(dados.quantidade, dados.custo_unitario, ctx.agora)
+    }
+    .map_err(|e| Erro::de_dominio(&e))?;
 
     // 3. Validar (domínio puro) o lote, quando esta entrada cria uma peça rastreável com
     // código de post-it.
@@ -269,7 +273,58 @@ pub fn registrar_entrada_comum(
     ctx: &Ctx,
     uow: &mut UnidadeDeTrabalho,
 ) -> Resultado<EntradaGravada> {
-    registrar_entrada_interna(dados, None, ctx, uow)
+    registrar_entrada_interna(dados, None, false, ctx, uow)
+}
+
+/// Devolve ao estoque tudo o que saiu por uma origem — o estorno de uma venda. Para cada
+/// saída de `(origem_modulo, origem_id)`, uma entrada no mesmo local, na mesma quantidade e
+/// **ao mesmo custo** da saída: é exatamente o CMV que o chamador estorna no Razão, então
+/// estoque e contabilidade voltam juntos ao que eram. Quem chama garante que a origem só se
+/// desfaz uma vez (o estado do agregado dela); ainda assim, uma origem que já tem entrada é
+/// recusada, para nunca devolver em dobro.
+///
+/// # Errors
+/// [`cardeal_kernel::CodigoErro::ESTADO_INVALIDO`] se a origem já tiver entrada; os erros de
+/// [`registrar_entrada_comum`] (local travado por inventário em contagem, por exemplo).
+#[cfg(feature = "sqlite")]
+pub fn devolver_saidas_da_origem(
+    origem_modulo: &'static str,
+    origem_id: Id,
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<Vec<EntradaGravada>> {
+    let movimentos = crate::consultas::movimentos_da_origem(
+        uow.conexao(),
+        ctx.empresa,
+        origem_modulo,
+        origem_id,
+    )?;
+    if movimentos.iter().any(|m| m.tipo == TipoMovimento::Entrada) {
+        return Err(Erro::novo(
+            cardeal_kernel::CodigoErro::ESTADO_INVALIDO,
+            "O que saiu por esta origem já foi devolvido ao estoque",
+        ));
+    }
+    movimentos
+        .into_iter()
+        .filter(|m| m.tipo == TipoMovimento::Saida)
+        .map(|m| {
+            registrar_entrada_interna(
+                DadosEntrada {
+                    produto: m.produto,
+                    local: m.local,
+                    quantidade: m.quantidade,
+                    custo_unitario: m.custo_unitario.unwrap_or(Preco::ZERO),
+                    origem_modulo,
+                    origem_id: Some(origem_id),
+                },
+                None,
+                true,
+                ctx,
+                uow,
+            )
+        })
+        .collect()
 }
 
 /// Como [`registrar_entrada_comum`], mas cria também um [`Lote`] rastreável (o código do
@@ -288,7 +343,7 @@ pub fn registrar_entrada_com_lote_comum(
     ctx: &Ctx,
     uow: &mut UnidadeDeTrabalho,
 ) -> Resultado<EntradaGravada> {
-    registrar_entrada_interna(dados, Some(lote), ctx, uow)
+    registrar_entrada_interna(dados, Some(lote), false, ctx, uow)
 }
 
 /// Os dados que `RegistrarSaida` e chamadas diretas de outros módulos passam ao corpo

@@ -79,7 +79,12 @@ O que eles têm e o Cardeal não, com o que aprenderam:
 
 ## 5. O que trazer, em ordem de prioridade para o MVP
 
-1. **Estornar a venda finalizada no PDV**, com a lista das **vendas do dia** de onde ela é feita (§3).
+1. ~~**Estornar a venda finalizada no PDV**, com a lista das **vendas do dia** de onde ela é feita
+   (§3).~~ **Feito (2026-10-15).** `EstornarVenda` estorna o lançamento e devolve a mercadoria ao custo
+   em que saiu; a NFC-e é anulada pela fila conforme o estado (cancela, inutiliza, ou emite e cancela
+   quando a tentativa pode ter chegado à SEFAZ). Melhor que lá: com supervisor, em uma transação, e
+   sem marcar a venda como "NFC-e a cancelar" à mão — a nota tem a marca permanente e a fila a leva
+   até o fim.
 2. **Nunca transformar em compra uma nota que não é compra.** A função `classifyNote` deles:
    - se o emitente é a própria empresa, é saída própria;
    - se o destinatário é outro CNPJ, a nota não é nossa;
@@ -146,5 +151,7 @@ Cada item é uma rejeição que eles já tomaram em produção:
 
 ## 7. Já aplicado
 
+- **Operador de Caixa emite NFC-e.** Achado ao fazer o estorno: o papel de fábrica não tinha
+  `fiscal.ver`/`fiscal.emitir`, então a venda de um operador saía sem nota, sem aviso.
 - **Pix leva o grupo `card` na NFC-e** (NT 2025.001; lá os códigos `03`, `04` e `17`). O Cardeal só o
   mandava em crédito e débito.

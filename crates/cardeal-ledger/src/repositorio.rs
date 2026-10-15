@@ -196,6 +196,39 @@ impl<'a, 'b> RepositorioRazao<'a, 'b> {
         Ok(Dinheiro::centavos(centavos))
     }
 
+    /// Os lançamentos **vivos** de uma origem: os originais (não os estornos) que ainda não
+    /// foram estornados, do mais antigo ao mais novo. É como um módulo acha o lançamento de um
+    /// agregado seu para desfazê-lo (o PDV estornando a venda de um cupom) sem guardar o id.
+    ///
+    /// # Errors
+    /// [`ErroRazao::FalhaDePersistencia`] em erro do SQLite.
+    pub fn lancamentos_vivos_da_origem(
+        &self,
+        empresa: Id,
+        modulo: &str,
+        tipo: &str,
+        agregado: Id,
+    ) -> Resultado<Vec<Id>> {
+        let mut stmt = self
+            .conn()
+            .prepare(
+                "SELECT id FROM razao_lancamento
+                 WHERE empresa = ?1 AND origem_modulo = ?2 AND origem_tipo = ?3
+                   AND origem_id = ?4 AND estorna IS NULL AND estado <> 'Estornado'
+                 ORDER BY numero",
+            )
+            .map_err(persist)?;
+        let ids = stmt
+            .query_map(
+                rusqlite::params![blob(empresa), modulo, tipo, blob(agregado)],
+                |r| r.get::<_, Vec<u8>>(0),
+            )
+            .map_err(persist)?
+            .map(|b| b.map(id_de).map_err(persist))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(ids)
+    }
+
     /// O maior código filho direto de `pai` já cadastrado, se houver — o que
     /// `CodigoConta::proximo_filho` usa para abrir a próxima conta em runtime
     /// (`Conta::abrir_filha`).

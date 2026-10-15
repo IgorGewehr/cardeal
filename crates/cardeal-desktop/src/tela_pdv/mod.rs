@@ -23,6 +23,7 @@ mod estado;
 mod pagamento;
 #[cfg(test)]
 mod testes;
+mod vendas_do_dia;
 mod visao;
 
 use cardeal_cliente::{Motor, Sessao};
@@ -159,6 +160,9 @@ fn atalhos(ctx: &egui::Context, estado: &mut EstadoTelaPdv) {
     }
     if consumir(ctx, egui::Key::F10) {
         estado.pendentes.push(Acao::AbrirConsultaPreco);
+    }
+    if consumir(ctx, egui::Key::F11) {
+        estado.pendentes.push(Acao::AbrirVendasDoDia);
     }
     if consumir(ctx, egui::Key::Escape) {
         estado.entrada.clear();

@@ -127,6 +127,8 @@ pub(super) enum Dlg {
         /// A linha destacada na lista.
         sel: usize,
     },
+    /// `F11`: as vendas de hoje — estornar, reimprimir, acompanhar a NFC-e.
+    VendasDoDia(super::vendas_do_dia::EstadoVendasDoDia),
     /// `F10`: consulta de preço sem abrir venda.
     ConsultaPreco {
         /// O que o operador digitou/bipou.
@@ -158,6 +160,8 @@ pub(super) enum Acao {
     AbrirFechamento,
     /// `F10`.
     AbrirConsultaPreco,
+    /// `F11`.
+    AbrirVendasDoDia,
     /// `F6`.
     AbrirCliente,
     /// Um cliente foi escolhido (`None` = consumidor não identificado).

@@ -492,4 +492,15 @@ pub(super) fn acoes(ui: &mut egui::Ui, estado: &mut EstadoTelaPdv) {
     {
         estado.pendentes.push(Acao::AbrirConsultaPreco);
     }
+    ui.add_space(Espaco::E8);
+    if ui
+        .add(
+            Botao::secundario("Vendas de hoje")
+                .atalho("F11")
+                .preenche_largura(),
+        )
+        .clicked()
+    {
+        estado.pendentes.push(Acao::AbrirVendasDoDia);
+    }
 }

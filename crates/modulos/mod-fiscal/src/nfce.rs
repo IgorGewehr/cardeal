@@ -191,6 +191,59 @@ impl Comando for InutilizarNumero {
     }
 }
 
+/// A venda do PDV foi estornada: a NFC-e dela tem de sair de cena. Marca o documento (de forma
+/// permanente) e pede o que o estado dele pede — cancelar a autorizada, inutilizar a rejeitada
+/// e a que nunca foi transmitida; a incerta e a pendente já tentada a fila resolve primeiro
+/// (emite ou confere) e só então cancela ou inutiliza. Só vale para venda **estornada**: é a
+/// consequência do estorno, por isso basta a permissão de emitir.
+///
+/// Devolve o documento, ou `None` se a venda não tinha NFC-e.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnularDocumentoDaVenda {
+    /// O cupom estornado.
+    pub cupom: Id,
+    /// A justificativa que vai ao cancelamento ou à inutilização (15 a 255 caracteres).
+    pub justificativa: String,
+}
+
+impl Comando for AnularDocumentoDaVenda {
+    type Saida = Option<DocumentoResumo>;
+    const PERMISSAO: &'static str = "fiscal.emitir";
+    const RISCO: Risco = Risco::Medio;
+    const AUDITA: bool = true;
+
+    #[cfg(feature = "sqlite")]
+    fn executar(
+        self,
+        ctx: &Ctx,
+        uow: &mut UnidadeDeTrabalho,
+    ) -> Resultado<Option<DocumentoResumo>> {
+        sqlite::anular(ctx, uow, self.cupom, &self.justificativa)
+    }
+}
+
+/// As NFC-e de várias vendas de uma vez (a lista "Vendas do dia" do PDV).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocumentosDasVendas {
+    /// Os cupons.
+    pub cupons: Vec<Id>,
+}
+
+impl Consulta for DocumentosDasVendas {
+    type Saida = Vec<DocumentoResumo>;
+    const PERMISSAO: &'static str = "fiscal.ver";
+
+    #[cfg(feature = "sqlite")]
+    fn executar(self, ctx: &Ctx, c: &Connection) -> Resultado<Vec<DocumentoResumo>> {
+        crate::sql_documento::documentos_das_origens(
+            c,
+            ctx.empresa,
+            sqlite::ORIGEM_PDV,
+            &self.cupons,
+        )
+    }
+}
+
 /// Os documentos fiscais, os mais novos primeiro (até 500).
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct DocumentosFiscais {
@@ -637,6 +690,12 @@ pub(crate) mod sqlite {
                 ),
             ));
         }
+        if resumo.anulada || resumo.pedido.is_some() {
+            return Err(Erro::novo(
+                CodigoErro::ESTADO_INVALIDO,
+                "Esta nota não se reenvia: a venda foi desfeita ou o número já vai ser inutilizado",
+            ));
+        }
         if origem_modulo != ORIGEM_PDV {
             return Err(Erro::novo(
                 CodigoErro::ESTADO_INVALIDO,
@@ -676,6 +735,49 @@ pub(crate) mod sqlite {
             .ok_or_else(|| Erro::nao_encontrado("documento fiscal"))
     }
 
+    /// A justificativa da SEFAZ: de 15 a 255 caracteres.
+    fn justificativa_valida(justificativa: &str) -> Resultado<&str> {
+        let justificativa = justificativa.trim();
+        let n = justificativa.chars().count();
+        if (15..=255).contains(&n) {
+            Ok(justificativa)
+        } else {
+            Err(Erro::novo(
+                CodigoErro::VALOR_INVALIDO,
+                "A justificativa precisa ter de 15 a 255 caracteres",
+            )
+            .no_campo("justificativa"))
+        }
+    }
+
+    pub(super) fn anular(
+        ctx: &Ctx,
+        uow: &mut UnidadeDeTrabalho,
+        cupom: Id,
+        justificativa: &str,
+    ) -> Resultado<Option<DocumentoResumo>> {
+        let justificativa = justificativa_valida(justificativa)?;
+        let venda = mod_pdv::RepositorioPdv::novo(uow)
+            .buscar_cupom(cupom)?
+            .ok_or_else(|| Erro::nao_encontrado("venda"))?;
+        if venda.estado != mod_pdv::EstadoCupom::Estornado {
+            return Err(Erro::novo(
+                CodigoErro::ESTADO_INVALIDO,
+                "A venda não foi estornada: a NFC-e só se anula junto com o estorno da venda",
+            ));
+        }
+        let c = uow.conexao();
+        let Some(doc) = sqld::documento_da_origem(c, ctx.empresa, ORIGEM_PDV, cupom)? else {
+            return Ok(None);
+        };
+        if !doc.anulada {
+            let pedido = crate::documento::pedido_da_anulacao(doc.estado, doc.tentativas)
+                .filter(|_| doc.pedido.is_none());
+            sqld::anular(c, ctx.empresa, doc.id, justificativa, pedido, ctx.agora)?;
+        }
+        sqld::documento_da_origem(c, ctx.empresa, ORIGEM_PDV, cupom)
+    }
+
     pub(super) fn pedir(
         ctx: &Ctx,
         uow: &mut UnidadeDeTrabalho,
@@ -683,15 +785,7 @@ pub(crate) mod sqlite {
         pedido: PedidoDocumento,
         justificativa: &str,
     ) -> Resultado<DocumentoResumo> {
-        let justificativa = justificativa.trim();
-        let n = justificativa.chars().count();
-        if !(15..=255).contains(&n) {
-            return Err(Erro::novo(
-                CodigoErro::VALOR_INVALIDO,
-                "A justificativa precisa ter de 15 a 255 caracteres",
-            )
-            .no_campo("justificativa"));
-        }
+        let justificativa = justificativa_valida(justificativa)?;
         let c = uow.conexao();
         let guardado = sqld::documento(c, ctx.empresa, documento)?
             .ok_or_else(|| Erro::nao_encontrado("documento fiscal"))?;
@@ -839,16 +933,37 @@ pub(crate) mod sqlite {
                 *contagem.entry(m.estado).or_default() += 1;
                 m
             };
+            // Venda desfeita: o documento que acaba de chegar a autorizado ou rejeitado já
+            // recebe o pedido de cancelar ou inutilizar.
+            let pedido_da_anulacao =
+                (doc.anulada && doc.pedido.is_none() && mudanca.estado != doc.estado)
+                    .then(|| crate::documento::pedido_da_anulacao(mudanca.estado, 0))
+                    .flatten()
+                    .filter(|_| mudanca.estado != EstadoDocumento::Pendente);
+            let justificativa = doc.justificativa.clone().unwrap_or_default();
             let (id, estado_lido) = (doc.id, doc.estado);
             t.escrever(move |uow| {
-                sqld::aplicar_mudanca(
+                let agora = Instante::agora();
+                let aplicou = sqld::aplicar_mudanca(
                     uow.conexao(),
                     empresa,
                     id,
                     estado_lido,
                     &mudanca,
-                    Instante::agora(),
-                )
+                    agora,
+                )?;
+                if let (true, Some(p)) = (aplicou, pedido_da_anulacao) {
+                    sqld::pedir(
+                        uow.conexao(),
+                        empresa,
+                        id,
+                        p,
+                        &justificativa,
+                        mudanca.estado,
+                        agora,
+                    )?;
+                }
+                Ok(aplicou)
             })?;
             if parar {
                 break;

@@ -272,6 +272,11 @@ fn grade(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoN
                 if let Some(p) = d.pedido {
                     ui.add(Etiqueta::atencao(p.rotulo()));
                 }
+                if d.anulacao_pendente() {
+                    ui.add(Etiqueta::negativa("venda desfeita, cancelamento recusado"));
+                } else if d.anulada {
+                    ui.add(Etiqueta::neutra("venda desfeita"));
+                }
                 if d.ambiente == AmbienteFiscal::Homologacao {
                     ui.add(Etiqueta::neutra("teste"));
                 }
@@ -505,6 +510,7 @@ mod testes {
             criado_em: cardeal_kernel::Instante::agora(),
             autorizado_em: None,
             pedido: None,
+            anulada: false,
         }
     }
 

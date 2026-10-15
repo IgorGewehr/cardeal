@@ -594,6 +594,38 @@ pub fn movimentos_do_produto(
         .map_err(persist)
 }
 
+/// Os movimentos de uma origem (`"pdv"` + o cupom, por exemplo), do mais antigo ao mais
+/// novo — sobre o índice `estoque_movimento_origem`.
+///
+/// # Errors
+/// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+#[cfg(feature = "sqlite")]
+pub fn movimentos_da_origem(
+    conexao: &Connection,
+    empresa: Id,
+    origem_modulo: &str,
+    origem_id: Id,
+) -> Resultado<Vec<Movimento>> {
+    let mut stmt = conexao
+        .prepare(
+            "SELECT id, empresa, produto, variacao, local, tipo, quantidade, custo_unitario,
+                    lote, origem_modulo, origem_id, lancamento, criado_em, criado_por
+             FROM estoque_movimento
+             WHERE empresa = ?1 AND origem_modulo = ?2 AND origem_id = ?3
+             ORDER BY criado_em",
+        )
+        .map_err(persist)?;
+    let linhas = stmt
+        .query_map(
+            rusqlite::params![blob(empresa), origem_modulo, blob(origem_id)],
+            movimento_de_linha,
+        )
+        .map_err(persist)?;
+    linhas
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(persist)
+}
+
 /// Consulta os movimentos de um produto, opcionalmente filtrados por módulo de origem.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MovimentosDoProduto {

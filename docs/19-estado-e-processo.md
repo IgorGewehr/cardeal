@@ -44,8 +44,9 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   feitos (2026-10-14; homologação SC respondeu 107 com o A1 real). A **NFC-e do PDV** saiu (2026-10-15):
   documento criado na venda sem rede, fila, transmissão em segundo plano (tarefa no despacho), conferência
   pela chave antes de reemitir, área Notas fiscais — e o **DANFCE** (80 mm, QR Code), o **cancelamento** e a
-  **inutilização** como pedidos na fila. Próximo: a 1ª autorizada no RS (dados do usuário), estorno da venda
-  no PDV, contingência (`docs/modulos/fiscal.md` §11).
+  **inutilização** como pedidos na fila, e o **estorno da venda** no PDV com a NFC-e anulada pela fila.
+  Próximo: o backlog do `docs/21-licoes-do-gestao-raiz.md` §5 (classificar a nota de entrada, cancelar
+  título, saldo inicial e transferência…); a 1ª autorizada no RS espera os dados do usuário.
 - **Pendência de confiança:** as tabelas do Simples e as alíquotas precisam ser conferidas com o
   contador; o ST/IPI **da nota** já entra no custo (2026-10-13), mas a estimativa de ST pela MVA (sem o valor na
   nota) ainda não.
@@ -615,6 +616,15 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   `CancelarNfce`/`InutilizarNumero` (permissão nova `fiscal.cancelar`) e `decidir_evento`; a mesma tarefa da
   fila leva os pedidos. Testes: cancelamento aceito, recusado por prazo, pedido repetido, inutilização,
   decisões dos eventos e o cupom (o QR renderizado decodifica com OpenCV).
+- **Estorno da venda finalizada (2026-10-15, item 1 do doc 21):** `pdv.estornar_venda.v1` (permissão nova
+  `pdv.venda.estornar`, Alto) estorna o lançamento da venda — achado pela origem com o novo
+  `RepositorioRazao::lancamentos_vivos_da_origem` — e devolve ao estoque cada saída ao custo em que saiu
+  (`mod_estoque::devolver_saidas_da_origem`, com `SaldoLocal::devolucao` aceitando custo zero). Estado
+  `Estornado` em tabela à parte (`pdv_estorno`, migração v2 do PDV). `pdv.vendas_do_periodo.v1` alimenta o
+  `F11` **Vendas de hoje** (estornar com supervisor, imprimir, anular NFC-e). No fiscal, migração v4
+  (`anulada`) e `fiscal.anular_documento_da_venda.v1`: a fila cancela, inutiliza ou emite-e-cancela
+  conforme o estado. Corrigido junto: o papel Operador de Caixa não tinha `fiscal.ver`/`fiscal.emitir`
+  (a venda dele saía sem NFC-e).
 - **Inventário com contagem cega (2026-10-13):** migração `estoque` v11 (`estoque_inventario`,
   `estoque_contagem_item`), comandos `criar_inventario`/`iniciar_contagem`/`registrar_contagem`/
   `encerrar_inventario`/`cancelar_inventario` (`.v1`) e consultas `inventarios`/`posicao_do_inventario`.

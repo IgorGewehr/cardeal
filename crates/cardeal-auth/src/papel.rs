@@ -234,7 +234,14 @@ impl PapelDeFabrica {
                 tudo: false,
                 nega_prefixo: &["estoque.custo", "vendas.margem", "pdv.margem", "relatorio"],
                 modulos: &["pdv"],
-                concede_prefixo: &["vendas.venda", "financeiro.caixa"],
+                // `fiscal.ver`/`fiscal.emitir`: sem eles a venda do caixa sai sem NFC-e, em
+                // silêncio (o PDV só emite com as duas). Cancelar e configurar, não.
+                concede_prefixo: &[
+                    "vendas.venda",
+                    "financeiro.caixa",
+                    "fiscal.ver",
+                    "fiscal.emitir",
+                ],
                 concede_sufixo: &[],
             },
             Self::Vendedor => PoliticaPapel {
@@ -377,6 +384,10 @@ mod testes {
         "compras.pedido.criar",
         "clientes.pessoa.editar",
         "pdv.cupom.cancelar",
+        "fiscal.ver",
+        "fiscal.emitir",
+        "fiscal.cancelar",
+        "fiscal.configurar",
         "auditoria.ver",
         "relatorio.exportar",
     ];
@@ -417,6 +428,9 @@ mod testes {
     fn operador_de_caixa_nao_ve_custo_nem_margem() {
         let p = permissoes(PapelDeFabrica::OperadorCaixa);
         assert!(p.contains("vendas.venda.registrar"));
+        // A NFC-e da venda dele sai; cancelar nota e configurar o fiscal, não.
+        assert!(p.contains("fiscal.ver") && p.contains("fiscal.emitir"));
+        assert!(!p.contains("fiscal.cancelar") && !p.contains("fiscal.configurar"));
         assert!(p.contains("financeiro.caixa.abrir"));
         assert!(!p.contains("estoque.custo.ver"));
         assert!(!p.contains("vendas.margem.ver"));

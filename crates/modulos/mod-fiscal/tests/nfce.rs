@@ -32,13 +32,14 @@ use mod_financeiro::{
     AbrirCaixa, CadastrarCaixa, CaixaCadastrado, CaixaFoiAberto, ModuloFinanceiro,
 };
 use mod_fiscal::{
-    CancelarNfce, ConfigurarNfce, DetalheDocumento, DocumentoFiscal, DocumentoResumo,
-    EmitirNfceDoCupom, EstadoDocumento, InstalarCertificado, InutilizarNumero, ModuloFiscal,
-    PedidoDocumento, ProvedorFiscal, ReenviarDocumento, ResumoDaFilaFiscal, ResumoFiscal,
-    SituacaoFiscal, SituacaoFiscalDaEmpresa, TAREFA_TRANSMITIR,
+    AnularDocumentoDaVenda, CancelarNfce, ConfigurarNfce, DetalheDocumento, DocumentoFiscal,
+    DocumentoResumo, EmitirNfceDoCupom, EstadoDocumento, InstalarCertificado, InutilizarNumero,
+    ModuloFiscal, PedidoDocumento, ProvedorFiscal, ReenviarDocumento, ResumoDaFilaFiscal,
+    ResumoFiscal, SituacaoFiscal, SituacaoFiscalDaEmpresa, TAREFA_TRANSMITIR,
 };
 use mod_pdv::{
-    AbrirCupom, AdicionarItem, CupomAberto, FinalizarVenda, ModuloPdv, PagamentoInformado,
+    AbrirCupom, AdicionarItem, CupomAberto, EstornarVenda, FinalizarVenda, ModuloPdv,
+    PagamentoInformado, VendaFoiEstornada,
 };
 use mod_vendas::{CriarRegraPreco, CriarTabelaPreco, ModuloVendas, TabelaPrecoCriada, TipoTabela};
 use serde::de::DeserializeOwned;
@@ -133,6 +134,7 @@ impl Mundo {
             "financeiro.caixa.abrir",
             "pdv.venda.editar",
             "pdv.venda.finalizar",
+            "pdv.venda.estornar",
             "empresa.dados.ver",
             "empresa.dados.editar",
             "fiscal.ver",
@@ -758,5 +760,143 @@ fn cancela_a_autorizada_e_inutiliza_o_numero_da_rejeitada() {
     assert_eq!(
         m.documento(c.id).resumo.estado,
         EstadoDocumento::Inutilizada
+    );
+}
+
+#[test]
+fn venda_estornada_anula_a_nfce_conforme_o_estado() {
+    let m = Mundo::novo();
+    let cen = m.cenario();
+    m.configurar(1);
+    let estornar = |cupom: Id| -> Option<DocumentoResumo> {
+        let _: VendaFoiEstornada = m
+            .executar(
+                "pdv.estornar_venda.v1",
+                &EstornarVenda {
+                    cupom,
+                    motivo: "Cliente desistiu da compra".into(),
+                    autorizado_por: Id::novo(),
+                },
+            )
+            .unwrap();
+        m.executar(
+            "fiscal.anular_documento_da_venda.v1",
+            &AnularDocumentoDaVenda {
+                cupom,
+                justificativa: "Venda estornada no PDV a pedido do cliente".into(),
+            },
+        )
+        .unwrap()
+    };
+    let emissoes = || m.sim.emissoes.load(std::sync::atomic::Ordering::SeqCst);
+
+    // Só a venda estornada anula a nota.
+    let viva = m.vender(&cen, cen.produto, 1, false);
+    let erro = m
+        .executar::<Option<DocumentoResumo>>(
+            "fiscal.anular_documento_da_venda.v1",
+            &AnularDocumentoDaVenda {
+                cupom: viva,
+                justificativa: "Venda estornada no PDV a pedido do cliente".into(),
+            },
+        )
+        .unwrap_err();
+    assert_eq!(erro.codigo, CodigoErro::ESTADO_INVALIDO);
+    // Estornada antes de a NFC-e existir: nada a anular, e a nota não nasce mais.
+    let sem_nota = m.vender(&cen, cen.produto, 1, false);
+    assert!(estornar(sem_nota).is_none());
+    assert!(m
+        .executar::<DocumentoResumo>(
+            "fiscal.emitir_nfce_do_cupom.v1",
+            &EmitirNfceDoCupom { cupom: sem_nota },
+        )
+        .is_err());
+
+    // Autorizada: cancela.
+    let a = m.vender(&cen, cen.produto, 1, false);
+    let doc_a = m.emitir(a);
+    assert!(m.transmitir().starts_with("1 autorizada"));
+    let d = estornar(a).unwrap();
+    assert!(d.anulada);
+    assert_eq!(d.pedido, Some(PedidoDocumento::Cancelar));
+    assert!(m.transmitir().contains("1 cancelada"));
+    assert_eq!(
+        m.documento(doc_a.id).resumo.estado,
+        EstadoDocumento::Cancelada
+    );
+
+    // Nunca transmitida: inutiliza o número, sem emitir.
+    let b = m.vender(&cen, cen.produto, 1, false);
+    let doc_b = m.emitir(b);
+    let antes = emissoes();
+    assert_eq!(
+        estornar(b).unwrap().pedido,
+        Some(PedidoDocumento::Inutilizar)
+    );
+    assert!(m.transmitir().contains("1 inutilizada"));
+    assert_eq!(
+        m.documento(doc_b.id).resumo.estado,
+        EstadoDocumento::Inutilizada
+    );
+    assert_eq!(emissoes(), antes, "não emitiu a nota da venda desfeita");
+
+    // Rejeitada: inutiliza, e não se reenvia mais.
+    let c = m.vender(&cen, cen.produto, 1, false);
+    let doc_c = m.emitir(c);
+    m.sim.programar(retorno(SituacaoRetorno::Rejeitado, "778"));
+    assert!(m.transmitir().contains("1 rejeitada"));
+    assert_eq!(
+        estornar(c).unwrap().pedido,
+        Some(PedidoDocumento::Inutilizar)
+    );
+    assert!(m
+        .executar::<DocumentoResumo>(
+            "fiscal.reenviar_documento.v1",
+            &ReenviarDocumento {
+                documento: doc_c.id
+            },
+        )
+        .is_err());
+    assert!(m.transmitir().contains("1 inutilizada"));
+    assert_eq!(
+        m.documento(doc_c.id).resumo.estado,
+        EstadoDocumento::Inutilizada
+    );
+
+    // Tentada sem resposta (pode ter chegado à SEFAZ): a fila emite primeiro e cancela logo
+    // depois — o prazo de 30 minutos conta da autorização.
+    m.sim.simular_fora_do_ar(true);
+    let e = m.vender(&cen, cen.produto, 1, false);
+    let doc_e = m.emitir(e);
+    m.transmitir();
+    let d = estornar(e).unwrap();
+    assert_eq!(
+        (d.estado, d.pedido, d.anulada),
+        (EstadoDocumento::Pendente, None, true)
+    );
+    m.sim.simular_fora_do_ar(false);
+    m.tentar_ja();
+    assert!(m.transmitir().starts_with("1 autorizada"));
+    let d = m.documento(doc_e.id).resumo;
+    assert_eq!(
+        (d.estado, d.pedido),
+        (EstadoDocumento::Autorizada, Some(PedidoDocumento::Cancelar))
+    );
+    assert!(m.transmitir().contains("1 cancelada"));
+
+    // Cancelamento recusado (fora do prazo): a nota segue valendo e o caso fica à vista.
+    let f = m.vender(&cen, cen.produto, 1, false);
+    let doc_f = m.emitir(f);
+    m.transmitir();
+    estornar(f);
+    m.sim.programar(retorno(SituacaoRetorno::Rejeitado, "501"));
+    assert!(m.transmitir().contains("1 pedido(s) recusado(s)"));
+    let d = m.documento(doc_f.id).resumo;
+    assert_eq!(d.estado, EstadoDocumento::Autorizada);
+    assert!(d.anulacao_pendente());
+    assert_eq!(
+        m.transmitir(),
+        "nada na fila",
+        "não insiste num cancelamento recusado"
     );
 }

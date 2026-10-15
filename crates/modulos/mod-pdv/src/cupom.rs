@@ -2,7 +2,8 @@
 //!
 //! Preço **congelado no item**, como em `mod-vendas::ItemVenda` (mesma disciplina, §11.1 de
 //! lá) — o item de cupom não reaproveita o tipo de vendas porque cupom não tem orçamento nem
-//! reserva, só a máquina de estado mais simples `EmAndamento → Finalizado`/`Cancelado`.
+//! reserva, só a máquina de estado mais simples `EmAndamento → Finalizado`/`Cancelado`, e o
+//! estorno da venda já paga, `Finalizado → Estornado`.
 
 #![allow(clippy::too_many_arguments)]
 
@@ -16,10 +17,13 @@ use crate::erros::ErroPdv;
 pub enum EstadoCupom {
     /// Em montagem no balcão.
     EmAndamento,
-    /// Pago e encerrado — irreversível nesta fatia (sem estorno pós-fechamento ainda).
+    /// Pago e encerrado. Só se desfaz pelo estorno ([`Cupom::estornar`]).
     Finalizado,
     /// Cancelado antes de finalizar — nenhum lançamento chegou a existir.
     Cancelado,
+    /// Finalizado e depois desfeito (`EstornarVenda`): o lançamento da venda foi estornado e a
+    /// mercadoria voltou ao estoque.
+    Estornado,
 }
 
 impl EstadoCupom {
@@ -30,6 +34,7 @@ impl EstadoCupom {
             Self::EmAndamento => "EmAndamento",
             Self::Finalizado => "Finalizado",
             Self::Cancelado => "Cancelado",
+            Self::Estornado => "Estornado",
         }
     }
 }
@@ -304,12 +309,25 @@ impl Cupom {
                 self.transicionar(EstadoCupom::Cancelado);
                 Ok(())
             }
-            EstadoCupom::Finalizado => Err(ErroPdv::CupomJaFinalizado),
+            EstadoCupom::Finalizado | EstadoCupom::Estornado => Err(ErroPdv::CupomJaFinalizado),
             EstadoCupom::Cancelado => Err(ErroPdv::CupomEmEstadoInvalido {
                 atual: self.estado.rotulo(),
                 esperado: "EmAndamento",
             }),
         }
+    }
+
+    /// `Finalizado → Estornado` — a venda desfeita depois de paga (`EstornarVenda`).
+    ///
+    /// # Errors
+    /// [`ErroPdv::VendaJaEstornada`]; [`ErroPdv::CupomEmEstadoInvalido`] fora de `Finalizado`.
+    pub fn estornar(&mut self) -> Result<(), ErroPdv> {
+        if self.estado == EstadoCupom::Estornado {
+            return Err(ErroPdv::VendaJaEstornada);
+        }
+        self.exigir(EstadoCupom::Finalizado)?;
+        self.transicionar(EstadoCupom::Estornado);
+        Ok(())
     }
 
     fn transicionar(&mut self, novo: EstadoCupom) {
@@ -435,6 +453,38 @@ mod testes {
         c.adicionar_item(item(1, 10)).unwrap();
         c.finalizar().unwrap();
         assert_eq!(c.estado, EstadoCupom::Finalizado);
+    }
+
+    #[test]
+    fn estornar_so_a_venda_finalizada_e_uma_vez() {
+        let mut c = Cupom::novo(
+            Id::novo(),
+            Id::novo(),
+            Id::novo(),
+            1,
+            1,
+            None,
+            Id::novo(),
+            cardeal_kernel::Instante::agora(),
+            Id::novo(),
+            Id::novo(),
+        );
+        c.adicionar_item(item(1, 10)).unwrap();
+        assert!(matches!(
+            c.estornar().unwrap_err(),
+            ErroPdv::CupomEmEstadoInvalido { .. }
+        ));
+        c.finalizar().unwrap();
+        c.estornar().unwrap();
+        assert_eq!(c.estado, EstadoCupom::Estornado);
+        assert!(matches!(
+            c.estornar().unwrap_err(),
+            ErroPdv::VendaJaEstornada
+        ));
+        assert!(matches!(
+            c.cancelar().unwrap_err(),
+            ErroPdv::CupomJaFinalizado
+        ));
     }
 
     #[test]

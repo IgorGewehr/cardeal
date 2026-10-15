@@ -7,6 +7,7 @@ mod adicionar_item;
 mod aplicar_desconto_item;
 mod cancelar_cupom;
 mod cancelar_item;
+mod estornar_venda;
 mod finalizar_venda;
 mod identificar_cliente;
 
@@ -15,6 +16,9 @@ pub use adicionar_item::{AdicionarItem, ItemFoiAdicionado};
 pub use aplicar_desconto_item::AplicarDescontoItem;
 pub use cancelar_cupom::CancelarCupom;
 pub use cancelar_item::CancelarItem;
+pub use estornar_venda::{
+    EstornarVenda, VendaFoiEstornada, MOTIVO_MINIMO as MOTIVO_MINIMO_DO_ESTORNO,
+};
 pub use finalizar_venda::{FinalizarVenda, PagamentoInformado, VendaFoiFinalizada};
 pub use identificar_cliente::IdentificarCliente;
 

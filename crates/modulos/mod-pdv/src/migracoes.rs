@@ -75,12 +75,37 @@ CREATE TABLE pdv_pagamento_cupom (
 CREATE INDEX pdv_pagamento_cupom_cupom ON pdv_pagamento_cupom(cupom);
 ";
 
-const MIGRACOES: &[Migracao] = &[Migracao {
-    versao: 1,
-    nome: "pdv_cupom_e_pagamento",
-    sql: SQL_CUPOM,
-    tipo: TipoMigracao::Esquema,
-}];
+/// v2: o estorno da venda finalizada. Fica numa tabela à parte, e não num estado novo no
+/// `CHECK` de `pdv_cupom`: o SQLite não altera um `CHECK`, e recriar `pdv_cupom` com as chaves
+/// estrangeiras ligadas quebraria itens e pagamentos, que apontam para ela. Um cupom
+/// `Finalizado` com linha aqui é `Estornado` (o repositório faz a tradução).
+const SQL_ESTORNO: &str = r"
+CREATE TABLE pdv_estorno (
+    cupom          BLOB PRIMARY KEY REFERENCES pdv_cupom(id),
+    empresa        BLOB    NOT NULL REFERENCES nucleo_empresa(id),
+    motivo         TEXT    NOT NULL,
+    autorizado_por BLOB    NOT NULL,
+    estornado_por  BLOB    NOT NULL,
+    estornado_em   INTEGER NOT NULL
+) STRICT;
+CREATE INDEX pdv_estorno_empresa ON pdv_estorno(empresa, estornado_em);
+CREATE INDEX pdv_cupom_empresa_abertura ON pdv_cupom(empresa, abertura);
+";
+
+const MIGRACOES: &[Migracao] = &[
+    Migracao {
+        versao: 1,
+        nome: "pdv_cupom_e_pagamento",
+        sql: SQL_CUPOM,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 2,
+        nome: "pdv_estorno_da_venda",
+        sql: SQL_ESTORNO,
+        tipo: TipoMigracao::Esquema,
+    },
+];
 
 /// O conjunto de migrações do módulo de PDV.
 #[must_use]

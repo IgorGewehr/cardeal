@@ -157,8 +157,28 @@ rejeitada que não vai mais sair (o número não vira buraco na série) — perm
 justificativa de 15 a 255 caracteres. O comando só registra o pedido; a mesma tarefa da fila o leva à SEFAZ
 (sem internet, ele espera). `decidir_evento`: aceito (135/136/155, 102) → `Cancelada`/`Inutilizada`; já feito
 antes (573/218, 563/206/256) → idem; recusado (ex.: 501 fora do prazo) → a nota volta ao que era, sem o pedido,
-com o motivo; sem resposta → o pedido espera. O cancelamento **não desfaz a venda** (o PDV ainda não estorna
-venda finalizada — §11).
+com o motivo; sem resposta → o pedido espera. O cancelamento manual **não desfaz a venda**: para desfazer a venda,
+use o estorno do PDV (`F11`), que anula a nota junto.
+
+**Venda estornada no PDV** (migração v4, coluna `anulada`): `AnularDocumentoDaVenda`
+(`fiscal.anular_documento_da_venda.v1`, permissão `fiscal.emitir` — é consequência do estorno, que
+já exigiu supervisor; o comando recusa venda que não esteja `Estornado`) marca o documento **de
+forma permanente** e pede o que o estado pede (`pedido_da_anulacao`):
+- autorizada → cancelar;
+- rejeitada → inutilizar (e não se reenvia mais);
+- pendente **nunca transmitida** → inutilizar o número, sem emitir;
+- pendente já tentada ou incerta → nada ainda: a tentativa pode ter chegado à SEFAZ sem resposta, então
+  a fila emite (a duplicidade revela a chave) ou confere, e o documento que chega a autorizado ou
+  rejeitado já recebe o pedido na mesma escrita. O prazo de 30 minutos conta da autorização, então o
+  cancelamento logo depois cabe;
+- denegada/cancelada/inutilizada → nada.
+
+Se a SEFAZ recusar o cancelamento (fora do prazo), a nota continua autorizada e
+`DocumentoResumo::anulacao_pendente` a mostra como "cancelamento recusado" (no PDV e em Notas
+fiscais), com a orientação de emitir uma NFC-e de devolução; a fila não insiste. A venda estornada
+antes de a NFC-e existir não gera nota (o `EmitirNfceDoCupom` exige venda `Finalizado`).
+`DocumentosDasVendas` (`fiscal.documentos_das_vendas.v1`) devolve as NFC-e de várias vendas numa
+consulta, para a lista do dia.
 
 **DANFCE** (`cardeal_pdf::gerar_danfce`): bobina de 80 mm com a altura do cupom, no leiaute do manual
 (emitente, itens, totais, pagamentos e troco, chave em 11 grupos com o endereço de consulta, consumidor,
@@ -194,6 +214,10 @@ autorizada ganha **Imprimir cupom fiscal**.
 | `fiscal.ver` | Baixo | Situação fiscal, notas, teste de conexão |
 | `fiscal.emitir` | Médio | Criar a NFC-e da venda, reenviar, transmitir a fila |
 | `fiscal.cancelar` | Alto | Cancelar NFC-e autorizada, inutilizar número |
+
+O papel de fábrica **Operador de Caixa** recebe `fiscal.ver` e `fiscal.emitir` (2026-10-15): sem
+eles, a venda feita por um operador saía **sem NFC-e**, em silêncio (o PDV só emite com os dois).
+Cancelar e configurar continuam fora do papel.
 | `fiscal.configurar` | Alto | Certificado, ambiente, configuração da NFC-e (CSC) |
 
 ## 10. Tabelas
@@ -206,12 +230,12 @@ autorizada ganha **Imprimir cupom fiscal**.
   série+número+ambiente).
 - v3: `fiscal_documento` recriada (o SQLite não muda `CHECK`) com o estado `Inutilizada` e o pedido
   (`pedido`, `justificativa`, `protocolo_evento`, `evento_em`).
+- v4: `fiscal_documento.anulada` — a venda foi desfeita (estorno no PDV).
 
 ## 11. Próximas fatias da onda 7
 
 1. **Primeira NFC-e autorizada no RS** (falta a IE, o endereço e o CSC de homologação da SEFAZ-RS).
-2. **Estorno da venda finalizada** no PDV (o cancelamento da NFC-e hoje não devolve estoque/dinheiro) e a
-   impressão direta na térmica (ESC/POS).
+2. A impressão direta na térmica (ESC/POS) e o DANFCE em 58 mm.
 3. **Contingência offline** (`tpEmis=9`, `prepare`/`transmit` do `sefaz-api`): exige a API alcançável — sem
    internet nenhuma, a nota espera na fila (assinar localmente seria trazer a assinatura para o Cardeal).
 4. Série por terminal (hoje uma série por empresa).

@@ -58,6 +58,12 @@ pub enum ErroPdv {
     /// `CancelarCupom` exige motivo e identificação de quem autorizou (§5, `F8`).
     #[error("Cancelar o cupom inteiro exige motivo")]
     MotivoObrigatorio,
+    /// `EstornarVenda` sobre uma venda já estornada.
+    #[error("Esta venda já foi estornada")]
+    VendaJaEstornada,
+    /// O motivo do estorno vai para o histórico do lançamento: ao menos 10 caracteres.
+    #[error("Explique o motivo do estorno (ao menos 10 caracteres)")]
+    MotivoDoEstornoCurto,
 }
 
 impl ErroDominio for ErroPdv {
@@ -66,11 +72,13 @@ impl ErroDominio for ErroPdv {
             Self::QuantidadeInvalida
             | Self::PagamentoSemFormas
             | Self::CupomSemItens
-            | Self::MotivoObrigatorio => CodigoErro::ENTRADA_INVALIDA,
+            | Self::MotivoObrigatorio
+            | Self::MotivoDoEstornoCurto => CodigoErro::ENTRADA_INVALIDA,
             Self::DescontoAcimaDoLimite { .. } => CodigoErro::SEM_PERMISSAO,
             Self::ItemJaCancelado
             | Self::CupomEmEstadoInvalido { .. }
-            | Self::CupomJaFinalizado => CodigoErro::ESTADO_INVALIDO,
+            | Self::CupomJaFinalizado
+            | Self::VendaJaEstornada => CodigoErro::ESTADO_INVALIDO,
             Self::SomaDePagamentosDivergente { .. } => CodigoErro::REGRA_VIOLADA,
         }
     }
@@ -86,8 +94,8 @@ impl ErroDominio for ErroPdv {
             )),
             Self::CupomJaFinalizado => Some(Detalhes::nova(
                 "Venda já finalizada",
-                "Assim como no Razão, uma venda finalizada não se desfaz por aqui — a correção \
-                 é uma devolução (ver mod-vendas), não um cancelamento de cupom.",
+                "Uma venda paga não se cancela pelo F8: ela se desfaz pelo estorno, em Vendas do \
+                 dia (F11), que devolve a mercadoria ao estoque e estorna o lançamento.",
             )),
             _ => None,
         }

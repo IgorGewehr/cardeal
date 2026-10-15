@@ -67,9 +67,12 @@ mod repositorio;
 
 pub use comandos::{
     AbrirCupom, AdicionarItem, AplicarDescontoItem, CancelarCupom, CancelarItem, CupomAberto,
-    FinalizarVenda, IdentificarCliente, ItemFoiAdicionado, PagamentoInformado, VendaFoiFinalizada,
+    EstornarVenda, FinalizarVenda, IdentificarCliente, ItemFoiAdicionado, PagamentoInformado,
+    VendaFoiEstornada, VendaFoiFinalizada, MOTIVO_MINIMO_DO_ESTORNO,
 };
-pub use consultas::{PrecoConsultado, PrecoDoProduto};
+pub use consultas::{
+    EstornoDaVenda, PrecoConsultado, PrecoDoProduto, VendaDoPeriodo, VendasDoPeriodo,
+};
 pub use cupom::{
     validar_pagamentos, Cupom, EstadoCupom, FormaPagamentoPdv, ItemCupom, PagamentoCupom,
 };

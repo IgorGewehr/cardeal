@@ -208,7 +208,8 @@ pub(crate) fn inserir_documento(c: &Connection, d: &NovoDocumento<'_>) -> Result
 
 const COLUNAS: &str =
     "id, modelo, serie, numero, ambiente, estado, total, chave, protocolo, codigo,
-                       motivo, origem_id, tentativas, criado_em, autorizado_em, pedido";
+                       motivo, origem_id, tentativas, criado_em, autorizado_em, pedido,
+                       anulada";
 
 fn resumo_de(r: &Row<'_>) -> rusqlite::Result<DocumentoResumo> {
     Ok(DocumentoResumo {
@@ -240,7 +241,42 @@ fn resumo_de(r: &Row<'_>) -> rusqlite::Result<DocumentoResumo> {
             .get::<_, Option<String>>(15)?
             .as_deref()
             .and_then(PedidoDocumento::de_str),
+        anulada: r.get::<_, i64>(16)? != 0,
     })
+}
+
+/// Os documentos de várias origens de um módulo (as NFC-e das vendas do dia) — uma consulta,
+/// não uma por venda.
+pub(crate) fn documentos_das_origens(
+    c: &Connection,
+    empresa: Id,
+    origem_modulo: &str,
+    origens: &[Id],
+) -> Resultado<Vec<DocumentoResumo>> {
+    let mut stmt = c
+        .prepare(&format!(
+            "SELECT {COLUNAS} FROM fiscal_documento
+             WHERE empresa = ?1 AND origem_modulo = ?2 AND origem_id = ?3"
+        ))
+        .map_err(falha)?;
+    let mut docs = Vec::new();
+    for origem in origens {
+        if let Some(d) = stmt
+            .query_row(
+                params![
+                    empresa.em_bytes().as_slice(),
+                    origem_modulo,
+                    origem.em_bytes().as_slice()
+                ],
+                resumo_de,
+            )
+            .optional()
+            .map_err(falha)?
+        {
+            docs.push(d);
+        }
+    }
+    Ok(docs)
 }
 
 pub(crate) fn documento_da_origem(
@@ -289,9 +325,9 @@ pub(crate) fn documento(
         |r| {
             Ok(DocumentoGuardado {
                 resumo: resumo_de(r)?,
-                nota: r.get(16)?,
-                xml: r.get(17)?,
-                origem_modulo: r.get(18)?,
+                nota: r.get(17)?,
+                xml: r.get(18)?,
+                origem_modulo: r.get(19)?,
             })
         },
     )
@@ -338,6 +374,7 @@ pub(crate) struct NaFila {
     pub serie: u32,
     pub numero: u64,
     pub criado_em: Instante,
+    pub anulada: bool,
     pub estado: EstadoDocumento,
     pub tentativas: u32,
     pub chave: Option<String>,
@@ -354,7 +391,7 @@ pub(crate) fn fila(
     let mut stmt = c
         .prepare(
             "SELECT id, estado, tentativas, chave, nota, ambiente, pedido, justificativa, protocolo,
-                    serie, numero, criado_em
+                    serie, numero, criado_em, anulada
              FROM fiscal_documento
              WHERE empresa = ?1 AND (estado IN ('Pendente','Incerta') OR pedido IS NOT NULL)
                AND proxima_tentativa <= ?2
@@ -386,6 +423,7 @@ pub(crate) fn fila(
                     serie: r.get(9)?,
                     numero: u64::try_from(r.get::<_, i64>(10)?).unwrap_or(0),
                     criado_em: Instante::de_micros(r.get(11)?),
+                    anulada: r.get::<_, i64>(12)? != 0,
                 })
             },
         )
@@ -439,6 +477,34 @@ pub(crate) fn aplicar_mudanca(
             agora.em_micros(),
             m.limpar_pedido,
             m.protocolo_evento,
+        ],
+    )
+    .map(|n| n > 0)
+    .map_err(falha)
+}
+
+/// Marca o documento como de venda desfeita (permanente), guarda a justificativa e, quando
+/// já há o que pedir, registra o pedido (se ainda não houver outro). Devolve se marcou.
+pub(crate) fn anular(
+    c: &Connection,
+    empresa: Id,
+    id: Id,
+    justificativa: &str,
+    pedido: Option<PedidoDocumento>,
+    agora: Instante,
+) -> Resultado<bool> {
+    c.execute(
+        "UPDATE fiscal_documento SET anulada = 1, justificativa = ?3,
+           pedido = COALESCE(pedido, ?4),
+           tentativas = CASE WHEN ?4 IS NOT NULL AND pedido IS NULL THEN 0 ELSE tentativas END,
+           proxima_tentativa = 0, atualizado_em = ?5
+         WHERE empresa = ?1 AND id = ?2 AND anulada = 0",
+        params![
+            empresa.em_bytes().as_slice(),
+            id.em_bytes().as_slice(),
+            justificativa,
+            pedido.map(PedidoDocumento::como_str),
+            agora.em_micros()
         ],
     )
     .map(|n| n > 0)

@@ -45,7 +45,9 @@ pub(crate) fn versao_i64(v: Versao) -> i64 {
 pub(crate) fn estado_txt(e: EstadoCupom) -> &'static str {
     match e {
         EstadoCupom::EmAndamento => "EmAndamento",
-        EstadoCupom::Finalizado => "Finalizado",
+        // O estorno mora em `pdv_estorno` (migração v2): na coluna, a venda estornada continua
+        // `Finalizado`; `buscar_cupom` devolve `Estornado` quando há a linha do estorno.
+        EstadoCupom::Finalizado | EstadoCupom::Estornado => "Finalizado",
         EstadoCupom::Cancelado => "Cancelado",
     }
 }
@@ -299,6 +301,11 @@ impl<'a, 'b> RepositorioPdv<'a, 'b> {
         else {
             return Ok(None);
         };
+        let estado = if estado == EstadoCupom::Finalizado && self.foi_estornado(id)? {
+            EstadoCupom::Estornado
+        } else {
+            estado
+        };
         let itens = self.itens_do_cupom(id)?;
         let pagamentos = self.pagamentos_do_cupom(id)?;
         Ok(Some(Cupom {
@@ -321,6 +328,52 @@ impl<'a, 'b> RepositorioPdv<'a, 'b> {
             estado,
             versao,
         }))
+    }
+
+    /// Se a venda tem estorno registrado.
+    ///
+    /// # Errors
+    /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+    pub fn foi_estornado(&self, cupom: Id) -> Resultado<bool> {
+        self.conn()
+            .query_row(
+                "SELECT 1 FROM pdv_estorno WHERE cupom = ?1",
+                [blob(cupom)],
+                |_| Ok(()),
+            )
+            .optional()
+            .map(|o| o.is_some())
+            .map_err(persist)
+    }
+
+    /// Registra o estorno de uma venda: o motivo, quem autorizou, quem executou e quando.
+    ///
+    /// # Errors
+    /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite (inclusive estorno repetido).
+    pub fn inserir_estorno(
+        &mut self,
+        cupom: &Cupom,
+        motivo: &str,
+        autorizado_por: Id,
+        estornado_por: Id,
+        quando: Instante,
+    ) -> Resultado<()> {
+        self.conn()
+            .execute(
+                "INSERT INTO pdv_estorno
+                    (cupom, empresa, motivo, autorizado_por, estornado_por, estornado_em)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    blob(cupom.id),
+                    blob(cupom.empresa),
+                    motivo,
+                    blob(autorizado_por),
+                    blob(estornado_por),
+                    quando.em_micros()
+                ],
+            )
+            .map_err(persist)?;
+        Ok(())
     }
 
     /// Os itens de um cupom.

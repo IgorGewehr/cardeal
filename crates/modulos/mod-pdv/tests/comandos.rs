@@ -29,8 +29,9 @@ use mod_financeiro::{
 };
 use mod_pdv::{
     AbrirCupom, AdicionarItem, AplicarDescontoItem, CancelarCupom, CancelarItem, CupomAberto,
-    FinalizarVenda, IdentificarCliente, ItemFoiAdicionado, ModuloPdv, PagamentoInformado,
-    PrecoConsultado, PrecoDoProduto, ReceitaPorProduto, VendaFoiFinalizada,
+    EstadoCupom, EstornarVenda, FinalizarVenda, FormaPagamentoPdv, IdentificarCliente,
+    ItemFoiAdicionado, ModuloPdv, PagamentoInformado, PrecoConsultado, PrecoDoProduto,
+    ReceitaPorProduto, VendaDoPeriodo, VendaFoiEstornada, VendaFoiFinalizada, VendasDoPeriodo,
 };
 use mod_vendas::{
     CriarRegraPreco, CriarTabelaPreco, ModuloVendas, RegraPrecoCriada, TabelaPrecoCriada,
@@ -103,6 +104,8 @@ fn sessao_completa(empresa: Id) -> Sessao {
         "pdv.cupom.cancelar",
         "pdv.preco.consultar",
         "pdv.margem.ver",
+        "pdv.venda.estornar",
+        "pdv.venda.ver",
     ] {
         papel = papel.com_permissao(p);
     }
@@ -847,4 +850,189 @@ fn receita_por_produto_soma_so_cupons_finalizados_sem_itens_cancelados() {
     assert_eq!(r[0].quantidade, Quantidade::unidades(2));
     assert_eq!(r[0].receita, Dinheiro::reais(50));
     assert!(receita(Periodo::novo(hoje.mais_dias(-30), hoje.mais_dias(-10))).is_empty());
+}
+
+/// Soma das partidas (realizadas e estornadas) da conta de um papel — o saldo que o caixa vê.
+fn saldo_do_papel(arm: &Armazenamento, empresa: Id, papel: &str) -> i64 {
+    arm.leitor()
+        .consultar(|c| {
+            c.query_row(
+                "SELECT COALESCE(SUM(rp.valor), 0)
+                 FROM razao_partida rp
+                 JOIN razao_lancamento rl ON rl.id = rp.lancamento
+                 JOIN razao_conta rc ON rc.id = rp.conta
+                 WHERE rc.empresa = ?1 AND rc.papel_padrao = ?2
+                   AND rl.estado IN ('Realizado', 'Estornado')",
+                rusqlite::params![empresa.em_bytes().as_slice(), papel],
+                |r| r.get(0),
+            )
+            .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+        })
+        .unwrap()
+}
+
+/// `(quantidade disponível, custo médio)` do produto no local, em unidades internas.
+fn saldo_de_estoque(arm: &Armazenamento, produto: Id) -> (i64, i64) {
+    arm.leitor()
+        .consultar(|c| {
+            c.query_row(
+                "SELECT quantidade_disponivel, custo_medio FROM estoque_saldo_local WHERE produto = ?1",
+                [produto.em_bytes().as_slice()],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+        })
+        .unwrap()
+}
+
+#[test]
+fn estornar_venda_finalizada_devolve_estoque_e_zera_o_razao() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[
+        &ModuloClientes,
+        &ModuloEstoque,
+        &ModuloFinanceiro,
+        &ModuloVendas,
+        &ModuloPdv,
+    ])
+    .unwrap();
+    let s = sessao_completa(empresa);
+    let amb = ambiente(empresa);
+    let cen = montar_cenario(&d, &s, &amb, &arm, empresa, 25);
+    let estoque_antes = saldo_de_estoque(&arm, cen.produto);
+
+    let cupom = abrir_cupom(&d, &s, &amb, &arm, &cen);
+    d.executar_comando(
+        "pdv.adicionar_item.v1",
+        &carga(&AdicionarItem {
+            cupom: cupom.cupom,
+            produto: cen.produto,
+            variacao: None,
+            quantidade: Quantidade::unidades(2),
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+    let estornar = |motivo: &str, sessao: &Sessao| {
+        d.executar_comando(
+            "pdv.estornar_venda.v1",
+            &carga(&EstornarVenda {
+                cupom: cupom.cupom,
+                motivo: motivo.to_string(),
+                autorizado_por: Id::novo(),
+            }),
+            sessao,
+            &amb,
+            arm.escritor(),
+        )
+    };
+    // Em andamento não se estorna: cancela-se (F8).
+    assert_eq!(
+        estornar("Cliente desistiu da compra", &s)
+            .unwrap_err()
+            .codigo,
+        CodigoErro::ESTADO_INVALIDO
+    );
+    d.executar_comando(
+        "pdv.finalizar_venda.v1",
+        &carga(&FinalizarVenda {
+            cupom: cupom.cupom,
+            pagamentos: vec![
+                PagamentoInformado {
+                    forma: FormaPagamentoPdv::Dinheiro,
+                    valor: Dinheiro::reais(30),
+                },
+                PagamentoInformado {
+                    forma: FormaPagamentoPdv::Pix,
+                    valor: Dinheiro::reais(20),
+                },
+            ],
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+    assert_eq!(saldo_do_papel(&arm, empresa, "Caixa"), 3_000);
+    assert_eq!(
+        saldo_de_estoque(&arm, cen.produto).0,
+        estoque_antes.0 - 20_000
+    );
+
+    // Motivo curto e falta de permissão são recusados antes de mexer em qualquer coisa.
+    assert_eq!(
+        estornar("errei", &s).unwrap_err().codigo,
+        CodigoErro::ENTRADA_INVALIDA
+    );
+    let mut sem_estorno = PapelAuth::novo(empresa, "Caixa sem estorno");
+    for p in ["pdv.venda.editar", "pdv.venda.finalizar"] {
+        sem_estorno = sem_estorno.com_permissao(p);
+    }
+    let caixa_simples = Sessao::abrir(EmissaoSessao::padrao(
+        Id::novo(),
+        Id::novo(),
+        Escopo::empresa_inteira(empresa),
+        AutorizacoesEfetivas::consolidar([&sem_estorno]),
+        Instante::EPOCA,
+    ));
+    assert_eq!(
+        estornar("Cliente desistiu da compra", &caixa_simples)
+            .unwrap_err()
+            .codigo,
+        CodigoErro::SEM_PERMISSAO
+    );
+
+    let estorno: VendaFoiEstornada =
+        postcard::from_bytes(&estornar("Cliente desistiu da compra", &s).unwrap()).unwrap();
+    assert_eq!(estorno.lancamentos.len(), 1);
+    assert_eq!(estorno.itens_devolvidos, 1);
+    assert_eq!(estorno.devolver.len(), 2, "devolve forma por forma");
+
+    // O Razão volta ao que era: caixa, Pix em trânsito, receita, CMV e estoque.
+    for papel in [
+        "Caixa",
+        "ValoresEmTransito",
+        "ReceitaVendas",
+        "Cmv",
+        "EstoqueMercadorias",
+    ] {
+        assert_eq!(saldo_do_papel(&arm, empresa, papel), 0, "{papel}");
+    }
+    // E o estoque também, ao mesmo custo médio.
+    assert_eq!(saldo_de_estoque(&arm, cen.produto), estoque_antes);
+
+    // Não se estorna duas vezes.
+    assert_eq!(
+        estornar("Cliente desistiu da compra", &s)
+            .unwrap_err()
+            .codigo,
+        CodigoErro::ESTADO_INVALIDO
+    );
+
+    // A lista de vendas do dia mostra o estorno.
+    let hoje = Data::hoje(Fuso::BRASILIA);
+    let vendas: Vec<VendaDoPeriodo> = postcard::from_bytes(
+        &d.executar_consulta(
+            "pdv.vendas_do_periodo.v1",
+            &carga(&VendasDoPeriodo {
+                de: hoje.mais_dias(-1),
+                ate: hoje.mais_dias(1),
+            }),
+            &s,
+            &amb,
+            arm.leitor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(vendas.len(), 1);
+    assert_eq!(vendas[0].estado, EstadoCupom::Estornado);
+    assert_eq!(vendas[0].total, Dinheiro::reais(50));
+    assert_eq!(vendas[0].pagamentos.len(), 2);
+    assert_eq!(
+        vendas[0].estorno.as_ref().map(|e| e.motivo.as_str()),
+        Some("Cliente desistiu da compra")
+    );
 }

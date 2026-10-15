@@ -160,6 +160,36 @@ pub struct DocumentoResumo {
     pub autorizado_em: Option<Instante>,
     /// Um cancelamento ou inutilização esperando a fila.
     pub pedido: Option<PedidoDocumento>,
+    /// A venda foi desfeita (estorno no PDV): a fila leva a nota ao cancelamento ou à
+    /// inutilização, conforme o estado em que ela estiver.
+    pub anulada: bool,
+}
+
+impl DocumentoResumo {
+    /// A venda foi desfeita, mas a nota ainda vale na SEFAZ e nada mais está em curso para
+    /// mudar isso — o cancelamento foi recusado (fora do prazo, em geral). Pede uma NFC-e de
+    /// devolução ou a ajuda do contador.
+    #[must_use]
+    pub fn anulacao_pendente(&self) -> bool {
+        self.anulada && self.estado == EstadoDocumento::Autorizada && self.pedido.is_none()
+    }
+}
+
+/// O pedido que a anulação gera para um documento no estado `estado` — `None` quando não há
+/// o que pedir agora: a incerta e a pendente já tentada esperam a fila resolver (emitir ou
+/// conferir) e só então recebem o pedido; a denegada, a cancelada e a inutilizada já acabaram.
+/// A pendente que **nunca** foi transmitida não saiu desta máquina: inutiliza-se o número.
+#[must_use]
+pub const fn pedido_da_anulacao(
+    estado: EstadoDocumento,
+    tentativas: u32,
+) -> Option<PedidoDocumento> {
+    match estado {
+        EstadoDocumento::Autorizada => Some(PedidoDocumento::Cancelar),
+        EstadoDocumento::Rejeitada => Some(PedidoDocumento::Inutilizar),
+        EstadoDocumento::Pendente if tentativas == 0 => Some(PedidoDocumento::Inutilizar),
+        _ => None,
+    }
 }
 
 /// O resumo da fila fiscal — a faixa de estado do PDV (`docs/10` §4).
@@ -638,6 +668,20 @@ mod testes {
         );
         let recusada = decidir_evento(Inutilizar, Rejeitada, 0, r(Rejeitado, "241", None));
         assert_eq!((recusada.estado, recusada.limpar_pedido), (Rejeitada, true));
+    }
+
+    #[test]
+    fn a_anulacao_pede_conforme_o_estado() {
+        use PedidoDocumento::{Cancelar, Inutilizar};
+        assert_eq!(pedido_da_anulacao(Autorizada, 3), Some(Cancelar));
+        assert_eq!(pedido_da_anulacao(Rejeitada, 1), Some(Inutilizar));
+        assert_eq!(pedido_da_anulacao(Pendente, 0), Some(Inutilizar));
+        // Já tentada: pode ter chegado à SEFAZ sem resposta — a fila emite (a duplicidade
+        // revela a chave) e só então cancela.
+        assert_eq!(pedido_da_anulacao(Pendente, 1), None);
+        assert_eq!(pedido_da_anulacao(Incerta, 0), None);
+        assert_eq!(pedido_da_anulacao(Denegada, 0), None);
+        assert_eq!(pedido_da_anulacao(Cancelada, 0), None);
     }
 
     #[test]

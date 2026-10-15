@@ -21,6 +21,9 @@ pub(super) fn dialogos(
         Dlg::Sangria { .. } => dialogo_sangria(ctx, motor, sessao, estado),
         Dlg::ConsultaPreco { .. } => dialogo_consulta_preco(ctx, estado),
         Dlg::Cliente { .. } => dialogo_cliente(ctx, estado),
+        Dlg::VendasDoDia(_) => {
+            super::vendas_do_dia::dialogo_vendas_do_dia(ctx, motor, sessao, estado);
+        }
     }
 }
 

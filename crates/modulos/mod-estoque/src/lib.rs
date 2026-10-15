@@ -116,8 +116,8 @@ pub use comandos::criar_produto_de_compra_comum;
 pub use comandos::{completar_ncm_se_vazio, criar_peca_rapida_comum};
 #[cfg(feature = "sqlite")]
 pub use comandos::{
-    registrar_entrada_com_lote_comum, registrar_entrada_comum, registrar_saida_comum,
-    registrar_saida_de_lote_comum,
+    devolver_saidas_da_origem, registrar_entrada_com_lote_comum, registrar_entrada_comum,
+    registrar_saida_comum, registrar_saida_de_lote_comum,
 };
 pub use comandos::{
     AjustarSaldo, AparelhoOrigemRegistrado, CriarGrupoProduto, CriarLocal, CriarProduto,
@@ -148,8 +148,8 @@ pub use comandos::{MotivoPerda, PerdaRegistrada, RegistrarPerda};
 pub use comandos::{TransferenciaFeita, TransferirEntreLocais};
 #[cfg(feature = "sqlite")]
 pub use consultas::{
-    melhor_local_de_saida, movimentos_do_produto, produtos_abaixo_do_ponto_pedido,
-    saldo_disponivel_do_produto,
+    melhor_local_de_saida, movimentos_da_origem, movimentos_do_produto,
+    produtos_abaixo_do_ponto_pedido, saldo_disponivel_do_produto,
 };
 pub use consultas::{
     AparelhoOrigemResumo, ArvoreGruposProduto, DetalheDoLotePorCodigo, DetalheLote, GruposProduto,
