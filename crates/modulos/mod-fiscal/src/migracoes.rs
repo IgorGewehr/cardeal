@@ -25,12 +25,70 @@ CREATE TABLE fiscal_configuracao (
 ) STRICT;
 ";
 
-const MIGRACOES: &[Migracao] = &[Migracao {
-    versao: 1,
-    nome: "fiscal_certificado_e_configuracao",
-    sql: SQL_V1,
-    tipo: TipoMigracao::Esquema,
-}];
+/// v2: a NFC-e — configuração (emitir nas vendas, série, CSC no cofre), a numeração por série e
+/// ambiente, e o documento fiscal (a nota guardada como foi montada, o estado, a chave, o
+/// protocolo, o XML, a fila de tentativas).
+const SQL_V2: &str = "
+ALTER TABLE fiscal_configuracao ADD COLUMN emitir_nfce INTEGER NOT NULL DEFAULT 0
+    CHECK (emitir_nfce IN (0,1));
+ALTER TABLE fiscal_configuracao ADD COLUMN serie_nfce INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE fiscal_configuracao ADD COLUMN csc_id TEXT;
+ALTER TABLE fiscal_configuracao ADD COLUMN csc_selado BLOB;
+
+CREATE TABLE fiscal_serie (
+    empresa  BLOB    NOT NULL REFERENCES nucleo_empresa(id),
+    modelo   TEXT    NOT NULL CHECK (modelo IN ('55','65')),
+    serie    INTEGER NOT NULL,
+    ambiente TEXT    NOT NULL CHECK (ambiente IN ('homologacao','producao')),
+    proximo  INTEGER NOT NULL CHECK (proximo >= 1),
+    PRIMARY KEY (empresa, modelo, serie, ambiente)
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE fiscal_documento (
+    id                BLOB PRIMARY KEY,
+    empresa           BLOB    NOT NULL REFERENCES nucleo_empresa(id),
+    modelo            TEXT    NOT NULL CHECK (modelo IN ('55','65')),
+    serie             INTEGER NOT NULL,
+    numero            INTEGER NOT NULL,
+    ambiente          TEXT    NOT NULL CHECK (ambiente IN ('homologacao','producao')),
+    origem_modulo     TEXT    NOT NULL,
+    origem_id         BLOB    NOT NULL,
+    estado            TEXT    NOT NULL CHECK (estado IN
+                          ('Pendente','Incerta','Autorizada','Rejeitada','Denegada','Cancelada')),
+    total             INTEGER NOT NULL,
+    nota              BLOB,
+    chave             TEXT,
+    protocolo         TEXT,
+    codigo            TEXT,
+    motivo            TEXT,
+    xml               TEXT,
+    tentativas        INTEGER NOT NULL DEFAULT 0,
+    proxima_tentativa INTEGER NOT NULL DEFAULT 0,
+    criado_em         INTEGER NOT NULL,
+    atualizado_em     INTEGER NOT NULL,
+    autorizado_em     INTEGER,
+    UNIQUE (empresa, origem_modulo, origem_id),
+    UNIQUE (empresa, modelo, serie, ambiente, numero)
+) STRICT;
+CREATE INDEX fiscal_documento_fila ON fiscal_documento(empresa, proxima_tentativa)
+    WHERE estado IN ('Pendente','Incerta');
+CREATE INDEX fiscal_documento_criado ON fiscal_documento(empresa, criado_em);
+";
+
+const MIGRACOES: &[Migracao] = &[
+    Migracao {
+        versao: 1,
+        nome: "fiscal_certificado_e_configuracao",
+        sql: SQL_V1,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 2,
+        nome: "fiscal_nfce_documento_e_serie",
+        sql: SQL_V2,
+        tipo: TipoMigracao::Esquema,
+    },
+];
 
 /// O conjunto de migrações do módulo fiscal.
 #[must_use]

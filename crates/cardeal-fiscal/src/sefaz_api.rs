@@ -19,6 +19,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::chave::ChaveAcesso;
+use crate::emissao::{Csc, ItemDocumento, Nfce, RetornoSefaz, SituacaoRetorno};
 use crate::erros::ErroFiscal;
 use crate::porta::{
     AmbienteFiscal, ModeloFiscal, Nsu, PortaFiscal, ResumoDfe, StatusSefaz, XmlNota,
@@ -163,6 +164,218 @@ pub(crate) struct RespostaSefazApi {
     pub status: String,
     pub codigo_status: String,
     pub motivo_status: String,
+    pub chave_acesso: Option<String>,
+    pub protocolo: Option<String>,
+    pub data_recebimento: Option<String>,
+    pub xml: Option<String>,
+    pub erros: Option<Vec<String>>,
+}
+
+impl RespostaSefazApi {
+    /// Em [`RetornoSefaz`]. A validação do provedor ("erro" com código 400) é uma rejeição: o
+    /// número não foi usado e a nota precisa de correção.
+    fn em_retorno(self) -> RetornoSefaz {
+        let situacao = match self.status.as_str() {
+            "autorizado" => SituacaoRetorno::Autorizado,
+            "rejeitado" => SituacaoRetorno::Rejeitado,
+            "denegado" => SituacaoRetorno::Denegado,
+            "processando" => SituacaoRetorno::Processando,
+            "cancelado" => SituacaoRetorno::Cancelado,
+            "erro" if self.codigo_status == "400" => SituacaoRetorno::Rejeitado,
+            _ => SituacaoRetorno::Erro,
+        };
+        RetornoSefaz {
+            situacao,
+            codigo: self.codigo_status,
+            motivo: self.motivo_status,
+            chave: self.chave_acesso.filter(|c| !c.is_empty()),
+            protocolo: self.protocolo.filter(|p| !p.is_empty()),
+            recebido_em: self.data_recebimento.filter(|d| !d.is_empty()),
+            xml: self.xml,
+            erros: self.erros.unwrap_or_default(),
+        }
+    }
+}
+
+/// Dinheiro, quantidade, preço e percentual como número JSON (o `sefaz-api` formata as
+/// casas): centavos/100, 1e-4, 1e-6, pontos percentuais.
+#[allow(clippy::cast_precision_loss)]
+fn reais(d: cardeal_kernel::Dinheiro) -> f64 {
+    d.em_centavos() as f64 / 100.0
+}
+
+#[allow(clippy::cast_precision_loss)]
+fn numero_quantidade(q: cardeal_kernel::Quantidade) -> f64 {
+    q.unidades_internas() as f64 / 10_000.0
+}
+
+#[allow(clippy::cast_precision_loss)]
+fn numero_preco(p: cardeal_kernel::Preco) -> f64 {
+    p.unidades_internas() as f64 / 1_000_000.0
+}
+
+#[allow(clippy::cast_precision_loss)]
+fn numero_percentual(p: cardeal_kernel::Percentual) -> f64 {
+    p.unidades_internas() as f64 / 1_000_000.0
+}
+
+fn item_json(numero: usize, item: &ItemDocumento) -> Value {
+    let gtin = item.gtin.clone().unwrap_or_else(|| "SEM GTIN".into());
+    let mut produto = json!({
+        "codigo": item.codigo,
+        "cEAN": gtin,
+        "descricao": item.descricao,
+        "ncm": item.ncm,
+        "cfop": item.cfop,
+        "unidade": item.unidade,
+        "quantidade": numero_quantidade(item.quantidade),
+        "valorUnitario": numero_preco(item.valor_unitario),
+        "valorTotal": reais(item.valor_bruto),
+        "cEANTrib": gtin,
+        "unidadeTrib": item.unidade,
+        "quantidadeTrib": numero_quantidade(item.quantidade),
+        "valorUnitarioTrib": numero_preco(item.valor_unitario),
+        "indTot": "1",
+    });
+    if let Some(cest) = &item.cest {
+        produto["cest"] = Value::from(cest.as_str());
+    }
+    if !item.desconto.e_zero() {
+        produto["valorDesconto"] = Value::from(reais(item.desconto));
+    }
+    let i = &item.impostos.icms;
+    let mut icms = json!({ "orig": i.origem.to_string() });
+    if let Some(cst) = &i.cst {
+        icms["cst"] = Value::from(cst.as_str());
+    }
+    if let Some(csosn) = &i.csosn {
+        icms["csosn"] = Value::from(csosn.as_str());
+    }
+    if let Some(base) = i.base {
+        icms["modBC"] = Value::from("3");
+        icms["valorBC"] = Value::from(reais(base));
+    }
+    if let Some(a) = i.aliquota {
+        icms["aliquota"] = Value::from(numero_percentual(a));
+    }
+    if let Some(v) = i.valor {
+        icms["valor"] = Value::from(reais(v));
+    }
+    if let Some(r) = i.reducao_base {
+        icms["pRedBC"] = Value::from(numero_percentual(r));
+    }
+    let contribuicao = |c: &crate::emissao::ContribuicaoItem| {
+        let mut v = json!({ "cst": c.cst });
+        if let Some(b) = c.base {
+            v["valorBC"] = Value::from(reais(b));
+        }
+        if let Some(a) = c.aliquota {
+            v["aliquota"] = Value::from(numero_percentual(a));
+        }
+        if let Some(x) = c.valor {
+            v["valor"] = Value::from(reais(x));
+        }
+        v
+    };
+    json!({
+        "numero": numero,
+        "produto": produto,
+        "imposto": {
+            "icms": icms,
+            "pis": contribuicao(&item.impostos.pis),
+            "cofins": contribuicao(&item.impostos.cofins),
+        },
+    })
+}
+
+/// O corpo do `POST /nfe/nfce/emitir` (sem certificado e ambiente, que o adaptador põe).
+pub(crate) fn nfce_json(nota: &Nfce, csc: &Csc) -> serde_json::Map<String, Value> {
+    let e = &nota.emitente;
+    let en = &e.endereco;
+    let mut endereco = json!({
+        "logradouro": en.logradouro,
+        "numero": en.numero,
+        "bairro": en.bairro,
+        "codigoMunicipio": en.codigo_municipio,
+        "municipio": en.municipio,
+        "uf": en.uf.sigla(),
+        "cep": en.cep,
+    });
+    if !en.complemento.is_empty() {
+        endereco["complemento"] = Value::from(en.complemento.as_str());
+    }
+    if let Some(t) = &en.telefone {
+        endereco["telefone"] = Value::from(t.as_str());
+    }
+    let mut emitente = json!({
+        "cnpj": e.cnpj.sem_mascara(),
+        "nome": e.razao_social,
+        "nomeFantasia": e.nome_fantasia,
+        "inscricaoEstadual": e.inscricao_estadual,
+        "crt": e.crt.codigo(),
+        "endereco": endereco,
+    });
+    if let Some(im) = &e.inscricao_municipal {
+        emitente["inscricaoMunicipal"] = Value::from(im.as_str());
+    }
+    let formas: Vec<Value> = nota
+        .pagamentos
+        .iter()
+        .map(|p| {
+            let mut f = json!({ "tipo": p.meio.codigo(), "valor": reais(p.valor) });
+            if p.meio.e_cartao() {
+                f["cartao"] = json!({ "tipoIntegracao": "2" });
+            }
+            if p.meio == crate::emissao::MeioPagamento::Outros {
+                f["descricao"] = Value::from("Outros");
+            }
+            f
+        })
+        .collect();
+    let mut pagamento = json!({ "indicadorPagamento": "0", "formas": formas });
+    if !nota.troco.e_zero() {
+        pagamento["troco"] = Value::from(reais(nota.troco));
+    }
+    let mut corpo = serde_json::Map::new();
+    corpo.insert("emitente".into(), emitente);
+    corpo.insert(
+        "itens".into(),
+        Value::Array(
+            nota.itens
+                .iter()
+                .enumerate()
+                .map(|(i, it)| item_json(i + 1, it))
+                .collect(),
+        ),
+    );
+    corpo.insert("pagamento".into(), pagamento);
+    corpo.insert("transporte".into(), json!({ "modFrete": "9" }));
+    corpo.insert(
+        "csc".into(),
+        json!({ "id": csc.id, "token": csc.token.expor() }),
+    );
+    corpo.insert("serie".into(), Value::from(nota.serie.to_string()));
+    corpo.insert("numero".into(), Value::from(nota.numero));
+    corpo.insert("ufEmitente".into(), Value::from(en.uf.sigla()));
+    if let Some(c) = &nota.consumidor {
+        let mut consumidor = match &c.documento {
+            crate::emissao::DocumentoConsumidor::Cpf(cpf) => json!({ "cpf": cpf.sem_mascara() }),
+            crate::emissao::DocumentoConsumidor::Cnpj(cnpj) => {
+                json!({ "cnpj": cnpj.sem_mascara() })
+            }
+        };
+        if let Some(n) = &c.nome {
+            consumidor["nome"] = Value::from(n.as_str());
+        }
+        corpo.insert("consumidor".into(), consumidor);
+    }
+    if let Some(info) = &nota.informacoes {
+        corpo.insert(
+            "informacoesAdicionais".into(),
+            json!({ "contribuinte": info }),
+        );
+    }
+    corpo
 }
 
 #[derive(Deserialize)]
@@ -206,6 +419,23 @@ impl PortaFiscal for ApiFiscalHttp {
         Err(Erro::de_dominio(&ErroFiscal::NaoSuportadoPeloProvedor(
             "o download de notas de entrada (DFe)".into(),
         )))
+    }
+
+    fn emitir_nfce(&self, nota: &Nfce, csc: &Csc) -> Resultado<RetornoSefaz> {
+        let mut corpo = self.corpo_base();
+        corpo.extend(nfce_json(nota, csc));
+        self.postar("/nfe/nfce/emitir", &Value::Object(corpo))
+            .map(RespostaSefazApi::em_retorno)
+            .map_err(|e| Erro::de_dominio(&e))
+    }
+
+    fn consultar_documento(&self, chave: &ChaveAcesso, uf: Uf) -> Resultado<RetornoSefaz> {
+        let mut corpo = self.corpo_base();
+        corpo.insert("chaveAcesso".into(), Value::from(chave.como_str()));
+        corpo.insert("ufEmitente".into(), Value::from(uf.sigla()));
+        self.postar("/nfe/consultar", &Value::Object(corpo))
+            .map(RespostaSefazApi::em_retorno)
+            .map_err(|e| Erro::de_dominio(&e))
     }
 
     fn status_servico(&self, uf: Uf, modelo: ModeloFiscal) -> Resultado<StatusSefaz> {
@@ -299,6 +529,75 @@ mod testes {
         assert_eq!(corpo["ufEmitente"], "SC");
         assert_eq!(corpo["modelo"], "65");
         assert_eq!(corpo["ambiente"], "homologacao");
+    }
+
+    #[test]
+    fn nfce_vira_o_json_do_sefaz_api() {
+        let nota = crate::emissao::exemplo();
+        assert_eq!(nota.total(), cardeal_kernel::Dinheiro::centavos(6_900));
+        let csc = Csc {
+            id: "000001".into(),
+            token: Segredo::novo("TOKEN".into()),
+        };
+        let j = Value::Object(nfce_json(&nota, &csc));
+        assert_eq!(j["emitente"]["cnpj"], "11222333000181");
+        assert_eq!(j["emitente"]["crt"], "1");
+        assert_eq!(j["emitente"]["endereco"]["uf"], "RS");
+        assert!(j["emitente"]["endereco"].get("complemento").is_none());
+        assert_eq!(j["ufEmitente"], "RS");
+        assert_eq!(j["serie"], "1");
+        assert_eq!(j["numero"], 42);
+        assert_eq!(j["csc"]["token"], "TOKEN");
+        assert_eq!(j["consumidor"]["cpf"], "52998224725");
+        let i1 = &j["itens"][0];
+        assert_eq!(i1["numero"], 1);
+        assert_eq!(i1["produto"]["quantidade"], 2.0);
+        assert_eq!(i1["produto"]["valorUnitario"], 29.9);
+        assert_eq!(i1["produto"]["valorTotal"], 59.8);
+        assert_eq!(i1["produto"]["valorDesconto"], 5.8);
+        assert_eq!(i1["produto"]["cEAN"], "7891000315507");
+        assert_eq!(i1["imposto"]["icms"]["orig"], "0");
+        assert_eq!(i1["imposto"]["icms"]["csosn"], "102");
+        assert!(i1["imposto"]["icms"].get("modBC").is_none());
+        assert_eq!(i1["imposto"]["pis"]["cst"], "49");
+        assert_eq!(i1["imposto"]["pis"]["valorBC"], 0.0);
+        let i2 = &j["itens"][1];
+        assert_eq!(i2["produto"]["cEAN"], "SEM GTIN");
+        assert_eq!(i2["produto"]["cest"], "1001200");
+        assert!(i2["produto"].get("valorDesconto").is_none());
+        let formas = &j["pagamento"]["formas"];
+        assert_eq!(formas[0]["tipo"], "17");
+        assert!(formas[0].get("cartao").is_none());
+        assert_eq!(formas[1]["tipo"], "04");
+        assert_eq!(formas[1]["cartao"]["tipoIntegracao"], "2");
+        assert!(j["pagamento"].get("troco").is_none());
+        assert_eq!(j["transporte"]["modFrete"], "9");
+    }
+
+    #[test]
+    fn retorno_da_api_vira_situacao() {
+        let r = |status: &str, codigo: &str| {
+            RespostaSefazApi {
+                status: status.into(),
+                codigo_status: codigo.into(),
+                ..RespostaSefazApi::default()
+            }
+            .em_retorno()
+            .situacao
+        };
+        assert_eq!(r("autorizado", "100"), SituacaoRetorno::Autorizado);
+        assert_eq!(r("rejeitado", "539"), SituacaoRetorno::Rejeitado);
+        assert_eq!(r("erro", "400"), SituacaoRetorno::Rejeitado);
+        assert_eq!(r("erro", "ERR"), SituacaoRetorno::Erro);
+        assert_eq!(r("processando", "TIMEOUT"), SituacaoRetorno::Processando);
+        assert_eq!(r("denegado", "302"), SituacaoRetorno::Denegado);
+        let completo: RespostaSefazApi = serde_json::from_str(
+            r#"{"success":true,"status":"autorizado","codigoStatus":"100","motivoStatus":"Autorizado o uso da NF-e","chaveAcesso":"43261011222333000181650010000000421100000001","protocolo":"143260000000001","xml":"<nfeProc/>"}"#,
+        )
+        .unwrap();
+        let retorno = completo.em_retorno();
+        assert_eq!(retorno.protocolo.as_deref(), Some("143260000000001"));
+        assert_eq!(retorno.xml.as_deref(), Some("<nfeProc/>"));
     }
 
     #[test]

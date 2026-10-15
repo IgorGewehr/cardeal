@@ -52,7 +52,7 @@ mod registro;
 
 pub use contrato::{Comando, Consulta, TETO_LISTA_COMPLETA};
 #[cfg(feature = "sqlite")]
-pub use despacho::{Ambiente, Ctx, Despachante, Modulo, Registro};
+pub use despacho::{Ambiente, ContextoTarefa, Ctx, Despachante, Modulo, Registro};
 pub use icone::Icone;
 pub use manifesto::{ContaPadrao, EntradaMenu, ErroManifesto, IdModulo, Manifesto, Submodulo};
 pub use pagina::{Cursor, Pagina, PedidoPagina};

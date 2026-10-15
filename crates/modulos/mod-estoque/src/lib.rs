@@ -91,6 +91,8 @@ pub mod padronizacao;
 mod parametros_preco;
 pub mod precificacao;
 mod produto;
+#[cfg(feature = "sqlite")]
+mod produto_para_nota;
 pub mod receituario;
 #[cfg(feature = "sqlite")]
 mod repositorio;
@@ -189,6 +191,8 @@ pub use produto::{
     validar_gtin, Conversao, DetalhesTecnicos, EstadoLote, Lote, OrigemLote, Produto, Unidade,
     Variacao,
 };
+#[cfg(feature = "sqlite")]
+pub use produto_para_nota::{produtos_para_nota, ProdutoParaNota};
 #[cfg(feature = "sqlite")]
 pub use repositorio::RepositorioEstoque;
 pub use saldo::{custo_medio_movel, Movimento, SaidaAplicada, SaldoLocal, TipoMovimento};

@@ -9,12 +9,19 @@ use cardeal_modkit::{Icone, IdModulo, Manifesto, Permissao, Risco, Submodulo};
 pub const ID: IdModulo = IdModulo::novo("fiscal");
 
 const EMPRESA: IdModulo = IdModulo::novo("empresa");
+const PDV: IdModulo = IdModulo::novo("pdv");
 
 const PERMISSOES: &[Permissao] = &[
     Permissao {
         chave: "fiscal.ver",
         descricao: "Ver a situação fiscal (certificado, ambiente) e testar a conexão com a SEFAZ",
         risco: Risco::Baixo,
+        requer_submodulo: None,
+    },
+    Permissao {
+        chave: "fiscal.emitir",
+        descricao: "Emitir e reenviar a NFC-e das vendas",
+        risco: Risco::Medio,
         requer_submodulo: None,
     },
     Permissao {
@@ -34,7 +41,7 @@ pub static MANIFESTO: Manifesto = Manifesto {
     descricao: "Certificado digital, ambiente e conexão com a SEFAZ pelo sefaz-api.",
     icone: Icone::Nota,
     depende_de: &[EMPRESA],
-    melhora_com: &[],
+    melhora_com: &[PDV],
     conflita_com: &[],
     submodulos: &[Submodulo {
         id: "configuracao",

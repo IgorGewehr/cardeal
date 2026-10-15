@@ -25,7 +25,9 @@ impl Drop for Emprestada<'_> {
     }
 }
 
-/// O pool de conexões de leitura.
+/// O pool de conexões de leitura. Clonar é barato (dois canais) — os clones dividem o mesmo
+/// pool.
+#[derive(Clone)]
 pub struct Leitor {
     disponiveis: Receiver<Connection>,
     devolver: Sender<Connection>,

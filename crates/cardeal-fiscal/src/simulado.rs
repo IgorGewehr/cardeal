@@ -6,6 +6,7 @@ use std::sync::Mutex;
 use cardeal_kernel::{Cnpj, Erro, Resultado, Uf};
 
 use crate::chave::ChaveAcesso;
+use crate::emissao::{Csc, Nfce, RetornoSefaz, SituacaoRetorno};
 use crate::erros::ErroFiscal;
 use crate::porta::{ModeloFiscal, Nsu, PortaFiscal, ResumoDfe, StatusSefaz, XmlNota};
 
@@ -16,6 +17,12 @@ use crate::porta::{ModeloFiscal, Nsu, PortaFiscal, ResumoDfe, StatusSefaz, XmlNo
 pub struct FiscalSimulado {
     notas: Mutex<Vec<(ResumoDfe, XmlNota)>>,
     fora_do_ar: std::sync::atomic::AtomicBool,
+    /// Retornos programados para as próximas emissões (o primeiro sai primeiro).
+    programados: Mutex<std::collections::VecDeque<RetornoSefaz>>,
+    /// O que cada chave "emitida" retorna na consulta.
+    emitidas: Mutex<std::collections::HashMap<String, RetornoSefaz>>,
+    /// Quantas emissões chegaram.
+    pub emissoes: std::sync::atomic::AtomicUsize,
 }
 
 impl FiscalSimulado {
@@ -42,6 +49,18 @@ impl FiscalSimulado {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push((resumo, XmlNota(xml.into())));
+    }
+
+    /// Programa o retorno da próxima emissão (fila). Um retorno `Processando`/`Erro` com
+    /// chave é lembrado como **autorizado** na consulta — o caso "a SEFAZ autorizou, mas a
+    /// resposta se perdeu".
+    pub fn programar(&self, retorno: RetornoSefaz) {
+        travar(&self.programados).push_back(retorno);
+    }
+
+    /// O que a consulta desta chave vai responder.
+    pub fn definir_consulta(&self, chave: &str, retorno: RetornoSefaz) {
+        travar(&self.emitidas).insert(chave.to_string(), retorno);
     }
 
     /// Faz a API fiscal simulada parar de responder (ou voltar).
@@ -76,6 +95,82 @@ impl PortaFiscal for FiscalSimulado {
             .ok_or_else(|| Erro::nao_encontrado("XML da nota"))
     }
 
+    fn emitir_nfce(&self, nota: &Nfce, _csc: &Csc) -> Resultado<RetornoSefaz> {
+        if self.fora_do_ar.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(Erro::de_dominio(&ErroFiscal::ServicoIndisponivel));
+        }
+        self.emissoes
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let n = travar(&self.emitidas).len();
+        let chave = ChaveAcesso::montar(
+            nota.emitente.endereco.uf.codigo_ibge(),
+            "2610",
+            &nota.emitente.cnpj.sem_mascara(),
+            "65",
+            nota.serie,
+            nota.numero,
+            1,
+            u32::try_from(n).unwrap_or(0) + 10_000_000,
+        );
+        let chave = chave.como_str().to_string();
+        let autorizado = RetornoSefaz {
+            situacao: SituacaoRetorno::Autorizado,
+            codigo: "100".into(),
+            motivo: "Autorizado o uso da NF-e".into(),
+            chave: Some(chave.clone()),
+            protocolo: Some(format!("143{:012}", nota.numero)),
+            recebido_em: Some("2026-10-14T12:00:00-03:00".into()),
+            xml: Some(xml_simulado(&chave, nota)),
+            erros: Vec::new(),
+        };
+        let retorno = match travar(&self.programados).pop_front() {
+            Some(mut r) => {
+                if r.chave.is_none() && r.situacao != SituacaoRetorno::Rejeitado {
+                    r.chave = Some(chave.clone());
+                }
+                r
+            }
+            None => autorizado.clone(),
+        };
+        // Na consulta: o que foi autorizado (ou se perdeu no caminho) consta autorizado; o
+        // rejeitado não consta.
+        if matches!(
+            retorno.situacao,
+            SituacaoRetorno::Autorizado | SituacaoRetorno::Processando | SituacaoRetorno::Erro
+        ) {
+            travar(&self.emitidas).insert(chave, autorizado);
+        } else if retorno.situacao == SituacaoRetorno::Denegado {
+            travar(&self.emitidas).insert(chave, retorno.clone());
+        }
+        Ok(retorno)
+    }
+
+    fn consultar_documento(&self, chave: &ChaveAcesso, _uf: Uf) -> Resultado<RetornoSefaz> {
+        if self.fora_do_ar.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(Erro::de_dominio(&ErroFiscal::ServicoIndisponivel));
+        }
+        Ok(travar(&self.emitidas)
+            .get(chave.como_str())
+            .cloned()
+            .map_or_else(
+                || RetornoSefaz {
+                    situacao: SituacaoRetorno::Rejeitado,
+                    codigo: "217".into(),
+                    motivo: "Rejeição: NF-e não consta na base de dados da SEFAZ".into(),
+                    chave: Some(chave.como_str().to_string()),
+                    protocolo: None,
+                    recebido_em: None,
+                    xml: None,
+                    erros: Vec::new(),
+                },
+                |mut r| {
+                    // A consulta devolve o protocolo, não o XML da nota.
+                    r.xml = None;
+                    r
+                },
+            ))
+    }
+
     fn status_servico(&self, uf: Uf, modelo: ModeloFiscal) -> Resultado<StatusSefaz> {
         if self.fora_do_ar.load(std::sync::atomic::Ordering::SeqCst) {
             return Err(Erro::de_dominio(&ErroFiscal::ServicoIndisponivel));
@@ -89,6 +184,26 @@ impl PortaFiscal for FiscalSimulado {
             ),
         })
     }
+}
+
+fn travar<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Um `nfeProc` mínimo, com o grupo do QR Code — o bastante para guardar e imprimir em teste.
+fn xml_simulado(chave: &str, nota: &Nfce) -> String {
+    format!(
+        "<nfeProc versao=\"4.00\"><NFe><infNFe Id=\"NFe{chave}\"><ide><nNF>{}</nNF><serie>{}</serie>\
+         </ide><total><ICMSTot><vNF>{}</vNF></ICMSTot></total></infNFe><infNFeSupl><qrCode>\
+         https://homologacao.simulado/nfce?p={chave}|3|2</qrCode><urlChave>https://homologacao.simulado/nfce</urlChave>\
+         </infNFeSupl></NFe><protNFe><infProt><chNFe>{chave}</chNFe><cStat>100</cStat></infProt></protNFe></nfeProc>",
+        nota.numero,
+        nota.serie,
+        {
+            let c = nota.total().em_centavos();
+            format!("{}.{:02}", c / 100, c % 100)
+        }
+    )
 }
 
 #[cfg(test)]
@@ -110,6 +225,59 @@ mod testes {
 
         let xml = sim.baixar_xml(&chave1).unwrap();
         assert_eq!(xml.0, "<xml1/>");
+    }
+
+    fn retorno(situacao: SituacaoRetorno, codigo: &str) -> RetornoSefaz {
+        RetornoSefaz {
+            situacao,
+            codigo: codigo.into(),
+            motivo: format!("simulado {codigo}"),
+            chave: None,
+            protocolo: None,
+            recebido_em: None,
+            xml: None,
+            erros: vec![],
+        }
+    }
+
+    #[test]
+    fn emite_programa_rejeicao_e_lembra_o_que_se_perdeu() {
+        let sim = FiscalSimulado::novo();
+        let nota = crate::emissao::exemplo();
+        let csc = Csc {
+            id: "1".into(),
+            token: cardeal_storage::Segredo::novo("t".into()),
+        };
+        let ok = sim.emitir_nfce(&nota, &csc).unwrap();
+        assert_eq!(ok.situacao, SituacaoRetorno::Autorizado);
+        let chave = ChaveAcesso::nova(ok.chave.as_deref().unwrap()).unwrap();
+        assert!(chave.dv_confere());
+        assert_eq!(chave.numero(), 42);
+        assert!(ok.xml.as_deref().unwrap().contains("<qrCode>"));
+        assert_eq!(
+            sim.consultar_documento(&chave, Uf::Rs).unwrap().situacao,
+            SituacaoRetorno::Autorizado
+        );
+
+        // Rejeição programada.
+        sim.programar(retorno(SituacaoRetorno::Rejeitado, "778"));
+        assert_eq!(sim.emitir_nfce(&nota, &csc).unwrap().codigo, "778");
+
+        // "Processando": a resposta se perdeu, mas a consulta acha autorizada (sem o XML).
+        sim.programar(retorno(SituacaoRetorno::Processando, "TIMEOUT"));
+        let perdida = sim.emitir_nfce(&nota, &csc).unwrap();
+        let chave = ChaveAcesso::nova(perdida.chave.as_deref().unwrap()).unwrap();
+        let consulta = sim.consultar_documento(&chave, Uf::Rs).unwrap();
+        assert_eq!(consulta.situacao, SituacaoRetorno::Autorizado);
+        assert!(consulta.xml.is_none());
+        let desconhecida = ChaveAcesso::nova(&"4".repeat(44)).unwrap();
+        assert_eq!(
+            sim.consultar_documento(&desconhecida, Uf::Rs)
+                .unwrap()
+                .codigo,
+            "217"
+        );
+        assert_eq!(sim.emissoes.load(std::sync::atomic::Ordering::SeqCst), 3);
     }
 
     #[test]

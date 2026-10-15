@@ -23,27 +23,45 @@
 
 mod comandos;
 mod consultas;
+mod documento;
 mod erros;
+mod explicacao;
 mod manifesto;
 #[cfg(feature = "sqlite")]
 mod migracoes;
 #[cfg(feature = "sqlite")]
 mod modulo;
+#[cfg(feature = "sqlite")]
+mod montagem;
+mod nfce;
 mod provedor;
 #[cfg(feature = "sqlite")]
 mod sql;
+#[cfg(feature = "sqlite")]
+mod sql_documento;
 mod tipos;
+mod tributacao;
 
 pub use cardeal_fiscal::{AmbienteFiscal, ModeloFiscal, StatusSefaz};
 pub use comandos::{DefinirAmbienteFiscal, InstalarCertificado, RemoverCertificado};
 pub use consultas::{SituacaoFiscal, StatusDaSefaz};
+pub use documento::{
+    decidir, espera, Desfecho, DocumentoResumo, EstadoDocumento, Mudanca, ResumoFiscal,
+};
 pub use erros::ErroModuloFiscal;
+pub use explicacao::explicar;
 pub use manifesto::{ID, MANIFESTO};
 #[cfg(feature = "sqlite")]
 pub use modulo::ModuloFiscal;
+pub use nfce::{
+    ConfiguracaoDaNfce, ConfiguracaoNfce, ConfigurarNfce, DetalheDocumento, DocumentoDaVenda,
+    DocumentoFiscal, DocumentosFiscais, EmitirNfceDoCupom, ReenviarDocumento, ResumoDaFilaFiscal,
+    TAREFA_TRANSMITIR,
+};
 #[cfg(feature = "sqlite")]
 pub use provedor::porta_da_empresa;
 pub use provedor::ProvedorFiscal;
 pub use tipos::{
     CertificadoResumo, PendenciaFiscal, SituacaoFiscalDaEmpresa, ALERTA_VENCIMENTO_DIAS,
 };
+pub use tributacao::{tributar, TributacaoDoItem};

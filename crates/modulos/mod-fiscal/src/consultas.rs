@@ -24,10 +24,13 @@ impl Consulta for SituacaoFiscal {
     fn executar(self, ctx: &Ctx, c: &Connection) -> Resultado<SituacaoFiscalDaEmpresa> {
         let certificado = crate::sql::certificado(c, ctx.empresa)?;
         let dados = mod_empresa::sql::dados_fiscais(c, ctx.empresa)?;
+        let nfce = crate::sql_documento::config_nfce(c, ctx.empresa)?;
+        let falta_csc = nfce.emitir && nfce.csc_selado.is_none();
         Ok(SituacaoFiscalDaEmpresa {
             pendencias: crate::tipos::pendencias(
                 certificado.as_ref(),
                 dados.completos(),
+                falta_csc,
                 ctx.hoje(),
                 ctx.fuso,
             ),

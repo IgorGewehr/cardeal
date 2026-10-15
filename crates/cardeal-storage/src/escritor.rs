@@ -66,7 +66,9 @@ pub struct MetricasEscritor {
     pub fila_atual: usize,
 }
 
-/// O ponto de entrada de toda escrita do sistema.
+/// O ponto de entrada de toda escrita do sistema. Clonar é barato (canal + `Arc`) e serve
+/// para levar o escritor a outra thread; depois de encerrado, os clones recebem erro.
+#[derive(Clone)]
 pub struct Escritor {
     fila: Sender<Tarefa>,
     metricas: Arc<Mutex<MetricasInternas>>,

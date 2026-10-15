@@ -162,6 +162,71 @@ type ExecutorComando = Arc<
 type ExecutorConsulta =
     Arc<dyn Fn(&Ctx, &Connection, &[u8]) -> Result<Vec<u8>, ErroArmazenamento> + Send + Sync>;
 
+type ExecutorTarefa = Arc<dyn Fn(&ContextoTarefa<'_>) -> Resultado<String> + Send + Sync>;
+
+struct EntradaTarefa {
+    permissao: &'static str,
+    executor: ExecutorTarefa,
+}
+
+/// O que uma tarefa recebe: o [`Ctx`] da sessão e acesso direto à leitura e à escrita — para o
+/// trabalho que **não cabe numa transação** (ler, falar com a rede, gravar o resultado), como a
+/// transmissão fiscal. Roda no processo do motor (desktop ou servidor), nunca pela rede: os
+/// segredos que a tarefa abre (certificado) não saem dali.
+pub struct ContextoTarefa<'a> {
+    /// O contexto da sessão que pediu a tarefa.
+    pub ctx: Ctx,
+    sessao: &'a Sessao,
+    ambiente: &'a Ambiente,
+    leitor: &'a Leitor,
+    escritor: &'a Escritor,
+}
+
+impl ContextoTarefa<'_> {
+    /// Uma leitura sobre o pool de leitura.
+    ///
+    /// # Errors
+    /// O erro do fecho, ou o do armazenamento.
+    pub fn ler<T>(&self, f: impl FnOnce(&Connection) -> Resultado<T>) -> Resultado<T> {
+        match self
+            .leitor
+            .consultar(|c| f(c).map_err(ErroArmazenamento::from))
+        {
+            Ok(v) => Ok(v),
+            Err(ErroArmazenamento::Dominio(e)) => Err(e),
+            Err(outro) => Err(Erro::de_dominio(&outro)),
+        }
+    }
+
+    /// Uma escrita: uma transação do escritor, com o mesmo contexto de escrita de um comando
+    /// da sessão (autoria, correlação).
+    ///
+    /// # Errors
+    /// O erro do fecho (desfaz a transação), ou o do armazenamento.
+    pub fn escrever<T, F>(&self, f: F) -> Resultado<T>
+    where
+        F: for<'u> FnOnce(&mut UnidadeDeTrabalho<'u>) -> Resultado<T> + Send + 'static,
+        T: Send + 'static,
+    {
+        let mut cte = ContextoEscrita::novo(
+            self.ambiente.empresa,
+            self.sessao.usuario,
+            self.sessao.dispositivo,
+            self.sessao.id,
+        );
+        cte.agora = Instante::agora();
+        cte.correlacao = self.ctx.correlacao;
+        match self
+            .escritor
+            .executar(cte, move |uow| f(uow).map_err(ErroArmazenamento::from))
+        {
+            Ok(confirmado) => Ok(confirmado.valor),
+            Err(ErroArmazenamento::Dominio(e)) => Err(e),
+            Err(outro) => Err(Erro::de_dominio(&outro)),
+        }
+    }
+}
+
 struct EntradaComando {
     permissao: &'static str,
     risco: Risco,
@@ -180,6 +245,7 @@ struct EntradaConsulta {
 pub struct Registro {
     comandos: HashMap<&'static str, EntradaComando>,
     consultas: HashMap<&'static str, EntradaConsulta>,
+    tarefas: HashMap<&'static str, EntradaTarefa>,
     erros: Vec<String>,
 }
 
@@ -213,6 +279,29 @@ impl Registro {
         {
             self.erros
                 .push(format!("comando \"{nome}\" declarado duas vezes"));
+        }
+        self
+    }
+
+    /// Declara uma tarefa sob o nome `nome`, exigindo `permissao` de quem a pede. A tarefa
+    /// devolve um resumo em texto (para log e tela). Não é exposta pela rede.
+    pub fn tarefa<F>(&mut self, nome: &'static str, permissao: &'static str, f: F) -> &mut Self
+    where
+        F: Fn(&ContextoTarefa<'_>) -> Resultado<String> + Send + Sync + 'static,
+    {
+        if self
+            .tarefas
+            .insert(
+                nome,
+                EntradaTarefa {
+                    permissao,
+                    executor: Arc::new(f),
+                },
+            )
+            .is_some()
+        {
+            self.erros
+                .push(format!("tarefa \"{nome}\" declarada duas vezes"));
         }
         self
     }
@@ -333,6 +422,7 @@ impl Ambiente {
 pub struct Despachante {
     comandos: HashMap<&'static str, EntradaComando>,
     consultas: HashMap<&'static str, EntradaConsulta>,
+    tarefas: HashMap<&'static str, EntradaTarefa>,
 }
 
 impl std::fmt::Debug for Despachante {
@@ -340,6 +430,7 @@ impl std::fmt::Debug for Despachante {
         f.debug_struct("Despachante")
             .field("comandos", &self.comandos.len())
             .field("consultas", &self.consultas.len())
+            .field("tarefas", &self.tarefas.len())
             .finish()
     }
 }
@@ -361,6 +452,7 @@ impl Despachante {
         Ok(Self {
             comandos: registro.comandos,
             consultas: registro.consultas,
+            tarefas: registro.tarefas,
         })
     }
 
@@ -484,6 +576,36 @@ impl Despachante {
             Err(ErroArmazenamento::Dominio(e)) => Err(e),
             Err(outro) => Err(Erro::de_dominio(&outro)),
         }
+    }
+}
+
+impl Despachante {
+    /// Executa uma tarefa: confere módulo ativo e permissão e roda o manipulador com acesso a
+    /// leitura e escrita (ver [`ContextoTarefa`]).
+    ///
+    /// # Errors
+    /// [`CodigoErro::NAO_ENCONTRADO`] se a tarefa não existe; o erro de acesso; o da tarefa.
+    pub fn executar_tarefa(
+        &self,
+        nome: &str,
+        sessao: &Sessao,
+        ambiente: &Ambiente,
+        leitor: &Leitor,
+        escritor: &Escritor,
+    ) -> Resultado<String> {
+        let entrada = self
+            .tarefas
+            .get(nome)
+            .ok_or_else(|| nao_encontrado("tarefa", nome))?;
+        verificar_acesso(entrada.permissao, sessao, ambiente)?;
+        let contexto = ContextoTarefa {
+            ctx: montar_ctx(sessao, ambiente),
+            sessao,
+            ambiente,
+            leitor,
+            escritor,
+        };
+        (entrada.executor)(&contexto)
     }
 }
 

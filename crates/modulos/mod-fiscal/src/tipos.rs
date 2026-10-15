@@ -43,6 +43,8 @@ pub enum PendenciaFiscal {
     DadosFiscaisIncompletos,
     /// Nenhum certificado instalado.
     SemCertificado,
+    /// A emissão de NFC-e está ligada, mas sem o CSC.
+    SemCsc,
     /// O certificado venceu.
     CertificadoVencido {
         /// Quando venceu.
@@ -65,6 +67,7 @@ impl PendenciaFiscal {
                     .into()
             }
             Self::SemCertificado => "Instale o certificado digital A1 da empresa.".into(),
+            Self::SemCsc => "Cadastre o CSC da NFC-e (identificador e token da SEFAZ).".into(),
             Self::CertificadoVencido { em } => format!(
                 "O certificado digital venceu em {} — sem ele nenhuma nota é emitida. Instale o novo.",
                 em.formatar()
@@ -111,10 +114,14 @@ impl SituacaoFiscalDaEmpresa {
 pub(crate) fn pendencias(
     certificado: Option<&CertificadoResumo>,
     dados_completos: bool,
+    falta_csc: bool,
     hoje: Data,
     fuso: Fuso,
 ) -> Vec<PendenciaFiscal> {
     let mut lista = Vec::new();
+    if falta_csc {
+        lista.push(PendenciaFiscal::SemCsc);
+    }
     match certificado {
         None => lista.push(PendenciaFiscal::SemCertificado),
         Some(c) => {
@@ -163,14 +170,26 @@ mod testes {
         let hoje = Data::de_ymd(2026, 10, 14).unwrap();
         let f = Fuso::BRASILIA;
         assert_eq!(
-            pendencias(None, false, hoje, f),
+            pendencias(None, false, false, hoje, f),
             vec![
                 PendenciaFiscal::SemCertificado,
                 PendenciaFiscal::DadosFiscaisIncompletos
             ]
         );
-        assert!(pendencias(Some(&certificado(hoje.mais_dias(31))), true, hoje, f).is_empty());
-        let vencendo = pendencias(Some(&certificado(hoje.mais_dias(30))), false, hoje, f);
+        assert!(
+            pendencias(Some(&certificado(hoje.mais_dias(31))), true, false, hoje, f).is_empty()
+        );
+        assert_eq!(
+            pendencias(Some(&certificado(hoje.mais_dias(31))), true, true, hoje, f),
+            vec![PendenciaFiscal::SemCsc]
+        );
+        let vencendo = pendencias(
+            Some(&certificado(hoje.mais_dias(30))),
+            false,
+            false,
+            hoje,
+            f,
+        );
         // O que impede a emissão vem primeiro.
         assert_eq!(
             vencendo,
@@ -180,7 +199,7 @@ mod testes {
             ]
         );
         assert_eq!(
-            pendencias(Some(&certificado(hoje.mais_dias(-1))), true, hoje, f),
+            pendencias(Some(&certificado(hoje.mais_dias(-1))), true, false, hoje, f),
             vec![PendenciaFiscal::CertificadoVencido {
                 em: hoje.mais_dias(-1)
             }]

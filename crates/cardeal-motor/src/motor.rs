@@ -388,7 +388,55 @@ impl MotorLocal {
     }
 }
 
+/// Um executor de tarefas que pode ir para outra thread: carrega clones baratos do escritor,
+/// do leitor, do plano e do ambiente, e a sessão de quem pediu. É assim que o desktop roda a
+/// transmissão fiscal sem prender a tela (`docs/modulos/fiscal.md`).
+#[derive(Clone)]
+pub struct ExecutorDeTarefas {
+    escritor: cardeal_storage::Escritor,
+    leitor: cardeal_storage::Leitor,
+    plano: Arc<Plano>,
+    ambiente: Ambiente,
+    sessao: Sessao,
+}
+
+impl ExecutorDeTarefas {
+    /// Roda a tarefa `nome` (bloqueante: chame de uma thread própria).
+    ///
+    /// # Errors
+    /// O da tarefa, de acesso, ou o armazenamento já fechado.
+    pub fn executar(&self, nome: &str) -> Resultado<String> {
+        self.plano.despachante.executar_tarefa(
+            nome,
+            &self.sessao,
+            &self.ambiente,
+            &self.leitor,
+            &self.escritor,
+        )
+    }
+}
+
 impl MotorLocal {
+    /// Roda uma tarefa de módulo na thread de quem chama.
+    ///
+    /// # Errors
+    /// O da tarefa ou de acesso.
+    pub fn executar_tarefa(&self, sessao: &SessaoLocal, nome: &str) -> Resultado<String> {
+        self.executor_de_tarefas(sessao).executar(nome)
+    }
+
+    /// Um executor de tarefas para levar a outra thread (ver [`ExecutorDeTarefas`]).
+    #[must_use]
+    pub fn executor_de_tarefas(&self, sessao: &SessaoLocal) -> ExecutorDeTarefas {
+        ExecutorDeTarefas {
+            escritor: self.arm.escritor().clone(),
+            leitor: self.arm.leitor().clone(),
+            plano: Arc::clone(&self.plano),
+            ambiente: self.ambiente_de(sessao).into_owned(),
+            sessao: sessao.sessao.clone(),
+        }
+    }
+
     /// Injeta os recursos da instalação (cofre de segredos, provedor fiscal...) que os
     /// comandos pedem com `Ctx::recurso` — quem monta o motor sabe quais são; o núcleo não.
     #[must_use]

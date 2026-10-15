@@ -19,6 +19,7 @@ use cardeal_kernel::{Cnpj, Resultado, Uf};
 use serde::{Deserialize, Serialize};
 
 use crate::chave::ChaveAcesso;
+use crate::emissao::{Csc, Nfce, RetornoSefaz};
 
 /// O modelo do documento fiscal eletrônico.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -105,6 +106,21 @@ pub trait PortaFiscal: Send + Sync {
     /// [`crate::ErroFiscal::ServicoIndisponivel`] se a API fiscal não responde; os erros de
     /// credencial/certificado que ela devolver.
     fn status_servico(&self, uf: Uf, modelo: ModeloFiscal) -> Resultado<StatusSefaz>;
+
+    /// Emite uma NFC-e (síncrona na SEFAZ). Rejeição e denegação voltam em `Ok`, no
+    /// [`RetornoSefaz`]; `Err` é não ter conseguido falar com a API.
+    ///
+    /// # Errors
+    /// [`crate::ErroFiscal::ServicoIndisponivel`] (tentar de novo depois);
+    /// [`crate::ErroFiscal::ApiFiscalRecusou`] (o provedor recusou o pedido — corrigir).
+    fn emitir_nfce(&self, nota: &Nfce, csc: &Csc) -> Resultado<RetornoSefaz>;
+
+    /// Consulta a situação de um documento pela chave — o passo obrigatório antes de reenviar
+    /// uma nota cujo resultado não chegou.
+    ///
+    /// # Errors
+    /// Como [`Self::emitir_nfce`].
+    fn consultar_documento(&self, chave: &ChaveAcesso, uf: Uf) -> Resultado<RetornoSefaz>;
 }
 
 /// Uma porta compartilhada é uma porta (o simulado de um teste, servindo várias empresas).
@@ -119,5 +135,13 @@ impl<T: PortaFiscal + ?Sized> PortaFiscal for std::sync::Arc<T> {
 
     fn status_servico(&self, uf: Uf, modelo: ModeloFiscal) -> Resultado<StatusSefaz> {
         (**self).status_servico(uf, modelo)
+    }
+
+    fn emitir_nfce(&self, nota: &Nfce, csc: &Csc) -> Resultado<RetornoSefaz> {
+        (**self).emitir_nfce(nota, csc)
+    }
+
+    fn consultar_documento(&self, chave: &ChaveAcesso, uf: Uf) -> Resultado<RetornoSefaz> {
+        (**self).consultar_documento(chave, uf)
     }
 }

@@ -108,6 +108,18 @@ impl Motor {
         }
     }
 
+    /// Um executor de tarefas para rodar numa thread própria (a transmissão fiscal). `None` no
+    /// remoto: lá as tarefas rodam no servidor.
+    #[must_use]
+    #[cfg(feature = "local")]
+    pub fn executor_de_tarefas(&self, sessao: &Sessao) -> Option<cardeal_motor::ExecutorDeTarefas> {
+        match (self, sessao) {
+            (Self::Local(m), Sessao::Local(s)) => Some(m.executor_de_tarefas(s)),
+            #[cfg(not(target_arch = "wasm32"))]
+            _ => None,
+        }
+    }
+
     /// Abre o motor local sobre um arquivo (monoposto).
     ///
     /// # Errors
