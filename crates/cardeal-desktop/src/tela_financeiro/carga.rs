@@ -333,6 +333,7 @@ impl EstadoTelaFinanceiro {
             Ok(v) => self.contas_disp = v,
             Err(e) => self.erro = Some(e.mensagem),
         }
+        self.transferencias = super::bancos::carregar_transferencias(motor, sessao);
     }
 
     /// Resolve "OS #123 — cliente" para cada OS por trás do extrato e das parcelas da aba

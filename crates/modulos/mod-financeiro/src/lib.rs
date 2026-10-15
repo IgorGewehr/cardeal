@@ -131,6 +131,10 @@ pub use comandos::{
 pub use comandos::{
     BaixarPagamentosEmLote, BaixarRecebimentosEmLote, BaixasEmLoteFeitas, DadosBaixaEmLote,
 };
+pub use comandos::{
+    CancelarTransferencia, DefinirSaldoInicial, DesativarContaDisponivel, ItemTransferencia,
+    SaldoInicialDefinido, TransferenciaFeita, Transferencias, TransferirEntreContas,
+};
 pub use comandos::{CriarCategoriasSugeridas, CATEGORIAS_SUGERIDAS};
 pub use comandos::{DadosContaAvulsa, PagamentoAvulso};
 pub use conciliacao::{

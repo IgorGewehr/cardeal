@@ -16,6 +16,7 @@ mod baixar_recebimento;
 mod cadastrar_caixa;
 mod cheque;
 mod conta_a_pagar_avulsa;
+mod contas_do_disponivel;
 mod criar_categoria;
 mod criar_categorias_sugeridas;
 mod criar_conta_bancaria;
@@ -49,6 +50,10 @@ pub use cheque::{
 #[cfg(feature = "sqlite")]
 pub use conta_a_pagar_avulsa::lancar_conta_a_pagar_avulsa;
 pub use conta_a_pagar_avulsa::{DadosContaAvulsa, PagamentoAvulso};
+pub use contas_do_disponivel::{
+    CancelarTransferencia, DefinirSaldoInicial, DesativarContaDisponivel, ItemTransferencia,
+    SaldoInicialDefinido, TransferenciaFeita, Transferencias, TransferirEntreContas,
+};
 pub use criar_categoria::{CategoriaCriada, CriarCategoria};
 pub use criar_categorias_sugeridas::{CriarCategoriasSugeridas, CATEGORIAS_SUGERIDAS};
 pub use criar_conta_bancaria::{ContaBancariaCriada, CriarContaBancaria};

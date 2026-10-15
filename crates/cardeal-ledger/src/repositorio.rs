@@ -196,6 +196,21 @@ impl<'a, 'b> RepositorioRazao<'a, 'b> {
         Ok(Dinheiro::centavos(centavos))
     }
 
+    /// Desativa uma conta do plano: ela deixa de aceitar lançamento e some das listas de contas
+    /// ativas. Nunca apaga — o histórico continua apontando para ela.
+    ///
+    /// # Errors
+    /// [`ErroRazao::FalhaDePersistencia`] em erro do SQLite.
+    pub fn desativar_conta(&mut self, conta: Id) -> Resultado<()> {
+        self.conn()
+            .execute(
+                "UPDATE razao_conta SET ativa = 0 WHERE id = ?1",
+                [blob(conta)],
+            )
+            .map_err(persist)?;
+        Ok(())
+    }
+
     /// Os lançamentos **vivos** de uma origem: os originais (não os estornos) que ainda não
     /// foram estornados, do mais antigo ao mais novo. É como um módulo acha o lançamento de um
     /// agregado seu para desfazê-lo (o PDV estornando a venda de um cupom) sem guardar o id.

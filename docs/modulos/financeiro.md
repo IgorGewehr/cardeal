@@ -348,6 +348,10 @@ stateDiagram-v2
 | `MaterializarRecorrencia` ✅ | (tarefa agendada, sem permissão de usuário) | Baixo | `materializar_recorrencias_pendentes` — gera `Titulo` real quando falta `antecedencia_geracao_dias`, idempotente por `(origem_id, emissao)` | — |
 | `CriarCategoria` ✅ | `financeiro.categoria.criar` | Baixo | Cria `CategoriaFinanceira` | `NomeDeCategoriaVazio` |
 | `CriarContaBancaria` ✅ | `financeiro.banco.criar` | Baixo | Abre uma conta analítica nova, filha de `1.1` (Disponível) — `1.1.05`, `1.1.06`… (`CodigoConta::proximo_filho`, novo em `cardeal-ledger`). **Decisão**: não mexe em `1.1.02 "Bancos"`, que continua sendo o destino de `BaixarPagamento`/`BaixarRecebimento` quando `meio_pagamento` não é `Dinheiro` e `conta_destino` não escolhe uma conta específica; cada conta nova nasce com `papel: None` — só endereçável pelo `Id`, escolhido na tela | — |
+| `DefinirSaldoInicial` ✅ (2026-10-15, `financeiro.definir_saldo_inicial.v1`) | `financeiro.banco.editar` | Médio | O saldo de uma conta do Disponível na data da implantação: `Realizado` D conta / C Lucros acumulados (3.2) — crédito no Disponível quando negativo (cheque especial). **Um só por conta**: redefinir estorna o anterior e lança de novo (origem `financeiro/saldo_inicial/<conta>`); zero tira o saldo. A conferência banco × sistema deixa de acusar "saldo inicial não lançado". Na tela, a conta nova já pede o "saldo hoje" | `ContaDisponivelInvalida` |
+| `TransferirEntreContas` ✅ (2026-10-15, `financeiro.transferir_entre_contas.v1`) | `financeiro.banco.transferir` | Médio | `Realizado` D destino / C origem (origem `financeiro/transferencia`), com a linha em `financeiro_transferencia` para listar e cancelar. **Dinheiro em espécie não fica negativo**: de um caixa (papel Caixa ou conta de caixa cadastrado) exige saldo; banco pode (cheque especial). É como o dinheiro da sangria, que cai em `1.1.02 Bancos`, chega à conta bancária de verdade | `TransferenciaParaAMesmaConta`, `SaldoInsuficienteNaOrigem`, `ContaDisponivelInvalida` |
+| `CancelarTransferencia` ✅ (2026-10-15, `financeiro.cancelar_transferencia.v1`) | `financeiro.banco.transferir` | Médio | Estorna o lançamento (os dois lados de uma vez) e marca `cancelada_em`; motivo ≥ 10 caracteres | `TransferenciaJaCancelada` |
+| `DesativarContaDisponivel` ✅ (2026-10-15, `financeiro.desativar_conta.v1`) | `financeiro.banco.editar` | Médio | `razao_conta.ativa = 0` (nunca apaga). Recusa as contas do sistema (Caixa, Bancos, Aplicações, Valores em trânsito), a conta de um caixa cadastrado e a conta com saldo ("transfira antes") | `ContaDisponivelInvalida`, `ContaComSaldo` |
 | `ImportarExtrato` | `financeiro.conciliacao.importar` | Baixo | Parseia OFX/CNAB240/Pix, cria `ItemExtrato` em `Pendente`, dispara casamento automático | `FormatoInvalido`, `PeriodoJaImportado` |
 | `ConciliarItem` | `financeiro.conciliacao.confirmar` | Médio | Vincula `ItemExtrato` a um `Lancamento`/`Baixa` existente ou cria um novo | `ItemJaConciliado`, `ValorDivergente` |
 | `CriarCentroCusto` | `financeiro.centro_custo.criar` | Baixo | | `CodigoDuplicado` |
@@ -594,6 +598,8 @@ que o módulo financeiro precisa cobrir em `testes/receituario.rs`.
 | `financeiro.pagar.autorizar` | Autorizar pagamento acima do teto do papel | Alto |
 | `financeiro.banco.ver` | Consultar contas bancárias e extratos | Baixo |
 | `financeiro.banco.criar` | Cadastrar conta bancária | Médio |
+| `financeiro.banco.editar` | Definir o saldo inicial e desativar conta do caixa/banco | Médio |
+| `financeiro.banco.transferir` | Transferir entre contas e cancelar a transferência | Médio |
 | `financeiro.conciliacao.ver` | Ver a conciliação bancária | Baixo |
 | `financeiro.conciliacao.importar` | Importar extrato bancário | Baixo |
 | `financeiro.conciliacao.confirmar` | Confirmar casamento de item do extrato | Médio |

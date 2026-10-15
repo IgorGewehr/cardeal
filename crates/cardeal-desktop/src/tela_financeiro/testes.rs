@@ -1374,3 +1374,92 @@ fn dialogo_da_parcela_com_ajustes_desenha_e_a_conta_cancelada_sai_como_cancelada
         .filter(|x| x.parcela == parcela)
         .all(|x| x.estado == EstadoParcela::Cancelada));
 }
+
+#[test]
+fn conta_nova_com_saldo_e_transferencia_aparecem_na_aba_de_bancos() {
+    let t = motor_de_teste();
+    let mut estado = EstadoTelaFinanceiro {
+        aba: Aba::Bancos,
+        ..Default::default()
+    };
+    estado.carregar(&t.motor, &t.sessao);
+    let ctx = egui::Context::default();
+    cardeal_ui::tokens::instalar_fontes(&ctx);
+    cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+
+    // A conta nasce já com o saldo de hoje.
+    estado.dlg = Dlg::NovaContaBancaria {
+        nome: "Sicredi".to_owned(),
+        saldo: "1.500,00".to_owned(),
+    };
+    super::bancos::criar_conta(&ctx, &t.motor, &t.sessao, &mut estado);
+    assert!(matches!(estado.dlg, Dlg::Fechado));
+    let sicredi = estado
+        .contas_disp
+        .iter()
+        .find(|c| c.nome == "Sicredi")
+        .cloned()
+        .expect("conta criada");
+    assert_eq!(sicredi.saldo, Dinheiro::reais(1_500));
+
+    let caixa = estado
+        .contas_disp
+        .iter()
+        .find(|c| c.e_caixa)
+        .map(|c| c.conta)
+        .expect("caixa");
+    let _: mod_financeiro::TransferenciaFeita = t
+        .motor
+        .executar(
+            &t.sessao,
+            "financeiro.transferir_entre_contas.v1",
+            &mod_financeiro::TransferirEntreContas {
+                origem: sicredi.conta,
+                destino: caixa,
+                valor: Dinheiro::reais(200),
+                data: Data::hoje(Fuso::BRASILIA),
+                observacao: None,
+            },
+        )
+        .expect("transferir");
+    estado.carregar_fluxo(&t.motor, &t.sessao);
+    assert_eq!(estado.transferencias.len(), 1);
+
+    // A aba e os diálogos desenham.
+    let dialogos = [
+        Dlg::SaldoInicial {
+            conta: sicredi.conta,
+            nome: "Sicredi".to_owned(),
+            valor: String::new(),
+            data: Data::hoje(Fuso::BRASILIA).to_string(),
+        },
+        Dlg::Transferir(super::bancos::FormTransferencia::default()),
+        Dlg::CancelarTransferencia {
+            id: estado.transferencias[0].id,
+            descricao: "R$ 200,00".to_owned(),
+            motivo: String::new(),
+        },
+    ];
+    for dlg in dialogos {
+        estado.dlg = dlg;
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                super::bancos::painel_bancos(ui, &t.sessao, &mut estado);
+            });
+            match &estado.dlg {
+                Dlg::SaldoInicial { .. } => {
+                    super::bancos::dialogo_saldo_inicial(ctx, &t.motor, &t.sessao, &mut estado);
+                }
+                Dlg::Transferir(_) => {
+                    super::bancos::dialogo_transferir(ctx, &t.motor, &t.sessao, &mut estado);
+                }
+                _ => super::bancos::dialogo_cancelar_transferencia(
+                    ctx,
+                    &t.motor,
+                    &t.sessao,
+                    &mut estado,
+                ),
+            }
+        });
+    }
+}

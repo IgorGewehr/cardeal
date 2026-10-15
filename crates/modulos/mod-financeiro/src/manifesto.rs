@@ -230,6 +230,18 @@ const PERMISSOES: &[Permissao] = &[
         Some("bancos"),
     ),
     perm(
+        "financeiro.banco.editar",
+        "Definir o saldo inicial e desativar conta do caixa/banco",
+        Risco::Medio,
+        Some("bancos"),
+    ),
+    perm(
+        "financeiro.banco.transferir",
+        "Transferir entre contas (caixa para banco, banco para banco) e cancelar a transferência",
+        Risco::Medio,
+        Some("bancos"),
+    ),
+    perm(
         "financeiro.conciliacao.ver",
         "Ver a conciliação bancária",
         Risco::Baixo,

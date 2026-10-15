@@ -311,6 +311,27 @@ const SQL_LISTA_PAGINADA: &str = r"
 CREATE INDEX financeiro_parcela_lista ON financeiro_parcela(empresa, vencimento, id);
 ";
 
+// Migração v13 (2026-10-15): transferência entre contas do Disponível (caixa → banco, banco →
+// banco). O dinheiro anda pelo Razão (D destino / C origem); a linha aqui é para listar e
+// cancelar (o cancelamento estorna o lançamento, nunca apaga).
+const SQL_TRANSFERENCIA: &str = r"
+CREATE TABLE financeiro_transferencia (
+    id                  BLOB PRIMARY KEY,
+    empresa             BLOB    NOT NULL REFERENCES nucleo_empresa(id),
+    origem              BLOB    NOT NULL,
+    destino             BLOB    NOT NULL,
+    valor               INTEGER NOT NULL CHECK (valor > 0),
+    data                INTEGER NOT NULL,
+    observacao          TEXT,
+    lancamento          BLOB    NOT NULL,
+    criado_em           INTEGER NOT NULL,
+    criado_por          BLOB    NOT NULL,
+    cancelada_em        INTEGER,
+    motivo_cancelamento TEXT
+) STRICT;
+CREATE INDEX financeiro_transferencia_empresa ON financeiro_transferencia(empresa, data);
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -382,6 +403,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 12,
         nome: "financeiro_regua_de_cobranca",
         sql: SQL_REGUA,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 13,
+        nome: "financeiro_transferencia",
+        sql: SQL_TRANSFERENCIA,
         tipo: TipoMigracao::Esquema,
     },
 ];

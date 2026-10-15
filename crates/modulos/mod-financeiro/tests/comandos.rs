@@ -12,15 +12,18 @@ use cardeal_storage::{Armazenamento, ConfigArmazenamento, ContextoEscrita, ErroA
 use mod_financeiro::{
     lancar_titulo_comum, materializar_recorrencias_pendentes, AbrirCaixa, AlterarVencimento,
     BaixarPagamento, BaixarRecebimento, CadastrarCaixa, CaixaFoiAberto, CaixaFoiFechado,
-    CancelarTitulo, CategoriaCriada, CategoriaFinanceira, Categorias, ConstrutorTitulo,
-    CriarCategoria, CriarContaBancaria, CriarRecorrencia, DadosLancamentoTitulo, EspecieTitulo,
-    EstornarBaixa, ExtratoDisponivel, FecharCaixa, ItemTituloEmAberto, ItemTotalPorCategoria,
-    LancarTituloAPagar, LancarTituloAReceber, MeioPagamento, ModuloFinanceiro, PagamentoBaixado,
+    CancelarTitulo, CancelarTransferencia, CategoriaCriada, CategoriaFinanceira, Categorias,
+    ConstrutorTitulo, ContaBancariaCriada, ContasDisponiveis, CriarCategoria, CriarContaBancaria,
+    CriarRecorrencia, DadosLancamentoTitulo, DefinirSaldoInicial, DesativarContaDisponivel,
+    EspecieTitulo, EstornarBaixa, ExtratoDisponivel, FecharCaixa, ItemContaDisponivel,
+    ItemTituloEmAberto, ItemTotalPorCategoria, ItemTransferencia, LancarTituloAPagar,
+    LancarTituloAReceber, MeioPagamento, ModuloFinanceiro, PagamentoBaixado,
     ParcelasAReceberNoPeriodo, Periodicidade, PoliticaJuros, QuitadoAgora, RecebimentoBaixado,
     RecorrenciaCriada, RegistrarSangria, RegistrarSuprimento, RenegociarTitulo,
-    RepositorioFinanceiro, SangriaFoiRegistrada, SuprimentoFoiRegistrado, TipoValor,
-    TituloAPagarLancado, TituloAReceberLancado, TituloDaOrigem, TituloFoiCancelado,
-    TitulosAReceberEmAberto, TotalPorCategoriaNoPeriodo, TotalRecebidoNoPeriodo, MANIFESTO,
+    RepositorioFinanceiro, SaldoInicialDefinido, SangriaFoiRegistrada, SuprimentoFoiRegistrado,
+    TipoValor, TituloAPagarLancado, TituloAReceberLancado, TituloDaOrigem, TituloFoiCancelado,
+    TitulosAReceberEmAberto, TotalPorCategoriaNoPeriodo, TotalRecebidoNoPeriodo,
+    TransferenciaFeita, Transferencias, TransferirEntreContas, MANIFESTO,
 };
 use serde::Serialize;
 use tempfile::TempDir;
@@ -2611,4 +2614,269 @@ fn titulo_de_compra_nao_se_cancela_pelo_financeiro_mas_o_vencimento_muda() {
         )
         .unwrap_err();
     assert_eq!(negado.codigo, CodigoErro::SEM_PERMISSAO);
+}
+
+fn sessao_bancos(empresa: Id) -> Sessao {
+    sessao(
+        empresa,
+        &[
+            "financeiro.banco.ver",
+            "financeiro.banco.criar",
+            "financeiro.banco.editar",
+            "financeiro.banco.transferir",
+        ],
+    )
+}
+
+fn nova_conta(d: &Despachante, arm: &Armazenamento, empresa: Id, s: &Sessao, nome: &str) -> Id {
+    let c: ContaBancariaCriada = postcard::from_bytes(
+        &d.executar_comando(
+            "financeiro.criar_conta_bancaria.v1",
+            &carga(&CriarContaBancaria {
+                nome: nome.to_string(),
+            }),
+            s,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    c.conta
+}
+
+fn saldos(
+    d: &Despachante,
+    arm: &Armazenamento,
+    empresa: Id,
+    s: &Sessao,
+) -> Vec<ItemContaDisponivel> {
+    postcard::from_bytes(
+        &d.executar_consulta(
+            "financeiro.contas_disponiveis.v1",
+            &carga(&ContasDisponiveis),
+            s,
+            &ambiente(empresa),
+            arm.leitor(),
+        )
+        .unwrap(),
+    )
+    .unwrap()
+}
+
+fn saldo_de(
+    d: &Despachante,
+    arm: &Armazenamento,
+    empresa: Id,
+    s: &Sessao,
+    conta: Id,
+) -> Option<Dinheiro> {
+    saldos(d, arm, empresa, s)
+        .into_iter()
+        .find(|c| c.conta == conta)
+        .map(|c| c.saldo)
+}
+
+fn definir(
+    d: &Despachante,
+    arm: &Armazenamento,
+    empresa: Id,
+    s: &Sessao,
+    conta: Id,
+    reais: i64,
+) -> Result<SaldoInicialDefinido, cardeal_kernel::Erro> {
+    d.executar_comando(
+        "financeiro.definir_saldo_inicial.v1",
+        &carga(&DefinirSaldoInicial {
+            conta,
+            saldo: Dinheiro::reais(reais),
+            data: hoje().mais_dias(-10),
+        }),
+        s,
+        &ambiente(empresa),
+        arm.escritor(),
+    )
+    .map(|b| postcard::from_bytes(&b).unwrap())
+}
+
+#[test]
+fn saldo_inicial_substitui_em_vez_de_somar_e_aceita_cheque_especial() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloFinanceiro]).unwrap();
+    let s = sessao_bancos(empresa);
+    let banco = nova_conta(&d, &arm, empresa, &s, "Sicredi");
+
+    assert_eq!(
+        definir(&d, &arm, empresa, &s, banco, 12_000)
+            .unwrap()
+            .saldo_atual,
+        Dinheiro::reais(12_000)
+    );
+    // Redefinir ajusta: um saldo inicial só (lá no gestao-raiz havia dois e as telas divergiam).
+    assert_eq!(
+        definir(&d, &arm, empresa, &s, banco, 10_000)
+            .unwrap()
+            .saldo_atual,
+        Dinheiro::reais(10_000)
+    );
+    assert_eq!(
+        saldo_de(&d, &arm, empresa, &s, banco),
+        Some(Dinheiro::reais(10_000))
+    );
+    // Negativo: banco no cheque especial.
+    assert_eq!(
+        definir(&d, &arm, empresa, &s, banco, -500)
+            .unwrap()
+            .saldo_atual,
+        Dinheiro::reais(-500)
+    );
+    // Zero tira o saldo inicial.
+    let zero = definir(&d, &arm, empresa, &s, banco, 0).unwrap();
+    assert_eq!((zero.lancamento, zero.saldo_atual), (None, Dinheiro::ZERO));
+    // Só conta do Disponível.
+    let receita = conta_papel(&arm, empresa, PapelConta::ReceitaVendas);
+    assert_eq!(
+        definir(&d, &arm, empresa, &s, receita, 100)
+            .unwrap_err()
+            .codigo,
+        CodigoErro::ENTRADA_INVALIDA
+    );
+}
+
+#[test]
+fn transferir_do_caixa_exige_dinheiro_e_cancelar_estorna_os_dois_lados() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloFinanceiro]).unwrap();
+    let s = sessao_bancos(empresa);
+    let caixa = conta_papel(&arm, empresa, PapelConta::Caixa);
+    let banco = nova_conta(&d, &arm, empresa, &s, "Sicredi");
+    let outro = nova_conta(&d, &arm, empresa, &s, "Cresol");
+    definir(&d, &arm, empresa, &s, caixa, 300).unwrap();
+    let transferir = |origem: Id, destino: Id, reais: i64| {
+        d.executar_comando(
+            "financeiro.transferir_entre_contas.v1",
+            &carga(&TransferirEntreContas {
+                origem,
+                destino,
+                valor: Dinheiro::reais(reais),
+                data: hoje(),
+                observacao: Some("Depósito do caixa".to_string()),
+            }),
+            &s,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+    };
+
+    // Dinheiro em espécie não fica negativo.
+    let erro = transferir(caixa, banco, 500).unwrap_err();
+    assert_eq!(erro.codigo, CodigoErro::REGRA_VIOLADA);
+    assert!(erro.mensagem.contains("300,00"), "{}", erro.mensagem);
+    assert_eq!(
+        transferir(caixa, caixa, 10).unwrap_err().codigo,
+        CodigoErro::ENTRADA_INVALIDA
+    );
+
+    let feita: TransferenciaFeita =
+        postcard::from_bytes(&transferir(caixa, banco, 200).unwrap()).unwrap();
+    assert_eq!(
+        saldo_de(&d, &arm, empresa, &s, caixa),
+        Some(Dinheiro::reais(100))
+    );
+    assert_eq!(
+        saldo_de(&d, &arm, empresa, &s, banco),
+        Some(Dinheiro::reais(200))
+    );
+    // Banco pode ir para o cheque especial.
+    transferir(outro, banco, 50).unwrap();
+    assert_eq!(
+        saldo_de(&d, &arm, empresa, &s, outro),
+        Some(Dinheiro::reais(-50))
+    );
+
+    let lista: Vec<ItemTransferencia> = postcard::from_bytes(
+        &d.executar_consulta(
+            "financeiro.transferencias.v1",
+            &carga(&Transferencias),
+            &s,
+            &ambiente(empresa),
+            arm.leitor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(lista.len(), 2);
+    assert!(lista
+        .iter()
+        .any(|t| t.origem == "Caixa" && t.destino == "Sicredi"));
+
+    let cancelar = |motivo: &str| {
+        d.executar_comando(
+            "financeiro.cancelar_transferencia.v1",
+            &carga(&CancelarTransferencia {
+                transferencia: feita.transferencia,
+                motivo: motivo.to_string(),
+            }),
+            &s,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+    };
+    assert_eq!(
+        cancelar("errei").unwrap_err().codigo,
+        CodigoErro::ENTRADA_INVALIDA
+    );
+    cancelar("Depósito não foi feito").unwrap();
+    assert_eq!(
+        saldo_de(&d, &arm, empresa, &s, caixa),
+        Some(Dinheiro::reais(300))
+    );
+    assert_eq!(
+        saldo_de(&d, &arm, empresa, &s, banco),
+        Some(Dinheiro::reais(50))
+    );
+    assert_eq!(
+        cancelar("Depósito não foi feito").unwrap_err().codigo,
+        CodigoErro::ESTADO_INVALIDO
+    );
+}
+
+#[test]
+fn desativar_conta_so_sem_saldo_e_nunca_a_do_sistema() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloFinanceiro]).unwrap();
+    let s = sessao_bancos(empresa);
+    let banco = nova_conta(&d, &arm, empresa, &s, "Banco antigo");
+    let desativar = |conta: Id| {
+        d.executar_comando(
+            "financeiro.desativar_conta.v1",
+            &carga(&DesativarContaDisponivel { conta }),
+            &s,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+    };
+    let caixa = conta_papel(&arm, empresa, PapelConta::Caixa);
+    assert_eq!(
+        desativar(caixa).unwrap_err().codigo,
+        CodigoErro::ENTRADA_INVALIDA
+    );
+    definir(&d, &arm, empresa, &s, banco, 80).unwrap();
+    let erro = desativar(banco).unwrap_err();
+    assert_eq!(erro.codigo, CodigoErro::REGRA_VIOLADA);
+    assert!(erro.mensagem.contains("transfira"), "{}", erro.mensagem);
+    definir(&d, &arm, empresa, &s, banco, 0).unwrap();
+    desativar(banco).unwrap();
+    assert_eq!(
+        saldo_de(&d, &arm, empresa, &s, banco),
+        None,
+        "some da lista"
+    );
+    // Conta desativada não recebe mais nada.
+    assert_eq!(
+        definir(&d, &arm, empresa, &s, banco, 10)
+            .unwrap_err()
+            .codigo,
+        CodigoErro::ENTRADA_INVALIDA
+    );
 }

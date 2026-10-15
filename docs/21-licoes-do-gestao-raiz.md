@@ -67,7 +67,7 @@ O que eles têm e o Cardeal não, com o que aprenderam:
 | **Cancelar título lançado errado** | Conta a pagar ou a receber cancelada ou excluída; **título cancelado não pode ser baixado**, porque "ressuscitaria a venda cancelada e creditaria o saldo" (tem teste) | **Falta.** Só há `EstornarBaixa` e `RenegociarTitulo`. O spec prevê o estado `Cancelada`, mas não há comando. Lançou errado, não tem como desfazer |
 | **Corrigir título** | Editar valor e vencimento da conta em aberto | Falta. Alterar o vencimento é o caso mais comum |
 | **Saldo inicial da conta** | Por conta; alterar o saldo inicial ajusta o saldo atual pela diferença. Eles tinham duas fontes de saldo inicial, com telas divergentes, e unificaram | **Falta.** A conferência banco × sistema lista "saldo inicial não lançado" como diferença sem explicação. É o primeiro dia de qualquer cliente |
-| **Transferência entre contas** | Caixa para banco e banco para banco, os dois lados de uma vez; mesma conta e saldo insuficiente são recusados; cancelar estorna os dois lados | **Falta.** A sangria não leva o dinheiro a nenhuma conta |
+| **Transferência entre contas** | Caixa para banco e banco para banco, os dois lados de uma vez; mesma conta e saldo insuficiente são recusados; cancelar estorna os dois lados | **Feito (2026-10-15).** A sangria cai no `1.1.02 Bancos` genérico; com várias contas bancárias, a transferência leva o dinheiro à conta certa |
 | Desativar conta | Não deixa desativar o único Caixa nem uma conta com saldo ("transfira antes") | Não há desativação de conta. Trazer junto com a transferência |
 | **Importar títulos** | Contas a pagar e a receber em lote, de planilha | Falta. É a implantação: trazer o que está em aberto no sistema antigo |
 | Parcelar título | Dividir uma conta em N parcelas mensais | O `RenegociarTitulo` já cobre, com juros e multa |
@@ -108,7 +108,14 @@ O que eles têm e o Cardeal não, com o que aprenderam:
    - o valor não se edita: corrigir valor é cancelar e lançar de novo.
 
    Mantida a lição deles: conta cancelada não se baixa.
-4. **Saldo inicial** de cada conta e **transferência entre contas**, com a desativação de conta (§4).
+4. ~~**Saldo inicial** de cada conta e **transferência entre contas**, com a desativação de conta (§4).~~
+   **Feito (2026-10-15).** As regras de lá foram mantidas:
+   - o saldo inicial é um só por conta (redefinir substitui);
+   - a transferência é atômica e cancelar estorna os dois lados;
+   - não se desativa conta com saldo nem a do caixa em uso.
+
+   Diferente de lá: só o **caixa** exige saldo para transferir. Banco pode ficar negativo (cheque
+   especial), e o saldo inicial também aceita negativo.
 5. **Comprovante não fiscal** em 80 e 58 mm, com reimpressão; o DANFCE também em 58 mm (§3).
 6. **Venda a receber no PDV**: crediário, boleto e cheque, gerando o título com vencimento e
    respeitando o limite de crédito que o cadastro já tem (§3).

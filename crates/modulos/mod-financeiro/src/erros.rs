@@ -74,6 +74,30 @@ pub enum ErroFinanceiro {
     #[error("Explique o motivo do cancelamento (ao menos 10 caracteres)")]
     MotivoDoCancelamentoCurto,
 
+    /// A conta informada não serve para esta operação (não é do Disponível, está inativa, é
+    /// de outra empresa, é uma conta do sistema…).
+    #[error("{0}")]
+    ContaDisponivelInvalida(&'static str),
+
+    /// Origem e destino da transferência são a mesma conta.
+    #[error("Escolha contas diferentes para a origem e o destino")]
+    TransferenciaParaAMesmaConta,
+
+    /// O caixa de origem não tem o dinheiro (dinheiro em espécie não fica negativo).
+    #[error("Saldo insuficiente no caixa de origem: há {disponivel}")]
+    SaldoInsuficienteNaOrigem {
+        /// O que há no caixa.
+        disponivel: Dinheiro,
+    },
+
+    /// A transferência já foi cancelada.
+    #[error("Esta transferência já foi cancelada")]
+    TransferenciaJaCancelada,
+
+    /// Desativar conta com saldo deixaria o dinheiro numa conta escondida.
+    #[error("A conta ainda tem saldo de {0}: transfira antes de desativar")]
+    ContaComSaldo(Dinheiro),
+
     /// O novo vencimento cai antes da emissão do título.
     #[error("O vencimento não pode ser antes da emissão ({0})")]
     VencimentoAntesDaEmissao(Data),
@@ -177,11 +201,15 @@ impl ErroDominio for ErroFinanceiro {
             | Self::DataDoChequeInvalida(_)
             | Self::BaixaZerada
             | Self::MotivoDoCancelamentoCurto
-            | Self::VencimentoAntesDaEmissao(_) => CodigoErro::ENTRADA_INVALIDA,
+            | Self::VencimentoAntesDaEmissao(_)
+            | Self::ContaDisponivelInvalida(_)
+            | Self::TransferenciaParaAMesmaConta => CodigoErro::ENTRADA_INVALIDA,
             Self::ParcelaDeOutroTitulo
             | Self::SemSaldoParaRenegociar
             | Self::TituloDeOutraOrigem(_)
             | Self::TituloComMovimento(_)
+            | Self::SaldoInsuficienteNaOrigem { .. }
+            | Self::ContaComSaldo(_)
             | Self::ValorSuperaSaldo { .. }
             | Self::QuebraExigeMotivo { .. }
             | Self::CaixaInativo
@@ -192,6 +220,7 @@ impl ErroDominio for ErroFinanceiro {
             | Self::CaixaJaAberto
             | Self::BaixaJaEstornada
             | Self::TituloJaCancelado
+            | Self::TransferenciaJaCancelada
             | Self::ChequeEmEstadoInvalido { .. }
             | Self::ParcelaEncerradaNaoReverte(_) => CodigoErro::ESTADO_INVALIDO,
             Self::CaixaFechado => CodigoErro::CAIXA_FECHADO,

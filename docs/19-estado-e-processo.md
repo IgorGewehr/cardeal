@@ -45,8 +45,8 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   documento criado na venda sem rede, fila, transmissão em segundo plano (tarefa no despacho), conferência
   pela chave antes de reemitir, área Notas fiscais — e o **DANFCE** (80 mm, QR Code), o **cancelamento** e a
   **inutilização** como pedidos na fila, e o **estorno da venda** no PDV com a NFC-e anulada pela fila.
-  Próximo: o backlog do `docs/21-licoes-do-gestao-raiz.md` §5 (saldo inicial e transferência entre
-  contas, comprovante não fiscal…); a 1ª autorizada no RS espera os dados do usuário.
+  Próximo: o backlog do `docs/21-licoes-do-gestao-raiz.md` §5 (comprovante não fiscal, venda a
+  receber no PDV, importação de clientes e títulos…); a 1ª autorizada no RS espera os dados do usuário.
 - **Pendência de confiança:** as tabelas do Simples e as alíquotas precisam ser conferidas com o
   contador; o ST/IPI **da nota** já entra no custo (2026-10-13), mas a estimativa de ST pela MVA (sem o valor na
   nota) ainda não.
@@ -636,6 +636,16 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   `financeiro.alterar_vencimento.v1` (`financeiro.titulo.editar`) muda o vencimento de parcela em
   aberto de qualquer origem. No diálogo da parcela, seções "Alterar vencimento" e "Cancelar esta conta"
   (com a explicação de onde desfazer quando a conta veio de outro módulo).
+- **Saldo inicial, transferência e desativar conta (2026-10-15, item 4 do doc 21):**
+  - `financeiro.definir_saldo_inicial.v1`: D conta / C Lucros acumulados, um só por conta, redefinir
+    substitui;
+  - `financeiro.transferir_entre_contas.v1` e `cancelar_transferencia` (migração v13,
+    `financeiro_transferencia`): o caixa exige saldo, o banco aceita cheque especial;
+  - `financeiro.desativar_conta.v1`: sem saldo, nunca as contas do sistema nem a de um caixa;
+  - novo `RepositorioRazao::desativar_conta`;
+  - permissões novas `financeiro.banco.editar` e `financeiro.banco.transferir`;
+  - a aba Contas bancárias ganhou Transferir, Saldo inicial e Desativar por conta e a lista das
+    transferências com Cancelar; a conta nova já pede o saldo de hoje.
 - **Inventário com contagem cega (2026-10-13):** migração `estoque` v11 (`estoque_inventario`,
   `estoque_contagem_item`), comandos `criar_inventario`/`iniciar_contagem`/`registrar_contagem`/
   `encerrar_inventario`/`cancelar_inventario` (`.v1`) e consultas `inventarios`/`posicao_do_inventario`.

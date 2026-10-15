@@ -6,6 +6,7 @@
 mod ajustes;
 mod baixa;
 mod balancete;
+mod bancos;
 mod cadastro_rapido;
 mod carga;
 mod cheques;
@@ -32,6 +33,7 @@ use std::collections::HashMap;
 
 use ajustes::*;
 use baixa::*;
+use bancos::*;
 use cadastro_rapido::*;
 use cardeal_cliente::{Motor, Sessao};
 use cardeal_kernel::{Competencia, Data, Dinheiro, Fuso, Id, Periodo};
@@ -163,6 +165,28 @@ enum Dlg {
     Recorrencias,
     NovaRecorrencia(FormRecorrencia),
     NovaContaBancaria {
+        nome: String,
+        /// O saldo de hoje, opcional — vira o saldo inicial da conta.
+        saldo: String,
+    },
+    /// O saldo inicial de uma conta do Disponível.
+    SaldoInicial {
+        conta: Id,
+        nome: String,
+        valor: String,
+        data: String,
+    },
+    /// Transferir entre contas (caixa → banco, banco → banco).
+    Transferir(FormTransferencia),
+    /// Cancelar uma transferência (estorna os dois lados).
+    CancelarTransferencia {
+        id: Id,
+        descricao: String,
+        motivo: String,
+    },
+    /// Confirmação de desativar uma conta sem saldo.
+    DesativarConta {
+        conta: Id,
         nome: String,
     },
     NovaCategoria {
@@ -459,6 +483,8 @@ pub struct EstadoTelaFinanceiro {
     /// cada `carregar` (a OS pode ter mudado).
     margens_os: HashMap<Id, Option<mod_os::MargemDaOrdemServico>>,
     contas_disp: Vec<ItemContaDisponivel>,
+    /// As transferências entre contas (aba Contas bancárias).
+    transferencias: Vec<mod_financeiro::ItemTransferencia>,
     erro: Option<String>,
     dlg: Dlg,
     /// Cadastro rápido (cliente/fornecedor/categoria) aberto por cima do `dlg` principal —
@@ -521,7 +547,7 @@ pub fn mostrar(
             match estado.aba {
                 Aba::Visao => painel_visao(ui, motor, sessao, estado),
                 Aba::Fluxo => painel_fluxo(ui, motor, sessao, estado),
-                Aba::Bancos => painel_bancos(ui, estado),
+                Aba::Bancos => painel_bancos(ui, sessao, estado),
                 Aba::Custos => painel_custos(ui, motor, sessao, estado),
                 Aba::Cobranca => painel_cobranca(ui, motor, sessao, estado),
                 Aba::Resultado => painel_dre(ui, motor, sessao, estado),
@@ -546,6 +572,12 @@ pub fn mostrar(
         Dlg::Recorrencias => dialogo_recorrencias(ui.ctx(), motor, sessao, estado),
         Dlg::NovaRecorrencia(_) => dialogo_nova_recorrencia(ui.ctx(), motor, sessao, estado),
         Dlg::NovaContaBancaria { .. } => dialogo_conta_bancaria(ui.ctx(), motor, sessao, estado),
+        Dlg::SaldoInicial { .. } => dialogo_saldo_inicial(ui.ctx(), motor, sessao, estado),
+        Dlg::Transferir(_) => dialogo_transferir(ui.ctx(), motor, sessao, estado),
+        Dlg::CancelarTransferencia { .. } => {
+            dialogo_cancelar_transferencia(ui.ctx(), motor, sessao, estado);
+        }
+        Dlg::DesativarConta { .. } => confirmar_desativacao(ui.ctx(), motor, sessao, estado),
         Dlg::NovaCategoria { .. } => dialogo_categoria(ui.ctx(), motor, sessao, estado),
     }
     if estado.dlg_rapido.is_some() {
