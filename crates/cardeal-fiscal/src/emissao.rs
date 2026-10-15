@@ -189,10 +189,12 @@ impl MeioPagamento {
         }
     }
 
-    /// Cartão exige o grupo `card` na NFC-e (aqui sempre "não integrado": POS à parte).
+    /// Pagamento eletrônico (cartão e Pix) leva o grupo `card` na NFC-e — a NT 2025.001 o exige
+    /// também no Pix (aqui sempre "não integrado": POS/QR à parte). É o que o `gestao-raiz`, em
+    /// produção, manda (`03`, `04`, `17`).
     #[must_use]
-    pub const fn e_cartao(self) -> bool {
-        matches!(self, Self::CartaoCredito | Self::CartaoDebito)
+    pub const fn exige_grupo_cartao(self) -> bool {
+        matches!(self, Self::CartaoCredito | Self::CartaoDebito | Self::Pix)
     }
 }
 

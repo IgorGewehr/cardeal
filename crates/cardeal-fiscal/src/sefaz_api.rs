@@ -336,7 +336,7 @@ pub(crate) fn nfce_json(nota: &Nfce, csc: &Csc) -> serde_json::Map<String, Value
         .iter()
         .map(|p| {
             let mut f = json!({ "tipo": p.meio.codigo(), "valor": reais(p.valor) });
-            if p.meio.e_cartao() {
+            if p.meio.exige_grupo_cartao() {
                 f["cartao"] = json!({ "tipoIntegracao": "2" });
             }
             if p.meio == crate::emissao::MeioPagamento::Outros {
@@ -615,7 +615,10 @@ mod testes {
         assert!(i2["produto"].get("valorDesconto").is_none());
         let formas = &j["pagamento"]["formas"];
         assert_eq!(formas[0]["tipo"], "17");
-        assert!(formas[0].get("cartao").is_none());
+        assert_eq!(
+            formas[0]["cartao"]["tipoIntegracao"], "2",
+            "Pix leva o grupo card"
+        );
         assert_eq!(formas[1]["tipo"], "04");
         assert_eq!(formas[1]["cartao"]["tipoIntegracao"], "2");
         assert!(j["pagamento"].get("troco").is_none());
