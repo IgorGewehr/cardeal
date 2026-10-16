@@ -188,7 +188,10 @@ impl Consulta for VendasDoPeriodo {
             .collect::<rusqlite::Result<Vec<_>>>()
             .map_err(persist)?;
         let mut pagamentos = conexao
-            .prepare("SELECT id, forma, valor FROM pdv_pagamento_cupom WHERE cupom = ?1")
+            .prepare(&format!(
+                "SELECT {} FROM pdv_pagamento_cupom WHERE cupom = ?1 ORDER BY rowid",
+                crate::repositorio::COLUNAS_PAGAMENTO
+            ))
             .map_err(persist)?;
         for v in &mut vendas {
             v.pagamentos = pagamentos

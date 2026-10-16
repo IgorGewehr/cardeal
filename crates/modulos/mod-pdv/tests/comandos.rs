@@ -109,6 +109,8 @@ fn sessao_completa(empresa: Id) -> Sessao {
         "pdv.venda.estornar",
         "pdv.venda.ver",
         "pdv.impressao.configurar",
+        "clientes.credito.definir_limite",
+        "financeiro.receber.baixar",
     ] {
         papel = papel.com_permissao(p);
     }
@@ -425,6 +427,7 @@ fn ciclo_completo_venda_de_balcao_com_um_pagamento() {
                 pagamentos: vec![PagamentoInformado {
                     forma: mod_pdv::FormaPagamentoPdv::Dinheiro,
                     valor: Dinheiro::reais(50),
+                    prazo: None,
                 }],
             }),
             &s,
@@ -510,6 +513,7 @@ fn venda_com_multiplas_formas_e_desconto_de_item() {
                 pagamentos: vec![PagamentoInformado {
                     forma: mod_pdv::FormaPagamentoPdv::Dinheiro,
                     valor: Dinheiro::reais(80),
+                    prazo: None,
                 }],
             }),
             &s,
@@ -528,10 +532,12 @@ fn venda_com_multiplas_formas_e_desconto_de_item() {
                     PagamentoInformado {
                         forma: mod_pdv::FormaPagamentoPdv::Dinheiro,
                         valor: Dinheiro::reais(50),
+                        prazo: None,
                     },
                     PagamentoInformado {
                         forma: mod_pdv::FormaPagamentoPdv::Credito,
                         valor: Dinheiro::reais(40),
+                        prazo: None,
                     },
                 ],
             }),
@@ -612,6 +618,7 @@ fn cancelar_item_recalcula_total_e_cancelar_cupom_impede_finalizar() {
                 pagamentos: vec![PagamentoInformado {
                     forma: mod_pdv::FormaPagamentoPdv::Dinheiro,
                     valor: Dinheiro::ZERO,
+                    prazo: None,
                 }],
             }),
             &s,
@@ -807,6 +814,7 @@ fn receita_por_produto_soma_so_cupons_finalizados_sem_itens_cancelados() {
             pagamentos: vec![PagamentoInformado {
                 forma: mod_pdv::FormaPagamentoPdv::Dinheiro,
                 valor: Dinheiro::reais(50),
+                prazo: None,
             }],
         }),
         &s,
@@ -946,10 +954,12 @@ fn estornar_venda_finalizada_devolve_estoque_e_zera_o_razao() {
                 PagamentoInformado {
                     forma: FormaPagamentoPdv::Dinheiro,
                     valor: Dinheiro::reais(30),
+                    prazo: None,
                 },
                 PagamentoInformado {
                     forma: FormaPagamentoPdv::Pix,
                     valor: Dinheiro::reais(20),
+                    prazo: None,
                 },
             ],
         }),
@@ -1090,6 +1100,7 @@ fn comprovante_traz_empresa_itens_cliente_e_a_impressao_configurada() {
             pagamentos: vec![PagamentoInformado {
                 forma: FormaPagamentoPdv::Dinheiro,
                 valor: Dinheiro::reais(50),
+                prazo: None,
             }],
         }),
         &s,
@@ -1138,4 +1149,223 @@ fn comprovante_traz_empresa_itens_cliente_e_a_impressao_configurada() {
     assert!(i.imprimir_ao_finalizar);
     assert_eq!(i.rodape.as_deref(), Some("Trocas em até 7 dias"));
     assert_eq!(comprovante().unwrap().impressao, i);
+}
+
+/// Abre um cupom (com ou sem cliente), põe `qtd` do produto (R$ 25 cada) e devolve o cupom.
+fn cupom_com(
+    d: &Despachante,
+    s: &Sessao,
+    amb: &Ambiente,
+    arm: &Armazenamento,
+    cen: &Cenario,
+    cliente: Option<Id>,
+    qtd: i64,
+) -> Id {
+    let cupom: CupomAberto = postcard::from_bytes(
+        &d.executar_comando(
+            "pdv.abrir_cupom.v1",
+            &carga(&AbrirCupom {
+                sessao_caixa: cen.sessao_caixa,
+                terminal: Id::novo(),
+                serie_fiscal: 1,
+                cliente,
+                tabela_preco: cen.tabela_preco,
+                local_expedicao: cen.local,
+            }),
+            s,
+            amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    d.executar_comando(
+        "pdv.adicionar_item.v1",
+        &carga(&AdicionarItem {
+            cupom: cupom.cupom,
+            produto: cen.produto,
+            variacao: None,
+            quantidade: Quantidade::unidades(qtd),
+        }),
+        s,
+        amb,
+        arm.escritor(),
+    )
+    .unwrap();
+    cupom.cupom
+}
+
+fn a_prazo(valor: Dinheiro, parcelas: u16) -> PagamentoInformado {
+    PagamentoInformado {
+        forma: FormaPagamentoPdv::Prazo,
+        valor,
+        prazo: Some(mod_pdv::CondicaoPrazo {
+            primeiro_vencimento: Data::hoje(Fuso::BRASILIA).mais_dias(30),
+            parcelas,
+            intervalo_dias: 30,
+        }),
+    }
+}
+
+#[test]
+fn venda_a_prazo_gera_conta_a_receber_respeita_o_limite_e_o_estorno_cancela() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[
+        &ModuloClientes,
+        &ModuloEstoque,
+        &ModuloFinanceiro,
+        &ModuloVendas,
+        &ModuloPdv,
+    ])
+    .unwrap();
+    let s = sessao_completa(empresa);
+    let amb = ambiente(empresa);
+    let cen = montar_cenario(&d, &s, &amb, &arm, empresa, 25);
+    let finalizar = |cupom: Id, pagamentos: Vec<PagamentoInformado>| {
+        d.executar_comando(
+            "pdv.finalizar_venda.v1",
+            &carga(&FinalizarVenda { cupom, pagamentos }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+    };
+
+    // Sem cliente, não há quem deva.
+    let anonimo = cupom_com(&d, &s, &amb, &arm, &cen, None, 1);
+    let erro = finalizar(anonimo, vec![a_prazo(Dinheiro::reais(25), 1)]).unwrap_err();
+    assert_eq!(erro.codigo, CodigoErro::ENTRADA_INVALIDA);
+    assert!(
+        erro.mensagem.contains("identifique o cliente"),
+        "{}",
+        erro.mensagem
+    );
+
+    // R$ 50: 20 no Pix, 30 a prazo em 2 parcelas.
+    let venda = cupom_com(&d, &s, &amb, &arm, &cen, Some(cen.cliente), 2);
+    let feita: VendaFoiFinalizada = postcard::from_bytes(
+        &finalizar(
+            venda,
+            vec![
+                PagamentoInformado {
+                    forma: FormaPagamentoPdv::Pix,
+                    valor: Dinheiro::reais(20),
+                    prazo: None,
+                },
+                a_prazo(Dinheiro::reais(30), 2),
+            ],
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(feita.titulo_a_receber.is_some());
+    assert_eq!(saldo_do_papel(&arm, empresa, "ClientesAReceber"), 3_000);
+    assert_eq!(saldo_do_papel(&arm, empresa, "ValoresEmTransito"), 2_000);
+    let parcelas: i64 = arm
+        .leitor()
+        .consultar(|c| {
+            c.query_row(
+                "SELECT COUNT(*) FROM financeiro_parcela WHERE titulo = ?1",
+                [feita.titulo_a_receber.unwrap().em_bytes().as_slice()],
+                |r| r.get(0),
+            )
+            .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+        })
+        .unwrap();
+    assert_eq!(parcelas, 2);
+
+    // Limite de R$ 40 com R$ 30 em aberto: cabe 10, não 25.
+    d.executar_comando(
+        "clientes.definir_limite_credito.v1",
+        &carga(&mod_clientes::DefinirLimiteCredito {
+            pessoa: cen.cliente,
+            limite: Dinheiro::reais(40),
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+    let outra = cupom_com(&d, &s, &amb, &arm, &cen, Some(cen.cliente), 1);
+    let erro = finalizar(outra, vec![a_prazo(Dinheiro::reais(25), 1)]).unwrap_err();
+    assert_eq!(erro.codigo, CodigoErro::REGRA_VIOLADA);
+    assert!(erro.mensagem.contains("10,00"), "{}", erro.mensagem);
+
+    // O estorno da venda cancela a conta a prazo (nada recebido ainda).
+    d.executar_comando(
+        "pdv.estornar_venda.v1",
+        &carga(&EstornarVenda {
+            cupom: venda,
+            motivo: "Cliente desistiu da compra".into(),
+            autorizado_por: Id::novo(),
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+    assert_eq!(saldo_do_papel(&arm, empresa, "ClientesAReceber"), 0);
+    let canceladas: i64 = arm
+        .leitor()
+        .consultar(|c| {
+            c.query_row(
+                "SELECT COUNT(*) FROM financeiro_parcela WHERE titulo = ?1 AND estado = 'Cancelada'",
+                [feita.titulo_a_receber.unwrap().em_bytes().as_slice()],
+                |r| r.get(0),
+            )
+            .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+        })
+        .unwrap();
+    assert_eq!(canceladas, 2);
+
+    // Agora cabe (o que estava em aberto saiu): vende a prazo, o cliente paga parte, e o
+    // estorno é barrado até o recebimento ser estornado.
+    let terceira = cupom_com(&d, &s, &amb, &arm, &cen, Some(cen.cliente), 1);
+    let feita: VendaFoiFinalizada =
+        postcard::from_bytes(&finalizar(terceira, vec![a_prazo(Dinheiro::reais(25), 1)]).unwrap())
+            .unwrap();
+    let parcela: Vec<u8> = arm
+        .leitor()
+        .consultar(|c| {
+            c.query_row(
+                "SELECT id FROM financeiro_parcela WHERE titulo = ?1",
+                [feita.titulo_a_receber.unwrap().em_bytes().as_slice()],
+                |r| r.get(0),
+            )
+            .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+        })
+        .unwrap();
+    d.executar_comando(
+        "financeiro.baixar_recebimento.v1",
+        &carga(&mod_financeiro::BaixarRecebimento {
+            parcela: Id::de_bytes(parcela.try_into().unwrap()),
+            valor: Dinheiro::reais(10),
+            data: Data::hoje(Fuso::BRASILIA),
+            meio_pagamento: mod_financeiro::MeioPagamento::Dinheiro,
+            conta_destino: None,
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+    let erro = d
+        .executar_comando(
+            "pdv.estornar_venda.v1",
+            &carga(&EstornarVenda {
+                cupom: terceira,
+                motivo: "Cliente desistiu da compra".into(),
+                autorizado_por: Id::novo(),
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap_err();
+    assert_eq!(erro.codigo, CodigoErro::REGRA_VIOLADA);
+    assert!(
+        erro.mensagem.contains("estorne o recebimento"),
+        "{}",
+        erro.mensagem
+    );
 }

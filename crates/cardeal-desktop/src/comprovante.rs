@@ -32,6 +32,19 @@ const fn forma(f: FormaPagamentoPdv) -> &'static str {
         FormaPagamentoPdv::Pix => "Pix",
         FormaPagamentoPdv::Debito => "Cartão de débito",
         FormaPagamentoPdv::Credito => "Cartão de crédito",
+        FormaPagamentoPdv::Prazo => "A prazo",
+    }
+}
+
+/// "A prazo (3x, 1ª em 15/11/2026)".
+fn rotulo_pagamento(p: &mod_pdv::PagamentoCupom) -> String {
+    match p.prazo {
+        Some(c) if p.forma == FormaPagamentoPdv::Prazo => format!(
+            "A prazo ({}x, 1ª em {})",
+            c.parcelas,
+            c.primeiro_vencimento.formatar()
+        ),
+        _ => forma(p.forma).to_owned(),
     }
 }
 
@@ -68,7 +81,7 @@ pub fn montar(
         pagamentos: d
             .pagamentos
             .iter()
-            .map(|p| (forma(p.forma).to_owned(), p.valor))
+            .map(|p| (rotulo_pagamento(p), p.valor))
             .collect(),
         troco,
         rodape: d.impressao.rodape.clone(),
@@ -78,6 +91,10 @@ pub fn montar(
                 .as_ref()
                 .map_or_else(String::new, |e| e.motivo.clone())
         }),
+        assinatura: d
+            .pagamentos
+            .iter()
+            .any(|p| p.forma == FormaPagamentoPdv::Prazo),
         fuso: Fuso::BRASILIA,
     }
 }
@@ -144,6 +161,7 @@ mod testes {
                 id: Id::novo(),
                 forma: FormaPagamentoPdv::Pix,
                 valor: Dinheiro::reais(25),
+                prazo: None,
             }],
             estado: EstadoCupom::Estornado,
             estorno: Some(mod_pdv::EstornoDaVenda {

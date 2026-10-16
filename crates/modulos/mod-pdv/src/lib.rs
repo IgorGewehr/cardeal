@@ -75,7 +75,8 @@ pub use consultas::{
     EstornoDaVenda, PrecoConsultado, PrecoDoProduto, VendaDoPeriodo, VendasDoPeriodo,
 };
 pub use cupom::{
-    validar_pagamentos, Cupom, EstadoCupom, FormaPagamentoPdv, ItemCupom, PagamentoCupom,
+    validar_pagamentos, CondicaoPrazo, Cupom, EstadoCupom, FormaPagamentoPdv, ItemCupom,
+    PagamentoCupom,
 };
 pub use erros::ErroPdv;
 pub use impressao::{

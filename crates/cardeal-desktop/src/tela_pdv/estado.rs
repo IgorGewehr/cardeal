@@ -76,17 +76,24 @@ pub(super) struct EstadoPagamento {
     /// `Esc`, *antes* de a tela rodar — o foco atual já seria falso no quadro do `Esc`, que
     /// então fecharia o diálogo em vez de só sair da digitação.
     pub(super) digitando: bool,
+    /// A venda a prazo: o 1º vencimento e o número de parcelas, como digitados.
+    pub(super) prazo_vencimento: String,
+    pub(super) prazo_parcelas: String,
 }
 
 impl EstadoPagamento {
     pub(super) fn nova() -> Self {
         Self {
-            valores: [Dinheiro::ZERO; 4],
+            valores: [Dinheiro::ZERO; 5],
             ativa: 0,
             digitado: String::new(),
             foco_valor: false,
             id_valor: None,
             digitando: false,
+            prazo_vencimento: cardeal_kernel::Data::hoje(cardeal_kernel::Fuso::BRASILIA)
+                .mais_dias(30)
+                .to_string(),
+            prazo_parcelas: "1".to_owned(),
         }
     }
 }

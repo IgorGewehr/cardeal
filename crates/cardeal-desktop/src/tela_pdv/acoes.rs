@@ -524,6 +524,19 @@ pub(super) fn pedir_finalizar(ctx: &egui::Context, estado: &mut EstadoTelaPdv) {
         notificar(ctx, Notificacao::aviso(a));
         return;
     }
+    if p.valores[pagamento::PRAZO] > Dinheiro::ZERO {
+        if estado.cliente.is_none() {
+            notificar(
+                ctx,
+                Notificacao::aviso("Para vender a prazo, identifique o cliente (F6)."),
+            );
+            return;
+        }
+        if let Err(a) = condicao_digitada(p) {
+            notificar(ctx, Notificacao::aviso(a));
+            return;
+        }
+    }
     estado.finalizar_pendente = true;
     notificar(
         ctx,
@@ -548,14 +561,21 @@ pub(super) fn finalizar(
         Situacao::Troco(t) => t,
         _ => Dinheiro::ZERO,
     };
-    let pagamentos = pagamento::montar(total, &p.valores);
+    let prazo = (p.valores[pagamento::PRAZO] > Dinheiro::ZERO)
+        .then(|| condicao_digitada(p).ok())
+        .flatten();
+    let pagamentos = pagamento::montar(total, &p.valores, prazo);
 
     match motor.executar(
         sessao,
         "pdv.finalizar_venda.v1",
         &FinalizarVenda { cupom, pagamentos },
     ) {
-        Ok(VendaFoiFinalizada { total, .. }) => {
+        Ok(VendaFoiFinalizada {
+            total,
+            titulo_a_receber,
+            ..
+        }) => {
             let numero = estado.cupom_numero.unwrap_or(0);
             estado.ultima_venda = Some(UltimaVenda {
                 cupom,
@@ -587,6 +607,9 @@ pub(super) fn finalizar(
             };
             if let Some(f) = nota_fiscal {
                 detalhe = format!("{detalhe} · {f}");
+            }
+            if titulo_a_receber.is_some() {
+                detalhe = format!("{detalhe} · a parte a prazo foi para Contas a receber");
             }
             notificar(
                 ctx,

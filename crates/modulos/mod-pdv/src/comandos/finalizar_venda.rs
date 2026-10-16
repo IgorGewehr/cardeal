@@ -47,6 +47,8 @@ pub struct PagamentoInformado {
     pub forma: FormaPagamentoPdv,
     /// O valor — o troco em dinheiro já vem descontado (calculado na tela, não aqui).
     pub valor: Dinheiro,
+    /// A condição, quando a forma é a prazo.
+    pub prazo: Option<crate::cupom::CondicaoPrazo>,
 }
 
 /// Finaliza a venda.
@@ -65,6 +67,140 @@ pub struct VendaFoiFinalizada {
     pub lancamento: Id,
     /// O total pago.
     pub total: Dinheiro,
+    /// A conta a receber da parte a prazo, se houve.
+    pub titulo_a_receber: Option<Id>,
+}
+
+/// A conta de um pagamento, o valor e o cliente (só na parte a prazo).
+#[cfg(feature = "sqlite")]
+type PagamentoResolvido = (Id, Dinheiro, Option<cardeal_ledger::Contraparte>);
+
+/// As contas do lançamento da venda: receita, desconto, CMV e estoque, e a conta de cada
+/// pagamento (a parte a prazo leva o cliente na partida).
+#[cfg(feature = "sqlite")]
+fn resolver_contas(
+    cupom: &crate::cupom::Cupom,
+    pagamentos: &[crate::cupom::PagamentoCupom],
+    cmv_total: Dinheiro,
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<(ContasFinalizacao, Vec<PagamentoResolvido>)> {
+    let contas = {
+        let repo = RepositorioRazao::novo(uow);
+        let resolvedor = Contas::nova(&repo, ctx.empresa);
+        ContasFinalizacao {
+            receita: resolvedor
+                .papel(PapelConta::ReceitaVendas)
+                .map_err(|e| Erro::de_dominio(&e))?,
+            descontos: if cupom.desconto.e_positivo() {
+                resolvedor
+                    .papel(PapelConta::DescontosConcedidos)
+                    .map_err(|e| Erro::de_dominio(&e))?
+            } else {
+                Id::NULO
+            },
+            cmv: if cmv_total.e_positivo() {
+                resolvedor
+                    .papel(PapelConta::Cmv)
+                    .map_err(|e| Erro::de_dominio(&e))?
+            } else {
+                Id::NULO
+            },
+            estoque: if cmv_total.e_positivo() {
+                resolvedor
+                    .papel(PapelConta::EstoqueMercadorias)
+                    .map_err(|e| Erro::de_dominio(&e))?
+            } else {
+                Id::NULO
+            },
+        }
+    };
+    let pagamentos_resolvidos = {
+        let repo = RepositorioRazao::novo(uow);
+        let resolvedor = Contas::nova(&repo, ctx.empresa);
+        pagamentos
+            .iter()
+            .map(|p| {
+                let contraparte = (p.forma == crate::cupom::FormaPagamentoPdv::Prazo)
+                    .then_some(cupom.cliente)
+                    .flatten()
+                    .map(cardeal_ledger::Contraparte::Cliente);
+                resolvedor
+                    .papel(papel_da_forma(p.forma))
+                    .map(|conta| (conta, p.valor, contraparte))
+                    .map_err(|e| Erro::de_dominio(&e))
+            })
+            .collect::<Resultado<Vec<_>>>()?
+    };
+    Ok((contas, pagamentos_resolvidos))
+}
+
+/// A parte a prazo vira conta a receber do cliente — parcelas apontando para o lançamento da
+/// venda (que já debitou Clientes a receber), sem lançar receita de novo.
+#[cfg(feature = "sqlite")]
+fn abrir_conta_a_prazo(
+    cupom: &crate::cupom::Cupom,
+    a_prazo: Option<crate::cupom::PagamentoCupom>,
+    lancamento: Id,
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<Option<Id>> {
+    Ok(match (a_prazo, cupom.cliente) {
+        (Some(p), Some(cliente)) => {
+            let c = p.prazo.expect("validar_pagamentos exige a condição");
+            let mut tcp = mod_financeiro::ConstrutorTitulo::novo(
+                ctx.empresa,
+                mod_financeiro::EspecieTitulo::Receber,
+                Some(cardeal_ledger::Contraparte::Cliente(cliente)),
+                p.valor,
+                ctx.hoje(),
+            )
+            .origem("pdv", Some(cupom.id))
+            .parcelas(c.parcelas, c.primeiro_vencimento, c.intervalo_dias)
+            .observacao(format!("Venda nº {} (PDV)", cupom.numero_terminal))
+            .construir()
+            .map_err(|e| Erro::de_dominio(&e))?;
+            for parcela in &mut tcp.parcelas {
+                parcela.lancamento = Some(lancamento);
+            }
+            mod_financeiro::RepositorioFinanceiro::novo(uow).inserir_titulo(&tcp)?;
+            Some(tcp.titulo.id)
+        }
+        _ => None,
+    })
+}
+
+/// A venda a prazo precisa de um cliente, com crédito liberado e limite que comporte o valor
+/// (o "em aberto" vem do financeiro). Sem limite cadastrado, não há teto.
+#[cfg(feature = "sqlite")]
+fn exigir_credito(
+    cupom: &crate::cupom::Cupom,
+    valor: Dinheiro,
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<()> {
+    let Some(cliente) = cupom.cliente else {
+        return Err(Erro::de_dominio(&crate::erros::ErroPdv::PrazoSemCliente));
+    };
+    let Some(limite) = mod_clientes::limite_credito_da_pessoa(uow.conexao(), cliente)? else {
+        return Ok(());
+    };
+    if limite.situacao == mod_clientes::SituacaoCredito::Bloqueado {
+        return Err(Erro::de_dominio(&crate::erros::ErroPdv::CreditoBloqueado(
+            limite.motivo_bloqueio.clone().unwrap_or_default(),
+        )));
+    }
+    let em_aberto =
+        mod_financeiro::em_aberto_a_receber_do_cliente(uow.conexao(), ctx.empresa, cliente)?;
+    let disponivel = limite.disponivel(em_aberto).disponivel;
+    if valor > disponivel {
+        return Err(Erro::de_dominio(
+            &crate::erros::ErroPdv::LimiteDeCreditoExcedido {
+                disponivel: disponivel.nao_negativo(),
+            },
+        ));
+    }
+    Ok(())
 }
 
 impl Comando for FinalizarVenda {
@@ -86,10 +222,18 @@ impl Comando for FinalizarVenda {
                 id: Id::novo(),
                 forma: p.forma,
                 valor: p.valor,
+                prazo: p.prazo,
             })
             .collect();
         validar_pagamentos(&pagamentos, cupom.total).map_err(|e| Erro::de_dominio(&e))?;
         cupom.finalizar().map_err(|e| Erro::de_dominio(&e))?;
+        let a_prazo = pagamentos
+            .iter()
+            .find(|p| p.forma == crate::cupom::FormaPagamentoPdv::Prazo)
+            .copied();
+        if let Some(p) = a_prazo {
+            exigir_credito(&cupom, p.valor, ctx, uow)?;
+        }
 
         // 3. Consumir o estoque item a item, somando o CMV apurado (quem consome é quem
         //    lança — `docs/modulos/estoque.md` §7).
@@ -110,49 +254,8 @@ impl Comando for FinalizarVenda {
         }
 
         // Resolver contas e montar o lançamento combinado (pagamentos + desconto + CMV).
-        let contas = {
-            let repo = RepositorioRazao::novo(uow);
-            let resolvedor = Contas::nova(&repo, ctx.empresa);
-            ContasFinalizacao {
-                receita: resolvedor
-                    .papel(PapelConta::ReceitaVendas)
-                    .map_err(|e| Erro::de_dominio(&e))?,
-                descontos: if cupom.desconto.e_positivo() {
-                    resolvedor
-                        .papel(PapelConta::DescontosConcedidos)
-                        .map_err(|e| Erro::de_dominio(&e))?
-                } else {
-                    Id::NULO
-                },
-                cmv: if cmv_total.e_positivo() {
-                    resolvedor
-                        .papel(PapelConta::Cmv)
-                        .map_err(|e| Erro::de_dominio(&e))?
-                } else {
-                    Id::NULO
-                },
-                estoque: if cmv_total.e_positivo() {
-                    resolvedor
-                        .papel(PapelConta::EstoqueMercadorias)
-                        .map_err(|e| Erro::de_dominio(&e))?
-                } else {
-                    Id::NULO
-                },
-            }
-        };
-        let pagamentos_resolvidos = {
-            let repo = RepositorioRazao::novo(uow);
-            let resolvedor = Contas::nova(&repo, ctx.empresa);
-            pagamentos
-                .iter()
-                .map(|p| {
-                    resolvedor
-                        .papel(papel_da_forma(p.forma))
-                        .map(|conta| (conta, p.valor))
-                        .map_err(|e| Erro::de_dominio(&e))
-                })
-                .collect::<Resultado<Vec<_>>>()?
-        };
+        let (contas, pagamentos_resolvidos) =
+            resolver_contas(&cupom, &pagamentos, cmv_total, ctx, uow)?;
 
         let lancamento_balanceado = faturar_cupom(
             &cupom,
@@ -177,6 +280,9 @@ impl Comando for FinalizarVenda {
                 repo.inserir_pagamento(cupom.id, pagamento)?;
             }
         }
+        // A parte a prazo vira conta a receber do cliente — parcelas apontando para o
+        // lançamento da venda (que já debitou Clientes a receber), sem lançar receita de novo.
+        let titulo_a_receber = abrir_conta_a_prazo(&cupom, a_prazo, lancamento, ctx, uow)?;
 
         // 5. Publicar.
         uow.publicar(VendaFinalizada {
@@ -189,6 +295,7 @@ impl Comando for FinalizarVenda {
         Ok(VendaFoiFinalizada {
             lancamento,
             total: cupom.total,
+            titulo_a_receber,
         })
     }
 }

@@ -146,7 +146,7 @@ pub use conferencia::{
     OrigemDoSaldo, SaldoDoBanco, Soma,
 };
 #[cfg(feature = "sqlite")]
-pub use consultas::titulo_da_origem;
+pub use consultas::{em_aberto_a_receber_do_cliente, titulo_da_origem};
 pub use consultas::{
     BaixasDaParcela, Caixas, Categorias, ContasDeCaixa, ContasDeResultado, ContasDisponiveis,
     ExtratoDisponivel, ItemBaixa, ItemCaixa, ItemContaDisponivel, ItemContaResultado,

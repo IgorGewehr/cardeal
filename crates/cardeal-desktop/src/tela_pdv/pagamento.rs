@@ -6,21 +6,25 @@
 //! cliente". Só o **dinheiro** dá troco: cartão e Pix pagam o valor exato.
 
 use cardeal_kernel::Dinheiro;
-use mod_pdv::{FormaPagamentoPdv, PagamentoInformado};
+use mod_pdv::{CondicaoPrazo, FormaPagamentoPdv, PagamentoInformado};
 
-/// As formas de pagamento, na ordem das teclas `1..=4`.
-pub const FORMAS: [(FormaPagamentoPdv, &str); 4] = [
+/// As formas de pagamento, na ordem das teclas `1..=5`.
+pub const FORMAS: [(FormaPagamentoPdv, &str); 5] = [
     (FormaPagamentoPdv::Dinheiro, "Dinheiro"),
     (FormaPagamentoPdv::Pix, "Pix"),
     (FormaPagamentoPdv::Debito, "Cartão de débito"),
     (FormaPagamentoPdv::Credito, "Cartão de crédito"),
+    (FormaPagamentoPdv::Prazo, "A prazo (fiado/crediário)"),
 ];
+
+/// Índice da venda a prazo em [`FORMAS`].
+pub const PRAZO: usize = 4;
 
 /// Índice do dinheiro em [`FORMAS`] — a única forma que dá troco.
 const DINHEIRO: usize = 0;
 
 /// Quanto foi informado em cada forma, na ordem de [`FORMAS`]. `ZERO` = não usada.
-pub type Valores = [Dinheiro; 4];
+pub type Valores = [Dinheiro; 5];
 
 /// Onde o pagamento está em relação ao total.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -81,9 +85,13 @@ pub fn restante_para(total: Dinheiro, valores: &Valores, indice: usize) -> Dinhe
 }
 
 /// Monta os pagamentos que o backend recebe: só as formas usadas, com o troco já
-/// descontado do dinheiro (o backend exige soma exata).
+/// descontado do dinheiro (o backend exige soma exata) e a condição na parte a prazo.
 #[must_use]
-pub fn montar(total: Dinheiro, valores: &Valores) -> Vec<PagamentoInformado> {
+pub fn montar(
+    total: Dinheiro,
+    valores: &Valores,
+    prazo: Option<CondicaoPrazo>,
+) -> Vec<PagamentoInformado> {
     let troco = match situacao(total, valores) {
         Situacao::Troco(t) => t,
         _ => Dinheiro::ZERO,
@@ -96,6 +104,7 @@ pub fn montar(total: Dinheiro, valores: &Valores) -> Vec<PagamentoInformado> {
         .map(|(i, ((forma, _), v))| PagamentoInformado {
             forma: *forma,
             valor: if i == DINHEIRO { *v - troco } else { *v },
+            prazo: if i == PRAZO { prazo } else { None },
         })
         .collect()
 }
@@ -104,12 +113,32 @@ pub fn montar(total: Dinheiro, valores: &Valores) -> Vec<PagamentoInformado> {
 mod testes {
     use super::*;
 
+    #[test]
+    fn a_parte_a_prazo_leva_a_condicao_e_as_outras_nao() {
+        let c = mod_pdv::CondicaoPrazo {
+            primeiro_vencimento: cardeal_kernel::Data::hoje(cardeal_kernel::Fuso::BRASILIA),
+            parcelas: 3,
+            intervalo_dias: 30,
+        };
+        let mut v = [Dinheiro::ZERO; 5];
+        v[1] = r(10);
+        v[PRAZO] = r(20);
+        let p = montar(r(30), &v, Some(c));
+        assert_eq!(p.len(), 2);
+        assert_eq!((p[0].forma, p[0].prazo), (FormaPagamentoPdv::Pix, None));
+        assert_eq!(
+            (p[1].forma, p[1].prazo),
+            (FormaPagamentoPdv::Prazo, Some(c))
+        );
+        assert_eq!(situacao(r(30), &v), Situacao::Fecha);
+    }
+
     fn r(n: i64) -> Dinheiro {
         Dinheiro::reais(n)
     }
 
     fn valores(dinheiro: i64, pix: i64, debito: i64, credito: i64) -> Valores {
-        [r(dinheiro), r(pix), r(debito), r(credito)]
+        [r(dinheiro), r(pix), r(debito), r(credito), Dinheiro::ZERO]
     }
 
     #[test]
@@ -173,7 +202,7 @@ mod testes {
     fn montar_desconta_o_troco_do_dinheiro_e_fecha_exato() {
         let total = r(30);
         let v = valores(50, 0, 0, 0);
-        let p = montar(total, &v);
+        let p = montar(total, &v, None);
         assert_eq!(p.len(), 1);
         assert_eq!(p[0].valor, r(30)); // 50 recebidos − 20 de troco
         let soma: Dinheiro = p.iter().fold(Dinheiro::ZERO, |a, x| a + x.valor);
@@ -182,7 +211,7 @@ mod testes {
 
     #[test]
     fn montar_ignora_formas_zeradas_e_preserva_as_usadas() {
-        let p = montar(r(30), &valores(20, 0, 10, 0));
+        let p = montar(r(30), &valores(20, 0, 10, 0), None);
         let formas: Vec<_> = p.iter().map(|x| x.forma).collect();
         assert_eq!(
             formas,

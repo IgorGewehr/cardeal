@@ -60,6 +60,8 @@ pub struct ComprovantePdf {
     pub segunda_via: bool,
     /// A venda foi estornada — o motivo.
     pub estornada: Option<String>,
+    /// Venda a prazo: a linha para o cliente assinar (reconhece a dívida).
+    pub assinatura: bool,
     /// O fuso das datas.
     pub fuso: Fuso,
 }
@@ -140,6 +142,17 @@ fn compor(c: &mut Cursor, d: &ComprovantePdf) {
         c.par("Troco", &d.troco.formatar(), Fonte::Regular);
     }
     c.tracejado();
+    if d.assinatura {
+        c.espaco(8.0);
+        c.centro("_______________________________", Fonte::Regular, corpo);
+        c.centro(
+            d.cliente.as_deref().unwrap_or("Assinatura do cliente"),
+            Fonte::Regular,
+            pequeno,
+        );
+        c.centro("Reconheço a dívida acima", Fonte::Regular, pequeno);
+        c.espaco(1.5);
+    }
     if let Some(r) = d.rodape.as_deref().map(str::trim).filter(|r| !r.is_empty()) {
         c.centro(r, Fonte::Regular, pequeno);
     }
@@ -191,6 +204,7 @@ mod testes {
             rodape: Some("Trocas em até 7 dias com este comprovante".into()),
             segunda_via: false,
             estornada: None,
+            assinatura: false,
             fuso: Fuso::BRASILIA,
         }
     }
@@ -218,9 +232,11 @@ mod testes {
         d.segunda_via = true;
         d.troco = Dinheiro::ZERO;
         d.estornada = Some("Cliente desistiu da compra".into());
+        d.assinatura = true;
         let texto = String::from_utf8_lossy(&gerar_comprovante(&d, Bobina::Mm58)).into_owned();
         assert!(texto.contains("VIA"));
         assert!(texto.contains("VENDA ESTORNADA"));
+        assert!(texto.contains("Reconhe"), "a linha de assinatura do fiado");
         assert!(!texto.contains("Troco"));
     }
 }

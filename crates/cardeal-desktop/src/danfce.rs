@@ -26,6 +26,7 @@ fn meio(m: MeioPagamento) -> &'static str {
     match m {
         MeioPagamento::Dinheiro => "Dinheiro",
         MeioPagamento::CartaoCredito => "Cartão de crédito",
+        MeioPagamento::CreditoLoja => "Crédito loja",
         MeioPagamento::CartaoDebito => "Cartão de débito",
         MeioPagamento::Pix => "Pix",
         MeioPagamento::Outros => "Outros",

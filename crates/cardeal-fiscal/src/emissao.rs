@@ -172,6 +172,8 @@ pub enum MeioPagamento {
     CartaoDebito,
     /// 17 — Pix.
     Pix,
+    /// 05 — crédito loja (a venda a prazo, o fiado, o crediário).
+    CreditoLoja,
     /// 99 — outros.
     Outros,
 }
@@ -185,6 +187,7 @@ impl MeioPagamento {
             Self::CartaoCredito => "03",
             Self::CartaoDebito => "04",
             Self::Pix => "17",
+            Self::CreditoLoja => "05",
             Self::Outros => "99",
         }
     }

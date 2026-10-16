@@ -321,6 +321,32 @@ impl Consulta for TotalPagoNoPeriodo {
     }
 }
 
+/// Quanto o cliente deve hoje: a soma do que falta das parcelas a receber em aberto dele
+/// (títulos não cancelados). É o "em aberto" que o limite de crédito confere.
+///
+/// # Errors
+/// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+#[cfg(feature = "sqlite")]
+pub fn em_aberto_a_receber_do_cliente(
+    conexao: &Connection,
+    empresa: Id,
+    cliente: Id,
+) -> Resultado<Dinheiro> {
+    conexao
+        .query_row(
+            "SELECT COALESCE(SUM(p.valor - p.valor_baixado), 0)
+             FROM financeiro_parcela p
+             JOIN financeiro_titulo t ON t.id = p.titulo
+             WHERE t.empresa = ?1 AND t.especie = 'Receber' AND t.cancelado_em IS NULL
+               AND t.contraparte_tipo = 'Cliente' AND t.contraparte_id = ?2
+               AND p.estado IN ('Aberta', 'Parcial')",
+            [blob(empresa), blob(cliente)],
+            |r| r.get::<_, i64>(0),
+        )
+        .map(Dinheiro::centavos)
+        .map_err(persist)
+}
+
 /// O título mais recente originado por um agregado de outro módulo (`origem_modulo` +
 /// `origem_id`) — o mesmo par de correlação que `Titulo` já carrega desde a origem
 /// (`docs/19-estado-e-processo.md` §1.1). Usado por telas de outro módulo (ex.: o detalhe de

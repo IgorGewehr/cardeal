@@ -181,6 +181,16 @@ impl Bancada {
 }
 
 #[test]
+fn cinco_escolhe_a_prazo_e_a_condicao_nasce_valida() {
+    let mut b = Bancada::nova(30);
+    b.quadro(vec![tecla(egui::Key::Num5)]);
+    assert_eq!(b.p().ativa, pagamento::PRAZO);
+    b.quadro(vec![]);
+    let c = condicao_digitada(b.p()).expect("hoje + 30 dias, 1 parcela");
+    assert_eq!((c.parcelas, c.intervalo_dias), (1, 30));
+}
+
+#[test]
 fn dinheiro_exato_e_f2_enter_enter() {
     // O caminho mais comum do balcão: tudo em dinheiro, valor exato.
     let mut b = Bancada::nova(30);

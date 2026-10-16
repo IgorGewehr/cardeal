@@ -58,6 +58,26 @@ pub enum ErroPdv {
     /// `CancelarCupom` exige motivo e identificação de quem autorizou (§5, `F8`).
     #[error("Cancelar o cupom inteiro exige motivo")]
     MotivoObrigatorio,
+    /// A parte a prazo veio sem condição válida.
+    #[error("Venda a prazo: {0}")]
+    CondicaoDePrazoInvalida(&'static str),
+    /// Venda a prazo sem cliente identificado — alguém tem de dever.
+    #[error("Para vender a prazo, identifique o cliente (F6)")]
+    PrazoSemCliente,
+    /// O crédito do cliente está bloqueado (só um supervisor libera, no cadastro).
+    #[error("O crédito deste cliente está bloqueado: {0}")]
+    CreditoBloqueado(String),
+    /// A venda a prazo passa do limite de crédito do cliente.
+    #[error("A venda passa do limite de crédito do cliente: disponível {disponivel}")]
+    LimiteDeCreditoExcedido {
+        /// O que ainda cabe no limite.
+        disponivel: Dinheiro,
+    },
+    /// O cliente já pagou parte da conta a prazo desta venda.
+    #[error(
+        "O cliente já pagou parte desta venda a prazo: estorne o recebimento no financeiro antes"
+    )]
+    PrazoComRecebimento,
     /// `EstornarVenda` sobre uma venda já estornada.
     #[error("Esta venda já foi estornada")]
     VendaJaEstornada,
@@ -73,13 +93,18 @@ impl ErroDominio for ErroPdv {
             | Self::PagamentoSemFormas
             | Self::CupomSemItens
             | Self::MotivoObrigatorio
-            | Self::MotivoDoEstornoCurto => CodigoErro::ENTRADA_INVALIDA,
+            | Self::MotivoDoEstornoCurto
+            | Self::CondicaoDePrazoInvalida(_)
+            | Self::PrazoSemCliente => CodigoErro::ENTRADA_INVALIDA,
             Self::DescontoAcimaDoLimite { .. } => CodigoErro::SEM_PERMISSAO,
             Self::ItemJaCancelado
             | Self::CupomEmEstadoInvalido { .. }
             | Self::CupomJaFinalizado
             | Self::VendaJaEstornada => CodigoErro::ESTADO_INVALIDO,
-            Self::SomaDePagamentosDivergente { .. } => CodigoErro::REGRA_VIOLADA,
+            Self::SomaDePagamentosDivergente { .. }
+            | Self::CreditoBloqueado(_)
+            | Self::LimiteDeCreditoExcedido { .. }
+            | Self::PrazoComRecebimento => CodigoErro::REGRA_VIOLADA,
         }
     }
 

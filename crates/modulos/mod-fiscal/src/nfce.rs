@@ -546,6 +546,7 @@ pub(crate) mod sqlite {
                     mod_pdv::FormaPagamentoPdv::Pix => MeioPagamento::Pix,
                     mod_pdv::FormaPagamentoPdv::Debito => MeioPagamento::CartaoDebito,
                     mod_pdv::FormaPagamentoPdv::Credito => MeioPagamento::CartaoCredito,
+                    mod_pdv::FormaPagamentoPdv::Prazo => MeioPagamento::CreditoLoja,
                 };
                 (meio, p.valor)
             })

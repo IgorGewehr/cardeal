@@ -99,6 +99,7 @@ pub(super) fn dialogo_pagamento(ctx: &egui::Context, estado: &mut EstadoTelaPdv)
 
 pub(super) fn corpo_pagamento(ui: &mut egui::Ui, estado: &mut EstadoTelaPdv) {
     let total = estado.total;
+    let cliente = estado.cliente.as_ref().map(|(_, nome)| nome.clone());
     let Dlg::Pagamento(p) = &mut estado.dlg else {
         return;
     };
@@ -139,12 +140,13 @@ pub(super) fn corpo_pagamento(ui: &mut egui::Ui, estado: &mut EstadoTelaPdv) {
         notificar(ui.ctx(), Notificacao::aviso("Valor inválido (ex.: 20,00)."));
         p.foco_valor = true;
     }
-    p.digitando = resp.has_focus() || p.foco_valor;
+    let em_prazo = condicao_prazo(ui, p, cliente.as_deref());
+    p.digitando = resp.has_focus() || p.foco_valor || em_prazo;
 
     ui.add_space(Espaco::E12);
     ui.horizontal_wrapped(|ui| {
         for (tecla, texto) in [
-            ("1–4", "escolhe a forma"),
+            ("1–5", "escolhe a forma"),
             ("Enter", "confirma o valor"),
             ("F2", "finaliza"),
             ("Esc", "volta"),
@@ -154,6 +156,65 @@ pub(super) fn corpo_pagamento(ui: &mut egui::Ui, estado: &mut EstadoTelaPdv) {
             ui.add_space(Espaco::E8);
         }
     });
+}
+
+/// A condição da venda a prazo, quando a forma está em uso ou escolhida. Devolve se um dos
+/// campos tem o foco (aí os dígitos são texto, não escolha de forma).
+fn condicao_prazo(ui: &mut egui::Ui, p: &mut EstadoPagamento, cliente: Option<&str>) -> bool {
+    if p.valores[pagamento::PRAZO] == Dinheiro::ZERO && p.ativa != pagamento::PRAZO {
+        return false;
+    }
+    let mut foco = false;
+    ui.add_space(Espaco::E8);
+    Painel::novo()
+        .realce(Tom::Atencao)
+        .compacto()
+        .mostrar(ui, |ui| {
+            match cliente {
+                Some(nome) => ui.add(Rotulo::campo(format!("A prazo para {nome}"))),
+                None => ui.add(
+                    Rotulo::campo("Para vender a prazo, identifique o cliente (F6).")
+                        .cor(ui.cores().negativo),
+                ),
+            };
+            ui.add_space(Espaco::E4);
+            let (r1, r2) = ui.columns(2, |c| {
+                (
+                    c[0].add(
+                        Campo::novo("1º vencimento", &mut p.prazo_vencimento)
+                            .mascara(Mascara::Data),
+                    ),
+                    c[1].add(Campo::novo(
+                        "Parcelas (a cada 30 dias)",
+                        &mut p.prazo_parcelas,
+                    )),
+                )
+            });
+            foco = r1.has_focus() || r2.has_focus();
+        });
+    foco
+}
+
+/// A condição digitada, validada — ou o aviso do que falta.
+pub(super) fn condicao_digitada(
+    p: &EstadoPagamento,
+) -> Result<mod_pdv::CondicaoPrazo, &'static str> {
+    let primeiro_vencimento = p
+        .prazo_vencimento
+        .parse::<cardeal_kernel::Data>()
+        .map_err(|_| "Informe o 1º vencimento (dd/mm/aaaa).")?;
+    let parcelas = p
+        .prazo_parcelas
+        .trim()
+        .parse::<u16>()
+        .ok()
+        .filter(|n| (1..=24).contains(n))
+        .ok_or("Parcelas: de 1 a 24.")?;
+    Ok(mod_pdv::CondicaoPrazo {
+        primeiro_vencimento,
+        parcelas,
+        intervalo_dias: 30,
+    })
 }
 
 /// Total · recebido · o que falta (ou o troco), com o terceiro em destaque.

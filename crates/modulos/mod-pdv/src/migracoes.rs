@@ -103,6 +103,25 @@ CREATE TABLE pdv_preferencias (
 ) STRICT;
 ";
 
+/// v4: a venda a prazo — a forma `Prazo` e a condição (1º vencimento, parcelas, intervalo) no
+/// pagamento. O SQLite não muda um `CHECK`: a tabela é recriada (nenhuma outra aponta para ela).
+const SQL_PRAZO: &str = r"
+CREATE TABLE pdv_pagamento_cupom_v4 (
+    id                  BLOB PRIMARY KEY,
+    cupom               BLOB    NOT NULL REFERENCES pdv_cupom(id),
+    forma               TEXT    NOT NULL CHECK (forma IN ('Dinheiro','Pix','Debito','Credito','Prazo')),
+    valor               INTEGER NOT NULL,
+    primeiro_vencimento INTEGER,
+    parcelas            INTEGER,
+    intervalo_dias      INTEGER
+) STRICT;
+INSERT INTO pdv_pagamento_cupom_v4 (id, cupom, forma, valor)
+SELECT id, cupom, forma, valor FROM pdv_pagamento_cupom ORDER BY rowid;
+DROP TABLE pdv_pagamento_cupom;
+ALTER TABLE pdv_pagamento_cupom_v4 RENAME TO pdv_pagamento_cupom;
+CREATE INDEX pdv_pagamento_cupom_cupom ON pdv_pagamento_cupom(cupom);
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -120,6 +139,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 3,
         nome: "pdv_preferencias_de_impressao",
         sql: SQL_IMPRESSAO,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 4,
+        nome: "pdv_venda_a_prazo",
+        sql: SQL_PRAZO,
         tipo: TipoMigracao::Esquema,
     },
 ];

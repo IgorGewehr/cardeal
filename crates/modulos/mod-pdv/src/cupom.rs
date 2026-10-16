@@ -150,6 +150,20 @@ pub enum FormaPagamentoPdv {
     Debito,
     /// Cartão de crédito.
     Credito,
+    /// A prazo — fiado, crediário, boleto: vira conta a receber do cliente identificado, com
+    /// vencimento e parcelas ([`CondicaoPrazo`]).
+    Prazo,
+}
+
+/// A condição da parte a prazo de uma venda.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CondicaoPrazo {
+    /// O vencimento da primeira parcela.
+    pub primeiro_vencimento: cardeal_kernel::Data,
+    /// Quantas parcelas (1 a 24).
+    pub parcelas: u16,
+    /// Dias entre as parcelas.
+    pub intervalo_dias: i32,
 }
 
 /// Uma parcela do pagamento de um cupom.
@@ -162,6 +176,8 @@ pub struct PagamentoCupom {
     /// O valor recebido nesta forma — o troco em dinheiro já vem descontado (§10: o troco é
     /// calculado e mostrado na tela, mas não é dinheiro que a empresa fica).
     pub valor: Dinheiro,
+    /// A condição, quando a forma é [`FormaPagamentoPdv::Prazo`].
+    pub prazo: Option<CondicaoPrazo>,
 }
 
 fn soma_itens(itens: &[ItemCupom]) -> (Dinheiro, Dinheiro) {
@@ -366,6 +382,30 @@ pub fn validar_pagamentos(pagamentos: &[PagamentoCupom], total: Dinheiro) -> Res
             total,
         });
     }
+    let a_prazo: Vec<_> = pagamentos
+        .iter()
+        .filter(|p| p.forma == FormaPagamentoPdv::Prazo)
+        .collect();
+    if a_prazo.len() > 1 {
+        return Err(ErroPdv::CondicaoDePrazoInvalida(
+            "informe a parte a prazo numa forma só",
+        ));
+    }
+    for p in a_prazo {
+        let Some(c) = p.prazo else {
+            return Err(ErroPdv::CondicaoDePrazoInvalida(
+                "informe o vencimento e as parcelas",
+            ));
+        };
+        if !(1..=24).contains(&c.parcelas) {
+            return Err(ErroPdv::CondicaoDePrazoInvalida("de 1 a 24 parcelas"));
+        }
+        if c.parcelas > 1 && !(1..=365).contains(&c.intervalo_dias) {
+            return Err(ErroPdv::CondicaoDePrazoInvalida(
+                "o intervalo entre as parcelas vai de 1 a 365 dias",
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -537,11 +577,13 @@ mod testes {
                 id: Id::novo(),
                 forma: FormaPagamentoPdv::Dinheiro,
                 valor: Dinheiro::reais(20),
+                prazo: None,
             },
             PagamentoCupom {
                 id: Id::novo(),
                 forma: FormaPagamentoPdv::Debito,
                 valor: Dinheiro::centavos(1134),
+                prazo: None,
             },
         ];
         validar_pagamentos(&pagamentos, Dinheiro::centavos(3134)).unwrap();

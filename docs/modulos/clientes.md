@@ -12,7 +12,9 @@
 - Valida CPF/CNPJ (dígito verificador) e consulta o cadastro na SEFAZ via `PortaFiscal` para
   pré-preencher razão social, endereço e situação cadastral.
 - Detecta e resolve **duplicidade** — por documento (certeza) e por similaridade de nome (sugestão).
-- Mantém **limite de crédito** por cliente, com bloqueio automático e liberação por supervisor.
+- Mantém **limite de crédito** por cliente, com bloqueio automático e liberação por supervisor. O PDV o
+  respeita na venda a prazo (2026-10-16): crédito bloqueado ou valor acima de `limite − em aberto` é
+  recusado; sem limite cadastrado, não há teto.
 - Calcula um **score interno de pagamento** a partir do histórico de baixas do financeiro (via evento,
   nunca por leitura direta de tabela de outro módulo).
 - Mantém **carteira de vendedor** (quais clientes pertencem a qual vendedor) e o vínculo opcional de

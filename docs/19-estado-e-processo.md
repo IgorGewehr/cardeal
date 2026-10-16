@@ -45,8 +45,8 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   documento criado na venda sem rede, fila, transmissão em segundo plano (tarefa no despacho), conferência
   pela chave antes de reemitir, área Notas fiscais — e o **DANFCE** (80 mm, QR Code), o **cancelamento** e a
   **inutilização** como pedidos na fila, e o **estorno da venda** no PDV com a NFC-e anulada pela fila.
-  Próximo: o backlog do `docs/21-licoes-do-gestao-raiz.md` §5 (venda a receber no PDV, importação
-  de clientes e títulos, desconto no total…); a 1ª autorizada no RS espera os dados do usuário.
+  Próximo: o backlog do `docs/21-licoes-do-gestao-raiz.md` §5 (importação de clientes e títulos,
+  desconto no total e busca de cliente no PDV…); a 1ª autorizada no RS espera os dados do usuário.
 - **Pendência de confiança:** as tabelas do Simples e as alíquotas precisam ser conferidas com o
   contador; o ST/IPI **da nota** já entra no custo (2026-10-13), mas a estimativa de ST pela MVA (sem o valor na
   nota) ainda não.
@@ -655,6 +655,16 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   - desktop: "Imprimir comprovante" na última venda e em Vendas de hoje (2ª via), comprovante
     automático opcional e a aba Configurações › Impressão. Conferido em imagem: o comprovante de 58 mm
     soma certo e fica legível.
+- **Venda a prazo no PDV (2026-10-16, item 6 do doc 21):**
+  - forma `Prazo` com `CondicaoPrazo`; o `pdv` v4 recria `pdv_pagamento_cupom` com a forma e a
+    condição;
+  - cliente obrigatório; crédito bloqueado ou acima do limite é recusado (novo
+    `mod_financeiro::em_aberto_a_receber_do_cliente`);
+  - o título a receber nasce ligado ao lançamento da venda (D Clientes a receber com o cliente);
+  - o estorno cancela o título sem recebimento;
+  - NFC-e `tPag 05` (`MeioPagamento::CreditoLoja`);
+  - desktop: tecla `5` no pagamento com 1º vencimento e parcelas; o comprovante mostra "A prazo (Nx,
+    1ª em …)" e a linha de assinatura.
 - **Inventário com contagem cega (2026-10-13):** migração `estoque` v11 (`estoque_inventario`,
   `estoque_contagem_item`), comandos `criar_inventario`/`iniciar_contagem`/`registrar_contagem`/
   `encerrar_inventario`/`cancelar_inventario` (`.v1`) e consultas `inventarios`/`posicao_do_inventario`.

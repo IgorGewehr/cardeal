@@ -104,6 +104,7 @@ fn forma_rotulo(f: FormaPagamentoPdv) -> &'static str {
         FormaPagamentoPdv::Pix => "Pix",
         FormaPagamentoPdv::Debito => "Débito",
         FormaPagamentoPdv::Credito => "Crédito",
+        FormaPagamentoPdv::Prazo => "A prazo",
     }
 }
 
@@ -538,6 +539,7 @@ mod testes {
             id: Id::novo(),
             forma,
             valor: Dinheiro::reais(reais),
+            prazo: None,
         };
         let estorno = VendaFoiEstornada {
             lancamentos: vec![],
@@ -705,6 +707,7 @@ mod testes {
                     pagamentos: vec![mod_pdv::PagamentoInformado {
                         forma: FormaPagamentoPdv::Dinheiro,
                         valor: Dinheiro::reais(25),
+                        prazo: None,
                     }],
                 },
             )

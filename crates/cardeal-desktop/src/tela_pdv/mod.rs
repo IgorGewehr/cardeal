@@ -31,7 +31,7 @@ use cardeal_kernel::texto::casa_por_palavras;
 use cardeal_kernel::{Arredondamento, Dinheiro, Id, Percentual, Preco, Quantidade};
 use cardeal_modkit::Icone;
 use cardeal_ui::atoms::{Botao, Divisor, Etiqueta, Rotulo, Tecla, Tom};
-use cardeal_ui::molecules::{Campo, CampoBusca, EstadoVazio, ItemDeLista, SeletorOpcao};
+use cardeal_ui::molecules::{Campo, CampoBusca, EstadoVazio, ItemDeLista, Mascara, SeletorOpcao};
 use cardeal_ui::organisms::{
     notificar, ColunaGrade, Dialogo, Grade, LayoutTela, Notificacao, Painel,
 };
@@ -65,11 +65,12 @@ const SERIE_FISCAL: i64 = 1;
 /// Quantos resultados de busca por nome a lista mostra.
 const MAX_RESULTADOS: usize = 8;
 /// As teclas `1..=4` escolhem a forma de pagamento, na ordem de [`FORMAS`].
-const TECLAS_FORMA: [egui::Key; 4] = [
+const TECLAS_FORMA: [egui::Key; 5] = [
     egui::Key::Num1,
     egui::Key::Num2,
     egui::Key::Num3,
     egui::Key::Num4,
+    egui::Key::Num5,
 ];
 
 /// Consome uma tecla (sem modificador) — assim nenhum outro widget a vê. Devolve se estava

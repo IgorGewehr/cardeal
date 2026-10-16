@@ -120,8 +120,21 @@ O que eles têm e o Cardeal não, com o que aprenderam:
    **Feito (2026-10-15).** Lá o recibo da venda é só na tela; o que imprime é o DANFE, com as
    escolhas de papel (80, 58 mm, A4) e de impressão automática, que trouxemos para cá. Aqui há também
    o comprovante não fiscal impresso, com rodapé configurável, 2ª via e a marca de venda estornada.
-6. **Venda a receber no PDV**: crediário, boleto e cheque, gerando o título com vencimento e
-   respeitando o limite de crédito que o cadastro já tem (§3).
+6. ~~**Venda a receber no PDV**: crediário, boleto e cheque, gerando o título com vencimento e
+   respeitando o limite de crédito que o cadastro já tem (§3).~~ **Feito (2026-10-16).** Lá:
+   - boleto e cheque viram conta a receber com vencimento fixo em 30 dias;
+   - o cliente é opcional ("Consumidor Final");
+   - não há limite.
+
+   Aqui:
+   - uma forma "A prazo" com 1º vencimento e parcelas;
+   - cliente obrigatório; respeita bloqueio e limite;
+   - o título aponta para o lançamento da venda (sem receita em dobro);
+   - o estorno da venda cancela o título se nada foi recebido;
+   - a NFC-e leva `tPag 05`;
+   - o comprovante ganha a linha de assinatura do cliente.
+
+   O cheque à vista continua pelo registro de cheque do financeiro, sobre a parcela.
 7. **Implantação por planilha**: clientes e títulos em aberto.
 8. **Desconto no total** e **busca de cliente** no PDV.
 9. **Notas recebidas pela SEFAZ (DFe) e manifestação.** Fluxo deles (`lib/fiscal/sefaz-distribuicao.ts`):

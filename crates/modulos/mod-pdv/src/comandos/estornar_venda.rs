@@ -58,6 +58,31 @@ pub struct VendaFoiEstornada {
     pub devolver: Vec<PagamentoCupom>,
 }
 
+/// Cancela o título a receber da parte a prazo da venda, se houver e não tiver recebimento.
+#[cfg(feature = "sqlite")]
+fn cancelar_conta_a_prazo(cupom: Id, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<()> {
+    let Some(mut titulo) =
+        mod_financeiro::titulo_da_origem(uow.conexao(), ctx.empresa, "pdv", cupom)?
+            .filter(|t| !t.esta_cancelado())
+    else {
+        return Ok(());
+    };
+    let mut repo = mod_financeiro::RepositorioFinanceiro::novo(uow);
+    let parcelas = repo.parcelas_do_titulo(titulo.id)?;
+    if parcelas
+        .iter()
+        .any(|p| p.valor_baixado.e_positivo() || p.estado != mod_financeiro::EstadoParcela::Aberta)
+    {
+        return Err(Erro::de_dominio(&ErroPdv::PrazoComRecebimento));
+    }
+    for mut p in parcelas {
+        p.cancelar();
+        repo.atualizar_parcela(&p)?;
+    }
+    titulo.cancelar(ctx.agora);
+    repo.atualizar_titulo_cancelado(&titulo)
+}
+
 impl Comando for EstornarVenda {
     type Saida = VendaFoiEstornada;
     const PERMISSAO: &'static str = "pdv.venda.estornar";
@@ -98,17 +123,21 @@ impl Comando for EstornarVenda {
                 .collect::<Resultado<Vec<_>>>()?
         };
 
-        // 4. Devolver a mercadoria, ao custo em que saiu.
+        // 4. A conta a prazo da venda some junto — o lançamento estornado acima já desfez o
+        //    Clientes a receber; se o cliente já pagou parte, o recebimento é estornado antes.
+        cancelar_conta_a_prazo(cupom.id, ctx, uow)?;
+
+        // 5. Devolver a mercadoria, ao custo em que saiu.
         let devolvidos = mod_estoque::devolver_saidas_da_origem("pdv", cupom.id, ctx, uow)?;
 
-        // 5. Persistir.
+        // 6. Persistir.
         {
             let mut repo = RepositorioPdv::novo(uow);
             repo.atualizar_cupom(&cupom)?;
             repo.inserir_estorno(&cupom, &motivo, self.autorizado_por, ctx.usuario, ctx.agora)?;
         }
 
-        // 6. Publicar.
+        // 7. Publicar.
         uow.publicar(VendaEstornada {
             cupom: cupom.id,
             terminal: cupom.terminal,

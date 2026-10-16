@@ -308,7 +308,10 @@ impl Consulta for ComprovanteDaVenda {
         }
         let estorno = estorno_do_cupom(c, self.cupom)?;
         let pagamentos = c
-            .prepare("SELECT id, forma, valor FROM pdv_pagamento_cupom WHERE cupom = ?1")
+            .prepare(&format!(
+                "SELECT {} FROM pdv_pagamento_cupom WHERE cupom = ?1 ORDER BY rowid",
+                crate::repositorio::COLUNAS_PAGAMENTO
+            ))
             .map_err(persist)?
             .query_map([blob(self.cupom)], pagamento_de_linha)
             .map_err(persist)?

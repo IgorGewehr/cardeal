@@ -426,6 +426,7 @@ impl Mundo {
                 pagamentos: vec![PagamentoInformado {
                     forma: mod_pdv::FormaPagamentoPdv::Dinheiro,
                     valor: Dinheiro::reais(25 * qtd),
+                    prazo: None,
                 }],
             },
         )

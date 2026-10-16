@@ -82,5 +82,6 @@ pub(crate) const fn papel_da_forma(forma: FormaPagamentoPdv) -> PapelConta {
         FormaPagamentoPdv::Dinheiro => PapelConta::Caixa,
         FormaPagamentoPdv::Pix => PapelConta::ValoresEmTransito,
         FormaPagamentoPdv::Debito | FormaPagamentoPdv::Credito => PapelConta::CartoesAReceber,
+        FormaPagamentoPdv::Prazo => PapelConta::ClientesAReceber,
     }
 }
