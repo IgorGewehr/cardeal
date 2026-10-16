@@ -147,7 +147,22 @@ const MIGRACOES: &[Migracao] = &[
         sql: SQL_PRAZO,
         tipo: TipoMigracao::Esquema,
     },
+    Migracao {
+        versao: 5,
+        nome: "pdv_desconto_no_total",
+        sql: SQL_DESCONTO_NO_TOTAL,
+        tipo: TipoMigracao::Esquema,
+    },
 ];
+
+// O desconto no total da venda aberta (`Shift+F5`): a regra (percentual ou valor). Ao
+// finalizar ele é rateado entre os itens e as colunas voltam a NULL. `ADD COLUMN` em vez de
+// recriar a tabela: `pdv_cupom` é referenciada por itens, pagamentos e estorno.
+const SQL_DESCONTO_NO_TOTAL: &str = r"
+ALTER TABLE pdv_cupom ADD COLUMN desconto_total_tipo TEXT
+    CHECK (desconto_total_tipo IN ('Percentual', 'Valor'));
+ALTER TABLE pdv_cupom ADD COLUMN desconto_total_valor INTEGER;
+";
 
 /// O conjunto de migrações do módulo de PDV.
 #[must_use]

@@ -12,7 +12,10 @@ use rusqlite::OptionalExtension;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
-use crate::acesso::{autenticar_usuario, sessao_de_usuario_ativo, sincronizar_papel_admin};
+use crate::acesso::{
+    autenticar_usuario, sessao_de_usuario_ativo, sincronizar_papeis_de_fabrica,
+    sincronizar_papel_admin,
+};
 use crate::plano::Plano;
 use crate::{como_erro_armazenamento, erro_armazenamento};
 
@@ -132,6 +135,7 @@ impl MotorLocal {
         if !em_dia && empresa_persistida.is_some() {
             for e in crate::organizacao::ids_das_empresas(&arm)? {
                 sincronizar_papel_admin(&arm, e, &plano.conjunto)?;
+                sincronizar_papeis_de_fabrica(&arm, e, &plano.conjunto)?;
             }
             // Só depois de tudo verificado — e só com empresa: uma base nova ainda passa pelo
             // primeiro acesso, e a próxima abertura precisa sincronizar o admin criado nele.
@@ -212,6 +216,7 @@ impl MotorLocal {
                 for p in permissoes {
                     papel = papel.com_permissao(p);
                 }
+                papel.limites = cardeal_auth::PapelDeFabrica::Administrador.limites_padrao();
                 let usuario = Usuario::novo(admin_login, admin_nome, &admin_senha, PoliticaSenha::PADRAO, agora)
                     .map_err(|e| como_erro_armazenamento(&e))?;
 

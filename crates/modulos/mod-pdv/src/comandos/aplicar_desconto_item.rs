@@ -47,6 +47,12 @@ impl Comando for AplicarDescontoItem {
             .map_err(|e| Erro::de_dominio(&e))?;
         let item = item.clone();
         cupom.recalcular();
+        // Com desconto no total, o teto vale para a venda inteira.
+        if cupom.desconto_no_total.is_some() {
+            cupom
+                .conferir_teto(limite_desconto(ctx))
+                .map_err(|e| Erro::de_dominio(&e))?;
+        }
 
         // 4. Persistir.
         let mut repo = RepositorioPdv::novo(uow);

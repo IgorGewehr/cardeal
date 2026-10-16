@@ -29,7 +29,7 @@ use mod_estoque::{registrar_saida_comum, DadosSaida};
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "sqlite")]
-use crate::comandos::{autoria_de, carregar_cupom, papel_da_forma};
+use crate::comandos::{autoria_de, carregar_cupom, limite_desconto, papel_da_forma};
 use crate::cupom::FormaPagamentoPdv;
 #[cfg(feature = "sqlite")]
 use crate::cupom::{validar_pagamentos, PagamentoCupom};
@@ -213,6 +213,7 @@ impl Comando for FinalizarVenda {
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         // 1. Carregar.
         let mut cupom = carregar_cupom(uow, self.cupom)?;
+        let rateado = ratear_desconto_no_total(&mut cupom, ctx)?;
 
         // 2. Validar (domínio puro): soma dos pagamentos e a transição de estado.
         let pagamentos: Vec<PagamentoCupom> = self
@@ -276,6 +277,11 @@ impl Comando for FinalizarVenda {
         {
             let mut repo = RepositorioPdv::novo(uow);
             repo.atualizar_cupom(&cupom)?;
+            if rateado {
+                for item in cupom.itens.iter().filter(|i| !i.cancelado) {
+                    repo.atualizar_item(item)?;
+                }
+            }
             for pagamento in &pagamentos {
                 repo.inserir_pagamento(cupom.id, pagamento)?;
             }
@@ -298,4 +304,21 @@ impl Comando for FinalizarVenda {
             titulo_a_receber,
         })
     }
+}
+
+/// O desconto no total (`Shift+F5`) passa a morar nos itens antes de tudo — a NFC-e, o
+/// comprovante e o estorno leem o desconto de cada item. Confere de novo o teto de quem
+/// finaliza: um item cancelado depois de um desconto em valor sobe o percentual da venda.
+/// Devolve se havia o que ratear (os itens precisam ser regravados).
+#[cfg(feature = "sqlite")]
+fn ratear_desconto_no_total(cupom: &mut crate::cupom::Cupom, ctx: &Ctx) -> Resultado<bool> {
+    if cupom.desconto_no_total.is_none() {
+        return Ok(false);
+    }
+    cupom.recalcular();
+    cupom
+        .conferir_teto(limite_desconto(ctx))
+        .map_err(|e| Erro::de_dominio(&e))?;
+    cupom.ratear_desconto_no_total();
+    Ok(true)
 }

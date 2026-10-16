@@ -1369,3 +1369,102 @@ fn venda_a_prazo_gera_conta_a_receber_respeita_o_limite_e_o_estorno_cancela() {
         erro.mensagem
     );
 }
+
+#[test]
+fn desconto_no_total_respeita_o_teto_da_venda_e_vai_para_os_itens_ao_finalizar() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[
+        &ModuloClientes,
+        &ModuloEstoque,
+        &ModuloFinanceiro,
+        &ModuloVendas,
+        &ModuloPdv,
+    ])
+    .unwrap();
+    let s = sessao_completa(empresa); // teto de 10%
+    let amb = ambiente(empresa);
+    let cen = montar_cenario(&d, &s, &amb, &arm, empresa, 25);
+    let cupom = cupom_com(&d, &s, &amb, &arm, &cen, None, 2); // R$ 50
+    let dar = |desconto: Option<mod_pdv::DescontoNoTotal>| {
+        d.executar_comando(
+            "pdv.aplicar_desconto_no_total.v1",
+            &carga(&mod_pdv::AplicarDescontoNoTotal { cupom, desconto }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+    };
+
+    // R$ 5 (10%) cabe; R$ 6 (12%) não.
+    let feito: mod_pdv::DescontoNoTotalAplicado = postcard::from_bytes(
+        &dar(Some(mod_pdv::DescontoNoTotal::Valor(Dinheiro::reais(5)))).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(feito.total, Dinheiro::reais(45));
+    let erro = dar(Some(mod_pdv::DescontoNoTotal::Valor(Dinheiro::reais(6)))).unwrap_err();
+    assert_eq!(erro.codigo, CodigoErro::SEM_PERMISSAO);
+    assert!(erro.mensagem.contains("5,00"), "{}", erro.mensagem);
+
+    // Com o total já no teto, o desconto no item passaria da venda: recusado.
+    let item: Vec<u8> = arm
+        .leitor()
+        .consultar(|c| {
+            c.query_row(
+                "SELECT id FROM pdv_item_cupom WHERE cupom = ?1",
+                [cupom.em_bytes().as_slice()],
+                |r| r.get(0),
+            )
+            .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+        })
+        .unwrap();
+    let erro = d
+        .executar_comando(
+            "pdv.aplicar_desconto_item.v1",
+            &carga(&AplicarDescontoItem {
+                cupom,
+                item: Id::de_bytes(item.try_into().unwrap()),
+                desconto_percentual: Percentual::pontos(10),
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap_err();
+    assert_eq!(erro.codigo, CodigoErro::SEM_PERMISSAO);
+
+    // Finaliza: o desconto vai para os itens, o lançamento leva os R$ 5 de desconto.
+    let feita: VendaFoiFinalizada = postcard::from_bytes(
+        &d.executar_comando(
+            "pdv.finalizar_venda.v1",
+            &carga(&FinalizarVenda {
+                cupom,
+                pagamentos: vec![PagamentoInformado {
+                    forma: FormaPagamentoPdv::Dinheiro,
+                    valor: Dinheiro::reais(45),
+                    prazo: None,
+                }],
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(feita.total, Dinheiro::reais(45));
+    let (desconto_itens, regra): (i64, Option<String>) = arm
+        .leitor()
+        .consultar(|c| {
+            c.query_row(
+                "SELECT (SELECT SUM(desconto_valor) FROM pdv_item_cupom WHERE cupom = ?1),
+                        desconto_total_tipo
+                 FROM pdv_cupom WHERE id = ?1",
+                [cupom.em_bytes().as_slice()],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+        })
+        .unwrap();
+    assert_eq!((desconto_itens, regra), (500, None));
+    assert_eq!(saldo_do_papel(&arm, empresa, "DescontosConcedidos"), 500);
+}

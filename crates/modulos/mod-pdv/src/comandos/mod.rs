@@ -5,6 +5,7 @@
 mod abrir_cupom;
 mod adicionar_item;
 mod aplicar_desconto_item;
+mod aplicar_desconto_total;
 mod cancelar_cupom;
 mod cancelar_item;
 mod estornar_venda;
@@ -14,6 +15,7 @@ mod identificar_cliente;
 pub use abrir_cupom::{AbrirCupom, CupomAberto};
 pub use adicionar_item::{AdicionarItem, ItemFoiAdicionado};
 pub use aplicar_desconto_item::AplicarDescontoItem;
+pub use aplicar_desconto_total::{AplicarDescontoNoTotal, DescontoNoTotalAplicado};
 pub use cancelar_cupom::CancelarCupom;
 pub use cancelar_item::CancelarItem;
 pub use estornar_venda::{

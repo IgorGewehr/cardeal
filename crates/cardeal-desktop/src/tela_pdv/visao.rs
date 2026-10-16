@@ -382,7 +382,7 @@ pub(super) fn detalhe(ui: &mut egui::Ui, estado: &mut EstadoTelaPdv) {
     let descontos = estado
         .ativos()
         .map(|l| l.bruto() - l.total)
-        .fold(Dinheiro::ZERO, |a, b| a + b);
+        .fold(estado.valor_do_desconto_no_total(), |a, b| a + b);
     let total = estado.total;
     let cliente = estado.cliente.as_ref().map(|c| c.1.clone());
     Painel::novo().mostrar(ui, |ui| {
@@ -459,6 +459,18 @@ pub(super) fn acoes(ui: &mut egui::Ui, estado: &mut EstadoTelaPdv) {
             estado.pendentes.push(Acao::CancelarLinha);
         }
     });
+    ui.add_space(Espaco::E8);
+    if ui
+        .add(
+            Botao::secundario("Desconto no total")
+                .atalho("Shift+F5")
+                .preenche_largura()
+                .habilitado(tem_itens),
+        )
+        .clicked()
+    {
+        estado.pendentes.push(Acao::AbrirDescontoTotal);
+    }
     ui.add_space(Espaco::E8);
     if ui
         .add(

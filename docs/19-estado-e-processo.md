@@ -45,8 +45,9 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   documento criado na venda sem rede, fila, transmissão em segundo plano (tarefa no despacho), conferência
   pela chave antes de reemitir, área Notas fiscais — e o **DANFCE** (80 mm, QR Code), o **cancelamento** e a
   **inutilização** como pedidos na fila, e o **estorno da venda** no PDV com a NFC-e anulada pela fila.
-  Próximo: o backlog do `docs/21-licoes-do-gestao-raiz.md` §5 (desconto no total e busca de cliente
-  no PDV, depois as compras…); a 1ª autorizada no RS espera os dados do usuário.
+  O MVP do backlog do `docs/21-licoes-do-gestao-raiz.md` §5 (itens 1–8) está feito. Próximo: o
+  resto do §5 (DFe com OK do usuário, parcelas e estorno da entrada de compra, pacote do contador
+  com XMLs…); a 1ª autorizada no RS espera os dados do usuário.
 - **Pendência de confiança:** as tabelas do Simples e as alíquotas precisam ser conferidas com o
   contador; o ST/IPI **da nota** já entra no custo (2026-10-13), mas a estimativa de ST pela MVA (sem o valor na
   nota) ainda não.
@@ -676,6 +677,17 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
     §8) para achar ou cadastrar a pessoa na mesma transação;
   - desktop: `importacao_planilha.rs` (o comum), "Importar clientes…" em Clientes e "Importar contas
     em aberto…" no Financeiro, cada um com o modelo para baixar.
+- **Desconto no total e cliente no PDV (2026-10-16, item 8 do doc 21):**
+  - `mod_pdv`: `DescontoNoTotal` (percentual ou valor) no `Cupom`, `AplicarDescontoNoTotal`
+    (`Shift+F5`), teto do papel para a venda inteira (`Cupom::conferir_teto`) e o rateio entre os
+    itens na finalização; migração `pdv` v5 (`ALTER TABLE` na regra do cupom);
+  - desktop: `tela_pdv/desconto_total.rs`, botão "Desconto no total" e o total da tela com a
+    mesma conta do domínio; `F6` com busca por dígitos (documento com máscara, telefone) e
+    "Cadastrar cliente" (o bloco de `pessoa.rs`);
+  - `cardeal-auth`: Operador de Caixa com `clientes.pessoa.ver`/`.criar`;
+    `PapelDeFabrica::limites_padrao` (teto de desconto: Admin/Gerente ∞, Caixa/Vendedor 10%);
+  - `cardeal-motor`: `sincronizar_papeis_de_fabrica` completa os papéis de fábrica gravados
+    (permissões e limites, só acrescentando), e a impressão do plano inclui a política deles.
 - **Inventário com contagem cega (2026-10-13):** migração `estoque` v11 (`estoque_inventario`,
   `estoque_contagem_item`), comandos `criar_inventario`/`iniciar_contagem`/`registrar_contagem`/
   `encerrar_inventario`/`cancelar_inventario` (`.v1`) e consultas `inventarios`/`posicao_do_inventario`.

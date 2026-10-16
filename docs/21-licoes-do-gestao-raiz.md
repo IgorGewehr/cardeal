@@ -54,8 +54,8 @@ O que eles têm e o Cardeal não, com o que aprenderam:
 | **Vendas do dia** | Lista com os totais do dia, reimpressão, cancelamento e o selo de NFC-e pendente | Falta. Só a última venda aparece |
 | **Comprovante não fiscal** | Recibo após a venda, em 80 mm, 58 mm ou A4, com impressão automática opcional | Falta. Só há o DANFCE, e só com NFC-e autorizada. Quem não emite NFC-e (MEI vendendo a pessoa física) fica sem recibo |
 | **Venda a receber** | Boleto ou cheque na finalização vira conta a receber com vencimento em 30 dias, sem tocar no saldo. Pagamento misto pago + a receber deixa a venda "parcial" | Falta. O `FormaPagamentoPdv` só tem dinheiro, Pix, débito e crédito; a venda a prazo (fiado) estava adiada no código |
-| **Desconto no total** | Além do desconto por item | Falta: só por item (`F5`) |
-| **Busca de cliente** | Busca por nome/documento, ou nome livre | O `F6` lista os 200 primeiros clientes, sem busca |
+| **Desconto no total** | Além do desconto por item | Falta: só por item (`F5`) — **feito (item 8)** |
+| **Busca de cliente** | Busca por nome/documento, ou nome livre | O `F6` busca por nome ou documento na carteira inteira (a nota "200 primeiros" estava errada: sem busca vêm até 50 mil). Faltava achar pelo documento com máscara e pelo telefone, e cadastrar ali — **feito (item 8)** |
 | **Venda em aberto** | Salva sem cobrar (não baixa estoque nem lança financeiro) e finaliza depois na tela de vendas | Falta. Baixa prioridade |
 | Idempotência da finalização | Uma chave por venda: repetir a finalização (duplo clique, nova tentativa) não duplica o financeiro | O cupom só finaliza a partir de "em andamento"; nada a fazer |
 | CPF incompleto | Recusa CPF parcial antes de finalizar | Conferir no `IdentificarCliente` |
@@ -150,7 +150,28 @@ O que eles têm e o Cardeal não, com o que aprenderam:
      Importar de novo não duplica nem ressuscita o que foi cancelado.
    - **Nas duas:** tudo ou nada, e sem atalho de permissão. O leitor de CSV agora é um só
      (`cardeal_kernel::planilha`), também usado pelo estoque.
-8. **Desconto no total** e **busca de cliente** no PDV.
+8. ~~**Desconto no total** e **busca de cliente** no PDV.~~ **Feito (2026-10-16).**
+
+   Lá:
+   - desconto em % ou valor, sem teto;
+   - o rateio por item só na hora da nota;
+   - busca de cliente com 5 resultados, ou nome livre.
+
+   Aqui:
+   - `Shift+F5` com `10%` ou valor, acompanhando os itens;
+   - o teto do papel vale para a venda inteira;
+   - rateado entre os itens ao finalizar (a NFC-e, o comprovante e o estorno veem o desconto
+     por item);
+   - o `F6` acha pelo documento com máscara e pelo telefone, e cadastra o cliente ali mesmo
+     (com aviso de telefone repetido).
+
+   Achados no caminho, corrigidos:
+   - **nenhum papel tinha teto de desconto**, então nem o `F5` funcionava fora dos testes. Os
+     papéis de fábrica agora nascem com ele: Admin e Gerente sem teto, Caixa e Vendedor 10%;
+   - **o Operador de Caixa não via clientes** (o `F6` vinha vazio, e sem cliente não há venda a
+     prazo). Agora vê e cadastra;
+   - **papéis de fábrica gravados ficavam congelados**: a correção do caixa no item 1 (fiscal) não
+     chegava a bases existentes. Agora o motor os completa ao abrir.
 9. **Notas recebidas pela SEFAZ (DFe) e manifestação.** Fluxo deles (`lib/fiscal/sefaz-distribuicao.ts`):
    - a distribuição por NSU;
    - se só vier o resumo (`resNFe`), registram a **Ciência da Operação** sozinhos e baixam o XML completo;

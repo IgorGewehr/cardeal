@@ -16,6 +16,7 @@
 mod acoes;
 #[cfg(feature = "demo")]
 pub mod demo;
+mod desconto_total;
 mod dialogo_pagamento;
 mod dialogos;
 mod entrada;
@@ -140,6 +141,10 @@ fn atalhos(ctx: &egui::Context, estado: &mut EstadoTelaPdv) {
     }
     if consumir(ctx, egui::Key::F3) {
         estado.foco_entrada = true;
+    }
+    // Antes do `F5` simples: `consumir` ignora o Shift.
+    if ctx.input_mut(|i| i.consume_key(egui::Modifiers::SHIFT, egui::Key::F5)) {
+        estado.pendentes.push(Acao::AbrirDescontoTotal);
     }
     if consumir(ctx, egui::Key::F5) {
         estado.pendentes.push(Acao::AbrirDesconto);

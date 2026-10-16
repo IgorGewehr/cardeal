@@ -20,6 +20,23 @@ pub enum ErroPdv {
         limite: Percentual,
     },
 
+    /// O desconto da venda inteira (itens + desconto no total) passa do teto do papel.
+    #[error(
+        "O desconto da venda ({desconto}) passa do seu limite: no máximo {maximo} ({limite} do valor dos itens)"
+    )]
+    DescontoDaVendaAcimaDoLimite {
+        /// O desconto pedido, somando itens e total.
+        desconto: Dinheiro,
+        /// O máximo que o papel autoriza nesta venda.
+        maximo: Dinheiro,
+        /// O teto do papel.
+        limite: Percentual,
+    },
+
+    /// Desconto no total com valor negativo ou percentual acima de 100.
+    #[error("Desconto inválido: use um valor positivo ou um percentual até 100%")]
+    DescontoInvalido,
+
     /// `CancelarItem` sobre um item já cancelado.
     #[error("Este item já está cancelado")]
     ItemJaCancelado,
@@ -95,8 +112,11 @@ impl ErroDominio for ErroPdv {
             | Self::MotivoObrigatorio
             | Self::MotivoDoEstornoCurto
             | Self::CondicaoDePrazoInvalida(_)
+            | Self::DescontoInvalido
             | Self::PrazoSemCliente => CodigoErro::ENTRADA_INVALIDA,
-            Self::DescontoAcimaDoLimite { .. } => CodigoErro::SEM_PERMISSAO,
+            Self::DescontoAcimaDoLimite { .. } | Self::DescontoDaVendaAcimaDoLimite { .. } => {
+                CodigoErro::SEM_PERMISSAO
+            }
             Self::ItemJaCancelado
             | Self::CupomEmEstadoInvalido { .. }
             | Self::CupomJaFinalizado
@@ -114,6 +134,13 @@ impl ErroDominio for ErroPdv {
                 "Desconto acima do seu limite",
                 format!(
                     "O seu papel autoriza até {}. Um supervisor pode autorizar na hora.",
+                    limite.formatar_com_simbolo()
+                ),
+            )),
+            Self::DescontoDaVendaAcimaDoLimite { limite, .. } => Some(Detalhes::nova(
+                "Desconto acima do seu limite",
+                format!(
+                    "O seu papel autoriza até {} da venda, somando o desconto dos itens e o do total.",
                     limite.formatar_com_simbolo()
                 ),
             )),

@@ -11,7 +11,9 @@ use cardeal_kernel::{
 use cardeal_storage::UnidadeDeTrabalho;
 use rusqlite::{params, Connection, OptionalExtension};
 
-use crate::cupom::{Cupom, EstadoCupom, FormaPagamentoPdv, ItemCupom, PagamentoCupom};
+use crate::cupom::{
+    Cupom, DescontoNoTotal, EstadoCupom, FormaPagamentoPdv, ItemCupom, PagamentoCupom,
+};
 
 #[allow(clippy::needless_pass_by_value)] // usado como `.map_err(persist)`
 pub(crate) fn persist(e: rusqlite::Error) -> Erro {
@@ -230,7 +232,8 @@ impl<'a, 'b> RepositorioPdv<'a, 'b> {
     pub fn atualizar_cupom(&mut self, c: &Cupom) -> Resultado<()> {
         self.conn()
             .execute(
-                "UPDATE pdv_cupom SET subtotal = ?2, desconto = ?3, total = ?4, estado = ?5, versao = ?6
+                "UPDATE pdv_cupom SET subtotal = ?2, desconto = ?3, total = ?4, estado = ?5, versao = ?6,
+                        desconto_total_tipo = ?7, desconto_total_valor = ?8
                  WHERE id = ?1",
                 params![
                     blob(c.id),
@@ -239,6 +242,14 @@ impl<'a, 'b> RepositorioPdv<'a, 'b> {
                     c.total.em_centavos(),
                     estado_txt(c.estado),
                     versao_i64(c.versao),
+                    c.desconto_no_total.map(|d| match d {
+                        DescontoNoTotal::Percentual(_) => "Percentual",
+                        DescontoNoTotal::Valor(_) => "Valor",
+                    }),
+                    c.desconto_no_total.map(|d| match d {
+                        DescontoNoTotal::Percentual(p) => p.unidades_internas(),
+                        DescontoNoTotal::Valor(v) => v.em_centavos(),
+                    }),
                 ],
             )
             .map_err(persist)?;
@@ -269,7 +280,7 @@ impl<'a, 'b> RepositorioPdv<'a, 'b> {
             .query_row(
                 "SELECT id, empresa, sessao_caixa, terminal, numero_terminal, serie_fiscal,
                         cliente, operador, tabela_preco, local_expedicao, abertura, subtotal,
-                        desconto, total, estado, versao
+                        desconto, total, estado, versao, desconto_total_tipo, desconto_total_valor
                  FROM pdv_cupom WHERE id = ?1",
                 [blob(id)],
                 |r| {
@@ -290,6 +301,18 @@ impl<'a, 'b> RepositorioPdv<'a, 'b> {
                         Dinheiro::centavos(r.get::<_, i64>(13)?),
                         estado_de(&r.get::<_, String>(14)?),
                         versao_de(r.get::<_, i64>(15)?),
+                        match (
+                            r.get::<_, Option<String>>(16)?.as_deref(),
+                            r.get::<_, Option<i64>>(17)?,
+                        ) {
+                            (Some("Percentual"), Some(v)) => {
+                                Some(DescontoNoTotal::Percentual(Percentual::unidades(v)))
+                            }
+                            (Some("Valor"), Some(v)) => {
+                                Some(DescontoNoTotal::Valor(Dinheiro::centavos(v)))
+                            }
+                            _ => None,
+                        },
                     ))
                 },
             )
@@ -312,6 +335,7 @@ impl<'a, 'b> RepositorioPdv<'a, 'b> {
             total,
             estado,
             versao,
+            desconto_no_total,
         )) = cabecalho
         else {
             return Ok(None);
@@ -339,6 +363,7 @@ impl<'a, 'b> RepositorioPdv<'a, 'b> {
             pagamentos,
             subtotal,
             desconto,
+            desconto_no_total,
             total,
             estado,
             versao,

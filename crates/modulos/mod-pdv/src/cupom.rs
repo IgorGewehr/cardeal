@@ -180,6 +180,40 @@ pub struct PagamentoCupom {
     pub prazo: Option<CondicaoPrazo>,
 }
 
+/// O desconto dado no total da venda (`Shift+F5`), além do desconto de cada item: "10% na
+/// compra" ou "fecha em R$ 100". Enquanto a venda está aberta ele vale sobre o que os itens
+/// somam (então acompanha item bipado ou cancelado); ao finalizar, é rateado entre os itens
+/// ([`Cupom::ratear_desconto_no_total`]) e passa a morar neles.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DescontoNoTotal {
+    /// Um percentual sobre o total dos itens (já com o desconto de cada um).
+    Percentual(Percentual),
+    /// Um valor fixo.
+    Valor(Dinheiro),
+}
+
+impl DescontoNoTotal {
+    /// Quanto o desconto tira de `liquido` — nunca mais que ele.
+    #[must_use]
+    pub fn valor_sobre(self, liquido: Dinheiro) -> Dinheiro {
+        match self {
+            Self::Percentual(p) => liquido.aplicar(p, Arredondamento::MeioAcima),
+            Self::Valor(v) => v,
+        }
+        .min(liquido)
+        .max(Dinheiro::ZERO)
+    }
+
+    /// Valor positivo; percentual entre 0 e 100.
+    #[must_use]
+    pub fn valido(self) -> bool {
+        match self {
+            Self::Percentual(p) => p > Percentual::ZERO && p <= Percentual::CEM,
+            Self::Valor(v) => v.e_positivo(),
+        }
+    }
+}
+
 fn soma_itens(itens: &[ItemCupom]) -> (Dinheiro, Dinheiro) {
     let ativos = itens.iter().filter(|i| !i.cancelado);
     let desconto = ativos.clone().map(|i| i.desconto_valor).sum();
@@ -218,8 +252,10 @@ pub struct Cupom {
     pub pagamentos: Vec<PagamentoCupom>,
     /// Soma dos itens antes de desconto (só os não cancelados).
     pub subtotal: Dinheiro,
-    /// Soma dos descontos de item (só os não cancelados).
+    /// O desconto da venda: o dos itens (só os não cancelados) mais o desconto no total.
     pub desconto: Dinheiro,
+    /// O desconto no total, enquanto a venda está aberta (ao finalizar, vai para os itens).
+    pub desconto_no_total: Option<DescontoNoTotal>,
     /// `subtotal − desconto`.
     pub total: Dinheiro,
     /// O estado.
@@ -259,6 +295,7 @@ impl Cupom {
             pagamentos: Vec::new(),
             subtotal: Dinheiro::ZERO,
             desconto: Dinheiro::ZERO,
+            desconto_no_total: None,
             total: Dinheiro::ZERO,
             estado: EstadoCupom::EmAndamento,
             versao: cardeal_kernel::Versao::INICIAL,
@@ -287,7 +324,8 @@ impl Cupom {
         Ok(())
     }
 
-    /// Recalcula `subtotal`/`desconto`/`total` a partir dos itens não cancelados.
+    /// Recalcula `subtotal`/`desconto`/`total` a partir dos itens não cancelados e do
+    /// desconto no total.
     pub fn recalcular(&mut self) {
         let (desconto, total_liquido) = soma_itens(&self.itens);
         self.subtotal = self
@@ -296,9 +334,91 @@ impl Cupom {
             .filter(|i| !i.cancelado)
             .map(ItemCupom::total_bruto)
             .sum();
-        self.desconto = desconto;
-        self.total = total_liquido;
+        let no_total = self
+            .desconto_no_total
+            .map_or(Dinheiro::ZERO, |d| d.valor_sobre(total_liquido));
+        self.desconto = desconto + no_total;
+        self.total = total_liquido - no_total;
         self.versao = self.versao.proxima();
+    }
+
+    /// Quanto o desconto no total tira agora.
+    #[must_use]
+    pub fn valor_do_desconto_no_total(&self) -> Dinheiro {
+        let (_, liquido) = soma_itens(&self.itens);
+        self.desconto_no_total
+            .map_or(Dinheiro::ZERO, |d| d.valor_sobre(liquido))
+    }
+
+    /// Dá (ou tira, com `None`) o desconto no total. Só em `EmAndamento`; recusa o que passar
+    /// do teto do papel — o teto vale para a venda inteira ([`Cupom::conferir_teto`]).
+    ///
+    /// # Errors
+    /// [`ErroPdv::CupomEmEstadoInvalido`], [`ErroPdv::DescontoInvalido`],
+    /// [`ErroPdv::DescontoDaVendaAcimaDoLimite`].
+    pub fn definir_desconto_no_total(
+        &mut self,
+        desconto: Option<DescontoNoTotal>,
+        limite: Percentual,
+    ) -> Result<(), ErroPdv> {
+        self.exigir(EstadoCupom::EmAndamento)?;
+        if desconto.is_some_and(|d| !d.valido()) {
+            return Err(ErroPdv::DescontoInvalido);
+        }
+        let anterior = self.desconto_no_total;
+        self.desconto_no_total = desconto;
+        self.recalcular();
+        if let Err(e) = self.conferir_teto(limite) {
+            self.desconto_no_total = anterior;
+            self.recalcular();
+            return Err(e);
+        }
+        Ok(())
+    }
+
+    /// O desconto da venda inteira (itens + total) cabe no teto do papel, sobre o valor bruto
+    /// dos itens? Cada item já respeita o teto sozinho; o desconto no total soma por cima, e
+    /// item cancelado depois de um desconto em valor sobe o percentual — por isso a
+    /// finalização confere de novo.
+    ///
+    /// # Errors
+    /// [`ErroPdv::DescontoDaVendaAcimaDoLimite`].
+    pub fn conferir_teto(&self, limite: Percentual) -> Result<(), ErroPdv> {
+        let maximo = self.subtotal.aplicar(limite, Arredondamento::MeioAcima);
+        if self.desconto > maximo {
+            return Err(ErroPdv::DescontoDaVendaAcimaDoLimite {
+                desconto: self.desconto,
+                maximo,
+                limite,
+            });
+        }
+        Ok(())
+    }
+
+    /// Distribui o desconto no total entre os itens ativos, na proporção do valor de cada um
+    /// (o centavo que sobra vai para os maiores), e o esquece: daí em diante o desconto mora
+    /// nos itens — o que a NFC-e (desconto por item), o comprovante e o estorno enxergam. O
+    /// total não muda. Chamado ao finalizar.
+    pub fn ratear_desconto_no_total(&mut self) {
+        let extra = self.valor_do_desconto_no_total();
+        self.desconto_no_total = None;
+        if extra.e_positivo() {
+            let ativos: Vec<usize> = (0..self.itens.len())
+                .filter(|&i| !self.itens[i].cancelado)
+                .collect();
+            let pesos: Vec<i64> = ativos
+                .iter()
+                .map(|&i| self.itens[i].total_item.em_centavos())
+                .collect();
+            if pesos.iter().sum::<i64>() > 0 {
+                for (&i, parte) in ativos.iter().zip(extra.ratear_por_pesos(&pesos)) {
+                    let item = &mut self.itens[i];
+                    item.desconto_valor += parte;
+                    item.total_item -= parte;
+                }
+            }
+        }
+        self.recalcular();
     }
 
     /// `EmAndamento → Finalizado` — irreversível nesta fatia.
@@ -431,6 +551,92 @@ mod testes {
         assert_eq!(i.total_bruto(), Dinheiro::reais(20));
         assert_eq!(i.desconto_valor, Dinheiro::reais(2));
         assert_eq!(i.total_item, Dinheiro::reais(18));
+    }
+
+    fn cupom_vazio() -> Cupom {
+        Cupom::novo(
+            Id::novo(),
+            Id::novo(),
+            Id::novo(),
+            1,
+            1,
+            None,
+            Id::novo(),
+            cardeal_kernel::Instante::agora(),
+            Id::novo(),
+            Id::novo(),
+        )
+    }
+
+    #[test]
+    fn desconto_no_total_acompanha_os_itens_e_respeita_o_teto_da_venda() {
+        let mut c = cupom_vazio();
+        c.adicionar_item(item(1, 70)).unwrap();
+        c.adicionar_item(item(1, 30)).unwrap();
+        let teto = Percentual::pontos(10);
+        // 10% sobre R$ 100: cabe.
+        c.definir_desconto_no_total(
+            Some(DescontoNoTotal::Percentual(Percentual::pontos(10))),
+            teto,
+        )
+        .unwrap();
+        assert_eq!(
+            (c.desconto, c.total),
+            (Dinheiro::reais(10), Dinheiro::reais(90))
+        );
+        // R$ 15 passa do teto (máximo R$ 10): recusado e o anterior fica.
+        let erro = c
+            .definir_desconto_no_total(Some(DescontoNoTotal::Valor(Dinheiro::reais(15))), teto)
+            .unwrap_err();
+        assert!(matches!(
+            erro,
+            ErroPdv::DescontoDaVendaAcimaDoLimite { maximo, .. } if maximo == Dinheiro::reais(10)
+        ));
+        assert_eq!(c.total, Dinheiro::reais(90));
+        // Um item a mais: o percentual acompanha.
+        c.adicionar_item(item(1, 50)).unwrap();
+        assert_eq!(c.total, Dinheiro::reais(135));
+        // Valor maior que os itens não deixa o total negativo; inválidos são recusados.
+        assert_eq!(
+            DescontoNoTotal::Valor(Dinheiro::reais(500)).valor_sobre(Dinheiro::reais(20)),
+            Dinheiro::reais(20)
+        );
+        assert!(!DescontoNoTotal::Valor(Dinheiro::ZERO).valido());
+        assert!(!DescontoNoTotal::Percentual(Percentual::pontos(101)).valido());
+        // Tirar.
+        c.definir_desconto_no_total(None, teto).unwrap();
+        assert_eq!(c.total, Dinheiro::reais(150));
+    }
+
+    #[test]
+    fn o_rateio_leva_o_desconto_para_os_itens_sem_mudar_o_total() {
+        let mut c = cupom_vazio();
+        c.adicionar_item(item(1, 10)).unwrap();
+        c.adicionar_item(item(1, 10)).unwrap();
+        c.adicionar_item(item(1, 10)).unwrap();
+        c.definir_desconto_no_total(
+            Some(DescontoNoTotal::Valor(Dinheiro::reais(1))),
+            Percentual::CEM,
+        )
+        .unwrap();
+        let (desconto, total) = (c.desconto, c.total);
+        c.ratear_desconto_no_total();
+        assert_eq!((c.desconto, c.total), (desconto, total));
+        assert!(c.desconto_no_total.is_none());
+        let partes: Vec<i64> = c
+            .itens
+            .iter()
+            .map(|i| i.desconto_valor.em_centavos())
+            .collect();
+        assert_eq!(
+            partes.iter().sum::<i64>(),
+            100,
+            "o centavo que sobra não some: {partes:?}"
+        );
+        assert!(c
+            .itens
+            .iter()
+            .all(|i| i.total_item + i.desconto_valor == Dinheiro::reais(10)));
     }
 
     #[test]

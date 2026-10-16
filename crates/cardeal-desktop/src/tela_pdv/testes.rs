@@ -160,7 +160,7 @@ impl Bancada {
         let _ = self.ctx.run(entrada, |ctx| match estado.dlg {
             Dlg::Pagamento(_) => dialogo_pagamento(ctx, estado),
             Dlg::ConsultaPreco { .. } => dialogo_consulta_preco(ctx, estado),
-            Dlg::Cliente { .. } => dialogo_cliente(ctx, estado),
+            Dlg::Cliente { .. } => dialogo_cliente(ctx, estado, true),
             _ => {}
         });
     }
@@ -516,6 +516,7 @@ fn bancada_de_clientes() -> Bancada {
     b.estado.dlg = Dlg::Cliente {
         busca: String::new(),
         sel: 0,
+        novo: None,
     };
     b.quadro(vec![]);
     b
@@ -596,4 +597,134 @@ fn nfce_da_venda_so_quando_ligada_e_explica_quando_nao_sai() {
     let frase = emitir_nfce(&ctx, m, s, &mut e, Id::novo()).unwrap();
     assert!(frase.starts_with("NFC-e não saiu"), "{frase}");
     assert!(e.nfce_ultima.is_none());
+}
+
+#[test]
+fn shift_f5_pede_o_desconto_no_total_e_f5_o_do_item() {
+    let shift_f5 = egui::Event::Key {
+        key: egui::Key::F5,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::SHIFT,
+    };
+    let ctx = egui::Context::default();
+    let mut e = caixa_aberto();
+    let _ = ctx.run(
+        egui::RawInput {
+            events: vec![shift_f5],
+            ..Default::default()
+        },
+        |ctx| atalhos(ctx, &mut e),
+    );
+    assert!(pediu(&e, |a| matches!(a, Acao::AbrirDescontoTotal)));
+    assert!(!pediu(&e, |a| matches!(a, Acao::AbrirDesconto)));
+}
+
+#[test]
+fn o_total_da_tela_tira_o_desconto_no_total_com_a_conta_do_dominio() {
+    let mut e = EstadoTelaPdv {
+        carrinho: vec![linha("1", "70,00"), linha("1", "30,00")],
+        ..EstadoTelaPdv::default()
+    };
+    e.desconto_no_total = Some(mod_pdv::DescontoNoTotal::Percentual(Percentual::pontos(10)));
+    e.recalcular_total();
+    assert_eq!(e.total, reais(90));
+    // Cancelar um item: o percentual acompanha.
+    e.carrinho[1].cancelado = true;
+    e.recalcular_total();
+    assert_eq!(e.total, reais(63));
+}
+
+#[test]
+fn cpf_com_mascara_e_telefone_acham_o_cliente() {
+    let mut maria = cliente("Maria Souza", "52998224725");
+    maria.telefone = Some("(51) 99999-0000".into());
+    let clientes = vec![maria, cliente("Pedro Lima", "39053344705")];
+    let nomes = |busca: &str| -> Vec<String> {
+        super::dialogos::clientes_que_casam(&clientes, busca)
+            .into_iter()
+            .map(|c| c.nome.clone())
+            .collect()
+    };
+    assert_eq!(nomes("529.982"), vec!["Maria Souza"]);
+    assert_eq!(nomes("99999-00"), vec!["Maria Souza"]);
+    assert_eq!(nomes("390.533.447-05"), vec!["Pedro Lima"]);
+    assert_eq!(nomes("pedro"), vec!["Pedro Lima"]);
+}
+
+#[test]
+fn cadastrar_cliente_no_f6_comeca_com_o_que_foi_digitado() {
+    let novo = super::dialogos::novo_a_partir_da_busca;
+    assert_eq!(novo("529.982.247-25").documento, "52998224725");
+    assert_eq!(novo("Fulano de Tal").nome, "Fulano de Tal");
+    assert_eq!(novo("(51) 99999-0000").telefone, "51999990000");
+    assert!(novo("12").nome.is_empty() && novo("12").documento.is_empty());
+
+    // O botão abre o formulário; "Cadastrar e usar" pede o cadastro.
+    let mut b = bancada_de_clientes();
+    if let Dlg::Cliente { busca, novo, .. } = &mut b.estado.dlg {
+        "Joana Prado".clone_into(busca);
+        *novo = Some(super::dialogos::novo_a_partir_da_busca(busca));
+    }
+    b.quadro(vec![]);
+    let Dlg::Cliente {
+        novo: Some(form), ..
+    } = &b.estado.dlg
+    else {
+        panic!("o formulário do cadastro continua aberto");
+    };
+    let criar = form.para_criar(mod_clientes::Papel::Cliente, None).unwrap();
+    assert_eq!(criar.nome, "Joana Prado");
+}
+
+#[test]
+fn desconto_no_total_vai_ao_motor_e_o_cadastro_rapido_identifica_o_cliente() {
+    let t = crate::testes_comum::motor_de_teste();
+    let (m, s) = (&t.motor, &t.sessao);
+    let cupom = super::vendas_do_dia::testes::cupom_com_um_item(m, s);
+    let ctx = egui::Context::default();
+    cardeal_ui::tokens::instalar_fontes(&ctx);
+    cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+    let mut e = EstadoTelaPdv {
+        cupom: Some(cupom),
+        carrinho: vec![linha("1", "25,00")],
+        total: reais(25),
+        dlg: Dlg::DescontoTotal {
+            texto: "10%".into(),
+        },
+        ..EstadoTelaPdv::default()
+    };
+    let quadro = |e: &mut EstadoTelaPdv, eventos: Vec<egui::Event>| {
+        let entrada = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1280.0, 800.0),
+            )),
+            events: eventos,
+            ..Default::default()
+        };
+        let _ = ctx.run(entrada, |ctx| super::desconto_total::dialogo(ctx, m, s, e));
+    };
+    quadro(&mut e, vec![]);
+    quadro(&mut e, vec![tecla(egui::Key::Enter)]);
+    assert!(matches!(e.dlg, Dlg::Fechado), "aplicado, o diálogo fecha");
+    assert_eq!(e.total, Dinheiro::centavos(2250));
+    e.recalcular_total();
+    assert_eq!(
+        e.total,
+        Dinheiro::centavos(2250),
+        "a conta da tela bate com a do motor"
+    );
+
+    // F6 › Cadastrar cliente › Cadastrar e usar: cadastra e identifica na venda.
+    let criar = super::dialogos::novo_a_partir_da_busca("Joana Prado")
+        .para_criar(mod_clientes::Papel::Cliente, None)
+        .unwrap();
+    cadastrar_cliente(&ctx, m, s, &mut e, criar);
+    assert_eq!(
+        e.cliente.as_ref().map(|c| c.1.as_str()),
+        Some("Joana Prado")
+    );
+    assert!(e.clientes.iter().any(|c| c.nome == "Joana Prado"));
 }

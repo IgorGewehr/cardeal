@@ -523,7 +523,7 @@ fn rodape(ui: &mut egui::Ui, v: &EstadoVendasDoDia, acao: &mut Option<AcaoVendas
 }
 
 #[cfg(test)]
-mod testes {
+pub(super) mod testes {
     use super::*;
 
     #[test]
@@ -557,6 +557,27 @@ mod testes {
     /// Uma venda de verdade: produto com estoque, tabela de preço, caixa aberto, cupom pago em
     /// dinheiro (R$ 25,00).
     fn vender(m: &Motor, s: &Sessao) -> Id {
+        let cupom = cupom_com_um_item(m, s);
+        let _: VendaFoiFinalizada = m
+            .executar(
+                s,
+                "pdv.finalizar_venda.v1",
+                &FinalizarVenda {
+                    cupom,
+                    pagamentos: vec![mod_pdv::PagamentoInformado {
+                        forma: FormaPagamentoPdv::Dinheiro,
+                        valor: Dinheiro::reais(25),
+                        prazo: None,
+                    }],
+                },
+            )
+            .unwrap();
+        cupom
+    }
+
+    /// O cupom aberto, com um item de R$ 25,00: produto com estoque, tabela de preço e caixa
+    /// aberto.
+    pub(in crate::tela_pdv) fn cupom_com_um_item(m: &Motor, s: &Sessao) -> Id {
         use mod_estoque::{
             CriarGrupoProduto, CriarLocal, CriarProduto, CriarUnidade, GrupoProdutoCriado,
             LocalCriado, ProdutoCriado, RegistrarEntrada, TipoLocal, UnidadeCriada,
@@ -695,20 +716,6 @@ mod testes {
                     produto: produto.produto,
                     variacao: None,
                     quantidade: Quantidade::unidades(1),
-                },
-            )
-            .unwrap();
-        let _: VendaFoiFinalizada = m
-            .executar(
-                s,
-                "pdv.finalizar_venda.v1",
-                &FinalizarVenda {
-                    cupom: cupom.cupom,
-                    pagamentos: vec![mod_pdv::PagamentoInformado {
-                        forma: FormaPagamentoPdv::Dinheiro,
-                        valor: Dinheiro::reais(25),
-                        prazo: None,
-                    }],
                 },
             )
             .unwrap();

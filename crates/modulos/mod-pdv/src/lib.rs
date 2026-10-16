@@ -67,16 +67,17 @@ pub mod receituario;
 mod repositorio;
 
 pub use comandos::{
-    AbrirCupom, AdicionarItem, AplicarDescontoItem, CancelarCupom, CancelarItem, CupomAberto,
-    EstornarVenda, FinalizarVenda, IdentificarCliente, ItemFoiAdicionado, PagamentoInformado,
-    VendaFoiEstornada, VendaFoiFinalizada, MOTIVO_MINIMO_DO_ESTORNO,
+    AbrirCupom, AdicionarItem, AplicarDescontoItem, AplicarDescontoNoTotal, CancelarCupom,
+    CancelarItem, CupomAberto, DescontoNoTotalAplicado, EstornarVenda, FinalizarVenda,
+    IdentificarCliente, ItemFoiAdicionado, PagamentoInformado, VendaFoiEstornada,
+    VendaFoiFinalizada, MOTIVO_MINIMO_DO_ESTORNO,
 };
 pub use consultas::{
     EstornoDaVenda, PrecoConsultado, PrecoDoProduto, VendaDoPeriodo, VendasDoPeriodo,
 };
 pub use cupom::{
-    validar_pagamentos, CondicaoPrazo, Cupom, EstadoCupom, FormaPagamentoPdv, ItemCupom,
-    PagamentoCupom,
+    validar_pagamentos, CondicaoPrazo, Cupom, DescontoNoTotal, EstadoCupom, FormaPagamentoPdv,
+    ItemCupom, PagamentoCupom,
 };
 pub use erros::ErroPdv;
 pub use impressao::{

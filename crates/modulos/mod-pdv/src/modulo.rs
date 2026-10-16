@@ -30,6 +30,7 @@ impl Modulo for ModuloPdv {
             .comando::<AbrirCupom>("pdv.abrir_cupom.v1")
             .comando::<AdicionarItem>("pdv.adicionar_item.v1")
             .comando::<AplicarDescontoItem>("pdv.aplicar_desconto_item.v1")
+            .comando::<crate::AplicarDescontoNoTotal>("pdv.aplicar_desconto_no_total.v1")
             .comando::<CancelarItem>("pdv.cancelar_item.v1")
             .comando::<CancelarCupom>("pdv.cancelar_cupom.v1")
             .comando::<FinalizarVenda>("pdv.finalizar_venda.v1")

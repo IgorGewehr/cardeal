@@ -84,8 +84,24 @@ pub(super) fn aplicar(
             Dlg::Cliente {
                 busca: String::new(),
                 sel: 0,
+                novo: None,
             },
         ),
+        Acao::AbrirDescontoTotal => {
+            if estado.cupom.is_none() || estado.ativos().count() == 0 {
+                notificar(
+                    ctx,
+                    Notificacao::aviso("Bipe os itens antes de dar desconto no total."),
+                );
+            } else {
+                let texto = estado
+                    .desconto_no_total
+                    .map(super::desconto_total::texto_do_desconto)
+                    .unwrap_or_default();
+                abrir(ctx, estado, Dlg::DescontoTotal { texto });
+            }
+        }
+        Acao::CadastrarCliente(criar) => cadastrar_cliente(ctx, motor, sessao, estado, *criar),
         Acao::EscolherCliente(escolhido) => {
             identificar_cliente(ctx, motor, sessao, estado, escolhido)
         }
@@ -211,6 +227,35 @@ pub(super) fn identificar_cliente(
     estado.cliente = escolhido;
     estado.dlg = Dlg::Fechado;
     estado.foco_entrada = true;
+}
+
+/// O cadastro rápido do `F6`: cadastra o cliente, põe na lista e o identifica na venda. Com
+/// erro (ex.: CPF já cadastrado), o formulário continua aberto para corrigir.
+pub(super) fn cadastrar_cliente(
+    ctx: &egui::Context,
+    motor: &Motor,
+    sessao: &Sessao,
+    estado: &mut EstadoTelaPdv,
+    criar: mod_clientes::CriarPessoa,
+) {
+    let nome = criar.nome.clone();
+    let documento = criar
+        .documento_numero
+        .as_deref()
+        .map(cardeal_kernel::texto::somente_digitos);
+    let telefone = criar.contato.as_ref().map(|c| c.valor.clone());
+    match motor.executar(sessao, "clientes.criar_pessoa.v1", &criar) {
+        Ok(feita) => {
+            estado.clientes.push(ItemPessoa {
+                pessoa: feita.pessoa,
+                nome: nome.clone(),
+                documento,
+                telefone,
+            });
+            identificar_cliente(ctx, motor, sessao, estado, Some((feita.pessoa, nome)));
+        }
+        Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
+    }
 }
 
 /// Resolve um código de barras no produto, avisando o operador se não achar.
@@ -491,6 +536,7 @@ pub(super) fn cancelar_cupom(
             estado.cupom = None;
             estado.cupom_numero = None;
             estado.cliente = None;
+            estado.desconto_no_total = None;
             estado.carrinho.clear();
             estado.linha_sel = None;
             estado.total = Dinheiro::ZERO;
@@ -589,6 +635,7 @@ pub(super) fn finalizar(
             estado.cupom = None;
             estado.cupom_numero = None;
             estado.cliente = None;
+            estado.desconto_no_total = None;
             estado.carrinho.clear();
             estado.linha_sel = None;
             estado.total = Dinheiro::ZERO;

@@ -1,4 +1,5 @@
 //! Diálogos que falam com o motor: cadastrar/abrir caixa, desconto no item, cancelar cupom.
+//! O desconto no total (`Shift+F5`) está em [`super::desconto_total`].
 
 use super::*;
 
@@ -20,7 +21,10 @@ pub(super) fn dialogos(
         Dlg::FecharCaixa { .. } => dialogo_fechar_caixa(ctx, motor, sessao, estado),
         Dlg::Sangria { .. } => dialogo_sangria(ctx, motor, sessao, estado),
         Dlg::ConsultaPreco { .. } => dialogo_consulta_preco(ctx, estado),
-        Dlg::Cliente { .. } => dialogo_cliente(ctx, estado),
+        Dlg::Cliente { .. } => {
+            dialogo_cliente(ctx, estado, sessao.concede("clientes.pessoa.criar"));
+        }
+        Dlg::DescontoTotal { .. } => super::desconto_total::dialogo(ctx, motor, sessao, estado),
         Dlg::VendasDoDia(_) => {
             super::vendas_do_dia::dialogo_vendas_do_dia(ctx, motor, sessao, estado);
         }
@@ -664,15 +668,29 @@ fn resultado_preco(ui: &mut egui::Ui, r: &PrecoConsultado) {
     });
 }
 
-/// Os clientes que casam com o texto (nome ou documento), no máximo [`MAX_CLIENTES`].
-fn clientes_que_casam<'a>(clientes: &'a [ItemPessoa], busca: &str) -> Vec<&'a ItemPessoa> {
+/// Os clientes que casam com o texto, no máximo [`MAX_CLIENTES`]: por palavras no nome (sem
+/// caixa nem acento) ou no documento; só números (3 ou mais) comparam os dígitos do documento
+/// e do telefone, com ou sem máscara — "529.982", "99999-0000".
+pub(super) fn clientes_que_casam<'a>(
+    clientes: &'a [ItemPessoa],
+    busca: &str,
+) -> Vec<&'a ItemPessoa> {
+    let digitos = cardeal_kernel::texto::somente_digitos(busca);
+    let so_numeros = digitos.len() >= 3 && !busca.chars().any(char::is_alphabetic);
     clientes
         .iter()
         .filter(|c| {
-            casa_por_palavras(&c.nome, busca)
-                || c.documento
-                    .as_deref()
-                    .is_some_and(|d| casa_por_palavras(d, busca))
+            if so_numeros {
+                [c.documento.as_deref(), c.telefone.as_deref()]
+                    .into_iter()
+                    .flatten()
+                    .any(|d| cardeal_kernel::texto::somente_digitos(d).contains(&digitos))
+            } else {
+                casa_por_palavras(&c.nome, busca)
+                    || c.documento
+                        .as_deref()
+                        .is_some_and(|d| casa_por_palavras(d, busca))
+            }
         })
         .take(MAX_CLIENTES)
         .collect()
@@ -681,90 +699,162 @@ fn clientes_que_casam<'a>(clientes: &'a [ItemPessoa], busca: &str) -> Vec<&'a It
 /// Quantos clientes o diálogo de `F6` mostra de uma vez.
 const MAX_CLIENTES: usize = 8;
 
-/// `F6`. Não fala com o motor: escolher empilha [`Acao::EscolherCliente`]. `↑↓` percorrem, `Enter`
-/// escolhe, `Esc` fecha; "Sem cliente" volta a venda para não identificada.
-pub(super) fn dialogo_cliente(ctx: &egui::Context, estado: &mut EstadoTelaPdv) {
-    let Dlg::Cliente { busca, sel } = &mut estado.dlg else {
+/// O cadastro rápido já com o que foi digitado na busca: um CPF/CNPJ válido, um telefone (8 ou
+/// mais dígitos — um celular com DDD tem 11, como o CPF, por isso o dígito verificador decide)
+/// ou o nome.
+pub(super) fn novo_a_partir_da_busca(busca: &str) -> crate::pessoa::EstadoPessoa {
+    let mut novo = crate::pessoa::EstadoPessoa::cadastro();
+    let digitos = cardeal_kernel::texto::somente_digitos(busca);
+    if busca.chars().any(char::is_alphabetic) {
+        busca.trim().clone_into(&mut novo.nome);
+    } else if cardeal_kernel::documento::Documento::novo(&digitos).is_ok() {
+        novo.documento = digitos;
+    } else if digitos.len() >= 8 {
+        novo.telefone = digitos;
+    }
+    novo
+}
+
+/// `F6`. Não fala com o motor: escolher empilha [`Acao::EscolherCliente`] e "Cadastrar e usar"
+/// empilha [`Acao::CadastrarCliente`]. `↑↓` percorrem, `Enter` escolhe, `Esc` fecha; "Sem
+/// cliente" volta a venda para não identificada. `pode_cadastrar` = a sessão tem
+/// `clientes.pessoa.criar`.
+pub(super) fn dialogo_cliente(
+    ctx: &egui::Context,
+    estado: &mut EstadoTelaPdv,
+    pode_cadastrar: bool,
+) {
+    let Dlg::Cliente { busca, sel, novo } = &mut estado.dlg else {
         return;
     };
-    let quantos = clientes_que_casam(&estado.clientes, busca).len();
-    for (tecla, subir) in [(egui::Key::ArrowUp, true), (egui::Key::ArrowDown, false)] {
-        if consumir(ctx, tecla) {
-            *sel = if subir {
-                sel.saturating_sub(1)
-            } else {
-                (*sel + 1).min(quantos.saturating_sub(1))
-            };
+    let cadastrando = novo.is_some();
+    if !cadastrando {
+        let quantos = clientes_que_casam(&estado.clientes, busca).len();
+        for (tecla, subir) in [(egui::Key::ArrowUp, true), (egui::Key::ArrowDown, false)] {
+            if consumir(ctx, tecla) {
+                *sel = if subir {
+                    sel.saturating_sub(1)
+                } else {
+                    (*sel + 1).min(quantos.saturating_sub(1))
+                };
+            }
         }
     }
 
-    let fechar = Dialogo::nova("Cliente da venda")
-        .descricao("Busque por nome ou documento. A venda pode seguir sem cliente.")
-        .medio()
-        .mostrar(
-            ctx,
-            estado,
-            |ui, estado| {
-                let Dlg::Cliente { busca, sel } = &mut estado.dlg else {
-                    return;
-                };
-                let resp =
-                    ui.add(Campo::novo("Buscar cliente", busca).marcador("Nome ou CPF/CNPJ"));
-                let confirmou = resp.lost_focus() && enter_pressionado(ui);
-                if resp.changed() {
-                    *sel = 0;
+    let fechar = Dialogo::nova(if cadastrando {
+        "Cadastrar cliente"
+    } else {
+        "Cliente da venda"
+    })
+    .descricao(if cadastrando {
+        "Só o nome é obrigatório. Com CPF/CNPJ, ele vai na NFC-e."
+    } else {
+        "Busque por nome, CPF/CNPJ ou telefone. A venda pode seguir sem cliente."
+    })
+    .medio()
+    .mostrar(
+        ctx,
+        estado,
+        |ui, estado| {
+            if let Dlg::Cliente {
+                novo: Some(form), ..
+            } = &mut estado.dlg
+            {
+                form.mostrar_cadastro(ui, &estado.clientes, PapelPessoa::Cliente, false);
+                // "Usar Fulano" no aviso de telefone repetido: escolhe o que já existe.
+                if let (false, Some(id)) = (form.novo, form.selecionada) {
+                    let nome = estado
+                        .clientes
+                        .iter()
+                        .find(|c| c.pessoa == id)
+                        .map(|c| c.nome.clone())
+                        .unwrap_or_default();
+                    estado
+                        .pendentes
+                        .push(Acao::EscolherCliente(Some((id, nome))));
                 }
-                focar_primeiro(ctx, &resp);
-                ui.add_space(Espaco::E12);
+                return;
+            }
+            let Dlg::Cliente { busca, sel, .. } = &mut estado.dlg else {
+                return;
+            };
+            let resp =
+                ui.add(Campo::novo("Buscar cliente", busca).marcador("Nome, CPF/CNPJ ou telefone"));
+            let confirmou = resp.lost_focus() && enter_pressionado(ui);
+            if resp.changed() {
+                *sel = 0;
+            }
+            focar_primeiro(ctx, &resp);
+            ui.add_space(Espaco::E12);
 
-                let achados: Vec<(Id, String, String)> =
-                    clientes_que_casam(&estado.clientes, busca)
+            let achados: Vec<(Id, String, String)> = clientes_que_casam(&estado.clientes, busca)
+                .into_iter()
+                .map(|c| {
+                    let detalhe = [c.documento.as_deref(), c.telefone.as_deref()]
                         .into_iter()
-                        .map(|c| {
-                            let detalhe = [c.documento.as_deref(), c.telefone.as_deref()]
-                                .into_iter()
-                                .flatten()
-                                .collect::<Vec<_>>()
-                                .join(" · ");
-                            (c.pessoa, c.nome.clone(), detalhe)
-                        })
-                        .collect();
-                if achados.is_empty() {
-                    ui.add(Rotulo::campo(if estado.clientes.is_empty() {
-                        "Nenhum cliente cadastrado."
-                    } else {
-                        "Nenhum cliente encontrado."
-                    }));
-                    return;
+                        .flatten()
+                        .collect::<Vec<_>>()
+                        .join(" · ");
+                    (c.pessoa, c.nome.clone(), detalhe)
+                })
+                .collect();
+            if achados.is_empty() {
+                ui.add(Rotulo::campo(if estado.clientes.is_empty() {
+                    "Nenhum cliente cadastrado."
+                } else {
+                    "Nenhum cliente encontrado."
+                }));
+                return;
+            }
+            let destacado = (*sel).min(achados.len() - 1);
+            for (i, (id, nome, detalhe)) in achados.iter().enumerate() {
+                let mut item = ItemDeLista::novo(nome.clone()).selecionado(i == destacado);
+                if !detalhe.is_empty() {
+                    item = item.subtitulo(detalhe.clone());
                 }
-                let destacado = (*sel).min(achados.len() - 1);
-                for (i, (id, nome, detalhe)) in achados.iter().enumerate() {
-                    let mut item = ItemDeLista::novo(nome.clone()).selecionado(i == destacado);
-                    if !detalhe.is_empty() {
-                        item = item.subtitulo(detalhe.clone());
-                    }
-                    if item.mostrar(ui, |_| {}).clicked() {
-                        estado
-                            .pendentes
-                            .push(Acao::EscolherCliente(Some((*id, nome.clone()))));
-                    }
-                }
-                if confirmou {
-                    let (id, nome, _) = &achados[destacado];
+                if item.mostrar(ui, |_| {}).clicked() {
                     estado
                         .pendentes
                         .push(Acao::EscolherCliente(Some((*id, nome.clone()))));
                 }
-            },
-            |ui, estado| {
-                if ui.add(Botao::secundario("Fechar").atalho("Esc")).clicked() {
-                    estado.dlg = Dlg::Fechado;
+            }
+            if confirmou {
+                let (id, nome, _) = &achados[destacado];
+                estado
+                    .pendentes
+                    .push(Acao::EscolherCliente(Some((*id, nome.clone()))));
+            }
+        },
+        |ui, estado| {
+            let Dlg::Cliente { busca, novo, .. } = &mut estado.dlg else {
+                return;
+            };
+            if let Some(form) = novo {
+                if ui.add(Botao::primario("Cadastrar e usar")).clicked() {
+                    match form.para_criar(PapelPessoa::Cliente, None) {
+                        Ok(criar) => estado
+                            .pendentes
+                            .push(Acao::CadastrarCliente(Box::new(criar))),
+                        Err(aviso) => notificar(ui.ctx(), Notificacao::aviso(aviso)),
+                    }
                 }
-                if ui.add(Botao::secundario("Sem cliente")).clicked() {
-                    estado.pendentes.push(Acao::EscolherCliente(None));
+                if ui.add(Botao::secundario("Voltar")).clicked() {
+                    *novo = None;
                 }
-            },
-        );
+                return;
+            }
+            if ui.add(Botao::secundario("Fechar").atalho("Esc")).clicked() {
+                estado.dlg = Dlg::Fechado;
+                return;
+            }
+            if ui.add(Botao::secundario("Sem cliente")).clicked() {
+                estado.pendentes.push(Acao::EscolherCliente(None));
+            }
+            if pode_cadastrar && ui.add(Botao::secundario("Cadastrar cliente")).clicked() {
+                *novo = Some(novo_a_partir_da_busca(busca));
+            }
+        },
+    );
     if fechar {
         estado.dlg = Dlg::Fechado;
         estado.foco_entrada = true;

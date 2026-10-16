@@ -133,6 +133,12 @@ pub(super) enum Dlg {
         busca: String,
         /// A linha destacada na lista.
         sel: usize,
+        /// "Cadastrar cliente": o formulário do cadastro rápido, quando aberto.
+        novo: Option<crate::pessoa::EstadoPessoa>,
+    },
+    /// `Shift+F5`: o desconto no total da venda.
+    DescontoTotal {
+        texto: String,
     },
     /// `F11`: as vendas de hoje — estornar, reimprimir, acompanhar a NFC-e.
     VendasDoDia(super::vendas_do_dia::EstadoVendasDoDia),
@@ -155,6 +161,10 @@ pub(super) enum Acao {
     CancelarLinha,
     /// `F5`.
     AbrirDesconto,
+    /// `Shift+F5`.
+    AbrirDescontoTotal,
+    /// "Cadastrar e usar" no `F6`: cadastra o cliente e o identifica na venda.
+    CadastrarCliente(Box<mod_clientes::CriarPessoa>),
     /// `F2` na tela de venda.
     AbrirPagamento,
     /// `F2` no diálogo de pagamento.
@@ -193,7 +203,7 @@ pub struct EstadoTelaPdv {
     pub(super) tabelas: Vec<TabelaPreco>,
     pub(super) locais: Vec<ItemLocal>,
     pub(super) produtos: Vec<ItemProdutoComSaldo>,
-    /// Os clientes cadastrados (até 200, o teto de `PessoasPorPapel` sem busca).
+    /// Os clientes ativos (a consulta sem busca traz até 50 mil) — o `F6` filtra aqui.
     pub(super) clientes: Vec<ItemPessoa>,
     /// O cliente identificado na venda atual, com o nome para mostrar.
     pub(super) cliente: Option<(Id, String)>,
@@ -215,6 +225,8 @@ pub struct EstadoTelaPdv {
     /// A linha destacada no cupom (alvo de `F5`/`F7`).
     pub(super) linha_sel: Option<usize>,
     pub(super) total: Dinheiro,
+    /// O desconto no total da venda aberta (`Shift+F5`), para refazer a conta do total aqui.
+    pub(super) desconto_no_total: Option<mod_pdv::DescontoNoTotal>,
     pub(super) ultima_venda: Option<UltimaVenda>,
     pub(super) dlg: Dlg,
     pub(super) erro: Option<String>,
@@ -259,6 +271,7 @@ impl Default for EstadoTelaPdv {
             carrinho: Vec::new(),
             linha_sel: None,
             total: Dinheiro::ZERO,
+            desconto_no_total: None,
             ultima_venda: None,
             dlg: Dlg::Fechado,
             erro: None,
@@ -381,11 +394,23 @@ impl EstadoTelaPdv {
             .filter(|&i| self.carrinho.get(i).is_some_and(|l| !l.cancelado))
     }
 
+    /// O total a pagar: os itens menos o desconto no total — a mesma conta do domínio
+    /// (`Cupom::recalcular`).
     pub(super) fn recalcular_total(&mut self) {
-        self.total = self
-            .ativos()
+        self.total = self.liquido_dos_itens() - self.valor_do_desconto_no_total();
+    }
+
+    /// A soma dos itens ativos, já com o desconto de cada um.
+    pub(super) fn liquido_dos_itens(&self) -> Dinheiro {
+        self.ativos()
             .map(|l| l.total)
-            .fold(Dinheiro::ZERO, |a, b| a + b);
+            .fold(Dinheiro::ZERO, |a, b| a + b)
+    }
+
+    /// Quanto o desconto no total tira agora.
+    pub(super) fn valor_do_desconto_no_total(&self) -> Dinheiro {
+        self.desconto_no_total
+            .map_or(Dinheiro::ZERO, |d| d.valor_sobre(self.liquido_dos_itens()))
     }
 
     /// Move o destaque entre os itens ativos do cupom.

@@ -17,6 +17,9 @@ use cardeal_kernel::{Id, Versao};
 use crate::erros::ErroAuth;
 use crate::limite::ValorLimite;
 
+/// O teto de desconto do papel (percentual), que vendas e PDV consultam.
+pub const CHAVE_DESCONTO_MAXIMO: &str = "vendas.desconto_maximo";
+
 /// Um papel atribuível: nome, permissões e limites. `empresa` é `None` para papéis globais
 /// do sistema.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -236,11 +239,16 @@ impl PapelDeFabrica {
                 modulos: &["pdv"],
                 // `fiscal.ver`/`fiscal.emitir`: sem eles a venda do caixa sai sem NFC-e, em
                 // silêncio (o PDV só emite com as duas). Cancelar e configurar, não.
+                // `clientes.pessoa.ver`/`.criar`: o `F6` lista e cadastra o cliente da venda —
+                // sem eles a lista vem vazia e o caixa não vende a prazo nem põe CPF na nota.
+                // Limite de crédito e o resto do cadastro, não.
                 concede_prefixo: &[
                     "vendas.venda",
                     "financeiro.caixa",
                     "fiscal.ver",
                     "fiscal.emitir",
+                    "clientes.pessoa.ver",
+                    "clientes.pessoa.criar",
                 ],
                 concede_sufixo: &[],
             },
@@ -292,6 +300,26 @@ impl PapelDeFabrica {
         }
     }
 
+    /// Os limites quantitativos com que o papel nasce — hoje o teto de desconto
+    /// (`vendas.desconto_maximo`, usado no PDV e nas vendas). Sem ele o teto é zero e nem o
+    /// dono consegue dar desconto: Administrador e Gerente sem teto; quem vende no balcão
+    /// (Operador de Caixa, Vendedor) até 10% — acima disso, quem tem o poder dá. Os outros
+    /// papéis não vendem.
+    #[must_use]
+    pub fn limites_padrao(self) -> BTreeMap<String, ValorLimite> {
+        let desconto = match self {
+            Self::Administrador | Self::Gerente => Some(ValorLimite::Ilimitado),
+            Self::OperadorCaixa | Self::Vendedor => Some(ValorLimite::Percentual(
+                cardeal_kernel::Percentual::pontos(10),
+            )),
+            _ => None,
+        };
+        desconto
+            .map(|v| (CHAVE_DESCONTO_MAXIMO.to_owned(), v))
+            .into_iter()
+            .collect()
+    }
+
     /// Constrói o [`Papel`] concreto (global, `sistema = true`) aplicando a [`politica`] ao
     /// catálogo informado — as chaves de permissão declaradas pelos módulos ativos.
     ///
@@ -305,7 +333,7 @@ impl PapelDeFabrica {
             descricao: self.descricao().to_string(),
             sistema: true,
             permissoes: self.politica().aplicar(catalogo),
-            limites: BTreeMap::new(),
+            limites: self.limites_padrao(),
             versao: Versao::INICIAL,
         }
     }
@@ -383,6 +411,9 @@ mod testes {
         "estoque.custo.ver",
         "compras.pedido.criar",
         "clientes.pessoa.editar",
+        "clientes.pessoa.ver",
+        "clientes.pessoa.criar",
+        "clientes.credito.definir_limite",
         "pdv.cupom.cancelar",
         "fiscal.ver",
         "fiscal.emitir",
@@ -425,6 +456,24 @@ mod testes {
     }
 
     #[test]
+    fn quem_vende_nasce_com_teto_de_desconto() {
+        let teto = |p: PapelDeFabrica| p.limites_padrao().get(CHAVE_DESCONTO_MAXIMO).copied();
+        assert_eq!(
+            teto(PapelDeFabrica::Administrador),
+            Some(ValorLimite::Ilimitado)
+        );
+        assert_eq!(teto(PapelDeFabrica::Gerente), Some(ValorLimite::Ilimitado));
+        let dez = Some(ValorLimite::Percentual(cardeal_kernel::Percentual::pontos(
+            10,
+        )));
+        assert_eq!(teto(PapelDeFabrica::OperadorCaixa), dez);
+        assert_eq!(teto(PapelDeFabrica::Vendedor), dez);
+        assert_eq!(teto(PapelDeFabrica::Estoquista), None);
+        let papel = PapelDeFabrica::OperadorCaixa.materializar(CATALOGO.iter().copied());
+        assert_eq!(papel.limites.get(CHAVE_DESCONTO_MAXIMO).copied(), dez);
+    }
+
+    #[test]
     fn operador_de_caixa_nao_ve_custo_nem_margem() {
         let p = permissoes(PapelDeFabrica::OperadorCaixa);
         assert!(p.contains("vendas.venda.registrar"));
@@ -432,6 +481,11 @@ mod testes {
         assert!(p.contains("fiscal.ver") && p.contains("fiscal.emitir"));
         assert!(!p.contains("fiscal.cancelar") && !p.contains("fiscal.configurar"));
         assert!(p.contains("financeiro.caixa.abrir"));
+        // O cliente da venda (F6): ver e cadastrar; mexer no crédito, não.
+        assert!(p.contains("clientes.pessoa.ver") && p.contains("clientes.pessoa.criar"));
+        assert!(
+            !p.contains("clientes.credito.definir_limite") && !p.contains("clientes.pessoa.editar")
+        );
         assert!(!p.contains("estoque.custo.ver"));
         assert!(!p.contains("vendas.margem.ver"));
     }
