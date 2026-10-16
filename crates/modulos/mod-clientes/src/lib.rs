@@ -50,6 +50,7 @@ mod credito;
 pub mod dedup;
 mod erros;
 pub mod eventos;
+pub mod importacao;
 mod listagem;
 mod manifesto;
 #[cfg(feature = "sqlite")]
@@ -66,12 +67,16 @@ pub use comandos::{adicionar_contato_comum, criar_pessoa_comum};
 pub use comandos::{
     AdicionarContato, AdicionarEndereco, AdicionarPapel, ContatoFoiAdicionado, ContatoInicial,
     CriarPessoa, DefinirLimiteCredito, DesativarPessoa, EditarPessoa, EnderecoFoiAdicionado,
-    EnderecoInicial, LimiteCreditoDefinido, PapelFoiAdicionado, PessoaCadastrada, PessoaDesativada,
-    PessoaEditada, PessoaReativada, ReativarPessoa,
+    EnderecoInicial, ImportarPessoas, LimiteCreditoDefinido, PapelFoiAdicionado, PessoaCadastrada,
+    PessoaDesativada, PessoaEditada, PessoaReativada, PessoasImportadas, ReativarPessoa,
 };
 #[cfg(feature = "sqlite")]
-pub use consultas::{documentos_da_pessoa, limite_credito_da_pessoa, pessoa_por_id};
-pub use consultas::{DetalhePessoa, ItemPessoa, PessoaDetalhada, PessoasPorPapel};
+pub use consultas::{
+    documentos_da_pessoa, indice_de_pessoas, limite_credito_da_pessoa, pessoa_por_id,
+};
+pub use consultas::{
+    DetalhePessoa, ItemPessoa, PessoaDetalhada, PessoasPorPapel, PreviaDaImportacaoDePessoas,
+};
 pub use credito::{
     DisponivelCredito, EventoCredito, LimiteCredito, Score, SituacaoCredito, SCORE_INICIAL,
     SCORE_MAXIMO, SCORE_MINIMO,

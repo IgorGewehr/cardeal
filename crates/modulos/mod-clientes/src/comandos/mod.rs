@@ -15,6 +15,7 @@ mod criar_pessoa;
 mod definir_limite_credito;
 mod desativar_pessoa;
 mod editar_pessoa;
+mod importar_pessoas;
 
 #[cfg(feature = "sqlite")]
 pub use adicionar_contato::adicionar_contato_comum;
@@ -27,3 +28,4 @@ pub use criar_pessoa::{ContatoInicial, CriarPessoa, EnderecoInicial, PessoaCadas
 pub use definir_limite_credito::{DefinirLimiteCredito, LimiteCreditoDefinido};
 pub use desativar_pessoa::{DesativarPessoa, PessoaDesativada, PessoaReativada, ReativarPessoa};
 pub use editar_pessoa::{EditarPessoa, PessoaEditada};
+pub use importar_pessoas::{ImportarPessoas, PessoasImportadas};

@@ -120,65 +120,9 @@ enum Alvo {
     Novo(usize),
 }
 
-/// Uma linha lida: número no arquivo e as células.
-pub(crate) type LinhaLida = (usize, Vec<String>);
-
-/// Separa o texto em células: `;` ou `,` (o que aparecer mais na primeira linha com
-/// conteúdo), aspas duplas protegem o separador. Linhas em branco somem. Usado também pela
+/// O leitor de planilha é o do kernel (`;` ou `,`, aspas, BOM do Excel); usado também pela
 /// importação de produtos ([`crate::importacao_produtos`]).
-pub(crate) fn ler_linhas(texto: &str) -> Vec<LinhaLida> {
-    let texto = texto.trim_start_matches('\u{feff}');
-    let separador = texto
-        .lines()
-        .find(|l| !l.trim().is_empty())
-        .map_or(';', |l| {
-            let fora_de_aspas = |c: char| {
-                let mut dentro = false;
-                l.chars()
-                    .filter(|x| {
-                        if *x == '"' {
-                            dentro = !dentro;
-                        }
-                        !dentro && *x == c
-                    })
-                    .count()
-            };
-            if fora_de_aspas(',') > fora_de_aspas(';') {
-                ','
-            } else {
-                ';'
-            }
-        });
-    texto
-        .lines()
-        .enumerate()
-        .filter(|(_, l)| !l.trim().is_empty())
-        .map(|(i, l)| (i + 1, celulas(l, separador)))
-        .collect()
-}
-
-fn celulas(linha: &str, separador: char) -> Vec<String> {
-    let mut saida = Vec::new();
-    let mut atual = String::new();
-    let mut dentro = false;
-    let mut chars = linha.chars().peekable();
-    while let Some(c) = chars.next() {
-        match c {
-            '"' if dentro && chars.peek() == Some(&'"') => {
-                atual.push('"');
-                chars.next();
-            }
-            '"' => dentro = !dentro,
-            c if c == separador && !dentro => {
-                saida.push(atual.trim().to_owned());
-                atual.clear();
-            }
-            c => atual.push(c),
-        }
-    }
-    saida.push(atual.trim().to_owned());
-    saida
-}
+pub(crate) use cardeal_kernel::planilha::ler_linhas;
 
 /// A primeira linha é cabeçalho quando a primeira célula é o nome do nível 1.
 fn e_cabecalho(celulas: &[String]) -> bool {

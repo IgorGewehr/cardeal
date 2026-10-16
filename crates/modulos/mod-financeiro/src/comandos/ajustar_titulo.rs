@@ -32,7 +32,11 @@ use crate::titulo::EstadoParcela;
 
 /// As origens de título que o próprio financeiro lança — as únicas que ele cancela.
 #[cfg(feature = "sqlite")]
-const ORIGENS_DO_FINANCEIRO: &[&str] = &["avulso", "financeiro_recorrencia"];
+const ORIGENS_DO_FINANCEIRO: &[&str] = &[
+    "avulso",
+    "financeiro_recorrencia",
+    crate::importacao::ORIGEM_IMPORTACAO,
+];
 
 /// De onde veio o título, para a mensagem de recusa.
 #[cfg(feature = "sqlite")]

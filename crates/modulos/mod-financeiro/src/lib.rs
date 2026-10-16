@@ -80,6 +80,7 @@ mod dre_consulta;
 mod erros;
 pub mod eventos;
 pub mod extrato;
+pub mod importacao;
 mod listagem;
 mod manifesto;
 mod meio_pagamento;
@@ -135,6 +136,7 @@ pub use comandos::{
     CancelarTransferencia, DefinirSaldoInicial, DesativarContaDisponivel, ItemTransferencia,
     SaldoInicialDefinido, TransferenciaFeita, Transferencias, TransferirEntreContas,
 };
+pub use comandos::{ContasImportadas, ImportarContasEmAberto, PreviaDaImportacaoDeContas};
 pub use comandos::{CriarCategoriasSugeridas, CATEGORIAS_SUGERIDAS};
 pub use comandos::{DadosContaAvulsa, PagamentoAvulso};
 pub use conciliacao::{

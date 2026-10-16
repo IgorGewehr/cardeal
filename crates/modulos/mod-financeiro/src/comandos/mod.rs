@@ -23,6 +23,7 @@ mod criar_conta_bancaria;
 mod criar_recorrencia;
 mod estornar_baixa;
 mod fechar_caixa;
+mod importar_contas;
 mod lancar_titulo_a_pagar;
 mod lancar_titulo_a_receber;
 mod materializar_recorrencia;
@@ -62,6 +63,7 @@ pub use criar_recorrencia::{CriarRecorrencia, RecorrenciaCriada};
 pub use estornar_baixa::estornar_baixa_comum;
 pub use estornar_baixa::{BaixaFoiEstornada, EstornarBaixa};
 pub use fechar_caixa::{CaixaFoiFechado, FecharCaixa};
+pub use importar_contas::{ContasImportadas, ImportarContasEmAberto, PreviaDaImportacaoDeContas};
 pub use lancar_titulo_a_pagar::{LancarTituloAPagar, TituloAPagarLancado};
 pub use lancar_titulo_a_receber::{LancarTituloAReceber, TituloAReceberLancado};
 #[cfg(feature = "sqlite")]

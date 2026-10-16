@@ -322,3 +322,70 @@ impl Consulta for PessoasPorPapel {
             .map_err(persist)
     }
 }
+
+/// Quem já está no cadastro, por CPF/CNPJ e por nome — o que as importações por planilha
+/// (esta e a de contas em aberto do financeiro) usam para não duplicar e para achar a pessoa.
+/// Pessoa anonimizada fica de fora (o nome dela não é mais o nome dela).
+///
+/// # Errors
+/// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+#[cfg(feature = "sqlite")]
+pub fn indice_de_pessoas(
+    conexao: &Connection,
+    organizacao: Id,
+) -> Resultado<crate::importacao::IndicePessoas> {
+    let mut indice = crate::importacao::IndicePessoas::default();
+    let mut stmt = conexao
+        .prepare(
+            "SELECT id, nome FROM clientes_pessoa WHERE empresa = ?1 AND estado <> 'Anonimizada'",
+        )
+        .map_err(persist)?;
+    let linhas = stmt
+        .query_map([blob(organizacao)], |r| {
+            Ok((r.get::<_, Vec<u8>>(0)?, r.get::<_, String>(1)?))
+        })
+        .map_err(persist)?;
+    for linha in linhas {
+        let (id, nome) = linha.map_err(persist)?;
+        indice
+            .por_nome
+            .entry(cardeal_kernel::texto::chave_busca(&nome))
+            .or_default()
+            .push(id_de(id));
+    }
+    let mut stmt = conexao
+        .prepare(
+            "SELECT numero, pessoa FROM clientes_documento
+             WHERE empresa = ?1 AND tipo IN ('Cpf', 'Cnpj')",
+        )
+        .map_err(persist)?;
+    let linhas = stmt
+        .query_map([blob(organizacao)], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, Vec<u8>>(1)?))
+        })
+        .map_err(persist)?;
+    for linha in linhas {
+        let (numero, pessoa) = linha.map_err(persist)?;
+        indice.por_documento.insert(numero, id_de(pessoa));
+    }
+    Ok(indice)
+}
+
+/// A prévia da importação de clientes por planilha: o que seria criado, quem já existe e os
+/// erros por linha — sem gravar nada.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PreviaDaImportacaoDePessoas {
+    /// O conteúdo do CSV.
+    pub texto: String,
+}
+
+impl Consulta for PreviaDaImportacaoDePessoas {
+    type Saida = crate::importacao::PreviaImportacaoClientes;
+    const PERMISSAO: &'static str = "clientes.pessoa.ver";
+
+    #[cfg(feature = "sqlite")]
+    fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        let existentes = indice_de_pessoas(conexao, ctx.organizacao)?;
+        Ok(crate::importacao::planejar(&self.texto, &existentes).previa())
+    }
+}

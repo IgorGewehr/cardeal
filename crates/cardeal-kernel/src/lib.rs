@@ -47,6 +47,7 @@ pub mod documento;
 pub mod erro;
 pub mod id;
 pub mod percentual;
+pub mod planilha;
 pub mod quantidade;
 pub mod tempo;
 pub mod texto;

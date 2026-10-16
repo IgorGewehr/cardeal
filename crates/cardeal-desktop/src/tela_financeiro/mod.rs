@@ -17,6 +17,7 @@ mod contas;
 mod custos;
 mod dre;
 mod fluxo;
+mod importacao;
 mod lancar;
 mod pacote_contador;
 mod pessoal;
@@ -194,6 +195,8 @@ enum Dlg {
         /// `None` = serve para as duas espécies.
         especie: Option<EspecieTitulo>,
     },
+    /// "Importar contas em aberto…": a planilha escolhida e a prévia.
+    ImportarContas(importacao::EstadoImportacaoContas),
 }
 
 /// Para qual formulário o cadastro rápido ([`DlgRapido`]) devolve o `Id` recém-criado —
@@ -579,6 +582,7 @@ pub fn mostrar(
         }
         Dlg::DesativarConta { .. } => confirmar_desativacao(ui.ctx(), motor, sessao, estado),
         Dlg::NovaCategoria { .. } => dialogo_categoria(ui.ctx(), motor, sessao, estado),
+        Dlg::ImportarContas(_) => importacao::dialogo(ui.ctx(), motor, sessao, estado),
     }
     if estado.dlg_rapido.is_some() {
         dialogo_rapido(ui.ctx(), motor, sessao, estado);
@@ -653,6 +657,14 @@ fn acoes_empresa(
     if ui.add(Botao::fantasma("Recorrências")).clicked() {
         estado.carregar_recorrencias(motor, sessao);
         estado.dlg = Dlg::Recorrencias;
+    }
+    // A implantação: o que já estava em aberto no sistema antigo.
+    if sessao.concede("financeiro.titulo.importar")
+        && ui
+            .add(Botao::fantasma("Importar contas em aberto…"))
+            .clicked()
+    {
+        estado.dlg = Dlg::ImportarContas(importacao::EstadoImportacaoContas::default());
     }
 }
 

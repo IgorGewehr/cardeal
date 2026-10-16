@@ -12,6 +12,7 @@ mod danfce;
 #[cfg(feature = "demo")]
 mod demo_app;
 mod fiscal_fundo;
+mod importacao_planilha;
 mod login;
 mod pagamento;
 mod pessoa;

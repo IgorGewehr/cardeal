@@ -180,6 +180,12 @@ const PERMISSOES: &[Permissao] = &[
     ),
     // ── títulos (receber e pagar) ───────────────────────────────────────────
     perm(
+        "financeiro.titulo.importar",
+        "Importar contas em aberto por planilha (implantação: saldo de abertura, não receita)",
+        Risco::Medio,
+        None,
+    ),
+    perm(
         "financeiro.titulo.cancelar",
         "Cancelar título lançado errado (estorna o lançamento das parcelas)",
         Risco::Alto,

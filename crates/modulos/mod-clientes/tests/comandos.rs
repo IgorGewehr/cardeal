@@ -766,3 +766,113 @@ fn listagem_paginada_busca_no_servidor_e_teto_por_pagina() {
     assert_eq!(tudo.itens.len(), 60, "abaixo do teto vem tudo numa página");
     assert!(tudo.proximo.is_none());
 }
+
+#[test]
+fn importar_pessoas_cria_com_contatos_endereco_e_limite_e_nao_duplica() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloClientes]).unwrap();
+    let s = sessao(
+        empresa,
+        &[
+            "clientes.pessoa.criar",
+            "clientes.pessoa.ver",
+            "clientes.credito.definir_limite",
+        ],
+    );
+    let amb = ambiente(empresa);
+    let csv = "Nome;CPF/CNPJ;Celular;E-mail;Rua;Número;Bairro;Cidade;UF;CEP;Limite de crédito;Papel\n\
+               Ana Lima;529.982.247-25;(51) 99999-0000;ana@exemplo.com;Rua A;10;Centro;Porto Alegre;RS;90010-000;800,00;\n\
+               Distribuidora Sul Ltda;11.222.333/0001-81;;;;;;;;;;Fornecedor\n\
+               Bruno Sem Documento;;;;;;;;;;;\n";
+
+    let previa: mod_clientes::importacao::PreviaImportacaoClientes = postcard::from_bytes(
+        &d.executar_consulta(
+            "clientes.previa_importacao_pessoas.v1",
+            &carga(&mod_clientes::PreviaDaImportacaoDePessoas { texto: csv.into() }),
+            &s,
+            &amb,
+            arm.leitor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        (previa.novos, previa.fornecedores, previa.com_limite),
+        (3, 1, 1)
+    );
+    assert_eq!(conta_pessoas(&arm, empresa), 0, "a prévia não grava");
+
+    let feito: mod_clientes::PessoasImportadas = postcard::from_bytes(
+        &d.executar_comando(
+            "clientes.importar_pessoas.v1",
+            &carga(&mod_clientes::ImportarPessoas { texto: csv.into() }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!((feito.criadas, feito.ja_existiam), (3, 0));
+    assert_eq!(conta_pessoas(&arm, empresa), 3);
+    let contar = |sql: &str| -> i64 {
+        arm.leitor()
+            .consultar(|c| {
+                c.query_row(sql, [], |r| r.get(0))
+                    .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+            })
+            .unwrap()
+    };
+    assert_eq!(contar("SELECT COUNT(*) FROM clientes_contato"), 2);
+    assert_eq!(contar("SELECT COUNT(*) FROM clientes_endereco"), 1);
+    assert_eq!(contar("SELECT COUNT(*) FROM clientes_limite_credito"), 1);
+    assert_eq!(
+        contar("SELECT COUNT(*) FROM clientes_papel WHERE papel = 'Fornecedor'"),
+        1
+    );
+
+    // De novo: nada a criar.
+    let de_novo: mod_clientes::PessoasImportadas = postcard::from_bytes(
+        &d.executar_comando(
+            "clientes.importar_pessoas.v1",
+            &carga(&mod_clientes::ImportarPessoas { texto: csv.into() }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!((de_novo.criadas, de_novo.ja_existiam), (0, 3));
+
+    // Uma linha com erro recusa o arquivo inteiro.
+    let erro = d
+        .executar_comando(
+            "clientes.importar_pessoas.v1",
+            &carga(&mod_clientes::ImportarPessoas {
+                texto: "Nome;CPF\nCarla;390.533.447-05\nDani;123\n".into(),
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap_err();
+    assert_eq!(erro.codigo, CodigoErro::REGRA_VIOLADA);
+    assert!(erro.mensagem.contains("linha 3"), "{}", erro.mensagem);
+    assert_eq!(conta_pessoas(&arm, empresa), 3);
+
+    // Limite sem a permissão de definir limite: recusado.
+    let sem_limite = sessao(empresa, &["clientes.pessoa.criar"]);
+    let erro = d
+        .executar_comando(
+            "clientes.importar_pessoas.v1",
+            &carga(&mod_clientes::ImportarPessoas {
+                texto: "Nome;Limite\nEva;100\n".into(),
+            }),
+            &sem_limite,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap_err();
+    assert_eq!(erro.codigo, CodigoErro::SEM_PERMISSAO);
+}

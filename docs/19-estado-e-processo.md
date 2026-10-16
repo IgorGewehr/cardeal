@@ -45,8 +45,8 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   documento criado na venda sem rede, fila, transmissão em segundo plano (tarefa no despacho), conferência
   pela chave antes de reemitir, área Notas fiscais — e o **DANFCE** (80 mm, QR Code), o **cancelamento** e a
   **inutilização** como pedidos na fila, e o **estorno da venda** no PDV com a NFC-e anulada pela fila.
-  Próximo: o backlog do `docs/21-licoes-do-gestao-raiz.md` §5 (importação de clientes e títulos,
-  desconto no total e busca de cliente no PDV…); a 1ª autorizada no RS espera os dados do usuário.
+  Próximo: o backlog do `docs/21-licoes-do-gestao-raiz.md` §5 (desconto no total e busca de cliente
+  no PDV, depois as compras…); a 1ª autorizada no RS espera os dados do usuário.
 - **Pendência de confiança:** as tabelas do Simples e as alíquotas precisam ser conferidas com o
   contador; o ST/IPI **da nota** já entra no custo (2026-10-13), mas a estimativa de ST pela MVA (sem o valor na
   nota) ainda não.
@@ -665,6 +665,17 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   - NFC-e `tPag 05` (`MeioPagamento::CreditoLoja`);
   - desktop: tecla `5` no pagamento com 1º vencimento e parcelas; o comprovante mostra "A prazo (Nx,
     1ª em …)" e a linha de assinatura.
+- **Implantação por planilha (2026-10-16, item 7 do doc 21):**
+  - `cardeal_kernel::planilha`: o leitor de CSV (`;`/`,`, aspas, BOM) e a `chave_coluna` saíram do
+    estoque e agora servem a todas as importações;
+  - `mod_clientes`: `importacao` (domínio), `ImportarPessoas` e `PreviaDaImportacaoDePessoas`, e
+    `indice_de_pessoas` (documento → pessoa, nome → pessoas);
+  - `mod_financeiro`: `importacao` (domínio), `ImportarContasEmAberto` e
+    `PreviaDaImportacaoDeContas`, permissão `financeiro.titulo.importar`, origem `importacao`
+    (cancelável) e a dependência nova em `mod-clientes` (núcleo pode depender de núcleo, doc 04
+    §8) para achar ou cadastrar a pessoa na mesma transação;
+  - desktop: `importacao_planilha.rs` (o comum), "Importar clientes…" em Clientes e "Importar contas
+    em aberto…" no Financeiro, cada um com o modelo para baixar.
 - **Inventário com contagem cega (2026-10-13):** migração `estoque` v11 (`estoque_inventario`,
   `estoque_contagem_item`), comandos `criar_inventario`/`iniciar_contagem`/`registrar_contagem`/
   `encerrar_inventario`/`cancelar_inventario` (`.v1`) e consultas `inventarios`/`posicao_do_inventario`.

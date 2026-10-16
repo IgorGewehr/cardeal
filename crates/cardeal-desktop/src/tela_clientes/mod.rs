@@ -10,6 +10,7 @@
 //! já cadastrados no backend (`PessoaDetalhada`), só não apareciam na tela.
 
 mod ficha;
+mod importacao;
 
 use cardeal_cliente::{Motor, Sessao};
 use cardeal_kernel::Id;
@@ -230,6 +231,8 @@ pub struct EstadoTelaClientes {
     pub pedido_os: Option<PedidoParaOs>,
     /// Um cliente que a tela quer abrir no próximo quadro (o "já existe com esse telefone").
     pedido_abrir: Option<Id>,
+    /// "Importar clientes…" aberto: a planilha escolhida e a prévia.
+    importacao: Option<importacao::EstadoImportacao>,
 }
 
 impl EstadoTelaClientes {
@@ -283,6 +286,11 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
             {
                 estado.form = Some(Form::novo());
             }
+            if sessao.concede("clientes.pessoa.criar")
+                && ui.add(Botao::secundario("Importar clientes…")).clicked()
+            {
+                estado.importacao = Some(importacao::EstadoImportacao::default());
+            }
         },
         |ui, estado| {
             if !estado.pessoas.is_empty() {
@@ -320,6 +328,9 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
 
     if estado.form.is_some() {
         dialogo(ui.ctx(), motor, sessao, estado);
+    }
+    if estado.importacao.is_some() {
+        importacao::dialogo(ui.ctx(), motor, sessao, estado);
     }
 
     if let Some((pessoa, nome)) = estado.confirmar_exclusao.clone() {

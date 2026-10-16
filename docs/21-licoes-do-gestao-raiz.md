@@ -135,7 +135,21 @@ O que eles têm e o Cardeal não, com o que aprenderam:
    - o comprovante ganha a linha de assinatura do cliente.
 
    O cheque à vista continua pelo registro de cheque do financeiro, sobre a parcela.
-7. **Implantação por planilha**: clientes e títulos em aberto.
+7. ~~**Implantação por planilha**: clientes e títulos em aberto.~~ **Feito (2026-10-16).**
+
+   Lá:
+   - os clientes "importados" vêm dos pedidos do marketplace, não de planilha;
+   - as contas vêm de uma planilha lida no navegador e gravadas sem conferência de pessoa,
+     sem contabilidade e sem proteção contra importar duas vezes.
+
+   Aqui:
+   - **Clientes:** `Importar clientes…` com prévia (novos, já existiam, erros por linha) e o
+     modelo para baixar. CPF/CNPJ e contatos são conferidos; quem já existe não duplica.
+   - **Contas em aberto:** `Importar contas em aberto…` acha ou cadastra a pessoa de cada
+     conta. Entra como saldo de abertura (Lucros acumulados), sem inflar a receita do mês.
+     Importar de novo não duplica nem ressuscita o que foi cancelado.
+   - **Nas duas:** tudo ou nada, e sem atalho de permissão. O leitor de CSV agora é um só
+     (`cardeal_kernel::planilha`), também usado pelo estoque.
 8. **Desconto no total** e **busca de cliente** no PDV.
 9. **Notas recebidas pela SEFAZ (DFe) e manifestação.** Fluxo deles (`lib/fiscal/sefaz-distribuicao.ts`):
    - a distribuição por NSU;

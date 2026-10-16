@@ -51,6 +51,8 @@ impl Modulo for ModuloFinanceiro {
             .comando::<EstornarBaixa>("financeiro.estornar_baixa.v1")
             .comando::<RenegociarTitulo>("financeiro.renegociar_titulo.v1")
             .comando::<CancelarTitulo>("financeiro.cancelar_titulo.v1")
+            .comando::<crate::ImportarContasEmAberto>("financeiro.importar_contas.v1")
+            .consulta::<crate::PreviaDaImportacaoDeContas>("financeiro.previa_importacao_contas.v1")
             .comando::<crate::DefinirSaldoInicial>("financeiro.definir_saldo_inicial.v1")
             .comando::<crate::TransferirEntreContas>("financeiro.transferir_entre_contas.v1")
             .comando::<crate::CancelarTransferencia>("financeiro.cancelar_transferencia.v1")

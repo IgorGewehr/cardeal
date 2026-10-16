@@ -2880,3 +2880,204 @@ fn desativar_conta_so_sem_saldo_e_nunca_a_do_sistema() {
         CodigoErro::ENTRADA_INVALIDA
     );
 }
+
+/// Soma das partidas de um papel (qualquer estado menos previsto): o original estornado e o
+/// estorno se anulam.
+fn saldo_contabil(arm: &Armazenamento, empresa: Id, papel: PapelConta) -> i64 {
+    let conta = conta_papel(arm, empresa, papel);
+    arm.leitor()
+        .consultar(|c| {
+            c.query_row(
+                "SELECT COALESCE(SUM(p.valor), 0) FROM razao_partida p
+                 JOIN razao_lancamento l ON l.id = p.lancamento
+                 WHERE p.conta = ?1 AND l.estado <> 'Previsto'",
+                [conta.em_bytes().as_slice()],
+                |r| r.get(0),
+            )
+            .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+        })
+        .unwrap()
+}
+
+#[test]
+fn importar_contas_em_aberto_e_saldo_de_abertura_acha_ou_cadastra_a_pessoa_e_nao_duplica() {
+    let (_dir, arm, empresa) = base();
+    arm.migrar(&[mod_clientes::ModuloClientes.migracoes()])
+        .unwrap();
+    let d = Despachante::construir(&[&ModuloFinanceiro, &mod_clientes::ModuloClientes]).unwrap();
+    let mut rm = RegistroModulos::novo();
+    rm.registrar(&MANIFESTO).unwrap();
+    rm.registrar(&mod_clientes::MANIFESTO).unwrap();
+    let amb = Ambiente::novo(
+        empresa,
+        rm.resolver(
+            &PedidoAtivacao::nova()
+                .com_modulo("financeiro")
+                .com_modulo("clientes"),
+        )
+        .unwrap(),
+    );
+    let s = sessao(
+        empresa,
+        &[
+            "financeiro.titulo.importar",
+            "financeiro.receber.criar",
+            "financeiro.pagar.criar",
+            "financeiro.titulo.cancelar",
+            "clientes.pessoa.criar",
+        ],
+    );
+    let ana: mod_clientes::PessoaCadastrada = postcard::from_bytes(
+        &d.executar_comando(
+            "clientes.criar_pessoa.v1",
+            &carga(&mod_clientes::CriarPessoa {
+                tipo: mod_clientes::TipoPessoa::Fisica,
+                nome: "Ana Lima".into(),
+                nome_fantasia: None,
+                papel_inicial: mod_clientes::Papel::Cliente,
+                documento_tipo: Some(mod_clientes::TipoDocumento::Cpf),
+                documento_numero: Some("52998224725".into()),
+                data_nascimento: None,
+                endereco: None,
+                contato: None,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    let futuro = hoje().mais_dias(20).formatar();
+    let passado = hoje().mais_dias(-10).formatar();
+    let csv = format!(
+        "Tipo;Nome;CPF/CNPJ;Vencimento;Valor;Número\n\
+         Receber;Ana;529.982.247-25;{futuro};150,00;NF 10\n\
+         Receber;Bruno Novo;;{passado};50,00;\n\
+         Pagar;Distribuidora Sul;11.222.333/0001-81;{futuro};300,00;Boleto 99\n"
+    );
+
+    let previa: mod_financeiro::importacao::PreviaImportacaoContas = postcard::from_bytes(
+        &d.executar_consulta(
+            "financeiro.previa_importacao_contas.v1",
+            &carga(&mod_financeiro::PreviaDaImportacaoDeContas { texto: csv.clone() }),
+            &s,
+            &amb,
+            arm.leitor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(previa.erros.is_empty(), "{:?}", previa.erros);
+    assert_eq!(
+        (previa.a_receber, previa.a_pagar, previa.vencidas),
+        (2, 1, 1)
+    );
+    assert_eq!(previa.total_a_receber, Dinheiro::reais(200));
+    assert_eq!(
+        previa.pessoas_novas,
+        vec!["Bruno Novo", "Distribuidora Sul"]
+    );
+    assert_eq!(previa.amostra[0].pessoa, "Ana Lima", "achada pelo CPF");
+    assert_eq!(conta_lancamentos(&arm, empresa), 0, "a prévia não grava");
+
+    let importar = |texto: &str, sessao: &Sessao| {
+        d.executar_comando(
+            "financeiro.importar_contas.v1",
+            &carga(&mod_financeiro::ImportarContasEmAberto {
+                texto: texto.into(),
+            }),
+            sessao,
+            &amb,
+            arm.escritor(),
+        )
+    };
+    let feito: mod_financeiro::ContasImportadas =
+        postcard::from_bytes(&importar(&csv, &s).unwrap()).unwrap();
+    assert_eq!(
+        (feito.a_receber, feito.a_pagar, feito.pessoas_criadas),
+        (2, 1, 2)
+    );
+    // Saldo de abertura: o balanço mostra quem deve; a DRE não muda.
+    assert_eq!(
+        saldo_contabil(&arm, empresa, PapelConta::ClientesAReceber),
+        20_000
+    );
+    assert_eq!(
+        saldo_contabil(&arm, empresa, PapelConta::Fornecedores),
+        -30_000
+    );
+    assert_eq!(
+        saldo_contabil(&arm, empresa, PapelConta::LucrosAcumulados),
+        10_000
+    );
+    assert_eq!(saldo_contabil(&arm, empresa, PapelConta::OutrasReceitas), 0);
+    let contraparte_da_nf: Vec<u8> = arm
+        .leitor()
+        .consultar(|c| {
+            c.query_row(
+                "SELECT contraparte_id FROM financeiro_titulo WHERE observacao = 'Doc. NF 10'",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+        })
+        .unwrap();
+    assert_eq!(contraparte_da_nf, ana.pessoa.em_bytes().to_vec());
+
+    // De novo: nada a criar.
+    let de_novo: mod_financeiro::ContasImportadas =
+        postcard::from_bytes(&importar(&csv, &s).unwrap()).unwrap();
+    assert_eq!(
+        (de_novo.a_receber + de_novo.a_pagar, de_novo.ja_existiam),
+        (0, 3)
+    );
+
+    // A conta importada errada pode ser cancelada, e não volta numa nova importação.
+    let titulo: Vec<u8> = arm
+        .leitor()
+        .consultar(|c| {
+            c.query_row(
+                "SELECT id FROM financeiro_titulo WHERE especie = 'Pagar'",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+        })
+        .unwrap();
+    d.executar_comando(
+        "financeiro.cancelar_titulo.v1",
+        &carga(&CancelarTitulo {
+            titulo: Id::de_bytes(titulo.try_into().unwrap()),
+            motivo: "Já tinha sido pago no sistema antigo".into(),
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+    assert_eq!(saldo_contabil(&arm, empresa, PapelConta::Fornecedores), 0);
+    let de_novo: mod_financeiro::ContasImportadas =
+        postcard::from_bytes(&importar(&csv, &s).unwrap()).unwrap();
+    assert_eq!(de_novo.ja_existiam, 3);
+
+    // Pessoa nova sem a permissão de cadastrar: recusado, e nada é gravado.
+    let sem_cadastro = sessao(
+        empresa,
+        &["financeiro.titulo.importar", "financeiro.receber.criar"],
+    );
+    let antes = conta_lancamentos(&arm, empresa);
+    let erro = importar(
+        &format!("Tipo;Nome;Vencimento;Valor\nR;Carla Nova;{futuro};10\n"),
+        &sem_cadastro,
+    )
+    .unwrap_err();
+    assert_eq!(erro.codigo, CodigoErro::SEM_PERMISSAO);
+    assert!(
+        erro.mensagem.contains("importe os clientes antes"),
+        "{}",
+        erro.mensagem
+    );
+    assert_eq!(conta_lancamentos(&arm, empresa), antes);
+}
