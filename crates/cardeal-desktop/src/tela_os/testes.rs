@@ -667,3 +667,75 @@ fn nova_os_a_partir_da_ficha_do_cliente_ja_vem_com_ele() {
     };
     assert_eq!(pessoa.selecionada, Some(cliente));
 }
+
+/// Regressão: o "Editar" da lista só funcionava na última linha (o closure por linha
+/// sobrescrevia o clique com o `None` das seguintes).
+#[test]
+fn editar_da_lista_funciona_em_qualquer_linha() {
+    let mut c = cenario();
+    let primeira = c.os;
+    c.estado.carregar(&c.motor, &c.sessao);
+    let cliente = c.estado.ordens[0].cliente;
+    let segunda: OrdemServicoAberta = c
+        .motor
+        .executar(
+            &c.sessao,
+            "os.abrir_ordem_servico.v1",
+            &AbrirOrdemServico {
+                cliente,
+                equipamento: "Segundo aparelho".to_owned(),
+                defeito_relatado: "não liga".to_owned(),
+                tecnico_responsavel: c.sessao.usuario(),
+                garantia_dias: 90,
+                ficha: mod_os::FichaEntrada::default(),
+            },
+        )
+        .expect("segunda OS");
+    let segunda = segunda.ordem_servico;
+    cardeal_ui::tokens::instalar_fontes(&c.ctx);
+    cardeal_ui::tokens::instalar_estilo(&c.ctx, cardeal_ui::tokens::Tema::Claro);
+    c.estado.carregar(&c.motor, &c.sessao);
+    assert_eq!(c.estado.ordens.len(), 2);
+    let ctx = c.ctx.clone();
+    let roda = |c: &mut Cenario, evs: Vec<egui::Event>| {
+        let entrada = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1200.0, 800.0),
+            )),
+            events: evs,
+            ..Default::default()
+        };
+        let _ = ctx.run(entrada, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                mostrar(ui, &c.motor, &c.sessao, &mut c.estado);
+            });
+        });
+    };
+    roda(&mut c, vec![]);
+    roda(&mut c, vec![]);
+    let mut abertas = std::collections::HashSet::new();
+    for y in (400..600).step_by(4) {
+        for x in (1010..1070).step_by(10) {
+            c.estado.dlg = Dlg::Fechado;
+            let p = egui::pos2(x as f32, y as f32);
+            roda(&mut c, vec![egui::Event::PointerMoved(p)]);
+            let b = |pressed| egui::Event::PointerButton {
+                pos: p,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            roda(&mut c, vec![b(true)]);
+            roda(&mut c, vec![b(false)]);
+            roda(&mut c, vec![]);
+            if let Dlg::EditarDados(id) = c.estado.dlg {
+                abertas.insert(id);
+            }
+        }
+    }
+    assert!(
+        abertas.contains(&primeira) && abertas.contains(&segunda),
+        "{abertas:?}"
+    );
+}

@@ -135,19 +135,22 @@ pub(super) fn lista(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &
                 ui.add(ValorDinheiro::novo(os.valor_total));
             });
             row.col(|ui| {
-                acao_clicada = AcoesRegistro::novo()
+                // Só sobrescreve quando ESTA linha foi clicada: o closure roda uma vez por
+                // linha, e atribuir o `None` das outras apagava o clique de qualquer linha que
+                // não fosse a última.
+                if let Some(a) = AcoesRegistro::novo()
                     .excluir(pode_cancelar(os.estado))
                     .mostrar(ui)
-                    .map(|a| {
-                        (
-                            a,
-                            os.id,
-                            os.equipamento.clone(),
-                            equipamento_label(os).to_owned(),
-                            FormFicha::de(&os.ficha),
-                            os.garantia_dias == 0,
-                        )
-                    });
+                {
+                    acao_clicada = Some((
+                        a,
+                        os.id,
+                        os.equipamento.clone(),
+                        equipamento_label(os).to_owned(),
+                        FormFicha::de(&os.ficha),
+                        os.garantia_dias == 0,
+                    ));
+                }
             });
         });
 

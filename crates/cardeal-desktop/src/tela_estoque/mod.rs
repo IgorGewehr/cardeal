@@ -417,9 +417,11 @@ fn lista(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoT
                 ui.add(Rotulo::interface(p.custo_medio.to_string()));
             });
             row.col(|ui| {
-                acao_clicada = AcoesRegistro::novo()
-                    .mostrar(ui)
-                    .map(|a| (a, indices[i], p.produto, p.nome.clone()));
+                // `if let`, não `=`: o closure roda por linha e o `None` das outras apagaria o
+                // clique de qualquer linha que não fosse a última.
+                if let Some(a) = AcoesRegistro::novo().mostrar(ui) {
+                    acao_clicada = Some((a, indices[i], p.produto, p.nome.clone()));
+                }
             });
         });
 

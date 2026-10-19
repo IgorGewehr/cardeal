@@ -381,9 +381,11 @@ fn lista(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoT
                 }
             });
             row.col(|ui| {
-                acao_clicada = AcoesRegistro::novo()
-                    .mostrar(ui)
-                    .map(|a| (a, p.pessoa, p.nome.clone()));
+                // `if let`, não `=`: o closure roda por linha e o `None` das outras apagaria o
+                // clique de qualquer linha que não fosse a última.
+                if let Some(a) = AcoesRegistro::novo().mostrar(ui) {
+                    acao_clicada = Some((a, p.pessoa, p.nome.clone()));
+                }
             });
         });
 
