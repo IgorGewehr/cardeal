@@ -55,6 +55,7 @@ mod consultas;
 mod cupom;
 mod erros;
 pub mod eventos;
+mod impressao;
 mod manifesto;
 #[cfg(feature = "sqlite")]
 pub mod migracoes;
@@ -66,14 +67,23 @@ pub mod receituario;
 mod repositorio;
 
 pub use comandos::{
-    AbrirCupom, AdicionarItem, AplicarDescontoItem, CancelarCupom, CancelarItem, CupomAberto,
-    FinalizarVenda, IdentificarCliente, ItemFoiAdicionado, PagamentoInformado, VendaFoiFinalizada,
+    AbrirCupom, AdicionarItem, AplicarDescontoItem, AplicarDescontoNoTotal, CancelarCupom,
+    CancelarItem, CupomAberto, DescontoNoTotalAplicado, EstornarVenda, FinalizarVenda,
+    IdentificarCliente, ItemFoiAdicionado, PagamentoInformado, VendaFoiEstornada,
+    VendaFoiFinalizada, MOTIVO_MINIMO_DO_ESTORNO,
 };
-pub use consultas::{PrecoConsultado, PrecoDoProduto};
+pub use consultas::{
+    EstornoDaVenda, PrecoConsultado, PrecoDoProduto, VendaDoPeriodo, VendasDoPeriodo,
+};
 pub use cupom::{
-    validar_pagamentos, Cupom, EstadoCupom, FormaPagamentoPdv, ItemCupom, PagamentoCupom,
+    validar_pagamentos, CondicaoPrazo, Cupom, DescontoNoTotal, EstadoCupom, FormaPagamentoPdv,
+    ItemCupom, PagamentoCupom,
 };
 pub use erros::ErroPdv;
+pub use impressao::{
+    ComprovanteDaVenda, DadosDoComprovante, DefinirImpressaoPdv, ImpressaoDoPdv, ImpressaoPdv,
+    ItemDoComprovante, LarguraBobina,
+};
 pub use manifesto::{manifesto, MANIFESTO};
 #[cfg(feature = "sqlite")]
 pub use modulo::ModuloPdv;

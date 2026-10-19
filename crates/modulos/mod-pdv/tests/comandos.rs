@@ -28,9 +28,12 @@ use mod_financeiro::{
     AbrirCaixa, CadastrarCaixa, CaixaCadastrado, CaixaFoiAberto, ModuloFinanceiro,
 };
 use mod_pdv::{
-    AbrirCupom, AdicionarItem, AplicarDescontoItem, CancelarCupom, CancelarItem, CupomAberto,
-    FinalizarVenda, IdentificarCliente, ItemFoiAdicionado, ModuloPdv, PagamentoInformado,
-    PrecoConsultado, PrecoDoProduto, ReceitaPorProduto, VendaFoiFinalizada,
+    AbrirCupom, AdicionarItem, AplicarDescontoItem, CancelarCupom, CancelarItem,
+    ComprovanteDaVenda, CupomAberto, DadosDoComprovante, DefinirImpressaoPdv, EstadoCupom,
+    EstornarVenda, FinalizarVenda, FormaPagamentoPdv, IdentificarCliente, ImpressaoDoPdv,
+    ImpressaoPdv, ItemFoiAdicionado, LarguraBobina, ModuloPdv, PagamentoInformado, PrecoConsultado,
+    PrecoDoProduto, ReceitaPorProduto, VendaDoPeriodo, VendaFoiEstornada, VendaFoiFinalizada,
+    VendasDoPeriodo,
 };
 use mod_vendas::{
     CriarRegraPreco, CriarTabelaPreco, ModuloVendas, RegraPrecoCriada, TabelaPrecoCriada,
@@ -103,6 +106,11 @@ fn sessao_completa(empresa: Id) -> Sessao {
         "pdv.cupom.cancelar",
         "pdv.preco.consultar",
         "pdv.margem.ver",
+        "pdv.venda.estornar",
+        "pdv.venda.ver",
+        "pdv.impressao.configurar",
+        "clientes.credito.definir_limite",
+        "financeiro.receber.baixar",
     ] {
         papel = papel.com_permissao(p);
     }
@@ -419,6 +427,7 @@ fn ciclo_completo_venda_de_balcao_com_um_pagamento() {
                 pagamentos: vec![PagamentoInformado {
                     forma: mod_pdv::FormaPagamentoPdv::Dinheiro,
                     valor: Dinheiro::reais(50),
+                    prazo: None,
                 }],
             }),
             &s,
@@ -504,6 +513,7 @@ fn venda_com_multiplas_formas_e_desconto_de_item() {
                 pagamentos: vec![PagamentoInformado {
                     forma: mod_pdv::FormaPagamentoPdv::Dinheiro,
                     valor: Dinheiro::reais(80),
+                    prazo: None,
                 }],
             }),
             &s,
@@ -522,10 +532,12 @@ fn venda_com_multiplas_formas_e_desconto_de_item() {
                     PagamentoInformado {
                         forma: mod_pdv::FormaPagamentoPdv::Dinheiro,
                         valor: Dinheiro::reais(50),
+                        prazo: None,
                     },
                     PagamentoInformado {
                         forma: mod_pdv::FormaPagamentoPdv::Credito,
                         valor: Dinheiro::reais(40),
+                        prazo: None,
                     },
                 ],
             }),
@@ -606,6 +618,7 @@ fn cancelar_item_recalcula_total_e_cancelar_cupom_impede_finalizar() {
                 pagamentos: vec![PagamentoInformado {
                     forma: mod_pdv::FormaPagamentoPdv::Dinheiro,
                     valor: Dinheiro::ZERO,
+                    prazo: None,
                 }],
             }),
             &s,
@@ -801,6 +814,7 @@ fn receita_por_produto_soma_so_cupons_finalizados_sem_itens_cancelados() {
             pagamentos: vec![PagamentoInformado {
                 forma: mod_pdv::FormaPagamentoPdv::Dinheiro,
                 valor: Dinheiro::reais(50),
+                prazo: None,
             }],
         }),
         &s,
@@ -847,4 +861,610 @@ fn receita_por_produto_soma_so_cupons_finalizados_sem_itens_cancelados() {
     assert_eq!(r[0].quantidade, Quantidade::unidades(2));
     assert_eq!(r[0].receita, Dinheiro::reais(50));
     assert!(receita(Periodo::novo(hoje.mais_dias(-30), hoje.mais_dias(-10))).is_empty());
+}
+
+/// Soma das partidas (realizadas e estornadas) da conta de um papel — o saldo que o caixa vê.
+fn saldo_do_papel(arm: &Armazenamento, empresa: Id, papel: &str) -> i64 {
+    arm.leitor()
+        .consultar(|c| {
+            c.query_row(
+                "SELECT COALESCE(SUM(rp.valor), 0)
+                 FROM razao_partida rp
+                 JOIN razao_lancamento rl ON rl.id = rp.lancamento
+                 JOIN razao_conta rc ON rc.id = rp.conta
+                 WHERE rc.empresa = ?1 AND rc.papel_padrao = ?2
+                   AND rl.estado IN ('Realizado', 'Estornado')",
+                rusqlite::params![empresa.em_bytes().as_slice(), papel],
+                |r| r.get(0),
+            )
+            .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+        })
+        .unwrap()
+}
+
+/// `(quantidade disponível, custo médio)` do produto no local, em unidades internas.
+fn saldo_de_estoque(arm: &Armazenamento, produto: Id) -> (i64, i64) {
+    arm.leitor()
+        .consultar(|c| {
+            c.query_row(
+                "SELECT quantidade_disponivel, custo_medio FROM estoque_saldo_local WHERE produto = ?1",
+                [produto.em_bytes().as_slice()],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+        })
+        .unwrap()
+}
+
+#[test]
+fn estornar_venda_finalizada_devolve_estoque_e_zera_o_razao() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[
+        &ModuloClientes,
+        &ModuloEstoque,
+        &ModuloFinanceiro,
+        &ModuloVendas,
+        &ModuloPdv,
+    ])
+    .unwrap();
+    let s = sessao_completa(empresa);
+    let amb = ambiente(empresa);
+    let cen = montar_cenario(&d, &s, &amb, &arm, empresa, 25);
+    let estoque_antes = saldo_de_estoque(&arm, cen.produto);
+
+    let cupom = abrir_cupom(&d, &s, &amb, &arm, &cen);
+    d.executar_comando(
+        "pdv.adicionar_item.v1",
+        &carga(&AdicionarItem {
+            cupom: cupom.cupom,
+            produto: cen.produto,
+            variacao: None,
+            quantidade: Quantidade::unidades(2),
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+    let estornar = |motivo: &str, sessao: &Sessao| {
+        d.executar_comando(
+            "pdv.estornar_venda.v1",
+            &carga(&EstornarVenda {
+                cupom: cupom.cupom,
+                motivo: motivo.to_string(),
+                autorizado_por: Id::novo(),
+            }),
+            sessao,
+            &amb,
+            arm.escritor(),
+        )
+    };
+    // Em andamento não se estorna: cancela-se (F8).
+    assert_eq!(
+        estornar("Cliente desistiu da compra", &s)
+            .unwrap_err()
+            .codigo,
+        CodigoErro::ESTADO_INVALIDO
+    );
+    d.executar_comando(
+        "pdv.finalizar_venda.v1",
+        &carga(&FinalizarVenda {
+            cupom: cupom.cupom,
+            pagamentos: vec![
+                PagamentoInformado {
+                    forma: FormaPagamentoPdv::Dinheiro,
+                    valor: Dinheiro::reais(30),
+                    prazo: None,
+                },
+                PagamentoInformado {
+                    forma: FormaPagamentoPdv::Pix,
+                    valor: Dinheiro::reais(20),
+                    prazo: None,
+                },
+            ],
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+    assert_eq!(saldo_do_papel(&arm, empresa, "Caixa"), 3_000);
+    assert_eq!(
+        saldo_de_estoque(&arm, cen.produto).0,
+        estoque_antes.0 - 20_000
+    );
+
+    // Motivo curto e falta de permissão são recusados antes de mexer em qualquer coisa.
+    assert_eq!(
+        estornar("errei", &s).unwrap_err().codigo,
+        CodigoErro::ENTRADA_INVALIDA
+    );
+    let mut sem_estorno = PapelAuth::novo(empresa, "Caixa sem estorno");
+    for p in ["pdv.venda.editar", "pdv.venda.finalizar"] {
+        sem_estorno = sem_estorno.com_permissao(p);
+    }
+    let caixa_simples = Sessao::abrir(EmissaoSessao::padrao(
+        Id::novo(),
+        Id::novo(),
+        Escopo::empresa_inteira(empresa),
+        AutorizacoesEfetivas::consolidar([&sem_estorno]),
+        Instante::EPOCA,
+    ));
+    assert_eq!(
+        estornar("Cliente desistiu da compra", &caixa_simples)
+            .unwrap_err()
+            .codigo,
+        CodigoErro::SEM_PERMISSAO
+    );
+
+    let estorno: VendaFoiEstornada =
+        postcard::from_bytes(&estornar("Cliente desistiu da compra", &s).unwrap()).unwrap();
+    assert_eq!(estorno.lancamentos.len(), 1);
+    assert_eq!(estorno.itens_devolvidos, 1);
+    assert_eq!(estorno.devolver.len(), 2, "devolve forma por forma");
+
+    // O Razão volta ao que era: caixa, Pix em trânsito, receita, CMV e estoque.
+    for papel in [
+        "Caixa",
+        "ValoresEmTransito",
+        "ReceitaVendas",
+        "Cmv",
+        "EstoqueMercadorias",
+    ] {
+        assert_eq!(saldo_do_papel(&arm, empresa, papel), 0, "{papel}");
+    }
+    // E o estoque também, ao mesmo custo médio.
+    assert_eq!(saldo_de_estoque(&arm, cen.produto), estoque_antes);
+
+    // Não se estorna duas vezes.
+    assert_eq!(
+        estornar("Cliente desistiu da compra", &s)
+            .unwrap_err()
+            .codigo,
+        CodigoErro::ESTADO_INVALIDO
+    );
+
+    // A lista de vendas do dia mostra o estorno.
+    let hoje = Data::hoje(Fuso::BRASILIA);
+    let vendas: Vec<VendaDoPeriodo> = postcard::from_bytes(
+        &d.executar_consulta(
+            "pdv.vendas_do_periodo.v1",
+            &carga(&VendasDoPeriodo {
+                de: hoje.mais_dias(-1),
+                ate: hoje.mais_dias(1),
+            }),
+            &s,
+            &amb,
+            arm.leitor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(vendas.len(), 1);
+    assert_eq!(vendas[0].estado, EstadoCupom::Estornado);
+    assert_eq!(vendas[0].total, Dinheiro::reais(50));
+    assert_eq!(vendas[0].pagamentos.len(), 2);
+    assert_eq!(
+        vendas[0].estorno.as_ref().map(|e| e.motivo.as_str()),
+        Some("Cliente desistiu da compra")
+    );
+}
+
+#[test]
+fn comprovante_traz_empresa_itens_cliente_e_a_impressao_configurada() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[
+        &ModuloClientes,
+        &ModuloEstoque,
+        &ModuloFinanceiro,
+        &ModuloVendas,
+        &ModuloPdv,
+    ])
+    .unwrap();
+    let s = sessao_completa(empresa);
+    let amb = ambiente(empresa);
+    let cen = montar_cenario(&d, &s, &amb, &arm, empresa, 25);
+    let cupom = abrir_cupom(&d, &s, &amb, &arm, &cen);
+    d.executar_comando(
+        "pdv.adicionar_item.v1",
+        &carga(&AdicionarItem {
+            cupom: cupom.cupom,
+            produto: cen.produto,
+            variacao: None,
+            quantidade: Quantidade::unidades(2),
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+    let comprovante = || -> Result<DadosDoComprovante, cardeal_kernel::Erro> {
+        d.executar_consulta(
+            "pdv.comprovante_da_venda.v1",
+            &carga(&ComprovanteDaVenda { cupom: cupom.cupom }),
+            &s,
+            &amb,
+            arm.leitor(),
+        )
+        .map(|b| postcard::from_bytes(&b).unwrap())
+    };
+    // Venda em andamento ainda não tem comprovante.
+    assert_eq!(
+        comprovante().unwrap_err().codigo,
+        CodigoErro::ESTADO_INVALIDO
+    );
+    d.executar_comando(
+        "pdv.finalizar_venda.v1",
+        &carga(&FinalizarVenda {
+            cupom: cupom.cupom,
+            pagamentos: vec![PagamentoInformado {
+                forma: FormaPagamentoPdv::Dinheiro,
+                valor: Dinheiro::reais(50),
+                prazo: None,
+            }],
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+
+    let c = comprovante().unwrap();
+    assert_eq!(c.cliente.as_deref(), Some("João Silva"));
+    assert_eq!(c.itens.len(), 1);
+    assert_eq!(c.itens[0].descricao, "Capinha de celular");
+    assert_eq!(
+        (c.itens[0].unidade.as_str(), c.total),
+        ("UN", Dinheiro::reais(50))
+    );
+    assert_eq!(c.cnpj, "11.222.333/0001-81");
+    assert_eq!(c.impressao, ImpressaoPdv::default());
+
+    d.executar_comando(
+        "pdv.definir_impressao.v1",
+        &carga(&DefinirImpressaoPdv {
+            impressao: ImpressaoPdv {
+                bobina: LarguraBobina::Mm58,
+                imprimir_ao_finalizar: true,
+                rodape: Some("  Trocas em até 7 dias  ".into()),
+            },
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+    let i: ImpressaoPdv = postcard::from_bytes(
+        &d.executar_consulta(
+            "pdv.impressao.v1",
+            &carga(&ImpressaoDoPdv),
+            &s,
+            &amb,
+            arm.leitor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(i.bobina, LarguraBobina::Mm58);
+    assert!(i.imprimir_ao_finalizar);
+    assert_eq!(i.rodape.as_deref(), Some("Trocas em até 7 dias"));
+    assert_eq!(comprovante().unwrap().impressao, i);
+}
+
+/// Abre um cupom (com ou sem cliente), põe `qtd` do produto (R$ 25 cada) e devolve o cupom.
+fn cupom_com(
+    d: &Despachante,
+    s: &Sessao,
+    amb: &Ambiente,
+    arm: &Armazenamento,
+    cen: &Cenario,
+    cliente: Option<Id>,
+    qtd: i64,
+) -> Id {
+    let cupom: CupomAberto = postcard::from_bytes(
+        &d.executar_comando(
+            "pdv.abrir_cupom.v1",
+            &carga(&AbrirCupom {
+                sessao_caixa: cen.sessao_caixa,
+                terminal: Id::novo(),
+                serie_fiscal: 1,
+                cliente,
+                tabela_preco: cen.tabela_preco,
+                local_expedicao: cen.local,
+            }),
+            s,
+            amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    d.executar_comando(
+        "pdv.adicionar_item.v1",
+        &carga(&AdicionarItem {
+            cupom: cupom.cupom,
+            produto: cen.produto,
+            variacao: None,
+            quantidade: Quantidade::unidades(qtd),
+        }),
+        s,
+        amb,
+        arm.escritor(),
+    )
+    .unwrap();
+    cupom.cupom
+}
+
+fn a_prazo(valor: Dinheiro, parcelas: u16) -> PagamentoInformado {
+    PagamentoInformado {
+        forma: FormaPagamentoPdv::Prazo,
+        valor,
+        prazo: Some(mod_pdv::CondicaoPrazo {
+            primeiro_vencimento: Data::hoje(Fuso::BRASILIA).mais_dias(30),
+            parcelas,
+            intervalo_dias: 30,
+        }),
+    }
+}
+
+#[test]
+fn venda_a_prazo_gera_conta_a_receber_respeita_o_limite_e_o_estorno_cancela() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[
+        &ModuloClientes,
+        &ModuloEstoque,
+        &ModuloFinanceiro,
+        &ModuloVendas,
+        &ModuloPdv,
+    ])
+    .unwrap();
+    let s = sessao_completa(empresa);
+    let amb = ambiente(empresa);
+    let cen = montar_cenario(&d, &s, &amb, &arm, empresa, 25);
+    let finalizar = |cupom: Id, pagamentos: Vec<PagamentoInformado>| {
+        d.executar_comando(
+            "pdv.finalizar_venda.v1",
+            &carga(&FinalizarVenda { cupom, pagamentos }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+    };
+
+    // Sem cliente, não há quem deva.
+    let anonimo = cupom_com(&d, &s, &amb, &arm, &cen, None, 1);
+    let erro = finalizar(anonimo, vec![a_prazo(Dinheiro::reais(25), 1)]).unwrap_err();
+    assert_eq!(erro.codigo, CodigoErro::ENTRADA_INVALIDA);
+    assert!(
+        erro.mensagem.contains("identifique o cliente"),
+        "{}",
+        erro.mensagem
+    );
+
+    // R$ 50: 20 no Pix, 30 a prazo em 2 parcelas.
+    let venda = cupom_com(&d, &s, &amb, &arm, &cen, Some(cen.cliente), 2);
+    let feita: VendaFoiFinalizada = postcard::from_bytes(
+        &finalizar(
+            venda,
+            vec![
+                PagamentoInformado {
+                    forma: FormaPagamentoPdv::Pix,
+                    valor: Dinheiro::reais(20),
+                    prazo: None,
+                },
+                a_prazo(Dinheiro::reais(30), 2),
+            ],
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(feita.titulo_a_receber.is_some());
+    assert_eq!(saldo_do_papel(&arm, empresa, "ClientesAReceber"), 3_000);
+    assert_eq!(saldo_do_papel(&arm, empresa, "ValoresEmTransito"), 2_000);
+    let parcelas: i64 = arm
+        .leitor()
+        .consultar(|c| {
+            c.query_row(
+                "SELECT COUNT(*) FROM financeiro_parcela WHERE titulo = ?1",
+                [feita.titulo_a_receber.unwrap().em_bytes().as_slice()],
+                |r| r.get(0),
+            )
+            .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+        })
+        .unwrap();
+    assert_eq!(parcelas, 2);
+
+    // Limite de R$ 40 com R$ 30 em aberto: cabe 10, não 25.
+    d.executar_comando(
+        "clientes.definir_limite_credito.v1",
+        &carga(&mod_clientes::DefinirLimiteCredito {
+            pessoa: cen.cliente,
+            limite: Dinheiro::reais(40),
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+    let outra = cupom_com(&d, &s, &amb, &arm, &cen, Some(cen.cliente), 1);
+    let erro = finalizar(outra, vec![a_prazo(Dinheiro::reais(25), 1)]).unwrap_err();
+    assert_eq!(erro.codigo, CodigoErro::REGRA_VIOLADA);
+    assert!(erro.mensagem.contains("10,00"), "{}", erro.mensagem);
+
+    // O estorno da venda cancela a conta a prazo (nada recebido ainda).
+    d.executar_comando(
+        "pdv.estornar_venda.v1",
+        &carga(&EstornarVenda {
+            cupom: venda,
+            motivo: "Cliente desistiu da compra".into(),
+            autorizado_por: Id::novo(),
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+    assert_eq!(saldo_do_papel(&arm, empresa, "ClientesAReceber"), 0);
+    let canceladas: i64 = arm
+        .leitor()
+        .consultar(|c| {
+            c.query_row(
+                "SELECT COUNT(*) FROM financeiro_parcela WHERE titulo = ?1 AND estado = 'Cancelada'",
+                [feita.titulo_a_receber.unwrap().em_bytes().as_slice()],
+                |r| r.get(0),
+            )
+            .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+        })
+        .unwrap();
+    assert_eq!(canceladas, 2);
+
+    // Agora cabe (o que estava em aberto saiu): vende a prazo, o cliente paga parte, e o
+    // estorno é barrado até o recebimento ser estornado.
+    let terceira = cupom_com(&d, &s, &amb, &arm, &cen, Some(cen.cliente), 1);
+    let feita: VendaFoiFinalizada =
+        postcard::from_bytes(&finalizar(terceira, vec![a_prazo(Dinheiro::reais(25), 1)]).unwrap())
+            .unwrap();
+    let parcela: Vec<u8> = arm
+        .leitor()
+        .consultar(|c| {
+            c.query_row(
+                "SELECT id FROM financeiro_parcela WHERE titulo = ?1",
+                [feita.titulo_a_receber.unwrap().em_bytes().as_slice()],
+                |r| r.get(0),
+            )
+            .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+        })
+        .unwrap();
+    d.executar_comando(
+        "financeiro.baixar_recebimento.v1",
+        &carga(&mod_financeiro::BaixarRecebimento {
+            parcela: Id::de_bytes(parcela.try_into().unwrap()),
+            valor: Dinheiro::reais(10),
+            data: Data::hoje(Fuso::BRASILIA),
+            meio_pagamento: mod_financeiro::MeioPagamento::Dinheiro,
+            conta_destino: None,
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+    let erro = d
+        .executar_comando(
+            "pdv.estornar_venda.v1",
+            &carga(&EstornarVenda {
+                cupom: terceira,
+                motivo: "Cliente desistiu da compra".into(),
+                autorizado_por: Id::novo(),
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap_err();
+    assert_eq!(erro.codigo, CodigoErro::REGRA_VIOLADA);
+    assert!(
+        erro.mensagem.contains("estorne o recebimento"),
+        "{}",
+        erro.mensagem
+    );
+}
+
+#[test]
+fn desconto_no_total_respeita_o_teto_da_venda_e_vai_para_os_itens_ao_finalizar() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[
+        &ModuloClientes,
+        &ModuloEstoque,
+        &ModuloFinanceiro,
+        &ModuloVendas,
+        &ModuloPdv,
+    ])
+    .unwrap();
+    let s = sessao_completa(empresa); // teto de 10%
+    let amb = ambiente(empresa);
+    let cen = montar_cenario(&d, &s, &amb, &arm, empresa, 25);
+    let cupom = cupom_com(&d, &s, &amb, &arm, &cen, None, 2); // R$ 50
+    let dar = |desconto: Option<mod_pdv::DescontoNoTotal>| {
+        d.executar_comando(
+            "pdv.aplicar_desconto_no_total.v1",
+            &carga(&mod_pdv::AplicarDescontoNoTotal { cupom, desconto }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+    };
+
+    // R$ 5 (10%) cabe; R$ 6 (12%) não.
+    let feito: mod_pdv::DescontoNoTotalAplicado = postcard::from_bytes(
+        &dar(Some(mod_pdv::DescontoNoTotal::Valor(Dinheiro::reais(5)))).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(feito.total, Dinheiro::reais(45));
+    let erro = dar(Some(mod_pdv::DescontoNoTotal::Valor(Dinheiro::reais(6)))).unwrap_err();
+    assert_eq!(erro.codigo, CodigoErro::SEM_PERMISSAO);
+    assert!(erro.mensagem.contains("5,00"), "{}", erro.mensagem);
+
+    // Com o total já no teto, o desconto no item passaria da venda: recusado.
+    let item: Vec<u8> = arm
+        .leitor()
+        .consultar(|c| {
+            c.query_row(
+                "SELECT id FROM pdv_item_cupom WHERE cupom = ?1",
+                [cupom.em_bytes().as_slice()],
+                |r| r.get(0),
+            )
+            .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+        })
+        .unwrap();
+    let erro = d
+        .executar_comando(
+            "pdv.aplicar_desconto_item.v1",
+            &carga(&AplicarDescontoItem {
+                cupom,
+                item: Id::de_bytes(item.try_into().unwrap()),
+                desconto_percentual: Percentual::pontos(10),
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap_err();
+    assert_eq!(erro.codigo, CodigoErro::SEM_PERMISSAO);
+
+    // Finaliza: o desconto vai para os itens, o lançamento leva os R$ 5 de desconto.
+    let feita: VendaFoiFinalizada = postcard::from_bytes(
+        &d.executar_comando(
+            "pdv.finalizar_venda.v1",
+            &carga(&FinalizarVenda {
+                cupom,
+                pagamentos: vec![PagamentoInformado {
+                    forma: FormaPagamentoPdv::Dinheiro,
+                    valor: Dinheiro::reais(45),
+                    prazo: None,
+                }],
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(feita.total, Dinheiro::reais(45));
+    let (desconto_itens, regra): (i64, Option<String>) = arm
+        .leitor()
+        .consultar(|c| {
+            c.query_row(
+                "SELECT (SELECT SUM(desconto_valor) FROM pdv_item_cupom WHERE cupom = ?1),
+                        desconto_total_tipo
+                 FROM pdv_cupom WHERE id = ?1",
+                [cupom.em_bytes().as_slice()],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+        })
+        .unwrap();
+    assert_eq!((desconto_itens, regra), (500, None));
+    assert_eq!(saldo_do_papel(&arm, empresa, "DescontosConcedidos"), 500);
 }

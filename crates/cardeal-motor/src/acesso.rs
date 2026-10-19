@@ -58,14 +58,83 @@ pub(crate) fn sincronizar_papel_admin(
             else {
                 return Ok(());
             };
-            let antes = papel.permissoes.len();
+            let antes = (papel.permissoes.len(), papel.limites.len());
             papel.permissoes.extend(catalogo);
-            if papel.permissoes.len() == antes {
+            // O teto de desconto de quem ainda não tem (o que o dono ajustou fica).
+            for (chave, valor) in cardeal_auth::PapelDeFabrica::Administrador.limites_padrao() {
+                papel.limites.entry(chave).or_insert(valor);
+            }
+            if (papel.permissoes.len(), papel.limites.len()) == antes {
                 return Ok(());
             }
             papel.versao = papel.versao.proxima();
             repo.atualizar_papel(&papel)
                 .map_err(|e| como_erro_armazenamento(&e))
+        })
+        .map_err(erro_armazenamento)?;
+    Ok(())
+}
+
+/// Completa os papéis de fábrica já gravados (Gerente, Operador de Caixa…) com o que a política
+/// de cada um concede do catálogo atual e ainda falta neles — ex.: o caixa passou a ver e
+/// cadastrar o cliente da venda — e com os limites padrão que ainda não têm (o teto de
+/// desconto). São imutáveis para o usuário (`sistema = 1`; quem quer outro
+/// conjunto copia o papel), então acompanhar a política é seguro. Só acrescenta, como o
+/// [`sincronizar_papel_admin`].
+pub(crate) fn sincronizar_papeis_de_fabrica(
+    arm: &Armazenamento,
+    empresa: Id,
+    conjunto: &ConjuntoEfetivo,
+) -> Resultado<()> {
+    let catalogo: Vec<String> = conjunto
+        .permissoes
+        .iter()
+        .map(|p| (*p).to_string())
+        .collect();
+    if catalogo.is_empty() {
+        return Ok(());
+    }
+    let ctx = ContextoEscrita::novo(empresa, Id::novo(), Id::novo(), Id::novo());
+    arm.escritor()
+        .executar(ctx, move |uow| {
+            for fabrica in cardeal_auth::PapelDeFabrica::TODOS {
+                if fabrica == cardeal_auth::PapelDeFabrica::Administrador {
+                    continue;
+                }
+                let ids: Vec<Vec<u8>> = {
+                    let mut stmt = uow
+                        .conexao()
+                        .prepare(
+                            "SELECT id FROM nucleo_papel
+                             WHERE nome = ?1 AND sistema = 1 AND (empresa = ?2 OR empresa IS NULL)",
+                        )
+                        .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))?;
+                    let linhas = stmt
+                        .query_map(
+                            rusqlite::params![fabrica.nome(), empresa.em_bytes().as_slice()],
+                            |r| r.get::<_, Vec<u8>>(0),
+                        )
+                        .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))?;
+                    linhas
+                        .collect::<rusqlite::Result<_>>()
+                        .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))?
+                };
+                let concede = fabrica
+                    .politica()
+                    .aplicar(catalogo.iter().map(String::as_str));
+                let limites = fabrica.limites_padrao();
+                for id in ids.into_iter().filter_map(|b| <[u8; 16]>::try_from(b).ok()) {
+                    let mut repo = RepositorioAuth::novo(uow);
+                    repo.acrescentar_permissoes_de_fabrica(
+                        Id::de_bytes(id),
+                        concede.iter().map(String::as_str),
+                    )
+                    .map_err(|e| como_erro_armazenamento(&e))?;
+                    repo.acrescentar_limites_ausentes(Id::de_bytes(id), &limites)
+                        .map_err(|e| como_erro_armazenamento(&e))?;
+                }
+            }
+            Ok(())
         })
         .map_err(erro_armazenamento)?;
     Ok(())

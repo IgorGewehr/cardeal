@@ -32,6 +32,7 @@
 // Ver a mesma justificativa em cardeal-kernel: Erro carrega Detalhes de propósito.
 #![allow(clippy::result_large_err)]
 
+mod balancete;
 mod caixa;
 mod construtor;
 mod conta;
@@ -51,8 +52,13 @@ mod resultado;
 mod testkit_interno;
 
 #[cfg(feature = "sqlite")]
-pub use caixa::movimentos_de_caixa;
-pub use caixa::{ContrapartidaDeCaixa, MovimentoDeCaixa};
+pub use balancete::{balancete, diario};
+pub use balancete::{
+    comparar_codigos, montar_balancete, LancamentoDoDiario, LinhaBalancete, PartidaDoDiario,
+};
+#[cfg(feature = "sqlite")]
+pub use caixa::{movimentos_de_caixa, variacoes_patrimoniais};
+pub use caixa::{ContrapartidaDeCaixa, MovimentoDeCaixa, VariacaoPatrimonial};
 pub use construtor::{ConstrutorLancamento, LancamentoBalanceado};
 pub use conta::{CodigoConta, Conta, GrupoFluxo, Natureza, PapelConta, TipoConta};
 pub use contas::Contas;

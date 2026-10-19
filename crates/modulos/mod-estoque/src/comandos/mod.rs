@@ -19,21 +19,27 @@ mod criar_unidade;
 mod definir_ativo_produto;
 mod definir_campos_fiscais_do_grupo;
 mod definir_campos_fiscais_do_produto;
+mod definir_comissao;
 mod definir_margem_do_grupo;
 mod definir_margem_do_produto;
 mod definir_parametros_preco;
 mod definir_perfil_fiscal_do_grupo;
 mod definir_ponto_pedido;
 mod desfazer_alteracao_em_lote;
+mod dicionario;
 mod editar_detalhes_tecnicos_produto;
 mod importar_estrutura;
+mod importar_produtos;
+mod inventario;
 mod mover_grupo_produto;
 mod mover_produtos_de_grupo;
 mod registrar_aparelho_origem;
 mod registrar_entrada;
 mod registrar_entrada_com_lote;
+mod registrar_perda;
 mod registrar_saida;
 mod renomear_grupo_produto;
+mod transferir_entre_locais;
 
 pub use ajustar_saldo::{AjustarSaldo, SaldoAjustado};
 pub use aplicar_alteracao_em_lote::{AlteracaoAplicada, AplicarAlteracaoEmLote};
@@ -47,21 +53,32 @@ pub use criar_unidade::{CriarUnidade, UnidadeCriada};
 pub use definir_ativo_produto::DefinirAtivoProduto;
 pub use definir_campos_fiscais_do_grupo::DefinirCamposFiscaisDoGrupo;
 pub use definir_campos_fiscais_do_produto::DefinirCamposFiscaisDoProduto;
+pub use definir_comissao::{DefinirComissaoDoGrupo, DefinirComissaoDoProduto};
 pub use definir_margem_do_grupo::DefinirMargemDoGrupo;
 pub use definir_margem_do_produto::DefinirMargemDoProduto;
 pub use definir_parametros_preco::DefinirParametrosPreco;
 pub use definir_perfil_fiscal_do_grupo::DefinirPerfilFiscalDoGrupo;
 pub use definir_ponto_pedido::DefinirPontoPedido;
 pub use desfazer_alteracao_em_lote::{AlteracaoDesfeita, DesfazerAlteracaoEmLote};
+#[cfg(feature = "sqlite")]
+pub use dicionario::criar_produto_de_compra_comum;
+pub use dicionario::{DefinirTermoDoDicionario, ProdutoDeCompraCriado, RemoverTermoDoDicionario};
 pub use editar_detalhes_tecnicos_produto::EditarDetalhesTecnicosProduto;
 pub use importar_estrutura::{EstruturaImportada, ImportarEstrutura};
+pub use importar_produtos::{ImportarProdutos, ProdutosImportados};
+pub use inventario::{
+    CancelarInventario, ContagemIniciada, ContagemRegistrada, CriarInventario, EncerrarInventario,
+    IniciarContagem, InventarioCriado, InventarioEncerradoResumo, RegistrarContagem,
+};
 pub use mover_grupo_produto::MoverGrupoProduto;
 pub use mover_produtos_de_grupo::{MoverProdutosDeGrupo, ProdutosMovidos};
 pub use registrar_aparelho_origem::{AparelhoOrigemRegistrado, RegistrarAparelhoOrigem};
 pub use registrar_entrada::{EntradaRegistrada, RegistrarEntrada};
 pub use registrar_entrada_com_lote::{EntradaComLoteRegistrada, RegistrarEntradaComLote};
+pub use registrar_perda::{MotivoPerda, PerdaRegistrada, RegistrarPerda};
 pub use registrar_saida::{RegistrarSaida, SaidaRegistrada};
 pub use renomear_grupo_produto::RenomearGrupoProduto;
+pub use transferir_entre_locais::{TransferenciaFeita, TransferirEntreLocais};
 
 /// Traduz uma recusa da árvore de grupos para o erro do despacho.
 #[cfg(feature = "sqlite")]
@@ -167,9 +184,12 @@ pub struct EntradaGravada {
 fn registrar_entrada_interna(
     dados: DadosEntrada,
     dados_lote: Option<DadosNovoLote>,
+    devolucao: bool,
     ctx: &Ctx,
     uow: &mut UnidadeDeTrabalho,
 ) -> Resultado<EntradaGravada> {
+    // 0. Inventário em contagem trava o local (§11.4).
+    crate::repositorio_inventario::exigir_local_livre(uow.conexao(), dados.local)?;
     // 1. Carregar (ou criar) o saldo.
     let existente = RepositorioEstoque::novo(uow).buscar_saldo(dados.produto, dados.local)?;
     let saldo_e_novo = existente.is_none();
@@ -178,9 +198,12 @@ fn registrar_entrada_interna(
     });
 
     // 2. Validar (domínio puro): recalcula o custo médio.
-    saldo
-        .entrada(dados.quantidade, dados.custo_unitario, ctx.agora)
-        .map_err(|e| Erro::de_dominio(&e))?;
+    if devolucao {
+        saldo.devolucao(dados.quantidade, dados.custo_unitario, ctx.agora)
+    } else {
+        saldo.entrada(dados.quantidade, dados.custo_unitario, ctx.agora)
+    }
+    .map_err(|e| Erro::de_dominio(&e))?;
 
     // 3. Validar (domínio puro) o lote, quando esta entrada cria uma peça rastreável com
     // código de post-it.
@@ -250,7 +273,58 @@ pub fn registrar_entrada_comum(
     ctx: &Ctx,
     uow: &mut UnidadeDeTrabalho,
 ) -> Resultado<EntradaGravada> {
-    registrar_entrada_interna(dados, None, ctx, uow)
+    registrar_entrada_interna(dados, None, false, ctx, uow)
+}
+
+/// Devolve ao estoque tudo o que saiu por uma origem — o estorno de uma venda. Para cada
+/// saída de `(origem_modulo, origem_id)`, uma entrada no mesmo local, na mesma quantidade e
+/// **ao mesmo custo** da saída: é exatamente o CMV que o chamador estorna no Razão, então
+/// estoque e contabilidade voltam juntos ao que eram. Quem chama garante que a origem só se
+/// desfaz uma vez (o estado do agregado dela); ainda assim, uma origem que já tem entrada é
+/// recusada, para nunca devolver em dobro.
+///
+/// # Errors
+/// [`cardeal_kernel::CodigoErro::ESTADO_INVALIDO`] se a origem já tiver entrada; os erros de
+/// [`registrar_entrada_comum`] (local travado por inventário em contagem, por exemplo).
+#[cfg(feature = "sqlite")]
+pub fn devolver_saidas_da_origem(
+    origem_modulo: &'static str,
+    origem_id: Id,
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<Vec<EntradaGravada>> {
+    let movimentos = crate::consultas::movimentos_da_origem(
+        uow.conexao(),
+        ctx.empresa,
+        origem_modulo,
+        origem_id,
+    )?;
+    if movimentos.iter().any(|m| m.tipo == TipoMovimento::Entrada) {
+        return Err(Erro::novo(
+            cardeal_kernel::CodigoErro::ESTADO_INVALIDO,
+            "O que saiu por esta origem já foi devolvido ao estoque",
+        ));
+    }
+    movimentos
+        .into_iter()
+        .filter(|m| m.tipo == TipoMovimento::Saida)
+        .map(|m| {
+            registrar_entrada_interna(
+                DadosEntrada {
+                    produto: m.produto,
+                    local: m.local,
+                    quantidade: m.quantidade,
+                    custo_unitario: m.custo_unitario.unwrap_or(Preco::ZERO),
+                    origem_modulo,
+                    origem_id: Some(origem_id),
+                },
+                None,
+                true,
+                ctx,
+                uow,
+            )
+        })
+        .collect()
 }
 
 /// Como [`registrar_entrada_comum`], mas cria também um [`Lote`] rastreável (o código do
@@ -269,7 +343,7 @@ pub fn registrar_entrada_com_lote_comum(
     ctx: &Ctx,
     uow: &mut UnidadeDeTrabalho,
 ) -> Resultado<EntradaGravada> {
-    registrar_entrada_interna(dados, Some(lote), ctx, uow)
+    registrar_entrada_interna(dados, Some(lote), false, ctx, uow)
 }
 
 /// Os dados que `RegistrarSaida` e chamadas diretas de outros módulos passam ao corpo
@@ -313,6 +387,8 @@ fn registrar_saida_interna(
     ctx: &Ctx,
     uow: &mut UnidadeDeTrabalho,
 ) -> Resultado<SaidaGravada> {
+    // 0. Inventário em contagem trava o local (§11.4).
+    crate::repositorio_inventario::exigir_local_livre(uow.conexao(), dados.local)?;
     // 1. Carregar.
     let existente = RepositorioEstoque::novo(uow).buscar_saldo(dados.produto, dados.local)?;
     let saldo_e_novo = existente.is_none();

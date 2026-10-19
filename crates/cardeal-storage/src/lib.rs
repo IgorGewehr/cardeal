@@ -20,6 +20,8 @@
 //! - [`Migracao`]/[`ConjuntoMigracoes`] — o executor com ordenação topológica e verificação
 //!   de hash (migração publicada é imutável).
 //! - [`Segredo`] — valor sensível que não vaza em `Debug` e zera no `Drop`.
+//! - [`Cofre`] — segredos em repouso (certificado A1, CSC) cifrados com AES-256-GCM por uma
+//!   chave que não mora na base.
 //!
 //! ## O que falta (ver `docs/17-roadmap.md`, Fase 0)
 //!
@@ -35,6 +37,7 @@
 #![allow(clippy::result_large_err)]
 
 mod armazenamento;
+mod cofre;
 mod conexao;
 mod config;
 mod contexto;
@@ -50,6 +53,7 @@ mod sql;
 mod uow;
 
 pub use armazenamento::Armazenamento;
+pub use cofre::{Cofre, ErroCofre};
 pub use config::ConfigArmazenamento;
 pub use contexto::{Confirmado, ContextoEscrita};
 pub use erros::ErroArmazenamento;

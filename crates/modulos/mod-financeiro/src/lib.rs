@@ -69,8 +69,10 @@ pub mod aging;
 mod baixa;
 mod caixa;
 mod categoria;
+pub mod cheque;
 mod comandos;
 mod conciliacao;
+mod conferencia;
 mod consultas;
 pub mod dfc;
 pub mod dre;
@@ -78,6 +80,7 @@ mod dre_consulta;
 mod erros;
 pub mod eventos;
 pub mod extrato;
+pub mod importacao;
 mod listagem;
 mod manifesto;
 mod meio_pagamento;
@@ -90,11 +93,13 @@ mod plano;
 mod projecao;
 pub mod receituario;
 mod recorrencia;
+pub mod regua;
 #[cfg(feature = "sqlite")]
 mod repositorio;
 pub mod saude;
 pub mod sugestao;
 mod titulo;
+mod ultimo_lancamento;
 
 pub use aging::{AgingAPagar, AgingAReceber};
 pub use baixa::{PlanoBaixa, SituacaoParcela};
@@ -114,25 +119,36 @@ pub use comandos::{
     materializar_recorrencias_pendentes,
 };
 pub use comandos::{
-    AbrirCaixa, BaixaFoiEstornada, BaixarPagamento, BaixarRecebimento, CadastrarCaixa,
-    CaixaCadastrado, CaixaFoiAberto, CaixaFoiFechado, CategoriaCriada, ContaBancariaCriada,
-    CriarCategoria, CriarContaBancaria, CriarRecorrencia, DadosLancamentoTitulo, EstornarBaixa,
-    FecharCaixa, LancarTituloAPagar, LancarTituloAReceber, MaterializarRecorrencias,
-    PagamentoBaixado, RecebimentoBaixado, RecorrenciaCriada, RegistrarSangria, RegistrarSuprimento,
+    AbrirCaixa, AlterarVencimento, BaixaFoiEstornada, BaixarPagamento, BaixarRecebimento,
+    CadastrarCaixa, CaixaCadastrado, CaixaFoiAberto, CaixaFoiFechado, CancelarTitulo,
+    CarteiraDeCheques, CategoriaCriada, ChequeCompensado, ChequeFoiDevolvido, ChequeRegistrado,
+    CompensarCheque, ContaBancariaCriada, CriarCategoria, CriarContaBancaria, CriarRecorrencia,
+    DadosLancamentoTitulo, DevolverCheque, EstornarBaixa, FecharCaixa, ItemCheque,
+    LancarTituloAPagar, LancarTituloAReceber, MaterializarRecorrencias, PagamentoBaixado,
+    RecebimentoBaixado, RecorrenciaCriada, RegistrarCheque, RegistrarSangria, RegistrarSuprimento,
     RenegociarTitulo, SangriaFoiRegistrada, SuprimentoFoiRegistrado, TituloAPagarLancado,
-    TituloAReceberLancado, TituloFoiRenegociado, TituloGravado,
+    TituloAReceberLancado, TituloFoiCancelado, TituloFoiRenegociado, TituloGravado,
 };
 pub use comandos::{
     BaixarPagamentosEmLote, BaixarRecebimentosEmLote, BaixasEmLoteFeitas, DadosBaixaEmLote,
 };
+pub use comandos::{
+    CancelarTransferencia, DefinirSaldoInicial, DesativarContaDisponivel, ItemTransferencia,
+    SaldoInicialDefinido, TransferenciaFeita, Transferencias, TransferirEntreContas,
+};
+pub use comandos::{ContasImportadas, ImportarContasEmAberto, PreviaDaImportacaoDeContas};
 pub use comandos::{CriarCategoriasSugeridas, CATEGORIAS_SUGERIDAS};
 pub use comandos::{DadosContaAvulsa, PagamentoAvulso};
 pub use conciliacao::{
     ConciliarItem, EstadoItem, ExtratoImportado, IgnorarItemDoExtrato, ImportarExtrato,
     ItemDoExtrato, ItensDoExtrato, LancarItemDoExtrato,
 };
+pub use conferencia::{
+    ConferenciaDaConta, ConferenciaDasContas, FechamentoDoSaldo, InformarSaldoDoBanco,
+    OrigemDoSaldo, SaldoDoBanco, Soma,
+};
 #[cfg(feature = "sqlite")]
-pub use consultas::titulo_da_origem;
+pub use consultas::{em_aberto_a_receber_do_cliente, titulo_da_origem};
 pub use consultas::{
     BaixasDaParcela, Caixas, Categorias, ContasDeCaixa, ContasDeResultado, ContasDisponiveis,
     ExtratoDisponivel, ItemBaixa, ItemCaixa, ItemContaDisponivel, ItemContaResultado,
@@ -143,7 +159,8 @@ pub use consultas::{
 };
 pub use consultas::{SituacaoDaParcela, SituacaoNaData};
 pub use dre_consulta::{
-    ComparativoDre, DfcDoPeriodo, DreComparativa, DreDoPeriodo, SaudeFinanceira,
+    BalanceteDoPeriodo, ComparativoDre, DfcDoPeriodo, DfcIndiretoDoPeriodo, DiarioDoPeriodo,
+    DreComparativa, DreDoPeriodo, SaudeFinanceira,
 };
 pub use erros::ErroFinanceiro;
 pub use listagem::{
@@ -161,9 +178,14 @@ pub use plano::{
 pub use projecao::{ItemProjecaoCategoria, ProjecaoPorCategoria};
 pub use receituario::Autoria;
 pub use recorrencia::{Periodicidade, Recorrencia, TipoValor};
+pub use regua::{
+    DefinirReguaDeCobranca, EtapaRegua, FilaDeCobranca, FilaDoDia, ItemDaFila, RegistrarCobranca,
+    ReguaDeCobranca,
+};
 #[cfg(feature = "sqlite")]
 pub use repositorio::{BaixaGravada, RepositorioFinanceiro};
 pub use titulo::{
     ConstrutorTitulo, EspecieTitulo, EstadoParcela, FormaCobranca, Parcela, PoliticaJuros, Titulo,
     TituloComParcelas,
 };
+pub use ultimo_lancamento::{UltimoLancamento, UltimoLancamentoAPagar, UltimoLancamentoAReceber};

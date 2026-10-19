@@ -374,6 +374,66 @@ impl<'a, 'b> RepositorioAuth<'a, 'b> {
         Ok(())
     }
 
+    /// Acrescenta a um papel **de fábrica** as permissões que a política dele passou a
+    /// conceder (o papel é imutável para o usuário, então acompanhar a política é seguro).
+    /// Só acrescenta; devolve quantas entraram.
+    ///
+    /// # Errors
+    /// [`crate::ErroAuth::FalhaDePersistencia`] em erro do SQLite.
+    pub fn acrescentar_permissoes_de_fabrica<'p>(
+        &mut self,
+        papel: Id,
+        permissoes: impl IntoIterator<Item = &'p str>,
+    ) -> Resultado<usize> {
+        let mut novas = 0;
+        for chave in permissoes {
+            novas += self
+                .conn()
+                .execute(
+                    "INSERT INTO nucleo_papel_permissao (papel, permissao)
+                     SELECT ?1, ?2 WHERE EXISTS (SELECT 1 FROM nucleo_papel WHERE id = ?1 AND sistema = 1)
+                     ON CONFLICT (papel, permissao) DO NOTHING",
+                    rusqlite::params![blob(papel), chave],
+                )
+                .map_err(persist)?;
+        }
+        if novas > 0 {
+            self.conn()
+                .execute(
+                    "UPDATE nucleo_papel SET versao = versao + 1 WHERE id = ?1",
+                    [blob(papel)],
+                )
+                .map_err(persist)?;
+        }
+        Ok(novas)
+    }
+
+    /// Grava os limites que um papel ainda não tem (o que ele já tem fica como está) —
+    /// para o teto padrão chegar a papéis criados antes dele existir. Devolve quantos entraram.
+    ///
+    /// # Errors
+    /// [`crate::ErroAuth::FalhaDePersistencia`] em erro do SQLite.
+    pub fn acrescentar_limites_ausentes(
+        &mut self,
+        papel: Id,
+        limites: &std::collections::BTreeMap<String, ValorLimite>,
+    ) -> Resultado<usize> {
+        let mut novos = 0;
+        for (chave, valor) in limites {
+            let (tipo, bruto) = limite_split(*valor);
+            novos += self
+                .conn()
+                .execute(
+                    "INSERT INTO nucleo_papel_limite (papel, chave, tipo, valor)
+                     VALUES (?1, ?2, ?3, ?4)
+                     ON CONFLICT (papel, chave) DO NOTHING",
+                    rusqlite::params![blob(papel), chave, tipo, bruto],
+                )
+                .map_err(persist)?;
+        }
+        Ok(novos)
+    }
+
     /// Carrega um papel pelo `id`, com permissões e limites.
     ///
     /// # Errors

@@ -21,6 +21,8 @@ pub struct PerfilDoGrupo {
     pub pai: Option<Id>,
     /// Margem líquida desejada.
     pub margem: Option<Percentual>,
+    /// Comissão de vendedor própria do grupo.
+    pub comissao: Option<Percentual>,
     /// ICMS por substituição tributária.
     pub icms_st: Option<bool>,
     /// PIS/COFINS monofásico.
@@ -164,7 +166,7 @@ pub fn salvar_parametros_preco(
 pub fn perfis_dos_grupos(conn: &Connection, organizacao: Id) -> Resultado<Vec<PerfilDoGrupo>> {
     let mut stmt = conn
         .prepare(
-            "SELECT id, nome, pai, margem_desejada, icms_st, monofasico, perfil_fiscal
+            "SELECT id, nome, pai, margem_desejada, icms_st, monofasico, perfil_fiscal, comissao
              FROM estoque_grupo_produto WHERE empresa = ?1",
         )
         .map_err(persist)?;
@@ -178,12 +180,61 @@ pub fn perfis_dos_grupos(conn: &Connection, organizacao: Id) -> Resultado<Vec<Pe
                 icms_st: r.get::<_, Option<i64>>(4)?.map(|v| v != 0),
                 monofasico: r.get::<_, Option<i64>>(5)?.map(|v| v != 0),
                 fiscal: CamposFiscais::de_blob(r.get::<_, Option<Vec<u8>>>(6)?.as_deref()),
+                comissao: pct_opt(r.get::<_, Option<i64>>(7)?),
             })
         })
         .map_err(persist)?;
     linhas
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(persist)
+}
+
+/// Define (ou limpa, com `None`) a comissão própria de um grupo. `false` se não existe.
+///
+/// # Errors
+/// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+pub fn definir_comissao_do_grupo(
+    conn: &Connection,
+    organizacao: Id,
+    grupo: Id,
+    comissao: Option<Percentual>,
+) -> Resultado<bool> {
+    let n = conn
+        .execute(
+            "UPDATE estoque_grupo_produto SET comissao = ?3, versao = versao + 1
+             WHERE empresa = ?1 AND id = ?2",
+            params![
+                blob(organizacao),
+                blob(grupo),
+                comissao.map(Percentual::unidades_internas)
+            ],
+        )
+        .map_err(persist)?;
+    Ok(n > 0)
+}
+
+/// Define (ou limpa, com `None`) a comissão própria de um produto. `false` se não existe.
+///
+/// # Errors
+/// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+pub fn definir_comissao_do_produto(
+    conn: &Connection,
+    organizacao: Id,
+    produto: Id,
+    comissao: Option<Percentual>,
+) -> Resultado<bool> {
+    let n = conn
+        .execute(
+            "UPDATE estoque_produto SET comissao = ?3, versao = versao + 1
+             WHERE empresa = ?1 AND id = ?2",
+            params![
+                blob(organizacao),
+                blob(produto),
+                comissao.map(Percentual::unidades_internas)
+            ],
+        )
+        .map_err(persist)?;
+    Ok(n > 0)
 }
 
 /// Define (ou limpa, com `None`) a margem desejada de um grupo. `false` se não existe.

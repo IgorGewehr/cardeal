@@ -65,6 +65,7 @@
 mod apontamento;
 mod comandos;
 mod consultas;
+pub mod custo_hora;
 mod erros;
 pub mod eventos;
 mod execucao;
@@ -80,6 +81,7 @@ pub mod receituario;
 mod repositorio;
 
 pub use apontamento::ApontamentoDeTempo;
+pub use comandos::DefinirCustoHora;
 pub use comandos::{
     AbrirOrdemComClienteNovo, AbrirOrdemServico, AjustarApontamento, AplicarPeca, AplicarPecas,
     ApontamentoIniciado, AprovarOrcamentoOs, CancelarOrdemServico, ConcluirExecucao,
@@ -90,6 +92,7 @@ pub use comandos::{
     RegistrarMaoDeObra, RemoverItemOrcamento, ReprovarOrcamentoOs, TipoItemOrcamento,
 };
 pub use comandos::{ChegadaRegistrada, EncomendarPeca, PagamentoDaPeca, RegistrarChegadaDaPeca};
+pub use consultas::CustosHora;
 pub use consultas::OrdensDoCliente;
 pub use consultas::{
     ApontamentosDaOrdem, BuscarDetalheOrdem, BuscarOrdens, DetalheOrdem, FiltroEstadoOs,

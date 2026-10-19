@@ -32,6 +32,7 @@ deliberadamente honestas — um ADR sem trade-off real não está fazendo seu tr
 | [0016](0016-servidor-multi-tenant-e-cliente-web.md) | Servidor multi-tenant com um SQLite por empresa e cliente web em egui/WASM | Aceita | 2026-10-01 |
 | [0017](0017-organizacao-com-varios-cnpjs.md) | Organização com vários CNPJs numa base só | Aceita | 2026-10-02 |
 | [0018](0018-formacao-de-preco-por-markup-divisor.md) | Formação de preço por markup divisor, com carga tributária e custo operacional lidos do sistema | Aceita | 2026-10-09 |
+| [0019](0019-sefaz-api-como-provedor-e-cofre-do-certificado.md) | O `sefaz-api` é o provedor fiscal; o certificado A1 mora cifrado no cofre da instalação | Aceita | 2026-10-14 |
 
 ## Como usar
 

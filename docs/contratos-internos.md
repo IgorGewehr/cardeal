@@ -469,8 +469,22 @@ impl Ctx {
     pub fn limite(&self, chave: &str) -> Option<ValorLimite>;
     pub fn conjunto(&self) -> &ConjuntoEfetivo;
     pub fn de_sessao(sessao: &Sessao, ambiente: &Ambiente) -> Self;   // ver nota abaixo
-    // contas() / config() / porta(): adiados (contas espera um resolvedor não-genérico
+    /// Um recurso que o motor injetou (o cofre, o provedor fiscal...) — o `porta()` que era
+    /// adiado, generalizado (ADR-0019). Ausente: ESTADO_INVALIDO "recurso não configurado".
+    pub fn recurso<T: Send + Sync + 'static>(&self) -> Resultado<Arc<T>>;
+    // contas() / config(): adiados (contas espera um resolvedor não-genérico
     //   em cardeal-ledger; por ora o comando faz `Contas::nova(&RepositorioRazao::novo(uow), empresa)`).
+}
+
+/// O que não mora na base e o motor injeta, por tipo. Quem monta o motor (desktop, servidor,
+/// teste) conhece os tipos concretos; o núcleo não. `MotorLocal::com_recursos`,
+/// `Ambiente::com_recursos`; a distribuição monta os do produto (`cardeal_distribuicao::recursos`).
+#[derive(Clone, Default)]
+pub struct Recursos { /* TypeId → Arc<dyn Any + Send + Sync> */ }
+impl Recursos {
+    pub fn novo() -> Self;
+    pub fn com<T: Send + Sync + 'static>(self, valor: Arc<T>) -> Self;
+    pub fn obter<T: Send + Sync + 'static>(&self) -> Option<Arc<T>>;
 }
 
 pub trait Comando: serde::de::DeserializeOwned + Send + 'static {
@@ -493,11 +507,27 @@ impl Registro {
     pub fn novo() -> Self;
     pub fn comando<C: Comando>(&mut self, nome: &'static str) -> &mut Self;
     pub fn consulta<Q: Consulta>(&mut self, nome: &'static str) -> &mut Self;
-    // assinar / tarefa / fornecer_porta / item_pulso: adiados.
+    /// Trabalho que não cabe numa transação (ler → falar com a rede → gravar). Roda no processo
+    /// do motor, nunca pela rede (os segredos que abre não saem dali).
+    pub fn tarefa<F>(&mut self, nome: &'static str, permissao: &'static str, f: F) -> &mut Self
+        where F: Fn(&ContextoTarefa<'_>) -> Resultado<String> + Send + Sync + 'static;
+    // assinar / fornecer_porta / item_pulso / agendamento de tarefa: adiados.
 }
 
+/// O que uma tarefa recebe: o Ctx da sessão, leitura (pool) e escrita (uma transação por
+/// chamada, com a autoria da sessão).
+pub struct ContextoTarefa<'a> { pub ctx: Ctx, /* sessão, ambiente, leitor, escritor */ }
+impl ContextoTarefa<'_> {
+    pub fn ler<T>(&self, f: impl FnOnce(&Connection) -> Resultado<T>) -> Resultado<T>;
+    pub fn escrever<T, F>(&self, f: F) -> Resultado<T>
+        where F: for<'u> FnOnce(&mut UnidadeDeTrabalho<'u>) -> Resultado<T> + Send + 'static, T: Send + 'static;
+}
+// Despachante::executar_tarefa(nome, sessão, ambiente, leitor, escritor); no motor,
+// MotorLocal::executar_tarefa e MotorLocal::executor_de_tarefas (ExecutorDeTarefas: Clone + Send,
+// para rodar numa thread — Escritor e Leitor ganharam Clone barato).
+
 /// O que a empresa tem ativo, resolvido uma vez (`RegistroModulos::resolver`) e reusado.
-pub struct Ambiente { /* empresa, Arc<ConjuntoEfetivo>, fuso */ }
+pub struct Ambiente { /* empresa, Arc<ConjuntoEfetivo>, fuso, Arc<Recursos> */ }
 impl Ambiente {
     pub fn novo(empresa: Id, conjunto: ConjuntoEfetivo) -> Self;  // fuso padrão: Brasília
     pub fn com_fuso(self, fuso: Fuso) -> Self;

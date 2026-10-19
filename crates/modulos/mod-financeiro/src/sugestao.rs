@@ -1,6 +1,7 @@
 //! O casamento sugerido entre uma linha do extrato e o que o sistema já sabe: uma parcela em
-//! aberto (o banco mostra um pagamento que ainda não foi baixado) ou uma baixa já feita (o
-//! dinheiro já foi registrado, falta confirmar que o banco o viu). Domínio puro.
+//! aberto (o banco mostra um pagamento que ainda não foi baixado), uma baixa já feita (o
+//! dinheiro já foi registrado, falta confirmar que o banco o viu) ou outro movimento da conta
+//! no Razão (depósito do caixa, transferência, compensação de cheque). Domínio puro.
 //!
 //! O valor tem que ser **exatamente** o da parcela ou da baixa — extrato é prova, não palpite.
 //! A data e o número do documento só aumentam a confiança.
@@ -15,6 +16,9 @@ pub enum AlvoDaConciliacao {
     Parcela(Id),
     /// Uma baixa que já existe no sistema: conciliar só confirma.
     Baixa(Id),
+    /// Um lançamento realizado nesta conta que não é baixa (depósito do caixa no banco,
+    /// transferência entre contas, compensação de cheque): conciliar só confirma.
+    Movimento(Id),
 }
 
 /// Um candidato ao casamento.
@@ -63,7 +67,7 @@ pub fn pontuar(linha: &LinhaDoBanco, c: &Candidato) -> Option<u8> {
         return None;
     }
     let base: i32 = match c.alvo {
-        AlvoDaConciliacao::Baixa(_) => 80,
+        AlvoDaConciliacao::Baixa(_) | AlvoDaConciliacao::Movimento(_) => 80,
         AlvoDaConciliacao::Parcela(_) => 65,
     };
     let dias = linha.data.dias_ate(c.data).abs();
@@ -80,8 +84,12 @@ pub fn pontuar(linha: &LinhaDoBanco, c: &Candidato) -> Option<u8> {
         .filter(|d| d.len() >= 3 && c.texto.contains(*d))
         .map_or(0, |_| 10);
     let total = (base + data + documento).min(100);
-    // Uma baixa a mais de uma semana de distância já é outro pagamento.
-    if matches!(c.alvo, AlvoDaConciliacao::Baixa(_)) && dias > 7 {
+    // Uma baixa (ou movimento) a mais de uma semana de distância já é outro pagamento.
+    if matches!(
+        c.alvo,
+        AlvoDaConciliacao::Baixa(_) | AlvoDaConciliacao::Movimento(_)
+    ) && dias > 7
+    {
         return None;
     }
     (total >= 60).then(|| u8::try_from(total).unwrap_or(100))
@@ -149,6 +157,13 @@ mod testes {
         assert_eq!(pontuar(&linha(3, 100), &cand(b, 3, 100, "")), Some(100));
         assert_eq!(pontuar(&linha(3, 100), &cand(b, 8, 100, "")), Some(88));
         assert_eq!(pontuar(&linha(3, 100), &cand(b, 25, 100, "")), None);
+    }
+
+    #[test]
+    fn movimento_da_conta_pesa_como_baixa() {
+        let m = AlvoDaConciliacao::Movimento(Id::novo());
+        assert_eq!(pontuar(&linha(3, 500), &cand(m, 2, 500, "")), Some(95));
+        assert_eq!(pontuar(&linha(3, 500), &cand(m, 20, 500, "")), None);
     }
 
     #[test]

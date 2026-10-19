@@ -33,7 +33,7 @@ use crate::repositorio::RepositorioClientes;
 
 /// Um endereço informado já no cadastro da pessoa (opcional). Mesmos campos de
 /// [`AdicionarEndereco`](super::AdicionarEndereco) sem a `pessoa`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EnderecoInicial {
     /// O tipo do endereço.
     pub tipo: TipoEndereco,

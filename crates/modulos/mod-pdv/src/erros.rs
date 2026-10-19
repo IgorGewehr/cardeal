@@ -20,6 +20,23 @@ pub enum ErroPdv {
         limite: Percentual,
     },
 
+    /// O desconto da venda inteira (itens + desconto no total) passa do teto do papel.
+    #[error(
+        "O desconto da venda ({desconto}) passa do seu limite: no máximo {maximo} ({limite} do valor dos itens)"
+    )]
+    DescontoDaVendaAcimaDoLimite {
+        /// O desconto pedido, somando itens e total.
+        desconto: Dinheiro,
+        /// O máximo que o papel autoriza nesta venda.
+        maximo: Dinheiro,
+        /// O teto do papel.
+        limite: Percentual,
+    },
+
+    /// Desconto no total com valor negativo ou percentual acima de 100.
+    #[error("Desconto inválido: use um valor positivo ou um percentual até 100%")]
+    DescontoInvalido,
+
     /// `CancelarItem` sobre um item já cancelado.
     #[error("Este item já está cancelado")]
     ItemJaCancelado,
@@ -58,6 +75,32 @@ pub enum ErroPdv {
     /// `CancelarCupom` exige motivo e identificação de quem autorizou (§5, `F8`).
     #[error("Cancelar o cupom inteiro exige motivo")]
     MotivoObrigatorio,
+    /// A parte a prazo veio sem condição válida.
+    #[error("Venda a prazo: {0}")]
+    CondicaoDePrazoInvalida(&'static str),
+    /// Venda a prazo sem cliente identificado — alguém tem de dever.
+    #[error("Para vender a prazo, identifique o cliente (F6)")]
+    PrazoSemCliente,
+    /// O crédito do cliente está bloqueado (só um supervisor libera, no cadastro).
+    #[error("O crédito deste cliente está bloqueado: {0}")]
+    CreditoBloqueado(String),
+    /// A venda a prazo passa do limite de crédito do cliente.
+    #[error("A venda passa do limite de crédito do cliente: disponível {disponivel}")]
+    LimiteDeCreditoExcedido {
+        /// O que ainda cabe no limite.
+        disponivel: Dinheiro,
+    },
+    /// O cliente já pagou parte da conta a prazo desta venda.
+    #[error(
+        "O cliente já pagou parte desta venda a prazo: estorne o recebimento no financeiro antes"
+    )]
+    PrazoComRecebimento,
+    /// `EstornarVenda` sobre uma venda já estornada.
+    #[error("Esta venda já foi estornada")]
+    VendaJaEstornada,
+    /// O motivo do estorno vai para o histórico do lançamento: ao menos 10 caracteres.
+    #[error("Explique o motivo do estorno (ao menos 10 caracteres)")]
+    MotivoDoEstornoCurto,
 }
 
 impl ErroDominio for ErroPdv {
@@ -66,12 +109,22 @@ impl ErroDominio for ErroPdv {
             Self::QuantidadeInvalida
             | Self::PagamentoSemFormas
             | Self::CupomSemItens
-            | Self::MotivoObrigatorio => CodigoErro::ENTRADA_INVALIDA,
-            Self::DescontoAcimaDoLimite { .. } => CodigoErro::SEM_PERMISSAO,
+            | Self::MotivoObrigatorio
+            | Self::MotivoDoEstornoCurto
+            | Self::CondicaoDePrazoInvalida(_)
+            | Self::DescontoInvalido
+            | Self::PrazoSemCliente => CodigoErro::ENTRADA_INVALIDA,
+            Self::DescontoAcimaDoLimite { .. } | Self::DescontoDaVendaAcimaDoLimite { .. } => {
+                CodigoErro::SEM_PERMISSAO
+            }
             Self::ItemJaCancelado
             | Self::CupomEmEstadoInvalido { .. }
-            | Self::CupomJaFinalizado => CodigoErro::ESTADO_INVALIDO,
-            Self::SomaDePagamentosDivergente { .. } => CodigoErro::REGRA_VIOLADA,
+            | Self::CupomJaFinalizado
+            | Self::VendaJaEstornada => CodigoErro::ESTADO_INVALIDO,
+            Self::SomaDePagamentosDivergente { .. }
+            | Self::CreditoBloqueado(_)
+            | Self::LimiteDeCreditoExcedido { .. }
+            | Self::PrazoComRecebimento => CodigoErro::REGRA_VIOLADA,
         }
     }
 
@@ -84,10 +137,17 @@ impl ErroDominio for ErroPdv {
                     limite.formatar_com_simbolo()
                 ),
             )),
+            Self::DescontoDaVendaAcimaDoLimite { limite, .. } => Some(Detalhes::nova(
+                "Desconto acima do seu limite",
+                format!(
+                    "O seu papel autoriza até {} da venda, somando o desconto dos itens e o do total.",
+                    limite.formatar_com_simbolo()
+                ),
+            )),
             Self::CupomJaFinalizado => Some(Detalhes::nova(
                 "Venda já finalizada",
-                "Assim como no Razão, uma venda finalizada não se desfaz por aqui — a correção \
-                 é uma devolução (ver mod-vendas), não um cancelamento de cupom.",
+                "Uma venda paga não se cancela pelo F8: ela se desfaz pelo estorno, em Vendas do \
+                 dia (F11), que devolve a mercadoria ao estoque e estorna o lançamento.",
             )),
             _ => None,
         }

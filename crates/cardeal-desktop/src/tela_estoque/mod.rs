@@ -7,16 +7,21 @@
 //! existia no backend mas não estava ligado a nenhuma tela).
 
 mod analise;
+mod dicionario;
 mod estrutura;
 mod estrutura_importacao;
 mod fiscal;
+mod inventario;
 mod lote;
 mod precos;
 mod precos_defasados;
 mod precos_historico;
+mod produtos_importacao;
 mod rentabilidade;
 #[cfg(test)]
 mod testes;
+mod transferencia;
+mod validade;
 
 use cardeal_cliente::{Motor, Sessao};
 use cardeal_kernel::{Fuso, Id, Preco, Quantidade};
@@ -50,6 +55,9 @@ enum AbaEstoque {
     Lote,
     Analise,
     Rentabilidade,
+    Inventario,
+    Transferencias,
+    Validade,
     Radar,
 }
 
@@ -71,6 +79,10 @@ enum Dlg {
     HistoricoCompras,
     /// Importar a estrutura mercadológica de uma planilha CSV (aba Estrutura).
     ImportarEstrutura,
+    /// Importar produtos de uma planilha CSV ("Importar produtos…" no topo da tela).
+    ImportarProdutos,
+    /// O dicionário DE/PARA de nomes de produto.
+    Dicionario,
 }
 
 /// O estado local da tela.
@@ -80,16 +92,23 @@ pub struct EstadoTelaEstoque {
     produtos: Vec<ItemProdutoComSaldo>,
     grupos: Vec<ItemGrupoProduto>,
     est: estrutura::EstadoEstrutura,
+    imp_produtos: produtos_importacao::EstadoImportacaoProdutos,
     prc: precos::EstadoPrecos,
     lote: lote::EstadoLote,
     analise: analise::EstadoAnalise,
     rent: rentabilidade::EstadoRentabilidade,
+    inv: inventario::EstadoInventarioUi,
+    transf: transferencia::EstadoTransferenciaUi,
+    dic: dicionario::EstadoDicionario,
+    val: validade::EstadoValidade,
     /// Perfil fiscal do produto aberto em "Editar": o que ele define e o vigente.
     fisc: fiscal::FormFiscal,
     fisc_efetivo: Vec<mod_estoque::fiscal::LinhaFiscal>,
     unidades: Vec<ItemUnidade>,
     locais: Vec<ItemLocal>,
     radar: Vec<ItemAbaixoDoPontoPedido>,
+    /// Lotes vencidos ou que vencem em até 7 dias — o alerta da aba Produtos.
+    lotes_em_alerta: usize,
     /// Movimentações recentes do produto aberto no dialog "Ver" — a rastreabilidade
     /// peça↔origem já existente no backend (`estoque.movimentos_do_produto.v1`).
     movimentos: Vec<Movimento>,
@@ -142,6 +161,14 @@ impl EstadoTelaEstoque {
         if let Ok(g) = motor.consultar(sessao, "estoque.grupos_produto.v1", &GruposProduto) {
             self.grupos = g;
         }
+        // Sem o submódulo de lote a consulta é recusada: sem lote, sem alerta de validade.
+        self.lotes_em_alerta = motor
+            .consultar(
+                sessao,
+                "estoque.lotes_com_validade.v1",
+                &mod_estoque::LotesComValidade { dias: Some(7) },
+            )
+            .map_or(0, |l| l.len());
         self.est.carregar(motor, sessao);
         if self.aba == AbaEstoque::Precos {
             self.prc.carregar(motor, sessao);
@@ -245,6 +272,14 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
                 estado.limpar_novo();
                 estado.dlg = Dlg::Novo;
             }
+            if ui.add(Botao::secundario("Importar produtos…")).clicked() {
+                estado.imp_produtos.limpar();
+                estado.dlg = Dlg::ImportarProdutos;
+            }
+            if ui.add(Botao::fantasma("Dicionário de nomes…")).clicked() {
+                estado.dic.carregar(motor, sessao);
+                estado.dlg = Dlg::Dicionario;
+            }
         },
         |ui, estado| {
             if let Some(nova) = Abas::nova(&[
@@ -254,6 +289,9 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
                 (AbaEstoque::Lote, "Alteração em lote"),
                 (AbaEstoque::Analise, "Análise"),
                 (AbaEstoque::Rentabilidade, "Rentabilidade"),
+                (AbaEstoque::Inventario, "Inventário"),
+                (AbaEstoque::Transferencias, "Transferências"),
+                (AbaEstoque::Validade, "Validade"),
                 (AbaEstoque::Radar, "Radar de reposição"),
             ])
             .selecionada(estado.aba)
@@ -271,6 +309,15 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
                 }
                 if nova == AbaEstoque::Rentabilidade {
                     estado.rent.carregar(motor, sessao);
+                }
+                if nova == AbaEstoque::Inventario {
+                    estado.inv.carregar(motor, sessao);
+                }
+                if nova == AbaEstoque::Transferencias {
+                    estado.transf.carregar(motor, sessao);
+                }
+                if nova == AbaEstoque::Validade {
+                    estado.val.carregar(motor, sessao);
                 }
             }
             ui.add_space(Espaco::E16);
@@ -291,6 +338,9 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
                 AbaEstoque::Lote => lote::aba(ui, motor, sessao, estado),
                 AbaEstoque::Analise => analise::aba(ui, motor, sessao, estado),
                 AbaEstoque::Rentabilidade => rentabilidade::aba(ui, motor, sessao, estado),
+                AbaEstoque::Inventario => inventario::aba(ui, motor, sessao, estado),
+                AbaEstoque::Transferencias => transferencia::aba(ui, motor, sessao, estado),
+                AbaEstoque::Validade => validade::aba(ui, motor, sessao, estado),
                 AbaEstoque::Radar => radar(ui, estado),
             }
         },
@@ -307,6 +357,10 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
         Dlg::ImportarEstrutura => {
             estrutura_importacao::dialogo(ui.ctx(), motor, sessao, estado);
         }
+        Dlg::ImportarProdutos => {
+            produtos_importacao::dialogo(ui.ctx(), motor, sessao, estado);
+        }
+        Dlg::Dicionario => dicionario::dialogo(ui.ctx(), motor, sessao, estado),
     }
 
     if let Some((produto, nome)) = estado.confirmar_exclusao.clone() {
@@ -370,6 +424,20 @@ fn lista(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoT
                 "ver aba Radar de reposição"
             },
         ),
+        CartaoKpi::contagem(
+            "Lotes vencidos ou vencendo (7 dias)",
+            estado.lotes_em_alerta,
+        )
+        .variacao(if estado.lotes_em_alerta == 0 {
+            "nada a vencer"
+        } else {
+            "ver aba Validade"
+        })
+        .tom(if estado.lotes_em_alerta == 0 {
+            Tom::Neutro
+        } else {
+            Tom::Atencao
+        }),
     ])
     .mostrar(ui);
 

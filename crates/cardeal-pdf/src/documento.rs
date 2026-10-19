@@ -1,4 +1,5 @@
-//! Um escritor de PDF 1.7 mínimo: páginas A4, as duas fontes padrão, retângulos, linhas,
+//! Um escritor de PDF 1.7 mínimo: páginas A4 (ou de tamanho livre — a bobina do DANFCE), as
+//! duas fontes padrão, retângulos, linhas,
 //! texto e imagens RGB (sem filtro — o documento fica um pouco maior, mas o código não
 //! depende de nenhuma biblioteca de compressão).
 
@@ -69,6 +70,7 @@ pub struct Canvas {
     // algum ponto (era exatamente o bug: `String::from_utf8_lossy` trocava cada acento pelo
     // caractere de substituição, 3 bytes UTF-8 que o leitor de PDF então exibia como "ï¿½").
     ops: Vec<u8>,
+    largura_pt: f32,
     altura_pt: f32,
 }
 
@@ -78,8 +80,25 @@ impl Canvas {
     pub fn nova_a4() -> Self {
         Self {
             ops: Vec::new(),
+            largura_pt: A4_LARGURA,
             altura_pt: A4_ALTURA,
         }
+    }
+
+    /// Uma superfície em branco de `largura_mm` × `altura_mm`.
+    #[must_use]
+    pub fn nova(largura_mm: f32, altura_mm: f32) -> Self {
+        Self {
+            ops: Vec::new(),
+            largura_pt: largura_mm * MM,
+            altura_pt: altura_mm * MM,
+        }
+    }
+
+    /// O tamanho da página, em pontos.
+    #[must_use]
+    pub const fn tamanho_pt(&self) -> (f32, f32) {
+        (self.largura_pt, self.altura_pt)
     }
 
     /// Consome a superfície e devolve o fluxo de operadores de conteúdo (bytes crus, não UTF-8
@@ -175,7 +194,8 @@ impl Canvas {
 
 /// O documento em construção.
 pub struct Documento {
-    paginas: Vec<Vec<u8>>,
+    /// Operadores e tamanho (largura, altura em pontos) de cada página.
+    paginas: Vec<(Vec<u8>, f32, f32)>,
     imagens: Vec<Imagem>,
 }
 
@@ -198,7 +218,13 @@ impl Documento {
     /// Adiciona uma página a partir de um fluxo de operadores já montado (bytes crus — ver
     /// o comentário de `Canvas::ops`).
     pub fn pagina_bruta(&mut self, operadores: Vec<u8>) {
-        self.paginas.push(operadores);
+        self.paginas.push((operadores, A4_LARGURA, A4_ALTURA));
+    }
+
+    /// Adiciona a página desenhada no `canvas`, com o tamanho dele.
+    pub fn pagina(&mut self, canvas: Canvas) {
+        let (largura, altura) = canvas.tamanho_pt();
+        self.paginas.push((canvas.em_operadores(), largura, altura));
     }
 
     /// Serializa o PDF.
@@ -258,12 +284,12 @@ impl Documento {
             }
             format!(" /XObject << {entradas}>>")
         };
-        for (p, conteudo) in self.paginas.iter().enumerate() {
+        for (p, (conteudo, largura, altura)) in self.paginas.iter().enumerate() {
             let pag_obj = base_pag + p * 2;
             let cont_obj = pag_obj + 1;
             push(
                 format!(
-                    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {A4_LARGURA:.3} {A4_ALTURA:.3}] \
+                    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {largura:.3} {altura:.3}] \
                      /Resources << /Font << /F1 3 0 R /F2 4 0 R >>{xobject} >> /Contents {cont_obj} 0 R >>"
                 )
                 .into_bytes(),

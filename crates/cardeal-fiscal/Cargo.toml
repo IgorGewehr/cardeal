@@ -15,7 +15,21 @@ cardeal-storage.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-reqwest.workspace = true
+reqwest = { workspace = true, features = ["blocking"] }
+base64.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 quick-xml.workspace = true
+aes.workspace = true
+cbc.workspace = true
+des.workspace = true
+rc2.workspace = true
+hmac.workspace = true
+pbkdf2.workspace = true
+sha1.workspace = true
+sha2.workspace = true
+rand.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+postcard.workspace = true

@@ -51,6 +51,8 @@ Depois, o resto sob demanda.
 | 17 | [Roadmap](17-roadmap.md) | Fases, marcos, escopo de cada release |
 | 18 | [Glossário](18-glossario.md) | Vocabulário do domínio (contábil, fiscal, varejo) |
 | 19 | [Estado e processo](19-estado-e-processo.md) | **O que existe hoje**, o que é stub, decisões estratégicas registradas, onde retomar |
+| 20 | [Cliente web](20-cliente-web.md) | Estado do cliente web (ADR-0016) e o plano das telas assíncronas |
+| 21 | [Lições do gestao-raiz](21-licoes-do-gestao-raiz.md) | Comparação com o ERP em produção: o que trazer, em que ordem, e o checklist da NF-e |
 
 ## Decisões de arquitetura (ADR)
 

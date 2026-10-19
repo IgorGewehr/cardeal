@@ -76,6 +76,9 @@ pub struct NotaEntrada {
     pub valor_total: Dinheiro,
     /// O estado atual.
     pub estado: EstadoNotaEntrada,
+    /// Um aviso para quem confere (CFOP que não é venda, por exemplo). Nota com aviso nunca é
+    /// confirmada sozinha.
+    pub alerta: Option<String>,
     /// Versão para bloqueio otimista.
     pub versao: Versao,
 }
@@ -115,6 +118,8 @@ pub struct ItemNotaEntrada {
     pub codigo_fornecedor: String,
     /// A descrição, como veio do fornecedor.
     pub descricao_fornecedor: String,
+    /// O código de barras (cEAN) como veio na nota, quando veio.
+    pub codigo_barras: Option<String>,
     /// O NCM (8 dígitos).
     pub ncm: String,
     /// A quantidade.
@@ -123,6 +128,10 @@ pub struct ItemNotaEntrada {
     pub valor_unitario: Preco,
     /// A fração do frete/seguro/outras despesas rateada para este item.
     pub valor_rateio: Dinheiro,
+    /// O desconto do item na nota (`vDesc`).
+    pub valor_desconto: Dinheiro,
+    /// Os impostos da nota sobre o item que quem revende não recupera (ICMS-ST + FCP-ST + IPI).
+    pub valor_impostos: Dinheiro,
     /// O estado do casamento com um produto do estoque.
     pub estado_casamento: EstadoCasamento,
 }
@@ -138,12 +147,17 @@ impl ItemNotaEntrada {
         )
     }
 
-    /// O custo final unitário, já com o rateio embutido — o que vai para
-    /// `estoque.RegistrarEntrada` (`docs/modulos/compras.md` §11.3).
+    /// O custo total do item: bruto − desconto + rateio das despesas + ICMS-ST/IPI.
+    #[must_use]
+    pub fn custo_total(&self) -> Dinheiro {
+        self.valor_bruto() - self.valor_desconto + self.valor_rateio + self.valor_impostos
+    }
+
+    /// O custo final unitário, com desconto, rateio e os impostos não recuperáveis embutidos —
+    /// o que vai para `estoque.RegistrarEntrada` (`docs/modulos/compras.md` §11.3).
     #[must_use]
     pub fn custo_final_unitario(&self) -> Preco {
-        let total = self.valor_bruto() + self.valor_rateio;
-        preco_por_unidade(total, self.quantidade)
+        preco_por_unidade(self.custo_total(), self.quantidade)
     }
 
     /// Vincula (ou revincula) o item a um produto do estoque, marcando `Casado`.
@@ -202,6 +216,7 @@ mod testes {
             valor_outras_despesas: Dinheiro::ZERO,
             valor_total: Dinheiro::reais(3_400),
             estado: EstadoNotaEntrada::AConferir,
+            alerta: None,
             versao: Versao::INICIAL,
         }
     }
@@ -222,10 +237,13 @@ mod testes {
             produto_casado: None,
             codigo_fornecedor: "REF-8821".to_string(),
             descricao_fornecedor: "REFRIG COLA PET 2L".to_string(),
+            codigo_barras: None,
             ncm: "22021000".to_string(),
             quantidade: Quantidade::unidades(120),
             valor_unitario: Preco::reais(4),
             valor_rateio: Dinheiro::ZERO,
+            valor_desconto: Dinheiro::ZERO,
+            valor_impostos: Dinheiro::ZERO,
             estado_casamento: EstadoCasamento::NaoCasado,
         };
         assert_eq!(item.valor_bruto(), Dinheiro::reais(480));
@@ -234,6 +252,12 @@ mod testes {
         item.valor_rateio = Dinheiro::reais(120);
         // (480 + 120) / 120 = 5
         assert_eq!(item.custo_final_unitario(), Preco::reais(5));
+
+        // Desconto de R$ 60 e ICMS-ST + IPI de R$ 180: (480 − 60 + 120 + 180) / 120 = 6
+        item.valor_desconto = Dinheiro::reais(60);
+        item.valor_impostos = Dinheiro::reais(180);
+        assert_eq!(item.custo_total(), Dinheiro::reais(720));
+        assert_eq!(item.custo_final_unitario(), Preco::reais(6));
     }
 
     #[test]
@@ -244,10 +268,13 @@ mod testes {
             produto_casado: None,
             codigo_fornecedor: "X".to_string(),
             descricao_fornecedor: "X".to_string(),
+            codigo_barras: None,
             ncm: "12345678".to_string(),
             quantidade: Quantidade::unidades(1),
             valor_unitario: Preco::reais(1),
             valor_rateio: Dinheiro::ZERO,
+            valor_desconto: Dinheiro::ZERO,
+            valor_impostos: Dinheiro::ZERO,
             estado_casamento: EstadoCasamento::NaoCasado,
         };
         let produto = Id::novo();

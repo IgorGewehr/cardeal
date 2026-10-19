@@ -76,6 +76,8 @@ pub struct ItemNota {
     pub estado: EstadoNotaEntrada,
     /// Quantos itens a nota tem.
     pub itens: u32,
+    /// O aviso para quem confere (CFOP que não é venda), se houver.
+    pub alerta: Option<String>,
 }
 
 /// Lista as notas de entrada da empresa, mais recentes primeiro. sem corte silencioso — teto de segurança `cardeal_modkit::TETO_LISTA_COMPLETA` (a lista paginada para a rede é a `.v2`)
@@ -92,7 +94,8 @@ impl Consulta for NotasRecentes {
         let mut stmt = conexao
             .prepare(
                 "SELECT n.id, n.fornecedor, n.numero, n.serie, n.data_emissao, n.valor_total, n.estado,
-                        (SELECT COUNT(*) FROM compras_item_nota_entrada i WHERE i.nota_entrada = n.id)
+                        (SELECT COUNT(*) FROM compras_item_nota_entrada i WHERE i.nota_entrada = n.id),
+                        n.alerta
                  FROM compras_nota_entrada n
                  WHERE n.empresa = ?1
                  ORDER BY n.data_emissao DESC, n.id DESC
@@ -110,6 +113,7 @@ impl Consulta for NotasRecentes {
                     valor_total: Dinheiro::centavos(r.get::<_, i64>(5)?),
                     estado: estado_de(&r.get::<_, String>(6)?),
                     itens: r.get::<_, i64>(7)?.try_into().unwrap_or(0),
+                    alerta: r.get(8)?,
                 })
             })
             .map_err(persist)?;
@@ -136,7 +140,7 @@ impl Consulta for ItensDaNota {
             .prepare(
                 "SELECT id, nota_entrada, produto_casado, codigo_fornecedor,
                         descricao_fornecedor, ncm, quantidade, valor_unitario, valor_rateio,
-                        estado_casamento
+                        estado_casamento, codigo_barras, valor_desconto, valor_impostos
                  FROM compras_item_nota_entrada WHERE nota_entrada = ?1 ORDER BY rowid",
             )
             .map_err(persist)?;
@@ -153,6 +157,9 @@ impl Consulta for ItensDaNota {
                     valor_unitario: Preco::interna(r.get::<_, i64>(7)?),
                     valor_rateio: cardeal_kernel::Dinheiro::centavos(r.get::<_, i64>(8)?),
                     estado_casamento: casamento_de(&r.get::<_, String>(9)?),
+                    codigo_barras: r.get(10)?,
+                    valor_desconto: cardeal_kernel::Dinheiro::centavos(r.get::<_, i64>(11)?),
+                    valor_impostos: cardeal_kernel::Dinheiro::centavos(r.get::<_, i64>(12)?),
                 })
             })
             .map_err(persist)?;

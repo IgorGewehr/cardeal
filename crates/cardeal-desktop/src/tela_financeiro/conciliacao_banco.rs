@@ -23,6 +23,10 @@ pub(super) struct EstadoConciliacao {
     lancando: Option<ItemDoExtrato>,
     categoria: Option<Id>,
     descricao: String,
+    /// A conferência do saldo de cada conta bancária (`super::conferencia`).
+    pub(super) conferencias: Vec<mod_financeiro::ConferenciaDaConta>,
+    /// O formulário do saldo digitado aberto: (data, valor).
+    pub(super) saldo_form: Option<(String, String)>,
 }
 
 /// Lê o arquivo; extratos antigos vêm em ISO-8859-1, que não é UTF-8 válido.
@@ -50,6 +54,7 @@ impl EstadoConciliacao {
     }
 
     pub(super) fn recarregar_itens(&mut self, motor: &Motor, sessao: &Sessao) {
+        self.carregar_conferencias(motor, sessao);
         let Some(conta) = self.conta else {
             self.itens.clear();
             return;
@@ -88,6 +93,12 @@ fn texto_sugestao(s: &Sugestao) -> String {
         AlvoDaConciliacao::Baixa(_) => {
             format!("Baixa de {} ({}%)", s.data.formatar_curta(), s.confianca)
         }
+        AlvoDaConciliacao::Movimento(_) => format!(
+            "{} de {} ({}%)",
+            s.texto,
+            s.data.formatar_curta(),
+            s.confianca
+        ),
         AlvoDaConciliacao::Parcela(_) => format!(
             "Parcela que vence {}{} ({}%)",
             s.data.formatar_curta(),
@@ -117,6 +128,8 @@ pub(super) fn painel_conciliacao(
         .mostrar(ui);
         return;
     }
+    super::conferencia::painel(ui, motor, sessao, estado);
+    ui.add_space(Espaco::E12);
     let c = &estado.conciliacao;
     FaixaKpi::nova(vec![
         CartaoKpi::contagem("Pendentes", c.contar(EstadoItem::Pendente)).tom(

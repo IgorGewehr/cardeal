@@ -75,12 +75,94 @@ CREATE TABLE pdv_pagamento_cupom (
 CREATE INDEX pdv_pagamento_cupom_cupom ON pdv_pagamento_cupom(cupom);
 ";
 
-const MIGRACOES: &[Migracao] = &[Migracao {
-    versao: 1,
-    nome: "pdv_cupom_e_pagamento",
-    sql: SQL_CUPOM,
-    tipo: TipoMigracao::Esquema,
-}];
+/// v2: o estorno da venda finalizada. Fica numa tabela à parte, e não num estado novo no
+/// `CHECK` de `pdv_cupom`: o SQLite não altera um `CHECK`, e recriar `pdv_cupom` com as chaves
+/// estrangeiras ligadas quebraria itens e pagamentos, que apontam para ela. Um cupom
+/// `Finalizado` com linha aqui é `Estornado` (o repositório faz a tradução).
+const SQL_ESTORNO: &str = r"
+CREATE TABLE pdv_estorno (
+    cupom          BLOB PRIMARY KEY REFERENCES pdv_cupom(id),
+    empresa        BLOB    NOT NULL REFERENCES nucleo_empresa(id),
+    motivo         TEXT    NOT NULL,
+    autorizado_por BLOB    NOT NULL,
+    estornado_por  BLOB    NOT NULL,
+    estornado_em   INTEGER NOT NULL
+) STRICT;
+CREATE INDEX pdv_estorno_empresa ON pdv_estorno(empresa, estornado_em);
+CREATE INDEX pdv_cupom_empresa_abertura ON pdv_cupom(empresa, abertura);
+";
+
+/// v3: a impressão do PDV — a bobina (80 ou 58 mm), se o comprovante sai sozinho ao finalizar
+/// a venda e o rodapé dele. Por empresa (um balcão, em geral, tem uma impressora).
+const SQL_IMPRESSAO: &str = r"
+CREATE TABLE pdv_preferencias (
+    empresa              BLOB PRIMARY KEY REFERENCES nucleo_empresa(id),
+    bobina               TEXT    NOT NULL DEFAULT '80' CHECK (bobina IN ('80','58')),
+    imprimir_comprovante INTEGER NOT NULL DEFAULT 0 CHECK (imprimir_comprovante IN (0,1)),
+    rodape               TEXT
+) STRICT;
+";
+
+/// v4: a venda a prazo — a forma `Prazo` e a condição (1º vencimento, parcelas, intervalo) no
+/// pagamento. O SQLite não muda um `CHECK`: a tabela é recriada (nenhuma outra aponta para ela).
+const SQL_PRAZO: &str = r"
+CREATE TABLE pdv_pagamento_cupom_v4 (
+    id                  BLOB PRIMARY KEY,
+    cupom               BLOB    NOT NULL REFERENCES pdv_cupom(id),
+    forma               TEXT    NOT NULL CHECK (forma IN ('Dinheiro','Pix','Debito','Credito','Prazo')),
+    valor               INTEGER NOT NULL,
+    primeiro_vencimento INTEGER,
+    parcelas            INTEGER,
+    intervalo_dias      INTEGER
+) STRICT;
+INSERT INTO pdv_pagamento_cupom_v4 (id, cupom, forma, valor)
+SELECT id, cupom, forma, valor FROM pdv_pagamento_cupom ORDER BY rowid;
+DROP TABLE pdv_pagamento_cupom;
+ALTER TABLE pdv_pagamento_cupom_v4 RENAME TO pdv_pagamento_cupom;
+CREATE INDEX pdv_pagamento_cupom_cupom ON pdv_pagamento_cupom(cupom);
+";
+
+const MIGRACOES: &[Migracao] = &[
+    Migracao {
+        versao: 1,
+        nome: "pdv_cupom_e_pagamento",
+        sql: SQL_CUPOM,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 2,
+        nome: "pdv_estorno_da_venda",
+        sql: SQL_ESTORNO,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 3,
+        nome: "pdv_preferencias_de_impressao",
+        sql: SQL_IMPRESSAO,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 4,
+        nome: "pdv_venda_a_prazo",
+        sql: SQL_PRAZO,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 5,
+        nome: "pdv_desconto_no_total",
+        sql: SQL_DESCONTO_NO_TOTAL,
+        tipo: TipoMigracao::Esquema,
+    },
+];
+
+// O desconto no total da venda aberta (`Shift+F5`): a regra (percentual ou valor). Ao
+// finalizar ele é rateado entre os itens e as colunas voltam a NULL. `ADD COLUMN` em vez de
+// recriar a tabela: `pdv_cupom` é referenciada por itens, pagamentos e estorno.
+const SQL_DESCONTO_NO_TOTAL: &str = r"
+ALTER TABLE pdv_cupom ADD COLUMN desconto_total_tipo TEXT
+    CHECK (desconto_total_tipo IN ('Percentual', 'Valor'));
+ALTER TABLE pdv_cupom ADD COLUMN desconto_total_valor INTEGER;
+";
 
 /// O conjunto de migrações do módulo de PDV.
 #[must_use]

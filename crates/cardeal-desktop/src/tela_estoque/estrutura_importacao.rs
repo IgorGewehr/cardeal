@@ -21,11 +21,7 @@ impl EstadoImportacao {
     }
 }
 
-/// Planilhas antigas vêm em ISO-8859-1, que não é UTF-8 válido.
-fn ler_texto(bytes: &[u8]) -> String {
-    String::from_utf8(bytes.to_vec())
-        .unwrap_or_else(|_| bytes.iter().map(|b| char::from(*b)).collect())
-}
+pub(super) use crate::importacao_planilha::ler_texto;
 
 /// Guarda o texto e pede a prévia ao motor (sem gravar nada).
 pub(super) fn carregar_texto(

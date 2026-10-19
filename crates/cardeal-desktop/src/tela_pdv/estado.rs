@@ -53,6 +53,7 @@ impl Linha {
 /// informação mais importante do momento seguinte ao `F2`).
 #[derive(Clone, Copy)]
 pub(super) struct UltimaVenda {
+    pub(super) cupom: Id,
     pub(super) numero: i64,
     pub(super) total: Dinheiro,
     pub(super) troco: Dinheiro,
@@ -75,17 +76,24 @@ pub(super) struct EstadoPagamento {
     /// `Esc`, *antes* de a tela rodar — o foco atual já seria falso no quadro do `Esc`, que
     /// então fecharia o diálogo em vez de só sair da digitação.
     pub(super) digitando: bool,
+    /// A venda a prazo: o 1º vencimento e o número de parcelas, como digitados.
+    pub(super) prazo_vencimento: String,
+    pub(super) prazo_parcelas: String,
 }
 
 impl EstadoPagamento {
     pub(super) fn nova() -> Self {
         Self {
-            valores: [Dinheiro::ZERO; 4],
+            valores: [Dinheiro::ZERO; 5],
             ativa: 0,
             digitado: String::new(),
             foco_valor: false,
             id_valor: None,
             digitando: false,
+            prazo_vencimento: cardeal_kernel::Data::hoje(cardeal_kernel::Fuso::BRASILIA)
+                .mais_dias(30)
+                .to_string(),
+            prazo_parcelas: "1".to_owned(),
         }
     }
 }
@@ -125,7 +133,15 @@ pub(super) enum Dlg {
         busca: String,
         /// A linha destacada na lista.
         sel: usize,
+        /// "Cadastrar cliente": o formulário do cadastro rápido, quando aberto.
+        novo: Option<crate::pessoa::EstadoPessoa>,
     },
+    /// `Shift+F5`: o desconto no total da venda.
+    DescontoTotal {
+        texto: String,
+    },
+    /// `F11`: as vendas de hoje — estornar, reimprimir, acompanhar a NFC-e.
+    VendasDoDia(super::vendas_do_dia::EstadoVendasDoDia),
     /// `F10`: consulta de preço sem abrir venda.
     ConsultaPreco {
         /// O que o operador digitou/bipou.
@@ -145,6 +161,10 @@ pub(super) enum Acao {
     CancelarLinha,
     /// `F5`.
     AbrirDesconto,
+    /// `Shift+F5`.
+    AbrirDescontoTotal,
+    /// "Cadastrar e usar" no `F6`: cadastra o cliente e o identifica na venda.
+    CadastrarCliente(Box<mod_clientes::CriarPessoa>),
     /// `F2` na tela de venda.
     AbrirPagamento,
     /// `F2` no diálogo de pagamento.
@@ -157,12 +177,22 @@ pub(super) enum Acao {
     AbrirFechamento,
     /// `F10`.
     AbrirConsultaPreco,
+    /// `F11`.
+    AbrirVendasDoDia,
     /// `F6`.
     AbrirCliente,
     /// Um cliente foi escolhido (`None` = consumidor não identificado).
     EscolherCliente(Option<(Id, String)>),
     /// `Enter` no diálogo de consulta de preço.
     ConsultarPreco,
+    /// Imprimir o cupom fiscal (DANFCE) da NFC-e da última venda.
+    ImprimirNfce(Id),
+    /// Imprimir o comprovante (não fiscal) de uma venda — o troco só na primeira via.
+    ImprimirComprovante {
+        cupom: Id,
+        troco: Dinheiro,
+        segunda_via: bool,
+    },
 }
 
 /// Estado local da tela de PDV.
@@ -173,7 +203,7 @@ pub struct EstadoTelaPdv {
     pub(super) tabelas: Vec<TabelaPreco>,
     pub(super) locais: Vec<ItemLocal>,
     pub(super) produtos: Vec<ItemProdutoComSaldo>,
-    /// Os clientes cadastrados (até 200, o teto de `PessoasPorPapel` sem busca).
+    /// Os clientes ativos (a consulta sem busca traz até 50 mil) — o `F6` filtra aqui.
     pub(super) clientes: Vec<ItemPessoa>,
     /// O cliente identificado na venda atual, com o nome para mostrar.
     pub(super) cliente: Option<(Id, String)>,
@@ -195,6 +225,8 @@ pub struct EstadoTelaPdv {
     /// A linha destacada no cupom (alvo de `F5`/`F7`).
     pub(super) linha_sel: Option<usize>,
     pub(super) total: Dinheiro,
+    /// O desconto no total da venda aberta (`Shift+F5`), para refazer a conta do total aqui.
+    pub(super) desconto_no_total: Option<mod_pdv::DescontoNoTotal>,
     pub(super) ultima_venda: Option<UltimaVenda>,
     pub(super) dlg: Dlg,
     pub(super) erro: Option<String>,
@@ -204,6 +236,16 @@ pub struct EstadoTelaPdv {
     /// Devolve o foco ao campo de bipe no próximo quadro (depois de cada ação).
     pub(super) foco_entrada: bool,
     pub(super) pendentes: Vec<Acao>,
+    /// A empresa emite NFC-e a cada venda (Configurações › Fiscal).
+    pub(super) nfce_automatica: bool,
+    /// A fila fiscal, para a faixa do cabeçalho.
+    pub(super) fiscal: Option<mod_fiscal::ResumoFiscal>,
+    /// A NFC-e da última venda.
+    pub(super) nfce_ultima: Option<mod_fiscal::DocumentoResumo>,
+    /// A rodada da transmissão em segundo plano que a faixa já mostra.
+    pub(super) geracao_fiscal: u64,
+    /// A impressão do PDV (bobina, comprovante automático, rodapé).
+    pub(super) impressao: mod_pdv::ImpressaoPdv,
 }
 
 impl Default for EstadoTelaPdv {
@@ -229,12 +271,18 @@ impl Default for EstadoTelaPdv {
             carrinho: Vec::new(),
             linha_sel: None,
             total: Dinheiro::ZERO,
+            desconto_no_total: None,
             ultima_venda: None,
             dlg: Dlg::Fechado,
             erro: None,
             finalizar_pendente: false,
             foco_entrada: true,
             pendentes: Vec::new(),
+            nfce_automatica: false,
+            fiscal: None,
+            nfce_ultima: None,
+            geracao_fiscal: 0,
+            impressao: mod_pdv::ImpressaoPdv::default(),
         }
     }
 }
@@ -243,6 +291,7 @@ impl EstadoTelaPdv {
     /// Carrega caixas, catálogos e produtos.
     pub fn carregar(&mut self, motor: &Motor, sessao: &Sessao) {
         self.erro = None;
+        self.carregar_fiscal(motor, sessao);
         match motor.consultar(sessao, "financeiro.caixas.v1", &Caixas) {
             Ok(c) => self.caixas = c,
             Err(e) => self.erro = Some(e.mensagem),
@@ -262,6 +311,9 @@ impl EstadoTelaPdv {
             self.resultados = ("\u{0}".to_owned(), Vec::new());
         }
 
+        if let Ok(i) = motor.consultar(sessao, "pdv.impressao.v1", &mod_pdv::ImpressaoDoPdv) {
+            self.impressao = i;
+        }
         if let Ok(c) = motor.consultar(
             sessao,
             "clientes.pessoas_por_papel.v1",
@@ -289,6 +341,40 @@ impl EstadoTelaPdv {
         }
     }
 
+    /// A configuração e a fila fiscais, e a situação da NFC-e da última venda.
+    pub(super) fn carregar_fiscal(&mut self, motor: &Motor, sessao: &Sessao) {
+        self.geracao_fiscal = crate::fiscal_fundo::geracao();
+        if !sessao.concede("fiscal.ver") {
+            self.nfce_automatica = false;
+            self.fiscal = None;
+            return;
+        }
+        self.nfce_automatica = motor
+            .consultar(
+                sessao,
+                "fiscal.configuracao_nfce.v1",
+                &mod_fiscal::ConfiguracaoDaNfce,
+            )
+            .is_ok_and(|c| c.emitir_nas_vendas);
+        self.fiscal = motor
+            .consultar(
+                sessao,
+                "fiscal.resumo_da_fila.v1",
+                &mod_fiscal::ResumoDaFilaFiscal,
+            )
+            .ok();
+        if let Some(v) = self.ultima_venda {
+            self.nfce_ultima = motor
+                .consultar(
+                    sessao,
+                    "fiscal.documento_da_venda.v1",
+                    &mod_fiscal::DocumentoDaVenda { cupom: v.cupom },
+                )
+                .ok()
+                .flatten();
+        }
+    }
+
     pub(super) fn caixa_atual(&self) -> Option<&ItemCaixa> {
         let id = self.caixa_sel?;
         self.caixas.iter().find(|c| c.caixa == id)
@@ -308,11 +394,23 @@ impl EstadoTelaPdv {
             .filter(|&i| self.carrinho.get(i).is_some_and(|l| !l.cancelado))
     }
 
+    /// O total a pagar: os itens menos o desconto no total — a mesma conta do domínio
+    /// (`Cupom::recalcular`).
     pub(super) fn recalcular_total(&mut self) {
-        self.total = self
-            .ativos()
+        self.total = self.liquido_dos_itens() - self.valor_do_desconto_no_total();
+    }
+
+    /// A soma dos itens ativos, já com o desconto de cada um.
+    pub(super) fn liquido_dos_itens(&self) -> Dinheiro {
+        self.ativos()
             .map(|l| l.total)
-            .fold(Dinheiro::ZERO, |a, b| a + b);
+            .fold(Dinheiro::ZERO, |a, b| a + b)
+    }
+
+    /// Quanto o desconto no total tira agora.
+    pub(super) fn valor_do_desconto_no_total(&self) -> Dinheiro {
+        self.desconto_no_total
+            .map_or(Dinheiro::ZERO, |d| d.valor_sobre(self.liquido_dos_itens()))
     }
 
     /// Move o destaque entre os itens ativos do cupom.

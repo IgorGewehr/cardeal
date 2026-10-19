@@ -169,6 +169,16 @@ pub(super) fn dialogo_lancar(
                     (&estado.fornecedores, Papel::Fornecedor)
                 };
                 f.pessoa.mostrar(ui, catalogo, papel, true, false);
+                // Escolheu a pessoa: o que estiver em branco vem do último lançamento dela.
+                let escolhida = f.pessoa.escolhida();
+                if escolhida != f.preenchido_para {
+                    f.preenchido_para = escolhida;
+                    f.aviso_preenchido =
+                        escolhida.and_then(|p| preencher_com_o_ultimo(motor, sessao, f, p));
+                }
+                if let Some(aviso) = &f.aviso_preenchido {
+                    ui.add(Rotulo::apoio(aviso.clone()).quebravel());
+                }
                 ui.add_space(Espaco::E16);
                 f.pagamento.mostrar_com(
                     ui,
@@ -209,6 +219,54 @@ pub(super) fn dialogo_lancar(
     if fechar {
         estado.dlg = Dlg::Fechado;
     }
+}
+
+/// Preenche o que está em branco (descrição, categoria, valor) com o último lançamento à mão da
+/// pessoa na mesma espécie; devolve o aviso do que foi preenchido, `None` se nada.
+pub(super) fn preencher_com_o_ultimo(
+    motor: &Motor,
+    sessao: &Sessao,
+    f: &mut FormLancar,
+    pessoa: Id,
+) -> Option<String> {
+    let ultimo: Option<mod_financeiro::UltimoLancamento> = if f.a_receber {
+        motor.consultar(
+            sessao,
+            "financeiro.ultimo_lancamento_a_receber.v1",
+            &mod_financeiro::UltimoLancamentoAReceber { pessoa },
+        )
+    } else {
+        motor.consultar(
+            sessao,
+            "financeiro.ultimo_lancamento_a_pagar.v1",
+            &mod_financeiro::UltimoLancamentoAPagar { pessoa },
+        )
+    }
+    .ok()
+    .flatten();
+    let u = ultimo?;
+    let mut preenchidos = Vec::new();
+    if f.descricao.trim().is_empty() {
+        if let Some(o) = u.observacao.as_ref().filter(|o| !o.trim().is_empty()) {
+            f.descricao = o.clone();
+            preenchidos.push("descrição");
+        }
+    }
+    if f.categoria.is_none() && u.categoria.is_some() {
+        f.categoria = u.categoria;
+        preenchidos.push("categoria");
+    }
+    if f.valor.trim().is_empty() {
+        f.valor = u.valor_total.formatar();
+        preenchidos.push("valor");
+    }
+    (!preenchidos.is_empty()).then(|| {
+        format!(
+            "Preenchido com o último lançamento desta pessoa, de {}: {}. Confira antes de lançar.",
+            u.emissao.formatar(),
+            preenchidos.join(", ")
+        )
+    })
 }
 
 /// Lança o que está no formulário. Cliente/fornecedor novo é cadastrado antes (e fica

@@ -26,6 +26,7 @@ mod listagem;
 mod margem;
 mod receita;
 pub use listagem::{ItemListaOrdem, ListarOrdens};
+pub use margem::CustosHora;
 pub use margem::{
     MargemDaOrdem, MargemDaOrdemServico, MargemDasOrdens, MargemDasOrdensNoPeriodo, MargemPrevista,
     MargemPrevistaDaOrdem,

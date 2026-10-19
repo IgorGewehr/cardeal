@@ -26,12 +26,31 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   por correção do usuário, portas substituíveis), mas **nenhuma funcionalidade depende de IA** e
   nada de IA entra antes de a versão determinística equivalente existir e estar em uso. IA só sugere;
   quem confirma é o usuário. Ver [17 — Roadmap](17-roadmap.md), Fase 7.
-- **Ordem do que vem agora** (custo de referência, histórico de compras, preços defasados e
-  **rentabilidade por nível da árvore** já estão feitos; **comissão por estrutura mercadológica ainda NÃO foi
-  feita** e segue pendente): **seletor em árvore no cadastro (feito)** e **importação da estrutura por planilha (feita)**; segue pendente a importação de *produto* por planilha → inventário/transferência → importação de produto
-  por XML (dicionário determinístico).
+- **Ordem do que vem agora** (custo de referência, histórico de compras, preços defasados,
+  **rentabilidade por nível da árvore**, **seletor em árvore no cadastro**, **importação da estrutura por
+  planilha**, **importação de produto por planilha** e **comissão por estrutura mercadológica** (2026-10-13)
+  já estão feitos — a onda 4 fechou). Onda 5: **inventário com contagem cega**, **transferência entre locais**, **produto a partir da
+  nota com nome padronizado por dicionário**, **validade e perdas** e **custo-hora do técnico** feitos
+  (2026-10-13); do **ST/MVA no custo**, a parte determinística está feita (ICMS-ST, FCP-ST, IPI e desconto do XML
+  entram no custo e no título); resta estimar ST pela MVA quando a nota não traz o valor (tabelas + contador). A **apuração e
+  o pagamento da comissão do vendedor** estão feitos (2026-10-14); fora: comissão nas vendas do PDV (o cupom
+  tem operador, não vendedor) e o ajuste por devolução (a devolução ainda não é persistida).
+  Onda 6 (Financeiro 2) começou: **conciliação com alerta de pendências e saldo banco × sistema**,
+  **lançamento pré-preenchido pelo último da pessoa**, **DFC indireto**, **cheques**, **balancete/diário** e o
+  **pacote do contador** (PDF + `.xlsx`) e a **régua de cobrança** (fila do dia com envio de um clique) feitos
+  (2026-10-14) — **a onda 6 fechou**; o disparo sem clique espera uma API de WhatsApp (decisão de produto).
+  **Onda 7 (fiscal real) começou** sobre o `sefaz-api`, o motor fiscal próprio (ADR-0019): **certificado A1**
+  conferido e guardado cifrado no cofre, **dados fiscais do emitente**, **ambiente** e **status da SEFAZ**
+  feitos (2026-10-14; homologação SC respondeu 107 com o A1 real). A **NFC-e do PDV** saiu (2026-10-15):
+  documento criado na venda sem rede, fila, transmissão em segundo plano (tarefa no despacho), conferência
+  pela chave antes de reemitir, área Notas fiscais — e o **DANFCE** (80 mm, QR Code), o **cancelamento** e a
+  **inutilização** como pedidos na fila, e o **estorno da venda** no PDV com a NFC-e anulada pela fila.
+  O MVP do backlog do `docs/21-licoes-do-gestao-raiz.md` §5 (itens 1–8) está feito. Próximo: o
+  resto do §5 (DFe com OK do usuário, parcelas e estorno da entrada de compra, pacote do contador
+  com XMLs…); a 1ª autorizada no RS espera os dados do usuário.
 - **Pendência de confiança:** as tabelas do Simples e as alíquotas precisam ser conferidas com o
-  contador; ST/MVA ainda não entram no custo.
+  contador; o ST/IPI **da nota** já entra no custo (2026-10-13), mas a estimativa de ST pela MVA (sem o valor na
+  nota) ainda não.
 
 ## 1. O que existe, com precisão (tabela dos crates de 2026-09-05; as sessões seguintes, abaixo, a atualizam)
 
@@ -488,8 +507,228 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
 - **Importação da estrutura por planilha (2026-10-12):** `mod-estoque::importacao_estrutura` (domínio puro:
   parse CSV, plano de nós novos, erros por linha, idempotente), comando `estoque.importar_estrutura.v1` (tudo
   ou nada, permissão `estoque.produto.criar`) e prévia `estoque.previa_importacao_estrutura.v1`; aba Estrutura
-  ganhou "Importar planilha…" (arquivo → prévia "N novos, M já existiam, K erros" → confirmar). Só cria; a
-  importação de produto por planilha continua pendente.
+  ganhou "Importar planilha…" (arquivo → prévia "N novos, M já existiam, K erros" → confirmar). Só cria.
+- **Importação de produtos por planilha (2026-10-13):** `mod-estoque::importacao_produtos` (domínio puro: CSV
+  com cabeçalho, colunas por nome e sinônimos, só `Nome` obrigatória; grupos que faltam pelo mesmo
+  `ResolvedorDeCaminhos` da estrutura, extraído de `importacao_estrutura`; unidades novas por sigla; estoque
+  inicial com custo e local; todos os problemas da linha numa mensagem; produto existente por GTIN ou nome
+  fica como está, logo é idempotente), comando `estoque.importar_produtos.v1` (tudo ou nada; margem/reposição
+  exigem `estoque.produto.editar` e estoque exige `estoque.movimento.entrada` via `ctx.concede`) e prévia
+  `estoque.previa_importacao_produtos.v1`. Tela: "Importar produtos…" no topo do Estoque, com "Baixar
+  modelo…". `normalizar_ncm` saiu de `Produto::novo` para a importação validar igual. Detalhes e limites em
+  `docs/modulos/estoque.md`. Testes: 15 unit + 5 integração (Despachante + SQLite) + 1 de tela.
+- **Comissão por estrutura mercadológica (2026-10-13):** migração `estoque` v10 (`comissao` no grupo, no produto
+  e no antes/depois do lote); comandos `estoque.definir_comissao_do_grupo.v1`/`…_do_produto.v1`; herança
+  produto → grupo → `ParametrosPreco.comissao` (agora "comissão padrão") em `BaseDePreco::comissao`, com
+  `SugestaoDePreco.comissao`/`origem_comissao`. A comissão do produto entra no preço sugerido, nos painéis de
+  margem do pedido e da OS e na rentabilidade (`cardeal_analytics::EncargosDaVenda`, receita somada por
+  percentual de encargos: sem comissões próprias, resultado idêntico ao anterior). Telas: bloco "Comissão de
+  vendedor" na aba Estrutura (o bloco de percentual herdado virou genérico, `bloco_herdado`, usado também pela
+  margem), campo na alteração em lote, coluna na grade de Preços e na importação. A apuração veio em seguida
+  (abaixo).
+- **Apuração e pagamento da comissão do vendedor (2026-10-14):** migração `vendas` v2 (`comissao_percentual` no
+  item, congelado no `FaturarPedido`; tabela `vendas_comissao`, um registro por pedido). `ApurarComissoes`
+  (permissão nova `vendas.comissao.apurar`) é idempotente por pedido e lança D 5.42/5.5 / C 2.1.03 no fim do
+  mês da venda; `PagarComissoes` quita o apurado de um vendedor no mês num lançamento só, de caixa/banco;
+  `ComissoesDoMes` mostra apurado, pago e a **prévia** do que falta (mesmo cálculo da apuração). Evento
+  `vendas.comissao_apurada.v1`. Tela: diálogo "Comissões" na tela de Vendas (mês, KPIs, grade por vendedor,
+  apurar, pagar). Testes: 3 de domínio/resumo, 2 de integração (percentual congelado, idempotência, saldos no
+  Razão, conta do modelo Comércio, recusas do pagamento) e 1 de tela. Fora: PDV (cupom sem vendedor) e
+  ajuste por devolução.
+- **Conferência do saldo bancário e alerta da conciliação (2026-10-14, onda 6):** `extrato::saldo_do_ofx` lê o
+  `LEDGERBAL`; migração `financeiro` v9 (`financeiro_saldo_banco`); `InformarSaldoDoBanco` (saldo digitado) e
+  `ConferenciaDasContas` (banco × Razão na data, diferença explicada por pendentes/ignoradas/baixas só no
+  sistema, o que sobra "sem explicação", e os alertas de pendência antiga, extrato velho e diferença). Telas:
+  painel na aba Conciliação e quadro na Visão geral. Testes: 3 de unidade, 1 de integração (a diferença
+  explicada passo a passo: importar, conciliar, ignorar, saldo digitado) e 1 de tela.
+- **Lançamento pré-preenchido (2026-10-14, onda 6):** `UltimoLancamentoAReceber`/`…APagar` (só títulos à mão
+  ou de recorrência); o diálogo de lançamento preenche descrição, categoria e valor em branco ao escolher a
+  pessoa, com aviso. Testes: 1 de integração (manual mais recente, título de compra fora, espécies separadas)
+  e 1 de tela (preenche o vazio, não sobrescreve o digitado).
+- **DFC indireto (2026-10-14, onda 6):** `cardeal_ledger::variacoes_patrimoniais` (contas patrimoniais fora do
+  caixa, mesmo recorte da DRE) e `dfc::montar_indireto` (lucro da DRE + variações com o sinal trocado,
+  classificadas por depreciação → grupo de fluxo → papel → código); `DfcIndiretoDoPeriodo`. Fecha com a
+  variação do direto; a diferença de datas (competência × liquidação), se houver, vira linha visível. Tela:
+  "Método direto / Método indireto" na aba DFC. Testes: 2 de unidade, 1 de integração (os dois métodos com o
+  mesmo caixa e diferença zero) e a tela.
+- **Conciliação com qualquer movimento da conta (2026-10-14):** `AlvoDaConciliacao::Movimento` (lançamento
+  realizado na conta que não é baixa, sem linha conciliada; o par estornado que o banco não viu some) —
+  migração `financeiro` v10. **Corrige** o depósito do caixa no banco (sangria) e transferências, que não
+  tinham com o que casar, e a conferência do saldo, que os acusava como diferença. Preparação para os cheques
+  (a compensação é um movimento assim). Testes: 1 de unidade e 1 de integração (depósito, par estornado,
+  estorno de movimento já conciliado).
+- **Cheques recebidos (2026-10-14, onda 6):** `mod_financeiro::cheque` (domínio: estados `EmCarteira →
+  Compensado → Devolvido`, dados normalizados, alíneas) e `RegistrarCheque`/`CompensarCheque`/`DevolverCheque`/
+  `CarteiraDeCheques` (migração `financeiro` v11). Receber dá a baixa em Cheques a receber (1.2.03), não no
+  caixa; compensar é D Banco / C 1.2.03 e casa com o depósito na Conciliação; devolver estorna compensação e
+  baixa (a parcela reabre) e publica `financeiro.cheque_devolvido.v1`. Tela: aba **Cheques** (KPIs, filtro,
+  receber com busca da conta em aberto, "Compensou"/"Voltou"). Fora: cheque emitido (pagar com cheque),
+  repasse/endosso a fornecedor e cheque como forma de recebimento no PDV. Testes: 3 de domínio, 1 de
+  integração (o ciclo inteiro, com conciliação nos dois sentidos e reapresentação) e 1 de tela.
+- **Balancete e diário (2026-10-14, onda 6):** implementados os dois previstos no contrato do Razão
+  (`docs/contratos-internos.md`) e nunca feitos — `cardeal_ledger::{balancete, diario}` e as consultas
+  `BalanceteDoPeriodo`/`DiarioDoPeriodo`. O balancete fecha por construção (competência); o resultado de anos
+  anteriores, sem encerramento no sistema, aparece no PL. Tela: "Balancete" ao lado de DRE e DFC. Base do
+  pacote do contador. Testes: 2 de unidade, 1 de integração (fechamento, ano anterior, diário) e a tela.
+- **Pacote do contador (2026-10-14, onda 6):** crate novo `cardeal-planilha` (`.xlsx` próprio: ZIP armazenado com
+  CRC-32 + Office Open XML; dinheiro, data, negrito, larguras, cabeçalho congelado), `cardeal_pdf::gerar_relatorio`
+  (relatório tabular genérico com cabeçalho da empresa e quebra de página) e o botão "Pacote do contador…" na aba
+  Resultado (pasta `Contador AAAA-MM` com PDF de DRE/DFC/balancete e planilha com essas tabelas + diário).
+  Validação: testes do ZIP (lido de volta, CRC conferido), da planilha e do PDF; a amostra abriu no Excel
+  (abas, formato, negrito, painel congelado); o pacote real passou no `System.IO.Packaging` do .NET. Envio
+  automático (SMTP) fica para quando houver configuração de e-mail; Portal do Contador é da onda 8.
+- **Régua de cobrança (2026-10-14, onda 6):** `mod_financeiro::regua` (régua padrão −3/0/1/7/15/30, etapa devida
+  por parcela uma vez só, fila agrupada por cliente na etapa mais grave, mensagem redigida), migração `financeiro`
+  v12, `ReguaDeCobranca`/`FilaDeCobranca`/`DefinirReguaDeCobranca`/`RegistrarCobranca` e duas permissões novas
+  (`financeiro.cobranca.configurar`, `.enviar`). `cardeal-ui`: `Campo::multilinha` (com exemplo na galeria).
+  Tela: "Cobranças de hoje" na aba Cobrança (WhatsApp registra o envio, "Pular", editor) e aviso na Visão geral.
+  Testes: 4 de domínio, 1 de integração e 1 de tela.
+- **Configuração fiscal sobre o `sefaz-api` (2026-10-14, onda 7, fatia 1):** `cardeal-fiscal` ganhou o leitor/
+  escritor PKCS#12 em Rust puro (`ler_certificado_a1`/`preparar_certificado_a1`: PBES2 AES/3DES, PBES1
+  3DES/RC2, MAC SHA-1/2, CNPJ pela extensão ICP-Brasil; regrava os PFX com RC2, que o OpenSSL 3 do `sefaz-api`
+  recusa), o `ApiFiscalHttp` (Bearer + PFX/senha por chamada, numa thread própria) e o status do serviço na
+  porta; `cardeal-storage` ganhou o `Cofre` (AES-256-GCM, chave fora da base); `cardeal-modkit`, os
+  `Recursos` (`Ctx::recurso`, o `porta()` adiado); `mod-empresa`, os dados fiscais do emitente (IE, IM, endereço
+  com IBGE); crate novo `mod-fiscal` (migração v1, `InstalarCertificado`/`RemoverCertificado`/
+  `DefinirAmbienteFiscal`, `SituacaoFiscal`/`StatusDaSefaz`, `ProvedorFiscal`, `porta_da_empresa`). Desktop:
+  Configurações › Fiscal e o aviso do certificado na Visão geral. Conferido em homologação contra
+  `emissao.tensorroot.com` com o A1 da Tensorroot (SEFAZ-SP, a UF dela, e SEFAZ-SC: 107 para NF-e e NFC-e).
+  Decisões: ADR-0019.
+  Testes novos: 15 em `cardeal-fiscal` (mais o de homologação real, ignorado no CI), 3 do cofre, 1 dos
+  recursos, 2 de dados fiscais, 2 + 3 de `mod-fiscal` e 2 de tela.
+- **NFC-e do PDV (2026-10-15, onda 7, fatia 2):** `cardeal-modkit` ganhou **tarefas** (`Registro::tarefa`,
+  `ContextoTarefa` com `ler`/`escrever`, `Despachante::executar_tarefa`; `Escritor`/`Leitor` com `Clone`
+  barato; `ExecutorDeTarefas` no motor para rodar numa thread). `cardeal-fiscal`: tipos da NFC-e e do
+  retorno, `emitir_nfce`/`consultar_documento` na porta (sefaz-api e simulado), `ChaveAcesso::montar` (DV
+  módulo 11). `mod-fiscal`: tributação pelo perfil efetivo, montagem a partir do cupom, migração v2
+  (documento, série por ambiente, CSC no cofre), `ConfigurarNfce`/`EmitirNfceDoCupom`/`ReenviarDocumento`,
+  consultas da fila, a tarefa `fiscal.transmitir_pendentes` e `decidir` (a máquina de estados, pura).
+  `mod-estoque::produtos_para_nota` e `mod-clientes::documentos_da_pessoa` públicos. Desktop: NFC-e
+  automática no PDV com faixa de estado, área **Notas fiscais**, cartão NFC-e em Configurações › Fiscal e a
+  transmissão em segundo plano (`fiscal_fundo`). Conferido na SEFAZ-SP de homologação pelo `sefaz-api`
+  local: assinatura, schema e QR passaram; recusa só de cadastro (178 — a empresa mudou para o RS). Achados
+  do teste real: rejeições com código < 200 vinham como "erro" (agora são rejeição) e um erro do emissor
+  que se repete sai da fila depois de 6 tentativas. O `sefaz-api` publicado estava fora do ar
+  (Cloudflare 1033) em 2026-10-15.
+- **DANFCE, cancelamento e inutilização (2026-10-15, onda 7):** `cardeal-pdf` ganhou página de tamanho livre
+  e `gerar_danfce` (80 mm, QR Code com `qrcodegen`); o desktop monta o cupom da nota guardada + XML e abre
+  para imprimir (PDV e Notas fiscais). Porta: `cancelar`/`inutilizar` (sefaz-api e simulado). `mod-fiscal`
+  migração v3 (tabela recriada: estado `Inutilizada`, `pedido`/`justificativa`/`protocolo_evento`),
+  `CancelarNfce`/`InutilizarNumero` (permissão nova `fiscal.cancelar`) e `decidir_evento`; a mesma tarefa da
+  fila leva os pedidos. Testes: cancelamento aceito, recusado por prazo, pedido repetido, inutilização,
+  decisões dos eventos e o cupom (o QR renderizado decodifica com OpenCV).
+- **Estorno da venda finalizada (2026-10-15, item 1 do doc 21):** `pdv.estornar_venda.v1` (permissão nova
+  `pdv.venda.estornar`, Alto) estorna o lançamento da venda — achado pela origem com o novo
+  `RepositorioRazao::lancamentos_vivos_da_origem` — e devolve ao estoque cada saída ao custo em que saiu
+  (`mod_estoque::devolver_saidas_da_origem`, com `SaldoLocal::devolucao` aceitando custo zero). Estado
+  `Estornado` em tabela à parte (`pdv_estorno`, migração v2 do PDV). `pdv.vendas_do_periodo.v1` alimenta o
+  `F11` **Vendas de hoje** (estornar com supervisor, imprimir, anular NFC-e). No fiscal, migração v4
+  (`anulada`) e `fiscal.anular_documento_da_venda.v1`: a fila cancela, inutiliza ou emite-e-cancela
+  conforme o estado. Corrigido junto: o papel Operador de Caixa não tinha `fiscal.ver`/`fiscal.emitir`
+  (a venda dele saía sem NFC-e).
+- **Só compra vira compra (2026-10-15, item 2 do doc 21):** o leitor da NF-e passou a ler `tpNF`,
+  `finNFe`, o destinatário e o CFOP de cada item; `classificar_para` recusa saída própria, outro
+  destinatário, devolução de cliente e nota de entrada do emitente (importação por arquivo: erro com
+  o motivo; varredura da SEFAZ: pula). CFOP fora de venda deixa aviso na nota (`compras` v5,
+  `alerta`) e impede a confirmação automática.
+- **Cancelar conta e alterar vencimento (2026-10-15, item 3 do doc 21):** `financeiro.cancelar_titulo.v1`
+  (permissão nova `financeiro.titulo.cancelar`) estorna o `Confirmado` de cada parcela e marca
+  título/parcelas cancelados — só para título avulso ou de recorrência e sem baixa válida;
+  `financeiro.alterar_vencimento.v1` (`financeiro.titulo.editar`) muda o vencimento de parcela em
+  aberto de qualquer origem. No diálogo da parcela, seções "Alterar vencimento" e "Cancelar esta conta"
+  (com a explicação de onde desfazer quando a conta veio de outro módulo).
+- **Saldo inicial, transferência e desativar conta (2026-10-15, item 4 do doc 21):**
+  - `financeiro.definir_saldo_inicial.v1`: D conta / C Lucros acumulados, um só por conta, redefinir
+    substitui;
+  - `financeiro.transferir_entre_contas.v1` e `cancelar_transferencia` (migração v13,
+    `financeiro_transferencia`): o caixa exige saldo, o banco aceita cheque especial;
+  - `financeiro.desativar_conta.v1`: sem saldo, nunca as contas do sistema nem a de um caixa;
+  - novo `RepositorioRazao::desativar_conta`;
+  - permissões novas `financeiro.banco.editar` e `financeiro.banco.transferir`;
+  - a aba Contas bancárias ganhou Transferir, Saldo inicial e Desativar por conta e a lista das
+    transferências com Cancelar; a conta nova já pede o saldo de hoje.
+- **Comprovante não fiscal e bobina de 58 mm (2026-10-15, item 5 do doc 21):**
+  - `cardeal-pdf`: módulo `bobina` (80/58 mm, cursor comum) e `gerar_comprovante`; o DANFCE recebe a
+    bobina;
+  - `mod-pdv`: migração v3 (`pdv_preferencias`), `DefinirImpressaoPdv` / `ImpressaoDoPdv` e
+    `ComprovanteDaVenda`, que monta empresa, itens, cliente e estorno no próprio PDV para o operador de
+    caixa imprimir. Passou a depender de `mod-empresa` e `mod-clientes`, sem features padrão;
+  - desktop: "Imprimir comprovante" na última venda e em Vendas de hoje (2ª via), comprovante
+    automático opcional e a aba Configurações › Impressão. Conferido em imagem: o comprovante de 58 mm
+    soma certo e fica legível.
+- **Venda a prazo no PDV (2026-10-16, item 6 do doc 21):**
+  - forma `Prazo` com `CondicaoPrazo`; o `pdv` v4 recria `pdv_pagamento_cupom` com a forma e a
+    condição;
+  - cliente obrigatório; crédito bloqueado ou acima do limite é recusado (novo
+    `mod_financeiro::em_aberto_a_receber_do_cliente`);
+  - o título a receber nasce ligado ao lançamento da venda (D Clientes a receber com o cliente);
+  - o estorno cancela o título sem recebimento;
+  - NFC-e `tPag 05` (`MeioPagamento::CreditoLoja`);
+  - desktop: tecla `5` no pagamento com 1º vencimento e parcelas; o comprovante mostra "A prazo (Nx,
+    1ª em …)" e a linha de assinatura.
+- **Implantação por planilha (2026-10-16, item 7 do doc 21):**
+  - `cardeal_kernel::planilha`: o leitor de CSV (`;`/`,`, aspas, BOM) e a `chave_coluna` saíram do
+    estoque e agora servem a todas as importações;
+  - `mod_clientes`: `importacao` (domínio), `ImportarPessoas` e `PreviaDaImportacaoDePessoas`, e
+    `indice_de_pessoas` (documento → pessoa, nome → pessoas);
+  - `mod_financeiro`: `importacao` (domínio), `ImportarContasEmAberto` e
+    `PreviaDaImportacaoDeContas`, permissão `financeiro.titulo.importar`, origem `importacao`
+    (cancelável) e a dependência nova em `mod-clientes` (núcleo pode depender de núcleo, doc 04
+    §8) para achar ou cadastrar a pessoa na mesma transação;
+  - desktop: `importacao_planilha.rs` (o comum), "Importar clientes…" em Clientes e "Importar contas
+    em aberto…" no Financeiro, cada um com o modelo para baixar.
+- **Desconto no total e cliente no PDV (2026-10-16, item 8 do doc 21):**
+  - `mod_pdv`: `DescontoNoTotal` (percentual ou valor) no `Cupom`, `AplicarDescontoNoTotal`
+    (`Shift+F5`), teto do papel para a venda inteira (`Cupom::conferir_teto`) e o rateio entre os
+    itens na finalização; migração `pdv` v5 (`ALTER TABLE` na regra do cupom);
+  - desktop: `tela_pdv/desconto_total.rs`, botão "Desconto no total" e o total da tela com a
+    mesma conta do domínio; `F6` com busca por dígitos (documento com máscara, telefone) e
+    "Cadastrar cliente" (o bloco de `pessoa.rs`);
+  - `cardeal-auth`: Operador de Caixa com `clientes.pessoa.ver`/`.criar`;
+    `PapelDeFabrica::limites_padrao` (teto de desconto: Admin/Gerente ∞, Caixa/Vendedor 10%);
+  - `cardeal-motor`: `sincronizar_papeis_de_fabrica` completa os papéis de fábrica gravados
+    (permissões e limites, só acrescentando), e a impressão do plano inclui a política deles.
+- **Inventário com contagem cega (2026-10-13):** migração `estoque` v11 (`estoque_inventario`,
+  `estoque_contagem_item`), comandos `criar_inventario`/`iniciar_contagem`/`registrar_contagem`/
+  `encerrar_inventario`/`cancelar_inventario` (`.v1`) e consultas `inventarios`/`posicao_do_inventario`.
+  Iniciar tira a foto do saldo e trava o local na mesma transação; o corpo comum de entrada/saída e o
+  `AjustarSaldo` recusam movimento no local travado (`RECURSO_TRAVADO`) — **inclusive a venda**, por regra do
+  spec. Contagem cega (a posição só revela sistema/diferença/valor depois de encerrado), item achado entra na
+  hora, encerrar ajusta saldo + razão por `aplicar_delta_de_saldo` (extraído do `AjustarSaldo`, agora o corpo
+  comum dos dois). `CancelarInventario` e o estado `Cancelado` foram acrescentados ao spec. Aba **Inventário**
+  no Estoque. Testes: 2 de domínio + 4 de integração + 1 de tela.
+- **Transferência entre locais (2026-10-13):** domínio `mod-estoque::transferencia`, migração v12, comando
+  `estoque.transferir_entre_locais.v1` (vários itens, tudo ou nada, ao custo médio da origem) e consultas
+  `estoque.transferencias.v1`/`estoque.saldos_do_produto_por_local.v1`. Imediata (a etapa em trânsito com
+  confirmação fica para a transferência entre CNPJs com NF-e), recusa sem saldo, recusa produto com lote
+  ativo na origem, sem lançamento no razão (uma conta de estoque por CNPJ). Aba **Transferências** no Estoque.
+  Testes: 2 de domínio + 3 de integração + 1 de tela.
+- **Produto a partir da nota + dicionário de nomes (2026-10-13):** `mod-estoque::padronizacao` (sugestão
+  determinística do nome a partir do `xProd`: capitalização, DE/PARA, conteúdo normalizado no fim; e o
+  aprendizado só do que dá para explicar), migração `estoque` v13 (`estoque_dicionario_nome`), comandos e
+  consultas do dicionário e `criar_produto_de_compra_comum`; em `mod-compras`, migração v3 (o `cEAN` fica no
+  item) e `compras.criar_produto_do_item.v1` (cria, vincula, aprende regra de casamento e dicionário). Telas:
+  "Criar produto novo" no item não casado da conferência e "Dicionário de nomes…" no Estoque. Falta a
+  descrição reduzida (PDV) e o template configurável de ordem. Testes: 5 de domínio + 2 de integração + 2 de
+  tela (o primeiro teste da tela de Compras).
+- **Validade e perdas (2026-10-13):** `estoque.registrar_perda.v1` (motivo + observação no histórico, sai do
+  lote e do saldo, esgota o lote, D Perdas / C Estoque **ao custo médio** — como toda saída; recusa perda acima
+  do saldo), `estoque.lotes_com_validade.v1` (vencidos e a vencer, vencimento calculado na hora) e código de
+  lote gerado quando em branco em `registrar_entrada_com_lote`. Aba **Validade** no Estoque e cartão de alerta na
+  aba Produtos. Pendentes: evento/marcação diária de `Vencido` (agendador), lote na confirmação da nota (`rastro`
+  do XML) e FEFO na venda. Testes: 2 de integração + 1 de tela.
+- **Custo-hora do técnico (2026-10-13):** `mod_os::custo_hora` (tabela por técnico/usuário + padrão da oficina),
+  migração `os` v9, `os.definir_custo_hora.v1` (permissão nova `os.custo_hora.definir`) e `os.custos_hora.v1`.
+  A margem prevista da OS custeia a mão de obra (horas previstas ou apontadas × custo-hora); a margem real por OS
+  e por período desconta o tempo apontado (`custo_mao_de_obra`, `mao_de_obra_sem_custo`). Gerencial: o razão não
+  muda (a mão de obra própria é despesa de pessoal). Telas: "Custo-hora da equipe…" na OS, "Horas previstas" no
+  orçamento, mão de obra no diálogo de baixa e no cartão do Financeiro. Testes: 3 de domínio + 1 de integração + 1
+  de tela.
+- **ICMS-ST, IPI e desconto da nota no custo (2026-10-13):** o leitor da NF-e lê `vDesc`, `vICMSST`+`vFCPST` (não
+  o `vICMSSTRet`) e `vIPI` por item; `mod-compras` (migração v4) guarda desconto e impostos no item, o custo de
+  entrada vira bruto − desconto + rateio + ST + IPI e o total da nota passa a ser o `vNF`. **Corrige um erro real:**
+  o título a pagar saía menor que o boleto em toda nota com ST ou IPI. A conferência mostra a composição do
+  custo. Testes: 1 do leitor + 1 de integração (custo médio e título com o `vNF`).
 - **Dívidas conhecidas:** tabelas do Simples a conferir com o contador; a 6ª faixa e a anualização de
   RBT12 (ver ADR-0018); o PDV só avisa preço abaixo do mínimo de empate (etiqueta "abaixo do mínimo" na linha do
   cupom, depois do desconto); não bloqueia a venda e não é o painel de margem completo.
@@ -609,9 +848,8 @@ gigante por sessão. Nenhum commit é feito sem os quatro comandos de §3.3 pass
      de XML (`interpretar`, `quick-xml`, real) e `FiscalSimulado` (double em memória — é o
      que `mod-compras` usa em teste). Falta o adaptador de verdade: certificado digital A1
      (upload, parse do PKCS#12,
-     validade — o `gestao-raiz` reconverte para 3DES no upload porque libs de assinatura
-     antigas não leem PFX moderno em AES-256; **confirmar se o `sefaz-api` do usuário
-     precisa do mesmo** antes de implementar), `PortaFiscal`/`ApiFiscalHttp` mirado no
+     validade — **resolvido em 2026-10-14**: o que o TLS do `sefaz-api` (OpenSSL 3) recusa é
+     PFX com **RC2**, não AES; o Cardeal regrava só esses na instalação), `PortaFiscal`/`ApiFiscalHttp` mirado no
      contrato real do `sefaz-api` (Bearer token, PFX+senha no corpo de cada chamada de
      emissão — o serviço não guarda certificado —, NFC-e com contingência offline real via
      `/prepare`+`/transmit`, NF-e só lote+polling sem contingência própria). Tradução

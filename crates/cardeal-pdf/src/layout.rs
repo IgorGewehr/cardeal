@@ -6,7 +6,7 @@ use cardeal_kernel::Instante;
 use crate::documento::{Canvas, Cor, Documento, MM};
 use crate::fonte::{largura_texto, Fonte};
 use crate::imagem::decodificar_logo;
-use crate::{ComprovanteOsPdf, ErroPdf, IdentidadeEmpresa, OrcamentoPdf};
+use crate::{ComprovanteOsPdf, ErroPdf, IdentidadeEmpresa, OrcamentoPdf, RelatorioPdf};
 
 // ── Paleta (espelha os tokens do design system Rubro) ─────────────────────────
 const TEXTO_FORTE: Cor = Cor::rgb(17, 17, 20);
@@ -644,6 +644,155 @@ impl Compositor<'_> {
         let y = self.y;
         self.canvas()
             .texto(MX, y, Fonte::Negrito, 7.0, TEXTO_FRACO, texto);
+    }
+}
+
+/// Gera o PDF de um relatório tabular — o mesmo cabeçalho com a marca e o mesmo rodapé dos
+/// outros documentos; cada seção é um título, uma nota e uma tabela que quebra de página
+/// repetindo o cabeçalho.
+///
+/// # Errors
+/// [`ErroPdf::Logo`] se a logo cadastrada não for uma imagem válida.
+pub fn gerar_relatorio(
+    empresa: &IdentidadeEmpresa,
+    rel: &RelatorioPdf,
+    gerado_em: Instante,
+) -> Result<Vec<u8>, ErroPdf> {
+    let mut doc = Documento::novo();
+    let logo = match &empresa.logo_png {
+        Some(bytes) if !bytes.is_empty() => {
+            let img = decodificar_logo(bytes)?;
+            let prop = img.proporcao();
+            Some((doc.adicionar_imagem(img), prop))
+        }
+        _ => None,
+    };
+    let mut c = Compositor {
+        paginas: vec![Canvas::nova_a4()],
+        y: TOPO,
+        logo,
+        empresa,
+        gerado_em: gerado_em.formatar(cardeal_kernel::Fuso::BRASILIA),
+    };
+    c.cabecalho_marca();
+    let y = c.y;
+    c.texto_em(MX, y, Fonte::Negrito, 16.0, TEXTO_FORTE, &rel.titulo);
+    c.texto_em(
+        MX,
+        y + 6.0,
+        Fonte::Regular,
+        10.0,
+        TEXTO_MEDIO,
+        &rel.subtitulo,
+    );
+    c.y = y + 14.0;
+    for secao in &rel.secoes {
+        c.secao_relatorio(secao);
+    }
+    c.rodape_em_todas("");
+    for pagina in c.paginas {
+        doc.pagina_bruta(pagina.em_operadores());
+    }
+    Ok(doc.finalizar())
+}
+
+/// Corta `texto` com "…" para caber em `larg_mm`.
+fn caber(texto: &str, fonte: Fonte, tam: f32, larg_mm: f32) -> String {
+    let larg_pt = larg_mm * MM;
+    if largura_texto(texto, fonte, tam) <= larg_pt {
+        return texto.to_owned();
+    }
+    let mut s: String = texto.to_owned();
+    while !s.is_empty() && largura_texto(&format!("{s}…"), fonte, tam) > larg_pt {
+        s.pop();
+    }
+    format!("{}…", s.trim_end())
+}
+
+impl Compositor<'_> {
+    fn secao_relatorio(&mut self, secao: &crate::SecaoRelatorio) {
+        self.garantir(24.0);
+        let y = self.y;
+        self.texto_em(MX, y, Fonte::Negrito, 11.5, TEXTO_FORTE, &secao.titulo);
+        self.y += 5.5;
+        if let Some(nota) = &secao.nota {
+            for linha in quebrar(nota, Fonte::Regular, 8.0, LARGURA_CONTEUDO) {
+                self.garantir(4.0);
+                let y = self.y;
+                self.texto_em(MX, y, Fonte::Regular, 8.0, TEXTO_MEDIO, &linha);
+                self.y += 3.8;
+            }
+            self.y += 1.5;
+        }
+        let soma: f32 = secao.colunas.iter().map(|c| c.peso.max(0.1)).sum();
+        // (x da esquerda, largura) de cada coluna.
+        let mut x = MX;
+        let geometria: Vec<(f32, f32)> = secao
+            .colunas
+            .iter()
+            .map(|c| {
+                let larg = c.peso.max(0.1) / soma * LARGURA_CONTEUDO;
+                let g = (x, larg);
+                x += larg;
+                g
+            })
+            .collect();
+        self.cabecalho_relatorio(secao, &geometria);
+        for (i, linha) in secao.linhas.iter().enumerate() {
+            let altura = 5.6;
+            if self.y + altura > LIMITE_INFERIOR {
+                self.nova_pagina();
+                self.cabecalho_relatorio(secao, &geometria);
+            }
+            if i % 2 == 1 {
+                let y = self.y;
+                self.canvas()
+                    .retangulo(MX, y - 0.8, LARGURA_CONTEUDO, altura, ZEBRA);
+            }
+            let base = self.y + 3.2;
+            let fonte = if linha.destaque {
+                Fonte::Negrito
+            } else {
+                Fonte::Regular
+            };
+            for (j, (coluna, (x, larg))) in secao.colunas.iter().zip(&geometria).enumerate() {
+                let Some(texto) = linha.celulas.get(j) else {
+                    continue;
+                };
+                let recuo = if j == 0 {
+                    f32::from(linha.recuo) * 3.0
+                } else {
+                    0.0
+                };
+                let util = (larg - 2.0 - recuo).max(4.0);
+                let t = caber(texto, fonte, 8.5, util);
+                if coluna.direita {
+                    self.texto_direita(x + larg - 1.0, base, fonte, 8.5, TEXTO, &t);
+                } else {
+                    self.texto_em(x + 1.0 + recuo, base, fonte, 8.5, TEXTO, &t);
+                }
+            }
+            self.y += altura;
+        }
+        let y = self.y;
+        self.canvas().linha(MX, y, DIR, y, 0.4, BORDA);
+        self.y += 8.0;
+    }
+
+    fn cabecalho_relatorio(&mut self, secao: &crate::SecaoRelatorio, geometria: &[(f32, f32)]) {
+        let y = self.y;
+        self.canvas()
+            .retangulo(MX, y - 0.8, LARGURA_CONTEUDO, 6.0, CABECALHO_TABELA);
+        let base = y + 3.4;
+        for (coluna, (x, larg)) in secao.colunas.iter().zip(geometria) {
+            let t = caber(&coluna.titulo, Fonte::Negrito, 7.5, larg - 2.0);
+            if coluna.direita {
+                self.texto_direita(x + larg - 1.0, base, Fonte::Negrito, 7.5, TEXTO_MEDIO, &t);
+            } else {
+                self.texto_em(x + 1.0, base, Fonte::Negrito, 7.5, TEXTO_MEDIO, &t);
+            }
+        }
+        self.y += 6.4;
     }
 }
 

@@ -5,6 +5,7 @@
 mod adicionar_item_pedido;
 mod aplicar_precos_sugeridos;
 mod cancelar_pedido;
+mod comissao;
 mod confirmar_pedido;
 mod criar_pedido;
 mod criar_regra_preco;
@@ -14,6 +15,7 @@ mod faturar_pedido;
 pub use adicionar_item_pedido::{AdicionarItemPedido, ItemFoiAdicionado};
 pub use aplicar_precos_sugeridos::{AplicarPrecosSugeridos, PrecosAplicados};
 pub use cancelar_pedido::CancelarPedido;
+pub use comissao::{ApurarComissoes, ComissoesApuradas, ComissoesPagas, PagarComissoes};
 pub use confirmar_pedido::ConfirmarPedido;
 pub use criar_pedido::{CriarPedido, PedidoCriado};
 pub use criar_regra_preco::{CriarRegraPreco, RegraPrecoCriada};

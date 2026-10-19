@@ -209,6 +209,40 @@ pub fn pagar_comissao(
         .map_err(|_| ErroVendas::ComissaoEmEstadoInvalido { atual: "sem valor" })
 }
 
+/// O pagamento das comissões apuradas de um vendedor num mês, num lançamento só: D Comissões
+/// a pagar / C Caixa ou Bancos, `Realizado`. `pagamento` identifica o pagamento na origem.
+///
+/// # Errors
+/// [`ErroVendas::SemComissaoAPagar`] se `valor` não for positivo.
+pub fn pagar_comissoes(
+    empresa: Id,
+    vendedor: Id,
+    valor: Dinheiro,
+    pagamento: Id,
+    conta_saida: Id,
+    comissoes_a_pagar: Id,
+    data: Data,
+    autoria: Autoria,
+) -> Result<LancamentoBalanceado, ErroVendas> {
+    if !valor.e_positivo() {
+        return Err(ErroVendas::SemComissaoAPagar);
+    }
+    ConstrutorLancamento::novo(empresa, data, "Pagamento de comissões".to_string())
+        .origem(
+            Origem::modulo("vendas")
+                .tipo("comissao_pagamento")
+                .agregado(pagamento),
+        )
+        .liquidacao(data)
+        .criado_por(autoria.usuario, autoria.dispositivo)
+        .agora(autoria.agora)
+        .debitar(comissoes_a_pagar, valor)
+        .contraparte(Contraparte::Funcionario(vendedor))
+        .creditar(conta_saida, valor)
+        .construir()
+        .map_err(|_| ErroVendas::SemComissaoAPagar)
+}
+
 #[cfg(test)]
 mod testes {
     use cardeal_kernel::{Fuso, Percentual, Preco, Quantidade};

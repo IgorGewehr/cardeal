@@ -13,7 +13,7 @@ use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "sqlite")]
-use crate::importacao_estrutura::{planejar, PaiPlanejado};
+use crate::importacao_estrutura::{planejar, NoExistente, NoNovo, PaiPlanejado};
 #[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioEstoque;
 
@@ -54,37 +54,56 @@ impl Comando for ImportarEstrutura {
                 ),
             ));
         }
-        let arvore = crate::hierarquia::Arvore::de_nos(
-            &existentes
-                .iter()
-                .map(|e| crate::hierarquia::NoGrupo {
-                    id: e.id,
-                    pai: e.pai,
-                })
-                .collect::<Vec<_>>(),
-        );
-        let mut repo = RepositorioEstoque::novo(uow);
-        let mut ids: Vec<Id> = Vec::with_capacity(plano.nos.len());
-        for no in &plano.nos {
-            let pai = match no.pai {
-                PaiPlanejado::Raiz => None,
-                PaiPlanejado::Existente(p) => Some(p),
-                PaiPlanejado::Novo(i) => Some(ids[i]),
-            };
-            // As mesmas regras de `CriarGrupoProduto`: pai existente e profundidade. Pai novo
-            // já foi medido pelo plano (o caminho tem no máximo `NIVEL_MAXIMO` níveis).
-            if let PaiPlanejado::Existente(_) = no.pai {
-                arvore
-                    .validar_novo_filho(pai)
-                    .map_err(crate::comandos::erro_de_hierarquia)?;
-            }
-            let id = Id::novo();
-            repo.inserir_grupo_produto(ctx.organizacao, id, &no.codigo, &no.nome, pai)?;
-            ids.push(id);
-        }
+        let ids = criar_grupos_planejados(&plano.nos, &existentes, ctx.organizacao, uow)?;
         Ok(EstruturaImportada {
             criados: u32::try_from(ids.len()).unwrap_or(u32::MAX),
             ja_existiam: plano.ja_existiam,
         })
+    }
+}
+
+/// Grava os grupos de um plano (pais antes dos filhos) e devolve os ids na mesma ordem —
+/// para [`PaiPlanejado::Novo`] virar id. Usado também pela importação de produtos.
+#[cfg(feature = "sqlite")]
+pub(crate) fn criar_grupos_planejados(
+    nos: &[NoNovo],
+    existentes: &[NoExistente],
+    organizacao: Id,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<Vec<Id>> {
+    let arvore = crate::hierarquia::Arvore::de_nos(
+        &existentes
+            .iter()
+            .map(|e| crate::hierarquia::NoGrupo {
+                id: e.id,
+                pai: e.pai,
+            })
+            .collect::<Vec<_>>(),
+    );
+    let mut repo = RepositorioEstoque::novo(uow);
+    let mut ids: Vec<Id> = Vec::with_capacity(nos.len());
+    for no in nos {
+        let pai = id_planejado(no.pai, &ids);
+        // As mesmas regras de `CriarGrupoProduto`: pai existente e profundidade. Pai novo
+        // já foi medido pelo plano (o caminho tem no máximo `NIVEL_MAXIMO` níveis).
+        if let PaiPlanejado::Existente(_) = no.pai {
+            arvore
+                .validar_novo_filho(pai)
+                .map_err(crate::comandos::erro_de_hierarquia)?;
+        }
+        let id = Id::novo();
+        repo.inserir_grupo_produto(organizacao, id, &no.codigo, &no.nome, pai)?;
+        ids.push(id);
+    }
+    Ok(ids)
+}
+
+/// O id de um nó planejado, dados os ids dos nós novos já gravados; `None` na raiz.
+#[cfg(feature = "sqlite")]
+pub(crate) fn id_planejado(no: PaiPlanejado, novos: &[Id]) -> Option<Id> {
+    match no {
+        PaiPlanejado::Raiz => None,
+        PaiPlanejado::Existente(p) => Some(p),
+        PaiPlanejado::Novo(i) => Some(novos[i]),
     }
 }

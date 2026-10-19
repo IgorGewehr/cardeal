@@ -1,0 +1,47 @@
+[package]
+name         = "mod-fiscal"
+description  = "O fiscal da empresa sobre o sefaz-api: certificado A1 guardado no cofre, ambiente e conexão com a SEFAZ (e, nas próximas fatias, os documentos)."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+
+[features]
+default = ["sqlite"]
+# Persistência em SQLite (despacho, migrações, cofre). Desligada, sobram os tipos de
+# comando/consulta.
+sqlite = [
+    "dep:cardeal-storage",
+    "dep:rusqlite",
+    "dep:postcard",
+    "cardeal-modkit/sqlite",
+    "mod-empresa/sqlite",
+    "mod-pdv/sqlite",
+    "mod-estoque/sqlite",
+    "mod-clientes/sqlite",
+]
+
+[dependencies]
+cardeal-kernel.workspace = true
+cardeal-fiscal.workspace = true
+cardeal-modkit  = { path = "../../cardeal-modkit", default-features = false }
+mod-empresa     = { path = "../mod-empresa", default-features = false }
+mod-pdv         = { path = "../mod-pdv", default-features = false }
+mod-estoque     = { path = "../mod-estoque", default-features = false }
+mod-clientes    = { path = "../mod-clientes", default-features = false }
+cardeal-storage = { workspace = true, optional = true }
+rusqlite        = { workspace = true, optional = true }
+postcard        = { workspace = true, optional = true }
+serde.workspace     = true
+thiserror.workspace = true
+zeroize.workspace   = true
+
+[dev-dependencies]
+cardeal-auth.workspace = true
+cardeal-ledger.workspace = true
+mod-financeiro.workspace = true
+mod-vendas.workspace     = true
+postcard.workspace     = true
+tempfile.workspace     = true

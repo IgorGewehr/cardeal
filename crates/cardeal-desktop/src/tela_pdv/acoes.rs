@@ -12,6 +12,13 @@ pub(super) fn aplicar(
     estado: &mut EstadoTelaPdv,
 ) {
     match acao {
+        Acao::ImprimirNfce(documento) => match crate::danfce::imprimir(motor, sessao, documento) {
+            Ok(_) => notificar(
+                ctx,
+                Notificacao::sucesso("Cupom fiscal aberto para imprimir"),
+            ),
+            Err(e) => notificar(ctx, Notificacao::erro(e)),
+        },
         Acao::Bipar => bipar(ctx, motor, sessao, estado),
         Acao::Adicionar(produto) => {
             if adicionar(ctx, motor, sessao, estado, produto, Quantidade::UM) {
@@ -60,14 +67,41 @@ pub(super) fn aplicar(
             },
         ),
         Acao::ConsultarPreco => consultar_preco(ctx, motor, sessao, estado),
+        Acao::ImprimirComprovante {
+            cupom,
+            troco,
+            segunda_via,
+        } => imprimir_comprovante(ctx, motor, sessao, cupom, troco, segunda_via),
+        Acao::AbrirVendasDoDia => {
+            match super::vendas_do_dia::EstadoVendasDoDia::carregar(motor, sessao) {
+                Ok(v) => abrir(ctx, estado, Dlg::VendasDoDia(v)),
+                Err(e) => notificar(ctx, Notificacao::erro(e)),
+            }
+        }
         Acao::AbrirCliente => abrir(
             ctx,
             estado,
             Dlg::Cliente {
                 busca: String::new(),
                 sel: 0,
+                novo: None,
             },
         ),
+        Acao::AbrirDescontoTotal => {
+            if estado.cupom.is_none() || estado.ativos().count() == 0 {
+                notificar(
+                    ctx,
+                    Notificacao::aviso("Bipe os itens antes de dar desconto no total."),
+                );
+            } else {
+                let texto = estado
+                    .desconto_no_total
+                    .map(super::desconto_total::texto_do_desconto)
+                    .unwrap_or_default();
+                abrir(ctx, estado, Dlg::DescontoTotal { texto });
+            }
+        }
+        Acao::CadastrarCliente(criar) => cadastrar_cliente(ctx, motor, sessao, estado, *criar),
         Acao::EscolherCliente(escolhido) => {
             identificar_cliente(ctx, motor, sessao, estado, escolhido)
         }
@@ -193,6 +227,35 @@ pub(super) fn identificar_cliente(
     estado.cliente = escolhido;
     estado.dlg = Dlg::Fechado;
     estado.foco_entrada = true;
+}
+
+/// O cadastro rápido do `F6`: cadastra o cliente, põe na lista e o identifica na venda. Com
+/// erro (ex.: CPF já cadastrado), o formulário continua aberto para corrigir.
+pub(super) fn cadastrar_cliente(
+    ctx: &egui::Context,
+    motor: &Motor,
+    sessao: &Sessao,
+    estado: &mut EstadoTelaPdv,
+    criar: mod_clientes::CriarPessoa,
+) {
+    let nome = criar.nome.clone();
+    let documento = criar
+        .documento_numero
+        .as_deref()
+        .map(cardeal_kernel::texto::somente_digitos);
+    let telefone = criar.contato.as_ref().map(|c| c.valor.clone());
+    match motor.executar(sessao, "clientes.criar_pessoa.v1", &criar) {
+        Ok(feita) => {
+            estado.clientes.push(ItemPessoa {
+                pessoa: feita.pessoa,
+                nome: nome.clone(),
+                documento,
+                telefone,
+            });
+            identificar_cliente(ctx, motor, sessao, estado, Some((feita.pessoa, nome)));
+        }
+        Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
+    }
 }
 
 /// Resolve um código de barras no produto, avisando o operador se não achar.
@@ -473,6 +536,7 @@ pub(super) fn cancelar_cupom(
             estado.cupom = None;
             estado.cupom_numero = None;
             estado.cliente = None;
+            estado.desconto_no_total = None;
             estado.carrinho.clear();
             estado.linha_sel = None;
             estado.total = Dinheiro::ZERO;
@@ -506,10 +570,23 @@ pub(super) fn pedir_finalizar(ctx: &egui::Context, estado: &mut EstadoTelaPdv) {
         notificar(ctx, Notificacao::aviso(a));
         return;
     }
+    if p.valores[pagamento::PRAZO] > Dinheiro::ZERO {
+        if estado.cliente.is_none() {
+            notificar(
+                ctx,
+                Notificacao::aviso("Para vender a prazo, identifique o cliente (F6)."),
+            );
+            return;
+        }
+        if let Err(a) = condicao_digitada(p) {
+            notificar(ctx, Notificacao::aviso(a));
+            return;
+        }
+    }
     estado.finalizar_pendente = true;
     notificar(
         ctx,
-        Notificacao::carregando("Emitindo NFC-e…").id(egui::Id::new("pdv-fiscal")),
+        Notificacao::carregando("Finalizando a venda…").id(egui::Id::new("pdv-fiscal")),
     );
     ctx.request_repaint();
 }
@@ -530,23 +607,35 @@ pub(super) fn finalizar(
         Situacao::Troco(t) => t,
         _ => Dinheiro::ZERO,
     };
-    let pagamentos = pagamento::montar(total, &p.valores);
+    let prazo = (p.valores[pagamento::PRAZO] > Dinheiro::ZERO)
+        .then(|| condicao_digitada(p).ok())
+        .flatten();
+    let pagamentos = pagamento::montar(total, &p.valores, prazo);
 
     match motor.executar(
         sessao,
         "pdv.finalizar_venda.v1",
         &FinalizarVenda { cupom, pagamentos },
     ) {
-        Ok(VendaFoiFinalizada { total, .. }) => {
+        Ok(VendaFoiFinalizada {
+            total,
+            titulo_a_receber,
+            ..
+        }) => {
             let numero = estado.cupom_numero.unwrap_or(0);
             estado.ultima_venda = Some(UltimaVenda {
+                cupom,
                 numero,
                 total,
                 troco,
             });
+            // A NFC-e: o documento nasce agora (sem rede) e a transmissão vai para o segundo
+            // plano — a venda já acabou (`docs/10` §3).
+            let nota_fiscal = emitir_nfce(ctx, motor, sessao, estado, cupom);
             estado.cupom = None;
             estado.cupom_numero = None;
             estado.cliente = None;
+            estado.desconto_no_total = None;
             estado.carrinho.clear();
             estado.linha_sel = None;
             estado.total = Dinheiro::ZERO;
@@ -554,22 +643,88 @@ pub(super) fn finalizar(
             estado.erro = None;
             estado.foco_entrada = true;
             estado.carregar(motor, sessao);
-            let detalhe = if troco > Dinheiro::ZERO {
+            let mut detalhe = if troco > Dinheiro::ZERO {
                 format!(
                     "{} · troco {}",
                     total.formatar_com_simbolo(),
                     troco.formatar_com_simbolo()
                 )
             } else {
-                format!("NFC-e autorizada · {}", total.formatar_com_simbolo())
+                total.formatar_com_simbolo()
             };
+            if let Some(f) = nota_fiscal {
+                detalhe = format!("{detalhe} · {f}");
+            }
+            if titulo_a_receber.is_some() {
+                detalhe = format!("{detalhe} · a parte a prazo foi para Contas a receber");
+            }
             notificar(
                 ctx,
                 Notificacao::sucesso(format!("Venda #{numero} concluída"))
                     .detalhe(detalhe)
                     .id(fiscal),
             );
+            if estado.impressao.imprimir_ao_finalizar {
+                imprimir_comprovante(ctx, motor, sessao, cupom, troco, false);
+            }
         }
         Err(e) => notificar(ctx, Notificacao::erro(e.mensagem).id(fiscal)),
+    }
+}
+
+/// Abre o comprovante (não fiscal) da venda para imprimir.
+pub(super) fn imprimir_comprovante(
+    ctx: &egui::Context,
+    motor: &Motor,
+    sessao: &Sessao,
+    cupom: Id,
+    troco: Dinheiro,
+    segunda_via: bool,
+) {
+    if let Err(e) = crate::comprovante::imprimir(motor, sessao, cupom, troco, segunda_via) {
+        notificar(
+            ctx,
+            Notificacao::erro("Não foi possível abrir o comprovante").detalhe(e),
+        );
+    }
+}
+
+/// Cria a NFC-e da venda e dispara a transmissão em segundo plano. Devolve a frase para o
+/// aviso da venda (`None` quando a empresa não emite NFC-e nas vendas).
+pub(super) fn emitir_nfce(
+    ctx: &egui::Context,
+    motor: &Motor,
+    sessao: &Sessao,
+    estado: &mut EstadoTelaPdv,
+    cupom: Id,
+) -> Option<String> {
+    if !estado.nfce_automatica || !sessao.concede("fiscal.emitir") {
+        estado.nfce_ultima = None;
+        return None;
+    }
+    match motor.executar(
+        sessao,
+        "fiscal.emitir_nfce_do_cupom.v1",
+        &mod_fiscal::EmitirNfceDoCupom { cupom },
+    ) {
+        Ok(doc) => {
+            let frase = if doc.estado == mod_fiscal::EstadoDocumento::Pendente {
+                crate::fiscal_fundo::disparar(ctx, motor, sessao);
+                "NFC-e na fila".to_owned()
+            } else {
+                format!(
+                    "NFC-e não saiu: {}",
+                    doc.motivo
+                        .clone()
+                        .unwrap_or_else(|| doc.estado.rotulo().to_owned())
+                )
+            };
+            estado.nfce_ultima = Some(doc);
+            Some(frase)
+        }
+        Err(e) => {
+            estado.nfce_ultima = None;
+            Some(format!("NFC-e não saiu: {}", e.mensagem))
+        }
     }
 }

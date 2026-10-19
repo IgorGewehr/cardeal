@@ -58,7 +58,7 @@ pub use bloqueio::Bloqueio;
 pub use erros::ErroAuth;
 pub use escopo::Escopo;
 pub use limite::ValorLimite;
-pub use papel::{Papel, PapelDeFabrica, PoliticaPapel};
+pub use papel::{Papel, PapelDeFabrica, PoliticaPapel, CHAVE_DESCONTO_MAXIMO};
 #[cfg(feature = "sqlite")]
 pub use repositorio::{consultas, RepositorioAuth};
 pub use senha::{hash_senha, verificar_senha, HashDeSenha, PoliticaSenha};

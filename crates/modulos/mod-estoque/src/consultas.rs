@@ -231,6 +231,8 @@ pub struct NoArvoreGrupo {
     pub produtos_na_subarvore: u32,
     /// A margem líquida desejada definida **neste** grupo (`None` = herda).
     pub margem: Option<cardeal_kernel::Percentual>,
+    /// A comissão de vendedor definida **neste** grupo (`None` = herda).
+    pub comissao: Option<cardeal_kernel::Percentual>,
     /// ICMS-ST definido neste grupo (`None` = herda).
     pub icms_st: Option<bool>,
     /// PIS/COFINS monofásico definido neste grupo (`None` = herda).
@@ -315,6 +317,7 @@ impl Consulta for ArvoreGruposProduto {
             let do_grupo = perfis.iter().find(|p| p.id == id);
             saida.push(NoArvoreGrupo {
                 margem: do_grupo.and_then(|p| p.margem),
+                comissao: do_grupo.and_then(|p| p.comissao),
                 icms_st: do_grupo.and_then(|p| p.icms_st),
                 monofasico: do_grupo.and_then(|p| p.monofasico),
                 fiscal: do_grupo.map(|p| p.fiscal.clone()).unwrap_or_default(),
@@ -583,6 +586,38 @@ pub fn movimentos_do_produto(
     let linhas = stmt
         .query_map(
             rusqlite::params![blob(produto), origem_modulo],
+            movimento_de_linha,
+        )
+        .map_err(persist)?;
+    linhas
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(persist)
+}
+
+/// Os movimentos de uma origem (`"pdv"` + o cupom, por exemplo), do mais antigo ao mais
+/// novo — sobre o índice `estoque_movimento_origem`.
+///
+/// # Errors
+/// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+#[cfg(feature = "sqlite")]
+pub fn movimentos_da_origem(
+    conexao: &Connection,
+    empresa: Id,
+    origem_modulo: &str,
+    origem_id: Id,
+) -> Resultado<Vec<Movimento>> {
+    let mut stmt = conexao
+        .prepare(
+            "SELECT id, empresa, produto, variacao, local, tipo, quantidade, custo_unitario,
+                    lote, origem_modulo, origem_id, lancamento, criado_em, criado_por
+             FROM estoque_movimento
+             WHERE empresa = ?1 AND origem_modulo = ?2 AND origem_id = ?3
+             ORDER BY criado_em",
+        )
+        .map_err(persist)?;
+    let linhas = stmt
+        .query_map(
+            rusqlite::params![blob(empresa), origem_modulo, blob(origem_id)],
             movimento_de_linha,
         )
         .map_err(persist)?;

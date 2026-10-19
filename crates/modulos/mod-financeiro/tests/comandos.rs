@@ -10,16 +10,20 @@ use cardeal_ledger::{semear_plano_padrao, Contas, Contraparte, PapelConta, Repos
 use cardeal_modkit::{Ambiente, Ctx, Despachante, Modulo, PedidoAtivacao, RegistroModulos};
 use cardeal_storage::{Armazenamento, ConfigArmazenamento, ContextoEscrita, ErroArmazenamento};
 use mod_financeiro::{
-    materializar_recorrencias_pendentes, AbrirCaixa, BaixarPagamento, BaixarRecebimento,
-    CadastrarCaixa, CaixaFoiAberto, CaixaFoiFechado, CategoriaCriada, CategoriaFinanceira,
-    Categorias, ConstrutorTitulo, CriarCategoria, CriarContaBancaria, CriarRecorrencia,
-    EspecieTitulo, EstornarBaixa, ExtratoDisponivel, FecharCaixa, ItemTituloEmAberto,
-    ItemTotalPorCategoria, LancarTituloAPagar, LancarTituloAReceber, MeioPagamento,
-    ModuloFinanceiro, PagamentoBaixado, ParcelasAReceberNoPeriodo, Periodicidade, PoliticaJuros,
-    QuitadoAgora, RecebimentoBaixado, RecorrenciaCriada, RegistrarSangria, RegistrarSuprimento,
-    RenegociarTitulo, RepositorioFinanceiro, SangriaFoiRegistrada, SuprimentoFoiRegistrado,
-    TipoValor, TituloAPagarLancado, TituloAReceberLancado, TituloDaOrigem, TitulosAReceberEmAberto,
-    TotalPorCategoriaNoPeriodo, TotalRecebidoNoPeriodo, MANIFESTO,
+    lancar_titulo_comum, materializar_recorrencias_pendentes, AbrirCaixa, AlterarVencimento,
+    BaixarPagamento, BaixarRecebimento, CadastrarCaixa, CaixaFoiAberto, CaixaFoiFechado,
+    CancelarTitulo, CancelarTransferencia, CategoriaCriada, CategoriaFinanceira, Categorias,
+    ConstrutorTitulo, ContaBancariaCriada, ContasDisponiveis, CriarCategoria, CriarContaBancaria,
+    CriarRecorrencia, DadosLancamentoTitulo, DefinirSaldoInicial, DesativarContaDisponivel,
+    EspecieTitulo, EstornarBaixa, ExtratoDisponivel, FecharCaixa, ItemContaDisponivel,
+    ItemTituloEmAberto, ItemTotalPorCategoria, ItemTransferencia, LancarTituloAPagar,
+    LancarTituloAReceber, MeioPagamento, ModuloFinanceiro, PagamentoBaixado,
+    ParcelasAReceberNoPeriodo, Periodicidade, PoliticaJuros, QuitadoAgora, RecebimentoBaixado,
+    RecorrenciaCriada, RegistrarSangria, RegistrarSuprimento, RenegociarTitulo,
+    RepositorioFinanceiro, SaldoInicialDefinido, SangriaFoiRegistrada, SuprimentoFoiRegistrado,
+    TipoValor, TituloAPagarLancado, TituloAReceberLancado, TituloDaOrigem, TituloFoiCancelado,
+    TitulosAReceberEmAberto, TotalPorCategoriaNoPeriodo, TotalRecebidoNoPeriodo,
+    TransferenciaFeita, Transferencias, TransferirEntreContas, MANIFESTO,
 };
 use serde::Serialize;
 use tempfile::TempDir;
@@ -2108,4 +2112,972 @@ fn listagem_paginada_traz_o_saldo_de_tudo_e_nao_da_pagina() {
     assert!(todas.windows(2).all(|w| w[0].vencimento <= w[1].vencimento));
     let unicas: std::collections::HashSet<_> = todas.iter().map(|i| i.parcela).collect();
     assert_eq!(unicas.len(), 75);
+}
+
+/// O último lançamento à mão de um fornecedor pré-preenche o próximo — o título que veio de
+/// outro módulo (uma nota de compra) não serve de modelo, e a receber não se mistura.
+#[test]
+fn ultimo_lancamento_da_pessoa_e_o_manual_mais_recente_da_mesma_especie() {
+    use mod_financeiro::{UltimoLancamento, UltimoLancamentoAPagar, UltimoLancamentoAReceber};
+
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloFinanceiro]).unwrap();
+    let s = sessao(
+        empresa,
+        &[
+            "financeiro.categoria.criar",
+            "financeiro.pagar.criar",
+            "financeiro.pagar.ver",
+            "financeiro.receber.ver",
+        ],
+    );
+    let cat: CategoriaCriada = postcard::from_bytes(
+        &d.executar_comando(
+            "financeiro.criar_categoria.v1",
+            &carga(&CriarCategoria {
+                nome: "Energia".into(),
+                especie: Some(EspecieTitulo::Pagar),
+            }),
+            &s,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let fornecedor = Id::novo();
+    let consultar = |pagar: bool| -> Option<UltimoLancamento> {
+        let bytes = if pagar {
+            d.executar_consulta(
+                "financeiro.ultimo_lancamento_a_pagar.v1",
+                &carga(&UltimoLancamentoAPagar { pessoa: fornecedor }),
+                &s,
+                &ambiente(empresa),
+                arm.leitor(),
+            )
+        } else {
+            d.executar_consulta(
+                "financeiro.ultimo_lancamento_a_receber.v1",
+                &carga(&UltimoLancamentoAReceber { pessoa: fornecedor }),
+                &s,
+                &ambiente(empresa),
+                arm.leitor(),
+            )
+        };
+        postcard::from_bytes(&bytes.unwrap()).unwrap()
+    };
+    assert_eq!(consultar(true), None, "nada lançado ainda");
+
+    let lancar_luz = |dias: i32, centavos: i64, texto: &str| {
+        d.executar_comando(
+            "financeiro.lancar_titulo_a_pagar.v1",
+            &carga(&LancarTituloAPagar {
+                fornecedor: Some(fornecedor),
+                valor_total: Dinheiro::centavos(centavos),
+                emissao: hoje().mais_dias(dias),
+                parcelas: 1,
+                primeiro_vencimento: hoje().mais_dias(dias),
+                intervalo_dias: 0,
+                observacao: Some(texto.into()),
+                categoria: Some(cat.categoria),
+                quitado_agora: None,
+            }),
+            &s,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+        .unwrap();
+    };
+    lancar_luz(-30, 31_240, "Conta de luz de setembro");
+    lancar_luz(-1, 29_810, "Conta de luz de outubro");
+    // Um título mais novo do mesmo fornecedor, mas vindo de uma nota de compra.
+    lancar_luz(0, 99_900, "NF 123");
+    arm.escritor()
+        .executar(
+            ContextoEscrita::novo(empresa, Id::novo(), Id::novo(), Id::novo()),
+            |uow| {
+                uow.conexao()
+                    .execute(
+                        "UPDATE financeiro_titulo SET origem_modulo = 'compras'
+                         WHERE valor_original = 99900",
+                        [],
+                    )
+                    .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+            },
+        )
+        .unwrap();
+
+    let u = consultar(true).expect("o de outubro");
+    assert_eq!(u.valor_total, Dinheiro::centavos(29_810));
+    assert_eq!(u.observacao.as_deref(), Some("Conta de luz de outubro"));
+    assert_eq!(u.categoria, Some(cat.categoria));
+    assert_eq!((u.emissao, u.parcelas), (hoje().mais_dias(-1), 1));
+    assert_eq!(consultar(false), None, "a receber não se mistura");
+}
+
+/// A régua de cobrança pelo despachante: a fila de hoje sai dos títulos em aberto, o registro
+/// do envio tira o cliente da fila, e a régua da empresa substitui a padrão.
+#[test]
+fn regua_monta_a_fila_registra_o_envio_e_aceita_regua_propria() {
+    use mod_financeiro::{
+        DefinirReguaDeCobranca, EtapaRegua, FilaDoDia, RegistrarCobranca, ReguaDeCobranca,
+    };
+
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloFinanceiro]).unwrap();
+    let s = sessao(
+        empresa,
+        &[
+            "financeiro.receber.criar",
+            "financeiro.receber.ver",
+            "financeiro.cobranca.configurar",
+            "financeiro.cobranca.enviar",
+        ],
+    );
+    let lancar_com = |cliente: Option<Id>, reais: i64, vence_em: i32| -> TituloAReceberLancado {
+        let cmd = LancarTituloAReceber {
+            cliente,
+            valor_total: Dinheiro::reais(reais),
+            emissao: hoje().mais_dias(vence_em.min(0) - 10),
+            parcelas: 1,
+            primeiro_vencimento: hoje().mais_dias(vence_em),
+            intervalo_dias: 0,
+            observacao: None,
+            categoria: None,
+            quitado_agora: None,
+        };
+        postcard::from_bytes(
+            &d.executar_comando(
+                "financeiro.lancar_titulo_a_receber.v1",
+                &carga(&cmd),
+                &s,
+                &ambiente(empresa),
+                arm.escritor(),
+            )
+            .unwrap(),
+        )
+        .unwrap()
+    };
+    let (ana, beto) = (Id::novo(), Id::novo());
+    lancar_com(Some(ana), 100, -8); // 8 dias de atraso → etapa de 7
+    lancar_com(Some(beto), 80, 3); // vence em 3 → lembrete
+    lancar_com(None, 50, -20); // sem cliente: não há a quem cobrar
+    let fila = || -> FilaDoDia {
+        postcard::from_bytes(
+            &d.executar_consulta(
+                "financeiro.fila_de_cobranca.v1",
+                &carga(&mod_financeiro::FilaDeCobranca),
+                &s,
+                &ambiente(empresa),
+                arm.leitor(),
+            )
+            .unwrap(),
+        )
+        .unwrap()
+    };
+    let f = fila();
+    assert_eq!(f.empresa, "Teste");
+    assert_eq!(f.itens.len(), 2);
+    assert_eq!((f.itens[0].cliente, f.itens[0].etapa.dias), (ana, 7));
+    assert_eq!(f.itens[0].valor, Dinheiro::reais(100));
+    assert_eq!(
+        (f.itens[1].cliente, f.itens[1].etapa.nome.as_str()),
+        (beto, "Lembrete")
+    );
+
+    // Enviou para a Ana: ela sai da fila até a próxima etapa (15 dias).
+    let registrar = |parcelas: Vec<(Id, i32)>| {
+        d.executar_comando(
+            "financeiro.registrar_cobranca.v1",
+            &carga(&RegistrarCobranca {
+                parcelas,
+                pulada: false,
+            }),
+            &s,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+    };
+    registrar(f.itens[0].parcelas.clone()).unwrap();
+    let f = fila();
+    assert_eq!(f.itens.len(), 1);
+    assert_eq!(f.itens[0].cliente, beto);
+    // Parcela que não existe: recusado.
+    let e = registrar(vec![(Id::novo(), 1)]).unwrap_err();
+    assert_eq!(e.codigo, CodigoErro::NAO_ENCONTRADO);
+
+    // A empresa troca a régua por uma etapa só, aos 5 dias: a Ana (já cobrada na de 7) e o
+    // Beto (ainda não venceu) ficam fora.
+    let definir = |etapas: Vec<EtapaRegua>| {
+        d.executar_comando(
+            "financeiro.definir_regua_de_cobranca.v1",
+            &carga(&DefinirReguaDeCobranca { etapas }),
+            &s,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+    };
+    let cinco = EtapaRegua {
+        dias: 5,
+        nome: "Atraso".into(),
+        mensagem: "Olá, {nome}: {valor} em aberto.".into(),
+    };
+    definir(vec![cinco.clone()]).unwrap();
+    let regua: Vec<EtapaRegua> = postcard::from_bytes(
+        &d.executar_consulta(
+            "financeiro.regua_de_cobranca.v1",
+            &carga(&ReguaDeCobranca),
+            &s,
+            &ambiente(empresa),
+            arm.leitor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(regua, vec![cinco.clone()]);
+    assert!(fila().itens.is_empty());
+    // Duas etapas no mesmo dia: recusado, e a régua gravada continua a de antes.
+    let e = definir(vec![cinco.clone(), cinco]).unwrap_err();
+    assert_eq!(e.codigo, CodigoErro::ENTRADA_INVALIDA);
+}
+
+/// Quantas contas do Razão ficaram com saldo diferente de zero, somando todas as partidas.
+fn contas_com_saldo(arm: &Armazenamento, empresa: Id) -> i64 {
+    arm.leitor()
+        .consultar(|c| {
+            c.query_row(
+                "SELECT COUNT(*) FROM (
+                   SELECT rp.conta, SUM(rp.valor) s FROM razao_partida rp
+                   JOIN razao_lancamento rl ON rl.id = rp.lancamento
+                   WHERE rl.empresa = ?1 GROUP BY rp.conta HAVING s <> 0)",
+                [empresa.em_bytes().as_slice()],
+                |r| r.get(0),
+            )
+            .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+        })
+        .unwrap()
+}
+
+fn cancelar(
+    d: &Despachante,
+    arm: &Armazenamento,
+    empresa: Id,
+    s: &Sessao,
+    titulo: Id,
+    motivo: &str,
+) -> Result<TituloFoiCancelado, cardeal_kernel::Erro> {
+    d.executar_comando(
+        "financeiro.cancelar_titulo.v1",
+        &carga(&CancelarTitulo {
+            titulo,
+            motivo: motivo.to_string(),
+        }),
+        s,
+        &ambiente(empresa),
+        arm.escritor(),
+    )
+    .map(|b| postcard::from_bytes(&b).unwrap())
+}
+
+#[test]
+fn cancelar_titulo_lancado_errado_estorna_tudo_e_trava_a_baixa() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloFinanceiro]).unwrap();
+    let s = sessao(
+        empresa,
+        &[
+            "financeiro.receber.criar",
+            "financeiro.receber.baixar",
+            "financeiro.titulo.cancelar",
+        ],
+    );
+    let titulo = lancar(&d, &arm, empresa, &s, Dinheiro::reais(90), 3);
+
+    let curto = cancelar(&d, &arm, empresa, &s, titulo.titulo, "errei").unwrap_err();
+    assert_eq!(curto.codigo, CodigoErro::ENTRADA_INVALIDA);
+    let sem = sessao(empresa, &["financeiro.receber.criar"]);
+    let negado = cancelar(
+        &d,
+        &arm,
+        empresa,
+        &sem,
+        titulo.titulo,
+        "Lançado em duplicidade",
+    )
+    .unwrap_err();
+    assert_eq!(negado.codigo, CodigoErro::SEM_PERMISSAO);
+
+    let feito = cancelar(
+        &d,
+        &arm,
+        empresa,
+        &s,
+        titulo.titulo,
+        "Lançado em duplicidade",
+    )
+    .unwrap();
+    assert_eq!((feito.parcelas, feito.valor), (3, Dinheiro::reais(90)));
+    // Três lançamentos e três estornos: o Razão volta a zero em toda conta.
+    assert_eq!(conta_lancamentos(&arm, empresa), 6);
+    assert_eq!(contas_com_saldo(&arm, empresa), 0);
+
+    // Parcela cancelada não aceita baixa (não "ressuscita" a receita).
+    let baixa = d
+        .executar_comando(
+            "financeiro.baixar_recebimento.v1",
+            &carga(&BaixarRecebimento {
+                parcela: titulo.parcelas[0],
+                valor: Dinheiro::reais(30),
+                data: hoje(),
+                meio_pagamento: MeioPagamento::Dinheiro,
+                conta_destino: None,
+            }),
+            &s,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+        .unwrap_err();
+    assert_eq!(baixa.codigo, CodigoErro::ESTADO_INVALIDO);
+    assert_eq!(
+        cancelar(
+            &d,
+            &arm,
+            empresa,
+            &s,
+            titulo.titulo,
+            "Lançado em duplicidade"
+        )
+        .unwrap_err()
+        .codigo,
+        CodigoErro::ESTADO_INVALIDO
+    );
+}
+
+#[test]
+fn cancelar_titulo_com_baixa_exige_estornar_antes() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloFinanceiro]).unwrap();
+    let s = sessao(
+        empresa,
+        &[
+            "financeiro.receber.criar",
+            "financeiro.receber.baixar",
+            "financeiro.receber.estornar",
+            "financeiro.titulo.cancelar",
+        ],
+    );
+    let titulo = lancar(&d, &arm, empresa, &s, Dinheiro::reais(100), 1);
+    let baixada: RecebimentoBaixado = postcard::from_bytes(
+        &d.executar_comando(
+            "financeiro.baixar_recebimento.v1",
+            &carga(&BaixarRecebimento {
+                parcela: titulo.parcelas[0],
+                valor: Dinheiro::reais(40),
+                data: hoje(),
+                meio_pagamento: MeioPagamento::Dinheiro,
+                conta_destino: None,
+            }),
+            &s,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let erro = cancelar(
+        &d,
+        &arm,
+        empresa,
+        &s,
+        titulo.titulo,
+        "Cliente nunca existiu",
+    )
+    .unwrap_err();
+    assert_eq!(erro.codigo, CodigoErro::REGRA_VIOLADA);
+    assert!(erro.mensagem.contains("estorne"), "{}", erro.mensagem);
+
+    d.executar_comando(
+        "financeiro.estornar_baixa.v1",
+        &carga(&EstornarBaixa {
+            baixa: baixada.baixa,
+            motivo: "Recebimento lançado por engano".to_string(),
+        }),
+        &s,
+        &ambiente(empresa),
+        arm.escritor(),
+    )
+    .unwrap();
+    cancelar(
+        &d,
+        &arm,
+        empresa,
+        &s,
+        titulo.titulo,
+        "Cliente nunca existiu",
+    )
+    .unwrap();
+    assert_eq!(contas_com_saldo(&arm, empresa), 0);
+}
+
+/// Um título "de compra" lançado pelo corpo comum, como o `mod-compras` faz.
+fn titulo_de_compra(arm: &Armazenamento, empresa: Id) -> (Id, Id) {
+    let ctx_escrita = ContextoEscrita::novo(empresa, Id::novo(), Id::novo(), Id::novo());
+    let gravado = arm
+        .escritor()
+        .executar(ctx_escrita, move |uow| {
+            lancar_titulo_comum(
+                DadosLancamentoTitulo {
+                    especie: EspecieTitulo::Pagar,
+                    contraparte: None,
+                    valor_total: Dinheiro::reais(500),
+                    emissao: hoje(),
+                    parcelas: 1,
+                    primeiro_vencimento: hoje().mais_dias(30),
+                    intervalo_dias: 30,
+                    observacao: None,
+                    categoria: None,
+                    origem_modulo: "compras",
+                    origem_id: Some(Id::novo()),
+                    papel_contraparte: PapelConta::Fornecedores,
+                    papel_resultado: PapelConta::EstoqueMercadorias,
+                },
+                &ctx_direto(empresa),
+                uow,
+            )
+            .map_err(liga_erro)
+        })
+        .unwrap()
+        .valor;
+    (gravado.titulo, gravado.parcelas[0])
+}
+
+#[test]
+fn titulo_de_compra_nao_se_cancela_pelo_financeiro_mas_o_vencimento_muda() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloFinanceiro]).unwrap();
+    let s = sessao(
+        empresa,
+        &["financeiro.titulo.cancelar", "financeiro.titulo.editar"],
+    );
+    let (titulo, parcela) = titulo_de_compra(&arm, empresa);
+    let erro = cancelar(&d, &arm, empresa, &s, titulo, "Nota lançada em duplicidade").unwrap_err();
+    assert_eq!(erro.codigo, CodigoErro::REGRA_VIOLADA);
+    assert!(
+        erro.mensagem.contains("nota de compra"),
+        "{}",
+        erro.mensagem
+    );
+
+    let alterar = |vencimento: Data| {
+        d.executar_comando(
+            "financeiro.alterar_vencimento.v1",
+            &carga(&AlterarVencimento {
+                parcela,
+                vencimento,
+            }),
+            &s,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+    };
+    // O fornecedor prorrogou: vale para título de qualquer origem.
+    alterar(hoje().mais_dias(45)).unwrap();
+    let vencimento: i64 = arm
+        .leitor()
+        .consultar(|c| {
+            c.query_row(
+                "SELECT vencimento FROM financeiro_parcela WHERE id = ?1",
+                [parcela.em_bytes().as_slice()],
+                |r| r.get(0),
+            )
+            .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+        })
+        .unwrap();
+    assert_eq!(vencimento, i64::from(hoje().mais_dias(45).em_dias()));
+    // Antes da emissão, não.
+    assert_eq!(
+        alterar(hoje().mais_dias(-1)).unwrap_err().codigo,
+        CodigoErro::ENTRADA_INVALIDA
+    );
+    // Sem a permissão, não.
+    let sem = sessao(empresa, &["financeiro.titulo.cancelar"]);
+    let negado = d
+        .executar_comando(
+            "financeiro.alterar_vencimento.v1",
+            &carga(&AlterarVencimento {
+                parcela,
+                vencimento: hoje().mais_dias(60),
+            }),
+            &sem,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+        .unwrap_err();
+    assert_eq!(negado.codigo, CodigoErro::SEM_PERMISSAO);
+}
+
+fn sessao_bancos(empresa: Id) -> Sessao {
+    sessao(
+        empresa,
+        &[
+            "financeiro.banco.ver",
+            "financeiro.banco.criar",
+            "financeiro.banco.editar",
+            "financeiro.banco.transferir",
+        ],
+    )
+}
+
+fn nova_conta(d: &Despachante, arm: &Armazenamento, empresa: Id, s: &Sessao, nome: &str) -> Id {
+    let c: ContaBancariaCriada = postcard::from_bytes(
+        &d.executar_comando(
+            "financeiro.criar_conta_bancaria.v1",
+            &carga(&CriarContaBancaria {
+                nome: nome.to_string(),
+            }),
+            s,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    c.conta
+}
+
+fn saldos(
+    d: &Despachante,
+    arm: &Armazenamento,
+    empresa: Id,
+    s: &Sessao,
+) -> Vec<ItemContaDisponivel> {
+    postcard::from_bytes(
+        &d.executar_consulta(
+            "financeiro.contas_disponiveis.v1",
+            &carga(&ContasDisponiveis),
+            s,
+            &ambiente(empresa),
+            arm.leitor(),
+        )
+        .unwrap(),
+    )
+    .unwrap()
+}
+
+fn saldo_de(
+    d: &Despachante,
+    arm: &Armazenamento,
+    empresa: Id,
+    s: &Sessao,
+    conta: Id,
+) -> Option<Dinheiro> {
+    saldos(d, arm, empresa, s)
+        .into_iter()
+        .find(|c| c.conta == conta)
+        .map(|c| c.saldo)
+}
+
+fn definir(
+    d: &Despachante,
+    arm: &Armazenamento,
+    empresa: Id,
+    s: &Sessao,
+    conta: Id,
+    reais: i64,
+) -> Result<SaldoInicialDefinido, cardeal_kernel::Erro> {
+    d.executar_comando(
+        "financeiro.definir_saldo_inicial.v1",
+        &carga(&DefinirSaldoInicial {
+            conta,
+            saldo: Dinheiro::reais(reais),
+            data: hoje().mais_dias(-10),
+        }),
+        s,
+        &ambiente(empresa),
+        arm.escritor(),
+    )
+    .map(|b| postcard::from_bytes(&b).unwrap())
+}
+
+#[test]
+fn saldo_inicial_substitui_em_vez_de_somar_e_aceita_cheque_especial() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloFinanceiro]).unwrap();
+    let s = sessao_bancos(empresa);
+    let banco = nova_conta(&d, &arm, empresa, &s, "Sicredi");
+
+    assert_eq!(
+        definir(&d, &arm, empresa, &s, banco, 12_000)
+            .unwrap()
+            .saldo_atual,
+        Dinheiro::reais(12_000)
+    );
+    // Redefinir ajusta: um saldo inicial só (lá no gestao-raiz havia dois e as telas divergiam).
+    assert_eq!(
+        definir(&d, &arm, empresa, &s, banco, 10_000)
+            .unwrap()
+            .saldo_atual,
+        Dinheiro::reais(10_000)
+    );
+    assert_eq!(
+        saldo_de(&d, &arm, empresa, &s, banco),
+        Some(Dinheiro::reais(10_000))
+    );
+    // Negativo: banco no cheque especial.
+    assert_eq!(
+        definir(&d, &arm, empresa, &s, banco, -500)
+            .unwrap()
+            .saldo_atual,
+        Dinheiro::reais(-500)
+    );
+    // Zero tira o saldo inicial.
+    let zero = definir(&d, &arm, empresa, &s, banco, 0).unwrap();
+    assert_eq!((zero.lancamento, zero.saldo_atual), (None, Dinheiro::ZERO));
+    // Só conta do Disponível.
+    let receita = conta_papel(&arm, empresa, PapelConta::ReceitaVendas);
+    assert_eq!(
+        definir(&d, &arm, empresa, &s, receita, 100)
+            .unwrap_err()
+            .codigo,
+        CodigoErro::ENTRADA_INVALIDA
+    );
+}
+
+#[test]
+fn transferir_do_caixa_exige_dinheiro_e_cancelar_estorna_os_dois_lados() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloFinanceiro]).unwrap();
+    let s = sessao_bancos(empresa);
+    let caixa = conta_papel(&arm, empresa, PapelConta::Caixa);
+    let banco = nova_conta(&d, &arm, empresa, &s, "Sicredi");
+    let outro = nova_conta(&d, &arm, empresa, &s, "Cresol");
+    definir(&d, &arm, empresa, &s, caixa, 300).unwrap();
+    let transferir = |origem: Id, destino: Id, reais: i64| {
+        d.executar_comando(
+            "financeiro.transferir_entre_contas.v1",
+            &carga(&TransferirEntreContas {
+                origem,
+                destino,
+                valor: Dinheiro::reais(reais),
+                data: hoje(),
+                observacao: Some("Depósito do caixa".to_string()),
+            }),
+            &s,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+    };
+
+    // Dinheiro em espécie não fica negativo.
+    let erro = transferir(caixa, banco, 500).unwrap_err();
+    assert_eq!(erro.codigo, CodigoErro::REGRA_VIOLADA);
+    assert!(erro.mensagem.contains("300,00"), "{}", erro.mensagem);
+    assert_eq!(
+        transferir(caixa, caixa, 10).unwrap_err().codigo,
+        CodigoErro::ENTRADA_INVALIDA
+    );
+
+    let feita: TransferenciaFeita =
+        postcard::from_bytes(&transferir(caixa, banco, 200).unwrap()).unwrap();
+    assert_eq!(
+        saldo_de(&d, &arm, empresa, &s, caixa),
+        Some(Dinheiro::reais(100))
+    );
+    assert_eq!(
+        saldo_de(&d, &arm, empresa, &s, banco),
+        Some(Dinheiro::reais(200))
+    );
+    // Banco pode ir para o cheque especial.
+    transferir(outro, banco, 50).unwrap();
+    assert_eq!(
+        saldo_de(&d, &arm, empresa, &s, outro),
+        Some(Dinheiro::reais(-50))
+    );
+
+    let lista: Vec<ItemTransferencia> = postcard::from_bytes(
+        &d.executar_consulta(
+            "financeiro.transferencias.v1",
+            &carga(&Transferencias),
+            &s,
+            &ambiente(empresa),
+            arm.leitor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(lista.len(), 2);
+    assert!(lista
+        .iter()
+        .any(|t| t.origem == "Caixa" && t.destino == "Sicredi"));
+
+    let cancelar = |motivo: &str| {
+        d.executar_comando(
+            "financeiro.cancelar_transferencia.v1",
+            &carga(&CancelarTransferencia {
+                transferencia: feita.transferencia,
+                motivo: motivo.to_string(),
+            }),
+            &s,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+    };
+    assert_eq!(
+        cancelar("errei").unwrap_err().codigo,
+        CodigoErro::ENTRADA_INVALIDA
+    );
+    cancelar("Depósito não foi feito").unwrap();
+    assert_eq!(
+        saldo_de(&d, &arm, empresa, &s, caixa),
+        Some(Dinheiro::reais(300))
+    );
+    assert_eq!(
+        saldo_de(&d, &arm, empresa, &s, banco),
+        Some(Dinheiro::reais(50))
+    );
+    assert_eq!(
+        cancelar("Depósito não foi feito").unwrap_err().codigo,
+        CodigoErro::ESTADO_INVALIDO
+    );
+}
+
+#[test]
+fn desativar_conta_so_sem_saldo_e_nunca_a_do_sistema() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloFinanceiro]).unwrap();
+    let s = sessao_bancos(empresa);
+    let banco = nova_conta(&d, &arm, empresa, &s, "Banco antigo");
+    let desativar = |conta: Id| {
+        d.executar_comando(
+            "financeiro.desativar_conta.v1",
+            &carga(&DesativarContaDisponivel { conta }),
+            &s,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+    };
+    let caixa = conta_papel(&arm, empresa, PapelConta::Caixa);
+    assert_eq!(
+        desativar(caixa).unwrap_err().codigo,
+        CodigoErro::ENTRADA_INVALIDA
+    );
+    definir(&d, &arm, empresa, &s, banco, 80).unwrap();
+    let erro = desativar(banco).unwrap_err();
+    assert_eq!(erro.codigo, CodigoErro::REGRA_VIOLADA);
+    assert!(erro.mensagem.contains("transfira"), "{}", erro.mensagem);
+    definir(&d, &arm, empresa, &s, banco, 0).unwrap();
+    desativar(banco).unwrap();
+    assert_eq!(
+        saldo_de(&d, &arm, empresa, &s, banco),
+        None,
+        "some da lista"
+    );
+    // Conta desativada não recebe mais nada.
+    assert_eq!(
+        definir(&d, &arm, empresa, &s, banco, 10)
+            .unwrap_err()
+            .codigo,
+        CodigoErro::ENTRADA_INVALIDA
+    );
+}
+
+/// Soma das partidas de um papel (qualquer estado menos previsto): o original estornado e o
+/// estorno se anulam.
+fn saldo_contabil(arm: &Armazenamento, empresa: Id, papel: PapelConta) -> i64 {
+    let conta = conta_papel(arm, empresa, papel);
+    arm.leitor()
+        .consultar(|c| {
+            c.query_row(
+                "SELECT COALESCE(SUM(p.valor), 0) FROM razao_partida p
+                 JOIN razao_lancamento l ON l.id = p.lancamento
+                 WHERE p.conta = ?1 AND l.estado <> 'Previsto'",
+                [conta.em_bytes().as_slice()],
+                |r| r.get(0),
+            )
+            .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+        })
+        .unwrap()
+}
+
+#[test]
+fn importar_contas_em_aberto_e_saldo_de_abertura_acha_ou_cadastra_a_pessoa_e_nao_duplica() {
+    let (_dir, arm, empresa) = base();
+    arm.migrar(&[mod_clientes::ModuloClientes.migracoes()])
+        .unwrap();
+    let d = Despachante::construir(&[&ModuloFinanceiro, &mod_clientes::ModuloClientes]).unwrap();
+    let mut rm = RegistroModulos::novo();
+    rm.registrar(&MANIFESTO).unwrap();
+    rm.registrar(&mod_clientes::MANIFESTO).unwrap();
+    let amb = Ambiente::novo(
+        empresa,
+        rm.resolver(
+            &PedidoAtivacao::nova()
+                .com_modulo("financeiro")
+                .com_modulo("clientes"),
+        )
+        .unwrap(),
+    );
+    let s = sessao(
+        empresa,
+        &[
+            "financeiro.titulo.importar",
+            "financeiro.receber.criar",
+            "financeiro.pagar.criar",
+            "financeiro.titulo.cancelar",
+            "clientes.pessoa.criar",
+        ],
+    );
+    let ana: mod_clientes::PessoaCadastrada = postcard::from_bytes(
+        &d.executar_comando(
+            "clientes.criar_pessoa.v1",
+            &carga(&mod_clientes::CriarPessoa {
+                tipo: mod_clientes::TipoPessoa::Fisica,
+                nome: "Ana Lima".into(),
+                nome_fantasia: None,
+                papel_inicial: mod_clientes::Papel::Cliente,
+                documento_tipo: Some(mod_clientes::TipoDocumento::Cpf),
+                documento_numero: Some("52998224725".into()),
+                data_nascimento: None,
+                endereco: None,
+                contato: None,
+            }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+
+    let futuro = hoje().mais_dias(20).formatar();
+    let passado = hoje().mais_dias(-10).formatar();
+    let csv = format!(
+        "Tipo;Nome;CPF/CNPJ;Vencimento;Valor;Número\n\
+         Receber;Ana;529.982.247-25;{futuro};150,00;NF 10\n\
+         Receber;Bruno Novo;;{passado};50,00;\n\
+         Pagar;Distribuidora Sul;11.222.333/0001-81;{futuro};300,00;Boleto 99\n"
+    );
+
+    let previa: mod_financeiro::importacao::PreviaImportacaoContas = postcard::from_bytes(
+        &d.executar_consulta(
+            "financeiro.previa_importacao_contas.v1",
+            &carga(&mod_financeiro::PreviaDaImportacaoDeContas { texto: csv.clone() }),
+            &s,
+            &amb,
+            arm.leitor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(previa.erros.is_empty(), "{:?}", previa.erros);
+    assert_eq!(
+        (previa.a_receber, previa.a_pagar, previa.vencidas),
+        (2, 1, 1)
+    );
+    assert_eq!(previa.total_a_receber, Dinheiro::reais(200));
+    assert_eq!(
+        previa.pessoas_novas,
+        vec!["Bruno Novo", "Distribuidora Sul"]
+    );
+    assert_eq!(previa.amostra[0].pessoa, "Ana Lima", "achada pelo CPF");
+    assert_eq!(conta_lancamentos(&arm, empresa), 0, "a prévia não grava");
+
+    let importar = |texto: &str, sessao: &Sessao| {
+        d.executar_comando(
+            "financeiro.importar_contas.v1",
+            &carga(&mod_financeiro::ImportarContasEmAberto {
+                texto: texto.into(),
+            }),
+            sessao,
+            &amb,
+            arm.escritor(),
+        )
+    };
+    let feito: mod_financeiro::ContasImportadas =
+        postcard::from_bytes(&importar(&csv, &s).unwrap()).unwrap();
+    assert_eq!(
+        (feito.a_receber, feito.a_pagar, feito.pessoas_criadas),
+        (2, 1, 2)
+    );
+    // Saldo de abertura: o balanço mostra quem deve; a DRE não muda.
+    assert_eq!(
+        saldo_contabil(&arm, empresa, PapelConta::ClientesAReceber),
+        20_000
+    );
+    assert_eq!(
+        saldo_contabil(&arm, empresa, PapelConta::Fornecedores),
+        -30_000
+    );
+    assert_eq!(
+        saldo_contabil(&arm, empresa, PapelConta::LucrosAcumulados),
+        10_000
+    );
+    assert_eq!(saldo_contabil(&arm, empresa, PapelConta::OutrasReceitas), 0);
+    let contraparte_da_nf: Vec<u8> = arm
+        .leitor()
+        .consultar(|c| {
+            c.query_row(
+                "SELECT contraparte_id FROM financeiro_titulo WHERE observacao = 'Doc. NF 10'",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+        })
+        .unwrap();
+    assert_eq!(contraparte_da_nf, ana.pessoa.em_bytes().to_vec());
+
+    // De novo: nada a criar.
+    let de_novo: mod_financeiro::ContasImportadas =
+        postcard::from_bytes(&importar(&csv, &s).unwrap()).unwrap();
+    assert_eq!(
+        (de_novo.a_receber + de_novo.a_pagar, de_novo.ja_existiam),
+        (0, 3)
+    );
+
+    // A conta importada errada pode ser cancelada, e não volta numa nova importação.
+    let titulo: Vec<u8> = arm
+        .leitor()
+        .consultar(|c| {
+            c.query_row(
+                "SELECT id FROM financeiro_titulo WHERE especie = 'Pagar'",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+        })
+        .unwrap();
+    d.executar_comando(
+        "financeiro.cancelar_titulo.v1",
+        &carga(&CancelarTitulo {
+            titulo: Id::de_bytes(titulo.try_into().unwrap()),
+            motivo: "Já tinha sido pago no sistema antigo".into(),
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+    assert_eq!(saldo_contabil(&arm, empresa, PapelConta::Fornecedores), 0);
+    let de_novo: mod_financeiro::ContasImportadas =
+        postcard::from_bytes(&importar(&csv, &s).unwrap()).unwrap();
+    assert_eq!(de_novo.ja_existiam, 3);
+
+    // Pessoa nova sem a permissão de cadastrar: recusado, e nada é gravado.
+    let sem_cadastro = sessao(
+        empresa,
+        &["financeiro.titulo.importar", "financeiro.receber.criar"],
+    );
+    let antes = conta_lancamentos(&arm, empresa);
+    let erro = importar(
+        &format!("Tipo;Nome;Vencimento;Valor\nR;Carla Nova;{futuro};10\n"),
+        &sem_cadastro,
+    )
+    .unwrap_err();
+    assert_eq!(erro.codigo, CodigoErro::SEM_PERMISSAO);
+    assert!(
+        erro.mensagem.contains("importe os clientes antes"),
+        "{}",
+        erro.mensagem
+    );
+    assert_eq!(conta_lancamentos(&arm, empresa), antes);
 }

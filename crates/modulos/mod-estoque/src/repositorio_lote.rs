@@ -15,7 +15,7 @@ pub struct ProdutoDoLote {
     pub produto: Id,
     /// O nome.
     pub nome: String,
-    /// Grupo, margem própria, situação, NCM e campos fiscais próprios.
+    /// Grupo, margem e comissão próprias, situação, NCM e campos fiscais próprios.
     pub valores: ValoresProduto,
     /// O fabricante, quando cadastrado.
     pub fabricante: Option<String>,
@@ -24,7 +24,7 @@ pub struct ProdutoDoLote {
 }
 
 const COLUNAS_PRODUTO: &str =
-    "id, nome, grupo_produto, margem_desejada, ativo, ncm, perfil_fiscal, fabricante";
+    "id, nome, grupo_produto, margem_desejada, ativo, ncm, perfil_fiscal, fabricante, comissao";
 
 fn de_linha(r: &rusqlite::Row<'_>) -> rusqlite::Result<ProdutoDoLote> {
     Ok(ProdutoDoLote {
@@ -36,9 +36,10 @@ fn de_linha(r: &rusqlite::Row<'_>) -> rusqlite::Result<ProdutoDoLote> {
             ativo: r.get::<_, i64>(4)? != 0,
             ncm: r.get(5)?,
             fiscal: CamposFiscais::de_blob(r.get::<_, Option<Vec<u8>>>(6)?.as_deref()),
+            comissao: r.get::<_, Option<i64>>(8)?.map(Percentual::unidades),
         },
         fabricante: r.get::<_, Option<String>>(7)?,
-        custo: r.get::<_, i64>(8)?,
+        custo: r.get::<_, i64>(9)?,
     })
 }
 
@@ -134,7 +135,7 @@ pub fn gravar_valores(
     conn.execute(
         "UPDATE estoque_produto
          SET grupo_produto = ?3, margem_desejada = ?4, ativo = ?5, ncm = ?6, perfil_fiscal = ?7,
-             versao = versao + 1
+             comissao = ?8, versao = versao + 1
          WHERE empresa = ?1 AND id = ?2",
         params![
             blob(organizacao),
@@ -144,6 +145,7 @@ pub fn gravar_valores(
             i64::from(v.ativo),
             v.ncm.clone(),
             v.fiscal.para_blob(),
+            v.comissao.map(Percentual::unidades_internas),
         ],
     )
     .map_err(persist)?;
@@ -198,8 +200,8 @@ pub fn inserir_item(
         "INSERT INTO estoque_alteracao_lote_item
             (lote, produto, antes_grupo, antes_margem, antes_ativo,
              depois_grupo, depois_margem, depois_ativo,
-             antes_ncm, depois_ncm, antes_fiscal, depois_fiscal)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+             antes_ncm, depois_ncm, antes_fiscal, depois_fiscal, antes_comissao, depois_comissao)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
         params![
             blob(lote),
             blob(produto),
@@ -213,6 +215,8 @@ pub fn inserir_item(
             depois.ncm.clone(),
             antes.fiscal.para_blob(),
             depois.fiscal.para_blob(),
+            antes.comissao.map(Percentual::unidades_internas),
+            depois.comissao.map(Percentual::unidades_internas),
         ],
     )
     .map_err(persist)?;
@@ -323,7 +327,8 @@ pub fn itens_do_lote(conn: &Connection, lote: Id) -> Resultado<Vec<ItemDoLote>> 
         .prepare(
             "SELECT produto, antes_grupo, antes_margem, antes_ativo,
                     depois_grupo, depois_margem, depois_ativo,
-                    antes_ncm, depois_ncm, antes_fiscal, depois_fiscal
+                    antes_ncm, depois_ncm, antes_fiscal, depois_fiscal,
+                    antes_comissao, depois_comissao
              FROM estoque_alteracao_lote_item WHERE lote = ?1",
         )
         .map_err(persist)?;
@@ -337,6 +342,7 @@ pub fn itens_do_lote(conn: &Connection, lote: Id) -> Resultado<Vec<ItemDoLote>> 
                     ativo: r.get::<_, i64>(3)? != 0,
                     ncm: r.get::<_, Option<String>>(7)?.unwrap_or_default(),
                     fiscal: CamposFiscais::de_blob(r.get::<_, Option<Vec<u8>>>(9)?.as_deref()),
+                    comissao: r.get::<_, Option<i64>>(11)?.map(Percentual::unidades),
                 },
                 ValoresProduto {
                     grupo: id_de(r.get::<_, Vec<u8>>(4)?),
@@ -344,6 +350,7 @@ pub fn itens_do_lote(conn: &Connection, lote: Id) -> Resultado<Vec<ItemDoLote>> 
                     ativo: r.get::<_, i64>(6)? != 0,
                     ncm: r.get::<_, Option<String>>(8)?.unwrap_or_default(),
                     fiscal: CamposFiscais::de_blob(r.get::<_, Option<Vec<u8>>>(10)?.as_deref()),
+                    comissao: r.get::<_, Option<i64>>(12)?.map(Percentual::unidades),
                 },
             ))
         })

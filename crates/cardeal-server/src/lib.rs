@@ -70,7 +70,8 @@ impl Servidor {
             &cardeal_distribuicao::modulos(),
             &cardeal_distribuicao::pedido_ativacao(),
         )?;
-        let frota = Frota::nova(Arc::clone(&plano), config.clone());
+        let recursos = cardeal_distribuicao::recursos(&config.dados)?;
+        let frota = Frota::nova(Arc::clone(&plano), config.clone(), recursos);
         Ok(Arc::new(Self {
             logins: tokio::sync::Semaphore::new(config.logins_simultaneos.max(1)),
             limitador: limitador::LimitadorLogin::novo(

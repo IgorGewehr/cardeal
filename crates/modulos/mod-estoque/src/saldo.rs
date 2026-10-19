@@ -142,6 +142,37 @@ impl SaldoLocal {
         }
     }
 
+    /// Registra a **devolução** do que saiu (o estorno de uma venda): como
+    /// [`Self::entrada`], mas ao custo da saída que se desfaz — que pode ser zero, quando o
+    /// produto foi vendido sem custo cadastrado. Desfazer uma venda nunca pode esbarrar na
+    /// falta de custo.
+    ///
+    /// # Errors
+    /// [`ErroEstoque::QuantidadeInvalida`]; [`ErroEstoque::CustoUnitarioAusente`] se o custo
+    /// for negativo.
+    pub fn devolucao(
+        &mut self,
+        quantidade: Quantidade,
+        custo_unitario: Preco,
+        agora: Instante,
+    ) -> Result<(), ErroEstoque> {
+        if !quantidade.e_positiva() {
+            return Err(ErroEstoque::QuantidadeInvalida);
+        }
+        if custo_unitario.unidades_internas() < 0 {
+            return Err(ErroEstoque::CustoUnitarioAusente);
+        }
+        self.custo_medio = custo_medio_movel(
+            self.quantidade_disponivel,
+            self.custo_medio,
+            quantidade,
+            custo_unitario,
+        );
+        self.quantidade_disponivel += quantidade;
+        self.tocar(agora);
+        Ok(())
+    }
+
     /// Registra uma entrada: recalcula o custo médio e soma ao disponível.
     ///
     /// # Errors
@@ -325,6 +356,28 @@ mod testes {
 
     fn saldo() -> SaldoLocal {
         SaldoLocal::zerado(Id::novo(), Id::novo(), None, Id::novo(), agora())
+    }
+
+    #[test]
+    fn devolucao_aceita_custo_zero_e_mantem_o_medio() {
+        let mut s = saldo();
+        s.entrada(Quantidade::unidades(10), Preco::reais(4), agora())
+            .unwrap();
+        // Produto vendido sem custo: a devolução ao custo zero não pode falhar.
+        let mut sem_custo = saldo();
+        sem_custo
+            .devolucao(Quantidade::unidades(2), Preco::ZERO, agora())
+            .unwrap();
+        assert_eq!(sem_custo.quantidade_disponivel, Quantidade::unidades(2));
+        assert!(sem_custo
+            .entrada(Quantidade::unidades(1), Preco::ZERO, agora())
+            .is_err());
+        // Devolver ao custo médio vigente não mexe no médio.
+        s.saida(Quantidade::unidades(3), agora()).unwrap();
+        s.devolucao(Quantidade::unidades(3), Preco::reais(4), agora())
+            .unwrap();
+        assert_eq!(s.quantidade_disponivel, Quantidade::unidades(10));
+        assert_eq!(s.custo_medio, Preco::reais(4));
     }
 
     #[test]

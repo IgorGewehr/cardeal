@@ -3,44 +3,57 @@
 //! O cliente da API fiscal externa (ADR-0006, `docs/10-modulo-fiscal.md`) — o Cardeal não
 //! implementa emissor fiscal próprio.
 //!
-//! ## O que este crate contém agora
+//! O provedor é o **`sefaz-api`**, o motor fiscal próprio da operação
+//! (`docs/modulos/fiscal.md`); o contrato dele está em [`ApiFiscalHttp`].
 //!
-//! Uma fatia mínima, mirada no que `mod-compras` precisa para importar nota de entrada por
-//! distribuição `DFe`:
+//! ## O que este crate contém
 //!
-//! - [`PortaFiscal`] — a porta (síncrona nesta fase; ver o porquê no doc do módulo
-//!   `porta`) com `distribuicao_dfe`/`baixar_xml`.
-//! - [`FiscalSimulado`] — o adaptador em memória para testes e para `mod-compras` já
-//!   funcionar de ponta a ponta antes do adaptador HTTP real existir.
+//! - [`PortaFiscal`] — a porta (síncrona nesta fase; ver o porquê no doc do módulo `porta`):
+//!   distribuição `DFe` (que `mod-compras` usa) e o status do serviço da SEFAZ.
+//! - [`ApiFiscalHttp`] — o adaptador real, cliente do `sefaz-api` ([`ConfigApiFiscal`]: URL e
+//!   chave por variável de ambiente).
+//! - [`FiscalSimulado`] — o adaptador em memória para testes (autoriza; fica fora do ar sob
+//!   comando).
+//! - [`ler_certificado_a1`]/[`preparar_certificado_a1`] — abre o `.pfx`, confere a senha, lê
+//!   titular, CNPJ e validade, e regrava os arquivos com RC2 (o TLS do `sefaz-api` recusa).
 //! - [`interpretar`] — lê os campos essenciais de um XML de NF-e 4.00 (`quick-xml`,
 //!   sem validar contra o XSD oficial).
 //! - [`ChaveAcesso`] — a chave de acesso de 44 dígitos.
 //!
-//! ## O que falta (ver `docs/17-roadmap.md`, Fase 3)
+//! ## O que falta (onda 7, `docs/17-roadmap.md`)
 //!
-//! `ApiFiscalHttp` (o adaptador real contra o `sefaz-api`), o restante da trait `PortaFiscal`
-//! do doc 10 (emitir, cancelar, carta de correção, inutilizar, SPED, status do serviço), o
-//! certificado digital (upload, guarda cifrada via `cardeal_storage::Segredo<T>`, validade),
-//! e `mod-fiscal` (o módulo que amarra tudo isso ao despacho — documento fiscal como
-//! agregado assíncrono próprio, fila durável, contingência). Notas levantadas sobre o
-//! contrato real do `sefaz-api` (auth por Bearer token, certificado enviado em cada chamada
-//! de emissão — o serviço não guarda nada —, NFC-e com contingência offline real,
-//! `cStat` cru que precisa de tradução amigável) estão em
-//! `docs/19-estado-e-processo.md` §1.2/§4.
+//! O restante da trait `PortaFiscal` do doc 10 (emitir, consultar, cancelar, carta de
+//! correção, inutilizar) e o documento fiscal como agregado assíncrono em `mod-fiscal` (fila
+//! durável, numeração, contingência). O `sefaz-api` não tem distribuição `DFe`, manifestação
+//! nem SPED — [`ApiFiscalHttp`] responde [`ErroFiscal::NaoSuportadoPeloProvedor`] para elas.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs, clippy::pedantic)]
 #![allow(clippy::module_name_repetitions, clippy::must_use_candidate)]
 #![allow(clippy::result_large_err)]
 
+mod certificado;
 mod chave;
+mod der;
+mod emissao;
 mod erros;
 mod nfe;
 mod porta;
+mod sefaz_api;
 mod simulado;
 
+pub use certificado::{
+    ler_certificado_a1, preparar_certificado_a1, CertificadoPreparado, InfoCertificado,
+};
 pub use chave::ChaveAcesso;
+pub use emissao::{
+    Consumidor, ContribuicaoItem, Crt, Csc, DocumentoConsumidor, Emitente, EnderecoEmitente,
+    IcmsItem, ImpostosItem, ItemDocumento, MeioPagamento, Nfce, PagamentoDocumento,
+    PedidoInutilizacao, RetornoSefaz, SituacaoRetorno,
+};
 pub use erros::ErroFiscal;
+pub use nfe::{cfop_de_venda, descrever_cfop, ClassificacaoEntrada, FinalidadeNfe};
 pub use nfe::{interpretar, ItemNfe, NotaFiscalXml};
-pub use porta::{Nsu, PortaFiscal, ResumoDfe, XmlNota};
+pub use porta::{AmbienteFiscal, ModeloFiscal, Nsu, PortaFiscal, ResumoDfe, StatusSefaz, XmlNota};
+pub use sefaz_api::{ApiFiscalHttp, CertificadoA1, ConfigApiFiscal};
 pub use simulado::FiscalSimulado;

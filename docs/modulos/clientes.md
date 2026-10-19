@@ -12,7 +12,9 @@
 - Valida CPF/CNPJ (dígito verificador) e consulta o cadastro na SEFAZ via `PortaFiscal` para
   pré-preencher razão social, endereço e situação cadastral.
 - Detecta e resolve **duplicidade** — por documento (certeza) e por similaridade de nome (sugestão).
-- Mantém **limite de crédito** por cliente, com bloqueio automático e liberação por supervisor.
+- Mantém **limite de crédito** por cliente, com bloqueio automático e liberação por supervisor. O PDV o
+  respeita na venda a prazo (2026-10-16): crédito bloqueado ou valor acima de `limite − em aberto` é
+  recusado; sem limite cadastrado, não há teto.
 - Calcula um **score interno de pagamento** a partir do histórico de baixas do financeiro (via evento,
   nunca por leitura direta de tabela de outro módulo).
 - Mantém **carteira de vendedor** (quais clientes pertencem a qual vendedor) e o vínculo opcional de
@@ -196,6 +198,7 @@ stateDiagram-v2
 | `DefinirLimiteCredito` ✅ | `clientes.credito.definir_limite` | Médio | Cria/edita `LimiteCredito` | `LimiteNegativo` |
 | `AdicionarContato` ✅ (não estava no §5 original) | `clientes.pessoa.editar` | Baixo | Adiciona telefone/celular/e-mail/WhatsApp — sem isto não havia como ligar para o cliente | `ContatoInvalido` |
 | `AdicionarEndereco` ✅ (não estava no §5 original) | `clientes.pessoa.editar` | Baixo | Adiciona um endereço | `UfInvalida`, `CepInvalido` |
+| `ImportarPessoas` ✅ (2026-10-16, `clientes.importar_pessoas.v1`) | `clientes.pessoa.criar` (+ `clientes.credito.definir_limite` se a planilha trouxer limite) | Médio | A implantação: cadastra a carteira do sistema antigo a partir de um CSV (`mod_clientes::importacao`). Só `Nome` é obrigatória; CPF/CNPJ (dígito conferido; define PF/PJ), nome fantasia, contatos (celular, WhatsApp, telefone, e-mail, formato conferido), endereço (com logradouro exige CEP, cidade e UF), nascimento, limite de crédito e papel (`Cliente` ou `Fornecedor`). Colunas pelo nome, em qualquer ordem, sem caixa nem acento. Quem já existe (mesmo documento ou, sem ele, mesmo nome) fica como está, então importar duas vezes não duplica. Tudo ou nada: uma linha com erro recusa o arquivo. Cada pessoa passa pelo mesmo `criar_pessoa_comum`/`adicionar_contato_comum` do cadastro manual | `REGRA_VIOLADA` (linhas com erro), `SEM_PERMISSAO` |
 | `BloquearCredito` | (automático, disparado por `vendas`/`financeiro` via evento) | Médio | Ainda não implementado | — |
 | `LiberarCredito` | `clientes.credito.liberar` | Alto | Ainda não implementado | `SemPermissaoSupervisor` |
 | `VincularVendedor` | `clientes.carteira.gerenciar` | Baixo | Ainda não implementado | `VendedorInexistente` |
@@ -226,6 +229,7 @@ stateDiagram-v2
 | `LimiteDisponivel` | `clientes.credito.ver` | Selo na tela de venda/PDV | `clientes_limite_credito(pessoa)` + agregação em `financeiro_parcela` |
 | `ScoreDePagamento` | `clientes.credito.ver` | Selo "bom pagador" na ficha | `clientes_historico_credito(pessoa, data DESC)` |
 | `CarteiraDoVendedor` | `clientes.carteira.ver` | Painel do vendedor | `clientes_carteira(vendedor)` |
+| `PreviaDaImportacaoDePessoas` ✅ (`clientes.previa_importacao_pessoas.v1`) | `clientes.pessoa.ver` | O diálogo "Importar clientes…": novos, já existiam, fornecedores, com limite, erros por linha e os 200 primeiros — sem gravar | `clientes_documento(empresa, tipo, numero)` + nomes (`indice_de_pessoas`, também usado pela importação de contas do financeiro) |
 | `PessoasPorPapel` ✅ | `clientes.pessoa.ver` | Listas de clientes/fornecedores, também serve busca (parâmetro `busca` opcional faz `LIKE` em nome/documento) | `clientes_papel(papel, ativo)` — `LIMIT 200`, sem `Pagina`/`Cursor` ainda |
 
 ## 7. Receituário contábil

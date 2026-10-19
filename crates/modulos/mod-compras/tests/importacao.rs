@@ -851,3 +851,327 @@ fn sem_pago_no_ato_titulo_nasce_em_aberto() {
 
     assert_eq!(estado_da_parcela_da_nota(&arm, empresa, nota_id), "Aberta");
 }
+
+#[test]
+fn icms_st_ipi_e_desconto_entram_no_custo_e_o_titulo_bate_com_o_vnf() {
+    let (_dir, arm, empresa) = base();
+    let produto = cadastrar_produto(&arm, empresa, "Cerveja Lata 350ml", "22030000");
+    let local = cadastrar_local(&arm, empresa);
+    let chave = "8".repeat(44);
+    // 12 latas a R$ 5 = R$ 60, desconto R$ 6, ICMS-ST R$ 9,50 + FCP-ST R$ 1,20, IPI R$ 3,
+    // frete R$ 4,80 → vNF R$ 72,50; custo por lata = 72,50 / 12 = 6,041667.
+    let xml = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe"><NFe>
+<infNFe Id="NFe{chave}" versao="4.00">
+  <ide><nNF>31</nNF><serie>1</serie><dhEmi>2026-09-01T09:00:00-03:00</dhEmi></ide>
+  <emit><CNPJ>{CNPJ_FORNECEDOR}</CNPJ><xNome>Distribuidora Alfa LTDA</xNome></emit>
+  <det nItem="1">
+    <prod><cProd>CERV-350</cProd><xProd>CERVEJA LATA 350ML</xProd><NCM>22030000</NCM>
+      <qCom>12.0000</qCom><vUnCom>5.000000</vUnCom><vProd>60.00</vProd><vDesc>6.00</vDesc></prod>
+    <imposto>
+      <ICMS><ICMS10><vICMSST>9.50</vICMSST><vFCPST>1.20</vFCPST></ICMS10></ICMS>
+      <IPI><IPITrib><vIPI>3.00</vIPI></IPITrib></IPI>
+    </imposto>
+  </det>
+  <total><ICMSTot><vProd>60.00</vProd><vFrete>4.80</vFrete><vSeg>0.00</vSeg><vOutro>0.00</vOutro>
+    <vNF>72.50</vNF></ICMSTot></total>
+</infNFe></NFe></nfeProc>"#
+    );
+    let ctx_escrita = ContextoEscrita::novo(empresa, Id::novo(), Id::novo(), Id::novo());
+    let (nota_id, total, custo_unitario) = arm
+        .escritor()
+        .executar(ctx_escrita, move |uow| {
+            let nota_xml = cardeal_fiscal::interpretar(&xml)
+                .map_err(|e| cardeal_kernel::Erro::de_dominio(&e))
+                .map_err(cardeal_storage::ErroArmazenamento::Dominio)?;
+            let relatorio = importar_nota_da_sefaz(&nota_xml, &ctx(empresa), uow)
+                .map_err(cardeal_storage::ErroArmazenamento::Dominio)?;
+            let itens = RepositorioCompras::novo(uow)
+                .itens_da_nota(relatorio.nota_entrada)
+                .map_err(cardeal_storage::ErroArmazenamento::Dominio)?;
+            let mut item = itens[0].clone();
+            item.vincular(produto);
+            RepositorioCompras::novo(uow)
+                .atualizar_item(&item)
+                .map_err(cardeal_storage::ErroArmazenamento::Dominio)?;
+            let nota = RepositorioCompras::novo(uow)
+                .buscar_nota(relatorio.nota_entrada)
+                .map_err(cardeal_storage::ErroArmazenamento::Dominio)?
+                .expect("nota");
+            confirmar_entrada_comum(
+                relatorio.nota_entrada,
+                local,
+                true,
+                false,
+                &ctx(empresa),
+                uow,
+            )
+            .map_err(cardeal_storage::ErroArmazenamento::Dominio)?;
+            Ok((
+                relatorio.nota_entrada,
+                nota.valor_total,
+                item.custo_final_unitario(),
+            ))
+        })
+        .unwrap()
+        .valor;
+
+    // O total da nota é o vNF, e o título a pagar também.
+    assert_eq!(total, cardeal_kernel::Dinheiro::centavos(7_250));
+    let titulo: i64 = arm
+        .leitor()
+        .consultar(|c| {
+            c.query_row(
+                "SELECT valor_original FROM financeiro_titulo
+                 WHERE empresa = ?1 AND origem_modulo = 'compras' AND origem_id = ?2",
+                rusqlite::params![empresa.em_bytes().as_slice(), nota_id.em_bytes().as_slice()],
+                |r| r.get(0),
+            )
+            .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+        })
+        .unwrap();
+    assert_eq!(titulo, 7_250);
+    // E o custo que entrou no estoque tem desconto, frete, ST e IPI: 72,50 / 12.
+    assert_eq!(custo_unitario, cardeal_kernel::Preco::interna(6_041_667));
+    let custo_medio: i64 = arm
+        .leitor()
+        .consultar(|c| {
+            c.query_row(
+                "SELECT custo_medio FROM estoque_saldo_local WHERE produto = ?1",
+                [produto.em_bytes().as_slice()],
+                |r| r.get(0),
+            )
+            .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+        })
+        .unwrap();
+    assert_eq!(custo_medio, 6_041_667);
+}
+
+/// `xml_nota` com tipo, finalidade, destinatário, CFOP, GTIN e emitente escolhidos.
+fn xml_variante(
+    chave: &str,
+    tp_nf: &str,
+    fin: &str,
+    dest: &str,
+    cfop: &str,
+    emitente: &str,
+) -> String {
+    xml_nota(chave, "REF-1", "PRODUTO", "22021000")
+        .replace(
+            "<serie>1</serie>",
+            &format!("<serie>1</serie><tpNF>{tp_nf}</tpNF><finNFe>{fin}</finNFe>"),
+        )
+        .replace(
+            &format!("<CNPJ>{CNPJ_FORNECEDOR}</CNPJ>"),
+            &format!("<CNPJ>{emitente}</CNPJ>"),
+        )
+        .replace("</emit>", &format!("</emit><dest>{dest}</dest>"))
+        .replace(
+            "<NCM>22021000</NCM>",
+            "<cEAN>7894900011517</cEAN><NCM>22021000</NCM>",
+        )
+        .replace(
+            "<NCM>22021000</NCM>",
+            &format!("<NCM>22021000</NCM><CFOP>{cfop}</CFOP>"),
+        )
+}
+
+#[test]
+fn xml_que_nao_e_compra_da_empresa_e_recusado_com_o_motivo() {
+    let (_dir, arm, empresa) = base();
+    let (d, s, amb) = despachante_e_sessao(empresa);
+    let importar = |xml: String| {
+        d.executar_comando(
+            "compras.importar_nota_de_arquivo_xml.v1",
+            &carga(&ImportarNotaDeArquivoXml { xml }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+    };
+    let nos = format!("<CNPJ>{CNPJ_EMPRESA}</CNPJ>");
+    let casos = [
+        // Emitida pela própria empresa (uma venda nossa).
+        (
+            "6",
+            xml_variante(
+                &"6".repeat(44),
+                "1",
+                "1",
+                "<CPF>52998224725</CPF>",
+                "5102",
+                CNPJ_EMPRESA,
+            ),
+            "própria empresa",
+        ),
+        // Para outro destinatário.
+        (
+            "7",
+            xml_variante(
+                &"7".repeat(44),
+                "1",
+                "1",
+                "<CNPJ>12345678000195</CNPJ>",
+                "5102",
+                CNPJ_FORNECEDOR,
+            ),
+            "destinatário",
+        ),
+        // Devolução de cliente.
+        (
+            "8",
+            xml_variante(&"8".repeat(44), "1", "4", &nos, "5202", CNPJ_FORNECEDOR),
+            "devolução",
+        ),
+        // Nota de entrada de quem a emitiu.
+        (
+            "9",
+            xml_variante(&"9".repeat(44), "0", "1", &nos, "1102", CNPJ_FORNECEDOR),
+            "nota de entrada",
+        ),
+    ];
+    for (digito, xml, trecho) in casos {
+        let erro = importar(xml).unwrap_err();
+        assert_eq!(
+            erro.codigo,
+            cardeal_kernel::CodigoErro::ENTRADA_INVALIDA,
+            "{digito}"
+        );
+        assert!(
+            erro.mensagem.contains(trecho),
+            "{digito}: {}",
+            erro.mensagem
+        );
+        assert_eq!(conta_notas_com_chave(&arm, empresa, &digito.repeat(44)), 0);
+    }
+    // A venda do fornecedor para nós (tpNF 1) é compra.
+    let compra: RelatorioImportacao = postcard::from_bytes(
+        &importar(xml_variante(
+            &"2".repeat(44),
+            "1",
+            "1",
+            &nos,
+            "5102",
+            CNPJ_FORNECEDOR,
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(compra.estado, EstadoNotaEntrada::AConferir);
+}
+
+#[test]
+fn cfop_que_nao_e_venda_fica_a_conferir_com_aviso_mesmo_com_tudo_casado() {
+    let (_dir, arm, empresa) = base();
+    cadastrar_produto_com_gtin(&arm, empresa, "Refrigerante", "22021000", "7894900011517");
+    let local = cadastrar_local(&arm, empresa);
+    let ctx_escrita = ContextoEscrita::novo(empresa, Id::novo(), Id::novo(), Id::novo());
+    arm.escritor()
+        .executar(ctx_escrita, move |uow| {
+            RepositorioCompras::novo(uow)
+                .definir_preferencias(&PreferenciasCompras {
+                    empresa,
+                    confirma_automaticamente_quando_tudo_casa: true,
+                    gera_titulo_a_pagar: true,
+                    rateio_por: RateioPor::Valor,
+                    local_padrao: Some(local),
+                    pago_no_ato_padrao: false,
+                })
+                .map_err(cardeal_storage::ErroArmazenamento::Dominio)
+        })
+        .unwrap();
+    let (d, s, amb) = despachante_e_sessao(empresa);
+    let nos = format!("<CNPJ>{CNPJ_EMPRESA}</CNPJ>");
+    let importar = |chave: &str, cfop: &str| -> RelatorioImportacao {
+        postcard::from_bytes(
+            &d.executar_comando(
+                "compras.importar_nota_de_arquivo_xml.v1",
+                &carga(&ImportarNotaDeArquivoXml {
+                    xml: xml_variante(chave, "1", "1", &nos, cfop, CNPJ_FORNECEDOR),
+                }),
+                &s,
+                &amb,
+                arm.escritor(),
+            )
+            .unwrap(),
+        )
+        .unwrap()
+    };
+
+    // Uma venda com tudo casado (GTIN) entra sozinha…
+    let venda = importar(&"2".repeat(44), "5102");
+    assert_eq!(venda.estado, EstadoNotaEntrada::Confirmada);
+    // …mas a remessa de um aparelho para conserto, não: fica a conferir, com o aviso.
+    let conserto = importar(&"3".repeat(44), "5915");
+    assert_eq!(
+        (conserto.estado, conserto.itens_nao_casados),
+        (EstadoNotaEntrada::AConferir, 0)
+    );
+    assert!(conserto.titulo.is_none());
+    let alerta: Option<String> = arm
+        .leitor()
+        .consultar(|c| {
+            c.query_row(
+                "SELECT alerta FROM compras_nota_entrada WHERE id = ?1",
+                [conserto.nota_entrada.em_bytes().as_slice()],
+                |r| r.get(0),
+            )
+            .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+        })
+        .unwrap();
+    let alerta = alerta.expect("a nota guarda o aviso");
+    assert!(
+        alerta.contains("CFOP 5915 (remessa para conserto ou reparo)"),
+        "{alerta}"
+    );
+    assert_eq!(
+        conta_titulos_a_pagar(&arm, empresa),
+        1,
+        "só a venda gerou título"
+    );
+}
+
+#[test]
+fn varredura_da_sefaz_pula_o_que_nao_e_compra_sem_travar() {
+    let (_dir, arm, empresa) = base();
+    let sim = std::sync::Arc::new(FiscalSimulado::novo());
+    let cnpj_empresa = Cnpj::novo(CNPJ_EMPRESA).unwrap();
+    let nos = format!("<CNPJ>{CNPJ_EMPRESA}</CNPJ>");
+    let outra = "4".repeat(44);
+    let compra = "5".repeat(44);
+    sim.semear(
+        cnpj_empresa,
+        1,
+        &ChaveAcesso::nova(&outra).unwrap(),
+        xml_variante(
+            &outra,
+            "1",
+            "1",
+            "<CNPJ>12345678000195</CNPJ>",
+            "5102",
+            CNPJ_FORNECEDOR,
+        ),
+    );
+    sim.semear(
+        cnpj_empresa,
+        2,
+        &ChaveAcesso::nova(&compra).unwrap(),
+        xml_variante(&compra, "1", "1", &nos, "5102", CNPJ_FORNECEDOR),
+    );
+    let ctx_escrita = ContextoEscrita::novo(empresa, Id::novo(), Id::novo(), Id::novo());
+    arm.escritor()
+        .executar(ctx_escrita, move |uow| {
+            let relatorios = verificar_notas_na_sefaz(sim.as_ref(), &ctx(empresa), uow)
+                .map_err(cardeal_storage::ErroArmazenamento::Dominio)?;
+            assert_eq!(
+                relatorios.len(),
+                1,
+                "a nota de outro destinatário ficou de fora"
+            );
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(conta_notas_com_chave(&arm, empresa, &outra), 0);
+    assert_eq!(conta_notas_com_chave(&arm, empresa, &compra), 1);
+}

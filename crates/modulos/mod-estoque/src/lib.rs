@@ -65,16 +65,21 @@ mod comandos;
 mod consultas;
 mod consultas_analise;
 mod consultas_compras;
+mod consultas_dicionario;
 mod consultas_importacao;
+mod consultas_inventario;
 mod consultas_lote;
 mod consultas_preco;
 mod consultas_rentabilidade;
+mod consultas_transferencia;
+mod consultas_validade;
 mod erros;
 pub mod eventos;
 pub mod fiscal;
 pub mod hierarquia;
 pub mod historico_compras;
 pub mod importacao_estrutura;
+pub mod importacao_produtos;
 mod inventario;
 mod listagem;
 mod manifesto;
@@ -82,25 +87,37 @@ mod manifesto;
 pub mod migracoes;
 #[cfg(feature = "sqlite")]
 mod modulo;
+pub mod padronizacao;
 mod parametros_preco;
 pub mod precificacao;
 mod produto;
+#[cfg(feature = "sqlite")]
+mod produto_para_nota;
 pub mod receituario;
 #[cfg(feature = "sqlite")]
 mod repositorio;
 #[cfg(feature = "sqlite")]
+pub(crate) mod repositorio_dicionario;
+#[cfg(feature = "sqlite")]
+pub(crate) mod repositorio_inventario;
+#[cfg(feature = "sqlite")]
 pub(crate) mod repositorio_lote;
 #[cfg(feature = "sqlite")]
 pub(crate) mod repositorio_preco;
+#[cfg(feature = "sqlite")]
+pub(crate) mod repositorio_transferencia;
 mod saldo;
+pub mod transferencia;
 
 pub use aparelho_origem::AparelhoOrigem;
+#[cfg(feature = "sqlite")]
+pub use comandos::criar_produto_de_compra_comum;
 #[cfg(feature = "sqlite")]
 pub use comandos::{completar_ncm_se_vazio, criar_peca_rapida_comum};
 #[cfg(feature = "sqlite")]
 pub use comandos::{
-    registrar_entrada_com_lote_comum, registrar_entrada_comum, registrar_saida_comum,
-    registrar_saida_de_lote_comum,
+    devolver_saidas_da_origem, registrar_entrada_com_lote_comum, registrar_entrada_comum,
+    registrar_saida_comum, registrar_saida_de_lote_comum,
 };
 pub use comandos::{
     AjustarSaldo, AparelhoOrigemRegistrado, CriarGrupoProduto, CriarLocal, CriarProduto,
@@ -113,18 +130,26 @@ pub use comandos::{
 pub use comandos::{
     AlteracaoAplicada, AlteracaoDesfeita, AplicarAlteracaoEmLote, DesfazerAlteracaoEmLote,
 };
+pub use comandos::{
+    CancelarInventario, ContagemIniciada, ContagemRegistrada, CriarInventario, EncerrarInventario,
+    IniciarContagem, InventarioCriado, InventarioEncerradoResumo, RegistrarContagem,
+};
 pub use comandos::{CriarPecaRapida, PecaRapidaCriada};
 pub use comandos::{DefinirCamposFiscaisDoGrupo, DefinirCamposFiscaisDoProduto};
+pub use comandos::{DefinirComissaoDoGrupo, DefinirComissaoDoProduto};
 pub use comandos::{
     DefinirMargemDoGrupo, DefinirMargemDoProduto, DefinirParametrosPreco,
     DefinirPerfilFiscalDoGrupo, MoverGrupoProduto, MoverProdutosDeGrupo, ProdutosMovidos,
     RenomearGrupoProduto,
 };
-pub use comandos::{EstruturaImportada, ImportarEstrutura};
+pub use comandos::{DefinirTermoDoDicionario, ProdutoDeCompraCriado, RemoverTermoDoDicionario};
+pub use comandos::{EstruturaImportada, ImportarEstrutura, ImportarProdutos, ProdutosImportados};
+pub use comandos::{MotivoPerda, PerdaRegistrada, RegistrarPerda};
+pub use comandos::{TransferenciaFeita, TransferirEntreLocais};
 #[cfg(feature = "sqlite")]
 pub use consultas::{
-    melhor_local_de_saida, movimentos_do_produto, produtos_abaixo_do_ponto_pedido,
-    saldo_disponivel_do_produto,
+    melhor_local_de_saida, movimentos_da_origem, movimentos_do_produto,
+    produtos_abaixo_do_ponto_pedido, saldo_disponivel_do_produto,
 };
 pub use consultas::{
     AparelhoOrigemResumo, ArvoreGruposProduto, DetalheDoLotePorCodigo, DetalheLote, GruposProduto,
@@ -135,7 +160,11 @@ pub use consultas::{
 };
 pub use consultas_analise::AnaliseDeEstoque;
 pub use consultas_compras::HistoricoDeCompras;
-pub use consultas_importacao::PreviaDaImportacaoDaEstrutura;
+pub use consultas_dicionario::{DicionarioDeNomes, SugerirNomeDoProduto};
+pub use consultas_importacao::{PreviaDaImportacaoDaEstrutura, PreviaDaImportacaoDeProdutos};
+pub use consultas_inventario::{
+    Inventarios, ItemDaPosicao, PosicaoDoInventario, PosicaoInventario, ResumoInventario,
+};
 pub use consultas_lote::{
     AlteracaoRegistrada, HistoricoDeAlteracoesEmLote, LinhaDaPrevia, PerfilFiscalDoProduto,
     PerfilFiscalEfetivo, PreviaDaAlteracaoEmLote, ProdutoParaLote, ProdutosParaLote,
@@ -143,10 +172,14 @@ pub use consultas_lote::{
 #[cfg(feature = "sqlite")]
 pub use consultas_preco::{encargos_da_empresa, parametros_da_empresa, sugerir_precos};
 pub use consultas_preco::{
-    EncargosDaEmpresa, OrigemMargem, ParametrosDePreco, PrecoSugeridoDoProduto,
+    EncargosDaEmpresa, OrigemComissao, OrigemMargem, ParametrosDePreco, PrecoSugeridoDoProduto,
     PrecosSugeridosDoGrupo, SugestaoDePreco,
 };
 pub use consultas_rentabilidade::{EncargosAtuais, SaidaDoProduto, SaidasPorProdutoEOrigem};
+pub use consultas_transferencia::{
+    ItemTransferido, ResumoTransferencia, SaldoNoLocal, SaldosDoProdutoPorLocal, Transferencias,
+};
+pub use consultas_validade::{LoteComValidade, LotesComValidade};
 pub use erros::ErroEstoque;
 pub use inventario::{AjusteInventario, ContagemItem, EstadoInventario, Inventario};
 pub use listagem::ListarProdutos;
@@ -158,6 +191,8 @@ pub use produto::{
     validar_gtin, Conversao, DetalhesTecnicos, EstadoLote, Lote, OrigemLote, Produto, Unidade,
     Variacao,
 };
+#[cfg(feature = "sqlite")]
+pub use produto_para_nota::{produtos_para_nota, ProdutoParaNota};
 #[cfg(feature = "sqlite")]
 pub use repositorio::RepositorioEstoque;
 pub use saldo::{custo_medio_movel, Movimento, SaidaAplicada, SaldoLocal, TipoMovimento};

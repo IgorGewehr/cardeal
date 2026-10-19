@@ -211,6 +211,7 @@ está ocupado.
 | `os.garantia.ver` | Ver relatório de reincidência | Baixo |
 | `os.apontamento.iniciar` / `.encerrar` | Iniciar/encerrar apontamento de tempo | Baixo |
 | `os.apontamento.ajustar` | Corrigir manualmente um apontamento de tempo | Médio |
+| `os.custo_hora.definir` | Definir o custo-hora dos técnicos e o padrão da oficina (2026-10-13) | Médio |
 
 ## 10. Telas
 
@@ -402,3 +403,28 @@ A tela (`cardeal-desktop::tela_os`) ganhou uma aba "Lucratividade" com a margem 
 demanda para as ordens carregadas — sem uma consulta de "OS faturadas no período" ainda (gap
 conhecido, ver §6), o cálculo hoje roda sobre a mesma lista de `OrdensEmAberto` da aba
 principal. `cardeal-analytics` em si não tem UI própria — é consumida diretamente pela tela.
+
+## 15. Custo-hora da equipe (2026-10-13)
+
+O que faltava para a mão de obra entrar nas margens. **`mod_os::custo_hora::TabelaCustoHora`** (domínio
+puro): o custo de uma hora de cada técnico — o técnico é o **usuário** que apontou ou foi atribuído ao
+item — e o **padrão da oficina** para quem não tem o seu; `custo_do_tempo`/`custo_das_horas` arredondam ao
+centavo. Migração `os` v9 (`os_custo_hora`, o padrão guardado com o técnico vazio), comando
+`os.definir_custo_hora.v1` (`os.custo_hora.definir`; `None` tira o valor, e o técnico volta ao padrão) e
+consulta `os.custos_hora.v1` (`os.margem.ver`).
+
+Onde entra:
+- **Margem prevista** (`os.margem_prevista_da_ordem.v1`): cada item de mão de obra custa **horas × custo-hora
+  do técnico** — as horas previstas do item ou, sem elas, o tempo que aquele técnico já apontou na OS. Sem
+  horas ou sem custo-hora, o item segue na receita mas fora das margens (`itens_sem_custo`), como antes.
+- **Margem real** (`os.margem_da_ordem.v1` e `os.margem_das_ordens_no_periodo.v1`): ganham
+  `custo_mao_de_obra` (o tempo **apontado** e encerrado × custo-hora de cada técnico) e
+  `mao_de_obra_sem_custo` (houve tempo de técnico sem custo-hora, que ficou de fora); `margem()` desconta peças
+  **e** mão de obra.
+
+Telas: "Custo-hora da equipe…" no topo da tela de OS (padrão e um campo por usuário; grava só o que mudou);
+"Horas previstas" no item de mão de obra do orçamento; o painel de margem do detalhe explica quando a mão de
+obra ficou sem custo; no Financeiro, o diálogo de baixa da parcela da OS e o cartão "Margem das OS no mês"
+mostram a mão de obra. O lançamento contábil do faturamento **não muda**: a mão de obra própria já está na
+folha (despesa de pessoal); o custo-hora é **gerencial**, para a margem, e não vira CMV no razão.
+

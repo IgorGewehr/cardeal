@@ -73,6 +73,27 @@ const SQL_PAGO_NO_ATO: &str = r"
 ALTER TABLE compras_preferencias ADD COLUMN pago_no_ato_padrao INTEGER NOT NULL DEFAULT 0 CHECK (pago_no_ato_padrao IN (0,1));
 ";
 
+// Migração v3 (2026-10-13): o código de barras (cEAN) do item fica guardado — antes ele só
+// servia para casar e era descartado; agora o produto criado a partir do item nasce com ele.
+const SQL_CODIGO_BARRAS_ITEM: &str = r"
+ALTER TABLE compras_item_nota_entrada ADD COLUMN codigo_barras TEXT;
+";
+
+// Migração v4 (2026-10-13): o desconto do item e os impostos que a nota cobra sobre ele e quem
+// revende não recupera (ICMS-ST + FCP-ST + IPI) — entram no custo do item e no total da nota
+// (antes o total era só produtos + despesas, e o título a pagar saía menor que o boleto).
+const SQL_DESCONTO_E_IMPOSTOS_ITEM: &str = r"
+ALTER TABLE compras_item_nota_entrada ADD COLUMN valor_desconto INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE compras_item_nota_entrada ADD COLUMN valor_impostos INTEGER NOT NULL DEFAULT 0;
+";
+
+// Migração v5 (2026-10-15): o aviso de conferência da nota — CFOP de item que não é venda
+// (remessa para conserto, bonificação, consignação, entrega futura…). Nota com aviso nunca é
+// confirmada sozinha.
+const SQL_ALERTA_NOTA: &str = r"
+ALTER TABLE compras_nota_entrada ADD COLUMN alerta TEXT;
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -84,6 +105,24 @@ const MIGRACOES: &[Migracao] = &[
         versao: 2,
         nome: "compras_pago_no_ato",
         sql: SQL_PAGO_NO_ATO,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 3,
+        nome: "compras_item_codigo_barras",
+        sql: SQL_CODIGO_BARRAS_ITEM,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 4,
+        nome: "compras_item_desconto_e_impostos",
+        sql: SQL_DESCONTO_E_IMPOSTOS_ITEM,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 5,
+        nome: "compras_alerta_da_nota",
+        sql: SQL_ALERTA_NOTA,
         tipo: TipoMigracao::Esquema,
     },
 ];

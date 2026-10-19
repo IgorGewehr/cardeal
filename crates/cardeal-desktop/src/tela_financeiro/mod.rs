@@ -3,19 +3,27 @@
 //! Duas abas (a receber / a pagar), cada uma a lista inteira de parcelas em aberto.
 //! "+ Lançar título" e o clique numa linha abrem o `Dialogo` — ver a parcela e **dar baixa**.
 
+mod ajustes;
 mod baixa;
+mod balancete;
+mod bancos;
 mod cadastro_rapido;
 mod carga;
+mod cheques;
 mod cobranca;
 mod conciliacao_banco;
+mod conferencia;
 mod contas;
 mod custos;
 mod dre;
 mod fluxo;
+mod importacao;
 mod lancar;
+mod pacote_contador;
 mod pessoal;
 mod plano_contas;
 mod recorrencias;
+mod regua;
 mod renegociar;
 mod saude;
 #[cfg(test)]
@@ -24,7 +32,9 @@ mod visao;
 
 use std::collections::HashMap;
 
+use ajustes::*;
 use baixa::*;
+use bancos::*;
 use cadastro_rapido::*;
 use cardeal_cliente::{Motor, Sessao};
 use cardeal_kernel::{Competencia, Data, Dinheiro, Fuso, Id, Periodo};
@@ -75,6 +85,7 @@ enum Aba {
     Resultado,
     Plano,
     Conciliacao,
+    Cheques,
     Fluxo,
     Bancos,
 }
@@ -143,6 +154,8 @@ enum Dlg {
         valor_sugerido: String,
         /// A renegociação do saldo (seção recolhida no mesmo diálogo).
         renegociar: FormRenegociar,
+        /// Alterar o vencimento e cancelar a conta (seções recolhidas no mesmo diálogo).
+        ajuste: FormAjuste,
     },
     /// Quitar várias parcelas selecionadas de uma vez (pelo total devido de cada uma).
     BaixarLote {
@@ -154,12 +167,36 @@ enum Dlg {
     NovaRecorrencia(FormRecorrencia),
     NovaContaBancaria {
         nome: String,
+        /// O saldo de hoje, opcional — vira o saldo inicial da conta.
+        saldo: String,
+    },
+    /// O saldo inicial de uma conta do Disponível.
+    SaldoInicial {
+        conta: Id,
+        nome: String,
+        valor: String,
+        data: String,
+    },
+    /// Transferir entre contas (caixa → banco, banco → banco).
+    Transferir(FormTransferencia),
+    /// Cancelar uma transferência (estorna os dois lados).
+    CancelarTransferencia {
+        id: Id,
+        descricao: String,
+        motivo: String,
+    },
+    /// Confirmação de desativar uma conta sem saldo.
+    DesativarConta {
+        conta: Id,
+        nome: String,
     },
     NovaCategoria {
         nome: String,
         /// `None` = serve para as duas espécies.
         especie: Option<EspecieTitulo>,
     },
+    /// "Importar contas em aberto…": a planilha escolhida e a prévia.
+    ImportarContas(importacao::EstadoImportacaoContas),
 }
 
 /// Para qual formulário o cadastro rápido ([`DlgRapido`]) devolve o `Id` recém-criado —
@@ -320,6 +357,10 @@ struct FormLancar {
     data: String,
     categoria: Option<Id>,
     pagamento: crate::pagamento::EstadoPagamento,
+    /// A pessoa cujo último lançamento já foi consultado (para não consultar a cada quadro).
+    preenchido_para: Option<Id>,
+    /// O aviso do pré-preenchimento ("Preenchido com o último lançamento…").
+    aviso_preenchido: Option<String>,
 }
 
 impl FormLancar {
@@ -341,6 +382,8 @@ impl Default for FormLancar {
             data: Data::hoje(Fuso::BRASILIA).to_string(),
             categoria: None,
             pagamento: crate::pagamento::EstadoPagamento::novo(MeioPagamento::Pix),
+            preenchido_para: None,
+            aviso_preenchido: None,
         }
     }
 }
@@ -375,14 +418,30 @@ pub struct EstadoTelaFinanceiro {
     /// Aba Cobrança: o aging carregado e se está olhando o a pagar.
     aging: Option<mod_financeiro::aging::Aging>,
     cobranca_pagar: bool,
+    /// A fila de hoje da régua de cobrança.
+    fila_cobranca: Option<mod_financeiro::FilaDoDia>,
+    /// A situação fiscal (para o aviso do certificado na Visão).
+    situacao_fiscal: Option<mod_fiscal::SituacaoFiscalDaEmpresa>,
+    /// O aviso do certificado pediu para abrir Configurações › Fiscal (o `main` atende).
+    pub pedido_config_fiscal: bool,
+    /// O editor da régua aberto.
+    regua_edicao: Option<Vec<regua::EtapaEmEdicao>>,
     plano: plano_contas::EstadoPlano,
     conciliacao: conciliacao_banco::EstadoConciliacao,
+    /// A carteira de cheques (aba Cheques).
+    cheques: cheques::EstadoCheques,
     saude: Option<mod_financeiro::saude::Saude>,
     dre_mes: Option<Competencia>,
     dre: Option<mod_financeiro::ComparativoDre>,
     dfc: Option<mod_financeiro::dfc::Dfc>,
-    /// Dentro de Resultado: `false` = DRE, `true` = DFC.
-    dre_dfc: bool,
+    /// O DFC pelo método indireto (do lucro ao caixa) do mesmo mês.
+    dfc_indireto: Option<mod_financeiro::dfc::DfcIndireto>,
+    /// A aba do DFC mostra o método indireto.
+    dfc_metodo_indireto: bool,
+    /// Dentro de Resultado: 0 = DRE, 1 = DFC, 2 = balancete.
+    visao_resultado: u8,
+    /// O balancete do mês (aba Resultado › Balancete).
+    balancete: Option<Vec<cardeal_ledger::LinhaBalancete>>,
     projecao: Vec<mod_financeiro::ItemProjecaoCategoria>,
     ordenacao: Ordenacao,
     nomes: HashMap<Id, String>,
@@ -427,6 +486,8 @@ pub struct EstadoTelaFinanceiro {
     /// cada `carregar` (a OS pode ter mudado).
     margens_os: HashMap<Id, Option<mod_os::MargemDaOrdemServico>>,
     contas_disp: Vec<ItemContaDisponivel>,
+    /// As transferências entre contas (aba Contas bancárias).
+    transferencias: Vec<mod_financeiro::ItemTransferencia>,
     erro: Option<String>,
     dlg: Dlg,
     /// Cadastro rápido (cliente/fornecedor/categoria) aberto por cima do `dlg` principal —
@@ -489,12 +550,13 @@ pub fn mostrar(
             match estado.aba {
                 Aba::Visao => painel_visao(ui, motor, sessao, estado),
                 Aba::Fluxo => painel_fluxo(ui, motor, sessao, estado),
-                Aba::Bancos => painel_bancos(ui, estado),
+                Aba::Bancos => painel_bancos(ui, sessao, estado),
                 Aba::Custos => painel_custos(ui, motor, sessao, estado),
                 Aba::Cobranca => painel_cobranca(ui, motor, sessao, estado),
                 Aba::Resultado => painel_dre(ui, motor, sessao, estado),
                 Aba::Plano => painel_plano(ui, motor, sessao, estado),
                 Aba::Conciliacao => painel_conciliacao(ui, motor, sessao, estado),
+                Aba::Cheques => cheques::painel_cheques(ui, motor, sessao, estado),
                 _ => lista(ui, motor, sessao, estado),
             }
         },
@@ -513,7 +575,14 @@ pub fn mostrar(
         Dlg::Recorrencias => dialogo_recorrencias(ui.ctx(), motor, sessao, estado),
         Dlg::NovaRecorrencia(_) => dialogo_nova_recorrencia(ui.ctx(), motor, sessao, estado),
         Dlg::NovaContaBancaria { .. } => dialogo_conta_bancaria(ui.ctx(), motor, sessao, estado),
+        Dlg::SaldoInicial { .. } => dialogo_saldo_inicial(ui.ctx(), motor, sessao, estado),
+        Dlg::Transferir(_) => dialogo_transferir(ui.ctx(), motor, sessao, estado),
+        Dlg::CancelarTransferencia { .. } => {
+            dialogo_cancelar_transferencia(ui.ctx(), motor, sessao, estado);
+        }
+        Dlg::DesativarConta { .. } => confirmar_desativacao(ui.ctx(), motor, sessao, estado),
         Dlg::NovaCategoria { .. } => dialogo_categoria(ui.ctx(), motor, sessao, estado),
+        Dlg::ImportarContas(_) => importacao::dialogo(ui.ctx(), motor, sessao, estado),
     }
     if estado.dlg_rapido.is_some() {
         dialogo_rapido(ui.ctx(), motor, sessao, estado);
@@ -589,6 +658,14 @@ fn acoes_empresa(
         estado.carregar_recorrencias(motor, sessao);
         estado.dlg = Dlg::Recorrencias;
     }
+    // A implantação: o que já estava em aberto no sistema antigo.
+    if sessao.concede("financeiro.titulo.importar")
+        && ui
+            .add(Botao::fantasma("Importar contas em aberto…"))
+            .clicked()
+    {
+        estado.dlg = Dlg::ImportarContas(importacao::EstadoImportacaoContas::default());
+    }
 }
 
 fn abas(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTelaFinanceiro) {
@@ -601,6 +678,7 @@ fn abas(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTe
         (Aba::Resultado, "Resultado e caixa"),
         (Aba::Plano, "Plano de contas"),
         (Aba::Conciliacao, "Conciliação"),
+        (Aba::Cheques, "Cheques"),
         (Aba::Fluxo, "Fluxo de caixa"),
         (Aba::Bancos, "Contas bancárias"),
     ])
@@ -672,7 +750,7 @@ impl EstadoTelaFinanceiro {
             "financeiro-conciliacao" => self.aba = Aba::Conciliacao,
             "financeiro-dfc" => {
                 self.aba = Aba::Resultado;
-                self.dre_dfc = true;
+                self.visao_resultado = 1;
             }
             "financeiro-pagar" => self.aba = Aba::Pagar,
             "financeiro-fluxo" => self.aba = Aba::Fluxo,
@@ -720,6 +798,7 @@ impl EstadoTelaFinanceiro {
                     situacao: None,
                     valor_sugerido: String::new(),
                     renegociar: FormRenegociar::default(),
+                    ajuste: FormAjuste::default(),
                 };
             }
         }

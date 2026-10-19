@@ -242,6 +242,88 @@ ALTER TABLE estoque_parametros_preco ADD COLUMN custo_referencia TEXT NOT NULL D
     CHECK (custo_referencia IN ('CustoMedio','UltimaCompra','MaiorDosDois'));
 ";
 
+// Migração v10 (2026-10-13): comissão de vendedor por estrutura mercadológica — o percentual
+// próprio do grupo e do produto (nulo = herda), como a margem, e o antes/depois na alteração em
+// lote. O padrão continua sendo `estoque_parametros_preco.comissao`.
+const SQL_COMISSAO_POR_ESTRUTURA: &str = r"
+ALTER TABLE estoque_grupo_produto ADD COLUMN comissao INTEGER;
+ALTER TABLE estoque_produto ADD COLUMN comissao INTEGER;
+ALTER TABLE estoque_alteracao_lote_item ADD COLUMN antes_comissao INTEGER;
+ALTER TABLE estoque_alteracao_lote_item ADD COLUMN depois_comissao INTEGER;
+";
+
+// Migração v11 (2026-10-13): inventário com contagem cega. Um local tem no máximo um
+// inventário aberto (índice parcial); a contagem guarda a foto do sistema, o contado e, depois
+// de encerrado, o valor do ajuste (ao custo médio).
+const SQL_INVENTARIO: &str = r"
+CREATE TABLE estoque_inventario (
+    id            BLOB PRIMARY KEY,
+    empresa       BLOB    NOT NULL,
+    local         BLOB    NOT NULL REFERENCES estoque_local(id),
+    descricao     TEXT    NOT NULL,
+    grupo         BLOB REFERENCES estoque_grupo_produto(id),
+    estado        TEXT    NOT NULL CHECK (estado IN
+                    ('Planejado','EmContagem','Congelado','Conferido','Encerrado','Cancelado')),
+    criado_por    BLOB    NOT NULL,
+    criado_em     INTEGER NOT NULL,
+    iniciado_em   INTEGER,
+    encerrado_em  INTEGER,
+    versao        INTEGER NOT NULL DEFAULT 1
+) STRICT;
+CREATE UNIQUE INDEX estoque_inventario_aberto_por_local ON estoque_inventario(local)
+    WHERE estado NOT IN ('Encerrado','Cancelado');
+CREATE INDEX estoque_inventario_recentes ON estoque_inventario(empresa, criado_em DESC);
+
+CREATE TABLE estoque_contagem_item (
+    id                  BLOB PRIMARY KEY,
+    inventario          BLOB    NOT NULL REFERENCES estoque_inventario(id),
+    produto             BLOB    NOT NULL REFERENCES estoque_produto(id),
+    quantidade_sistema  INTEGER NOT NULL,
+    quantidade_contada  INTEGER,
+    divergencia         INTEGER,
+    contado_por         BLOB,
+    contado_em          INTEGER,
+    valor_ajuste        INTEGER,
+    UNIQUE (inventario, produto)
+) STRICT;
+";
+
+// Migração v12 (2026-10-13): transferência entre locais do mesmo CNPJ — o documento, para o
+// histórico; o saldo e os movimentos `Transferencia*` são os de sempre.
+const SQL_TRANSFERENCIA: &str = r"
+CREATE TABLE estoque_transferencia (
+    id          BLOB PRIMARY KEY,
+    empresa     BLOB    NOT NULL,
+    origem      BLOB    NOT NULL REFERENCES estoque_local(id),
+    destino     BLOB    NOT NULL REFERENCES estoque_local(id),
+    observacao  TEXT,
+    criado_por  BLOB    NOT NULL,
+    criado_em   INTEGER NOT NULL,
+    CHECK (origem <> destino)
+) STRICT;
+CREATE INDEX estoque_transferencia_recentes ON estoque_transferencia(empresa, criado_em DESC);
+
+CREATE TABLE estoque_transferencia_item (
+    transferencia   BLOB    NOT NULL REFERENCES estoque_transferencia(id),
+    produto         BLOB    NOT NULL REFERENCES estoque_produto(id),
+    quantidade      INTEGER NOT NULL CHECK (quantidade > 0),
+    custo_unitario  INTEGER NOT NULL,
+    PRIMARY KEY (transferencia, produto)
+) STRICT;
+";
+
+// Migração v13 (2026-10-13): o dicionário DE/PARA de nomes de produto (padronização
+// determinística do `xProd` da nota), do catálogo da organização.
+const SQL_DICIONARIO_NOME: &str = r"
+CREATE TABLE estoque_dicionario_nome (
+    empresa        BLOB    NOT NULL,
+    de             TEXT    NOT NULL,
+    para           TEXT    NOT NULL,
+    atualizado_em  INTEGER NOT NULL,
+    PRIMARY KEY (empresa, de)
+) STRICT, WITHOUT ROWID;
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -295,6 +377,30 @@ const MIGRACOES: &[Migracao] = &[
         versao: 9,
         nome: "estoque_custo_de_referencia",
         sql: SQL_CUSTO_DE_REFERENCIA,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 10,
+        nome: "estoque_comissao_por_estrutura",
+        sql: SQL_COMISSAO_POR_ESTRUTURA,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 11,
+        nome: "estoque_inventario",
+        sql: SQL_INVENTARIO,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 12,
+        nome: "estoque_transferencia",
+        sql: SQL_TRANSFERENCIA,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 13,
+        nome: "estoque_dicionario_nome",
+        sql: SQL_DICIONARIO_NOME,
         tipo: TipoMigracao::Esquema,
     },
 ];

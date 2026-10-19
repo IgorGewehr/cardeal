@@ -6,10 +6,10 @@ use cardeal_modkit::{Manifesto, Modulo, Registro};
 use cardeal_storage::ConjuntoMigracoes;
 
 use crate::comandos::{
-    AbrirCaixa, BaixarPagamento, BaixarRecebimento, CadastrarCaixa, CriarCategoria,
-    CriarContaBancaria, CriarRecorrencia, EstornarBaixa, FecharCaixa, LancarTituloAPagar,
-    LancarTituloAReceber, MaterializarRecorrencias, RegistrarSangria, RegistrarSuprimento,
-    RenegociarTitulo,
+    AbrirCaixa, AlterarVencimento, BaixarPagamento, BaixarRecebimento, CadastrarCaixa,
+    CancelarTitulo, CriarCategoria, CriarContaBancaria, CriarRecorrencia, EstornarBaixa,
+    FecharCaixa, LancarTituloAPagar, LancarTituloAReceber, MaterializarRecorrencias,
+    RegistrarSangria, RegistrarSuprimento, RenegociarTitulo,
 };
 use crate::comandos::{BaixarPagamentosEmLote, BaixarRecebimentosEmLote};
 use crate::consultas::SituacaoDaParcela;
@@ -50,6 +50,15 @@ impl Modulo for ModuloFinanceiro {
             .comando::<FecharCaixa>("financeiro.fechar_caixa.v1")
             .comando::<EstornarBaixa>("financeiro.estornar_baixa.v1")
             .comando::<RenegociarTitulo>("financeiro.renegociar_titulo.v1")
+            .comando::<CancelarTitulo>("financeiro.cancelar_titulo.v1")
+            .comando::<crate::ImportarContasEmAberto>("financeiro.importar_contas.v1")
+            .consulta::<crate::PreviaDaImportacaoDeContas>("financeiro.previa_importacao_contas.v1")
+            .comando::<crate::DefinirSaldoInicial>("financeiro.definir_saldo_inicial.v1")
+            .comando::<crate::TransferirEntreContas>("financeiro.transferir_entre_contas.v1")
+            .comando::<crate::CancelarTransferencia>("financeiro.cancelar_transferencia.v1")
+            .comando::<crate::DesativarContaDisponivel>("financeiro.desativar_conta.v1")
+            .consulta::<crate::Transferencias>("financeiro.transferencias.v1")
+            .comando::<AlterarVencimento>("financeiro.alterar_vencimento.v1")
             .comando::<CriarContaBancaria>("financeiro.criar_conta_bancaria.v1")
             .comando::<CriarCategoria>("financeiro.criar_categoria.v1")
             .comando::<crate::comandos::CriarCategoriasSugeridas>(
@@ -81,6 +90,20 @@ impl Modulo for ModuloFinanceiro {
             .comando::<crate::IgnorarItemDoExtrato>("financeiro.ignorar_item_do_extrato.v1")
             .comando::<crate::LancarItemDoExtrato>("financeiro.lancar_item_do_extrato.v1")
             .consulta::<crate::ItensDoExtrato>("financeiro.itens_do_extrato.v1")
+            .consulta::<crate::ConferenciaDasContas>("financeiro.conferencia_das_contas.v1")
+            .consulta::<crate::UltimoLancamentoAReceber>(
+                "financeiro.ultimo_lancamento_a_receber.v1",
+            )
+            .consulta::<crate::UltimoLancamentoAPagar>("financeiro.ultimo_lancamento_a_pagar.v1")
+            .comando::<crate::InformarSaldoDoBanco>("financeiro.informar_saldo_do_banco.v1")
+            .comando::<crate::RegistrarCheque>("financeiro.registrar_cheque.v1")
+            .comando::<crate::CompensarCheque>("financeiro.compensar_cheque.v1")
+            .comando::<crate::DevolverCheque>("financeiro.devolver_cheque.v1")
+            .consulta::<crate::CarteiraDeCheques>("financeiro.carteira_de_cheques.v1")
+            .consulta::<crate::ReguaDeCobranca>("financeiro.regua_de_cobranca.v1")
+            .consulta::<crate::FilaDeCobranca>("financeiro.fila_de_cobranca.v1")
+            .comando::<crate::DefinirReguaDeCobranca>("financeiro.definir_regua_de_cobranca.v1")
+            .comando::<crate::RegistrarCobranca>("financeiro.registrar_cobranca.v1")
             .comando::<crate::CriarContaDoPlano>("financeiro.criar_conta_do_plano.v1")
             .comando::<crate::AplicarModeloDePlano>("financeiro.aplicar_modelo_de_plano.v1")
             .comando::<crate::VincularCategoriaAConta>("financeiro.vincular_categoria_a_conta.v1")
@@ -90,6 +113,9 @@ impl Modulo for ModuloFinanceiro {
             .consulta::<crate::AgingAPagar>("financeiro.aging_a_pagar.v1")
             .consulta::<crate::SaudeFinanceira>("financeiro.saude.v1")
             .consulta::<crate::DfcDoPeriodo>("financeiro.dfc_do_periodo.v1")
+            .consulta::<crate::DfcIndiretoDoPeriodo>("financeiro.dfc_indireto_do_periodo.v1")
+            .consulta::<crate::BalanceteDoPeriodo>("financeiro.balancete_do_periodo.v1")
+            .consulta::<crate::DiarioDoPeriodo>("financeiro.diario_do_periodo.v1")
             .consulta::<crate::DreDoPeriodo>("financeiro.dre_do_periodo.v1")
             .consulta::<crate::DreComparativa>("financeiro.dre_comparativa.v1")
             .consulta::<crate::projecao::ProjecaoPorCategoria>(

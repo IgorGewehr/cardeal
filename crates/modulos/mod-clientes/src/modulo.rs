@@ -7,9 +7,9 @@ use cardeal_storage::ConjuntoMigracoes;
 
 use crate::comandos::{
     AdicionarContato, AdicionarEndereco, AdicionarPapel, CriarPessoa, DefinirLimiteCredito,
-    DesativarPessoa, EditarPessoa, ReativarPessoa,
+    DesativarPessoa, EditarPessoa, ImportarPessoas, ReativarPessoa,
 };
-use crate::consultas::{DetalhePessoa, PessoasPorPapel};
+use crate::consultas::{DetalhePessoa, PessoasPorPapel, PreviaDaImportacaoDePessoas};
 use crate::manifesto::MANIFESTO;
 use crate::migracoes;
 
@@ -35,6 +35,8 @@ impl Modulo for ModuloClientes {
             .comando::<AdicionarEndereco>("clientes.adicionar_endereco.v1")
             .comando::<DesativarPessoa>("clientes.desativar_pessoa.v1")
             .comando::<ReativarPessoa>("clientes.reativar_pessoa.v1")
+            .comando::<ImportarPessoas>("clientes.importar_pessoas.v1")
+            .consulta::<PreviaDaImportacaoDePessoas>("clientes.previa_importacao_pessoas.v1")
             .consulta::<DetalhePessoa>("clientes.detalhe_pessoa.v1")
             .consulta::<PessoasPorPapel>("clientes.pessoas_por_papel.v1")
             .consulta::<crate::listagem::ListarPessoas>("clientes.pessoas.v2");

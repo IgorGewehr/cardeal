@@ -81,6 +81,7 @@ fn sessao_completa(empresa: Id) -> Sessao {
     for p in [
         "clientes.pessoa.criar",
         "estoque.produto.criar",
+        "estoque.produto.editar",
         "estoque.local.criar",
         "estoque.movimento.entrada",
         "vendas.tabela_preco.criar",
@@ -619,6 +620,21 @@ fn painel_de_margem_do_pedido_desconta_custo_e_encargos_e_avisa_abaixo_do_minimo
     let m = margem(&d);
     assert!(m.pedido_abaixo_do_minimo);
     assert_eq!(m.itens_abaixo_do_minimo, vec![0]);
+
+    // Comissão por estrutura: 10% de comissão própria do produto tira mais 20 da margem.
+    d.executar_comando(
+        "estoque.definir_comissao_do_produto.v1",
+        &carga(&mod_estoque::DefinirComissaoDoProduto {
+            produto: cen.produto,
+            comissao: Some(Percentual::pontos(10)),
+        }),
+        &s,
+        &amb,
+        arm.escritor(),
+    )
+    .unwrap();
+    let m = margem(&d);
+    assert_eq!(m.painel.margem_liquida, Dinheiro::reais(112));
 }
 
 #[test]

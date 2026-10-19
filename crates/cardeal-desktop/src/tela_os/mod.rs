@@ -7,6 +7,7 @@
 mod andamento;
 mod apontamento;
 mod confirmacoes;
+mod custo_hora;
 mod detalhe;
 mod encomenda;
 mod faturar;
@@ -102,6 +103,8 @@ enum Dlg {
     Encomendar(Box<FormEncomenda>),
     /// A peça chegou: entrada, pagamento e aplicação (`os.registrar_chegada_da_peca.v1`).
     Chegou(Box<FormChegada>),
+    /// O custo-hora da equipe técnica (`os.definir_custo_hora.v1`).
+    CustoHora,
 }
 
 impl Dlg {
@@ -172,6 +175,7 @@ pub struct EstadoTelaOs {
     /// O local escolhido para aplicar peças; começa no primeiro (o comum é haver um só).
     aplicar_local: Option<Id>,
     usuarios: Vec<UsuarioResumo>,
+    custo_hora: custo_hora::EstadoCustoHora,
     identidade: Option<IdentidadeVisual>,
     detalhe: Option<DetalheOrdem>,
     /// A margem prevista da OS aberta; `None` sem a permissão `os.margem.ver`.
@@ -210,6 +214,8 @@ pub struct EstadoTelaOs {
     laudo_diagnostico: String,
     mao_de_obra_descricao: String,
     mao_de_obra_valor: String,
+    /// Horas previstas do serviço (opcional): com o custo-hora, põem a mão de obra na margem.
+    mao_de_obra_horas: String,
     peca_produto: Option<Id>,
     /// O texto digitado no lookup de peça (`SeletorBusca`) — hoje filtra por nome; fica
     /// pronto para somar o código curto de bancada assim que o backend o expuser (ver
@@ -423,6 +429,7 @@ impl EstadoTelaOs {
         self.laudo_diagnostico.clear();
         self.mao_de_obra_descricao.clear();
         self.mao_de_obra_valor.clear();
+        self.mao_de_obra_horas.clear();
         self.peca_produto = None;
         self.peca_busca.clear();
         self.peca_qtd.clear();
@@ -444,6 +451,11 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
                     .clicked()
                 {
                     estado.dlg = Dlg::nova();
+                }
+                if ui.add(Botao::fantasma("Custo-hora da equipe…")).clicked() {
+                    let usuarios = estado.usuarios.clone();
+                    estado.custo_hora.carregar(motor, sessao, &usuarios);
+                    estado.dlg = Dlg::CustoHora;
                 }
             }
             AbaOs::Orcamentos => {
@@ -507,6 +519,7 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
             Dlg::Faturar(_) => dialogo_faturar(ui.ctx(), motor, sessao, estado),
             Dlg::Encomendar(_) => dialogo_encomendar(ui.ctx(), motor, sessao, estado),
             Dlg::Chegou(_) => dialogo_chegada(ui.ctx(), motor, sessao, estado),
+            Dlg::CustoHora => custo_hora::dialogo(ui.ctx(), motor, sessao, estado),
         },
         AbaOs::Orcamentos => {
             crate::tela_orcamentos::dialogos(ui.ctx(), motor, sessao, &mut estado.orc);

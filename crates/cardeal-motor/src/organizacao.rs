@@ -190,6 +190,7 @@ impl MotorLocal {
                 for p in permissoes {
                     papel = papel.com_permissao(p);
                 }
+                papel.limites = cardeal_auth::PapelDeFabrica::Administrador.limites_padrao();
                 let mut repo = RepositorioAuth::novo(uow);
                 repo.inserir_papel(&papel)
                     .map_err(|e| como_erro_armazenamento(&e))?;

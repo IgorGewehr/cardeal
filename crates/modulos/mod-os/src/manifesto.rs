@@ -92,6 +92,12 @@ const PERMISSOES: &[Permissao] = &[
         None,
     ),
     perm(
+        "os.custo_hora.definir",
+        "Definir o custo-hora dos técnicos e o padrão da oficina",
+        Risco::Medio,
+        None,
+    ),
+    perm(
         "os.ordem.ver",
         "Consultar ordens de serviço",
         Risco::Baixo,

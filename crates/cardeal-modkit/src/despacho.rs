@@ -37,6 +37,7 @@ use rusqlite::Connection;
 use crate::contrato::{Comando, Consulta};
 use crate::manifesto::Manifesto;
 use crate::permissao::Risco;
+use crate::recursos::Recursos;
 use crate::registro::ConjuntoEfetivo;
 
 /// O contexto de execução de um comando ou consulta: quem, onde, quando — e o que a
@@ -63,9 +64,26 @@ pub struct Ctx {
     pub correlacao: Id,
     conjunto: Arc<ConjuntoEfetivo>,
     autorizacoes: Arc<AutorizacoesEfetivas>,
+    recursos: Arc<Recursos>,
 }
 
 impl Ctx {
+    /// O recurso do tipo `T` que o motor injetou (o cofre de segredos, o provedor fiscal...).
+    ///
+    /// # Errors
+    /// [`CodigoErro::ESTADO_INVALIDO`] se esta instalação não configurou o recurso.
+    pub fn recurso<T: Send + Sync + 'static>(&self) -> Resultado<Arc<T>> {
+        self.recursos.obter::<T>().ok_or_else(|| {
+            Erro::novo(
+                CodigoErro::ESTADO_INVALIDO,
+                format!(
+                    "recurso não configurado nesta instalação: {}",
+                    std::any::type_name::<T>()
+                ),
+            )
+        })
+    }
+
     /// A data corrente, no fuso da empresa.
     #[must_use]
     pub fn hoje(&self) -> Data {
@@ -144,6 +162,71 @@ type ExecutorComando = Arc<
 type ExecutorConsulta =
     Arc<dyn Fn(&Ctx, &Connection, &[u8]) -> Result<Vec<u8>, ErroArmazenamento> + Send + Sync>;
 
+type ExecutorTarefa = Arc<dyn Fn(&ContextoTarefa<'_>) -> Resultado<String> + Send + Sync>;
+
+struct EntradaTarefa {
+    permissao: &'static str,
+    executor: ExecutorTarefa,
+}
+
+/// O que uma tarefa recebe: o [`Ctx`] da sessão e acesso direto à leitura e à escrita — para o
+/// trabalho que **não cabe numa transação** (ler, falar com a rede, gravar o resultado), como a
+/// transmissão fiscal. Roda no processo do motor (desktop ou servidor), nunca pela rede: os
+/// segredos que a tarefa abre (certificado) não saem dali.
+pub struct ContextoTarefa<'a> {
+    /// O contexto da sessão que pediu a tarefa.
+    pub ctx: Ctx,
+    sessao: &'a Sessao,
+    ambiente: &'a Ambiente,
+    leitor: &'a Leitor,
+    escritor: &'a Escritor,
+}
+
+impl ContextoTarefa<'_> {
+    /// Uma leitura sobre o pool de leitura.
+    ///
+    /// # Errors
+    /// O erro do fecho, ou o do armazenamento.
+    pub fn ler<T>(&self, f: impl FnOnce(&Connection) -> Resultado<T>) -> Resultado<T> {
+        match self
+            .leitor
+            .consultar(|c| f(c).map_err(ErroArmazenamento::from))
+        {
+            Ok(v) => Ok(v),
+            Err(ErroArmazenamento::Dominio(e)) => Err(e),
+            Err(outro) => Err(Erro::de_dominio(&outro)),
+        }
+    }
+
+    /// Uma escrita: uma transação do escritor, com o mesmo contexto de escrita de um comando
+    /// da sessão (autoria, correlação).
+    ///
+    /// # Errors
+    /// O erro do fecho (desfaz a transação), ou o do armazenamento.
+    pub fn escrever<T, F>(&self, f: F) -> Resultado<T>
+    where
+        F: for<'u> FnOnce(&mut UnidadeDeTrabalho<'u>) -> Resultado<T> + Send + 'static,
+        T: Send + 'static,
+    {
+        let mut cte = ContextoEscrita::novo(
+            self.ambiente.empresa,
+            self.sessao.usuario,
+            self.sessao.dispositivo,
+            self.sessao.id,
+        );
+        cte.agora = Instante::agora();
+        cte.correlacao = self.ctx.correlacao;
+        match self
+            .escritor
+            .executar(cte, move |uow| f(uow).map_err(ErroArmazenamento::from))
+        {
+            Ok(confirmado) => Ok(confirmado.valor),
+            Err(ErroArmazenamento::Dominio(e)) => Err(e),
+            Err(outro) => Err(Erro::de_dominio(&outro)),
+        }
+    }
+}
+
 struct EntradaComando {
     permissao: &'static str,
     risco: Risco,
@@ -162,6 +245,7 @@ struct EntradaConsulta {
 pub struct Registro {
     comandos: HashMap<&'static str, EntradaComando>,
     consultas: HashMap<&'static str, EntradaConsulta>,
+    tarefas: HashMap<&'static str, EntradaTarefa>,
     erros: Vec<String>,
 }
 
@@ -195,6 +279,29 @@ impl Registro {
         {
             self.erros
                 .push(format!("comando \"{nome}\" declarado duas vezes"));
+        }
+        self
+    }
+
+    /// Declara uma tarefa sob o nome `nome`, exigindo `permissao` de quem a pede. A tarefa
+    /// devolve um resumo em texto (para log e tela). Não é exposta pela rede.
+    pub fn tarefa<F>(&mut self, nome: &'static str, permissao: &'static str, f: F) -> &mut Self
+    where
+        F: Fn(&ContextoTarefa<'_>) -> Resultado<String> + Send + Sync + 'static,
+    {
+        if self
+            .tarefas
+            .insert(
+                nome,
+                EntradaTarefa {
+                    permissao,
+                    executor: Arc::new(f),
+                },
+            )
+            .is_some()
+        {
+            self.erros
+                .push(format!("tarefa \"{nome}\" declarada duas vezes"));
         }
         self
     }
@@ -251,6 +358,7 @@ pub struct Ambiente {
     organizacao: Id,
     conjunto: Arc<ConjuntoEfetivo>,
     fuso: Fuso,
+    recursos: Arc<Recursos>,
 }
 
 impl Ambiente {
@@ -263,6 +371,7 @@ impl Ambiente {
             organizacao: empresa,
             conjunto: Arc::new(conjunto),
             fuso: Fuso::BRASILIA,
+            recursos: Arc::default(),
         }
     }
 
@@ -276,6 +385,7 @@ impl Ambiente {
             organizacao: empresa,
             conjunto,
             fuso: Fuso::BRASILIA,
+            recursos: Arc::default(),
         }
     }
 
@@ -283,6 +393,13 @@ impl Ambiente {
     #[must_use]
     pub const fn com_organizacao(mut self, organizacao: Id) -> Self {
         self.organizacao = organizacao;
+        self
+    }
+
+    /// Fixa os recursos da instalação ([`Recursos`]) que os manipuladores podem pedir.
+    #[must_use]
+    pub fn com_recursos(mut self, recursos: Arc<Recursos>) -> Self {
+        self.recursos = recursos;
         self
     }
 
@@ -305,6 +422,7 @@ impl Ambiente {
 pub struct Despachante {
     comandos: HashMap<&'static str, EntradaComando>,
     consultas: HashMap<&'static str, EntradaConsulta>,
+    tarefas: HashMap<&'static str, EntradaTarefa>,
 }
 
 impl std::fmt::Debug for Despachante {
@@ -312,6 +430,7 @@ impl std::fmt::Debug for Despachante {
         f.debug_struct("Despachante")
             .field("comandos", &self.comandos.len())
             .field("consultas", &self.consultas.len())
+            .field("tarefas", &self.tarefas.len())
             .finish()
     }
 }
@@ -333,6 +452,7 @@ impl Despachante {
         Ok(Self {
             comandos: registro.comandos,
             consultas: registro.consultas,
+            tarefas: registro.tarefas,
         })
     }
 
@@ -459,6 +579,36 @@ impl Despachante {
     }
 }
 
+impl Despachante {
+    /// Executa uma tarefa: confere módulo ativo e permissão e roda o manipulador com acesso a
+    /// leitura e escrita (ver [`ContextoTarefa`]).
+    ///
+    /// # Errors
+    /// [`CodigoErro::NAO_ENCONTRADO`] se a tarefa não existe; o erro de acesso; o da tarefa.
+    pub fn executar_tarefa(
+        &self,
+        nome: &str,
+        sessao: &Sessao,
+        ambiente: &Ambiente,
+        leitor: &Leitor,
+        escritor: &Escritor,
+    ) -> Resultado<String> {
+        let entrada = self
+            .tarefas
+            .get(nome)
+            .ok_or_else(|| nao_encontrado("tarefa", nome))?;
+        verificar_acesso(entrada.permissao, sessao, ambiente)?;
+        let contexto = ContextoTarefa {
+            ctx: montar_ctx(sessao, ambiente),
+            sessao,
+            ambiente,
+            leitor,
+            escritor,
+        };
+        (entrada.executor)(&contexto)
+    }
+}
+
 fn verificar_acesso(permissao: &str, sessao: &Sessao, ambiente: &Ambiente) -> Resultado<()> {
     let modulo = permissao.split('.').next().unwrap_or(permissao);
     if !ambiente.conjunto.modulo_ativo(modulo) {
@@ -487,6 +637,7 @@ fn montar_ctx(sessao: &Sessao, ambiente: &Ambiente) -> Ctx {
         correlacao: Id::novo(),
         conjunto: Arc::clone(&ambiente.conjunto),
         autorizacoes: Arc::new(sessao.autorizacoes().clone()),
+        recursos: Arc::clone(&ambiente.recursos),
     }
 }
 

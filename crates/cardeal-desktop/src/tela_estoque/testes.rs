@@ -752,3 +752,572 @@ fn importar_planilha_mostra_a_previa_e_so_grava_ao_confirmar() {
     assert_eq!((r.criados, r.ja_existiam), (4, 1));
     assert_eq!(estado.est.nos.len(), 5);
 }
+
+#[test]
+fn importar_produtos_o_modelo_entra_inteiro_e_so_ao_confirmar() {
+    use super::produtos_importacao::{carregar_texto, confirmar, MODELO};
+    let t = motor_de_teste();
+    let mut estado = EstadoTelaEstoque::default();
+    estado.carregar(&t.motor, &t.sessao);
+    if estado.locais.is_empty() {
+        let _: LocalCriado = t
+            .motor
+            .executar(
+                &t.sessao,
+                "estoque.criar_local.v1",
+                &CriarLocal {
+                    nome: "Loja".into(),
+                    tipo: TipoLocal::Loja,
+                },
+            )
+            .expect("local");
+        estado.carregar(&t.motor, &t.sessao);
+    }
+    assert_eq!(estado.locais.len(), 1, "o modelo não traz a coluna Local");
+    let antes = estado.produtos.len();
+
+    // Planilha com erro: a prévia lista a linha e confirmar não grava nada.
+    carregar_texto(
+        &t.motor,
+        &t.sessao,
+        &mut estado.imp_produtos,
+        "ruim.csv",
+        "Nome;Estoque\nCabo;3\n".into(),
+    )
+    .expect("prévia");
+    let previa = estado.imp_produtos.previa.as_ref().unwrap();
+    assert_eq!(previa.erros.len(), 1);
+    assert!(confirmar(&t.motor, &t.sessao, &mut estado).is_err());
+    estado.carregar(&t.motor, &t.sessao);
+    assert_eq!(estado.produtos.len(), antes);
+
+    // O modelo que "Baixar modelo…" salva é uma planilha válida.
+    carregar_texto(
+        &t.motor,
+        &t.sessao,
+        &mut estado.imp_produtos,
+        "modelo-produtos.csv",
+        MODELO.into(),
+    )
+    .expect("prévia");
+    let previa = estado.imp_produtos.previa.as_ref().unwrap();
+    assert!(previa.erros.is_empty(), "{:?}", previa.erros);
+    assert_eq!((previa.novos, previa.com_estoque), (2, 2));
+
+    // O diálogo desenha a prévia num quadro de verdade do egui.
+    estado.dlg = Dlg::ImportarProdutos;
+    let ctx = egui::Context::default();
+    cardeal_ui::tokens::instalar_fontes(&ctx);
+    cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+    for _ in 0..2 {
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            super::produtos_importacao::dialogo(ctx, &t.motor, &t.sessao, &mut estado);
+        });
+    }
+    let r = confirmar(&t.motor, &t.sessao, &mut estado).expect("importa");
+    assert_eq!((r.criados, r.com_estoque), (2, 2));
+    assert_eq!(estado.produtos.len(), antes + 2);
+    let refri = estado
+        .produtos
+        .iter()
+        .find(|p| p.nome == "Refrigerante Cola 2L")
+        .unwrap();
+    assert_eq!(refri.disponivel, Quantidade::unidades(24));
+    assert!(
+        estado.imp_produtos.previa.is_none(),
+        "o diálogo volta limpo"
+    );
+}
+
+#[test]
+fn comissao_do_grupo_aparece_herdada_no_subgrupo_e_na_grade_de_precos() {
+    use mod_estoque::{DefinirComissaoDoGrupo, OrigemComissao};
+    let t = motor_de_teste();
+    let a = grupo(&t.motor, &t.sessao, "A", None);
+    let b = grupo(&t.motor, &t.sessao, "B", Some(a));
+    t.motor
+        .executar(
+            &t.sessao,
+            "estoque.definir_comissao_do_grupo.v1",
+            &DefinirComissaoDoGrupo {
+                grupo: a,
+                comissao: Some(Percentual::pontos(4)),
+            },
+        )
+        .expect("comissão");
+
+    let mut estado = EstadoTelaEstoque::default();
+    estado.carregar(&t.motor, &t.sessao);
+    let (c, de) = estado.est.comissao_herdada(b).expect("herdada");
+    assert_eq!((c, de.as_str()), (Percentual::pontos(4), "A"));
+    assert!(estado.est.comissao_herdada(a).is_none());
+    estado.est.selecionar(a);
+    assert_eq!(estado.est.comissao, "4,00", "o formulário mostra a própria");
+
+    // O detalhe do grupo desenha os blocos de margem e comissão num quadro de verdade.
+    estado.aba = AbaEstoque::Estrutura;
+    let ctx = egui::Context::default();
+    cardeal_ui::tokens::instalar_fontes(&ctx);
+    cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+    for _ in 0..2 {
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                mostrar(ui, &t.motor, &t.sessao, &mut estado);
+            });
+        });
+    }
+
+    // Um produto em B herda a comissão de A no preço sugerido.
+    let un: UnidadeCriada = t
+        .motor
+        .executar(
+            &t.sessao,
+            "estoque.criar_unidade.v1",
+            &CriarUnidade {
+                sigla: "UN".into(),
+                nome: "Unidade".into(),
+                fracionavel: false,
+            },
+        )
+        .or_else(|_| {
+            let u: Vec<ItemUnidade> = t
+                .motor
+                .consultar(&t.sessao, "estoque.unidades.v1", &Unidades)
+                .expect("unidades");
+            Ok::<_, cardeal_kernel::Erro>(UnidadeCriada { unidade: u[0].id })
+        })
+        .expect("unidade");
+    let _: ProdutoCriado = t
+        .motor
+        .executar(
+            &t.sessao,
+            "estoque.criar_produto.v1",
+            &CriarProduto {
+                grupo_produto: b,
+                nome: "Produto em B".into(),
+                ncm: String::new(),
+                unidade_padrao: un.unidade,
+                codigo_barras: None,
+                detalhes_tecnicos: None,
+            },
+        )
+        .expect("produto");
+    estado.prc.carregar(&t.motor, &t.sessao);
+    let s = estado
+        .prc
+        .sugestoes
+        .iter()
+        .find(|s| s.nome == "Produto em B")
+        .expect("na grade de preços");
+    assert_eq!(s.comissao, Percentual::pontos(4));
+    assert_eq!(s.origem_comissao, OrigemComissao::Grupo("A".into()));
+}
+
+#[test]
+fn inventario_na_tela_e_cego_ate_encerrar_e_mostra_as_diferencas_depois() {
+    use mod_estoque::{
+        CriarInventario, EncerrarInventario, EstadoInventario, IniciarContagem, InventarioCriado,
+    };
+    let t = motor_de_teste();
+    let g = grupo(&t.motor, &t.sessao, "Mercearia", None);
+    let un: UnidadeCriada = t
+        .motor
+        .executar(
+            &t.sessao,
+            "estoque.criar_unidade.v1",
+            &CriarUnidade {
+                sigla: "UN".into(),
+                nome: "Unidade".into(),
+                fracionavel: false,
+            },
+        )
+        .or_else(|_| {
+            let u: Vec<ItemUnidade> = t
+                .motor
+                .consultar(&t.sessao, "estoque.unidades.v1", &Unidades)
+                .expect("unidades");
+            Ok::<_, cardeal_kernel::Erro>(UnidadeCriada { unidade: u[0].id })
+        })
+        .expect("unidade");
+    let p: ProdutoCriado = t
+        .motor
+        .executar(
+            &t.sessao,
+            "estoque.criar_produto.v1",
+            &CriarProduto {
+                grupo_produto: g,
+                nome: "Arroz 5kg".into(),
+                ncm: String::new(),
+                unidade_padrao: un.unidade,
+                codigo_barras: None,
+                detalhes_tecnicos: None,
+            },
+        )
+        .expect("produto");
+    let loc: LocalCriado = t
+        .motor
+        .executar(
+            &t.sessao,
+            "estoque.criar_local.v1",
+            &CriarLocal {
+                nome: "Loja".into(),
+                tipo: TipoLocal::Loja,
+            },
+        )
+        .expect("local");
+    let _: EntradaRegistrada = t
+        .motor
+        .executar(
+            &t.sessao,
+            "estoque.registrar_entrada.v1",
+            &RegistrarEntrada {
+                produto: p.produto,
+                local: loc.local,
+                quantidade: Quantidade::unidades(10),
+                custo_unitario: Preco::reais(20),
+            },
+        )
+        .expect("entrada");
+    let inv: InventarioCriado = t
+        .motor
+        .executar(
+            &t.sessao,
+            "estoque.criar_inventario.v1",
+            &CriarInventario {
+                local: loc.local,
+                grupo: None,
+                descricao: "Balanço".into(),
+            },
+        )
+        .expect("inventário");
+
+    let ctx = egui::Context::default();
+    cardeal_ui::tokens::instalar_fontes(&ctx);
+    cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+    let mut estado = EstadoTelaEstoque::default();
+    estado.carregar(&t.motor, &t.sessao);
+    estado.aba = AbaEstoque::Inventario;
+    estado.inv.carregar(&t.motor, &t.sessao);
+    assert_eq!(
+        estado.inv.selecionado,
+        Some(inv.inventario),
+        "abre no aberto"
+    );
+    let desenhar = |estado: &mut EstadoTelaEstoque| {
+        for _ in 0..2 {
+            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    mostrar(ui, &t.motor, &t.sessao, estado);
+                });
+            });
+        }
+    };
+    desenhar(&mut estado);
+
+    let _: mod_estoque::ContagemIniciada = t
+        .motor
+        .executar(
+            &t.sessao,
+            "estoque.iniciar_contagem.v1",
+            &IniciarContagem {
+                inventario: inv.inventario,
+            },
+        )
+        .expect("iniciar");
+    estado.inv.carregar(&t.motor, &t.sessao);
+    desenhar(&mut estado);
+
+    // Registrar pela tela: produto escolhido, quantidade digitada.
+    estado.inv.produto = Some(p.produto);
+    estado.inv.quantidade = "7".into();
+    super::inventario::registrar(&ctx, &t.motor, &t.sessao, &mut estado, inv.inventario);
+    let pos = estado.inv.posicao.clone().expect("posição");
+    assert_eq!(pos.resumo.contados, 1);
+    assert_eq!(pos.itens[0].contada, Some(Quantidade::unidades(7)));
+    assert!(pos.itens[0].sistema.is_none(), "cega durante a contagem");
+    assert!(estado.inv.produto.is_none(), "o formulário volta limpo");
+    desenhar(&mut estado);
+
+    let _: mod_estoque::InventarioEncerradoResumo = t
+        .motor
+        .executar(
+            &t.sessao,
+            "estoque.encerrar_inventario.v1",
+            &EncerrarInventario {
+                inventario: inv.inventario,
+            },
+        )
+        .expect("encerrar");
+    estado.inv.carregar(&t.motor, &t.sessao);
+    let pos = estado.inv.posicao.clone().expect("posição");
+    assert_eq!(pos.resumo.estado, EstadoInventario::Encerrado);
+    assert_eq!(pos.itens[0].sistema, Some(Quantidade::unidades(10)));
+    assert_eq!(pos.itens[0].diferenca, Some(Quantidade::unidades(-3)));
+    assert_eq!(
+        pos.itens[0].valor_ajuste,
+        Some(cardeal_kernel::Dinheiro::reais(60))
+    );
+    desenhar(&mut estado);
+}
+
+#[test]
+fn transferencia_na_tela_monta_a_lista_soma_repetido_e_grava() {
+    let t = motor_de_teste();
+    let g = grupo(&t.motor, &t.sessao, "Mercearia", None);
+    let un: UnidadeCriada = t
+        .motor
+        .executar(
+            &t.sessao,
+            "estoque.criar_unidade.v1",
+            &CriarUnidade {
+                sigla: "UN".into(),
+                nome: "Unidade".into(),
+                fracionavel: false,
+            },
+        )
+        .or_else(|_| {
+            let u: Vec<ItemUnidade> = t
+                .motor
+                .consultar(&t.sessao, "estoque.unidades.v1", &Unidades)
+                .expect("unidades");
+            Ok::<_, cardeal_kernel::Erro>(UnidadeCriada { unidade: u[0].id })
+        })
+        .expect("unidade");
+    let p: ProdutoCriado = t
+        .motor
+        .executar(
+            &t.sessao,
+            "estoque.criar_produto.v1",
+            &CriarProduto {
+                grupo_produto: g,
+                nome: "Arroz 5kg".into(),
+                ncm: String::new(),
+                unidade_padrao: un.unidade,
+                codigo_barras: None,
+                detalhes_tecnicos: None,
+            },
+        )
+        .expect("produto");
+    let local = |nome: &str, tipo| -> Id {
+        let l: LocalCriado = t
+            .motor
+            .executar(
+                &t.sessao,
+                "estoque.criar_local.v1",
+                &CriarLocal {
+                    nome: nome.into(),
+                    tipo,
+                },
+            )
+            .expect("local");
+        l.local
+    };
+    let deposito = local("Depósito", TipoLocal::Deposito);
+    let loja = local("Loja", TipoLocal::Loja);
+    let _: EntradaRegistrada = t
+        .motor
+        .executar(
+            &t.sessao,
+            "estoque.registrar_entrada.v1",
+            &RegistrarEntrada {
+                produto: p.produto,
+                local: deposito,
+                quantidade: Quantidade::unidades(10),
+                custo_unitario: Preco::reais(20),
+            },
+        )
+        .expect("entrada");
+
+    let mut estado = EstadoTelaEstoque::default();
+    estado.carregar(&t.motor, &t.sessao);
+    estado.aba = AbaEstoque::Transferencias;
+    estado.transf.carregar(&t.motor, &t.sessao);
+    estado.transf.origem = Some(deposito);
+    estado.transf.destino = Some(loja);
+    // Quantidade inválida não entra; o mesmo produto duas vezes soma.
+    estado.transf.produto = Some(p.produto);
+    estado.transf.quantidade = "0".into();
+    assert!(estado.transf.adicionar("Arroz 5kg").is_err());
+    estado.transf.quantidade = "2".into();
+    estado.transf.adicionar("Arroz 5kg").expect("adiciona");
+    estado.transf.produto = Some(p.produto);
+    estado.transf.quantidade = "1".into();
+    estado.transf.adicionar("Arroz 5kg").expect("soma");
+    assert_eq!(estado.transf.itens.len(), 1);
+    assert_eq!(estado.transf.itens[0].quantidade, Quantidade::unidades(3));
+
+    // A aba desenha num quadro de verdade, com o produto escolhido (o disponível por local).
+    estado.transf.produto = Some(p.produto);
+    let ctx = egui::Context::default();
+    cardeal_ui::tokens::instalar_fontes(&ctx);
+    cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+    for _ in 0..2 {
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                mostrar(ui, &t.motor, &t.sessao, &mut estado);
+            });
+        });
+    }
+
+    let r = super::transferencia::transferir(&t.motor, &t.sessao, &mut estado).expect("transfere");
+    assert_eq!(r.itens, 1);
+    assert_eq!(r.valor, cardeal_kernel::Dinheiro::reais(60));
+    assert!(estado.transf.itens.is_empty(), "a lista volta vazia");
+    assert_eq!(estado.transf.historico.len(), 1);
+    let disponivel: Quantidade = t
+        .motor
+        .consultar(
+            &t.sessao,
+            "estoque.saldo_disponivel_do_produto.v1",
+            &mod_estoque::SaldoDisponivelDoProduto { produto: p.produto },
+        )
+        .expect("saldo");
+    assert_eq!(
+        disponivel,
+        Quantidade::unidades(10),
+        "o total do CNPJ não muda"
+    );
+}
+
+#[test]
+fn dicionario_de_nomes_adiciona_testa_e_remove() {
+    let t = motor_de_teste();
+    let mut estado = EstadoTelaEstoque::default();
+    estado.carregar(&t.motor, &t.sessao);
+    estado.dic.carregar(&t.motor, &t.sessao);
+    assert!(estado.dic.termos.is_empty());
+
+    estado.dic.de = "REFRIG".into();
+    estado.dic.para = "Refrigerante".into();
+    super::dicionario::adicionar(&t.motor, &t.sessao, &mut estado.dic).expect("adiciona");
+    estado.dic.de = "pet".into();
+    estado.dic.para = String::new();
+    super::dicionario::adicionar(&t.motor, &t.sessao, &mut estado.dic).expect("remove palavra");
+    assert_eq!(estado.dic.termos.len(), 2);
+
+    estado.dic.teste = "REFRIG COLA PET 2000ML".into();
+    super::dicionario::testar(&t.motor, &t.sessao, &mut estado.dic);
+    assert_eq!(
+        estado.dic.resultado_teste.as_deref(),
+        Some("Refrigerante Cola 2Lt")
+    );
+
+    // O diálogo desenha num quadro de verdade.
+    estado.dlg = Dlg::Dicionario;
+    let ctx = egui::Context::default();
+    cardeal_ui::tokens::instalar_fontes(&ctx);
+    cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+    for _ in 0..2 {
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            super::dicionario::dialogo(ctx, &t.motor, &t.sessao, &mut estado);
+        });
+    }
+
+    let () = t
+        .motor
+        .executar(
+            &t.sessao,
+            "estoque.remover_termo_do_dicionario.v1",
+            &mod_estoque::RemoverTermoDoDicionario { de: "pet".into() },
+        )
+        .expect("remove");
+    estado.dic.carregar(&t.motor, &t.sessao);
+    assert_eq!(estado.dic.termos.len(), 1);
+}
+
+#[test]
+fn validade_na_tela_entrada_alerta_e_baixa() {
+    use cardeal_kernel::{Data, Fuso};
+    let t = motor_de_teste();
+    let g = grupo(&t.motor, &t.sessao, "Laticínios", None);
+    let un: UnidadeCriada = t
+        .motor
+        .executar(
+            &t.sessao,
+            "estoque.criar_unidade.v1",
+            &CriarUnidade {
+                sigla: "UN".into(),
+                nome: "Unidade".into(),
+                fracionavel: false,
+            },
+        )
+        .or_else(|_| {
+            let u: Vec<ItemUnidade> = t
+                .motor
+                .consultar(&t.sessao, "estoque.unidades.v1", &Unidades)
+                .expect("unidades");
+            Ok::<_, cardeal_kernel::Erro>(UnidadeCriada { unidade: u[0].id })
+        })
+        .expect("unidade");
+    let p: ProdutoCriado = t
+        .motor
+        .executar(
+            &t.sessao,
+            "estoque.criar_produto.v1",
+            &CriarProduto {
+                grupo_produto: g,
+                nome: "Iogurte Natural".into(),
+                ncm: String::new(),
+                unidade_padrao: un.unidade,
+                codigo_barras: None,
+                detalhes_tecnicos: None,
+            },
+        )
+        .expect("produto");
+    let loc: LocalCriado = t
+        .motor
+        .executar(
+            &t.sessao,
+            "estoque.criar_local.v1",
+            &CriarLocal {
+                nome: "Loja".into(),
+                tipo: TipoLocal::Loja,
+            },
+        )
+        .expect("local");
+
+    let mut estado = EstadoTelaEstoque::default();
+    estado.carregar(&t.motor, &t.sessao);
+    estado.aba = AbaEstoque::Validade;
+    estado.val.carregar(&t.motor, &t.sessao);
+
+    // Entrada pela tela: validade de ontem, código em branco (gerado).
+    let ontem = Data::hoje(Fuso::BRASILIA).mais_dias(-1);
+    estado.val.ent_produto = Some(p.produto);
+    estado.val.ent_local = Some(loc.local);
+    estado.val.ent_qtd = "12".into();
+    estado.val.ent_custo = "2,50".into();
+    estado.val.ent_validade = "abc".into();
+    assert!(super::validade::registrar_entrada(&t.motor, &t.sessao, &mut estado).is_err());
+    estado.val.ent_validade = ontem.formatar();
+    super::validade::registrar_entrada(&t.motor, &t.sessao, &mut estado).expect("entrada");
+    assert_eq!(estado.val.lotes.len(), 1);
+    assert!(estado.val.lotes[0].vencido());
+    assert_eq!(
+        estado.lotes_em_alerta, 1,
+        "o alerta aparece na aba Produtos"
+    );
+
+    // A aba desenha num quadro de verdade, com a baixa aberta.
+    estado.val.abrir_baixa(0);
+    assert_eq!(
+        estado.val.baixa_motivo,
+        Some(mod_estoque::MotivoPerda::Vencimento)
+    );
+    let ctx = egui::Context::default();
+    cardeal_ui::tokens::instalar_fontes(&ctx);
+    cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+    for _ in 0..2 {
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                mostrar(ui, &t.motor, &t.sessao, &mut estado);
+            });
+        });
+    }
+
+    let r = super::validade::dar_baixa(&t.motor, &t.sessao, &mut estado).expect("baixa");
+    assert!(r.lote_esgotado);
+    assert_eq!(r.valor, cardeal_kernel::Dinheiro::reais(30));
+    assert!(estado.val.lotes.is_empty());
+    assert_eq!(estado.lotes_em_alerta, 0);
+}

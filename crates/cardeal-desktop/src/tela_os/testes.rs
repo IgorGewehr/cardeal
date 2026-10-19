@@ -739,3 +739,57 @@ fn editar_da_lista_funciona_em_qualquer_linha() {
         "{abertas:?}"
     );
 }
+
+#[test]
+fn custo_hora_da_equipe_grava_padrao_e_por_tecnico_so_o_que_mudou() {
+    let c = cenario();
+    let mut estado = EstadoTelaOs::default();
+    estado.carregar(&c.motor, &c.sessao);
+    assert!(!estado.usuarios.is_empty(), "o dono é o primeiro técnico");
+    let usuarios = estado.usuarios.clone();
+    estado.custo_hora.carregar(&c.motor, &c.sessao, &usuarios);
+    let eu = usuarios[0].id;
+
+    estado.custo_hora.padrao = "abc".into();
+    assert!(super::custo_hora::salvar(&c.motor, &c.sessao, &mut estado).is_err());
+    estado.custo_hora.padrao = "30,00".into();
+    estado.custo_hora.tecnicos.insert(eu, "45,50".into());
+    assert_eq!(
+        super::custo_hora::salvar(&c.motor, &c.sessao, &mut estado),
+        Ok(2)
+    );
+    // Salvar de novo sem mexer não grava nada.
+    assert_eq!(
+        super::custo_hora::salvar(&c.motor, &c.sessao, &mut estado),
+        Ok(0)
+    );
+    let tabela: mod_os::custo_hora::TabelaCustoHora = c
+        .motor
+        .consultar(&c.sessao, "os.custos_hora.v1", &mod_os::CustosHora)
+        .expect("tabela");
+    assert_eq!(tabela.padrao, Some(Dinheiro::reais(30)));
+    assert_eq!(tabela.do_tecnico(eu), Some(Dinheiro::centavos(4_550)));
+
+    // Apagar o do técnico volta ao padrão.
+    estado.custo_hora.tecnicos.insert(eu, String::new());
+    assert_eq!(
+        super::custo_hora::salvar(&c.motor, &c.sessao, &mut estado),
+        Ok(1)
+    );
+    let tabela: mod_os::custo_hora::TabelaCustoHora = c
+        .motor
+        .consultar(&c.sessao, "os.custos_hora.v1", &mod_os::CustosHora)
+        .expect("tabela");
+    assert_eq!(tabela.do_tecnico(eu), Some(Dinheiro::reais(30)));
+
+    // O diálogo desenha num quadro de verdade.
+    estado.dlg = Dlg::CustoHora;
+    let ctx = egui::Context::default();
+    cardeal_ui::tokens::instalar_fontes(&ctx);
+    cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+    for _ in 0..2 {
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            super::custo_hora::dialogo(ctx, &c.motor, &c.sessao, &mut estado);
+        });
+    }
+}

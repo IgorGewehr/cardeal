@@ -26,7 +26,7 @@ mod plano;
 
 pub use alteracoes::Alteracoes;
 pub use empresa::{EmpresaResumo, IdentidadeVisual, PapelResumo, UsuarioResumo};
-pub use motor::{MotorLocal, SessaoLocal};
+pub use motor::{ExecutorDeTarefas, MotorLocal, SessaoLocal};
 pub use organizacao::{EmpresaDaOrganizacao, PERMISSAO_ORGANIZACAO};
 pub use plano::Plano;
 

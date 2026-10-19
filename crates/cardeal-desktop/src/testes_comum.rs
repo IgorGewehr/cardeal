@@ -18,7 +18,8 @@ pub fn motor_de_teste() -> MotorDeTeste {
         &cardeal_distribuicao::modulos(),
         &cardeal_distribuicao::pedido_ativacao(),
     )
-    .expect("abrir motor");
+    .expect("abrir motor")
+    .com_recursos(cardeal_distribuicao::recursos_simulados());
     motor
         .configurar_inicial(
             "Assistência Teste",

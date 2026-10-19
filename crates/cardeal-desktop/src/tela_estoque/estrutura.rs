@@ -1,6 +1,7 @@
 //! A aba "Estrutura": a árvore mercadológica de até 4 níveis (Grupo › Subgrupo › Categoria ›
-//! Subcategoria) com a margem desejada e o perfil fiscal de cada nó. Margem e perfil são
-//! herdados pelos filhos e pelos produtos até que alguém defina um valor mais próximo.
+//! Subcategoria) com a margem desejada, a comissão de vendedor e o perfil fiscal de cada nó.
+//! Margem, comissão e perfil são herdados pelos filhos e pelos produtos até que alguém defina
+//! um valor mais próximo.
 
 use std::collections::HashSet;
 
@@ -9,8 +10,8 @@ use cardeal_kernel::Percentual;
 use cardeal_ui::organisms::{ArvoreHierarquia, EstadoSeletorArvore, NoArvore, Painel};
 use mod_estoque::hierarquia::{nome_do_nivel, Arvore, NoGrupo, NIVEL_MAXIMO};
 use mod_estoque::{
-    ArvoreGruposProduto, DefinirMargemDoGrupo, DefinirPerfilFiscalDoGrupo, MoverGrupoProduto,
-    NoArvoreGrupo, RenomearGrupoProduto,
+    ArvoreGruposProduto, DefinirComissaoDoGrupo, DefinirMargemDoGrupo, DefinirPerfilFiscalDoGrupo,
+    MoverGrupoProduto, NoArvoreGrupo, RenomearGrupoProduto,
 };
 
 /// O estado da aba.
@@ -22,6 +23,7 @@ pub(super) struct EstadoEstrutura {
     codigo: String,
     nome: String,
     margem: String,
+    pub(super) comissao: String,
     /// 0 = herda, 1 = sim, 2 = não.
     st: Option<u8>,
     monofasico: Option<u8>,
@@ -98,6 +100,7 @@ impl EstadoEstrutura {
         self.codigo = n.codigo;
         self.nome = n.nome;
         self.margem = n.margem.map(|m| m.formatar(2)).unwrap_or_default();
+        self.comissao = n.comissao.map(|c| c.formatar(2)).unwrap_or_default();
         self.st = Some(tri(n.icms_st));
         self.monofasico = Some(tri(n.monofasico));
         self.fisc = super::fiscal::FormFiscal::de(&n.fiscal);
@@ -106,13 +109,27 @@ impl EstadoEstrutura {
 
     /// A margem herdada de quem está acima do nó, e de qual grupo vem.
     pub(super) fn margem_herdada(&self, id: Id) -> Option<(Percentual, String)> {
+        self.herdado(id, |n| n.margem)
+    }
+
+    /// A comissão herdada de quem está acima do nó, e de qual grupo vem.
+    pub(super) fn comissao_herdada(&self, id: Id) -> Option<(Percentual, String)> {
+        self.herdado(id, |n| n.comissao)
+    }
+
+    /// O primeiro valor definido acima do nó (sem contar ele), e o nome de quem definiu.
+    fn herdado(
+        &self,
+        id: Id,
+        valor: impl Fn(&NoArvoreGrupo) -> Option<Percentual>,
+    ) -> Option<(Percentual, String)> {
         self.arvore()
             .ancestrais(id)
             .into_iter()
             .skip(1)
             .find_map(|g| {
                 self.no(g)
-                    .and_then(|n| n.margem.map(|m| (m, n.nome.clone())))
+                    .and_then(|n| valor(n).map(|m| (m, n.nome.clone())))
             })
     }
 
@@ -228,6 +245,9 @@ fn arvore(ui: &mut egui::Ui, estado: &mut EstadoTelaEstoque) {
             if let Some(m) = g.margem {
                 ui.add(Etiqueta::info(format!("margem {}%", m.formatar(1))));
             }
+            if let Some(c) = g.comissao {
+                ui.add(Etiqueta::info(format!("comissão {}%", c.formatar(1))));
+            }
             if g.icms_st == Some(true) {
                 ui.add(Etiqueta::atencao("ST"));
             }
@@ -269,6 +289,8 @@ fn detalhe(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estad
         bloco_nome(ui, motor, sessao, estado, &no);
         ui.add(Divisor::novo());
         bloco_margem(ui, motor, sessao, estado, &no);
+        ui.add(Divisor::novo());
+        bloco_comissao(ui, motor, sessao, estado, &no);
         ui.add(Divisor::novo());
         bloco_perfil(ui, motor, sessao, estado, &no);
         ui.add(Divisor::novo());
@@ -344,6 +366,57 @@ fn bloco_nome(
     ui.add_space(Espaco::E12);
 }
 
+/// O que o usuário pediu num bloco de percentual herdado.
+enum AcaoHerdado {
+    Nenhuma,
+    Definir(Percentual),
+    Herdar,
+}
+
+/// Os textos de um bloco de percentual herdado pela árvore.
+struct TextosHerdado {
+    titulo: &'static str,
+    campo: &'static str,
+    marcador: &'static str,
+    ninguem: &'static str,
+    salvar: &'static str,
+    erro_numero: &'static str,
+}
+
+/// Um percentual herdado pela árvore (margem, comissão): de onde vem o que vale, o campo para
+/// definir neste grupo e o "Voltar a herdar".
+fn bloco_herdado(
+    ui: &mut egui::Ui,
+    t: &TextosHerdado,
+    texto: &mut String,
+    proprio: Option<Percentual>,
+    herdado: Option<(Percentual, String)>,
+) -> AcaoHerdado {
+    ui.add(Rotulo::titulo_secao(t.titulo));
+    ui.add(Rotulo::apoio(match (proprio, &herdado) {
+        (Some(_), _) => "Definida neste grupo.".to_owned(),
+        (None, Some((m, de))) => format!("Herdada de \"{de}\": {}%.", m.formatar(2)),
+        (None, None) => t.ninguem.to_owned(),
+    }));
+    ui.add_space(Espaco::E8);
+    ui.add(Campo::novo(t.campo, texto).marcador(t.marcador));
+    ui.add_space(Espaco::E8);
+    let mut acao = AcaoHerdado::Nenhuma;
+    ui.horizontal(|ui| {
+        if ui.add(Botao::secundario(t.salvar)).clicked() {
+            match Percentual::de_str(texto.trim()) {
+                Ok(m) => acao = AcaoHerdado::Definir(m),
+                Err(_) => notificar(ui.ctx(), Notificacao::erro(t.erro_numero)),
+            }
+        }
+        if proprio.is_some() && ui.add(Botao::fantasma("Voltar a herdar")).clicked() {
+            acao = AcaoHerdado::Herdar;
+        }
+    });
+    ui.add_space(Espaco::E12);
+    acao
+}
+
 fn bloco_margem(
     ui: &mut egui::Ui,
     motor: &Motor,
@@ -351,56 +424,64 @@ fn bloco_margem(
     estado: &mut EstadoTelaEstoque,
     no: &NoArvoreGrupo,
 ) {
-    ui.add(Rotulo::titulo_secao("Margem líquida desejada"));
     let herdada = estado.est.margem_herdada(no.id);
-    ui.add(Rotulo::apoio(match (&no.margem, &herdada) {
-        (Some(_), _) => "Definida neste grupo.".to_owned(),
-        (None, Some((m, de))) => format!("Herdada de \"{de}\": {}%.", m.formatar(2)),
-        (None, None) => "Ninguém definiu: vale a margem padrão da empresa (aba Preços).".to_owned(),
-    }));
-    ui.add_space(Espaco::E8);
-    ui.add(Campo::novo("Margem (%)", &mut estado.est.margem).marcador("ex.: 20"));
-    ui.add_space(Espaco::E8);
-    ui.horizontal(|ui| {
-        if ui.add(Botao::secundario("Salvar margem")).clicked() {
-            match Percentual::de_str(estado.est.margem.trim()) {
-                Ok(m) => {
-                    let r = motor.executar(
-                        sessao,
-                        "estoque.definir_margem_do_grupo.v1",
-                        &DefinirMargemDoGrupo {
-                            grupo: no.id,
-                            margem: Some(m),
-                        },
-                    );
-                    aplicar(ui.ctx(), motor, sessao, estado, r, "Margem salva");
-                }
-                Err(_) => notificar(
-                    ui.ctx(),
-                    Notificacao::erro("Digite a margem como número, por exemplo 20 ou 12,5"),
-                ),
-            }
-        }
-        if no.margem.is_some() && ui.add(Botao::fantasma("Voltar a herdar")).clicked() {
-            let r = motor.executar(
-                sessao,
-                "estoque.definir_margem_do_grupo.v1",
-                &DefinirMargemDoGrupo {
-                    grupo: no.id,
-                    margem: None,
-                },
-            );
-            aplicar(
-                ui.ctx(),
-                motor,
-                sessao,
-                estado,
-                r,
-                "Margem volta a ser herdada",
-            );
-        }
-    });
-    ui.add_space(Espaco::E12);
+    let textos = TextosHerdado {
+        titulo: "Margem líquida desejada",
+        campo: "Margem (%)",
+        marcador: "ex.: 20",
+        ninguem: "Ninguém definiu: vale a margem padrão da empresa (aba Preços).",
+        salvar: "Salvar margem",
+        erro_numero: "Digite a margem como número, por exemplo 20 ou 12,5",
+    };
+    let (margem, aviso) =
+        match bloco_herdado(ui, &textos, &mut estado.est.margem, no.margem, herdada) {
+            AcaoHerdado::Nenhuma => return,
+            AcaoHerdado::Definir(m) => (Some(m), "Margem salva"),
+            AcaoHerdado::Herdar => (None, "Margem volta a ser herdada"),
+        };
+    let r = motor.executar(
+        sessao,
+        "estoque.definir_margem_do_grupo.v1",
+        &DefinirMargemDoGrupo {
+            grupo: no.id,
+            margem,
+        },
+    );
+    aplicar(ui.ctx(), motor, sessao, estado, r, aviso);
+}
+
+fn bloco_comissao(
+    ui: &mut egui::Ui,
+    motor: &Motor,
+    sessao: &Sessao,
+    estado: &mut EstadoTelaEstoque,
+    no: &NoArvoreGrupo,
+) {
+    let herdada = estado.est.comissao_herdada(no.id);
+    let textos = TextosHerdado {
+        titulo: "Comissão de vendedor",
+        campo: "Comissão (%)",
+        marcador: "ex.: 3",
+        ninguem: "Ninguém definiu: vale a comissão padrão da empresa (aba Preços). Ela entra \
+                  no preço sugerido, nos painéis de margem e na rentabilidade.",
+        salvar: "Salvar comissão",
+        erro_numero: "Digite a comissão como número, por exemplo 3 ou 2,5",
+    };
+    let (comissao, aviso) =
+        match bloco_herdado(ui, &textos, &mut estado.est.comissao, no.comissao, herdada) {
+            AcaoHerdado::Nenhuma => return,
+            AcaoHerdado::Definir(c) => (Some(c), "Comissão salva"),
+            AcaoHerdado::Herdar => (None, "Comissão volta a ser herdada"),
+        };
+    let r = motor.executar(
+        sessao,
+        "estoque.definir_comissao_do_grupo.v1",
+        &DefinirComissaoDoGrupo {
+            grupo: no.id,
+            comissao,
+        },
+    );
+    aplicar(ui.ctx(), motor, sessao, estado, r, aviso);
 }
 
 fn bloco_perfil(

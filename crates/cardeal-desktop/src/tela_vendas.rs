@@ -3,7 +3,9 @@
 //! Fluxo completo: criar rascunho (cliente + tabela + local) → adicionar itens (preço
 //! resolvido da tabela) → confirmar → faturar. As tabelas de preço e suas regras são
 //! geridas num dialog à parte, já que `AdicionarItemPedido` exige uma regra que cubra o
-//! produto.
+//! produto. As comissões do mês (apurar e pagar) ficam no diálogo "Comissões".
+
+mod comissoes;
 
 use std::collections::HashMap;
 
@@ -33,6 +35,7 @@ enum Dlg {
     Ver(usize),
     Novo,
     Tabelas,
+    Comissoes,
 }
 
 /// Estado local da tela.
@@ -63,6 +66,7 @@ pub struct EstadoTelaVendas {
     tab_sel: Option<Id>,
     regra_produto: Option<Id>,
     regra_preco: String,
+    comissoes: comissoes::EstadoComissoes,
 }
 
 impl EstadoTelaVendas {
@@ -165,6 +169,10 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
         ui,
         estado,
         |ui, estado| {
+            if ui.add(Botao::secundario("Comissões")).clicked() {
+                estado.comissoes.carregar(motor, sessao);
+                estado.dlg = Dlg::Comissoes;
+            }
             if ui.add(Botao::secundario("Tabelas de preço")).clicked() {
                 estado.dlg = Dlg::Tabelas;
             }
@@ -222,6 +230,7 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
         Dlg::Ver(i) => dialogo_ver(ui.ctx(), motor, sessao, estado, i),
         Dlg::Novo => dialogo_novo(ui.ctx(), motor, sessao, estado),
         Dlg::Tabelas => dialogo_tabelas(ui.ctx(), motor, sessao, estado),
+        Dlg::Comissoes => comissoes::dialogo(ui.ctx(), motor, sessao, estado),
     }
 }
 
@@ -789,10 +798,9 @@ mod testes {
     };
     use mod_vendas::{PedidoCriado, TabelaPrecoCriada};
 
-    #[test]
-    fn abrir_pedido_traz_o_painel_de_margem_com_custo_e_lucro() {
-        let t = motor_de_teste();
-        let (m, s) = (&t.motor, &t.sessao);
+    /// Um pedido do administrador com 2 cabos a R$ 100 (custo R$ 30), em rascunho. Devolve
+    /// o pedido e o produto.
+    fn pedido_com_item(m: &Motor, s: &Sessao) -> (Id, Id) {
         let cliente: PessoaCadastrada = m
             .executar(
                 s,
@@ -922,6 +930,15 @@ mod testes {
             )
             .expect("item");
 
+        (ped.pedido, p.produto)
+    }
+
+    #[test]
+    fn abrir_pedido_traz_o_painel_de_margem_com_custo_e_lucro() {
+        let t = motor_de_teste();
+        let (m, s) = (&t.motor, &t.sessao);
+        pedido_com_item(m, s);
+
         let mut estado = EstadoTelaVendas::default();
         estado.carregar(m, s);
         estado.abrir_pedido(m, s, 0);
@@ -929,5 +946,65 @@ mod testes {
         assert_eq!(margem.painel.receita, Dinheiro::reais(200));
         assert_eq!(margem.painel.custo, Dinheiro::reais(60));
         assert!(margem.painel.margem_liquida.e_positivo());
+    }
+
+    #[test]
+    fn comissoes_do_mes_previa_apura_e_paga_o_vendedor() {
+        let t = motor_de_teste();
+        let (m, s) = (&t.motor, &t.sessao);
+        let (pedido, produto) = pedido_com_item(m, s);
+        let (): () = m
+            .executar(
+                s,
+                "estoque.definir_comissao_do_produto.v1",
+                &mod_estoque::DefinirComissaoDoProduto {
+                    produto,
+                    comissao: Some(Percentual::pontos(5)),
+                },
+            )
+            .expect("comissão do produto");
+        let (): () = m
+            .executar(s, "vendas.confirmar_pedido.v1", &ConfirmarPedido { pedido })
+            .expect("confirmar");
+        let _: mod_vendas::PedidoFoiFaturado = m
+            .executar(
+                s,
+                "vendas.faturar_pedido.v1",
+                &FaturarPedido {
+                    pedido,
+                    a_vista: true,
+                },
+            )
+            .expect("faturar");
+
+        let mut estado = EstadoTelaVendas::default();
+        estado.comissoes.carregar(m, s);
+        let r = estado.comissoes.resumo[0];
+        assert_eq!(r.vendedor, s.usuario());
+        assert_eq!(r.a_apurar, Dinheiro::reais(10)); // 200 × 5%
+
+        let apuradas = comissoes::apurar(m, s, &mut estado.comissoes).expect("apurar");
+        assert_eq!((apuradas.pedidos, apuradas.valor), (1, Dinheiro::reais(10)));
+        assert_eq!(estado.comissoes.resumo[0].a_pagar, Dinheiro::reais(10));
+
+        // Pagar sugere o caixa e hoje.
+        estado.comissoes.abrir_pagamento(s.usuario());
+        assert!(estado.comissoes.conta.is_some());
+        let pago = comissoes::pagar(m, s, &mut estado.comissoes).expect("pagar");
+        assert_eq!(pago.valor, Dinheiro::reais(10));
+        assert_eq!(estado.comissoes.resumo[0].pago, Dinheiro::reais(10));
+        assert!(estado.comissoes.pagar.is_none());
+
+        // O diálogo desenha (com o formulário de pagamento aberto também).
+        estado.comissoes.abrir_pagamento(s.usuario());
+        estado.dlg = Dlg::Comissoes;
+        let ctx = egui::Context::default();
+        cardeal_ui::tokens::instalar_fontes(&ctx);
+        cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+        for _ in 0..2 {
+            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                comissoes::dialogo(ctx, m, s, &mut estado);
+            });
+        }
     }
 }

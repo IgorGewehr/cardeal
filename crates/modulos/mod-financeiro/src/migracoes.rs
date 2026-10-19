@@ -231,8 +231,105 @@ CREATE INDEX financeiro_item_extrato_conta
     ON financeiro_item_extrato(empresa, conta, estado, data);
 ";
 
+// Migração v9 (2026-10-14): o saldo que o banco informa, por conta e data — lido do OFX
+// (`LEDGERBAL`) na importação ou digitado. É o lado "banco" da conferência banco × sistema.
+const SQL_SALDO_BANCO: &str = r"
+CREATE TABLE financeiro_saldo_banco (
+    empresa       BLOB    NOT NULL REFERENCES nucleo_empresa(id),
+    conta         BLOB    NOT NULL,
+    data          INTEGER NOT NULL,
+    saldo         INTEGER NOT NULL,
+    origem        TEXT    NOT NULL CHECK (origem IN ('Extrato','Digitado')),
+    informado_em  INTEGER NOT NULL,
+    informado_por BLOB    NOT NULL,
+    PRIMARY KEY (empresa, conta, data)
+) STRICT;
+";
+
+// Migração v10 (2026-10-14): a linha do extrato pode casar com qualquer lançamento realizado da
+// conta, não só com uma baixa — depósito do caixa no banco, transferência, compensação de
+// cheque. `lancamento` guarda esse lançamento (a `baixa` continua para os casamentos com baixa).
+const SQL_ITEM_EXTRATO_LANCAMENTO: &str = r"
+ALTER TABLE financeiro_item_extrato ADD COLUMN lancamento BLOB;
+";
+
+// Migração v11 (2026-10-14): a carteira de cheques recebidos. O mesmo cheque não entra duas vezes
+// enquanto não for devolvido (devolvido por falta de fundos pode ser reapresentado).
+const SQL_CHEQUE: &str = r"
+CREATE TABLE financeiro_cheque (
+    id                     BLOB PRIMARY KEY,
+    empresa                BLOB    NOT NULL REFERENCES nucleo_empresa(id),
+    parcela                BLOB    NOT NULL REFERENCES financeiro_parcela(id),
+    baixa                  BLOB    NOT NULL REFERENCES financeiro_baixa(id),
+    banco                  TEXT    NOT NULL,
+    agencia                TEXT    NOT NULL,
+    conta                  TEXT    NOT NULL,
+    numero                 TEXT    NOT NULL,
+    emitente               TEXT    NOT NULL,
+    documento_emitente     TEXT,
+    valor                  INTEGER NOT NULL,
+    recebido_em            INTEGER NOT NULL,
+    bom_para               INTEGER NOT NULL,
+    estado                 TEXT    NOT NULL CHECK (estado IN ('EmCarteira','Compensado','Devolvido')),
+    conta_deposito         BLOB,
+    compensado_em          INTEGER,
+    lancamento_compensacao BLOB,
+    devolvido_em           INTEGER,
+    alinea                 INTEGER,
+    motivo                 TEXT,
+    criado_em              INTEGER NOT NULL
+) STRICT;
+CREATE UNIQUE INDEX financeiro_cheque_unico
+    ON financeiro_cheque(empresa, banco, agencia, conta, numero) WHERE estado <> 'Devolvido';
+CREATE INDEX financeiro_cheque_carteira ON financeiro_cheque(empresa, estado, bom_para);
+";
+
+// Migração v12 (2026-10-14): a régua de cobrança (as etapas da empresa; sem etapas, vale a
+// padrão) e o registro do que já foi enviado ou pulado, por parcela e etapa — cada etapa sai uma
+// vez por parcela.
+const SQL_REGUA: &str = r"
+CREATE TABLE financeiro_regua_etapa (
+    empresa  BLOB    NOT NULL REFERENCES nucleo_empresa(id),
+    dias     INTEGER NOT NULL,
+    nome     TEXT    NOT NULL,
+    mensagem TEXT    NOT NULL,
+    PRIMARY KEY (empresa, dias)
+) STRICT;
+CREATE TABLE financeiro_cobranca_registro (
+    empresa    BLOB    NOT NULL REFERENCES nucleo_empresa(id),
+    parcela    BLOB    NOT NULL REFERENCES financeiro_parcela(id),
+    etapa_dias INTEGER NOT NULL,
+    situacao   TEXT    NOT NULL CHECK (situacao IN ('Enviada','Pulada')),
+    em         INTEGER NOT NULL,
+    por        BLOB    NOT NULL,
+    PRIMARY KEY (parcela, etapa_dias)
+) STRICT;
+CREATE INDEX financeiro_cobranca_registro_empresa ON financeiro_cobranca_registro(empresa);
+";
+
 const SQL_LISTA_PAGINADA: &str = r"
 CREATE INDEX financeiro_parcela_lista ON financeiro_parcela(empresa, vencimento, id);
+";
+
+// Migração v13 (2026-10-15): transferência entre contas do Disponível (caixa → banco, banco →
+// banco). O dinheiro anda pelo Razão (D destino / C origem); a linha aqui é para listar e
+// cancelar (o cancelamento estorna o lançamento, nunca apaga).
+const SQL_TRANSFERENCIA: &str = r"
+CREATE TABLE financeiro_transferencia (
+    id                  BLOB PRIMARY KEY,
+    empresa             BLOB    NOT NULL REFERENCES nucleo_empresa(id),
+    origem              BLOB    NOT NULL,
+    destino             BLOB    NOT NULL,
+    valor               INTEGER NOT NULL CHECK (valor > 0),
+    data                INTEGER NOT NULL,
+    observacao          TEXT,
+    lancamento          BLOB    NOT NULL,
+    criado_em           INTEGER NOT NULL,
+    criado_por          BLOB    NOT NULL,
+    cancelada_em        INTEGER,
+    motivo_cancelamento TEXT
+) STRICT;
+CREATE INDEX financeiro_transferencia_empresa ON financeiro_transferencia(empresa, data);
 ";
 
 const MIGRACOES: &[Migracao] = &[
@@ -282,6 +379,36 @@ const MIGRACOES: &[Migracao] = &[
         versao: 8,
         nome: "financeiro_conciliacao",
         sql: SQL_CONCILIACAO,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 9,
+        nome: "financeiro_saldo_banco",
+        sql: SQL_SALDO_BANCO,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 10,
+        nome: "financeiro_item_extrato_lancamento",
+        sql: SQL_ITEM_EXTRATO_LANCAMENTO,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 11,
+        nome: "financeiro_cheque",
+        sql: SQL_CHEQUE,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 12,
+        nome: "financeiro_regua_de_cobranca",
+        sql: SQL_REGUA,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 13,
+        nome: "financeiro_transferencia",
+        sql: SQL_TRANSFERENCIA,
         tipo: TipoMigracao::Esquema,
     },
 ];

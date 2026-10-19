@@ -6,7 +6,7 @@
 //! `mod-os::faturar_ordem_servico`, generalizado para N formas de pagamento em vez de uma só.
 
 use cardeal_kernel::{Data, Dinheiro, Id, Instante};
-use cardeal_ledger::{ConstrutorLancamento, LancamentoBalanceado, Origem};
+use cardeal_ledger::{ConstrutorLancamento, Contraparte, LancamentoBalanceado, Origem};
 
 use crate::cupom::Cupom;
 use crate::erros::ErroPdv;
@@ -42,8 +42,8 @@ fn origem_cupom(cupom: Id) -> Origem {
 
 /// Monta o lançamento de finalização de um cupom: um débito por linha de pagamento (já
 /// resolvida para a conta certa pelo comando), o desconto e o CMV, tudo num só lançamento
-/// `Realizado` — a venda de balcão é sempre à vista no ato, nunca `Confirmado`/a prazo nesta
-/// fatia (`FormaPagamentoPdv::Carteira` ainda não existe).
+/// `Realizado`. A parte a prazo debita Clientes a receber com o cliente na partida; o título
+/// que a cobra aponta para este mesmo lançamento.
 ///
 /// # Errors
 /// [`ErroPdv::CupomSemItens`] se o cupom não tem itens ativos; propaga um desbalanceamento
@@ -51,7 +51,7 @@ fn origem_cupom(cupom: Id) -> Origem {
 pub fn faturar_cupom(
     cupom: &Cupom,
     data: Data,
-    pagamentos_resolvidos: &[(Id, Dinheiro)],
+    pagamentos_resolvidos: &[(Id, Dinheiro, Option<Contraparte>)],
     cmv_total: Dinheiro,
     contas: ContasFinalizacao,
     autoria: Autoria,
@@ -66,8 +66,8 @@ pub fn faturar_cupom(
             .liquidacao(data)
             .criado_por(autoria.usuario, autoria.dispositivo)
             .agora(autoria.agora);
-    for (conta, valor) in pagamentos_resolvidos {
-        c = c.debitar(*conta, *valor);
+    for (conta, valor, contraparte) in pagamentos_resolvidos {
+        c = c.debitar(*conta, *valor).contraparte_se(*contraparte);
     }
     c = c
         .debitar_se(contas.descontos, cupom.desconto)
@@ -137,7 +137,7 @@ mod testes {
         let l = faturar_cupom(
             &c,
             hoje(),
-            &[(Id::novo(), Dinheiro::reais(90))],
+            &[(Id::novo(), Dinheiro::reais(90), None)],
             Dinheiro::reais(60),
             contas(),
             autoria(),
@@ -153,8 +153,8 @@ mod testes {
     fn faturamento_com_multiplas_formas_soma_os_debitos() {
         let c = cupom_com_item();
         let pagamentos = [
-            (Id::novo(), Dinheiro::reais(50)),
-            (Id::novo(), Dinheiro::reais(40)),
+            (Id::novo(), Dinheiro::reais(50), None),
+            (Id::novo(), Dinheiro::reais(40), None),
         ];
         let l =
             faturar_cupom(&c, hoje(), &pagamentos, Dinheiro::ZERO, contas(), autoria()).unwrap();

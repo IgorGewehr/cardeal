@@ -6,13 +6,16 @@ use std::sync::Arc;
 use cardeal_auth::{Papel, PoliticaSenha, RepositorioAuth, Sessao, Usuario};
 use cardeal_kernel::{ChaveIdempotencia, CodigoErro, Erro, Fuso, Id, Instante, Resultado};
 use cardeal_ledger::semear_plano_padrao;
-use cardeal_modkit::{Ambiente, Comando, Consulta, Modulo, PedidoAtivacao};
+use cardeal_modkit::{Ambiente, Comando, Consulta, Modulo, PedidoAtivacao, Recursos};
 use cardeal_storage::{Armazenamento, ConfigArmazenamento, ContextoEscrita, ErroArmazenamento};
 use rusqlite::OptionalExtension;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
-use crate::acesso::{autenticar_usuario, sessao_de_usuario_ativo, sincronizar_papel_admin};
+use crate::acesso::{
+    autenticar_usuario, sessao_de_usuario_ativo, sincronizar_papeis_de_fabrica,
+    sincronizar_papel_admin,
+};
 use crate::plano::Plano;
 use crate::{como_erro_armazenamento, erro_armazenamento};
 
@@ -24,6 +27,7 @@ pub struct MotorLocal {
     pub(crate) ambiente: Ambiente,
     pub(crate) empresa: Id,
     pub(crate) dispositivo: Id,
+    pub(crate) recursos: Arc<Recursos>,
 }
 
 /// Uma sessão autenticada — o que uma tela guarda depois do login para chamar `executar`/
@@ -131,6 +135,7 @@ impl MotorLocal {
         if !em_dia && empresa_persistida.is_some() {
             for e in crate::organizacao::ids_das_empresas(&arm)? {
                 sincronizar_papel_admin(&arm, e, &plano.conjunto)?;
+                sincronizar_papeis_de_fabrica(&arm, e, &plano.conjunto)?;
             }
             // Só depois de tudo verificado — e só com empresa: uma base nova ainda passa pelo
             // primeiro acesso, e a próxima abertura precisa sincronizar o admin criado nele.
@@ -143,6 +148,7 @@ impl MotorLocal {
             plano: Arc::clone(plano),
             empresa,
             dispositivo: Id::novo(),
+            recursos: Arc::default(),
         })
     }
 
@@ -210,6 +216,7 @@ impl MotorLocal {
                 for p in permissoes {
                     papel = papel.com_permissao(p);
                 }
+                papel.limites = cardeal_auth::PapelDeFabrica::Administrador.limites_padrao();
                 let usuario = Usuario::novo(admin_login, admin_nome, &admin_senha, PoliticaSenha::PADRAO, agora)
                     .map_err(|e| como_erro_armazenamento(&e))?;
 
@@ -263,7 +270,7 @@ impl MotorLocal {
             ));
         }
         self.empresa = empresa;
-        self.ambiente = ambiente_de(empresa, &self.plano);
+        self.ambiente = ambiente_de(empresa, &self.plano).com_recursos(Arc::clone(&self.recursos));
         Ok(())
     }
 
@@ -386,7 +393,64 @@ impl MotorLocal {
     }
 }
 
+/// Um executor de tarefas que pode ir para outra thread: carrega clones baratos do escritor,
+/// do leitor, do plano e do ambiente, e a sessão de quem pediu. É assim que o desktop roda a
+/// transmissão fiscal sem prender a tela (`docs/modulos/fiscal.md`).
+#[derive(Clone)]
+pub struct ExecutorDeTarefas {
+    escritor: cardeal_storage::Escritor,
+    leitor: cardeal_storage::Leitor,
+    plano: Arc<Plano>,
+    ambiente: Ambiente,
+    sessao: Sessao,
+}
+
+impl ExecutorDeTarefas {
+    /// Roda a tarefa `nome` (bloqueante: chame de uma thread própria).
+    ///
+    /// # Errors
+    /// O da tarefa, de acesso, ou o armazenamento já fechado.
+    pub fn executar(&self, nome: &str) -> Resultado<String> {
+        self.plano.despachante.executar_tarefa(
+            nome,
+            &self.sessao,
+            &self.ambiente,
+            &self.leitor,
+            &self.escritor,
+        )
+    }
+}
+
 impl MotorLocal {
+    /// Roda uma tarefa de módulo na thread de quem chama.
+    ///
+    /// # Errors
+    /// O da tarefa ou de acesso.
+    pub fn executar_tarefa(&self, sessao: &SessaoLocal, nome: &str) -> Resultado<String> {
+        self.executor_de_tarefas(sessao).executar(nome)
+    }
+
+    /// Um executor de tarefas para levar a outra thread (ver [`ExecutorDeTarefas`]).
+    #[must_use]
+    pub fn executor_de_tarefas(&self, sessao: &SessaoLocal) -> ExecutorDeTarefas {
+        ExecutorDeTarefas {
+            escritor: self.arm.escritor().clone(),
+            leitor: self.arm.leitor().clone(),
+            plano: Arc::clone(&self.plano),
+            ambiente: self.ambiente_de(sessao).into_owned(),
+            sessao: sessao.sessao.clone(),
+        }
+    }
+
+    /// Injeta os recursos da instalação (cofre de segredos, provedor fiscal...) que os
+    /// comandos pedem com `Ctx::recurso` — quem monta o motor sabe quais são; o núcleo não.
+    #[must_use]
+    pub fn com_recursos(mut self, recursos: Recursos) -> Self {
+        self.recursos = Arc::new(recursos);
+        self.ambiente = self.ambiente.com_recursos(Arc::clone(&self.recursos));
+        self
+    }
+
     /// O ambiente da empresa da sessão — o da matriz já vem pronto; o de outro CNPJ custa um
     /// `Arc::clone`.
     fn ambiente_de(&self, sessao: &SessaoLocal) -> std::borrow::Cow<'_, Ambiente> {
@@ -394,7 +458,9 @@ impl MotorLocal {
             std::borrow::Cow::Borrowed(&self.ambiente)
         } else {
             std::borrow::Cow::Owned(
-                ambiente_de(sessao.empresa(), &self.plano).com_organizacao(self.empresa),
+                ambiente_de(sessao.empresa(), &self.plano)
+                    .com_organizacao(self.empresa)
+                    .com_recursos(Arc::clone(&self.recursos)),
             )
         }
     }

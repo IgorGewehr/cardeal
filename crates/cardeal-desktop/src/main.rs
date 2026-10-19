@@ -7,8 +7,12 @@
 //! Ordens de Serviço e Estoque; as demais mostram `tela_em_construcao` (backend já responde).
 
 mod aviso_defasados;
+mod comprovante;
+mod danfce;
 #[cfg(feature = "demo")]
 mod demo_app;
+mod fiscal_fundo;
+mod importacao_planilha;
 mod login;
 mod pagamento;
 mod pessoa;
@@ -17,6 +21,8 @@ mod tela_clientes;
 mod tela_compras;
 mod tela_estoque;
 mod tela_financeiro;
+mod tela_fiscal;
+mod tela_notas;
 mod tela_orcamentos;
 mod tela_os;
 mod tela_pdv;
@@ -205,6 +211,7 @@ enum Area {
     Os,
     Agenda,
     Financeiro,
+    Fiscal,
     Configuracoes,
 }
 
@@ -219,6 +226,7 @@ impl Area {
             Self::Os => "os",
             Self::Agenda => "agenda",
             Self::Financeiro => "financeiro",
+            Self::Fiscal => "fiscal",
             Self::Configuracoes => "configuracoes",
         }
     }
@@ -232,6 +240,7 @@ impl Area {
             "os" => Self::Os,
             "agenda" => Self::Agenda,
             "financeiro" => Self::Financeiro,
+            "fiscal" => Self::Fiscal,
             "configuracoes" => Self::Configuracoes,
             _ => Self::Estoque,
         }
@@ -277,6 +286,11 @@ const ITENS_PALETA: &[ItemComando] = &[
     ItemComando {
         id: "financeiro",
         rotulo: "Financeiro",
+        grupo: "Ir para",
+    },
+    ItemComando {
+        id: "fiscal",
+        rotulo: "Notas fiscais",
         grupo: "Ir para",
     },
     ItemComando {
@@ -356,12 +370,20 @@ const GRUPOS_SIDEBAR: &[cardeal_ui::organisms::GrupoSidebar<'static>] = &[
     },
     cardeal_ui::organisms::GrupoSidebar {
         titulo: Some("Financeiro"),
-        itens: &[ItemSidebar {
-            id: "financeiro",
-            icone: Icone::Dinheiro,
-            rotulo: "Financeiro",
-            badge: None,
-        }],
+        itens: &[
+            ItemSidebar {
+                id: "financeiro",
+                icone: Icone::Dinheiro,
+                rotulo: "Financeiro",
+                badge: None,
+            },
+            ItemSidebar {
+                id: "fiscal",
+                icone: Icone::Nota,
+                rotulo: "Notas fiscais",
+                badge: None,
+            },
+        ],
     },
 ];
 
@@ -378,6 +400,7 @@ struct EstadoAutenticado {
     vendas: tela_vendas::EstadoTelaVendas,
     compras: tela_compras::EstadoTelaCompras,
     agenda: tela_agenda::EstadoTelaAgenda,
+    notas: tela_notas::EstadoNotas,
 }
 
 impl EstadoAutenticado {
@@ -408,6 +431,7 @@ impl EstadoAutenticado {
         match self.area {
             Area::Pdv => self.pdv.carregar(motor, s),
             Area::Configuracoes => self.settings.carregar(motor, s),
+            Area::Fiscal => self.notas.carregar(motor, s),
             Area::Os => self.os.carregar(motor, s),
             Area::Estoque => self.estoque.carregar(motor, s),
             Area::Clientes => self.clientes.carregar(motor, s),
@@ -576,7 +600,8 @@ impl App {
                 &cardeal_distribuicao::modulos(),
                 &cardeal_distribuicao::pedido_ativacao(),
             )
-            .expect("abrir a base da demo");
+            .expect("abrir a base da demo")
+            .com_recursos(cardeal_distribuicao::recursos_simulados());
             let sessao = demo_app::semear(&motor);
             let cena = demo.cena.clone();
             if cena.starts_with("login") {
@@ -595,11 +620,13 @@ impl App {
             }
             return;
         }
-        match Motor::abrir(
+        let aberto = Motor::abrir(
             &caminho_da_base(),
             &cardeal_distribuicao::modulos(),
             &cardeal_distribuicao::pedido_ativacao(),
-        ) {
+        )
+        .and_then(|m| Ok(m.com_recursos(cardeal_distribuicao::recursos(&diretorio_de_dados())?)));
+        match aberto {
             Ok(motor) => {
                 let precisa_config = motor.precisa_de_configuracao_inicial().unwrap_or(true);
                 self.motor = Some(motor);
@@ -648,6 +675,7 @@ impl App {
             vendas,
             compras,
             agenda,
+            notas: tela_notas::EstadoNotas::default(),
         }));
     }
 }
@@ -930,7 +958,12 @@ impl eframe::App for App {
                 }
                 Tela::Autenticado(estado) => {
                     let Some(motor) = &self.motor else { return };
+                    // As NFC-e que ficaram na fila saem sozinhas, em segundo plano.
+                    fiscal_fundo::vigiar(ui.ctx(), motor, &estado.sessao);
                     match estado.area {
+                        Area::Fiscal => {
+                            tela_notas::mostrar(ui, motor, &estado.sessao, &mut estado.notas);
+                        }
                         Area::Pdv => {
                             tela_pdv::mostrar(ui, motor, &estado.sessao, &mut estado.pdv);
                         }
@@ -972,6 +1005,11 @@ impl eframe::App for App {
                                 &estado.sessao,
                                 &mut estado.financeiro,
                             );
+                            // O aviso do certificado pediu a configuração fiscal.
+                            if std::mem::take(&mut estado.financeiro.pedido_config_fiscal) {
+                                estado.area = Area::Configuracoes;
+                                estado.settings.abrir_fiscal(motor, &estado.sessao);
+                            }
                         }
                         Area::Vendas => {
                             tela_vendas::mostrar(ui, motor, &estado.sessao, &mut estado.vendas);

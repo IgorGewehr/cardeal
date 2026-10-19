@@ -69,6 +69,12 @@ impl Comando for RegistrarEntradaComLote {
 
     #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
+        // Código em branco: o sistema gera um a partir da validade (ou de hoje), único na
+        // empresa — mercadoria de prateleira não tem post-it, mas o lote precisa de nome.
+        let codigo_lote = match self.codigo_lote.trim() {
+            "" => gerar_codigo_lote(uow, ctx, self.validade.unwrap_or_else(|| ctx.hoje()))?,
+            c => c.to_owned(),
+        };
         let g = registrar_entrada_com_lote_comum(
             DadosEntrada {
                 produto: self.produto,
@@ -79,7 +85,7 @@ impl Comando for RegistrarEntradaComLote {
                 origem_id: None,
             },
             DadosNovoLote {
-                codigo: self.codigo_lote,
+                codigo: codigo_lote,
                 origem: self.origem,
                 fornecedor: self.fornecedor,
                 aparelho_origem: self.aparelho_origem,
@@ -96,5 +102,30 @@ impl Comando for RegistrarEntradaComLote {
                 .lote
                 .expect("registrar_entrada_com_lote_comum sempre devolve um lote"),
         })
+    }
+}
+
+/// `L301126-1`, `L301126-2`… (`L` + validade em `ddmmaa` + sequência), o primeiro livre na
+/// empresa.
+#[cfg(feature = "sqlite")]
+fn gerar_codigo_lote(
+    uow: &mut UnidadeDeTrabalho,
+    ctx: &Ctx,
+    data: cardeal_kernel::Data,
+) -> Resultado<String> {
+    let base = format!(
+        "L{:02}{:02}{:02}",
+        data.dia(),
+        data.mes(),
+        data.ano().rem_euclid(100)
+    );
+    let repo = crate::repositorio::RepositorioEstoque::novo(uow);
+    let mut n = 1u32;
+    loop {
+        let codigo = format!("{base}-{n}");
+        if repo.buscar_lote_por_codigo(ctx.empresa, &codigo)?.is_none() {
+            return Ok(codigo);
+        }
+        n += 1;
     }
 }

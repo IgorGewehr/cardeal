@@ -10,6 +10,10 @@ O Cardeal integra com uma **API fiscal externa** (Focus NFe, NFe.io, Tecnospeed,
 ou um serviço próprio da operação) atrás de uma porta única. Ver
 [ADR-0006](adr/0006-fiscal-via-api-externa.md).
 
+**Decidido em 2026-10-14:** o provedor é o **`sefaz-api`**, o motor fiscal próprio da operação, e o
+certificado A1 fica cifrado no cofre da instalação ([ADR-0019](adr/0019-sefaz-api-como-provedor-e-cofre-do-certificado.md)).
+O contrato real, o que ele cobre e o que não cobre estão em [`modulos/fiscal.md`](modulos/fiscal.md) §2.
+
 O que **é** nosso: o modelo de dados fiscal, a máquina de estados dos documentos, a fila durável, a
 contingência, a conciliação com o razão e a experiência do usuário.
 
@@ -204,6 +208,14 @@ nfce = [
 
 Trocar de provedor é trocar uma linha e reiniciar. A porta protege todo o resto do sistema dessa
 decisão — que é exatamente o objetivo de uma arquitetura de portas e adaptadores.
+
+**Como ficou na implementação (2026-10-14):** o provedor é um recurso injetado
+(`mod_fiscal::ProvedorFiscal`), montado por `cardeal_distribuicao::recursos` a partir do ambiente do
+processo — `CARDEAL_FISCAL_TOKEN` (chave do `sefaz-api`; sem ela, "não configurado"),
+`CARDEAL_FISCAL_URL` (opcional) e `CARDEAL_CHAVE_SEGREDOS` (chave do cofre; sem ela, o arquivo
+`cofre.chave` da pasta de dados). O certificado não fica num caminho de arquivo: é enviado pela tela,
+conferido e guardado cifrado na base (`fiscal_certificado`). Ambiente, séries e alerta de vencimento são
+dados da empresa, não do arquivo de configuração. Ver [`modulos/fiscal.md`](modulos/fiscal.md).
 
 ## 9. O que fica no nosso lado
 

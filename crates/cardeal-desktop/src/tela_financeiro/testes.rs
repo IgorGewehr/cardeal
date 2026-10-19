@@ -58,6 +58,7 @@ fn baixa_vai_para_a_parcela_aberta_mesmo_se_a_lista_mudar_de_ordem() {
         situacao: None,
         valor_sugerido: String::new(),
         renegociar: FormRenegociar::default(),
+        ajuste: FormAjuste::default(),
     };
     estado.parcelas.reverse();
 
@@ -393,6 +394,7 @@ fn baixa_de_parcela_vencida_sugere_o_total_com_multa() {
         situacao: None,
         valor_sugerido: String::new(),
         renegociar: FormRenegociar::default(),
+        ajuste: FormAjuste::default(),
     };
     atualizar_situacao(&t.motor, &t.sessao, &mut estado, p.parcela);
     let Dlg::Baixar {
@@ -654,6 +656,45 @@ fn aba_resultado_apura_o_mes_pelo_razao_e_navega_entre_meses() {
     assert_eq!(cmp.mes_anterior.lucro_liquido, Dinheiro::ZERO);
     // Ainda nada foi recebido: o DFC (realizado) está zerado, ao contrário da DRE (competência).
     assert!(estado.dfc.clone().expect("DFC").variacao.e_zero());
+    // O indireto explica por quê: lucro de 250 preso no a receber, mesmo caixa zerado.
+    let ind = estado.dfc_indireto.clone().expect("DFC indireto");
+    assert_eq!(ind.lucro_liquido, Dinheiro::reais(250));
+    assert!(ind.variacao.e_zero() && ind.diferenca_de_datas.e_zero());
+    assert!(ind.blocos[0]
+        .linhas
+        .iter()
+        .any(|l| l.rotulo == "(Aumento) redução de contas a receber"
+            && l.valor == Dinheiro::reais(-250)));
+    // As duas tabelas desenham.
+    let ctx = egui::Context::default();
+    cardeal_ui::tokens::instalar_fontes(&ctx);
+    cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+    estado.visao_resultado = 1;
+    for indireto in [false, true] {
+        estado.dfc_metodo_indireto = indireto;
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                painel_dre(ui, &t.motor, &t.sessao, &mut estado);
+            });
+        });
+    }
+    // O balancete do mês: a receita de 250 lançada e fechando.
+    let b = estado.balancete.clone().expect("balancete");
+    let (anterior, debitos, creditos, atual) = super::balancete::totais(&b);
+    assert!(anterior.e_zero() && atual.e_zero());
+    assert_eq!(debitos, creditos);
+    assert_eq!(debitos, Dinheiro::reais(250));
+    assert_eq!(
+        super::balancete::com_natureza(Dinheiro::reais(-250)),
+        "250,00 C"
+    );
+    estado.visao_resultado = 2;
+    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            painel_dre(ui, &t.motor, &t.sessao, &mut estado);
+        });
+    });
+    estado.visao_resultado = 0;
 
     // Mês passado: nada lançado.
     estado.dre_mes = Some(estado.mes_dre().anterior());
@@ -853,4 +894,572 @@ fn aba_conciliacao_importa_ofx_sugere_a_baixa_e_concilia() {
     );
     // Texto em ISO-8859-1 (extratos antigos) também é lido.
     assert_eq!(ler_texto(&[b'a', 0xE7, b'a', b'o']), "açao");
+}
+
+#[test]
+fn conferencia_do_saldo_le_o_ofx_aceita_saldo_digitado_e_alerta_na_visao() {
+    let t = motor_de_teste();
+    let banco: ContaBancariaCriada = t
+        .motor
+        .executar(
+            &t.sessao,
+            "financeiro.criar_conta_bancaria.v1",
+            &CriarContaBancaria {
+                nome: "Sicredi".to_owned(),
+            },
+        )
+        .expect("banco");
+    let hoje = Data::hoje(Fuso::BRASILIA);
+    let mut estado = EstadoTelaFinanceiro {
+        aba: Aba::Conciliacao,
+        ..Default::default()
+    };
+    estado.carregar(&t.motor, &t.sessao);
+    estado.conciliacao.conta = Some(banco.conta);
+    estado.conciliacao.recarregar_itens(&t.motor, &t.sessao);
+    assert!(estado
+        .conciliacao
+        .conferencia()
+        .expect("a conta")
+        .fechamento
+        .is_none());
+
+    // Uma tarifa de 20 dias atrás, nunca conciliada, e o saldo de −15 no LEDGERBAL.
+    let iso = |d: Data| d.formatar_iso().replace('-', "");
+    let ofx = format!(
+        "<OFX><STMTTRN><DTPOSTED>{}<TRNAMT>-15.00<FITID>T1<MEMO>TARIFA
+</STMTTRN><LEDGERBAL><BALAMT>-15.00<DTASOF>{}</LEDGERBAL></OFX>",
+        iso(hoje.mais_dias(-20)),
+        iso(hoje)
+    );
+    importar_texto(
+        &egui::Context::default(),
+        &t.motor,
+        &t.sessao,
+        &mut estado,
+        banco.conta,
+        "extrato.ofx",
+        &ofx,
+    );
+    let f = estado
+        .conciliacao
+        .conferencia()
+        .and_then(|c| c.fechamento)
+        .expect("o saldo do OFX");
+    assert_eq!(f.banco.saldo, Dinheiro::reais(-15));
+    assert_eq!(
+        f.sem_explicacao(),
+        Dinheiro::ZERO,
+        "a tarifa pendente explica"
+    );
+    // A tarifa parada há 20 dias vira alerta na Visão geral.
+    let alertas = estado.conciliacao.alertas(hoje);
+    assert!(
+        alertas
+            .iter()
+            .any(|a| a.starts_with("Sicredi:") && a.contains("20 dias")),
+        "{alertas:?}"
+    );
+
+    // Saldo digitado pelo formulário.
+    estado.conciliacao.saldo_form = Some((hoje.formatar(), "-25,00".to_owned()));
+    super::conferencia::informar_saldo(&t.motor, &t.sessao, &mut estado).expect("informar");
+    assert!(estado.conciliacao.saldo_form.is_none());
+    let f = estado
+        .conciliacao
+        .conferencia()
+        .and_then(|c| c.fechamento)
+        .unwrap();
+    assert_eq!(f.sem_explicacao(), Dinheiro::reais(-10));
+    // Valor ilegível: recusado sem chamar o motor.
+    estado.conciliacao.saldo_form = Some((hoje.formatar(), "abc".to_owned()));
+    assert!(super::conferencia::informar_saldo(&t.motor, &t.sessao, &mut estado).is_err());
+
+    // Os dois painéis desenham.
+    let ctx = egui::Context::default();
+    cardeal_ui::tokens::instalar_fontes(&ctx);
+    cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+    for aba in [Aba::Conciliacao, Aba::Visao] {
+        estado.aba = aba;
+        for _ in 0..2 {
+            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    mostrar(ui, &t.motor, &t.sessao, &mut estado);
+                });
+            });
+        }
+    }
+}
+
+#[test]
+fn escolher_o_fornecedor_preenche_o_lancamento_com_o_ultimo_dele() {
+    let t = motor_de_teste();
+    let (m, s) = (&t.motor, &t.sessao);
+    let ceee: PessoaCadastrada = m
+        .executar(
+            s,
+            "clientes.criar_pessoa.v1",
+            &CriarPessoa {
+                tipo: TipoPessoa::Juridica,
+                nome: "Companhia de Energia".into(),
+                nome_fantasia: None,
+                papel_inicial: Papel::Fornecedor,
+                documento_tipo: None,
+                documento_numero: None,
+                data_nascimento: None,
+                endereco: None,
+                contato: None,
+            },
+        )
+        .expect("fornecedor");
+    let ontem = Data::hoje(Fuso::BRASILIA).mais_dias(-1);
+    let _: mod_financeiro::TituloAPagarLancado = m
+        .executar(
+            s,
+            "financeiro.lancar_titulo_a_pagar.v1",
+            &LancarTituloAPagar {
+                fornecedor: Some(ceee.pessoa),
+                valor_total: Dinheiro::centavos(31_240),
+                emissao: ontem,
+                parcelas: 1,
+                primeiro_vencimento: ontem,
+                intervalo_dias: 0,
+                observacao: Some("Conta de luz".into()),
+                categoria: None,
+                quitado_agora: None,
+            },
+        )
+        .expect("luz");
+
+    let mut estado = EstadoTelaFinanceiro::default();
+    estado.carregar(m, s);
+    let mut form = FormLancar::novo(false);
+    form.valor = "300,00".into(); // o que o usuário já digitou não é sobrescrito
+    form.pessoa.nenhuma = false;
+    form.pessoa.selecionada = Some(ceee.pessoa);
+    estado.dlg = Dlg::Lancar(form);
+    let ctx = egui::Context::default();
+    cardeal_ui::tokens::instalar_fontes(&ctx);
+    cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+    for _ in 0..2 {
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            dialogo_lancar(ctx, m, s, &mut estado);
+        });
+    }
+    let Dlg::Lancar(f) = &estado.dlg else {
+        panic!("o diálogo segue aberto");
+    };
+    assert_eq!(f.descricao, "Conta de luz");
+    assert_eq!(f.valor, "300,00");
+    let aviso = f.aviso_preenchido.as_deref().expect("o aviso");
+    assert!(
+        aviso.contains("descrição") && !aviso.contains("valor"),
+        "{aviso}"
+    );
+    // Sem pessoa (ou pessoa sem histórico): nada a preencher.
+    let mut vazio = FormLancar::novo(true);
+    assert!(preencher_com_o_ultimo(m, s, &mut vazio, ceee.pessoa).is_none());
+}
+
+#[test]
+fn aba_cheques_recebe_compensa_e_devolve() {
+    use mod_financeiro::cheque::EstadoCheque;
+
+    let t = motor_de_teste();
+    let (m, s) = (&t.motor, &t.sessao);
+    let banco: ContaBancariaCriada = m
+        .executar(
+            s,
+            "financeiro.criar_conta_bancaria.v1",
+            &CriarContaBancaria {
+                nome: "Sicredi".to_owned(),
+            },
+        )
+        .expect("banco");
+    let parcela = lancar_a_receber(m, s, 180);
+    let mut estado = EstadoTelaFinanceiro {
+        aba: Aba::Cheques,
+        ..Default::default()
+    };
+    estado.carregar(m, s);
+    assert!(estado.cheques.erro.is_none(), "{:?}", estado.cheques.erro);
+    assert!(estado.cheques.abertas.iter().any(|p| p.parcela == parcela));
+
+    // Recebe pelo formulário (o "bom para" em branco = à vista).
+    let hoje = Data::hoje(Fuso::BRASILIA);
+    estado.cheques.form = Some(super::cheques::FormCheque {
+        parcela: Some(parcela),
+        valor: "180,00".into(),
+        recebido_em: hoje.formatar(),
+        banco: "104".into(),
+        agencia: "0001".into(),
+        conta: "998877".into(),
+        numero: "000045".into(),
+        emitente: "Maria Souza".into(),
+        ..Default::default()
+    });
+    let r = super::cheques::registrar(m, s, &mut estado).expect("registrar");
+    assert!(r.parcela_quitada);
+    assert!(estado.cheques.form.is_none());
+    let c = estado.cheques.itens[0].cheque.clone();
+    assert!(c.pronto_para_depositar(hoje), "à vista: já pode depositar");
+
+    // Compensa no banco e depois devolve.
+    estado.cheques.acao = Some(super::cheques::AcaoCheque::Compensar {
+        cheque: c.id,
+        conta: Some(banco.conta),
+        data: hoje.formatar(),
+    });
+    super::cheques::executar_acao(m, s, &mut estado).expect("compensar");
+    assert_eq!(
+        estado.cheques.itens[0].cheque.estado,
+        EstadoCheque::Compensado
+    );
+    estado.cheques.acao = Some(super::cheques::AcaoCheque::Devolver {
+        cheque: c.id,
+        alinea: Some(11),
+        observacao: String::new(),
+    });
+    super::cheques::executar_acao(m, s, &mut estado).expect("devolver");
+    assert_eq!(
+        estado.cheques.itens[0].cheque.estado,
+        EstadoCheque::Devolvido
+    );
+    assert!(
+        estado.cheques.abertas.iter().any(|p| p.parcela == parcela),
+        "a conta voltou a ficar em aberto"
+    );
+
+    // A aba desenha, com o formulário e uma ação abertos.
+    estado.cheques.filtro = 3;
+    estado.cheques.form = Some(super::cheques::FormCheque::default());
+    let ctx = egui::Context::default();
+    cardeal_ui::tokens::instalar_fontes(&ctx);
+    cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+    for _ in 0..2 {
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                mostrar(ui, m, s, &mut estado);
+            });
+        });
+    }
+}
+
+#[test]
+fn pacote_do_contador_grava_pdf_e_planilha_do_mes() {
+    let t = motor_de_teste();
+    lancar_a_receber(&t.motor, &t.sessao, 250);
+    let mut estado = EstadoTelaFinanceiro {
+        aba: Aba::Resultado,
+        ..Default::default()
+    };
+    estado.carregar(&t.motor, &t.sessao);
+    let dir = tempfile::tempdir().unwrap();
+    let pasta = super::pacote_contador::gravar(&t.motor, &t.sessao, &estado, dir.path())
+        .expect("gravar o pacote");
+    let mut arquivos: Vec<std::path::PathBuf> = std::fs::read_dir(&pasta)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .collect();
+    arquivos.sort();
+    assert_eq!(arquivos.len(), 2, "{arquivos:?}");
+    let xlsx = std::fs::read(&arquivos[0]).unwrap();
+    let pdf = std::fs::read(&arquivos[1]).unwrap();
+    assert!(arquivos[0].to_string_lossy().ends_with(".xlsx"));
+    assert!(pdf.starts_with(b"%PDF-1."));
+    // O `.xlsx` guarda os XMLs sem compressão: dá para conferir o conteúdo nos bytes.
+    let texto = String::from_utf8_lossy(&xlsx);
+    assert!(xlsx.starts_with(b"PK"));
+    for aba in ["DRE", "DFC direto", "DFC indireto", "Balancete", "Diário"] {
+        assert!(texto.contains(&format!("name=\"{aba}\"")), "aba {aba}");
+    }
+    assert!(
+        texto.contains("<v>250.00</v>"),
+        "a receita de 250 na planilha"
+    );
+    // Para conferir num Excel de verdade: CARDEAL_SALVAR_PACOTE=<pasta> cargo test …
+    if let Ok(destino) = std::env::var("CARDEAL_SALVAR_PACOTE") {
+        for a in &arquivos {
+            std::fs::copy(
+                a,
+                std::path::Path::new(&destino).join(a.file_name().unwrap()),
+            )
+            .unwrap();
+        }
+    }
+}
+
+#[test]
+fn regua_de_cobranca_na_aba_cobranca_fila_registro_e_editor() {
+    let t = motor_de_teste();
+    let (m, s) = (&t.motor, &t.sessao);
+    let cliente: PessoaCadastrada = m
+        .executar(
+            s,
+            "clientes.criar_pessoa.v1",
+            &CriarPessoa {
+                tipo: TipoPessoa::Fisica,
+                nome: "Ana Paula".into(),
+                nome_fantasia: None,
+                papel_inicial: Papel::Cliente,
+                documento_tipo: None,
+                documento_numero: None,
+                data_nascimento: None,
+                endereco: None,
+                contato: None,
+            },
+        )
+        .expect("cliente");
+    let hoje = Data::hoje(Fuso::BRASILIA);
+    let _: mod_financeiro::TituloAReceberLancado = m
+        .executar(
+            s,
+            "financeiro.lancar_titulo_a_receber.v1",
+            &LancarTituloAReceber {
+                cliente: Some(cliente.pessoa),
+                valor_total: Dinheiro::reais(120),
+                emissao: hoje.mais_dias(-20),
+                parcelas: 1,
+                primeiro_vencimento: hoje.mais_dias(-1),
+                intervalo_dias: 0,
+                observacao: None,
+                categoria: None,
+                quitado_agora: None,
+            },
+        )
+        .expect("título");
+    let mut estado = EstadoTelaFinanceiro {
+        aba: Aba::Cobranca,
+        ..Default::default()
+    };
+    estado.carregar(m, s);
+    let fila = super::regua::fila(&estado).expect("fila").clone();
+    assert_eq!(fila.itens.len(), 1);
+    let item = fila.itens[0].clone();
+    assert_eq!(item.etapa.nome, "1 dia de atraso");
+    let msg = estado.mensagem_da_fila(&item);
+    assert!(
+        msg.starts_with("Olá, Ana!") && msg.contains("R$ 120,00"),
+        "{msg}"
+    );
+
+    // Pular tira a cliente da fila (sem telefone, o WhatsApp não aparece).
+    super::regua::registrar(m, s, &mut estado, &item, true).expect("pular");
+    assert!(super::regua::fila(&estado).unwrap().itens.is_empty());
+
+    // O editor: dias inválidos são recusados; a régua salva com uma etapa nova.
+    estado.regua_edicao = Some(vec![super::regua::EtapaEmEdicao {
+        dias: "dez".into(),
+        nome: "X".into(),
+        mensagem: "m".into(),
+    }]);
+    assert!(super::regua::salvar_regua(m, s, &mut estado).is_err());
+    estado.regua_edicao = Some(vec![super::regua::EtapaEmEdicao {
+        dias: "-2".into(),
+        nome: "Aviso".into(),
+        mensagem: "Olá, {nome}!".into(),
+    }]);
+    super::regua::salvar_regua(m, s, &mut estado).expect("salvar");
+    assert!(estado.regua_edicao.is_none());
+
+    // A Visão geral carrega a fila (vazia agora: a cliente foi pulada) e desenha.
+    estado.aba = Aba::Visao;
+    estado.carregar(m, s);
+    assert!(super::regua::fila(&estado).is_some());
+    // A aba desenha, com o editor aberto.
+    estado.aba = Aba::Cobranca;
+    estado.regua_edicao = Some(vec![super::regua::EtapaEmEdicao::default()]);
+    let ctx = egui::Context::default();
+    cardeal_ui::tokens::instalar_fontes(&ctx);
+    cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+    for _ in 0..2 {
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                mostrar(ui, m, s, &mut estado);
+            });
+        });
+    }
+}
+
+#[test]
+fn aviso_do_certificado_vencendo_na_visao_pede_a_configuracao_fiscal() {
+    let t = motor_de_teste();
+    let (m, s) = (&t.motor, &t.sessao);
+    let mut estado = EstadoTelaFinanceiro::default();
+    estado.carregar(m, s);
+    // Sem certificado instalado: nada na Visão (nem toda empresa emite).
+    assert!(estado
+        .situacao_fiscal
+        .as_ref()
+        .is_some_and(|f| f.certificado.is_none()));
+    estado.situacao_fiscal = Some(mod_fiscal::SituacaoFiscalDaEmpresa {
+        certificado: None,
+        ambiente: mod_fiscal::AmbienteFiscal::Producao,
+        pendencias: vec![mod_fiscal::PendenciaFiscal::CertificadoVencendo { dias: 9 }],
+    });
+    let ctx = egui::Context::default();
+    cardeal_ui::tokens::instalar_fontes(&ctx);
+    cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+    for _ in 0..2 {
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                mostrar(ui, m, s, &mut estado);
+            });
+        });
+    }
+    assert!(!estado.pedido_config_fiscal);
+}
+
+#[test]
+fn dialogo_da_parcela_com_ajustes_desenha_e_a_conta_cancelada_sai_como_cancelada() {
+    let t = motor_de_teste();
+    let parcela = lancar_a_receber(&t.motor, &t.sessao, 120);
+    let mut estado = EstadoTelaFinanceiro {
+        aba: Aba::Receber,
+        ..Default::default()
+    };
+    estado.carregar(&t.motor, &t.sessao);
+    let p = estado
+        .parcelas
+        .iter()
+        .find(|p| p.parcela == parcela)
+        .cloned()
+        .expect("parcela");
+    estado.dlg = Dlg::Baixar {
+        parcela,
+        valor: p.saldo().formatar(),
+        data: Data::hoje(Fuso::BRASILIA).to_string(),
+        pagamento: crate::pagamento::EstadoPagamento::novo(MeioPagamento::Dinheiro),
+        baixas: Vec::new(),
+        baixas_carregadas: true,
+        motivo_estorno: String::new(),
+        situacao: None,
+        valor_sugerido: String::new(),
+        renegociar: FormRenegociar::default(),
+        ajuste: FormAjuste {
+            motivo: "curto".to_owned(),
+            confirmar_cancelamento: true,
+            ..FormAjuste::default()
+        },
+    };
+    let ctx = egui::Context::default();
+    cardeal_ui::tokens::instalar_fontes(&ctx);
+    cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+    for _ in 0..2 {
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            dialogo_baixar(ctx, &t.motor, &t.sessao, &mut estado);
+        });
+    }
+    // Motivo curto: avisa e não pede confirmação.
+    let Dlg::Baixar { ajuste, .. } = &estado.dlg else {
+        panic!("o diálogo continua aberto");
+    };
+    assert!(!ajuste.confirmar_cancelamento);
+
+    let _: mod_financeiro::TituloFoiCancelado = t
+        .motor
+        .executar(
+            &t.sessao,
+            "financeiro.cancelar_titulo.v1",
+            &mod_financeiro::CancelarTitulo {
+                titulo: p.titulo,
+                motivo: "Lançada em duplicidade".to_owned(),
+            },
+        )
+        .expect("cancelar");
+    estado.carregar(&t.motor, &t.sessao);
+    assert!(estado
+        .parcelas
+        .iter()
+        .filter(|x| x.parcela == parcela)
+        .all(|x| x.estado == EstadoParcela::Cancelada));
+}
+
+#[test]
+fn conta_nova_com_saldo_e_transferencia_aparecem_na_aba_de_bancos() {
+    let t = motor_de_teste();
+    let mut estado = EstadoTelaFinanceiro {
+        aba: Aba::Bancos,
+        ..Default::default()
+    };
+    estado.carregar(&t.motor, &t.sessao);
+    let ctx = egui::Context::default();
+    cardeal_ui::tokens::instalar_fontes(&ctx);
+    cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+
+    // A conta nasce já com o saldo de hoje.
+    estado.dlg = Dlg::NovaContaBancaria {
+        nome: "Sicredi".to_owned(),
+        saldo: "1.500,00".to_owned(),
+    };
+    super::bancos::criar_conta(&ctx, &t.motor, &t.sessao, &mut estado);
+    assert!(matches!(estado.dlg, Dlg::Fechado));
+    let sicredi = estado
+        .contas_disp
+        .iter()
+        .find(|c| c.nome == "Sicredi")
+        .cloned()
+        .expect("conta criada");
+    assert_eq!(sicredi.saldo, Dinheiro::reais(1_500));
+
+    let caixa = estado
+        .contas_disp
+        .iter()
+        .find(|c| c.e_caixa)
+        .map(|c| c.conta)
+        .expect("caixa");
+    let _: mod_financeiro::TransferenciaFeita = t
+        .motor
+        .executar(
+            &t.sessao,
+            "financeiro.transferir_entre_contas.v1",
+            &mod_financeiro::TransferirEntreContas {
+                origem: sicredi.conta,
+                destino: caixa,
+                valor: Dinheiro::reais(200),
+                data: Data::hoje(Fuso::BRASILIA),
+                observacao: None,
+            },
+        )
+        .expect("transferir");
+    estado.carregar_fluxo(&t.motor, &t.sessao);
+    assert_eq!(estado.transferencias.len(), 1);
+
+    // A aba e os diálogos desenham.
+    let dialogos = [
+        Dlg::SaldoInicial {
+            conta: sicredi.conta,
+            nome: "Sicredi".to_owned(),
+            valor: String::new(),
+            data: Data::hoje(Fuso::BRASILIA).to_string(),
+        },
+        Dlg::Transferir(super::bancos::FormTransferencia::default()),
+        Dlg::CancelarTransferencia {
+            id: estado.transferencias[0].id,
+            descricao: "R$ 200,00".to_owned(),
+            motivo: String::new(),
+        },
+    ];
+    for dlg in dialogos {
+        estado.dlg = dlg;
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                super::bancos::painel_bancos(ui, &t.sessao, &mut estado);
+            });
+            match &estado.dlg {
+                Dlg::SaldoInicial { .. } => {
+                    super::bancos::dialogo_saldo_inicial(ctx, &t.motor, &t.sessao, &mut estado);
+                }
+                Dlg::Transferir(_) => {
+                    super::bancos::dialogo_transferir(ctx, &t.motor, &t.sessao, &mut estado);
+                }
+                _ => super::bancos::dialogo_cancelar_transferencia(
+                    ctx,
+                    &t.motor,
+                    &t.sessao,
+                    &mut estado,
+                ),
+            }
+        });
+    }
 }

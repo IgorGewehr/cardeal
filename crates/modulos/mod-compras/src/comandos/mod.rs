@@ -7,12 +7,14 @@
 //! ver `docs/19-estado-e-processo.md` §1.2/§4).
 
 mod confirmar_entrada;
+mod criar_produto_do_item;
 mod definir_preferencias_compras;
 mod importar_nota_de_arquivo_xml;
 mod lancar_nota_manual;
 mod vincular_produto_manual;
 
 pub use confirmar_entrada::{ConfirmarEntrada, EntradaConfirmada};
+pub use criar_produto_do_item::{CriarProdutoDoItem, ProdutoDoItemCriado};
 pub use definir_preferencias_compras::DefinirPreferenciasCompras;
 pub use importar_nota_de_arquivo_xml::ImportarNotaDeArquivoXml;
 pub use lancar_nota_manual::{ItemNotaManual, LancarNotaManual};
@@ -138,6 +140,72 @@ pub fn importar_nota_da_sefaz(
     importar_nota_interpretada(nota_xml, ctx, uow)
 }
 
+/// O cabeçalho da nota a partir do XML. O total é o que o fornecedor cobra (o `vNF`): produtos −
+/// descontos + ICMS-ST + IPI + frete/seguro/outras despesas.
+#[cfg(feature = "sqlite")]
+fn nota_do_xml(nota_xml: &cardeal_fiscal::NotaFiscalXml, fornecedor: Id, ctx: &Ctx) -> NotaEntrada {
+    let despesas = nota_xml.valor_frete + nota_xml.valor_seguro + nota_xml.valor_outras_despesas;
+    let valor_nos_itens: Dinheiro = nota_xml
+        .itens
+        .iter()
+        .map(cardeal_fiscal::ItemNfe::valor_na_nota)
+        .sum();
+    NotaEntrada {
+        id: Id::novo(),
+        empresa: ctx.empresa,
+        fornecedor,
+        chave_acesso: Some(nota_xml.chave_acesso.como_str().to_string()),
+        numero: nota_xml.numero.clone(),
+        serie: nota_xml.serie.clone(),
+        data_emissao: nota_xml.emissao,
+        valor_produtos: nota_xml.itens.iter().map(|i| i.valor_total).sum(),
+        valor_frete: nota_xml.valor_frete,
+        valor_seguro: nota_xml.valor_seguro,
+        valor_outras_despesas: nota_xml.valor_outras_despesas,
+        valor_total: valor_nos_itens + despesas,
+        estado: EstadoNotaEntrada::AConferir,
+        alerta: alerta_de_cfop(nota_xml),
+        versao: Versao::INICIAL,
+    }
+}
+
+/// O aviso para quem confere quando algum item tem CFOP que não é venda de mercadoria: a
+/// remessa de um aparelho para conserto, a bonificação, a consignação e o faturamento de
+/// entrega futura não podem virar estoque com conta a pagar sem alguém olhar.
+#[cfg(feature = "sqlite")]
+fn alerta_de_cfop(nota_xml: &cardeal_fiscal::NotaFiscalXml) -> Option<String> {
+    let cfops = nota_xml.cfops_fora_de_venda();
+    if cfops.is_empty() {
+        return None;
+    }
+    let lista: Vec<String> = cfops
+        .iter()
+        .map(|c| format!("CFOP {c} ({})", cardeal_fiscal::descrever_cfop(c)))
+        .collect();
+    Some(format!(
+        "Confira antes de dar entrada: {} — não é venda do fornecedor.",
+        lista.join(", ")
+    ))
+}
+
+/// Recusa o XML que não é uma compra da empresa: emitido por ela, para outro destinatário,
+/// devolução de cliente ou nota de entrada do emitente (lição do `gestao-raiz`).
+///
+/// # Errors
+/// [`ErroCompras::NaoECompra`] com o motivo.
+#[cfg(feature = "sqlite")]
+fn exigir_compra(
+    nota_xml: &cardeal_fiscal::NotaFiscalXml,
+    cnpj_empresa: &cardeal_kernel::Cnpj,
+) -> Resultado<()> {
+    match nota_xml.classificar_para(cnpj_empresa).motivo_da_recusa() {
+        None => Ok(()),
+        Some(motivo) => Err(Erro::de_dominio(&crate::erros::ErroCompras::NaoECompra(
+            motivo,
+        ))),
+    }
+}
+
 /// O miolo comum de toda importação de nota por XML — chamado por
 /// [`importar_nota_da_sefaz`] (XML baixado da distribuição `DFe`, via `PortaFiscal`) e por
 /// [`ImportarNotaDeArquivoXml`](crate::ImportarNotaDeArquivoXml) (XML lido de um arquivo
@@ -173,6 +241,9 @@ pub(crate) fn importar_nota_interpretada(
         });
     }
 
+    let cnpj_empresa = RepositorioCompras::novo(uow).cnpj_da_empresa(ctx.empresa)?;
+    exigir_compra(nota_xml, &cnpj_empresa)?;
+
     let fornecedor = resolver_fornecedor(
         &nota_xml.fornecedor_cnpj,
         &nota_xml.fornecedor_nome,
@@ -181,25 +252,8 @@ pub(crate) fn importar_nota_interpretada(
     )?;
     let preferencias = RepositorioCompras::novo(uow).preferencias(ctx.empresa)?;
 
-    let valor_produtos: Dinheiro = nota_xml.itens.iter().map(|i| i.valor_total).sum();
+    let nota = nota_do_xml(nota_xml, fornecedor, ctx);
     let despesas = nota_xml.valor_frete + nota_xml.valor_seguro + nota_xml.valor_outras_despesas;
-
-    let nota = NotaEntrada {
-        id: Id::novo(),
-        empresa: ctx.empresa,
-        fornecedor,
-        chave_acesso: Some(chave.to_string()),
-        numero: nota_xml.numero.clone(),
-        serie: nota_xml.serie.clone(),
-        data_emissao: nota_xml.emissao,
-        valor_produtos,
-        valor_frete: nota_xml.valor_frete,
-        valor_seguro: nota_xml.valor_seguro,
-        valor_outras_despesas: nota_xml.valor_outras_despesas,
-        valor_total: valor_produtos + despesas,
-        estado: EstadoNotaEntrada::AConferir,
-        versao: Versao::INICIAL,
-    };
 
     let pesos: Vec<i64> = match preferencias.rateio_por {
         RateioPor::Valor => nota_xml
@@ -213,7 +267,7 @@ pub(crate) fn importar_nota_interpretada(
             .map(|i| i.quantidade.unidades_internas())
             .collect(),
     };
-    let itens = montar_itens(
+    let mut itens = montar_itens(
         nota.id,
         fornecedor,
         despesas,
@@ -231,6 +285,11 @@ pub(crate) fn importar_nota_interpretada(
         ctx,
         uow,
     )?;
+    // Desconto e impostos não recuperáveis do XML entram no custo de cada item.
+    for (item, xml) in itens.iter_mut().zip(&nota_xml.itens) {
+        item.valor_desconto = xml.valor_desconto;
+        item.valor_impostos = xml.valor_icms_st + xml.valor_ipi;
+    }
 
     {
         let mut repo = RepositorioCompras::novo(uow);
@@ -245,10 +304,13 @@ pub(crate) fn importar_nota_interpretada(
         .filter(|i| i.estado_casamento != EstadoCasamento::Casado)
         .count();
 
-    if let Some(relatorio) =
-        tentar_confirmar_automaticamente(nota.id, &preferencias, itens_nao_casados, ctx, uow)?
-    {
-        return Ok(relatorio);
+    // Nota com aviso (CFOP fora de venda) sempre passa pela conferência.
+    if nota.alerta.is_none() {
+        if let Some(relatorio) =
+            tentar_confirmar_automaticamente(nota.id, &preferencias, itens_nao_casados, ctx, uow)?
+        {
+            return Ok(relatorio);
+        }
     }
 
     uow.publicar(EntradaAConferir {
@@ -401,10 +463,13 @@ fn montar_item_casado(
         produto_casado: None,
         codigo_fornecedor: codigo_fornecedor.to_string(),
         descricao_fornecedor: descricao.to_string(),
+        codigo_barras: codigo_barras.filter(|g| !g.is_empty()).map(str::to_owned),
         ncm: ncm.to_string(),
         quantidade,
         valor_unitario,
         valor_rateio: rateio,
+        valor_desconto: Dinheiro::ZERO,
+        valor_impostos: Dinheiro::ZERO,
         estado_casamento: EstadoCasamento::NaoCasado,
     };
     match casar(produto_por_gtin, regra, descricao, &candidatos_ref) {
@@ -445,6 +510,13 @@ pub fn verificar_notas_na_sefaz(
         let xml_bruto = porta.baixar_xml(&resumo.chave_acesso)?;
         let nota_xml =
             cardeal_fiscal::interpretar(&xml_bruto.0).map_err(|e| Erro::de_dominio(&e))?;
+        // A distribuição também traz notas em que a empresa aparece sem ser compradora
+        // (transportadora, autorizada a baixar o XML, devolução de cliente): essas ficam de
+        // fora, sem travar a varredura.
+        if nota_xml.classificar_para(&cnpj_empresa) != cardeal_fiscal::ClassificacaoEntrada::Compra
+        {
+            continue;
+        }
         relatorios.push(importar_nota_da_sefaz(&nota_xml, ctx, uow)?);
     }
 

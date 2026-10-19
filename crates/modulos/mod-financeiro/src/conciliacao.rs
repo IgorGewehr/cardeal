@@ -145,6 +145,58 @@ fn baixas_soltas(conexao: &Connection, empresa: Id, conta: Id) -> Resultado<Vec<
         .map_err(persist)
 }
 
+/// Um movimento da conta que não é baixa: (lançamento, data, valor nesta conta com sinal,
+/// histórico).
+#[cfg(feature = "sqlite")]
+pub(crate) type MovimentoSolto = (Id, Data, Dinheiro, String);
+
+/// Os lançamentos realizados nesta conta que não são baixa e que nenhuma linha do extrato
+/// conciliou — depósito do caixa no banco, transferência entre contas, compensação de cheque.
+/// Um lançamento estornado sem conciliação some junto com o estorno (o banco nunca viu nenhum
+/// dos dois); se o original já foi conciliado, o estorno aparece, porque o banco também vai
+/// mostrar a volta.
+#[cfg(feature = "sqlite")]
+pub(crate) fn movimentos_soltos(
+    conexao: &Connection,
+    empresa: Id,
+    conta: Id,
+) -> Resultado<Vec<MovimentoSolto>> {
+    let mut stmt = conexao
+        .prepare(
+            "WITH conciliados AS (
+                 SELECT i.lancamento AS l FROM financeiro_item_extrato i
+                  WHERE i.empresa = ?1 AND i.estado = 'Conciliado' AND i.lancamento IS NOT NULL
+                 UNION
+                 SELECT b.lancamento FROM financeiro_item_extrato i
+                   JOIN financeiro_baixa b ON b.id = i.baixa
+                  WHERE i.empresa = ?1 AND i.estado = 'Conciliado'
+             )
+             SELECT rl.id, COALESCE(rl.liquidacao, rl.competencia), SUM(rp.valor), rl.historico
+             FROM razao_lancamento rl
+             JOIN razao_partida rp ON rp.lancamento = rl.id AND rp.conta = ?2
+             WHERE rl.empresa = ?1 AND rl.estado = 'Realizado'
+               AND rl.id NOT IN (SELECT l FROM conciliados)
+               AND rl.id NOT IN (SELECT lancamento FROM financeiro_baixa WHERE empresa = ?1)
+               AND (rl.estorna IS NULL OR rl.estorna IN (SELECT l FROM conciliados))
+             GROUP BY rl.id
+             HAVING SUM(rp.valor) <> 0",
+        )
+        .map_err(persist)?;
+    let linhas = stmt
+        .query_map(params![blob(empresa), blob(conta)], |r| {
+            Ok((
+                id_de(r.get::<_, Vec<u8>>(0)?),
+                data_de(r.get(1)?),
+                Dinheiro::centavos(r.get(2)?),
+                r.get::<_, String>(3)?,
+            ))
+        })
+        .map_err(persist)?;
+    linhas
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(persist)
+}
+
 /// As linhas importadas de uma conta, com as sugestões de casamento das pendentes.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct ItensDoExtrato {
@@ -209,6 +261,19 @@ impl Consulta for ItensDoExtrato {
                         },
                     ));
                 }
+            }
+            for (lancamento, data, valor, texto) in
+                movimentos_soltos(conexao, ctx.empresa, self.conta)?
+            {
+                candidatos.push((
+                    valor.e_positivo(),
+                    Candidato {
+                        alvo: AlvoDaConciliacao::Movimento(lancamento),
+                        valor: valor.abs(),
+                        data,
+                        texto,
+                    },
+                ));
             }
             for (baixa, data, valor, receber, texto) in
                 baixas_soltas(conexao, ctx.empresa, self.conta)?
@@ -279,21 +344,7 @@ impl Comando for ImportarExtrato {
         let linhas = crate::extrato::ler(self.formato, &self.conteudo)
             .map_err(|m| Erro::novo(CodigoErro::ENTRADA_INVALIDA, m))?;
         let conn = uow.conexao();
-        let ok: Option<i64> = conn
-            .query_row(
-                "SELECT 1 FROM razao_conta WHERE empresa = ?1 AND id = ?2
-                 AND natureza = 'Ativo' AND tipo = 'Analitica' AND ativa = 1",
-                params![blob(ctx.empresa), blob(self.conta)],
-                |r| r.get(0),
-            )
-            .optional()
-            .map_err(persist)?;
-        if ok.is_none() {
-            return Err(Erro::novo(
-                CodigoErro::REGRA_VIOLADA,
-                "escolha uma conta bancária ativa do plano de contas",
-            ));
-        }
+        crate::conferencia::exigir_conta_bancaria(conn, ctx.empresa, self.conta)?;
         let extrato = Id::novo();
         conn.execute(
             "INSERT INTO financeiro_extrato
@@ -344,6 +395,21 @@ impl Comando for ImportarExtrato {
             params![blob(extrato), novos],
         )
         .map_err(persist)?;
+        // O saldo que o banco informa no OFX alimenta a conferência banco × sistema.
+        if self.formato == FormatoExtrato::Ofx {
+            if let Some((data, saldo)) = crate::extrato::saldo_do_ofx(&self.conteudo) {
+                crate::conferencia::gravar_saldo(
+                    conn,
+                    ctx,
+                    self.conta,
+                    crate::conferencia::SaldoDoBanco {
+                        data,
+                        saldo,
+                        origem: crate::conferencia::OrigemDoSaldo::Extrato,
+                    },
+                )?;
+            }
+        }
         Ok(ExtratoImportado {
             extrato,
             importados: novos,
@@ -381,6 +447,25 @@ impl Comando for ConciliarItem {
         }
         let entrada = linha.valor.e_positivo();
         let valor = linha.valor.abs();
+        if let AlvoDaConciliacao::Movimento(lancamento) = self.alvo {
+            let livre = movimentos_soltos(uow.conexao(), ctx.empresa, linha.conta)?
+                .into_iter()
+                .any(|(id, _, v, _)| id == lancamento && v == linha.valor);
+            if !livre {
+                return Err(Erro::novo(
+                    CodigoErro::REGRA_VIOLADA,
+                    "esse movimento não bate com a linha do extrato (valor, sentido ou já casado)",
+                ));
+            }
+            uow.conexao()
+                .execute(
+                    "UPDATE financeiro_item_extrato SET estado = 'Conciliado', lancamento = ?2
+                     WHERE id = ?1",
+                    params![blob(linha.id), blob(lancamento)],
+                )
+                .map_err(persist)?;
+            return Ok(());
+        }
         let baixa = match self.alvo {
             AlvoDaConciliacao::Parcela(parcela) => {
                 let permissao = if entrada {
@@ -432,6 +517,7 @@ impl Comando for ConciliarItem {
                 }
                 baixa
             }
+            AlvoDaConciliacao::Movimento(_) => unreachable!("tratado acima"),
         };
         uow.conexao()
             .execute(

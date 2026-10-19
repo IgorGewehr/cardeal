@@ -10,6 +10,10 @@ repository.workspace   = true
 
 [dependencies]
 cardeal-modkit.workspace = true
+cardeal-kernel.workspace = true
+cardeal-storage.workspace = true
+cardeal-fiscal.workspace = true
+tracing.workspace = true
 
 mod-empresa.workspace    = true
 mod-financeiro.workspace = true
@@ -21,3 +25,4 @@ mod-os.workspace         = true
 mod-orcamentos.workspace = true
 mod-agenda.workspace     = true
 mod-pdv.workspace        = true
+mod-fiscal.workspace     = true

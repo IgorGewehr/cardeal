@@ -33,6 +33,24 @@ pub struct ItemNfe {
     pub valor_unitario: Preco,
     /// O valor total do item (`vProd`).
     pub valor_total: Dinheiro,
+    /// O desconto do item (`det/prod/vDesc`); zero sem desconto.
+    pub valor_desconto: Dinheiro,
+    /// O ICMS de substituição tributária cobrado na nota para este item (`vICMSST` + `vFCPST`
+    /// de `det/imposto/ICMS/*`) — quem compra para revender não recupera: é custo. Não inclui o
+    /// ST **retido anteriormente** (`vICMSSTRet`), que já está embutido no preço.
+    pub valor_icms_st: Dinheiro,
+    /// O IPI do item (`det/imposto/IPI/IPITrib/vIPI`) — para o comércio, custo.
+    pub valor_ipi: Dinheiro,
+    /// O CFOP do item (`det/prod/CFOP`), na ótica de quem emitiu.
+    pub cfop: Option<String>,
+}
+
+impl ItemNfe {
+    /// O quanto o item soma no total da nota: produto − desconto + ST + IPI.
+    #[must_use]
+    pub fn valor_na_nota(&self) -> Dinheiro {
+        self.valor_total - self.valor_desconto + self.valor_icms_st + self.valor_ipi
+    }
 }
 
 /// Os campos essenciais de uma NF-e, extraídos do XML.
@@ -60,6 +78,156 @@ pub struct NotaFiscalXml {
     pub valor_outras_despesas: Dinheiro,
     /// Valor total da nota (`total/ICMSTot/vNF`).
     pub valor_total: Dinheiro,
+    /// `ide/tpNF = 0`: uma nota **de entrada** de quem a emitiu — quem recebe a mercadoria é o
+    /// emitente, não o destinatário.
+    pub entrada_do_emitente: bool,
+    /// A finalidade (`ide/finNFe`).
+    pub finalidade: FinalidadeNfe,
+    /// O documento do destinatário (`dest/CNPJ` ou `dest/CPF`, só dígitos), quando há.
+    pub destinatario: Option<String>,
+}
+
+/// A finalidade da NF-e (`ide/finNFe`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum FinalidadeNfe {
+    /// 1 — normal.
+    #[default]
+    Normal,
+    /// 2 — complementar.
+    Complementar,
+    /// 3 — de ajuste.
+    Ajuste,
+    /// 4 — devolução de mercadoria.
+    Devolucao,
+}
+
+impl FinalidadeNfe {
+    fn de_codigo(codigo: &str) -> Self {
+        match codigo.trim() {
+            "2" => Self::Complementar,
+            "3" => Self::Ajuste,
+            "4" => Self::Devolucao,
+            _ => Self::Normal,
+        }
+    }
+}
+
+/// O que uma NF-e recebida é para a empresa que a importa como compra. Lição do `gestao-raiz`
+/// (`classifyNote`): o `tpNF` **não** decide sozinho — a venda do fornecedor vem com `tpNF = 1`
+/// (saída **dele**) e, para nós, é compra. Decide quem emitiu e quem recebe.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClassificacaoEntrada {
+    /// O fornecedor nos vendeu: entra como compra.
+    Compra,
+    /// Nós emitimos esta nota (venda, remessa, devolução nossa).
+    SaidaPropria,
+    /// O destinatário é outra empresa ou pessoa.
+    DeOutroDestinatario,
+    /// Um cliente devolvendo mercadoria (`finNFe = 4`) — entra no estoque, mas não é compra
+    /// e não gera conta a pagar.
+    DevolucaoDeCliente,
+    /// Nota de entrada **do emitente** (`tpNF = 0`): a mercadoria sai de nós para ele (ele nos
+    /// comprou e emitiu a própria entrada, por exemplo).
+    EntradaDoEmitente,
+}
+
+impl ClassificacaoEntrada {
+    /// Por que esta nota não entra como compra — `None` quando entra.
+    #[must_use]
+    pub const fn motivo_da_recusa(self) -> Option<&'static str> {
+        match self {
+            Self::Compra => None,
+            Self::SaidaPropria => Some(
+                "ela foi emitida pela sua própria empresa (é uma saída sua, não uma compra)",
+            ),
+            Self::DeOutroDestinatario => {
+                Some("o destinatário dela não é a sua empresa")
+            }
+            Self::DevolucaoDeCliente => Some(
+                "é uma devolução de mercadoria de um cliente (finalidade 4), não uma compra",
+            ),
+            Self::EntradaDoEmitente => Some(
+                "é uma nota de entrada de quem a emitiu (a mercadoria saiu da sua empresa para ele)",
+            ),
+        }
+    }
+}
+
+impl NotaFiscalXml {
+    /// O que esta nota é para a empresa de CNPJ `empresa`. Sem destinatário no XML (resumo,
+    /// XML incompleto), não há como conferir: segue como compra.
+    #[must_use]
+    pub fn classificar_para(&self, empresa: &Cnpj) -> ClassificacaoEntrada {
+        let nossa = empresa.sem_mascara();
+        if self.fornecedor_cnpj.sem_mascara() == nossa {
+            ClassificacaoEntrada::SaidaPropria
+        } else if self.destinatario.as_deref().is_some_and(|d| d != nossa) {
+            ClassificacaoEntrada::DeOutroDestinatario
+        } else if self.finalidade == FinalidadeNfe::Devolucao {
+            ClassificacaoEntrada::DevolucaoDeCliente
+        } else if self.entrada_do_emitente {
+            ClassificacaoEntrada::EntradaDoEmitente
+        } else {
+            ClassificacaoEntrada::Compra
+        }
+    }
+
+    /// Os CFOPs dos itens que **não** são venda de mercadoria (remessa para conserto,
+    /// bonificação, consignação, faturamento de entrega futura…), sem repetir, na ordem dos
+    /// itens. Uma nota com eles não deve entrar sozinha no estoque com conta a pagar.
+    #[must_use]
+    pub fn cfops_fora_de_venda(&self) -> Vec<String> {
+        let mut cfops: Vec<String> = Vec::new();
+        for c in self.itens.iter().filter_map(|i| i.cfop.as_deref()) {
+            if !cfop_de_venda(c) && !cfops.iter().any(|x| x == c) {
+                cfops.push(c.to_owned());
+            }
+        }
+        cfops
+    }
+}
+
+/// O CFOP (de quem emitiu) é de **venda de mercadoria**: `x10x`–`x12x` (vendas; as `x15x` são
+/// transferências), `x401`–`x405` (vendas com substituição tributária) e `x651`–`x656`
+/// (combustíveis), em operação de saída (`5`, `6` ou `7`).
+#[must_use]
+pub fn cfop_de_venda(cfop: &str) -> bool {
+    let digitos: Vec<u32> = cfop.trim().chars().filter_map(|c| c.to_digit(10)).collect();
+    let [operacao, grupo, subgrupo, item] = digitos[..] else {
+        return false;
+    };
+    if !matches!(operacao, 5..=7) {
+        return false;
+    }
+    match (grupo, subgrupo) {
+        (1, 0..=2) => true,
+        (4, 0) => matches!(item, 1..=3 | 5),
+        (6, 5) => matches!(item, 1..=6),
+        _ => false,
+    }
+}
+
+/// O que um CFOP fora de venda significa, para o aviso na conferência.
+#[must_use]
+pub fn descrever_cfop(cfop: &str) -> &'static str {
+    match cfop.trim().get(1..).unwrap_or("") {
+        "910" => "bonificação, doação ou brinde",
+        "911" => "amostra grátis",
+        "912" => "remessa para demonstração",
+        "913" => "retorno de demonstração",
+        "915" => "remessa para conserto ou reparo",
+        "916" => "retorno de conserto ou reparo",
+        "917" => "remessa em consignação",
+        "908" => "remessa em comodato",
+        "901" => "remessa para industrialização",
+        "922" => "faturamento de venda para entrega futura (a mercadoria vem em outra nota)",
+        "933" => "prestação de serviço",
+        "949" => "outra saída que não é venda",
+        "151" | "152" | "155" | "156" => "transferência entre estabelecimentos",
+        "551" => "venda de ativo imobilizado",
+        "556" => "devolução de material de uso e consumo",
+        _ => "operação que não é venda de mercadoria",
+    }
 }
 
 fn campo_ausente(nome: &str) -> ErroFiscal {
@@ -108,6 +276,7 @@ pub fn interpretar(xml: &str) -> Result<NotaFiscalXml, ErroFiscal> {
     let mut valor_outras_despesas = Dinheiro::ZERO;
     let mut valor_total = None;
     let mut itens = Vec::new();
+    let mut ide = Identificacao::default();
 
     // Pilha de nomes de tag abertos — dá contexto para tags de nome repetido em seções
     // diferentes (nenhuma colide aqui, mas a pilha deixa o parser honesto sobre onde está).
@@ -166,6 +335,7 @@ pub fn interpretar(xml: &str) -> Result<NotaFiscalXml, ErroFiscal> {
                     &mut valor_outras_despesas,
                     &mut valor_total,
                     &mut item_atual,
+                    &mut ide,
                 )?;
             }
             // Inclui `Event::Empty` (`<tag/>` autofechada): nenhuma tag deste XML que nos
@@ -187,7 +357,18 @@ pub fn interpretar(xml: &str) -> Result<NotaFiscalXml, ErroFiscal> {
         valor_seguro,
         valor_outras_despesas,
         valor_total: valor_total.ok_or_else(|| campo_ausente("total/ICMSTot/vNF"))?,
+        entrada_do_emitente: ide.entrada_do_emitente,
+        finalidade: ide.finalidade,
+        destinatario: ide.destinatario,
     })
+}
+
+/// Tipo, finalidade e destinatário — o que diz se a nota é mesmo uma compra.
+#[derive(Default)]
+struct Identificacao {
+    entrada_do_emitente: bool,
+    finalidade: FinalidadeNfe,
+    destinatario: Option<String>,
 }
 
 #[derive(Default)]
@@ -199,6 +380,10 @@ struct ItemParcial {
     quantidade: Option<Quantidade>,
     valor_unitario: Option<Preco>,
     valor_total: Option<Dinheiro>,
+    valor_desconto: Dinheiro,
+    valor_icms_st: Dinheiro,
+    valor_ipi: Dinheiro,
+    cfop: Option<String>,
 }
 
 /// O literal que a NF-e usa em `cEAN`/`cEANTrib` para "este produto não tem código de
@@ -225,6 +410,10 @@ impl ItemParcial {
             valor_total: self
                 .valor_total
                 .ok_or_else(|| campo_ausente("det/prod/vProd"))?,
+            valor_desconto: self.valor_desconto,
+            valor_icms_st: self.valor_icms_st,
+            valor_ipi: self.valor_ipi,
+            cfop: self.cfop,
         })
     }
 }
@@ -243,8 +432,15 @@ fn processar_texto(
     valor_outras_despesas: &mut Dinheiro,
     valor_total: &mut Option<Dinheiro>,
     item_atual: &mut Option<ItemParcial>,
+    ide: &mut Identificacao,
 ) -> Result<(), ErroFiscal> {
     match caminho {
+        [.., "ide", "tpNF"] => ide.entrada_do_emitente = texto.trim() == "0",
+        [.., "ide", "finNFe"] => ide.finalidade = FinalidadeNfe::de_codigo(texto),
+        [.., "dest", "CNPJ" | "CPF"] => {
+            ide.destinatario = Some(texto.chars().filter(char::is_ascii_digit).collect());
+        }
+        [.., "prod", "CFOP"] => set_item(item_atual, |i| i.cfop = Some(texto.trim().to_string())),
         [.., "ide", "nNF"] => *numero = Some(texto.to_string()),
         [.., "ide", "serie"] => *serie = Some(texto.to_string()),
         [.., "ide", "dhEmi"] => *emissao = Some(data_de_dh_emi(texto)?),
@@ -303,6 +499,19 @@ fn processar_texto(
             let v = dinheiro_de(texto, "vProd")?;
             set_item(item_atual, |i| i.valor_total = Some(v));
         }
+        [.., "prod", "vDesc"] => {
+            let v = dinheiro_de(texto, "vDesc")?;
+            set_item(item_atual, |i| i.valor_desconto = v);
+        }
+        // ST cobrado nesta nota (ICMS10/30/70/90, ICMSSN201/202/900, ICMSPart) e o FCP dele.
+        [.., "imposto", "ICMS", _, "vICMSST" | "vFCPST"] => {
+            let v = dinheiro_de(texto, "vICMSST")?;
+            set_item(item_atual, |i| i.valor_icms_st += v);
+        }
+        [.., "imposto", "IPI", "IPITrib", "vIPI"] => {
+            let v = dinheiro_de(texto, "vIPI")?;
+            set_item(item_atual, |i| i.valor_ipi = v);
+        }
         _ => {}
     }
     Ok(())
@@ -317,6 +526,46 @@ fn set_item(item_atual: &mut Option<ItemParcial>, aplicar: impl FnOnce(&mut Item
 #[cfg(test)]
 mod testes {
     use super::*;
+
+    #[test]
+    fn st_fcp_ipi_e_desconto_do_item_e_o_st_retido_fica_de_fora() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe"><NFe>
+<infNFe Id="NFe35240912345678000181550010000012341123456789" versao="4.00">
+  <ide><nNF>9</nNF><serie>1</serie><dhEmi>2024-09-12T10:00:00-03:00</dhEmi></ide>
+  <emit><CNPJ>11222333000181</CNPJ><xNome>Fornecedor</xNome></emit>
+  <det nItem="1">
+    <prod><cProd>A</cProd><xProd>CERVEJA</xProd><NCM>22030000</NCM><qCom>12</qCom>
+      <vUnCom>5.00</vUnCom><vProd>60.00</vProd><vDesc>6.00</vDesc></prod>
+    <imposto>
+      <ICMS><ICMS10><vICMS>10.80</vICMS><vICMSST>9.50</vICMSST><vFCPST>1.20</vFCPST></ICMS10></ICMS>
+      <IPI><IPITrib><vIPI>3.00</vIPI></IPITrib></IPI>
+    </imposto>
+  </det>
+  <det nItem="2">
+    <prod><cProd>B</cProd><xProd>AGUA</xProd><NCM>22011000</NCM><qCom>6</qCom>
+      <vUnCom>2.00</vUnCom><vProd>12.00</vProd></prod>
+    <imposto><ICMS><ICMS60><vICMSSTRet>1.00</vICMSSTRet></ICMS60></ICMS></imposto>
+  </det>
+  <total><ICMSTot><vProd>72.00</vProd><vST>10.70</vST><vIPI>3.00</vIPI><vDesc>6.00</vDesc>
+    <vFrete>0.00</vFrete><vSeg>0.00</vSeg><vOutro>0.00</vOutro><vNF>79.70</vNF></ICMSTot></total>
+</infNFe></NFe></nfeProc>"#;
+        let n = interpretar(xml).unwrap();
+        let a = &n.itens[0];
+        assert_eq!(a.valor_desconto, Dinheiro::reais(6));
+        assert_eq!(a.valor_icms_st, Dinheiro::centavos(1_070));
+        assert_eq!(a.valor_ipi, Dinheiro::reais(3));
+        assert_eq!(a.valor_na_nota(), Dinheiro::centavos(6_770));
+        let b = &n.itens[1];
+        assert_eq!(
+            b.valor_icms_st,
+            Dinheiro::ZERO,
+            "ST retido antes não é desta nota"
+        );
+        // Itens somados batem com o vNF.
+        let soma: Dinheiro = n.itens.iter().map(ItemNfe::valor_na_nota).sum();
+        assert_eq!(soma, n.valor_total);
+    }
 
     const XML_EXEMPLO: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <nfeProc xmlns="http://www.portalfiscal.inf.br/nfe">
@@ -392,6 +641,105 @@ mod testes {
         // "SEM GTIN" é o literal da NF-e para "sem código de barras" — não é um GTIN de
         // verdade, então vira `None`, não a string literal.
         assert_eq!(nota.itens[1].codigo_barras, None);
+    }
+
+    fn com_ide(tp_nf: &str, fin: &str, dest: &str, cfop: &str) -> NotaFiscalXml {
+        let xml = XML_EXEMPLO
+            .replace(
+                "<serie>1</serie>",
+                &format!("<serie>1</serie><tpNF>{tp_nf}</tpNF><finNFe>{fin}</finNFe>"),
+            )
+            .replace(
+                "</emit>",
+                &format!(
+                    "</emit><dest>{dest}<enderDest><CNPJ>00000000000000</CNPJ></enderDest></dest>"
+                ),
+            )
+            .replace(
+                "<NCM>22021000</NCM>",
+                &format!("<NCM>22021000</NCM><CFOP>{cfop}</CFOP>"),
+            );
+        interpretar(&xml).unwrap()
+    }
+
+    #[test]
+    fn le_tipo_finalidade_destinatario_e_cfop() {
+        let n = com_ide("0", "4", "<CNPJ>45.543.915/0001-81</CNPJ>", "5915");
+        assert!(n.entrada_do_emitente);
+        assert_eq!(n.finalidade, FinalidadeNfe::Devolucao);
+        assert_eq!(
+            n.destinatario.as_deref(),
+            Some("45543915000181"),
+            "o CNPJ direto de dest"
+        );
+        assert_eq!(n.itens[0].cfop.as_deref(), Some("5915"));
+        let sem = interpretar(XML_EXEMPLO).unwrap();
+        assert_eq!(
+            (sem.entrada_do_emitente, sem.finalidade, sem.destinatario),
+            (false, FinalidadeNfe::Normal, None)
+        );
+    }
+
+    #[test]
+    fn classifica_o_que_e_compra_para_a_empresa() {
+        use ClassificacaoEntrada::*;
+        let nos = Cnpj::novo("45543915000181").unwrap();
+        let dest_nos = "<CNPJ>45543915000181</CNPJ>";
+        // A venda do fornecedor (tpNF 1) para nós é compra — o tpNF não decide sozinho.
+        assert_eq!(
+            com_ide("1", "1", dest_nos, "5102").classificar_para(&nos),
+            Compra
+        );
+        // Emitida por nós.
+        let emitente = Cnpj::novo("11222333000181").unwrap();
+        assert_eq!(
+            com_ide("1", "1", dest_nos, "5102").classificar_para(&emitente),
+            SaidaPropria
+        );
+        // Para outra empresa, ou para uma pessoa.
+        assert_eq!(
+            com_ide("1", "1", "<CNPJ>12345678000195</CNPJ>", "5102").classificar_para(&nos),
+            DeOutroDestinatario
+        );
+        assert_eq!(
+            com_ide("1", "1", "<CPF>52998224725</CPF>", "5102").classificar_para(&nos),
+            DeOutroDestinatario
+        );
+        assert_eq!(
+            com_ide("1", "4", dest_nos, "5202").classificar_para(&nos),
+            DevolucaoDeCliente
+        );
+        assert_eq!(
+            com_ide("0", "1", dest_nos, "1102").classificar_para(&nos),
+            EntradaDoEmitente
+        );
+        // Sem destinatário no XML não há como conferir: segue.
+        assert_eq!(
+            interpretar(XML_EXEMPLO).unwrap().classificar_para(&nos),
+            Compra
+        );
+        assert!(SaidaPropria.motivo_da_recusa().is_some() && Compra.motivo_da_recusa().is_none());
+    }
+
+    #[test]
+    fn cfop_de_venda_e_os_que_nao_sao() {
+        for venda in [
+            "5101", "5102", "6102", "5117", "5403", "5405", "6403", "5656",
+        ] {
+            assert!(cfop_de_venda(venda), "{venda}");
+        }
+        for outro in [
+            "5915", "5910", "5917", "5922", "5949", "5152", "5551", "5933", "1102", "5408", "51",
+        ] {
+            assert!(!cfop_de_venda(outro), "{outro}");
+        }
+        let n = com_ide("1", "1", "<CNPJ>45543915000181</CNPJ>", "5915");
+        assert_eq!(
+            n.cfops_fora_de_venda(),
+            vec!["5915".to_string()],
+            "sem repetir"
+        );
+        assert_eq!(descrever_cfop("6915"), "remessa para conserto ou reparo");
     }
 
     #[test]

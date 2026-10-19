@@ -179,10 +179,12 @@ pub fn ajuste_manual(
     )
 }
 
-/// Lançamento de uma perda por vencimento/quebra: D Perdas / C Estoque, `Realizado`.
+/// Lançamento de uma perda por vencimento/quebra: D Perdas / C Estoque, `Realizado`. O
+/// `motivo` ("vencimento", "quebra/avaria: caiu da prateleira") vai para o histórico.
 ///
 /// # Errors
 /// [`ErroEstoque::QuantidadeInvalida`].
+#[allow(clippy::too_many_arguments)]
 pub fn perda(
     empresa: Id,
     movimento: Id,
@@ -191,11 +193,12 @@ pub fn perda(
     contas: ContasEstoque,
     data: Data,
     autoria: Autoria,
+    motivo: &str,
 ) -> Result<LancamentoBalanceado, ErroEstoque> {
     lancamento_simples(
         empresa,
         data,
-        "Perda de estoque (vencimento/quebra)".to_string(),
+        format!("Perda de estoque ({motivo})"),
         origem("perda", movimento),
         autoria,
         true,
@@ -389,6 +392,7 @@ mod testes {
             contas(),
             hoje(),
             autoria(),
+            "vencimento",
         )
         .unwrap();
         assert!(l.interno().esta_balanceado());

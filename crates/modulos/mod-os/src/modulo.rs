@@ -38,6 +38,7 @@ impl Modulo for ModuloOs {
 
     fn registrar(&self, registro: &mut Registro) -> Resultado<()> {
         registro
+            .comando::<crate::DefinirCustoHora>("os.definir_custo_hora.v1")
             .comando::<AbrirOrdemServico>("os.abrir_ordem_servico.v1")
             .comando::<AbrirOrdemComClienteNovo>("os.abrir_ordem_com_cliente_novo.v1")
             .comando::<EditarDadosDaOrdem>("os.editar_dados_da_ordem.v1")
@@ -78,7 +79,8 @@ impl Modulo for ModuloOs {
             .consulta::<PecasAguardandoEstoque>("os.pecas_aguardando_estoque.v1")
             .consulta::<ApontamentosDaOrdem>("os.apontamentos_da_ordem.v1")
             .consulta::<TempoTotalDaOrdem>("os.tempo_total_da_ordem.v1")
-            .consulta::<TempoPorTecnicoNoPeriodo>("os.tempo_por_tecnico_no_periodo.v1");
+            .consulta::<TempoPorTecnicoNoPeriodo>("os.tempo_por_tecnico_no_periodo.v1")
+            .consulta::<crate::CustosHora>("os.custos_hora.v1");
         Ok(())
     }
 }

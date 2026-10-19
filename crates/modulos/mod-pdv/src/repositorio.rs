@@ -11,7 +11,9 @@ use cardeal_kernel::{
 use cardeal_storage::UnidadeDeTrabalho;
 use rusqlite::{params, Connection, OptionalExtension};
 
-use crate::cupom::{Cupom, EstadoCupom, FormaPagamentoPdv, ItemCupom, PagamentoCupom};
+use crate::cupom::{
+    Cupom, DescontoNoTotal, EstadoCupom, FormaPagamentoPdv, ItemCupom, PagamentoCupom,
+};
 
 #[allow(clippy::needless_pass_by_value)] // usado como `.map_err(persist)`
 pub(crate) fn persist(e: rusqlite::Error) -> Erro {
@@ -45,7 +47,9 @@ pub(crate) fn versao_i64(v: Versao) -> i64 {
 pub(crate) fn estado_txt(e: EstadoCupom) -> &'static str {
     match e {
         EstadoCupom::EmAndamento => "EmAndamento",
-        EstadoCupom::Finalizado => "Finalizado",
+        // O estorno mora em `pdv_estorno` (migração v2): na coluna, a venda estornada continua
+        // `Finalizado`; `buscar_cupom` devolve `Estornado` quando há a linha do estorno.
+        EstadoCupom::Finalizado | EstadoCupom::Estornado => "Finalizado",
         EstadoCupom::Cancelado => "Cancelado",
     }
 }
@@ -64,6 +68,7 @@ pub(crate) fn forma_txt(f: FormaPagamentoPdv) -> &'static str {
         FormaPagamentoPdv::Pix => "Pix",
         FormaPagamentoPdv::Debito => "Debito",
         FormaPagamentoPdv::Credito => "Credito",
+        FormaPagamentoPdv::Prazo => "Prazo",
     }
 }
 
@@ -72,6 +77,7 @@ pub(crate) fn forma_de(s: &str) -> FormaPagamentoPdv {
         "Pix" => FormaPagamentoPdv::Pix,
         "Debito" => FormaPagamentoPdv::Debito,
         "Credito" => FormaPagamentoPdv::Credito,
+        "Prazo" => FormaPagamentoPdv::Prazo,
         _ => FormaPagamentoPdv::Dinheiro,
     }
 }
@@ -91,11 +97,24 @@ pub(crate) fn item_de_linha(r: &rusqlite::Row<'_>) -> rusqlite::Result<ItemCupom
     })
 }
 
+/// As colunas que [`pagamento_de_linha`] lê, nesta ordem.
+pub(crate) const COLUNAS_PAGAMENTO: &str =
+    "id, forma, valor, primeiro_vencimento, parcelas, intervalo_dias";
+
 pub(crate) fn pagamento_de_linha(r: &rusqlite::Row<'_>) -> rusqlite::Result<PagamentoCupom> {
+    let prazo = match r.get::<_, Option<i64>>(3)? {
+        Some(dias) => Some(crate::cupom::CondicaoPrazo {
+            primeiro_vencimento: cardeal_kernel::Data::de_dias(i32::try_from(dias).unwrap_or(0)),
+            parcelas: u16::try_from(r.get::<_, Option<i64>>(4)?.unwrap_or(1)).unwrap_or(1),
+            intervalo_dias: i32::try_from(r.get::<_, Option<i64>>(5)?.unwrap_or(30)).unwrap_or(30),
+        }),
+        None => None,
+    };
     Ok(PagamentoCupom {
         id: id_de(r.get::<_, Vec<u8>>(0)?),
         forma: forma_de(&r.get::<_, String>(1)?),
         valor: Dinheiro::centavos(r.get::<_, i64>(2)?),
+        prazo,
     })
 }
 
@@ -213,7 +232,8 @@ impl<'a, 'b> RepositorioPdv<'a, 'b> {
     pub fn atualizar_cupom(&mut self, c: &Cupom) -> Resultado<()> {
         self.conn()
             .execute(
-                "UPDATE pdv_cupom SET subtotal = ?2, desconto = ?3, total = ?4, estado = ?5, versao = ?6
+                "UPDATE pdv_cupom SET subtotal = ?2, desconto = ?3, total = ?4, estado = ?5, versao = ?6,
+                        desconto_total_tipo = ?7, desconto_total_valor = ?8
                  WHERE id = ?1",
                 params![
                     blob(c.id),
@@ -222,6 +242,14 @@ impl<'a, 'b> RepositorioPdv<'a, 'b> {
                     c.total.em_centavos(),
                     estado_txt(c.estado),
                     versao_i64(c.versao),
+                    c.desconto_no_total.map(|d| match d {
+                        DescontoNoTotal::Percentual(_) => "Percentual",
+                        DescontoNoTotal::Valor(_) => "Valor",
+                    }),
+                    c.desconto_no_total.map(|d| match d {
+                        DescontoNoTotal::Percentual(p) => p.unidades_internas(),
+                        DescontoNoTotal::Valor(v) => v.em_centavos(),
+                    }),
                 ],
             )
             .map_err(persist)?;
@@ -252,7 +280,7 @@ impl<'a, 'b> RepositorioPdv<'a, 'b> {
             .query_row(
                 "SELECT id, empresa, sessao_caixa, terminal, numero_terminal, serie_fiscal,
                         cliente, operador, tabela_preco, local_expedicao, abertura, subtotal,
-                        desconto, total, estado, versao
+                        desconto, total, estado, versao, desconto_total_tipo, desconto_total_valor
                  FROM pdv_cupom WHERE id = ?1",
                 [blob(id)],
                 |r| {
@@ -273,6 +301,18 @@ impl<'a, 'b> RepositorioPdv<'a, 'b> {
                         Dinheiro::centavos(r.get::<_, i64>(13)?),
                         estado_de(&r.get::<_, String>(14)?),
                         versao_de(r.get::<_, i64>(15)?),
+                        match (
+                            r.get::<_, Option<String>>(16)?.as_deref(),
+                            r.get::<_, Option<i64>>(17)?,
+                        ) {
+                            (Some("Percentual"), Some(v)) => {
+                                Some(DescontoNoTotal::Percentual(Percentual::unidades(v)))
+                            }
+                            (Some("Valor"), Some(v)) => {
+                                Some(DescontoNoTotal::Valor(Dinheiro::centavos(v)))
+                            }
+                            _ => None,
+                        },
                     ))
                 },
             )
@@ -295,9 +335,15 @@ impl<'a, 'b> RepositorioPdv<'a, 'b> {
             total,
             estado,
             versao,
+            desconto_no_total,
         )) = cabecalho
         else {
             return Ok(None);
+        };
+        let estado = if estado == EstadoCupom::Finalizado && self.foi_estornado(id)? {
+            EstadoCupom::Estornado
+        } else {
+            estado
         };
         let itens = self.itens_do_cupom(id)?;
         let pagamentos = self.pagamentos_do_cupom(id)?;
@@ -317,10 +363,57 @@ impl<'a, 'b> RepositorioPdv<'a, 'b> {
             pagamentos,
             subtotal,
             desconto,
+            desconto_no_total,
             total,
             estado,
             versao,
         }))
+    }
+
+    /// Se a venda tem estorno registrado.
+    ///
+    /// # Errors
+    /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+    pub fn foi_estornado(&self, cupom: Id) -> Resultado<bool> {
+        self.conn()
+            .query_row(
+                "SELECT 1 FROM pdv_estorno WHERE cupom = ?1",
+                [blob(cupom)],
+                |_| Ok(()),
+            )
+            .optional()
+            .map(|o| o.is_some())
+            .map_err(persist)
+    }
+
+    /// Registra o estorno de uma venda: o motivo, quem autorizou, quem executou e quando.
+    ///
+    /// # Errors
+    /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite (inclusive estorno repetido).
+    pub fn inserir_estorno(
+        &mut self,
+        cupom: &Cupom,
+        motivo: &str,
+        autorizado_por: Id,
+        estornado_por: Id,
+        quando: Instante,
+    ) -> Resultado<()> {
+        self.conn()
+            .execute(
+                "INSERT INTO pdv_estorno
+                    (cupom, empresa, motivo, autorizado_por, estornado_por, estornado_em)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    blob(cupom.id),
+                    blob(cupom.empresa),
+                    motivo,
+                    blob(autorizado_por),
+                    blob(estornado_por),
+                    quando.em_micros()
+                ],
+            )
+            .map_err(persist)?;
+        Ok(())
     }
 
     /// Os itens de um cupom.
@@ -405,7 +498,9 @@ impl<'a, 'b> RepositorioPdv<'a, 'b> {
         let mut stmt = self
             .conn()
             .prepare(
-                "SELECT id, forma, valor FROM pdv_pagamento_cupom WHERE cupom = ?1 ORDER BY rowid",
+                &format!(
+                    "SELECT {COLUNAS_PAGAMENTO} FROM pdv_pagamento_cupom WHERE cupom = ?1 ORDER BY rowid"
+                ),
             )
             .map_err(persist)?;
         let linhas = stmt
@@ -423,12 +518,17 @@ impl<'a, 'b> RepositorioPdv<'a, 'b> {
     pub fn inserir_pagamento(&mut self, cupom: Id, p: &PagamentoCupom) -> Resultado<()> {
         self.conn()
             .execute(
-                "INSERT INTO pdv_pagamento_cupom (id, cupom, forma, valor) VALUES (?1,?2,?3,?4)",
+                "INSERT INTO pdv_pagamento_cupom
+                   (id, cupom, forma, valor, primeiro_vencimento, parcelas, intervalo_dias)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7)",
                 params![
                     blob(p.id),
                     blob(cupom),
                     forma_txt(p.forma),
-                    p.valor.em_centavos()
+                    p.valor.em_centavos(),
+                    p.prazo.map(|c| i64::from(c.primeiro_vencimento.em_dias())),
+                    p.prazo.map(|c| i64::from(c.parcelas)),
+                    p.prazo.map(|c| i64::from(c.intervalo_dias)),
                 ],
             )
             .map_err(persist)?;

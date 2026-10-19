@@ -199,6 +199,12 @@ const PERMISSOES: &[Permissao] = &[
         Some("comissao"),
     ),
     perm(
+        "vendas.comissao.apurar",
+        "Apurar comissões do mês",
+        Risco::Medio,
+        Some("comissao"),
+    ),
+    perm(
         "vendas.comissao.pagar",
         "Pagar comissão",
         Risco::Medio,
@@ -282,6 +288,10 @@ const CONTAS_REQUERIDAS: &[ContaPadrao] = &[
     },
     ContaPadrao {
         papel: PapelConta::DespesaComercial,
+        obrigatoria: false,
+    },
+    ContaPadrao {
+        papel: PapelConta::SalariosAPagar,
         obrigatoria: false,
     },
     ContaPadrao {

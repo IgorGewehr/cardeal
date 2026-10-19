@@ -83,6 +83,7 @@ struct Vaga {
 pub struct Frota {
     plano: Arc<Plano>,
     config: ConfigServidor,
+    recursos: cardeal_modkit::Recursos,
     ociosidade: Duration,
     teto: usize,
     inicio: Instant,
@@ -90,11 +91,17 @@ pub struct Frota {
 }
 
 impl Frota {
-    /// Uma frota vazia sobre a pasta das bases. Todas as empresas compartilham o `plano`.
+    /// Uma frota vazia sobre a pasta das bases. Todas as empresas compartilham o `plano` e os
+    /// `recursos` (o cofre e o provedor fiscal do servidor).
     #[must_use]
-    pub fn nova(plano: Arc<Plano>, config: ConfigServidor) -> Self {
+    pub fn nova(
+        plano: Arc<Plano>,
+        config: ConfigServidor,
+        recursos: cardeal_modkit::Recursos,
+    ) -> Self {
         Self {
             plano,
+            recursos,
             ociosidade: config.ociosidade,
             teto: config.teto_empresas.max(1),
             config,
@@ -151,7 +158,8 @@ impl Frota {
         }
         let inicio = Instant::now();
         let motor =
-            MotorLocal::abrir_com_plano(self.config.armazenamento_empresa(empresa), &self.plano)?;
+            MotorLocal::abrir_com_plano(self.config.armazenamento_empresa(empresa), &self.plano)?
+                .com_recursos(self.recursos.clone());
         if motor.empresa() != empresa {
             return Err(Erro::novo(
                 CodigoErro::ESTADO_INVALIDO,

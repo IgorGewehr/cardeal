@@ -1,4 +1,5 @@
-//! Leitura dos movimentos de caixa realizados — o insumo do DFC pelo método direto.
+//! Leitura dos movimentos de caixa realizados — o insumo do DFC pelo método direto — e das
+//! variações das contas patrimoniais fora do caixa — o insumo do método indireto.
 //!
 //! "Caixa" aqui é o que tem papel `Caixa`, `Bancos` ou `ValoresEmTransito` e toda conta aberta
 //! sob "1.1 Disponível" (as contas bancárias que o usuário cria), exceto as aplicações. Só entram
@@ -7,6 +8,26 @@
 
 use cardeal_kernel::{Data, Dinheiro, Id};
 use serde::{Deserialize, Serialize};
+
+use crate::conta::Natureza;
+
+/// Uma conta patrimonial fora do caixa com o quanto as partidas dela somaram no período
+/// (débito positivo, crédito negativo) — pela competência, nos mesmos lançamentos da DRE.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VariacaoPatrimonial {
+    /// O código da conta.
+    pub codigo: String,
+    /// O nome.
+    pub nome: String,
+    /// `Ativo`, `Passivo` ou `PatrimonioLiquido`.
+    pub natureza: Natureza,
+    /// O papel efetivo (próprio ou herdado), em texto.
+    pub papel: Option<String>,
+    /// `Operacional`, `Investimento` ou `Financiamento`, quando a conta classifica.
+    pub grupo_fluxo: Option<String>,
+    /// A soma das partidas no período.
+    pub valor: Dinheiro,
+}
 
 /// A outra ponta de um movimento de caixa.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -42,7 +63,8 @@ mod sql {
     use cardeal_kernel::{Data, Dinheiro, Id, Periodo};
     use rusqlite::{params_from_iter, types::Value, Connection};
 
-    use super::{ContrapartidaDeCaixa, MovimentoDeCaixa};
+    use super::{ContrapartidaDeCaixa, MovimentoDeCaixa, VariacaoPatrimonial};
+    use crate::conta::Natureza;
     use crate::erros::ErroRazao;
 
     #[allow(clippy::needless_pass_by_value)]
@@ -50,18 +72,33 @@ mod sql {
         ErroRazao::FalhaDePersistencia(e.to_string())
     }
 
-    /// id, código, nome, papel gravado, grupo de fluxo.
-    type Conta = (Vec<u8>, String, String, Option<String>, Option<String>);
+    /// id, código, nome, papel gravado, grupo de fluxo, natureza.
+    type Conta = (
+        Vec<u8>,
+        String,
+        String,
+        Option<String>,
+        Option<String>,
+        String,
+    );
 
     fn contas(conexao: &Connection, empresa: &[u8]) -> Result<Vec<Conta>, ErroRazao> {
         let mut stmt = conexao
             .prepare(
-                "SELECT id, codigo, nome, papel_padrao, grupo_fluxo FROM razao_conta WHERE empresa = ?1",
+                "SELECT id, codigo, nome, papel_padrao, grupo_fluxo, natureza
+                 FROM razao_conta WHERE empresa = ?1",
             )
             .map_err(persist)?;
         let linhas = stmt
             .query_map([empresa], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                ))
             })
             .map_err(persist)?
             .collect::<rusqlite::Result<_>>()
@@ -203,7 +240,69 @@ mod sql {
         }
         Ok((abertura, saida))
     }
+
+    /// As contas patrimoniais (ativo, passivo, PL) **fora do caixa** com a soma das partidas dos
+    /// lançamentos `Confirmado`/`Realizado`/`Estornado` cuja competência cai no período — o
+    /// mesmo recorte da DRE, para lucro + variações fecharem com o caixa. Contas sem variação
+    /// ficam de fora.
+    ///
+    /// # Errors
+    /// [`ErroRazao::FalhaDePersistencia`] em erro do SQLite.
+    pub fn variacoes_patrimoniais(
+        conexao: &Connection,
+        empresa: Id,
+        periodo: Periodo,
+    ) -> Result<Vec<VariacaoPatrimonial>, ErroRazao> {
+        let empresa_b = empresa.em_bytes().to_vec();
+        let contas = contas(conexao, &empresa_b)?;
+        let mut stmt = conexao
+            .prepare(
+                "SELECT rp.conta, SUM(rp.valor)
+                 FROM razao_partida rp JOIN razao_lancamento rl ON rl.id = rp.lancamento
+                 WHERE rl.empresa = ?1 AND rl.estado IN ('Confirmado','Realizado','Estornado')
+                   AND rl.competencia BETWEEN ?2 AND ?3
+                 GROUP BY rp.conta",
+            )
+            .map_err(persist)?;
+        let somas: Vec<(Vec<u8>, i64)> = stmt
+            .query_map(
+                rusqlite::params![
+                    &empresa_b,
+                    i64::from(periodo.de.em_dias()),
+                    i64::from(periodo.ate.em_dias())
+                ],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .map_err(persist)?
+            .collect::<rusqlite::Result<_>>()
+            .map_err(persist)?;
+        let mut saida = Vec::new();
+        for (conta_b, soma) in somas {
+            let Some(c) = contas.iter().find(|c| c.0 == conta_b) else {
+                continue;
+            };
+            let natureza = match c.5.as_str() {
+                "Ativo" => Natureza::Ativo,
+                "Passivo" => Natureza::Passivo,
+                "PatrimonioLiquido" => Natureza::PatrimonioLiquido,
+                _ => continue, // resultado: entra pelo lucro
+            };
+            if soma == 0 || e_caixa(&contas, &c.1) {
+                continue;
+            }
+            saida.push(VariacaoPatrimonial {
+                codigo: c.1.clone(),
+                nome: c.2.clone(),
+                natureza,
+                papel: papel_efetivo(&contas, &c.1),
+                grupo_fluxo: c.4.clone(),
+                valor: Dinheiro::centavos(soma),
+            });
+        }
+        saida.sort_by(|a, b| a.codigo.cmp(&b.codigo));
+        Ok(saida)
+    }
 }
 
 #[cfg(feature = "sqlite")]
-pub use sql::movimentos_de_caixa;
+pub use sql::{movimentos_de_caixa, variacoes_patrimoniais};

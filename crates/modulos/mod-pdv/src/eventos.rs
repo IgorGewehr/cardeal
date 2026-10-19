@@ -26,6 +26,30 @@ impl EventoDominio for VendaFinalizada {
     }
 }
 
+/// Uma venda finalizada foi estornada: o lançamento estornado e a mercadoria devolvida.
+#[derive(Debug, Serialize)]
+pub struct VendaEstornada {
+    /// O cupom.
+    pub cupom: Id,
+    /// O terminal.
+    pub terminal: Id,
+    /// O total da venda desfeita.
+    pub total: Dinheiro,
+    /// O motivo informado.
+    pub motivo: String,
+    /// Quem autorizou o estorno.
+    pub autorizado_por: Id,
+}
+
+#[cfg(feature = "sqlite")]
+impl EventoDominio for VendaEstornada {
+    const TIPO: &'static str = "pdv.venda_estornada.v1";
+
+    fn agregado(&self) -> Option<Id> {
+        Some(self.cupom)
+    }
+}
+
 /// Um cupom foi cancelado antes de finalizar.
 #[derive(Debug, Serialize)]
 pub struct CupomCancelado {

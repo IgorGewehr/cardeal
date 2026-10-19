@@ -490,3 +490,243 @@ fn saude_financeira_sai_verde_com_folga_e_vermelha_no_aperto() {
     assert_eq!(ruim.semaforo, Semaforo::Vermelho, "{ruim:?}");
     assert!(!ruim.puxando_para_baixo().is_empty());
 }
+
+/// Um lançamento direto no Razão, por código de conta: (código, valor) com débito positivo e
+/// crédito negativo; `realizado` = o dinheiro andou na data.
+fn lancar_no_razao(c: &Cena, historico: &str, partidas: &[(&str, i64)], realizado: bool) {
+    lancar_no_razao_em(c, hoje(), historico, partidas, realizado);
+}
+
+fn lancar_no_razao_em(
+    c: &Cena,
+    data: Data,
+    historico: &str,
+    partidas: &[(&str, i64)],
+    realizado: bool,
+) {
+    use cardeal_ledger::{ConstrutorLancamento, Origem, Razao, RepositorioRazao};
+    let empresa = c.empresa;
+    let historico = historico.to_owned();
+    let partidas: Vec<(String, i64)> = partidas
+        .iter()
+        .map(|(k, v)| ((*k).to_owned(), *v))
+        .collect();
+    c.arm
+        .escritor()
+        .executar(
+            ContextoEscrita::novo(empresa, Id::novo(), Id::novo(), Id::novo()),
+            move |uow| {
+                let erro = |e: String| ErroArmazenamento::Sqlite(e);
+                let mut l = ConstrutorLancamento::novo(empresa, data, historico)
+                    .origem(Origem::modulo("teste").tipo("manual"))
+                    .criado_por(Id::novo(), Id::novo())
+                    .agora(Instante::EPOCA);
+                if realizado {
+                    l = l.liquidacao(data);
+                }
+                for (codigo, valor) in &partidas {
+                    let conta: Vec<u8> = uow
+                        .conexao()
+                        .query_row(
+                            "SELECT id FROM razao_conta WHERE empresa = ?1 AND codigo = ?2",
+                            rusqlite::params![empresa.em_bytes().as_slice(), codigo],
+                            |r| r.get(0),
+                        )
+                        .map_err(|e| erro(e.to_string()))?;
+                    let conta = Id::de_bytes(conta.as_slice().try_into().unwrap());
+                    l = if *valor > 0 {
+                        l.debitar(conta, Dinheiro::reais(*valor))
+                    } else {
+                        l.creditar(conta, Dinheiro::reais(-*valor))
+                    };
+                }
+                let l = l.construir().map_err(|e| erro(e.to_string()))?;
+                Razao::registrar(&mut RepositorioRazao::novo(uow), l)
+                    .map_err(|e| erro(e.to_string()))?;
+                Ok(())
+            },
+        )
+        .unwrap();
+}
+
+#[test]
+fn dfc_indireto_vai_do_lucro_ao_mesmo_caixa_do_direto() {
+    use mod_financeiro::dfc::{Dfc, DfcIndireto, LUCRO_LIQUIDO};
+    use mod_financeiro::DfcIndiretoDoPeriodo;
+
+    let c = cena();
+    let s = c.sessao(
+        Id::novo(),
+        &[
+            "financeiro.receber.criar",
+            "financeiro.receber.baixar",
+            "financeiro.pagar.criar",
+            "financeiro.pagar.baixar",
+            "financeiro.dre.ver",
+        ],
+    );
+    let h = hoje();
+    // Vendeu 1.000 a prazo e recebeu 600; comprou 400 a prazo e pagou 150.
+    let r: mod_financeiro::TituloAReceberLancado = c.cmd(
+        &s,
+        "financeiro.lancar_titulo_a_receber.v1",
+        &LancarTituloAReceber {
+            cliente: None,
+            valor_total: Dinheiro::reais(1_000),
+            emissao: h,
+            parcelas: 1,
+            primeiro_vencimento: h,
+            intervalo_dias: 0,
+            observacao: None,
+            categoria: None,
+            quitado_agora: None,
+        },
+    );
+    let p: mod_financeiro::TituloAPagarLancado = c.cmd(
+        &s,
+        "financeiro.lancar_titulo_a_pagar.v1",
+        &LancarTituloAPagar {
+            fornecedor: None,
+            valor_total: Dinheiro::reais(400),
+            emissao: h,
+            parcelas: 1,
+            primeiro_vencimento: h,
+            intervalo_dias: 0,
+            observacao: None,
+            categoria: None,
+            quitado_agora: None,
+        },
+    );
+    baixar_receber(&c, &s, r.parcelas[0], Dinheiro::reais(600));
+    let _: mod_financeiro::PagamentoBaixado = c.cmd(
+        &s,
+        "financeiro.baixar_pagamento.v1",
+        &BaixarPagamento {
+            parcela: p.parcelas[0],
+            valor: Dinheiro::reais(150),
+            data: h,
+            meio_pagamento: MeioPagamento::Dinheiro,
+            conta_destino: None,
+        },
+    );
+    // Depreciação de 20 (não sai do caixa), máquina de 500 à vista, empréstimo de 600 e
+    // retirada de 100.
+    lancar_no_razao(&c, "Depreciação", &[("5.4", 20), ("1.4.02", -20)], false);
+    lancar_no_razao(&c, "Máquina", &[("1.4.01", 500), ("1.1.01", -500)], true);
+    lancar_no_razao(&c, "Empréstimo", &[("1.1.01", 600), ("2.1.04", -600)], true);
+    lancar_no_razao(&c, "Retirada", &[("3.3", 100), ("1.1.01", -100)], true);
+
+    let periodo = Periodo::novo(h.inicio_do_mes(), h.fim_do_mes());
+    let direto: Dfc = c.consulta(
+        &s,
+        "financeiro.dfc_do_periodo.v1",
+        &DfcDoPeriodo { periodo },
+    );
+    let ind: DfcIndireto = c.consulta(
+        &s,
+        "financeiro.dfc_indireto_do_periodo.v1",
+        &DfcIndiretoDoPeriodo { periodo },
+    );
+    let dre: Dre = c.consulta(
+        &s,
+        "financeiro.dre_do_periodo.v1",
+        &DreDoPeriodo { periodo },
+    );
+
+    // Caixa: 600 − 150 − 500 + 600 − 100 = 450, nos dois métodos, sem diferença de datas.
+    assert_eq!(direto.variacao, Dinheiro::reais(450));
+    assert_eq!(ind.variacao, direto.variacao);
+    assert_eq!(ind.saldo_final, direto.saldo_final);
+    assert_eq!(ind.diferenca_de_datas, Dinheiro::ZERO, "{ind:#?}");
+    // Lucro 1.000 − 400 − 20 = 580, o mesmo da DRE.
+    assert_eq!(ind.lucro_liquido, dre.lucro_liquido);
+    assert_eq!(ind.lucro_liquido, Dinheiro::reais(580));
+    assert_eq!(ind.blocos[0].linhas[0].rotulo, LUCRO_LIQUIDO);
+    // Operacional: 580 + 20 (depreciação) − 400 (a receber subiu) + 250 (fornecedores subiu).
+    assert_eq!(ind.blocos[0].total, Dinheiro::reais(450));
+    assert_eq!(ind.blocos[1].total, Dinheiro::reais(-500));
+    assert_eq!(ind.blocos[2].total, Dinheiro::reais(500));
+}
+
+#[test]
+fn balancete_fecha_e_traz_o_resultado_de_anos_anteriores_no_pl() {
+    use cardeal_ledger::{LancamentoDoDiario, LinhaBalancete};
+    use mod_financeiro::{BalanceteDoPeriodo, DiarioDoPeriodo};
+
+    let c = cena();
+    let s = c.sessao(Id::novo(), &["financeiro.dre.ver"]);
+    let h = hoje();
+    let ano_passado = Data::de_ymd(h.ano() - 1, 6, 15).unwrap();
+    // Ano passado: capital de 1.000 e uma venda à vista de 300 (lucro de um exercício que o
+    // sistema não encerrou).
+    lancar_no_razao_em(
+        &c,
+        ano_passado,
+        "Capital",
+        &[("1.1.01", 1_000), ("3.1", -1_000)],
+        true,
+    );
+    lancar_no_razao_em(
+        &c,
+        ano_passado,
+        "Venda",
+        &[("1.1.01", 300), ("4.1", -300)],
+        true,
+    );
+    // Este mês: venda de 200 e despesa de 50.
+    lancar_no_razao(&c, "Venda", &[("1.1.01", 200), ("4.1", -200)], true);
+    lancar_no_razao(&c, "Aluguel", &[("5.6", 50), ("1.1.01", -50)], true);
+
+    let periodo = Periodo::novo(h.inicio_do_mes(), h.fim_do_mes());
+    let b: Vec<LinhaBalancete> = c.consulta(
+        &s,
+        "financeiro.balancete_do_periodo.v1",
+        &BalanceteDoPeriodo { periodo },
+    );
+    let linha = |codigo: &str| b.iter().find(|l| l.codigo == codigo).unwrap().clone();
+    // Caixa: 1.300 antes, +200 −50 no mês.
+    let caixa = linha("1.1.01");
+    assert_eq!(caixa.saldo_anterior, Dinheiro::reais(1_300));
+    assert_eq!(
+        (caixa.debitos, caixa.creditos),
+        (Dinheiro::reais(200), Dinheiro::reais(50))
+    );
+    assert_eq!(caixa.saldo_atual(), Dinheiro::reais(1_450));
+    // A agrupadora soma as filhas.
+    assert_eq!(linha("1").saldo_atual(), Dinheiro::reais(1_450));
+    // A venda do ano passado não está no anterior da receita (só o ano corrente)...
+    let vendas = linha("4.1");
+    assert!(
+        vendas.saldo_anterior.e_zero(),
+        "nada de vendas antes, neste ano"
+    );
+    assert_eq!(vendas.creditos, Dinheiro::reais(200));
+    // ...ela aparece no PL como resultado de exercícios anteriores.
+    let anteriores = b
+        .iter()
+        .find(|l| l.codigo.is_empty())
+        .expect("anos anteriores");
+    assert_eq!(anteriores.saldo_anterior, Dinheiro::reais(-300));
+    // E o balancete fecha.
+    let analiticas: Vec<&LinhaBalancete> = b.iter().filter(|l| !l.sintetica).collect();
+    let soma =
+        |f: fn(&LinhaBalancete) -> Dinheiro| -> Dinheiro { analiticas.iter().map(|l| f(l)).sum() };
+    assert_eq!(soma(|l| l.saldo_anterior), Dinheiro::ZERO);
+    assert_eq!(soma(|l| l.debitos), soma(|l| l.creditos));
+    assert_eq!(soma(LinhaBalancete::saldo_atual), Dinheiro::ZERO);
+
+    // O diário do mês: os dois lançamentos, cada um com as suas partidas.
+    let d: Vec<LancamentoDoDiario> = c.consulta(
+        &s,
+        "financeiro.diario_do_periodo.v1",
+        &DiarioDoPeriodo { periodo },
+    );
+    assert_eq!(d.len(), 2);
+    assert!(d.iter().all(|l| l.partidas.len() == 2
+        && l.partidas
+            .iter()
+            .map(|p| p.valor)
+            .sum::<Dinheiro>()
+            .e_zero()));
+    assert_eq!(d[1].historico, "Aluguel");
+}

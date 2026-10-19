@@ -27,6 +27,19 @@ pub(super) fn cabecalho(ui: &mut egui::Ui, estado: &mut EstadoTelaPdv) {
         ("Caixa fechado", Tom::Neutro)
     };
     ui.add(Etiqueta::nova(texto, tom).com_ponto());
+    if estado.nfce_automatica {
+        if let Some(f) = &estado.fiscal {
+            ui.add_space(Espaco::E8);
+            let tom = if f.rejeitadas > 0 {
+                Tom::Negativo
+            } else if f.pendentes + f.incertas > 0 {
+                Tom::Atencao
+            } else {
+                Tom::Positivo
+            };
+            ui.add(Etiqueta::nova(f.frase(), tom).com_ponto());
+        }
+    }
     if let Some(n) = estado.cupom_numero {
         ui.add_space(Espaco::E8);
         ui.add(Etiqueta::info(format!("Cupom nº {n}")));
@@ -126,9 +139,11 @@ pub(super) fn aviso_erro(ui: &mut egui::Ui, estado: &EstadoTelaPdv) {
 }
 
 /// O resultado da última venda: o troco é o que o operador precisa ver logo depois do `F2`.
-pub(super) fn resultado_venda(ui: &mut egui::Ui, estado: &EstadoTelaPdv) {
+pub(super) fn resultado_venda(ui: &mut egui::Ui, estado: &mut EstadoTelaPdv) {
     let Some(v) = estado.ultima_venda else { return };
     let positivo = ui.cores().positivo;
+    let mut imprimir = None;
+    let mut comprovante = false;
     Painel::novo().realce(Tom::Positivo).mostrar(ui, |ui| {
         ui.add(Rotulo::interface(format!("Venda nº {} finalizada", v.numero)).cor(positivo));
         ui.add_space(Espaco::E8);
@@ -150,7 +165,50 @@ pub(super) fn resultado_venda(ui: &mut egui::Ui, estado: &EstadoTelaPdv) {
                 v.total.formatar_com_simbolo(),
             ));
         }
+        ui.add_space(Espaco::E8);
+        comprovante = ui
+            .add(Botao::secundario("Imprimir comprovante").pequeno())
+            .clicked();
+        if let Some(n) = estado.nfce_ultima.as_ref() {
+            ui.add_space(Espaco::E8);
+            ui.horizontal(|ui| {
+                ui.add(Rotulo::campo(format!("NFC-e {}-{}", n.serie, n.numero)));
+                let etiqueta = match n.estado {
+                    mod_fiscal::EstadoDocumento::Autorizada => {
+                        Etiqueta::positiva(n.estado.rotulo())
+                    }
+                    mod_fiscal::EstadoDocumento::Rejeitada
+                    | mod_fiscal::EstadoDocumento::Denegada => {
+                        Etiqueta::negativa(n.estado.rotulo())
+                    }
+                    _ => Etiqueta::info(n.estado.rotulo()),
+                };
+                ui.add(etiqueta.com_ponto());
+                if n.estado == mod_fiscal::EstadoDocumento::Autorizada
+                    && ui
+                        .add(Botao::secundario("Imprimir cupom fiscal").pequeno())
+                        .clicked()
+                {
+                    imprimir = Some(n.id);
+                }
+            });
+            if n.estado == mod_fiscal::EstadoDocumento::Rejeitada {
+                if let Some(m) = &n.motivo {
+                    ui.add(Rotulo::apoio(m.clone()).quebravel());
+                }
+            }
+        }
     });
+    if let Some(id) = imprimir {
+        estado.pendentes.push(Acao::ImprimirNfce(id));
+    }
+    if comprovante {
+        estado.pendentes.push(Acao::ImprimirComprovante {
+            cupom: v.cupom,
+            troco: v.troco,
+            segunda_via: false,
+        });
+    }
     ui.add_space(Espaco::E12);
 }
 
@@ -324,7 +382,7 @@ pub(super) fn detalhe(ui: &mut egui::Ui, estado: &mut EstadoTelaPdv) {
     let descontos = estado
         .ativos()
         .map(|l| l.bruto() - l.total)
-        .fold(Dinheiro::ZERO, |a, b| a + b);
+        .fold(estado.valor_do_desconto_no_total(), |a, b| a + b);
     let total = estado.total;
     let cliente = estado.cliente.as_ref().map(|c| c.1.clone());
     Painel::novo().mostrar(ui, |ui| {
@@ -404,6 +462,18 @@ pub(super) fn acoes(ui: &mut egui::Ui, estado: &mut EstadoTelaPdv) {
     ui.add_space(Espaco::E8);
     if ui
         .add(
+            Botao::secundario("Desconto no total")
+                .atalho("Shift+F5")
+                .preenche_largura()
+                .habilitado(tem_itens),
+        )
+        .clicked()
+    {
+        estado.pendentes.push(Acao::AbrirDescontoTotal);
+    }
+    ui.add_space(Espaco::E8);
+    if ui
+        .add(
             Botao::destrutivo("Cancelar cupom")
                 .atalho("F8")
                 .preenche_largura()
@@ -445,5 +515,16 @@ pub(super) fn acoes(ui: &mut egui::Ui, estado: &mut EstadoTelaPdv) {
         .clicked()
     {
         estado.pendentes.push(Acao::AbrirConsultaPreco);
+    }
+    ui.add_space(Espaco::E8);
+    if ui
+        .add(
+            Botao::secundario("Vendas de hoje")
+                .atalho("F11")
+                .preenche_largura(),
+        )
+        .clicked()
+    {
+        estado.pendentes.push(Acao::AbrirVendasDoDia);
     }
 }

@@ -58,6 +58,17 @@ pub fn ler(formato: FormatoExtrato, texto: &str) -> Result<Vec<LinhaDeExtrato>, 
     Ok(linhas)
 }
 
+/// O saldo que o banco informa no OFX (`<LEDGERBAL><BALAMT>…<DTASOF>…`): a data e o valor.
+/// `None` quando o arquivo não traz (CSV nunca traz; alguns bancos omitem no OFX).
+#[must_use]
+pub fn saldo_do_ofx(texto: &str) -> Option<(Data, Dinheiro)> {
+    let ini = texto.to_uppercase().find("<LEDGERBAL>")?;
+    let bloco = texto.get(ini..)?;
+    let valor = tag(bloco, "BALAMT").and_then(|v| parse_valor(&v))?;
+    let data = tag(bloco, "DTASOF").and_then(|d| data_ofx(&d))?;
+    Some((data, valor))
+}
+
 /// "1.234,56", "1234.56", "-29,90", "R$ 10,00" → centavos.
 fn parse_valor(t: &str) -> Option<Dinheiro> {
     let limpo: String = t
@@ -235,6 +246,22 @@ fn ler_csv(texto: &str) -> Result<Vec<LinhaDeExtrato>, String> {
 #[cfg(test)]
 mod testes {
     use super::*;
+
+    #[test]
+    fn saldo_do_ofx_le_o_ledgerbal_e_nao_o_disponivel() {
+        let ofx = "<OFX><STMTRS><BANKTRANLIST>\n\
+<STMTTRN><DTPOSTED>20261010<TRNAMT>-10.00<FITID>A\n\
+</BANKTRANLIST><LEDGERBAL><BALAMT>1.234,56<DTASOF>20261012120000[-3:BRT]</LEDGERBAL>\
+<AVAILBAL><BALAMT>999.00<DTASOF>20261013</AVAILBAL></STMTRS></OFX>";
+        assert_eq!(
+            saldo_do_ofx(ofx),
+            Some((
+                Data::de_ymd(2026, 10, 12).unwrap(),
+                Dinheiro::centavos(123_456)
+            ))
+        );
+        assert_eq!(saldo_do_ofx("<OFX><STMTTRN></OFX>"), None);
+    }
 
     const OFX: &str = "OFXHEADER:100\nDATA:OFXSGML\n\n<OFX><BANKMSGSRSV1><STMTTRNRS><STMTRS><BANKTRANLIST>\n\
 <STMTTRN>\n<TRNTYPE>CREDIT\n<DTPOSTED>20261003120000[-3:BRT]\n<TRNAMT>340.00\n<FITID>A001\n<MEMO>PIX RECEBIDO JOAO SILVA\n</STMTTRN>\n\

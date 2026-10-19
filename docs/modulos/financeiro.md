@@ -342,17 +342,24 @@ stateDiagram-v2
 > vem depois.
 | `EstornarBaixa` ✅ | `financeiro.receber.estornar` | Alto | Estorna o lançamento `Realizado` (`Razao::estornar`), reabre a parcela (`Parcial` ou `Aberta` conforme sobra saldo baixado) | `BaixaJaEstornada` |
 | `RenegociarTitulo` ✅ | `financeiro.receber.renegociar` | Alto | Marca as parcelas em aberto como `Renegociada`, cria um `Titulo` novo com o saldo consolidado e as condições novas — **sem** lançamento novo (ver nota abaixo) | `SemSaldoParaRenegociar` |
+| `CancelarTitulo` ✅ (2026-10-15, `financeiro.cancelar_titulo.v1`) | `financeiro.titulo.cancelar` | Alto | Cancela a conta lançada errado: estorna no Razão o `Confirmado` de cada parcela e marca parcelas e título como cancelados (nunca apaga). Só para título lançado **no financeiro** (avulso, de recorrência ou importado na implantação): o que veio de compra, venda, PDV, OS ou renegociação se desfaz pela origem. Recusa título com baixa válida (estornar um recebimento de verdade é decisão à parte, `EstornarBaixa`). Motivo ≥ 10 caracteres. Parcela cancelada não aceita baixa | `TituloJaCancelado`, `TituloDeOutraOrigem`, `TituloComMovimento`, `MotivoDoCancelamentoCurto` |
+| `AlterarVencimento` ✅ (2026-10-15, `financeiro.alterar_vencimento.v1`) | `financeiro.titulo.editar` | Médio | Muda o vencimento de uma parcela `Aberta`/`Parcial`, de título de qualquer origem (o fornecedor que prorrogou). A parcela é a fonte do vencimento para listas, aging, projeção e régua; o lançamento do Razão não se edita | `ParcelaNaoBaixavel`, `VencimentoAntesDaEmissao` |
 | `CriarRecorrencia` ✅ | `financeiro.recorrencia.criar` | Médio | Grava a regra (`categoria` opcional); não gera título imediatamente | `RegraDeRecorrenciaInvalida` |
 | `MaterializarRecorrencia` ✅ | (tarefa agendada, sem permissão de usuário) | Baixo | `materializar_recorrencias_pendentes` — gera `Titulo` real quando falta `antecedencia_geracao_dias`, idempotente por `(origem_id, emissao)` | — |
 | `CriarCategoria` ✅ | `financeiro.categoria.criar` | Baixo | Cria `CategoriaFinanceira` | `NomeDeCategoriaVazio` |
 | `CriarContaBancaria` ✅ | `financeiro.banco.criar` | Baixo | Abre uma conta analítica nova, filha de `1.1` (Disponível) — `1.1.05`, `1.1.06`… (`CodigoConta::proximo_filho`, novo em `cardeal-ledger`). **Decisão**: não mexe em `1.1.02 "Bancos"`, que continua sendo o destino de `BaixarPagamento`/`BaixarRecebimento` quando `meio_pagamento` não é `Dinheiro` e `conta_destino` não escolhe uma conta específica; cada conta nova nasce com `papel: None` — só endereçável pelo `Id`, escolhido na tela | — |
+| `ImportarContasEmAberto` ✅ (2026-10-16, `financeiro.importar_contas.v1`; prévia `financeiro.previa_importacao_contas.v1`) | `financeiro.titulo.importar` (+ `financeiro.receber.criar`/`financeiro.pagar.criar` conforme a planilha e `clientes.pessoa.criar` se houver pessoa nova) | Médio | A implantação do primeiro dia (`mod_financeiro::importacao`): um CSV com uma conta por linha — `Tipo` (Receber/Pagar), `Vencimento` e `Valor` em aberto obrigatórios; `Nome` e `CPF/CNPJ` dizem de quem é (achada pelo documento ou, sem ele, pelo nome; nome repetido no cadastro é erro e pede o documento; quem não está é **cadastrado** só com nome e documento, como cliente ou fornecedor); `Emissão` (padrão: o vencimento ou hoje, o que vier antes), `Número`, `Categoria` e `Descrição` vão para a observação. Cada linha vira um título de uma parcela pelo mesmo `lancar_titulo_comum` do avulso, com origem `importacao` e uma **chave estável** da linha (FNV-1a de tipo, pessoa, vencimento, valor, observação e ocorrência) como `origem_id` — importar de novo não duplica, nem ressuscita o que foi cancelado. É **saldo de abertura**, não receita nem despesa do período (§7). Pode ser cancelado por `CancelarTitulo` enquanto não tiver baixa. Tudo ou nada | `REGRA_VIOLADA` (linhas com erro), `SEM_PERMISSAO` |
+| `DefinirSaldoInicial` ✅ (2026-10-15, `financeiro.definir_saldo_inicial.v1`) | `financeiro.banco.editar` | Médio | O saldo de uma conta do Disponível na data da implantação: `Realizado` D conta / C Lucros acumulados (3.2) — crédito no Disponível quando negativo (cheque especial). **Um só por conta**: redefinir estorna o anterior e lança de novo (origem `financeiro/saldo_inicial/<conta>`); zero tira o saldo. A conferência banco × sistema deixa de acusar "saldo inicial não lançado". Na tela, a conta nova já pede o "saldo hoje" | `ContaDisponivelInvalida` |
+| `TransferirEntreContas` ✅ (2026-10-15, `financeiro.transferir_entre_contas.v1`) | `financeiro.banco.transferir` | Médio | `Realizado` D destino / C origem (origem `financeiro/transferencia`), com a linha em `financeiro_transferencia` para listar e cancelar. **Dinheiro em espécie não fica negativo**: de um caixa (papel Caixa ou conta de caixa cadastrado) exige saldo; banco pode (cheque especial). É como o dinheiro da sangria, que cai em `1.1.02 Bancos`, chega à conta bancária de verdade | `TransferenciaParaAMesmaConta`, `SaldoInsuficienteNaOrigem`, `ContaDisponivelInvalida` |
+| `CancelarTransferencia` ✅ (2026-10-15, `financeiro.cancelar_transferencia.v1`) | `financeiro.banco.transferir` | Médio | Estorna o lançamento (os dois lados de uma vez) e marca `cancelada_em`; motivo ≥ 10 caracteres | `TransferenciaJaCancelada` |
+| `DesativarContaDisponivel` ✅ (2026-10-15, `financeiro.desativar_conta.v1`) | `financeiro.banco.editar` | Médio | `razao_conta.ativa = 0` (nunca apaga). Recusa as contas do sistema (Caixa, Bancos, Aplicações, Valores em trânsito), a conta de um caixa cadastrado e a conta com saldo ("transfira antes") | `ContaDisponivelInvalida`, `ContaComSaldo` |
 | `ImportarExtrato` | `financeiro.conciliacao.importar` | Baixo | Parseia OFX/CNAB240/Pix, cria `ItemExtrato` em `Pendente`, dispara casamento automático | `FormatoInvalido`, `PeriodoJaImportado` |
 | `ConciliarItem` | `financeiro.conciliacao.confirmar` | Médio | Vincula `ItemExtrato` a um `Lancamento`/`Baixa` existente ou cria um novo | `ItemJaConciliado`, `ValorDivergente` |
 | `CriarCentroCusto` | `financeiro.centro_custo.criar` | Baixo | | `CodigoDuplicado` |
 | `GerarCobranca` | `financeiro.cobranca.gerar` | Baixo | Solicita boleto/Pix via `PortaBanco`, grava `nosso_numero` | `ContaSemConvenio` |
-| `RegistrarCheque` | `financeiro.cheque.registrar` | Médio | Cria `Titulo`/`Baixa` com forma `Cheque`, estado `EmCarteira` | `ChequeDuplicado` |
-| `CompensarCheque` | `financeiro.cheque.compensar` | Médio | Lançamento D Bancos / C Cheques a receber | `ChequeJaCompensado` |
-| `DevolverCheque` | `financeiro.cheque.devolver` | Alto | Estorna a compensação, reabre o título como inadimplente | `ChequeNaoCompensado` |
+| `RegistrarCheque` ✅ (2026-10-14, `financeiro.registrar_cheque.v1`) | `financeiro.cheque.registrar` | Médio | Sobre uma parcela a receber **já existente**: dá a baixa em **Cheques a receber** (D 1.2.03 / C Clientes; o caixa não muda) e guarda o cheque `EmCarteira` com banco/agência/conta/número/emitente e o "bom para" (pré-datado). O mesmo cheque não entra duas vezes enquanto não for devolvido (devolvido pode ser reapresentado) | `ChequeDuplicado`, `DadosDoChequeInvalidos`, `DataDoChequeInvalida` |
+| `CompensarCheque` ✅ (2026-10-14, `financeiro.compensar_cheque.v1`) | `financeiro.cheque.compensar` | Médio | D Banco (conta do 1.1 escolhida) / C Cheques a receber, na data (entre o recebimento e hoje) — um movimento que a Conciliação casa com o depósito no extrato | `ChequeEmEstadoInvalido`, `DataDoChequeInvalida` |
+| `DevolverCheque` ✅ (2026-10-14, `financeiro.devolver_cheque.v1`) | `financeiro.cheque.devolver` | Alto | Estorna a compensação, se houve, e a baixa: a parcela volta a ficar em aberto. Alínea (11, 12, 21…) e observação vão no motivo dos estornos; evento `financeiro.cheque_devolvido.v1` `{ titulo, cheque, motivo }` | `ChequeEmEstadoInvalido` |
 
 > **Nota (2026-09-05) — `EstornarBaixa`/`RenegociarTitulo`:** implementados com teste de
 > integração de ponta a ponta (`crates/modulos/mod-financeiro/tests/comandos.rs`). Duas
@@ -407,6 +414,10 @@ stateDiagram-v2
 | `SaudeFinanceira` ✅ (2026-10-09) | `financeiro.dre.ver` | Cartão da Visão geral: score 0–100 e semáforo (≥70 verde, 40–69 amarelo, <40 vermelho) de cinco sinais ponderados — liquidez 25 (caixa + a receber em 30 dias ÷ a pagar em 30 dias; 0 pts a 0,5×, 100 a 1,5×), inadimplência 20 (0 pts a 20%), margem EBITDA dos últimos 3 meses 20 (100 pts a 15%), giro de estoque 20 (100 pts a 1× por mês; informado pela tela, pois pertence ao estoque) e fluxo projetado em 30 dias 15. Sinal sem dados sai e os pesos se reescalam: nunca premia a ausência de informação. Mostra o que mais puxa para baixo com a dica de ação | `razao_*` + parcelas em aberto (`financeiro::saude`) |
 | `AgingAReceber` / `AgingAPagar` ✅ (2026-10-09) | `financeiro.receber.ver` / `financeiro.pagar.ver` | Aba Cobrança: o saldo em aberto por faixa de atraso (a vencer, 1–30, 31–60, 61–90, +90 dias), o total vencido, a **taxa de inadimplência** (vencido há +30 dias ÷ total em aberto) e os devedores do maior vencido para o menor, com o atraso da parcela mais antiga; WhatsApp a um clique com a mensagem de cobrança | `financeiro_parcela`/`financeiro_titulo` em aberto (`titulos_em_aberto`) |
 | `DfcDoPeriodo` ✅ (2026-10-09) | `financeiro.dre.ver` | Aba Resultado e caixa › DFC pelo método **direto**: saldo de abertura, entradas e saídas realizadas no período abertas por atividade (operacional, investimento, financiamento) e por contraparte, variação e saldo final — que bate com o saldo realizado das contas de caixa do Razão (testado). Cada contrapartida de um lançamento que mexe no caixa vira uma linha (um recebimento com juros dá "Recebimentos de clientes" e "Receitas financeiras"); transferência entre contas de caixa não tem contraparte e some. "Caixa" = papel Caixa/Bancos/ValoresEmTransito, próprio ou herdado. Data = liquidação (ou competência) | `razao_partida` × `razao_lancamento` (`cardeal_ledger::movimentos_de_caixa`) |
+| `DfcIndiretoDoPeriodo` ✅ (2026-10-14, `financeiro.dfc_indireto_do_periodo.v1`) | `financeiro.dre.ver` | Aba Resultado e caixa › DFC › "Método indireto": o **lucro líquido da DRE** e, com o sinal trocado, a variação de cada conta patrimonial fora do caixa nos mesmos lançamentos da DRE (Confirmado/Realizado/Estornado, pela competência) — ativo que cresce prendeu dinheiro, passivo que cresce o soltou. Classificação: depreciação/amortização (pelo nome) nas operacionais; senão o grupo de fluxo da conta; senão o papel (Empréstimos, Capital, Retiradas, Lucros acumulados → financiamento; Aplicações → investimento); senão o imobilizado pelo código (1.4 → investimento); o resto, operacional, com rótulos como "(Aumento) redução de contas a receber". Termina na **mesma variação** do método direto; se um lançamento tem competência num período e liquidação noutro, a sobra aparece numa linha própria ("Diferença de datas"), nunca some — zero no caso normal (testado com venda e compra a prazo, baixas, depreciação, máquina à vista, empréstimo e retirada) | `cardeal_ledger::variacoes_patrimoniais` + `resultado_por_conta` + `movimentos_de_caixa` |
+| `CarteiraDeCheques` ✅ (2026-10-14, `financeiro.carteira_de_cheques.v1`) | `financeiro.cheque.ver` | Aba Cheques: os cheques (filtro por estado) com o cliente e a descrição do título, o "bom para" mais antigo primeiro; a tela soma em carteira, os que já podem ir ao banco e os devolvidos | `financeiro_cheque(empresa, estado, bom_para)` (migração v11) |
+| `BalanceteDoPeriodo` ✅ (2026-10-14, `financeiro.balancete_do_periodo.v1`) | `financeiro.dre.ver` | Aba Resultado e caixa › Balancete: cada conta com saldo anterior, débitos, créditos e saldo atual (D/C), agrupadoras somadas, ordem numérica dos códigos. Pela competência (Confirmado/Realizado/Estornado), então sempre fecha. Sem encerramento de exercício no sistema, as contas de resultado acumulam só o **ano**; o resultado dos anos anteriores entra numa linha do PL ("Resultado de exercícios anteriores (não encerrado)") | `cardeal_ledger::balancete` |
+| `DiarioDoPeriodo` ✅ (2026-10-14, `financeiro.diario_do_periodo.v1`) | `financeiro.dre.ver` | O diário do período: cada lançamento (número, competência, histórico, estado) com as partidas — para o pacote do contador | `cardeal_ledger::diario` |
 | `DreDoPeriodo` / `DreComparativa` ✅ (2026-10-09; no lugar de `DreDoMes`) | `financeiro.dre.ver` | Aba Resultado: DRE de um período; comparativo mês × mês anterior × mesmo mês do ano anterior. Estrutura: receita bruta › deduções (descontos, devoluções, impostos sobre venda) › receita líquida › CMV/CSV › lucro bruto › outras receitas e despesas operacionais › EBITDA › resultado financeiro › lucro líquido. Cada linha é uma **contribuição com sinal**, então o lucro líquido é sempre receitas − despesas do Razão (propriedade testada). Conta aberta pelo usuário herda o papel da sintética; sem papel conhecido cai em "outras", nunca some. Entram `Confirmado`/`Realizado`/`Estornado` pela competência; `Previsto` não | `razao_lancamento(empresa, competencia, estado)` + `razao_partida(conta)` (`cardeal_ledger::resultado_por_conta`) |
 | `PosicaoPorCentroCusto` | `financeiro.centro_custo.ver` | Relatório de centro de custo | `razao_partida_cc(centro_custo, lancamento)` |
 | `HistoricoDoCliente` | `financeiro.receber.ver` | Ficha do cliente (aba financeira) | `financeiro_titulo(contraparte_tipo, contraparte_id)` |
@@ -414,6 +425,43 @@ stateDiagram-v2
 | `Categorias` ✅ | `financeiro.categoria.ver` | Seletor de categoria ao lançar título/recorrência | `financeiro_categoria(empresa, nome) WHERE ativa = 1` |
 | `TotalPorCategoriaNoPeriodo` ✅ | `financeiro.categoria.ver` | Gráfico de custo/receita por categoria e mês (churn, MRR por projeto) | agregação em memória sobre `financeiro_baixa` join `financeiro_titulo`, filtrando por `data` |
 | `TituloDaOrigem` ✅ (novo, 2026-09-11) | `financeiro.receber.ver` | Detalhe de OS (`os`)/vendas/compras faturada: "qual título isto gerou" | `financeiro_titulo(empresa, origem_modulo, origem_id)` — o par de correlação que `Titulo` já carregava desde a origem; usado por outro módulo pela consulta pública, nunca por SQL direto em `financeiro_titulo` (`docs/contratos-internos.md` §7 regra 2) |
+
+## 6.5 Régua de cobrança (2026-10-14)
+
+`mod_financeiro::regua`: as etapas da empresa (dias contados do vencimento — negativo = lembrete antes, 0 = no
+dia, positivo = atraso — com nome e modelo de mensagem com `{nome}`, `{valor}`, `{vencimento}`, `{dias}` e
+`{empresa}`); sem configuração, vale a padrão (−3, 0, 1, 7, 15, 30). `FilaDeCobranca`
+(`financeiro.fila_de_cobranca.v1`, `financeiro.receber.ver`) monta a fila de hoje a partir das parcelas a
+receber em aberto **com cliente**: para cada parcela, a etapa mais recente que já chegou e que ainda não foi
+registrada (nem uma posterior) — quem começa a usar com atraso grande cai direto na etapa atual; um item por
+cliente, na etapa mais grave entre as parcelas dele e com o total, os mais atrasados primeiro.
+`RegistrarCobranca` (`financeiro.cobranca.enviar`, nova) marca cada parcela do item como enviada ou pulada
+naquela etapa (migração v12, `financeiro_cobranca_registro`, chave parcela+etapa); `DefinirReguaDeCobranca`
+(`financeiro.cobranca.configurar`, nova) troca a régua inteira (até 12 etapas, dias de −30 a 365, sem dia
+repetido). Na tela: "Cobranças de hoje" no topo de Cobrança › Quem me deve (mensagem já escrita, WhatsApp a um
+clique que registra o envio, "Pular", editor da régua) e o aviso na Visão geral. O disparo **automático** (sem
+clique) espera uma API de WhatsApp — a fila já é o que ela vai consumir.
+
+## 6.4 Pacote do contador (2026-10-14)
+
+Na aba Resultado e caixa, **"Pacote do contador…"** grava, para o mês escolhido, uma pasta `Contador AAAA-MM`
+com dois arquivos e a abre: `Relatórios AAAA-MM.pdf` (DRE comparativa, DFC direto e indireto e balancete, com o
+cabeçalho da empresa — `cardeal_pdf::gerar_relatorio`, relatório tabular genérico) e `Contabilidade AAAA-MM.xlsx`
+(as mesmas tabelas com números de verdade e o **diário** completo, uma linha por partida com débito e crédito
+separados). O `.xlsx` vem do crate novo `cardeal-planilha`: Office Open XML escrito à mão (ZIP armazenado +
+XML), sem dependência externa — dinheiro como número `#.##0,00`, datas como data, negrito, larguras e cabeçalho
+congelado; conferido no Excel (amostra) e pelo leitor de pacotes Open XML do .NET (o pacote real). "Envio" é
+manual: o usuário anexa a pasta no e-mail/WhatsApp — SMTP e o Portal do Contador (onda 8) ficam para depois.
+
+## 6.3 Lançamento pré-preenchido pelo último da pessoa (2026-10-14)
+
+`UltimoLancamentoAReceber`/`UltimoLancamentoAPagar` (`financeiro.ultimo_lancamento_a_receber.v1`/
+`…_a_pagar.v1`, com a permissão de ver a espécie) devolvem o último título **lançado à mão** (origem
+`avulso` ou recorrência; não cancelado) da pessoa: data, valor, descrição, categoria e parcelas. Título que
+veio de nota de compra, pedido ou OS não serve de modelo. No diálogo de lançamento, ao escolher o cliente ou
+fornecedor, o que estiver **em branco** (descrição, categoria, valor) vem do último, com o aviso "Preenchido
+com o último lançamento desta pessoa, de dd/mm/aaaa: …. Confira antes de lançar." — o que o usuário já
+digitou nunca é sobrescrito.
 
 ## 6.2 Conciliação bancária (2026-10-09)
 
@@ -426,6 +474,31 @@ dada na data do banco, pela conta do extrato), **lançada** (`LancarItemDoExtrat
 que ninguém lançou — vira um título já quitado na conta do extrato, com categoria) ou **ignorada**
 (`IgnorarItemDoExtrato`, reversível). Linha conciliada não se ignora nem se concilia de novo.
 Não faz: Open Banking, CNAB, conciliação parcial (valor diferente do saldo).
+
+**Casar com qualquer movimento da conta (2026-10-14).** Além de parcela e baixa, a linha do extrato casa com
+`AlvoDaConciliacao::Movimento`: um lançamento **realizado** nesta conta que não é baixa — depósito do caixa no
+banco (sangria), transferência entre contas, compensação de cheque — e que nenhuma linha conciliou
+(migração v10: `financeiro_item_extrato.lancamento`). Antes, o depósito do caixa aparecia no extrato sem ter
+com o que casar: "Lançar" contaria em dobro e "Ignorar" deixaria a conferência com diferença falsa. Um
+lançamento estornado que o banco nunca viu some junto com o estorno; se o original já foi conciliado, o
+estorno vira candidato (o banco também mostra a volta). Mesma pontuação da baixa (80 + data; nunca a mais de
+7 dias). A conferência conta esses movimentos em "só no sistema".
+
+**Conferência do saldo e alerta de pendências (2026-10-14).** O OFX passa a trazer o saldo que o banco
+informa (`LEDGERBAL`: `BALAMT` na data `DTASOF`), gravado em `financeiro_saldo_banco` (migração v9);
+para CSV (que não traz saldo) ou para conferir pelo aplicativo do banco, `InformarSaldoDoBanco`
+(`financeiro.informar_saldo_do_banco.v1`, permissão de importar; data não pode ser futura; o mais recente
+para a mesma data vale). `ConferenciaDasContas` (`financeiro.conferencia_das_contas.v1`) põe, para cada
+conta do Disponível que não é o caixa, o último saldo do banco contra o saldo do Razão na mesma data
+(lançamentos realizados com liquidação até o fim do dia) e **explica a diferença**: linhas do extrato até a
+data ainda pendentes ou ignoradas (estão no banco, não no sistema) e baixas nesta conta que nenhuma linha
+conciliou, dentro do período coberto pelos extratos (estão no sistema; antes do primeiro extrato o saldo
+dos dois já as conta). O resto é a diferença **sem explicação** (saldo inicial não lançado, lançamento na
+conta errada, linha que falta); sem ela e sem nada esperando, a conta está **fechada**. Alertas
+(`ConferenciaDaConta::alertas`, tolerância de 7 dias na tela): linha pendente mais antiga que a
+tolerância, extrato sem importar há mais que a tolerância e diferença sem explicação. Na tela: painel
+"Saldo do banco × sistema" na aba Conciliação (com "Informar saldo…") e o quadro "Conciliação bancária"
+na Visão geral, com o atalho para a aba.
 
 ## 6.1 Plano de contas: modelos, contas novas e categoria → conta (2026-10-09)
 
@@ -462,6 +535,8 @@ empresa. Em cima dele:
 | Fechamento de caixa com quebra | Quebra de caixa (5.x) | Caixa | Realizado |
 | Lançamento de título a receber avulso | Clientes a receber (1.2.01) | Receita/conta indicada | Confirmado |
 | Lançamento de título a pagar avulso | Despesa/conta indicada | Fornecedores (2.1.01) | Confirmado |
+| Conta a receber importada na implantação (saldo de abertura) | Clientes a receber (1.2.01), com o cliente | Lucros acumulados (3.2) | Confirmado |
+| Conta a pagar importada na implantação (saldo de abertura) | Lucros acumulados (3.2) | Fornecedores (2.1.01), com o fornecedor | Confirmado |
 | Recebimento de parcela, em dia | Caixa/Bancos | Clientes a receber | Realizado |
 | Recebimento de parcela, com juros/multa | Caixa/Bancos | Clientes a receber + Receita financeira (4.6) | Realizado |
 | Recebimento de parcela, com desconto de antecipação | Caixa/Bancos + Descontos concedidos (4.4) | Clientes a receber | Realizado |
@@ -518,12 +593,16 @@ que o módulo financeiro precisa cobrir em `testes/receituario.rs`.
 | `financeiro.receber.baixar` | Dar baixa em recebimento | Médio |
 | `financeiro.receber.estornar` | Estornar baixa de recebimento | Alto |
 | `financeiro.receber.renegociar` | Renegociar título a receber | Alto |
+| `financeiro.titulo.cancelar` | Cancelar título lançado errado | Alto |
+| `financeiro.titulo.editar` | Alterar o vencimento de uma parcela em aberto | Médio |
 | `financeiro.pagar.ver` | Consultar contas a pagar | Baixo |
 | `financeiro.pagar.criar` | Lançar título a pagar | Baixo |
 | `financeiro.pagar.baixar` | Dar baixa em pagamento | Médio |
 | `financeiro.pagar.autorizar` | Autorizar pagamento acima do teto do papel | Alto |
 | `financeiro.banco.ver` | Consultar contas bancárias e extratos | Baixo |
 | `financeiro.banco.criar` | Cadastrar conta bancária | Médio |
+| `financeiro.banco.editar` | Definir o saldo inicial e desativar conta do caixa/banco | Médio |
+| `financeiro.banco.transferir` | Transferir entre contas e cancelar a transferência | Médio |
 | `financeiro.conciliacao.ver` | Ver a conciliação bancária | Baixo |
 | `financeiro.conciliacao.importar` | Importar extrato bancário | Baixo |
 | `financeiro.conciliacao.confirmar` | Confirmar casamento de item do extrato | Médio |

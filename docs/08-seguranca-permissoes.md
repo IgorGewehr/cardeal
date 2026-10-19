@@ -127,12 +127,18 @@ Alguns "poderes" são quantitativos, não booleanos:
 
 ```rust
 limites! {
-    "vendas.desconto_maximo"       => Percentual,   // Operador 5%, Gerente 20%, Admin ∞
+    "vendas.desconto_maximo"       => Percentual,   // padrão: Admin e Gerente ∞, Caixa e Vendedor 10%
     "financeiro.pagar.teto"        => Dinheiro,     // autoriza até R$ 5.000,00
     "pdv.cancelamento_por_turno"   => Contagem,     // até 3 cancelamentos por turno
     "vendas.prazo_maximo"          => Dias,
 }
 ```
+
+Os papéis de fábrica nascem com o teto de desconto (`PapelDeFabrica::limites_padrao`, 2026-10-16):
+sem ele o teto é zero e nem o dono conseguia dar desconto. E, por serem imutáveis (`sistema = 1`),
+a cada mudança de política o motor os completa ao abrir a base (`sincronizar_papeis_de_fabrica`):
+acrescenta o que a política passou a conceder e o limite que ainda não têm — só acrescenta, como já
+fazia com o Administrador.
 
 Exceder o limite não é erro: dispara **autorização de supervisor** na hora, que é registrada
 vinculando as duas identidades (quem pediu, quem autorizou).

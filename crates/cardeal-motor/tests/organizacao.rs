@@ -273,3 +273,89 @@ fn so_quem_tem_a_permissao_cria_cnpj_e_quem_nao_tem_papel_nao_entra() {
     assert_eq!(usuarios(&dono), vec!["dono", "vendedor"]);
     assert_eq!(usuarios(&na_filial), vec!["dono"]);
 }
+
+#[test]
+fn papel_de_fabrica_gravado_numa_versao_antiga_ganha_o_que_a_politica_passou_a_conceder() {
+    let arquivo = tempfile::NamedTempFile::new().unwrap();
+    let motor = abrir(arquivo.path());
+    motor
+        .configurar_inicial("Matriz Ltda", "11.222.333/0001-81", "dono", "Dono", SENHA)
+        .unwrap();
+    let dono = motor.autenticar("dono", SENHA).unwrap();
+    criar(&motor, &dono, "Ana Lima");
+    let caixa: cardeal_kernel::Id = motor
+        .executar(
+            &dono,
+            "empresa.adicionar_usuario.v1",
+            &mod_empresa::AdicionarUsuario {
+                login: "caixa".into(),
+                nome: "Caixa".into(),
+                papel: mod_empresa::PapelDeFabrica::OperadorCaixa,
+            },
+        )
+        .unwrap();
+    // O caixa vê o cliente da venda (o F6 do PDV).
+    let sessao = motor
+        .sessao_do_usuario(caixa, cardeal_kernel::Id::novo())
+        .unwrap();
+    assert_eq!(clientes(&motor, &sessao), vec!["Ana Lima"]);
+    drop(motor);
+
+    // Uma base de antes: o papel do caixa sem a permissão, e a impressão do plano antiga.
+    {
+        let c = rusqlite::Connection::open(arquivo.path()).unwrap();
+        let apagadas = c
+            .execute(
+                "DELETE FROM nucleo_papel_permissao WHERE permissao = 'clientes.pessoa.ver'
+                   AND papel IN (SELECT id FROM nucleo_papel WHERE nome = 'Operador de Caixa')",
+                [],
+            )
+            .unwrap();
+        assert_eq!(apagadas, 1, "o papel do caixa tinha a permissão");
+        // E sem o teto de desconto, como nas bases de antes dele (caixa e administrador).
+        let sem_teto = c
+            .execute(
+                "DELETE FROM nucleo_papel_limite WHERE chave = 'vendas.desconto_maximo'",
+                [],
+            )
+            .unwrap();
+        assert_eq!(sem_teto, 2, "o caixa e o administrador nasceram com o teto");
+        c.execute(
+            "UPDATE nucleo_esquema SET valor = zeroblob(32) WHERE chave = 'impressao_plano'",
+            [],
+        )
+        .unwrap();
+    }
+    let motor = abrir(arquivo.path());
+    let sessao = motor
+        .sessao_do_usuario(caixa, cardeal_kernel::Id::novo())
+        .unwrap();
+    assert_eq!(
+        clientes(&motor, &sessao),
+        vec!["Ana Lima"],
+        "ao abrir, o papel de fábrica volta a ter o que a política concede"
+    );
+    drop(motor);
+    let tetos: Vec<(String, String)> = {
+        let c = rusqlite::Connection::open(arquivo.path()).unwrap();
+        let mut stmt = c
+            .prepare(
+                "SELECT p.nome, l.tipo FROM nucleo_papel_limite l
+                 JOIN nucleo_papel p ON p.id = l.papel
+                 WHERE l.chave = 'vendas.desconto_maximo' ORDER BY p.nome",
+            )
+            .unwrap();
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    };
+    assert_eq!(
+        tetos,
+        vec![
+            ("Administrador".to_owned(), "Ilimitado".to_owned()),
+            ("Operador de Caixa".to_owned(), "Percentual".to_owned()),
+        ],
+        "o teto de desconto volta para quem não tinha"
+    );
+}

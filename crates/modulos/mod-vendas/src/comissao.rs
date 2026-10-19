@@ -84,6 +84,42 @@ impl Comissao {
         })
     }
 
+    /// Apura a comissão de um pedido faturado **item a item**, cada um com o seu percentual — a
+    /// comissão por estrutura mercadológica (a do produto, a do grupo ou a padrão), congelada
+    /// no faturamento. `itens` são (base do item, percentual). A base é o total líquido de
+    /// desconto; o `percentual` guardado é o efetivo (valor ÷ base). `None` sem nada a pagar.
+    #[must_use]
+    pub fn de_itens(
+        empresa: Id,
+        vendedor: Id,
+        pedido: Id,
+        itens: &[(Dinheiro, Percentual)],
+        competencia: Data,
+    ) -> Option<Self> {
+        let base = itens
+            .iter()
+            .fold(Dinheiro::ZERO, |t, (b, _)| t + b.nao_negativo());
+        let valor = itens.iter().fold(Dinheiro::ZERO, |t, (b, p)| {
+            t + b.nao_negativo().aplicar(*p, Arredondamento::MeioAcima)
+        });
+        if !valor.e_positivo() {
+            return None;
+        }
+        Some(Self {
+            id: Id::novo(),
+            empresa,
+            vendedor,
+            pedido,
+            base_calculo: base,
+            percentual: Percentual::da_razao(valor.em_centavos(), base.em_centavos()),
+            valor,
+            competencia,
+            estado: EstadoComissao::Apurada,
+            lancamento: None,
+            versao: Versao::INICIAL,
+        })
+    }
+
     /// `Apurada → Paga`, vinculando o lançamento.
     ///
     /// # Errors
@@ -214,6 +250,31 @@ mod testes {
         let c = Comissao::apurar(&p, Percentual::pontos(3), hoje(), Dinheiro::ZERO).unwrap();
         let delta = c.ajuste_para_nova_base(Dinheiro::reais(800));
         assert_eq!(delta, Dinheiro::reais(-6)); // 24 - 30
+    }
+
+    #[test]
+    fn de_itens_soma_cada_um_com_o_seu_percentual() {
+        let (e, v, p) = (Id::novo(), Id::novo(), Id::novo());
+        // R$ 100 a 3% + R$ 50 a 10% = 3 + 5 = R$ 8 sobre R$ 150 (5,33%).
+        let c = Comissao::de_itens(
+            e,
+            v,
+            p,
+            &[
+                (Dinheiro::reais(100), Percentual::pontos(3)),
+                (Dinheiro::reais(50), Percentual::pontos(10)),
+            ],
+            hoje(),
+        )
+        .unwrap();
+        assert_eq!(c.valor, Dinheiro::reais(8));
+        assert_eq!(c.base_calculo, Dinheiro::reais(150));
+        assert_eq!(c.percentual.formatar(2), "5,33");
+        // Tudo a 0%: nada a apurar.
+        assert!(
+            Comissao::de_itens(e, v, p, &[(Dinheiro::reais(100), Percentual::ZERO)], hoje())
+                .is_none()
+        );
     }
 
     #[test]

@@ -6,10 +6,10 @@ use cardeal_modkit::{Manifesto, Modulo, Registro};
 use cardeal_storage::ConjuntoMigracoes;
 
 use crate::comandos::{
-    AbrirCupom, AdicionarItem, AplicarDescontoItem, CancelarCupom, CancelarItem, FinalizarVenda,
-    IdentificarCliente,
+    AbrirCupom, AdicionarItem, AplicarDescontoItem, CancelarCupom, CancelarItem, EstornarVenda,
+    FinalizarVenda, IdentificarCliente,
 };
-use crate::consultas::PrecoDoProduto;
+use crate::consultas::{PrecoDoProduto, VendasDoPeriodo};
 use crate::manifesto::MANIFESTO;
 use crate::migracoes;
 
@@ -30,11 +30,17 @@ impl Modulo for ModuloPdv {
             .comando::<AbrirCupom>("pdv.abrir_cupom.v1")
             .comando::<AdicionarItem>("pdv.adicionar_item.v1")
             .comando::<AplicarDescontoItem>("pdv.aplicar_desconto_item.v1")
+            .comando::<crate::AplicarDescontoNoTotal>("pdv.aplicar_desconto_no_total.v1")
             .comando::<CancelarItem>("pdv.cancelar_item.v1")
             .comando::<CancelarCupom>("pdv.cancelar_cupom.v1")
             .comando::<FinalizarVenda>("pdv.finalizar_venda.v1")
+            .comando::<EstornarVenda>("pdv.estornar_venda.v1")
+            .comando::<crate::DefinirImpressaoPdv>("pdv.definir_impressao.v1")
+            .consulta::<crate::ImpressaoDoPdv>("pdv.impressao.v1")
+            .consulta::<crate::ComprovanteDaVenda>("pdv.comprovante_da_venda.v1")
             .comando::<IdentificarCliente>("pdv.identificar_cliente.v1")
             .consulta::<PrecoDoProduto>("pdv.preco_do_produto.v1")
+            .consulta::<VendasDoPeriodo>("pdv.vendas_do_periodo.v1")
             .consulta::<crate::ReceitaPorProduto>("pdv.receita_por_produto.v1");
         Ok(())
     }

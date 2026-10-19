@@ -9,17 +9,21 @@
 //! os papéis de conta e a permissão.
 
 mod abrir_caixa;
+mod ajustar_titulo;
 mod baixar_em_lote;
 mod baixar_pagamento;
 mod baixar_recebimento;
 mod cadastrar_caixa;
+mod cheque;
 mod conta_a_pagar_avulsa;
+mod contas_do_disponivel;
 mod criar_categoria;
 mod criar_categorias_sugeridas;
 mod criar_conta_bancaria;
 mod criar_recorrencia;
 mod estornar_baixa;
 mod fechar_caixa;
+mod importar_contas;
 mod lancar_titulo_a_pagar;
 mod lancar_titulo_a_receber;
 mod materializar_recorrencia;
@@ -29,6 +33,7 @@ mod registrar_suprimento;
 mod renegociar_titulo;
 
 pub use abrir_caixa::{AbrirCaixa, CaixaFoiAberto};
+pub use ajustar_titulo::{AlterarVencimento, CancelarTitulo, TituloFoiCancelado};
 pub use baixar_em_lote::{
     BaixarPagamentosEmLote, BaixarRecebimentosEmLote, BaixasEmLoteFeitas, DadosBaixaEmLote,
 };
@@ -39,9 +44,17 @@ pub use baixar_pagamento::{BaixarPagamento, PagamentoBaixado};
 pub use baixar_recebimento::baixar_recebimento_comum;
 pub use baixar_recebimento::{BaixarRecebimento, RecebimentoBaixado};
 pub use cadastrar_caixa::{CadastrarCaixa, CaixaCadastrado};
+pub use cheque::{
+    CarteiraDeCheques, ChequeCompensado, ChequeFoiDevolvido, ChequeRegistrado, CompensarCheque,
+    DevolverCheque, ItemCheque, RegistrarCheque,
+};
 #[cfg(feature = "sqlite")]
 pub use conta_a_pagar_avulsa::lancar_conta_a_pagar_avulsa;
 pub use conta_a_pagar_avulsa::{DadosContaAvulsa, PagamentoAvulso};
+pub use contas_do_disponivel::{
+    CancelarTransferencia, DefinirSaldoInicial, DesativarContaDisponivel, ItemTransferencia,
+    SaldoInicialDefinido, TransferenciaFeita, Transferencias, TransferirEntreContas,
+};
 pub use criar_categoria::{CategoriaCriada, CriarCategoria};
 pub use criar_categorias_sugeridas::{CriarCategoriasSugeridas, CATEGORIAS_SUGERIDAS};
 pub use criar_conta_bancaria::{ContaBancariaCriada, CriarContaBancaria};
@@ -50,6 +63,7 @@ pub use criar_recorrencia::{CriarRecorrencia, RecorrenciaCriada};
 pub use estornar_baixa::estornar_baixa_comum;
 pub use estornar_baixa::{BaixaFoiEstornada, EstornarBaixa};
 pub use fechar_caixa::{CaixaFoiFechado, FecharCaixa};
+pub use importar_contas::{ContasImportadas, ImportarContasEmAberto, PreviaDaImportacaoDeContas};
 pub use lancar_titulo_a_pagar::{LancarTituloAPagar, TituloAPagarLancado};
 pub use lancar_titulo_a_receber::{LancarTituloAReceber, TituloAReceberLancado};
 #[cfg(feature = "sqlite")]

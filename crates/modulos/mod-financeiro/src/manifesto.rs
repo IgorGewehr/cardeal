@@ -178,6 +178,25 @@ const PERMISSOES: &[Permissao] = &[
         Risco::Alto,
         Some("receber"),
     ),
+    // ── títulos (receber e pagar) ───────────────────────────────────────────
+    perm(
+        "financeiro.titulo.importar",
+        "Importar contas em aberto por planilha (implantação: saldo de abertura, não receita)",
+        Risco::Medio,
+        None,
+    ),
+    perm(
+        "financeiro.titulo.cancelar",
+        "Cancelar título lançado errado (estorna o lançamento das parcelas)",
+        Risco::Alto,
+        None,
+    ),
+    perm(
+        "financeiro.titulo.editar",
+        "Alterar o vencimento de uma parcela em aberto",
+        Risco::Medio,
+        None,
+    ),
     // ── pagar ────────────────────────────────────────────────────────────────
     perm(
         "financeiro.pagar.ver",
@@ -213,6 +232,18 @@ const PERMISSOES: &[Permissao] = &[
     perm(
         "financeiro.banco.criar",
         "Cadastrar conta bancária",
+        Risco::Medio,
+        Some("bancos"),
+    ),
+    perm(
+        "financeiro.banco.editar",
+        "Definir o saldo inicial e desativar conta do caixa/banco",
+        Risco::Medio,
+        Some("bancos"),
+    ),
+    perm(
+        "financeiro.banco.transferir",
+        "Transferir entre contas (caixa para banco, banco para banco) e cancelar a transferência",
         Risco::Medio,
         Some("bancos"),
     ),
@@ -294,6 +325,18 @@ const PERMISSOES: &[Permissao] = &[
         Some("centro_custo"),
     ),
     // ── cobrança ─────────────────────────────────────────────────────────────
+    perm(
+        "financeiro.cobranca.configurar",
+        "Configurar a régua de cobrança",
+        Risco::Medio,
+        None,
+    ),
+    perm(
+        "financeiro.cobranca.enviar",
+        "Enviar cobranças da régua",
+        Risco::Baixo,
+        None,
+    ),
     perm(
         "financeiro.cobranca.gerar",
         "Gerar boleto/Pix de cobrança",
@@ -469,6 +512,8 @@ const CONTAS_REQUERIDAS: &[ContaPadrao] = &[
 ];
 
 const EVENTOS_PUBLICADOS: &[&str] = &[
+    "financeiro.titulo_cancelado.v1",
+    "financeiro.vencimento_alterado.v1",
     "financeiro.caixa_aberto.v1",
     "financeiro.caixa_fechado.v1",
     "financeiro.sangria_registrada.v1",

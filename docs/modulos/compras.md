@@ -83,6 +83,7 @@ stateDiagram-v2
 | `LancarNotaManual` ✅ (não estava no spec original) | `compras.entrada.importar` | Baixo | Compra sem nota fiscal formal — mesma cascata de casamento/rateio de `importar_nota_da_sefaz`, mas os itens vêm digitados (`ItemNotaManual`, com `codigo_barras` opcional para entrar na cascata por GTIN também) em vez de um XML, e `chave_acesso` fica `None` (o índice `UNIQUE` do SQLite trata múltiplos `NULL` como distintos, então não colide com a idempotência das notas importadas) | — |
 | `DefinirPreferenciasCompras` ✅ (não estava no spec original) | `compras.entrada.preferencias` | Médio | Grava `PreferenciasCompras` — confirmação automática, geração de título a pagar, rateio por valor/peso, local padrão, `pago_no_ato_padrao` — a resposta desta versão ao pedido do usuário por "vários ajustes de preferências" e por "permitir gerar ou não registro automático no financeiro seja algo pago ou não" | — |
 | `VincularProdutoManual` ✅ | `compras.entrada.conferir` | Baixo | Casa a linha e grava `RegraCasamentoAprendida` | `ItemNaoPertenceANota` |
+| `CriarProdutoDoItem` ✅ (2026-10-13, `compras.criar_produto_do_item.v1`) | `compras.entrada.conferir` **e** `estoque.produto.criar` (`ctx.concede`) | Baixo | Item que não casou com nada: cria o produto (nome escolhido pelo usuário — a sugestão padronizada de `estoque.sugerir_nome_do_produto.v1`, possivelmente corrigida —, NCM e código de barras da nota, grupo opcional ou "Sem grupo", unidade `UN`) via `mod_estoque::criar_produto_de_compra_comum`, vincula o item, grava a `RegraCasamentoAprendida` e ensina ao dicionário DE/PARA de nomes o que a correção explica | `NotaJaConfirmada`, `SEM_PERMISSAO`, grupo inexistente |
 | `RatearDespesas` | `compras.entrada.conferir` | Baixo | Ainda não é um comando separado — o rateio acontece dentro de `importar_nota_da_sefaz`, não como passo manual | `ReferenciaInvalida` |
 | `ConferirQuantidade` | `compras.entrada.conferir` | Baixo | Ainda não implementado (não há `PedidoCompra` para comparar) | `QuantidadeDivergente` (aviso) |
 | `ConfirmarEntrada` ✅ | `compras.entrada.confirmar` | Alto | Exige todo item `Casado`; `mod_estoque::registrar_entrada_comum` por item e, se a preferência (ou o campo `gerar_titulo_a_pagar`) mandar, `mod_financeiro::lancar_titulo_comum` — chamados **direto, na mesma transação** (não via despacho — `docs/contratos-internos.md` §7 regra 2). Quando `pago_no_ato` (campo do comando, ou a preferência `pago_no_ato_padrao`) também é verdadeiro, a mesma transação já dá baixa completa no título recém-criado com `mod_financeiro::baixar_pagamento_comum`, na data da confirmação — a compra paga à vista nunca aparece "em aberto" no Contas a Pagar. Quando as preferências permitem e a varredura de `verificar_notas_na_sefaz` já casou tudo por GTIN ou regra aprendida, isto roda sozinho (`confirmar_entrada_comum`, mesma função por trás do comando) | `ItemNaoCasado`, `NotaJaConfirmada`, `EstadoDeNotaInvalido` |
@@ -134,6 +135,23 @@ stateDiagram-v2
 > zero ou negativo e `vUnCom` negativo agora são recusados (`ErroFiscal::XmlInvalido`) em vez
 > de aceitos silenciosamente — a importação em lote reduz a chance de alguém abrir cada nota
 > pra notar um XML anômalo, então o parser passou a barrar isso na entrada.
+
+> **Nota (2026-10-13) — produto a partir da nota (lunno §5.6):** o item guarda agora o código de
+> barras (`cEAN`) da nota (migração `compras` v3, `compras_item_nota_entrada.codigo_barras`), que antes
+> só servia para casar e era descartado. Na conferência, o item "Não casado" ganha "Não está no
+> catálogo? Criar produto novo": o nome vem sugerido pelo dicionário da empresa (ver
+> `estoque.md`, "Padronização do nome"), o usuário corrige se quiser e escolhe o grupo. A nota
+> seguinte do mesmo item casa sozinha (pelo código de barras e pela regra aprendida).
+
+> **Nota (2026-10-13) — ICMS-ST, IPI e desconto da nota no custo:** o leitor da NF-e (`cardeal_fiscal`) passou
+> a ler, por item, `vDesc`, `vICMSST` + `vFCPST` (o ST **cobrado nesta nota**; o `vICMSSTRet` retido antes
+> fica de fora, já está no preço) e `vIPI`. O item guarda desconto e impostos (migração `compras` v4) e o custo
+> que vai para o estoque passa a ser **bruto − desconto + rateio de despesas + ICMS-ST + IPI** — impostos que
+> quem compra para revender não recupera. O total da nota passou a ser o que o fornecedor cobra (o `vNF`):
+> **antes era só produtos + despesas, e o título a pagar saía menor que o boleto** em toda nota com ST ou IPI.
+> Na conferência, cada item mostra de onde vem o custo. Fora: estimar ST pela MVA quando a nota não traz o
+> valor (compra interestadual com antecipação, compra sem nota) — depende das tabelas por UF/NCM e de
+> conferência com o contador.
 
 ## 6. Consultas
 
@@ -213,6 +231,28 @@ pagar), `compras.entrada_a_conferir.v1`, `compras.devolucao_concluida.v1`.
    nota já confirmada.
 5. **Chave de acesso é única por empresa.** Reimportar a mesma NF-e (`ImportarNotaEntrada`) é
    idempotente — nunca duplica entrada.
+6. **Só compra vira compra** (2026-10-15, lição do `gestao-raiz`).
+   `NotaFiscalXml::classificar_para(cnpj_da_empresa)` recusa (`NaoECompra`, com o motivo):
+   - a nota **emitida pela própria empresa** (uma venda sua);
+   - a de **outro destinatário** (CNPJ ou CPF diferente);
+   - a **devolução de cliente** (`finNFe = 4`);
+   - a **nota de entrada do emitente** (`tpNF = 0` de terceiro: a mercadoria saiu da empresa para ele).
+
+   O `tpNF` não decide sozinho: a venda do fornecedor vem com `tpNF = 1`, a saída **dele**, e para nós
+   é compra. Sem destinatário no XML não há como conferir, e a nota segue. Na importação por arquivo a
+   recusa é um erro com o motivo. Na varredura da SEFAZ a nota é pulada, sem travar o lote: a
+   distribuição traz também notas em que a empresa é só transportadora ou autorizada a baixar o XML.
+7. **CFOP que não é venda passa pela conferência.** Itens com CFOP fora da família de venda de
+   mercadoria (`cfop_de_venda`: `x10x`–`x12x`, `x401`–`x405`, `x651`–`x656`) deixam um **aviso** na nota
+   (migração v5, `alerta`), e a nota com aviso nunca é confirmada sozinha. Exemplos:
+   - remessa de um aparelho para conserto (5915), que sem isso entraria no estoque com conta a pagar;
+   - bonificação (5910);
+   - consignação (5917);
+   - faturamento de entrega futura (5922), que duplicaria o estoque quando a remessa chegasse;
+   - transferência entre estabelecimentos;
+   - prestação de serviço.
+
+   A lista de compras marca "ver aviso" e a conferência mostra o texto.
 
 ## 12. Comportamento offline
 

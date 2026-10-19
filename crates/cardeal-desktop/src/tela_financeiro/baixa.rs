@@ -151,6 +151,9 @@ pub(super) fn dialogo_baixar(
                         secao_renegociar(ui, renegociar, p.saldo());
                     }
                 }
+                if let Dlg::Baixar { ajuste, .. } = &mut estado.dlg {
+                    secoes_ajuste(ui, sessao, ajuste, &p);
+                }
 
                 let Dlg::Baixar { baixas, .. } = &estado.dlg else {
                     return;
@@ -197,6 +200,7 @@ pub(super) fn dialogo_baixar(
             },
         );
     confirmar_renegociacao(ctx, motor, sessao, estado, p.titulo);
+    confirmar_ajustes(ctx, motor, sessao, estado, &p);
     if fechar {
         estado.dlg = Dlg::Fechado;
     }
@@ -570,10 +574,10 @@ pub(super) fn baixar_lote(
     }
 }
 
-/// Quanto a OS da parcela rendeu: total, custo das peças e margem (R$ e %) — o custo de
-/// verdade por trás do que está sendo recebido.
+/// Quanto a OS da parcela rendeu: total, custo das peças e da mão de obra apontada e margem
+/// (R$ e %) — o custo de verdade por trás do que está sendo recebido.
 fn painel_margem_os(ui: &mut egui::Ui, m: &mod_os::MargemDaOrdemServico) {
-    ui.columns(3, |c| {
+    ui.columns(4, |c| {
         dado(
             &mut c[0],
             &format!("Total da OS #{}", m.numero),
@@ -584,12 +588,25 @@ fn painel_margem_os(ui: &mut egui::Ui, m: &mod_os::MargemDaOrdemServico) {
             "Custo das peças",
             &m.custo_pecas.formatar_com_simbolo(),
         );
+        dado(
+            &mut c[2],
+            "Mão de obra (apontada)",
+            &m.custo_mao_de_obra.formatar_com_simbolo(),
+        );
         let margem = match m.percentual() {
             Some(pct) => format!("{} ({pct}%)", m.margem().formatar_com_simbolo()),
             None => m.margem().formatar_com_simbolo(),
         };
-        dado(&mut c[2], "Margem", &margem);
+        dado(&mut c[3], "Margem", &margem);
     });
+    if m.mao_de_obra_sem_custo {
+        ui.add(
+            Rotulo::campo(
+                "Há horas apontadas de técnico sem custo-hora definido — elas não entraram no custo                  (defina em OS → Custo-hora da equipe).",
+            )
+            .cor(ui.cores().atencao),
+        );
+    }
     if m.pecas_pendentes > 0 {
         ui.add(
             Rotulo::campo(format!(

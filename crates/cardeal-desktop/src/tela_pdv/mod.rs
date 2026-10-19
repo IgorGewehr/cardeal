@@ -16,6 +16,7 @@
 mod acoes;
 #[cfg(feature = "demo")]
 pub mod demo;
+mod desconto_total;
 mod dialogo_pagamento;
 mod dialogos;
 mod entrada;
@@ -23,6 +24,7 @@ mod estado;
 mod pagamento;
 #[cfg(test)]
 mod testes;
+mod vendas_do_dia;
 mod visao;
 
 use cardeal_cliente::{Motor, Sessao};
@@ -30,7 +32,7 @@ use cardeal_kernel::texto::casa_por_palavras;
 use cardeal_kernel::{Arredondamento, Dinheiro, Id, Percentual, Preco, Quantidade};
 use cardeal_modkit::Icone;
 use cardeal_ui::atoms::{Botao, Divisor, Etiqueta, Rotulo, Tecla, Tom};
-use cardeal_ui::molecules::{Campo, CampoBusca, EstadoVazio, ItemDeLista, SeletorOpcao};
+use cardeal_ui::molecules::{Campo, CampoBusca, EstadoVazio, ItemDeLista, Mascara, SeletorOpcao};
 use cardeal_ui::organisms::{
     notificar, ColunaGrade, Dialogo, Grade, LayoutTela, Notificacao, Painel,
 };
@@ -64,11 +66,12 @@ const SERIE_FISCAL: i64 = 1;
 /// Quantos resultados de busca por nome a lista mostra.
 const MAX_RESULTADOS: usize = 8;
 /// As teclas `1..=4` escolhem a forma de pagamento, na ordem de [`FORMAS`].
-const TECLAS_FORMA: [egui::Key; 4] = [
+const TECLAS_FORMA: [egui::Key; 5] = [
     egui::Key::Num1,
     egui::Key::Num2,
     egui::Key::Num3,
     egui::Key::Num4,
+    egui::Key::Num5,
 ];
 
 /// Consome uma tecla (sem modificador) — assim nenhum outro widget a vê. Devolve se estava
@@ -96,6 +99,11 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
     // depois, o spinner/toast já pintaram e podemos rodar a chamada bloqueante.
     if std::mem::take(&mut estado.finalizar_pendente) {
         finalizar(ui.ctx(), motor, sessao, estado);
+    }
+
+    // Uma rodada da transmissão fiscal terminou: a faixa e a nota da última venda mudaram.
+    if estado.geracao_fiscal != crate::fiscal_fundo::geracao() {
+        estado.carregar_fiscal(motor, sessao);
     }
 
     atalhos(ui.ctx(), estado);
@@ -134,6 +142,10 @@ fn atalhos(ctx: &egui::Context, estado: &mut EstadoTelaPdv) {
     if consumir(ctx, egui::Key::F3) {
         estado.foco_entrada = true;
     }
+    // Antes do `F5` simples: `consumir` ignora o Shift.
+    if ctx.input_mut(|i| i.consume_key(egui::Modifiers::SHIFT, egui::Key::F5)) {
+        estado.pendentes.push(Acao::AbrirDescontoTotal);
+    }
     if consumir(ctx, egui::Key::F5) {
         estado.pendentes.push(Acao::AbrirDesconto);
     }
@@ -154,6 +166,9 @@ fn atalhos(ctx: &egui::Context, estado: &mut EstadoTelaPdv) {
     }
     if consumir(ctx, egui::Key::F10) {
         estado.pendentes.push(Acao::AbrirConsultaPreco);
+    }
+    if consumir(ctx, egui::Key::F11) {
+        estado.pendentes.push(Acao::AbrirVendasDoDia);
     }
     if consumir(ctx, egui::Key::Escape) {
         estado.entrada.clear();

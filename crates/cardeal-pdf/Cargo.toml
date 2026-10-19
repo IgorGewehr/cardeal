@@ -11,6 +11,7 @@ repository.workspace   = true
 [dependencies]
 cardeal-kernel.workspace = true
 image.workspace          = true
+qrcodegen.workspace      = true
 thiserror.workspace      = true
 
 [dev-dependencies]

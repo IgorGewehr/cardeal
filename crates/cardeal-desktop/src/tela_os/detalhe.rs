@@ -263,15 +263,23 @@ pub(super) fn corpo_detalhe(
                 "Peça ainda não aplicada: o custo é o combinado na encomenda ou o custo médio de hoje.",
             ));
         }
+        if p.itens_sem_custo > 0 && !detalhe.itens_mao_de_obra.is_empty() {
+            ui.add(Rotulo::apoio(
+                "Mão de obra entra no custo com as horas (previstas no item ou apontadas) e o                  custo-hora do técnico — defina em \"Custo-hora da equipe…\".",
+            ));
+        }
     }
 
     if os.estado.aceita_edicao_de_orcamento() {
         ui.add_space(Espaco::E12);
         ui.add(Rotulo::campo("Mão de obra"));
         ui.add_space(Espaco::E4);
-        ui.columns(2, |c| {
+        ui.columns(3, |c| {
             c[0].add(Campo::novo("Serviço", &mut estado.mao_de_obra_descricao));
             c[1].add(Campo::novo("Valor", &mut estado.mao_de_obra_valor).marcador("80,00"));
+            c[2].add(
+                Campo::novo("Horas previstas", &mut estado.mao_de_obra_horas).marcador("opcional"),
+            );
         });
         ui.add_space(Espaco::E4);
         if ui

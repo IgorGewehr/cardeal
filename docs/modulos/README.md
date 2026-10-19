@@ -20,6 +20,7 @@ tabela do doc 05 §5. Nenhum módulo lança dinheiro fora desse contrato.
 | [`vendas`](vendas.md) | Fase 2 — Estoque + Vendas + PDV | financeiro, clientes, estoque | MEI/autônomo, Comércio, Posto, Micro indústria, Assistência técnica, Serviços |
 | [`pdv`](pdv.md) | Fase 2 — Estoque + Vendas + PDV | vendas | Comércio, Posto |
 | [`compras`](compras.md) | Fase 3 — Compras + Fiscal completo | estoque, financeiro | Comércio, Posto, Micro indústria, Assistência técnica |
+| [`fiscal`](fiscal.md) | Fase 2/3 — onda 7 (fiscal real, sobre o `sefaz-api`) | empresa | Todos que emitem nota |
 | [`crm`](crm.md) | Fase 5 — Verticais | clientes | Serviços/consultoria, Comércio (opcional) |
 | [`agenda`](agenda.md) | Fase 5 — Verticais | núcleo | Assistência técnica, Serviços/consultoria, Hotel/pousada |
 | [`os`](os.md) | Fase 5 — Verticais | vendas, agenda | Assistência técnica |

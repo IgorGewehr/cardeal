@@ -78,6 +78,7 @@ pub use comandos::{
     ImportarNotaDeArquivoXml, ItemNotaManual, LancarNotaManual, RelatorioImportacao,
     VincularProdutoManual,
 };
+pub use comandos::{CriarProdutoDoItem, ProdutoDoItemCriado};
 pub use consultas::{ItemNota, ItensDaNota, NotasRecentes};
 pub use erros::ErroCompras;
 pub use manifesto::{manifesto, MANIFESTO};

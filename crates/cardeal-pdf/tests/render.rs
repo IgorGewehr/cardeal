@@ -3,8 +3,8 @@
 
 use cardeal_kernel::{Data, Dinheiro, Instante, Percentual, Preco, Quantidade};
 use cardeal_pdf::{
-    gerar_comprovante_os, gerar_orcamento, ComprovanteOsPdf, IdentidadeEmpresa, ItemPdf,
-    OrcamentoPdf,
+    gerar_comprovante_os, gerar_orcamento, gerar_relatorio, ColunaRelatorio, ComprovanteOsPdf,
+    IdentidadeEmpresa, ItemPdf, LinhaRelatorio, OrcamentoPdf, RelatorioPdf, SecaoRelatorio,
 };
 
 fn empresa(com_logo: bool) -> IdentidadeEmpresa {
@@ -255,4 +255,40 @@ fn comprovante_os_com_logo_invalida_vira_erro() {
     let mut e = empresa(true);
     e.logo_png = Some(vec![9, 9, 9]);
     assert!(gerar_comprovante_os(&e, &comprovante_os(true, true), Instante::EPOCA).is_err());
+}
+
+#[test]
+fn relatorio_tabular_quebra_pagina_e_corta_texto_longo() {
+    let coluna = |t: &str, peso: f32, direita: bool| ColunaRelatorio {
+        titulo: t.to_owned(),
+        peso,
+        direita,
+    };
+    let linhas: Vec<LinhaRelatorio> = (0..120)
+        .map(|i| LinhaRelatorio {
+            celulas: vec![
+                format!("1.1.{i:02}  Conta com um nome bem comprido que não cabe na coluna {i}"),
+                "1.234,56 D".to_owned(),
+            ],
+            destaque: i % 10 == 0,
+            recuo: u8::try_from(i % 3).unwrap(),
+        })
+        .collect();
+    let rel = RelatorioPdf {
+        titulo: "Pacote do contador".to_owned(),
+        subtitulo: "Outubro de 2026".to_owned(),
+        secoes: vec![SecaoRelatorio {
+            titulo: "Balancete".to_owned(),
+            nota: Some("Pela competência; débitos = créditos.".to_owned()),
+            colunas: vec![coluna("Conta", 3.0, false), coluna("Saldo", 1.0, true)],
+            linhas,
+        }],
+    };
+    let bytes = gerar_relatorio(&empresa(false), &rel, Instante::EPOCA).unwrap();
+    assert!(bytes.starts_with(b"%PDF-1.") && bytes.ends_with(b"%%EOF\n"));
+    let texto = String::from_utf8_lossy(&bytes);
+    assert!(
+        texto.matches("/Type /Page ").count() >= 3,
+        "120 linhas não cabem em 2 páginas"
+    );
 }

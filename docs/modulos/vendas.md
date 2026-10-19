@@ -111,7 +111,7 @@
 | `vendedor` | Id | sim | |
 | `pedido` | Id | sim | |
 | `base_calculo` | Dinheiro | sim | total do pedido, líquido de devolução |
-| `percentual` | Percentual | sim | da tabela de comissão do vendedor |
+| `percentual` | Percentual | sim | **Desde 2026-10-14:** a comissão é item a item — cada item leva o percentual da comissão por estrutura de `estoque` (a do produto, a do grupo ou a padrão), **congelado no faturamento** (`vendas_item_pedido.comissao_percentual`); o `percentual` da comissão é o efetivo (valor ÷ base). Pedido faturado antes da migração usa o percentual vigente na apuração. Não há "tabela de comissão do vendedor" |
 | `valor` | Dinheiro | sim | |
 | `competencia` | Data | sim | mês de apuração |
 | `estado` | enum(`Apurada`,`Paga`,`Cancelada`) | sim | ver §4 |
@@ -183,8 +183,8 @@ stateDiagram-v2
 | `ConcluirDevolucao` | `vendas.devolucao.concluir` | Alto | Ainda não implementado (domínio pronto: `Devolucao` + `receituario::concluir_devolucao`) | `ValorSuperaOriginal` |
 | `CriarTabelaPreco` ✅ | `vendas.tabela_preco.criar` | Baixo | | `NomeDuplicado` |
 | `CriarRegraPreco` ✅ | `vendas.tabela_preco.editar` | Baixo | Recusa regra que mira produto **e** grupo, ou nenhum dos dois | `RegraPrecoAmbigua` |
-| `ApurarComissao` | (tarefa agendada, mensal) | Baixo | Ainda não implementado (domínio pronto: `Comissao::apurar` + `receituario::apurar_comissao`) | — |
-| `PagarComissao` | `vendas.comissao.pagar` | Médio | Ainda não implementado (domínio pronto: `receituario::pagar_comissao`) | `ComissaoJaPaga` |
+| `ApurarComissoes` ✅ (2026-10-14, `vendas.apurar_comissoes.v1`) | `vendas.comissao.apurar` (nova) | Médio | Idempotente por pedido: um lançamento por pedido faturado no mês ainda sem comissão, item a item com o percentual congelado no faturamento; rodar de novo só pega os pedidos novos | — |
+| `PagarComissoes` ✅ (2026-10-14, `vendas.pagar_comissoes.v1`) | `vendas.comissao.pagar` | Médio | Quita tudo o que o vendedor tem apurado no mês, num lançamento só, de uma conta do Disponível (1.1), com data entre a apuração e hoje | `SemComissaoAPagar`, `DataDoPagamentoInvalida`, `ContaDePagamentoInvalida` |
 | `CriarContratoRecorrente` | `vendas.contrato_recorrente.criar` | Baixo | Ainda não implementado | `ClienteSemCadastro` |
 
 > **Nota (2026-09-05):** as linhas ✅ estão implementadas com teste de integração de ponta a
@@ -203,7 +203,7 @@ stateDiagram-v2
 | `OrcamentosAbertos` | `vendas.orcamento.ver` | Fila de orçamentos | `vendas_orcamento(empresa, estado, validade)` |
 | `PedidosPorEstado` | `vendas.pedido.ver` | Painel de pedidos | `vendas_pedido(empresa, estado, data)` |
 | `ItensDoPedido` | `vendas.pedido.ver` | Detalhe do pedido | `vendas_item_pedido(pedido)` |
-| `ComissaoDoVendedor` | `vendas.comissao.ver` | Painel do vendedor, fechamento mensal | `vendas_comissao(vendedor, competencia)` |
+| `ComissoesDoMes` ✅ (2026-10-14, `vendas.comissoes_do_mes.v1`; no lugar de `ComissaoDoVendedor`) | `vendas.comissao.ver` | Diálogo "Comissões" da tela de Vendas: pedido a pedido, o apurado/pago e a **prévia** do que falta apurar (o mesmo cálculo da apuração); `resumo_por_vendedor` agrupa | `vendas_comissao(empresa, competencia, vendedor)` + `vendas_pedido(empresa, estado, data)` |
 | `DevolucoesPendentes` | `vendas.devolucao.ver` | Fila de aprovação | `vendas_devolucao(empresa, estado)` |
 | `HistoricoDeComprasDoCliente` | `vendas.pedido.ver` | Aba "Histórico" da ficha do cliente | `vendas_pedido(cliente, data DESC)` |
 | `ReceitaPorProduto` ✅ (2026-10-12, `vendas.receita_por_produto.v1`) | `vendas.margem.ver` | Rentabilidade por nível (aba do Estoque): receita por produto dos pedidos **faturados** com `data` no período | `vendas_pedido(empresa, estado, data)` + `vendas_item_pedido(pedido)` |
@@ -218,9 +218,16 @@ stateDiagram-v2
 | Desconto concedido no pedido | Descontos concedidos (4.4) | Receita de vendas | igual ao lançamento acima |
 | Devolução total | Devoluções de venda (4.5) + Estoque | Caixa/Clientes a receber + CMV (estorno) | Realizado |
 | Devolução parcial | Devoluções de venda (proporcional) + Estoque (itens devolvidos) | Caixa/Clientes a receber (proporcional) + CMV (proporcional) | Realizado |
-| Comissão apurada | Despesas comerciais (5.5) | Comissões a pagar (2.1.03, subconta) | Confirmado |
-| Pagamento de comissão | Comissões a pagar | Bancos | Realizado |
+| Comissão apurada | Comissões de vendedores (5.42, do modelo Comércio) ou Despesas comerciais (5.5) | Salários e encargos (2.1.03) | Confirmado |
+| Pagamento de comissão | Salários e encargos (2.1.03) | Caixa ou Bancos (conta escolhida) | Realizado |
 | Contrato recorrente faturado no ciclo | Clientes a receber | Receita de vendas/serviços | Confirmado |
+
+> **Nota (2026-10-14) — comissão do vendedor:** a "subconta 2.1.03" do desenho original não existe no plano
+> padrão; a comissão a pagar fica direto em **2.1.03 Salários e encargos** (é remuneração, e é ali que o
+> contador espera vê-la). O débito vai para **5.42 Comissões de vendedores** quando a empresa aplicou o modelo de
+> plano do Comércio, senão para 5.5. A apuração é lançada no **último dia do mês** (ou hoje, se o mês não
+> acabou), para a despesa cair na competência da venda; o mês é o da data do pedido, a mesma do lançamento da
+> receita. O pagamento é um lançamento por vendedor e mês, com o vendedor como contraparte.
 
 ## 8. Eventos
 
@@ -447,19 +454,25 @@ CREATE TABLE vendas_item_pedido (
 ) STRICT;
 CREATE INDEX vendas_item_pedido_pedido ON vendas_item_pedido(pedido);
 
+-- Migração vendas v2 (2026-10-14). `pedido` é único (a apuração é idempotente por pedido);
+-- `competencia` é a data do lançamento da apuração (sempre dentro do mês); `lancamento` é o do
+-- pagamento. O item ganhou `comissao_percentual`, congelado no faturamento.
+ALTER TABLE vendas_item_pedido ADD COLUMN comissao_percentual INTEGER;
 CREATE TABLE vendas_comissao (
-    id             BLOB PRIMARY KEY,
-    empresa        BLOB    NOT NULL,
-    vendedor       BLOB    NOT NULL,
-    pedido         BLOB    NOT NULL REFERENCES vendas_pedido(id),
-    base_calculo   INTEGER NOT NULL,
-    percentual     INTEGER NOT NULL,   -- Percentual
-    valor          INTEGER NOT NULL,
-    competencia    INTEGER NOT NULL,
-    estado         TEXT    NOT NULL CHECK (estado IN ('Apurada','Paga','Cancelada')),
-    lancamento     BLOB
+    id                   BLOB PRIMARY KEY,
+    empresa              BLOB    NOT NULL,
+    vendedor             BLOB    NOT NULL,
+    pedido               BLOB    NOT NULL UNIQUE REFERENCES vendas_pedido(id),
+    base_calculo         INTEGER NOT NULL,
+    percentual           INTEGER NOT NULL,   -- Percentual efetivo (valor ÷ base)
+    valor                INTEGER NOT NULL,
+    competencia          INTEGER NOT NULL,
+    estado               TEXT    NOT NULL CHECK (estado IN ('Apurada','Paga','Cancelada')),
+    lancamento_apuracao  BLOB    NOT NULL,
+    lancamento           BLOB,
+    criado_em            INTEGER NOT NULL
 ) STRICT;
-CREATE INDEX vendas_comissao_vendedor ON vendas_comissao(vendedor, competencia);
+CREATE INDEX vendas_comissao_competencia ON vendas_comissao(empresa, competencia, vendedor);
 
 CREATE TABLE vendas_devolucao (
     id                  BLOB PRIMARY KEY,
@@ -481,7 +494,8 @@ CREATE INDEX vendas_devolucao_estado ON vendas_devolucao(empresa, estado);
 `vendas.margem_do_pedido.v1` (permissão `vendas.margem.ver`, risco Médio) devolve, para um pedido, a
 margem de cada item e do conjunto: receita (já com desconto), custo (custo médio atual do estoque,
 o maior entre os locais), encargos sobre a receita (custo operacional + imposto do produto +
-comissão + taxa de pagamento — os mesmos percentuais do preço sugerido, ver
+comissão do produto — própria, do grupo ou a padrão, a comissão por estrutura de `estoque` — + taxa de
+pagamento — os mesmos percentuais do preço sugerido, ver
 [ADR-0018](../adr/0018-formacao-de-preco-por-markup-divisor.md)), margem bruta e líquida em R$ e em %.
 Itens sem custo conhecido ficam **fora** das margens e são contados à parte: um produto sem custo
 nunca aparece como lucro de 100%. A margem mínima vem dos parâmetros de preço; abaixo dela o pedido

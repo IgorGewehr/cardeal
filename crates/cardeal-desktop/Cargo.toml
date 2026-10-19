@@ -28,6 +28,7 @@ cardeal-ui.workspace      = true
 cardeal-cliente.workspace = true
 cardeal-distribuicao.workspace = true
 cardeal-pdf.workspace     = true
+cardeal-planilha.workspace = true
 cardeal-analytics.workspace = true
 
 mod-financeiro.workspace = true
@@ -39,6 +40,9 @@ mod-os.workspace         = true
 mod-orcamentos.workspace = true
 mod-agenda.workspace     = true
 mod-pdv.workspace        = true
+mod-empresa.workspace    = true
+mod-fiscal.workspace     = true
+cardeal-fiscal.workspace = true
 
 eframe.workspace      = true
 egui.workspace        = true

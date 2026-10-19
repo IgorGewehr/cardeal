@@ -202,6 +202,19 @@ margem: produto → grupo mais próximo acima → `ParametrosPreco.margem_padrao
 (a consulta devolve o problema em português, nunca um número inventado). Perfil fiscal: o valor
 não-nulo do grupo mais próximo; sem nenhum, falso.
 
+**Comissão por estrutura (2026-10-13, migração `estoque` v10).** Grupo e produto têm `comissao` própria
+(`NULL = herda`), resolvida como a margem: produto → grupo mais próximo acima →
+`ParametrosPreco.comissao` (a **comissão padrão** da empresa, que antes era "média" e valia para tudo).
+`SugestaoDePreco` traz `comissao` e `origem_comissao` (`Produto` / `Grupo(nome)` / `Padrao`), e o
+divisor do markup usa a comissão do produto. A mesma comissão vale nos painéis de margem do pedido
+(`vendas.margem_do_pedido.v1`) e da OS (`os.margem_prevista_da_ordem.v1`, imposto e comissão da peça;
+operação e taxa da empresa) e na rentabilidade por nível (abaixo). Edição: aba Estrutura ("Comissão de
+vendedor" no detalhe do grupo, com "Voltar a herdar"), alteração em lote (campo "Comissão de vendedor",
+com antes/depois e desfazer) e a coluna `Comissão` da importação de produtos. A grade de Preços mostra
+a comissão de cada produto e de onde ela vem. **Ainda não existe** a apuração da comissão do vendedor
+(`vendas.ApurarComissao`): o percentual de cada item já está definido, falta o processo mensal que o
+aplica sobre o que cada vendedor faturou.
+
 **Parâmetros por CNPJ (`estoque_parametros_preco`).** Regime (`Mei` / `Simples` + anexo I–V /
 `Manual` com percentual informado), custo operacional (informado ou derivado do Razão), comissão,
 taxa de pagamento, margem padrão, margem mínima e "preço sugerido obrigatório no PDV". Sem linha
@@ -264,6 +277,7 @@ stateDiagram-v2
 |---|---|---|---|---|
 | `CriarGrupoProduto` ✅ | `estoque.produto.criar` | Baixo | Cria um grupo na estrutura mercadológica (até 4 níveis; recusa o 5º) | `REGRA_VIOLADA` (profundidade), `CAMPO_OBRIGATORIO` |
 | `ImportarEstrutura` ✅ (2026-10-12, `estoque.importar_estrutura.v1`) | `estoque.produto.criar` | Médio | Cria a estrutura mercadológica de um CSV (`Grupo;Subgrupo;Categoria;Subcategoria`, um caminho por linha), tudo ou nada, em uma transação; ignora o que já existe por nome sob o mesmo pai (sem caixa/acento) e gera os códigos | `REGRA_VIOLADA` (qualquer linha com erro, profundidade) |
+| `ImportarProdutos` ✅ (2026-10-13, `estoque.importar_produtos.v1`) | `estoque.produto.criar` (+ `estoque.produto.editar` se a planilha traz margem/ponto de pedido/mínimo/máximo, + `estoque.movimento.entrada` se traz estoque inicial) | Médio | Cria produtos de um CSV com cabeçalho (só `Nome` obrigatória), criando também os grupos e unidades que faltam e lançando o estoque inicial com custo; tudo ou nada, em uma transação; produto que já existe (mesmo GTIN ou, sem ele, mesmo nome) fica como está | `REGRA_VIOLADA` (qualquer linha com erro), `SEM_PERMISSAO` |
 | `CriarProduto` ✅ | `estoque.produto.criar` | Baixo | Cria `Produto` + unidade padrão; aceita `codigo_barras` opcional já na criação (valida dígito verificador via `Produto::com_codigo_barras`) e `detalhes_tecnicos` opcional (fabricante, MPN, categoria técnica, especificação, compatibilidade, garantia do fornecedor, localização física — 2026-09-11) | `NcmInvalido`, `GtinInvalido` |
 | `EditarDetalhesTecnicosProduto` ✅ (novo, 2026-09-11) | `estoque.produto.editar` | Baixo | Edita depois os sete campos técnicos opcionais (substitui por completo — campo não informado vira `None`); não toca nome/NCM/código de barras | — |
 | `CriarVariacao` | `estoque.produto.criar` | Baixo | Ainda não implementado | `ProdutoSemGrade` |
@@ -273,19 +287,21 @@ stateDiagram-v2
 | `RegistrarSaida` ✅ | `estoque.movimento.saida` | Médio | Cria `Movimento Saida`, decrementa disponível | `SaldoInsuficiente` (aviso, não bloqueia por padrão — ver regra 2) |
 | `ReservarEstoque` | (consulta síncrona de `vendas`, sem permissão de usuário direta) | Baixo | Ainda não implementado | `SaldoInsuficiente` |
 | `LiberarReserva` | idem | Baixo | Ainda não implementado | `ReservaInexistente` |
-| `TransferirEntreLocais` | `estoque.transferencia.criar` | Médio | Ainda não implementado | `LocalIgual`, `SaldoInsuficiente` |
-| `ConfirmarRecebimentoTransferencia` | `estoque.transferencia.confirmar` | Baixo | Ainda não implementado | `TransferenciaJaConfirmada` |
+| `TransferirEntreLocais` ✅ (2026-10-13, `estoque.transferir_entre_locais.v1`) | `estoque.transferencia.criar` | Médio | Vários produtos de um local para outro do mesmo CNPJ, numa transação: por item, saída na origem e entrada no destino ao custo médio da origem (o destino recalcula; sem custo conhecido só a quantidade muda), movimentos `TransferenciaSaida`/`TransferenciaEntrada` com origem `transferencia` e o documento em `estoque_transferencia*`. Produto repetido soma | `LocalIgual`, `TransferenciaSemItens`, `SaldoInsuficienteNaOrigem` (`ESTOQUE_INSUFICIENTE`, tudo ou nada), `TransferenciaComLote`, `LocalCongelado` (local em inventário) |
+| `ConfirmarRecebimentoTransferencia` | `estoque.transferencia.confirmar` | Baixo | **Adiado de propósito (2026-10-13):** entre locais do mesmo CNPJ a mercadoria muda de lugar na hora; a etapa `EmTransito` com confirmação vem com a transferência entre filiais (CNPJs), que exige NF-e de transferência (onda fiscal) | `TransferenciaJaConfirmada` |
 | `AjustarSaldo` ✅ | `estoque.movimento.ajustar` | Alto | Corrige o disponível de um produto/local para `nova_quantidade` (erro de digitação de contagem/entrada), fora do fluxo formal de inventário; **é o único comando de movimento desta fatia que posta no razão** (`receituario::ajuste_manual`, mesma contabilização de `ajuste_de_inventario` — D Estoque/C Outras receitas na sobra, D Perdas/C Estoque na falta), porque não há nenhum outro módulo gerando a contrapartida de uma correção manual. Corrige quantidade, não custo — reabrir/corrigir só o `custo_medio` sem mexer na quantidade fica para quando existir `EditarProduto` | `MotivoObrigatorio` (motivo com menos de 10 caracteres), `QuantidadeInvalida` (`nova_quantidade` igual à atual — nada a corrigir) |
-| `RegistrarPerda` | `estoque.movimento.perda` | Médio | Ainda não implementado | `LoteInexistente` |
-| `CriarInventario` | `estoque.inventario.criar` | Baixo | Ainda não implementado como comando — o domínio (`Inventario`, contagem cega) já existe e é testado, só falta a amarração ao despacho | — |
-| `IniciarContagem` | `estoque.inventario.contar` | Baixo | Ainda não implementado (idem) | `LocalJaEmInventario` |
-| `RegistrarContagem` | `estoque.inventario.contar` | Baixo | Ainda não implementado (idem) | — |
-| `EncerrarInventario` | `estoque.inventario.encerrar` | Alto | Ainda não implementado (idem) | `ContagensPendentes` |
+| `RegistrarPerda` ✅ (2026-10-13, `estoque.registrar_perda.v1`) | `estoque.movimento.perda` | Médio | Baixa de perda (motivo vencimento, quebra/avaria, furto/extravio, outro + observação): sai do saldo do local e, se informado, do lote (que vira `Esgotado` quando zera); movimento `Perda`; lança D Perdas / C Estoque **ao custo médio** (como toda saída — o custo do lote é informativo) com o motivo no histórico. Não deixa saldo negativo | `LoteInexistente`, `LoteDeOutroProduto`, `LoteSaldoInsuficiente`, `PerdaAcimaDoSaldo`, `LocalCongelado` |
+| `CriarInventario` ✅ (2026-10-13, `estoque.criar_inventario.v1`) | `estoque.inventario.criar` | Baixo | Planeja a contagem de um local (CNPJ da sessão): o local inteiro ou um grupo da estrutura com a subárvore | `LocalJaEmInventario` (um inventário aberto por local), local/grupo inexistente |
+| `IniciarContagem` ✅ (2026-10-13, `estoque.iniciar_contagem.v1`) | `estoque.inventario.contar` | Médio | Tira a foto do saldo (produtos ativos com saldo registrado no local, no recorte) e trava o local na mesma transação: `Planejado → EmContagem → Congelado` | `InventarioSemItens`, estado inválido |
+| `RegistrarContagem` ✅ (2026-10-13, `estoque.registrar_contagem.v1`) | `estoque.inventario.contar` | Baixo | A quantidade contada de um produto, **sem devolver a do sistema**; produto achado fora da lista entra com o disponível do local (o mesmo da foto, porque o local está travado); contar de novo corrige | estado inválido, produto inexistente, quantidade negativa |
+| `EncerrarInventario` ✅ (2026-10-13, `estoque.encerrar_inventario.v1`) | `estoque.inventario.encerrar` | Alto | Exige tudo contado (`Conferido`), encerra e gera um ajuste por diferença com `aplicar_delta_de_saldo` (o mesmo corpo do `AjustarSaldo`): saldo, movimento `Ajuste*` com origem `inventario` e lançamento `receituario::ajuste_de_inventario` ao custo médio (sobra → outras receitas, falta → perdas); guarda o valor por item; publica `estoque.inventario_encerrado.v1`; libera o local | `ContagensPendentes` |
+| `CancelarInventario` ✅ (2026-10-13, `estoque.cancelar_inventario.v1`; **além do spec**) | `estoque.inventario.encerrar` | Médio | Desiste antes de encerrar (estado novo `Cancelado`): libera o local, não ajusta nada — sem ele um local travado por engano ficaria travado para sempre | estado inválido (já encerrado/cancelado) |
 | `DefinirPontoPedido` ✅ (novo, 2026-09-12) | `estoque.produto.editar` | Baixo | Define/limpa `ponto_pedido` e `estoque_minimo` de um produto — o gatilho que `Produto::abaixo_do_ponto`/`ProdutosAbaixoPontoPedido`/`estoque.abaixo_ponto_pedido.v1` consultam | — |
 | `RenomearGrupoProduto` ✅ (2026-10-09) | `estoque.produto.editar` | Baixo | Troca nome e código do grupo | `CAMPO_OBRIGATORIO`, código duplicado |
 | `MoverGrupoProduto` ✅ (2026-10-09) | `estoque.produto.editar` | Médio | Muda um grupo (com a subárvore) de lugar; `novo_pai: None` promove à raiz | 5º nível, ciclo, grupo inexistente |
 | `MoverProdutosDeGrupo` ✅ (2026-10-09) | `estoque.produto.editar` | Médio | Passa vários produtos para outro grupo; tudo-ou-nada (produto inexistente desfaz o lote) | grupo/produto inexistente |
 | `DefinirMargemDoGrupo` / `DefinirMargemDoProduto` ✅ (2026-10-09) | `estoque.produto.editar` | Médio | Define ou limpa (`None` = herda) a margem líquida desejada | margem fora de 0%..100% (100% exclusive) |
+| `DefinirComissaoDoGrupo` / `DefinirComissaoDoProduto` ✅ (2026-10-13, `estoque.definir_comissao_do_grupo.v1` / `…_do_produto.v1`) | `estoque.produto.editar` | Médio | Define ou limpa (`None` = herda) a comissão de vendedor própria — comissão por estrutura | `FORA_DA_FAIXA` (fora de 0%..100%, 100% exclusive) |
 | `DefinirPerfilFiscalDoGrupo` ✅ (2026-10-09) | `estoque.tributario.editar` | Alto | ICMS-ST e monofásico do grupo (`None` herda) | — |
 | `AplicarPrecosSugeridos` ✅ (2026-10-09; **em `mod-vendas`**, `vendas.aplicar_precos_sugeridos.v1`) | `vendas.tabela_preco.editar` | Médio | Leva o preço sugerido (arredondado para cima: nenhum, final ,90 ou real inteiro) à tabela de venda/atacado: atualiza a regra permanente do produto ou cria uma; produto sem custo/margem volta em `ignorados` com o motivo. Pedidos já feitos não mudam (preço congelado no item) | tabela inexistente, promocional ou inativa |
 | `AplicarAlteracaoEmLote` / `DesfazerAlteracaoEmLote` ✅ (2026-10-09) | `estoque.produto.editar` | Alto | Margem, grupo e situação de até 5.000 produtos de uma vez, guardando antes e depois de cada um (`estoque_alteracao_lote*`). Tudo-ou-nada; a consulta `PreviaDaAlteracaoEmLote` mostra o resultado sem gravar; desfazer só vale para a última alteração não desfeita, em até 24h, e restaura apenas produtos ainda como a alteração os deixou | produto/grupo inexistente, margem fora de 0..100%, nada mudaria, prazo vencido, não é a última |
@@ -336,9 +352,12 @@ stateDiagram-v2
 | `SaidasPorProdutoEOrigem` ✅ (2026-10-12, `estoque.saidas_por_produto_e_origem.v1`) | `estoque.abc.ver` | Aba Rentabilidade: o que saiu (movimentos `Saida`) no período, por produto e `origem_modulo` (`vendas`, `pdv`, `os`, `estoque`…), com a quantidade e o custo (Σ quantidade × custo gravado; sem custo gravado, o custo médio atual). O dia é o do fuso da empresa | `estoque_movimento(empresa, tipo, criado_em)` |
 | `EncargosAtuais` ✅ (2026-10-12, `estoque.encargos_atuais.v1`) | `estoque.produto.ver` | Os percentuais que incidem hoje sobre a venda (operação, imposto, comissão, taxas) e a margem líquida mínima — a régua da margem líquida **estimada** | parâmetros de preço + Razão |
 | `CurvaAbc` | `estoque.abc.ver` | Relatório de curva ABC | agregação de `estoque_movimento` por valor no período |
-| `LotesProximosDoVencimento` | `estoque.lote.ver` | Alerta de validade | `estoque_lote(validade)` índice parcial `WHERE estado = 'Ativo'` |
-| `EstoqueEmTransito` | `estoque.transferencia.ver` | Painel de transferências pendentes | `estoque_saldo_local(local) WHERE local = local_em_transito` |
-| `PosicaoDoInventario` | `estoque.inventario.ver` | Tela de contagem em andamento | `estoque_contagem_item(inventario)` |
+| `LotesComValidade` ✅ (2026-10-13, `estoque.lotes_com_validade.v1`; o `LotesProximosDoVencimento` do spec) | `estoque.lote.ver` | Alerta de validade: lotes com validade e saldo no CNPJ, os vencidos e os que vencem em até `dias` (ou todos), do mais urgente para o último, com dias restantes e o valor parado (saldo × custo do lote). O vencimento é calculado na hora contra hoje — não depende de uma tarefa diária marcar `Vencido` | `estoque_lote` + saldo do lote pelos movimentos |
+| `EstoqueEmTransito` | `estoque.transferencia.ver` | Painel de transferências pendentes — adiado junto com a confirmação de recebimento | `estoque_saldo_local(local) WHERE local = local_em_transito` |
+| `Transferencias` ✅ (2026-10-13, `estoque.transferencias.v1`) | `estoque.transferencia.ver` | Histórico: origem, destino, observação, itens com quantidade e valor ao custo da origem | `estoque_transferencia*` |
+| `SaldosDoProdutoPorLocal` ✅ (2026-10-13, `estoque.saldos_do_produto_por_local.v1`) | `estoque.saldo.ver` | O disponível de um produto em cada local ativo do CNPJ (o "disponível na origem" da transferência) | `estoque_local` + `estoque_saldo_local` |
+| `PosicaoDoInventario` ✅ (2026-10-13, `estoque.posicao_do_inventario.v1`) | `estoque.inventario.ver` | Tela de contagem em andamento e resultado: itens com o contado; **sistema, diferença e valor do ajuste só depois de encerrado** (cega) | `estoque_contagem_item(inventario)` |
+| `Inventarios` ✅ (2026-10-13, `estoque.inventarios.v1`) | `estoque.inventario.ver` | Lista de inventários do CNPJ (estado, contados/itens, datas) | `estoque_inventario` |
 
 ### Escolha de grupo em árvore (2026-10-12)
 
@@ -360,7 +379,111 @@ sob pai existente com as regras de `CriarGrupoProduto` (profundidade/pai). A pr�
 e uma amostra de até 200 caminhos. Importar o mesmo arquivo duas vezes não cria nada na segunda. Na tela:
 aba Estrutura → "Importar planilha…" (seletor de arquivo, prévia, confirmar). Limites: só cria (não renomeia
 nem move); nome igual com grafia diferente além de caixa/acento/pontuação vira outro grupo; o código gerado
-não é editável na planilha. A importação de **produtos** por planilha segue pendente.
+não é editável na planilha. A importação de **produtos** por planilha é a seção seguinte.
+
+### Validade e perdas (2026-10-13)
+
+O domínio de lote com validade existia, mas nada o alimentava nem o consumia: não havia tela para entrar
+mercadoria com validade, nem consulta de vencimento, nem baixa de perda. Agora: `RegistrarEntradaComLote`
+aceita o código do lote **em branco** e gera um (`L` + validade em `ddmmaa` + sequência, único na empresa —
+mercadoria de prateleira não tem post-it); `LotesComValidade` lista vencidos e a vencer; `RegistrarPerda`
+dá a baixa. Decisão: a perda vale **custo médio**, não o custo do lote, porque toda saída (inclusive o CMV
+da venda) sai a custo médio e misturar os dois faria o saldo contábil do estoque divergir de saldo × custo
+médio. Tela: aba **Validade** no Estoque (cartões de vencidos, dinheiro parado e vencendo em 7 dias; lista
+com filtro de prazo e "Dar baixa"; "Entrada com validade") e o cartão "Lotes vencidos ou vencendo (7 dias)"
+na aba Produtos. Fora desta fatia: o evento `estoque.lote_vencido.v1` e a marcação diária `Vencido` (precisam
+do agendador), o lote/validade na confirmação da nota de compra (o `rastro` do XML) e escolher o lote na
+venda (FEFO).
+
+### Padronização do nome e dicionário DE/PARA (2026-10-13)
+
+A versão **determinística** do "template de nomenclatura + dicionário de abreviações" do lunno (§5.6),
+sem IA. Domínio puro em `padronizacao.rs`: `sugerir_nome(descricao, dicionario)` capitaliza cada palavra
+(`COCA-COLA` → `Coca-Cola`; preposições curtas em minúsculo no meio), troca as palavras pelo dicionário
+DE/PARA da empresa (`REFRIG` → `Refrigerante`; PARA vazio tira a palavra) e normaliza o conteúdo, que vai
+para o fim (`35G` → `35gr`, `2000ML` → `2Lt`, `1500ML` → `1,5Lt`, `1000G` → `1Kg`, `500 G` → `500gr`,
+`12X350ML` → `12x350ml`). `aprender(descricao, escolhido, dicionario)` é o outro lado: só aprende pares que
+dá para explicar — a palavra escolhida **começa** com a da nota (abreviação expandida, `FERM` → `Fermento`)
+ou é a mesma sem caixa/acento (`PO` → `Pó`) e difere do que o sistema sugeriria; palavra inserida, juntada
+(`COCA COLA` → `Coca-Cola`) ou trocada por outra não ensina nada. Migração `estoque` v13
+(`estoque_dicionario_nome`, da organização); comandos `estoque.definir_termo_do_dicionario.v1`/
+`estoque.remover_termo_do_dicionario.v1` (`estoque.produto.editar`), consultas
+`estoque.dicionario_de_nomes.v1`/`estoque.sugerir_nome_do_produto.v1` (`estoque.produto.ver`) e o corpo
+comum `criar_produto_de_compra_comum` (usado por `compras.CriarProdutoDoItem`). Tela: "Dicionário de
+nomes…" no topo do Estoque (lista, acrescenta, remove e testa uma descrição). Fora desta fatia: a
+**descrição reduzida** (até 20 caracteres, PDV/cupom) e o template configurável de ordem dos elementos
+(tipo, marca, complemento) — a ordem é a da nota, com o conteúdo no fim; marca não é reconhecida sem
+modelo, então fica onde o fornecedor a pôs.
+
+### Transferência entre locais (2026-10-13)
+
+Domínio puro em `transferencia.rs` (`Transferencia::nova`: locais diferentes, itens com quantidade positiva,
+produto repetido soma numa linha), migração `estoque` v12 (`estoque_transferencia`, `estoque_transferencia_item`
+com o custo unitário que cada item levou) e o comando `TransferirEntreLocais`. Decisões que fogem do spec
+original: **imediata** (sem `EmTransito` nem confirmação de recebimento, que ficam para a transferência entre
+CNPJs com NF-e); **sem saldo, recusa** (diferente da venda, que segue negativa porque o mundo físico já
+aconteceu — transferir o que não existe é erro de digitação); **produto com lote ativo na origem é
+recusado** (o lote guarda o local; a transferência por lote fica para depois); **sem lançamento no razão**
+(uma conta de estoque por CNPJ). As análises (ABC, giro, rentabilidade, histórico de compras, última compra)
+filtram `Saida`/`Entrada` e por isso não enxergam a transferência como consumo nem como compra. Tela: aba
+**Transferências** no Estoque — de/para, produto com o disponível na origem e no destino, lista com remover,
+observação, e o histórico com os itens da selecionada.
+
+### Inventário com contagem cega (2026-10-13)
+
+Migração `estoque` v11: `estoque_inventario` (cabeçalho, com o recorte opcional por grupo; índice único
+parcial garante um inventário aberto por local) e `estoque_contagem_item` (foto do sistema, contado,
+divergência, quem/quando contou e, no encerramento, o valor do ajuste). O domínio `Inventario` ganhou
+`abrir_contagem` (foto + `EmContagem` + `Congelado` de uma vez, para nenhum movimento entrar entre a foto e
+a trava), `incluir_item` (produto achado), `cancelar` e o estado `Cancelado`. Grade e lote ficam de fora
+(`variacao`/`lote` sempre vazios), como no resto desta fatia do estoque. Tela: aba **Inventário** no
+Estoque — lista e "Novo inventário" à esquerda; à direita, o selecionado: iniciar (com confirmação, porque
+trava o local), contar por bipe (código de barras exato seleciona) ou busca por nome, a lista com
+"registrado/pendente" e, depois de encerrado, sistema × contado × diferença × valor com sobras e faltas.
+
+### Importação de produtos por planilha (2026-10-13)
+
+Domínio puro em `importacao_produtos.rs`: `planejar(texto, existentes)` lê o CSV com o mesmo leitor da
+estrutura (`;` ou `,`, aspas, BOM), mas aqui **o cabeçalho é obrigatório** e as colunas valem pelo nome, em
+qualquer ordem, sem caixa/acento/espaço/pontuação. Só `Nome` (ou `Produto`/`Descrição`) é obrigatória:
+
+| Coluna (e sinônimos) | Vira |
+|---|---|
+| `Grupo`, `Subgrupo`, `Categoria`, `Subcategoria` (ou `Nível 1..4`) | O grupo do produto; o que falta é criado com o mesmo `ResolvedorDeCaminhos` da importação da estrutura. Sem grupo: "Sem grupo" |
+| `Unidade` (`UN`, `Und`, `Sigla`) | A unidade pela sigla; padrão `UN`. Sigla nova vira unidade nova (nome e "fracionável" vêm de uma tabela de siglas conhecidas — KG, L, M… fracionam) |
+| `Código de barras` (`EAN`, `GTIN`, `Cód. barras`) | GTIN validado pelo dígito verificador |
+| `NCM` | 8 dígitos, com ou sem máscara; vazio fica pendente |
+| `Margem` (`Margem desejada`, `Margem líquida`) | A margem própria do produto (0% a 100%, exclusive) |
+| `Comissão` (`Comissão de vendedor`) | A comissão própria do produto (0% a 100%, exclusive) — exige `estoque.produto.editar`, como a margem |
+| `Ponto de pedido`, `Estoque mínimo` (`Mínimo`), `Estoque máximo` (`Máximo`) | Os parâmetros de reposição (mínimo ≤ máximo) |
+| `Fabricante` (`Marca`), `Código do fabricante` (`MPN`, `Referência`), `Localização` (`Prateleira`) | Os detalhes técnicos |
+| `Estoque` (`Estoque inicial`, `Quantidade`, `Saldo`) + `Custo` (`Custo unitário`, `Preço de custo`) + `Local` (`Depósito`) | O estoque inicial: uma entrada (`registrar_entrada_comum`) com esse custo. Sem `Local`, vale o único local do CNPJ; com mais de um, a coluna é exigida |
+
+Coluna desconhecida é ignorada e listada na prévia; coluna repetida é erro. Números no padrão brasileiro
+(`1.250,5`, `R$ 12,90`). Cada linha junta **todos** os seus problemas numa mensagem só. Estoque positivo exige
+custo > 0 e local; custo com estoque vazio/zero não tem onde ficar (o custo mora no saldo) e é ignorado, com
+aviso na prévia (`custos_sem_estoque`) em vez de erro — planilha de cliente traz custo de tudo.
+
+**Idempotência:** produto que já existe — mesmo código de barras ou, sem ele (ou sem achar), mesmo nome
+normalizado — conta como "já existia" e **fica como está** (a importação só cria; não move, não renomeia, não
+lança estoque de novo). Por isso importar o mesmo arquivo duas vezes não duplica nem produto nem estoque.
+Nome ou GTIN repetido *dentro* da planilha é erro.
+
+`ImportarProdutos` refaz o plano dentro da transação, recusa o arquivo inteiro com qualquer erro e grava na
+ordem grupos (`criar_grupos_planejados`, o mesmo da estrutura, com a validação de profundidade sob pai
+existente) → unidades → produtos (`Produto::novo` + GTIN + detalhes + ponto/mín/máx) → margem
+(`repositorio_preco::definir_margem_do_produto`) → estoque inicial. A importação **não é atalho de
+permissão**: margem e parâmetros de reposição exigem `estoque.produto.editar`, estoque inicial exige
+`estoque.movimento.entrada` (`ctx.concede`), como nos comandos que fazem isso um a um. O catálogo (grupos,
+unidades, produtos) é da organização; os locais são do CNPJ em que se age (ADR-0017). Prévia:
+`estoque.previa_importacao_produtos.v1` (`estoque.produto.ver`) — novos, já existiam, grupos novos, unidades
+novas, com estoque, erros, colunas ignoradas e uma amostra de até 200 produtos.
+
+Na tela: "Importar produtos…" no topo da tela de Estoque → escolher arquivo → prévia → Importar. "Baixar
+modelo…" salva um CSV de exemplo com todas as colunas (o mesmo modelo é testado: importa sem erro). Limites:
+não atualiza produto existente (para isso há a alteração em lote); preço de venda não entra (mora em
+`vendas`, que depende de `estoque`, e não o contrário); categoria técnica, especificação, compatibilidade e
+garantia do fornecedor não têm coluna; grade, lote e validade ficam de fora.
 
 ### Rentabilidade por nível da estrutura (2026-10-12)
 
@@ -386,8 +509,11 @@ Regras (testadas no domínio):
 
 Limitações conhecidas: o custo vem das **saídas do período** e a receita do **faturamento** do período
 (pedido: data do pedido; cupom: abertura; OS: passo Faturada), então venda e baixa em meses diferentes
-desalinham um mês; devolução/estorno de saída não abate o custo; **comissão por estrutura ainda não foi
-feita** (a comissão entra só como percentual médio dos encargos).
+desalinham um mês; devolução/estorno de saída não abate o custo. **Comissão por estrutura (2026-10-13):**
+a margem líquida estimada troca a comissão padrão pela de cada produto (`EncargosDaVenda::do_produto`,
+com a comissão efetiva vinda de `estoque.precos_sugeridos_do_grupo.v1`); num nó, a receita é somada por
+percentual de encargos e cada soma é descontada uma vez, então sem comissões próprias o resultado é
+idêntico ao de antes (propriedade testada).
 
 ## 7. Receituário contábil
 
@@ -402,7 +528,7 @@ e a sequência completa em [doc 01 §3](../01-arquitetura-geral.md#3-o-caminho-d
 | Ajuste positivo de inventário (sobra na contagem) | Estoque (1.3.01) | Sobra de inventário (4.6 Outras receitas) | Realizado |
 | Ajuste negativo de inventário (falta na contagem) | Perdas de estoque (5.x) | Estoque | Realizado |
 | Perda por vencimento/quebra | Perdas de estoque (5.x) | Estoque | Realizado |
-| Transferência entre locais da mesma empresa | Estoque — local destino | Estoque — local origem | Realizado |
+| Transferência entre locais da mesma empresa | Estoque — local destino | Estoque — local origem | **Sem lançamento (2026-10-13):** o plano de contas tem uma conta de estoque por CNPJ, não uma por local, então débito e crédito cairiam na mesma conta. A transferência fica nos movimentos; o valor por local, quando for preciso, sai deles |
 | Transferência entre empresas do grupo (filiais) | Estoque — empresa destino | Estoque — empresa origem | Realizado, com `Origem` espelhada nas duas empresas (ver [doc 05 §8](../05-nucleo-financeiro.md#8-multiempresa-e-consolidação)) |
 | Entrada avulsa sem nota de compra (doação, brinde recebido) | Estoque | Outras receitas (4.6) | Confirmado |
 | **Baixa de estoque por venda** *(lançada por `vendas`/`pdv`, não por `estoque`)* | CMV (5.1) | Estoque | igual ao lançamento da venda |
@@ -528,7 +654,12 @@ já as pressupunha e toda entrada de menu precisa de uma permissão declarada.
 3. **Reserva não é saída.** `ReservarEstoque` move quantidade de `disponivel` para `reservada` sem
    gerar `Movimento` de saída nem lançamento no razão — só o consumo real (venda finalizada, OS
    concluída) gera a saída física e o CMV.
-4. **Inventário em `Congelado` bloqueia movimento no local.** `RegistrarEntrada`/`RegistrarSaida`
+4. **Inventário em `Congelado` bloqueia movimento no local.** *(Implementado em 2026-10-13 sem
+   `nucleo_trava`: o corpo comum de entrada e de saída e o `AjustarSaldo` consultam
+   `estoque_inventario` (`repositorio_inventario::exigir_local_livre`) na mesma transação, e a
+   saída do PDV, do pedido e da OS passa pelo mesmo corpo — ou seja, **vender no local em
+   contagem também é recusado**; inventário de loja aberta se faz por seção, ou fora do
+   expediente.)* `RegistrarEntrada`/`RegistrarSaida`
    contra um local com `nucleo_trava` ativa de inventário retornam `4002 RecursoTravado` — impede
    contagem de perseguir um alvo que se move.
 5. **Contagem de inventário é cega.** `quantidade_sistema` é congelada no início e só é exposta ao

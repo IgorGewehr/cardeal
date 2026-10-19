@@ -55,8 +55,8 @@ impl Plano {
 }
 
 /// A impressão digital do plano: tudo o que, mudando, exige verificar a base de novo — as
-/// migrações de cada módulo (versão, nome e o próprio SQL) e o catálogo de permissões que o
-/// papel de administrador acompanha.
+/// migrações de cada módulo (versão, nome e o próprio SQL), o catálogo de permissões que o
+/// papel de administrador acompanha e o que a política de cada papel de fábrica concede dele.
 fn impressao(migracoes: &[ConjuntoMigracoes], conjunto: &ConjuntoEfetivo) -> [u8; 32] {
     let mut h = blake3::Hasher::new();
     for c in migracoes {
@@ -74,6 +74,22 @@ fn impressao(migracoes: &[ConjuntoMigracoes], conjunto: &ConjuntoEfetivo) -> [u8
     for p in &conjunto.permissoes {
         h.update(p.as_bytes());
         h.update(&[0]);
+    }
+    // E o que cada papel de fábrica concede desse catálogo: mudar a política de um papel (ex.:
+    // o caixa passar a cadastrar cliente) também pede a sincronização da base.
+    for papel in cardeal_auth::PapelDeFabrica::TODOS {
+        h.update(papel.nome().as_bytes());
+        for p in papel
+            .politica()
+            .aplicar(conjunto.permissoes.iter().copied())
+        {
+            h.update(p.as_bytes());
+            h.update(&[0]);
+        }
+        for (chave, valor) in papel.limites_padrao() {
+            h.update(format!("{chave}={valor:?}").as_bytes());
+            h.update(&[0]);
+        }
     }
     *h.finalize().as_bytes()
 }

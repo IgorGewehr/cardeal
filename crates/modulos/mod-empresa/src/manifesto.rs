@@ -14,7 +14,7 @@ const PERMISSOES: &[Permissao] = &[
     },
     Permissao {
         chave: "empresa.dados.editar",
-        descricao: "Alterar dados cadastrais, contato e logo da empresa",
+        descricao: "Alterar dados cadastrais e fiscais, contato e logo da empresa",
         risco: Risco::Alto,
         requer_submodulo: None,
     },

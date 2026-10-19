@@ -1025,3 +1025,121 @@ fn receita_por_produto_soma_pecas_faturadas_e_garantia_rende_zero() {
     );
     assert!(receita(passado).is_empty());
 }
+
+#[test]
+fn custo_hora_poe_a_mao_de_obra_nas_margens_prevista_e_real() {
+    let b = Balcao::novo(
+        &[
+            TODAS,
+            &[
+                "os.margem.ver",
+                "os.custo_hora.definir",
+                "os.apontamento.iniciar",
+                "os.apontamento.encerrar",
+                "os.apontamento.ajustar",
+            ],
+        ]
+        .concat(),
+    );
+    let cliente = b.cliente("João");
+    let (produto, _) = produto_com_estoque(&b); // custo médio R$ 90
+    let os = b.abrir(cliente, "Notebook", "Tela").ordem_servico;
+    orcar_peca(&b, os, produto); // cobra R$ 200
+    let tecnico = Id::novo();
+    let _: Id = b
+        .cmd(
+            "os.montar_orcamento.v1",
+            &MontarOrcamentoOs {
+                ordem_servico: os,
+                item: ItemOrcamentoNovo::MaoDeObra {
+                    descricao: "Troca de tela".into(),
+                    valor: cardeal_kernel::Dinheiro::reais(80),
+                    tecnico,
+                    horas: Some(cardeal_kernel::Quantidade::unidades(2)),
+                },
+            },
+        )
+        .unwrap();
+    // Padrão da oficina R$ 20/h; este técnico custa R$ 25/h (o dele vence o padrão).
+    let definir = |tecnico: Option<Id>, reais: Option<i64>| {
+        let () = b
+            .cmd(
+                "os.definir_custo_hora.v1",
+                &mod_os::DefinirCustoHora {
+                    tecnico,
+                    custo_hora: reais.map(cardeal_kernel::Dinheiro::reais),
+                },
+            )
+            .unwrap();
+    };
+    definir(None, Some(20));
+    definir(Some(tecnico), Some(25));
+    let tabela: mod_os::custo_hora::TabelaCustoHora =
+        b.consulta("os.custos_hora.v1", &mod_os::CustosHora);
+    assert_eq!(tabela.padrao, Some(cardeal_kernel::Dinheiro::reais(20)));
+
+    // Prevista: 2 h × R$ 25 = R$ 50 de mão de obra, agora dentro das margens.
+    let m: mod_os::MargemPrevista = b.consulta(
+        "os.margem_prevista_da_ordem.v1",
+        &mod_os::MargemPrevistaDaOrdem { ordem_servico: os },
+    );
+    assert_eq!(m.painel.custo, cardeal_kernel::Dinheiro::reais(140));
+    assert_eq!(m.painel.itens_sem_custo, 0);
+    // (200 + 80) × 96% − 140 = 128,80
+    assert_eq!(
+        m.painel.margem_liquida,
+        cardeal_kernel::Dinheiro::centavos(12_880)
+    );
+
+    // Real: o técnico apontou 1h30 → R$ 37,50 na margem da OS.
+    let ap: mod_os::ApontamentoIniciado = b
+        .cmd(
+            "os.iniciar_apontamento.v1",
+            &mod_os::IniciarApontamento {
+                ordem_servico: os,
+                tecnico,
+            },
+        )
+        .unwrap();
+    let () = b
+        .cmd(
+            "os.encerrar_apontamento.v1",
+            &mod_os::EncerrarApontamento {
+                apontamento: ap.apontamento,
+            },
+        )
+        .unwrap();
+    let inicio = cardeal_kernel::Instante::de_micros(1_000_000_000);
+    let () = b
+        .cmd(
+            "os.ajustar_apontamento.v1",
+            &mod_os::AjustarApontamento {
+                apontamento: ap.apontamento,
+                novo_inicio: inicio,
+                novo_fim: cardeal_kernel::Instante::de_micros(inicio.em_micros() + 5_400_000_000),
+                motivo: "esqueceu de encerrar na hora".into(),
+            },
+        )
+        .unwrap();
+    let real: Option<mod_os::MargemDaOrdemServico> = b.consulta(
+        "os.margem_da_ordem.v1",
+        &mod_os::MargemDaOrdem { ordem_servico: os },
+    );
+    let real = real.unwrap();
+    assert_eq!(
+        real.custo_mao_de_obra,
+        cardeal_kernel::Dinheiro::centavos(3_750)
+    );
+    assert!(!real.mao_de_obra_sem_custo);
+
+    // Sem custo-hora nenhum (tira o do técnico e o padrão): avisa que ficou de fora.
+    definir(Some(tecnico), None);
+    definir(None, None);
+    let real: Option<mod_os::MargemDaOrdemServico> = b.consulta(
+        "os.margem_da_ordem.v1",
+        &mod_os::MargemDaOrdem { ordem_servico: os },
+    );
+    let real = real.unwrap();
+    assert_eq!(real.custo_mao_de_obra, cardeal_kernel::Dinheiro::ZERO);
+    assert!(real.mao_de_obra_sem_custo);
+}

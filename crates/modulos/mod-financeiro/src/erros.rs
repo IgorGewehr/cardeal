@@ -3,7 +3,7 @@
 //! Todos implementam [`ErroDominio`](cardeal_kernel::ErroDominio) — é o que a UI usa para
 //! transformar a falha em conversa (`docs/09-protocolo-api.md` §3), não em stack trace.
 
-use cardeal_kernel::{AcaoSugerida, CodigoErro, Detalhes, Dinheiro, ErroDominio};
+use cardeal_kernel::{AcaoSugerida, CodigoErro, Data, Detalhes, Dinheiro, ErroDominio};
 
 use crate::titulo::EstadoParcela;
 
@@ -56,6 +56,51 @@ pub enum ErroFinanceiro {
     /// A renegociação foi pedida sobre um título sem saldo em aberto.
     #[error("Não há saldo em aberto para renegociar")]
     SemSaldoParaRenegociar,
+
+    /// O título já foi cancelado.
+    #[error("Este título já foi cancelado")]
+    TituloJaCancelado,
+
+    /// O título nasceu de outro módulo (compra, venda, OS, renegociação): cancelá-lo só no
+    /// financeiro deixaria estoque e contabilidade desencontrados.
+    #[error("Este título veio {0}: desfaça por lá, não pelo financeiro")]
+    TituloDeOutraOrigem(&'static str),
+
+    /// O título tem baixa (recebimento ou pagamento) ainda válida, ou parcela renegociada.
+    #[error("Este título já tem {0}: estorne antes de cancelar")]
+    TituloComMovimento(&'static str),
+
+    /// O motivo do cancelamento vai ao histórico do estorno: ao menos 10 caracteres.
+    #[error("Explique o motivo do cancelamento (ao menos 10 caracteres)")]
+    MotivoDoCancelamentoCurto,
+
+    /// A conta informada não serve para esta operação (não é do Disponível, está inativa, é
+    /// de outra empresa, é uma conta do sistema…).
+    #[error("{0}")]
+    ContaDisponivelInvalida(&'static str),
+
+    /// Origem e destino da transferência são a mesma conta.
+    #[error("Escolha contas diferentes para a origem e o destino")]
+    TransferenciaParaAMesmaConta,
+
+    /// O caixa de origem não tem o dinheiro (dinheiro em espécie não fica negativo).
+    #[error("Saldo insuficiente no caixa de origem: há {disponivel}")]
+    SaldoInsuficienteNaOrigem {
+        /// O que há no caixa.
+        disponivel: Dinheiro,
+    },
+
+    /// A transferência já foi cancelada.
+    #[error("Esta transferência já foi cancelada")]
+    TransferenciaJaCancelada,
+
+    /// Desativar conta com saldo deixaria o dinheiro numa conta escondida.
+    #[error("A conta ainda tem saldo de {0}: transfira antes de desativar")]
+    ContaComSaldo(Dinheiro),
+
+    /// O novo vencimento cai antes da emissão do título.
+    #[error("O vencimento não pode ser antes da emissão ({0})")]
+    VencimentoAntesDaEmissao(Data),
 
     /// A quebra de caixa no fechamento passou da tolerância e nenhum motivo foi informado.
     #[error("A quebra de {quebra} passa da tolerância — informe o motivo")]
@@ -119,6 +164,27 @@ pub enum ErroFinanceiro {
     /// `CriarCategoria` com nome vazio.
     #[error("A categoria precisa de um nome")]
     NomeDeCategoriaVazio,
+
+    /// O mesmo cheque (banco, agência, conta e número) já está na carteira.
+    #[error("Este cheque (banco, agência, conta e número) já está na carteira")]
+    ChequeDuplicado,
+
+    /// Operação que o estado do cheque não permite.
+    #[error("O cheque está \"{atual}\" — não dá para {operacao}")]
+    ChequeEmEstadoInvalido {
+        /// O estado atual.
+        atual: &'static str,
+        /// O que se tentou.
+        operacao: &'static str,
+    },
+
+    /// Dados do cheque incompletos ou mal formados.
+    #[error("Dados do cheque: {0}")]
+    DadosDoChequeInvalidos(&'static str),
+
+    /// Data impossível para o cheque.
+    #[error("Data do cheque: {0}")]
+    DataDoChequeInvalida(&'static str),
 }
 
 impl ErroDominio for ErroFinanceiro {
@@ -131,17 +197,31 @@ impl ErroDominio for ErroFinanceiro {
             | Self::ContaDeCaixaInvalida
             | Self::NomeDeCaixaVazio
             | Self::NomeDeCategoriaVazio
-            | Self::BaixaZerada => CodigoErro::ENTRADA_INVALIDA,
+            | Self::DadosDoChequeInvalidos(_)
+            | Self::DataDoChequeInvalida(_)
+            | Self::BaixaZerada
+            | Self::MotivoDoCancelamentoCurto
+            | Self::VencimentoAntesDaEmissao(_)
+            | Self::ContaDisponivelInvalida(_)
+            | Self::TransferenciaParaAMesmaConta => CodigoErro::ENTRADA_INVALIDA,
             Self::ParcelaDeOutroTitulo
             | Self::SemSaldoParaRenegociar
+            | Self::TituloDeOutraOrigem(_)
+            | Self::TituloComMovimento(_)
+            | Self::SaldoInsuficienteNaOrigem { .. }
+            | Self::ContaComSaldo(_)
             | Self::ValorSuperaSaldo { .. }
             | Self::QuebraExigeMotivo { .. }
             | Self::CaixaInativo
+            | Self::ChequeDuplicado
             | Self::ValorSuperaSaldoDoCaixa { .. } => CodigoErro::REGRA_VIOLADA,
             Self::ParcelaNaoBaixavel(_)
             | Self::EstadoDeSessaoInvalido { .. }
             | Self::CaixaJaAberto
             | Self::BaixaJaEstornada
+            | Self::TituloJaCancelado
+            | Self::TransferenciaJaCancelada
+            | Self::ChequeEmEstadoInvalido { .. }
             | Self::ParcelaEncerradaNaoReverte(_) => CodigoErro::ESTADO_INVALIDO,
             Self::CaixaFechado => CodigoErro::CAIXA_FECHADO,
         }
