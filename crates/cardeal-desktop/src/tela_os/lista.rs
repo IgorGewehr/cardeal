@@ -145,6 +145,7 @@ pub(super) fn lista(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &
                             os.equipamento.clone(),
                             equipamento_label(os).to_owned(),
                             FormFicha::de(&os.ficha),
+                            os.garantia_dias == 0,
                         )
                     });
             });
@@ -153,11 +154,12 @@ pub(super) fn lista(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &
     if let Some((coluna, direcao)) = estado.ordenacao.clicar(&resposta) {
         ordenar_ordens(&mut estado.ordens, &estado.clientes, coluna, direcao);
     }
-    if let Some((acao, id, equipamento, rotulo, ficha)) = acao_clicada {
+    if let Some((acao, id, equipamento, rotulo, ficha, sem_garantia)) = acao_clicada {
         match acao {
             AcaoRegistro::Editar => {
                 estado.editar_equipamento = equipamento;
                 estado.editar_ficha = ficha;
+                estado.sem_garantia = sem_garantia;
                 estado.editar_complemento_defeito.clear();
                 estado.dlg = Dlg::EditarDados(id);
             }

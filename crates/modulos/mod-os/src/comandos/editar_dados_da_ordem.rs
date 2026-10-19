@@ -35,6 +35,8 @@ pub struct EditarDadosDaOrdem {
     /// A ficha de entrada inteira (previsão, nº de série, acessórios), substituindo a atual.
     /// `None` = não mexer.
     pub ficha: Option<FichaEntrada>,
+    /// Prazo de garantia em dias (`0` = sem garantia). `None` = não mexer.
+    pub garantia_dias: Option<u16>,
 }
 
 impl Comando for EditarDadosDaOrdem {
@@ -47,6 +49,7 @@ impl Comando for EditarDadosDaOrdem {
         if self.equipamento.is_none()
             && self.complemento_defeito_relatado.is_none()
             && self.ficha.is_none()
+            && self.garantia_dias.is_none()
         {
             return Err(Erro::de_dominio(&ErroOs::NadaParaAtualizar));
         }
@@ -67,6 +70,11 @@ impl Comando for EditarDadosDaOrdem {
         // 4. Persistir.
         if let Some(ficha) = self.ficha {
             os.atualizar_ficha(ficha)
+                .map_err(|e| Erro::de_dominio(&e))?;
+        }
+
+        if let Some(dias) = self.garantia_dias {
+            os.definir_garantia(dias)
                 .map_err(|e| Erro::de_dominio(&e))?;
         }
 

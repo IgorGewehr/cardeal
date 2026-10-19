@@ -26,9 +26,10 @@ pub enum ErroOs {
     #[error("Informe ao menos o equipamento ou um complemento ao defeito relatado")]
     NadaParaAtualizar,
 
-    /// `EditarDadosDaOrdem` sobre uma ordem já finalizada (`Faturada`/`Cancelada`/
-    /// `Reprovada`) — a partir daí a OS é histórico, não rascunho.
-    #[error("Esta ordem de serviço já foi finalizada e não aceita mais edição de dados")]
+    /// `EditarDadosDaOrdem` sobre uma ordem `Cancelada`/`Reprovada` — a partir daí a OS
+    /// é histórico. A `Faturada` ainda aceita correção de dados (aparelho, defeito, ficha,
+    /// garantia): o que ela não aceita é mexer no orçamento.
+    #[error("Esta ordem de serviço foi cancelada ou reprovada e não aceita mais edição de dados")]
     OrdemFinalizada,
 
     /// Descrição do problema vazia no laudo.

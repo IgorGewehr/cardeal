@@ -25,7 +25,7 @@ use cardeal_cliente::{IdentidadeVisual, Motor, Sessao, UsuarioResumo};
 use cardeal_kernel::{Data, Dinheiro, Fuso, Id, Instante, Percentual, Preco, Quantidade};
 use cardeal_modkit::Icone;
 use cardeal_pdf::{gerar_comprovante_os, ComprovanteOsPdf, IdentidadeEmpresa, ItemPdf};
-use cardeal_ui::atoms::{Botao, Divisor, Etiqueta, Rotulo, Tom, ValorDinheiro, ATALHO_NOVO};
+use cardeal_ui::atoms::{Botao, Caixa, Divisor, Etiqueta, Rotulo, Tom, ValorDinheiro, ATALHO_NOVO};
 use cardeal_ui::molecules::{
     Abas, AcaoRegistro, AcoesRegistro, BarraFiltros, Campo, CartaoKpi, EstadoVazio, Mascara,
     OpcaoBusca, SecaoExpansivel, SeletorBusca, SeletorOpcao,
@@ -195,6 +195,8 @@ pub struct EstadoTelaOs {
     /// Campos do dialog "Editar dados da ordem" (`EditarDadosDaOrdem`).
     editar_equipamento: String,
     editar_complemento_defeito: String,
+    /// Desmarcada a caixa "Garantia de 90 dias" (nova OS e edição). `false` = com garantia.
+    sem_garantia: bool,
     editar_ficha: FormFicha,
     /// Outras OS do mesmo cliente com aparelho parecido (`os.historico_do_equipamento.v1`).
     historico: Vec<OrdemServico>,

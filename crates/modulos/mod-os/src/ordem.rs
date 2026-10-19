@@ -201,10 +201,7 @@ impl OrdemServico {
     /// rascunho.
     #[must_use]
     pub const fn aceita_edicao_de_dados(&self) -> bool {
-        !matches!(
-            self.estado,
-            EstadoOs::Faturada | EstadoOs::Cancelada | EstadoOs::Reprovada
-        )
+        !matches!(self.estado, EstadoOs::Cancelada | EstadoOs::Reprovada)
     }
 
     pub(crate) fn exigir_nao_finalizada(&self) -> Result<(), ErroOs> {
@@ -229,6 +226,18 @@ impl OrdemServico {
             return Err(ErroOs::EquipamentoVazio);
         }
         self.equipamento = equipamento;
+        self.versao = self.versao.proxima();
+        Ok(())
+    }
+
+    /// Define o prazo de garantia do serviço, em dias (`0` = sem garantia). Vale também para
+    /// uma OS já faturada — a garantia é dado do comprovante, não do financeiro.
+    ///
+    /// # Errors
+    /// [`ErroOs::OrdemFinalizada`].
+    pub fn definir_garantia(&mut self, dias: u16) -> Result<(), ErroOs> {
+        self.exigir_nao_finalizada()?;
+        self.garantia_dias = dias;
         self.versao = self.versao.proxima();
         Ok(())
     }
@@ -616,7 +625,18 @@ mod testes {
     }
 
     #[test]
-    fn editar_dados_e_recusado_apos_finalizar() {
+    fn os_faturada_ainda_aceita_corrigir_dados_e_garantia() {
+        let mut os = os_aberta();
+        os.faturar().unwrap();
+        assert!(os.aceita_edicao_de_dados());
+        os.definir_garantia(0).unwrap();
+        assert_eq!(os.garantia_dias, 0);
+        os.completar_equipamento("Notebook Dell").unwrap();
+        assert_eq!(os.estado, EstadoOs::Faturada);
+    }
+
+    #[test]
+    fn editar_dados_e_recusado_apos_reprovar() {
         let mut os = os_aberta();
         os.adicionar_ao_orcamento(Dinheiro::reais(100)).unwrap();
         os.enviar_para_aprovacao().unwrap();

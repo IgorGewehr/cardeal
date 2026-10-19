@@ -29,6 +29,8 @@ pub(super) fn dialogo_editar_dados(
                 );
                 ui.add_space(Espaco::E12);
                 estado.editar_ficha.mostrar(ui);
+                ui.add_space(Espaco::E8);
+                caixa_garantia(ui, &mut estado.sem_garantia);
             },
             |ui, estado| {
                 let clicou = ui.add(Botao::primario("Salvar")).clicked();
@@ -52,6 +54,7 @@ pub(super) fn dialogo_editar_dados(
                             equipamento,
                             complemento_defeito_relatado: complemento,
                             ficha: Some(ficha),
+                            garantia_dias: Some(garantia_dias(estado.sem_garantia)),
                         },
                     ) {
                         Ok(()) => {
@@ -143,6 +146,8 @@ pub(super) fn dialogo_nova(
                 );
                 ui.add_space(Espaco::E12);
                 ficha.mostrar(ui);
+                ui.add_space(Espaco::E8);
+                caixa_garantia(ui, &mut estado.sem_garantia);
             },
             |ui, estado| {
                 if ui.add(Botao::primario("Abrir OS")).clicked() || enter {
@@ -196,6 +201,7 @@ pub(super) fn abrir_os(
     let end_cep = end_cep.clone();
     let equipamento = equipamento.clone();
     let defeito_relatado = defeito_relatado.clone();
+    let sem_garantia = estado.sem_garantia;
 
     if equipamento.trim().is_empty() {
         notificar(
@@ -247,7 +253,7 @@ pub(super) fn abrir_os(
                     equipamento,
                     defeito_relatado,
                     tecnico_responsavel,
-                    garantia_dias: 90,
+                    garantia_dias: garantia_dias(sem_garantia),
                     ficha,
                 },
             )
@@ -261,7 +267,7 @@ pub(super) fn abrir_os(
                 equipamento,
                 defeito_relatado,
                 tecnico_responsavel,
-                garantia_dias: 90,
+                garantia_dias: garantia_dias(sem_garantia),
                 ficha,
             },
         )
@@ -277,6 +283,7 @@ pub(super) fn abrir_os(
         Ok(aberta) => {
             let aberta: OrdemServicoAberta = aberta;
             estado.erro = None;
+            estado.sem_garantia = false;
             if cliente_novo {
                 estado.carregar_clientes(motor, sessao);
             }
@@ -289,4 +296,25 @@ pub(super) fn abrir_os(
         }
         Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
     }
+}
+
+/// Prazo padrão de garantia do serviço, em dias.
+const GARANTIA_PADRAO_DIAS: u16 = 90;
+
+fn garantia_dias(sem_garantia: bool) -> u16 {
+    if sem_garantia {
+        0
+    } else {
+        GARANTIA_PADRAO_DIAS
+    }
+}
+
+/// A caixa "Garantia de 90 dias" — marcada por padrão; desmarcar grava a OS sem garantia.
+fn caixa_garantia(ui: &mut egui::Ui, sem_garantia: &mut bool) {
+    let mut com_garantia = !*sem_garantia;
+    ui.add(Caixa::nova(
+        &mut com_garantia,
+        format!("Garantia de {GARANTIA_PADRAO_DIAS} dias sobre o serviço"),
+    ));
+    *sem_garantia = !com_garantia;
 }

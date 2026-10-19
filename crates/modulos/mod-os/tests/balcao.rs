@@ -532,6 +532,7 @@ fn ficha_de_entrada_e_gravada_na_abertura_e_corrigida_depois() {
                 previsao_entrega: Some(hoje.mais_dias(10)),
                 ..f
             }),
+            garantia_dias: None,
         },
     )
     .unwrap();
@@ -567,6 +568,7 @@ fn linha_do_tempo_registra_cada_mudanca_de_estado_uma_vez() {
             equipamento: Some("Notebook Dell".to_owned()),
             complemento_defeito_relatado: None,
             ficha: None,
+            garantia_dias: None,
         },
     )
     .unwrap();
