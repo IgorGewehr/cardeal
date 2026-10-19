@@ -163,7 +163,8 @@ impl<'a, 'b> RepositorioOs<'a, 'b> {
                 "UPDATE os_ordem_servico
                  SET equipamento = ?2, defeito_relatado = ?3, estado = ?4, aprovado_por = ?5,
                      valor_total = ?6, itens_orcamento = ?7, versao = ?8,
-                     previsao_entrega = ?9, numero_serie = ?10, acessorios = ?11
+                     previsao_entrega = ?9, numero_serie = ?10, acessorios = ?11,
+                     garantia_dias = ?12
                  WHERE id = ?1",
                 params![
                     blob(os.id),
@@ -177,6 +178,7 @@ impl<'a, 'b> RepositorioOs<'a, 'b> {
                     os.ficha.previsao_entrega.map(dias),
                     os.ficha.numero_serie,
                     os.ficha.acessorios,
+                    i64::from(os.garantia_dias),
                 ],
             )
             .map_err(persist)?;

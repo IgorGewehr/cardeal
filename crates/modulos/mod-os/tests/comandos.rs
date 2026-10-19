@@ -2656,7 +2656,7 @@ fn editar_dados_da_ordem_completa_equipamento_e_complementa_defeito() {
             equipamento: Some("Notebook Dell XPS 13".to_string()),
             complemento_defeito_relatado: Some("Também não carrega a bateria".to_string()),
             ficha: None,
-            garantia_dias: None,
+            garantia_dias: Some(0),
         }),
         &s,
         &amb,
@@ -2679,6 +2679,8 @@ fn editar_dados_da_ordem_completa_equipamento_e_complementa_defeito() {
         .unwrap()
         .unwrap();
     assert_eq!(detalhe.ordem.equipamento, "Notebook Dell XPS 13");
+    // A garantia editada tem de chegar ao banco (o UPDATE já esqueceu essa coluna).
+    assert_eq!(detalhe.ordem.garantia_dias, 0);
     assert_eq!(
         detalhe.ordem.defeito_relatado,
         "Não liga | Também não carrega a bateria"
