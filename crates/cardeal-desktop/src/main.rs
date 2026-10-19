@@ -654,12 +654,6 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Linux: o egui liga o IME (set_ime_allowed) assim que um campo de texto ganha foco, e
-        // então o Wayland/ibus passa a entregar o texto composto (á, ã, ç) como `Ime::Commit`
-        // — que o egui-winit ignora no Linux (emilk/egui#5008). Resultado: tecla morta não
-        // escrevia nada. Sem pedir IME, o winit compõe as teclas mortas sozinho (xkb).
-        #[cfg(target_os = "linux")]
-        ctx.output_mut(|o| o.ime = None);
         if self.motor.is_none() && !matches!(self.tela, Tela::FalhaAoAbrir(_)) {
             self.carregar();
         }
@@ -1053,6 +1047,14 @@ impl eframe::App for App {
         if let Some(demo) = &mut self.demo {
             demo.quadro(ctx);
         }
+
+        // Linux: o egui liga o IME (set_ime_allowed) assim que um campo de texto ganha foco, e
+        // então o Wayland/ibus passa a entregar o texto composto (á, ã, ç) como `Ime::Commit`
+        // — que o egui-winit ignora no Linux (emilk/egui#5008). Resultado: tecla morta não
+        // escrevia nada. Zerado aqui, no fim do quadro (o campo de texto o marca durante o
+        // `update`), o egui não pede IME e o winit compõe as teclas mortas sozinho (xkb).
+        #[cfg(target_os = "linux")]
+        ctx.output_mut(|o| o.ime = None);
     }
 }
 
