@@ -3,6 +3,27 @@
 use super::*;
 
 pub(super) fn lista(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTelaOs) {
+    // Visões rápidas: as faturadas saem da fila ativa, então precisam de um atalho à vista
+    // (e fora do early-return abaixo, senão sem OS em aberto a tela nem as oferece).
+    let atual = estado.filtro_status.unwrap_or(FiltroStatusOs::Ativas);
+    let mut abas = Abas::nova(&[
+        (FiltroStatusOs::Ativas, "Em aberto"),
+        (FiltroStatusOs::Um(EstadoOs::Faturada), "Faturadas"),
+        (FiltroStatusOs::Todos, "Todas"),
+    ])
+    .id_salt("os-visao");
+    if matches!(
+        atual,
+        FiltroStatusOs::Ativas | FiltroStatusOs::Todos | FiltroStatusOs::Um(EstadoOs::Faturada)
+    ) {
+        abas = abas.selecionada(atual);
+    }
+    if let Some(nova) = abas.mostrar(ui) {
+        estado.filtro_status = Some(nova);
+        estado.buscar_ordens(motor, sessao);
+    }
+    ui.add_space(Espaco::E8);
+
     let sem_busca = estado.busca.trim().is_empty()
         && matches!(estado.filtro_status, None | Some(FiltroStatusOs::Ativas));
     if estado.ativas.is_empty() && estado.ordens.is_empty() && sem_busca {

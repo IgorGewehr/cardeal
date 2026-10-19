@@ -114,6 +114,9 @@ pub(super) fn faturar_os(
     ) {
         Ok(f) => {
             let f: OrdemServicoFaturada = f;
+            // A OS sai da fila ativa ao faturar: leva a lista para "Faturadas" para ela não
+            // parecer ter sumido (e o comprovante em PDF fica a um clique).
+            estado.filtro_status = Some(FiltroStatusOs::Um(EstadoOs::Faturada));
             estado.recarregar_lista(motor, sessao);
             estado.abrir_detalhe(motor, sessao, os.id);
             estado.dlg = Dlg::Detalhe;
