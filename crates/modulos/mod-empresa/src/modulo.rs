@@ -5,10 +5,12 @@ use cardeal_modkit::{Manifesto, Modulo, Registro};
 use cardeal_storage::ConjuntoMigracoes;
 
 use crate::comandos::{AtualizarDadosEmpresa, DefinirContatoEmpresa, DefinirLogoEmpresa};
-use crate::consultas::{DadosDaEmpresa, IdentidadeDaEmpresa, PapeisDaEmpresa, UsuariosDaEmpresa};
+use crate::consultas::{
+    DadosDaEmpresa, IdentidadeDaEmpresa, PapeisDaEmpresa, TetosDeDesconto, UsuariosDaEmpresa,
+};
 use crate::fiscal::{DadosFiscaisDaEmpresa, DefinirDadosFiscaisEmpresa};
 use crate::manifesto::MANIFESTO;
-use crate::membros::{AdicionarUsuario, DesativarUsuario};
+use crate::membros::{AdicionarUsuario, DefinirTetoDeDesconto, DesativarUsuario};
 
 /// O módulo, para registrar no [`Despachante`](cardeal_modkit::Despachante).
 pub struct ModuloEmpresa;
@@ -34,11 +36,13 @@ impl Modulo for ModuloEmpresa {
             .comando::<DefinirDadosFiscaisEmpresa>("empresa.definir_dados_fiscais.v1")
             .comando::<AdicionarUsuario>("empresa.adicionar_usuario.v1")
             .comando::<DesativarUsuario>("empresa.desativar_usuario.v1")
+            .comando::<DefinirTetoDeDesconto>("empresa.definir_teto_desconto.v1")
             .consulta::<DadosDaEmpresa>("empresa.dados.v1")
             .consulta::<IdentidadeDaEmpresa>("empresa.identidade_visual.v1")
             .consulta::<DadosFiscaisDaEmpresa>("empresa.dados_fiscais.v1")
             .consulta::<UsuariosDaEmpresa>("empresa.usuarios.v1")
-            .consulta::<PapeisDaEmpresa>("empresa.papeis.v1");
+            .consulta::<PapeisDaEmpresa>("empresa.papeis.v1")
+            .consulta::<TetosDeDesconto>("empresa.tetos_desconto.v1");
         Ok(())
     }
 }

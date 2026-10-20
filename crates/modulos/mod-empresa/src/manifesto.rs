@@ -20,7 +20,8 @@ const PERMISSOES: &[Permissao] = &[
     },
     Permissao {
         chave: "empresa.usuarios.gerenciar",
-        descricao: "Adicionar e desativar usuários da empresa",
+        descricao:
+            "Adicionar e desativar usuários da empresa e ajustar o teto de desconto de cada papel",
         risco: Risco::Alto,
         requer_submodulo: None,
     },

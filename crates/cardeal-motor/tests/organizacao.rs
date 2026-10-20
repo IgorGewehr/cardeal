@@ -359,3 +359,112 @@ fn papel_de_fabrica_gravado_numa_versao_antiga_ganha_o_que_a_politica_passou_a_c
         "o teto de desconto volta para quem não tinha"
     );
 }
+
+#[test]
+fn o_dono_ajusta_o_teto_de_desconto_de_cada_papel_e_a_sincronizacao_nao_desfaz() {
+    use cardeal_kernel::Percentual;
+    use mod_empresa::{DefinirTetoDeDesconto, PapelDeFabrica, TetoDeDesconto, TetosDeDesconto};
+
+    let arquivo = tempfile::NamedTempFile::new().unwrap();
+    let motor = abrir(arquivo.path());
+    motor
+        .configurar_inicial("Matriz Ltda", "11.222.333/0001-81", "dono", "Dono", SENHA)
+        .unwrap();
+    let dono = motor.autenticar("dono", SENHA).unwrap();
+    let caixa: cardeal_kernel::Id = motor
+        .executar(
+            &dono,
+            "empresa.adicionar_usuario.v1",
+            &mod_empresa::AdicionarUsuario {
+                login: "caixa".into(),
+                nome: "Caixa".into(),
+                papel: PapelDeFabrica::OperadorCaixa,
+            },
+        )
+        .unwrap();
+    let tetos = |motor: &MotorLocal, s| -> Vec<(PapelDeFabrica, Option<Percentual>, usize)> {
+        let l: Vec<TetoDeDesconto> = motor
+            .consultar(s, "empresa.tetos_desconto.v1", &TetosDeDesconto)
+            .unwrap();
+        l.into_iter()
+            .map(|t| (t.papel, t.teto, t.usuarios))
+            .collect()
+    };
+    let dez = Some(Percentual::pontos(10));
+    // Os padrões — o Gerente e o Vendedor ainda não existem na base, e aparecem com o teto
+    // com que vão nascer.
+    assert_eq!(
+        tetos(&motor, &dono),
+        vec![
+            (PapelDeFabrica::Administrador, None, 1),
+            (PapelDeFabrica::Gerente, None, 0),
+            (PapelDeFabrica::OperadorCaixa, dez, 1),
+            (PapelDeFabrica::Vendedor, dez, 0),
+        ]
+    );
+    let definir = |papel, teto| -> Result<(), cardeal_kernel::Erro> {
+        motor.executar(
+            &dono,
+            "empresa.definir_teto_desconto.v1",
+            &DefinirTetoDeDesconto { papel, teto },
+        )
+    };
+    definir(PapelDeFabrica::OperadorCaixa, Some(Percentual::pontos(5))).unwrap();
+    definir(
+        PapelDeFabrica::Vendedor,
+        Some(Percentual::milesimos(12_500)),
+    )
+    .unwrap();
+    definir(PapelDeFabrica::Gerente, Some(Percentual::pontos(30))).unwrap();
+    // Quem não vende não tem teto; e o teto vai até 100%.
+    let erro = definir(PapelDeFabrica::Estoquista, None).unwrap_err();
+    assert_eq!(erro.codigo, CodigoErro::REGRA_VIOLADA);
+    let erro = definir(PapelDeFabrica::Vendedor, Some(Percentual::pontos(101))).unwrap_err();
+    assert_eq!(erro.codigo, CodigoErro::FORA_DA_FAIXA);
+    let esperado = vec![
+        (PapelDeFabrica::Administrador, None, 1),
+        (PapelDeFabrica::Gerente, Some(Percentual::pontos(30)), 0),
+        (
+            PapelDeFabrica::OperadorCaixa,
+            Some(Percentual::pontos(5)),
+            1,
+        ),
+        (
+            PapelDeFabrica::Vendedor,
+            Some(Percentual::milesimos(12_500)),
+            0,
+        ),
+    ];
+    assert_eq!(tetos(&motor, &dono), esperado);
+    drop(motor);
+
+    // Uma atualização que muda a política: a sincronização dos papéis de fábrica roda e não
+    // desfaz o que o dono ajustou.
+    {
+        let c = rusqlite::Connection::open(arquivo.path()).unwrap();
+        c.execute(
+            "UPDATE nucleo_esquema SET valor = zeroblob(32) WHERE chave = 'impressao_plano'",
+            [],
+        )
+        .unwrap();
+    }
+    let motor = abrir(arquivo.path());
+    let dono = motor.autenticar("dono", SENHA).unwrap();
+    assert_eq!(tetos(&motor, &dono), esperado);
+
+    // Sem a permissão de gerenciar usuários, não ajusta.
+    let caixa = motor
+        .sessao_do_usuario(caixa, cardeal_kernel::Id::novo())
+        .unwrap();
+    let erro = motor
+        .executar(
+            &caixa,
+            "empresa.definir_teto_desconto.v1",
+            &DefinirTetoDeDesconto {
+                papel: PapelDeFabrica::OperadorCaixa,
+                teto: None,
+            },
+        )
+        .unwrap_err();
+    assert_eq!(erro.codigo, CodigoErro::SEM_PERMISSAO);
+}

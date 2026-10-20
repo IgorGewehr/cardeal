@@ -434,6 +434,33 @@ impl<'a, 'b> RepositorioAuth<'a, 'b> {
         Ok(novos)
     }
 
+    /// Grava (ou troca) um limite do papel — o ajuste que o dono faz no teto de um papel,
+    /// **inclusive de fábrica**: o que um papel de fábrica pode fazer (as permissões) é
+    /// imutável; o tamanho do poder (o teto) é da empresa. A sincronização do motor só
+    /// preenche limite ausente, então o ajuste fica. Sobe a versão do papel.
+    ///
+    /// # Errors
+    /// [`crate::ErroAuth::FalhaDePersistencia`] em erro do SQLite.
+    pub fn definir_limite(&mut self, papel: Id, chave: &str, valor: ValorLimite) -> Resultado<()> {
+        let (tipo, bruto) = limite_split(valor);
+        self.conn()
+            .execute(
+                "INSERT INTO nucleo_papel_limite (papel, chave, tipo, valor)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT (papel, chave) DO UPDATE SET tipo = excluded.tipo,
+                                                          valor = excluded.valor",
+                rusqlite::params![blob(papel), chave, tipo, bruto],
+            )
+            .map_err(persist)?;
+        self.conn()
+            .execute(
+                "UPDATE nucleo_papel SET versao = versao + 1 WHERE id = ?1",
+                [blob(papel)],
+            )
+            .map_err(persist)?;
+        Ok(())
+    }
+
     /// Carrega um papel pelo `id`, com permissões e limites.
     ///
     /// # Errors

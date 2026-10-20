@@ -6,7 +6,7 @@
 //! com o catálogo inteiro).
 
 use cardeal_auth::PapelDeFabrica;
-use cardeal_kernel::Id;
+use cardeal_kernel::{Id, Percentual};
 use cardeal_modkit::{Comando, Risco};
 use serde::{Deserialize, Serialize};
 
@@ -152,6 +152,86 @@ impl Comando for DesativarUsuario {
     }
 }
 
+/// Ajusta o teto de desconto (`vendas.desconto_maximo`) de um papel que vende, nesta empresa
+/// — vale no PDV e nas vendas, para quem tem o papel, a partir da próxima vez que entrar.
+/// `None` tira o teto. O papel de fábrica que ainda não foi usado é criado aqui, já com o
+/// teto (como faria [`AdicionarUsuario`]).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DefinirTetoDeDesconto {
+    /// O papel.
+    pub papel: PapelDeFabrica,
+    /// O teto, de 0% (não dá desconto) a 100%; `None` = sem teto.
+    pub teto: Option<Percentual>,
+}
+
+impl Comando for DefinirTetoDeDesconto {
+    type Saida = ();
+    const PERMISSAO: &'static str = "empresa.usuarios.gerenciar";
+    const RISCO: Risco = Risco::Alto;
+    const AUDITA: bool = true;
+
+    #[cfg(feature = "sqlite")]
+    fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<()> {
+        use cardeal_auth::{RepositorioAuth, ValorLimite, CHAVE_DESCONTO_MAXIMO};
+
+        if !self
+            .papel
+            .limites_padrao()
+            .contains_key(CHAVE_DESCONTO_MAXIMO)
+        {
+            return Err(Erro::novo(
+                CodigoErro::REGRA_VIOLADA,
+                format!(
+                    "o papel {} não vende — não tem teto de desconto",
+                    self.papel.nome()
+                ),
+            ));
+        }
+        let valor = match self.teto {
+            None => ValorLimite::Ilimitado,
+            Some(p) if p.e_fracao_valida() => ValorLimite::Percentual(p),
+            Some(_) => {
+                return Err(Erro::novo(
+                    CodigoErro::FORA_DA_FAIXA,
+                    "o teto de desconto vai de 0% a 100%",
+                )
+                .no_campo("teto"))
+            }
+        };
+        let papel = papel_da_empresa(ctx, uow, self.papel)?;
+        RepositorioAuth::novo(uow)
+            .definir_limite(papel, CHAVE_DESCONTO_MAXIMO, valor)
+            .map_err(|e| Erro::de_dominio(&e))
+    }
+}
+
+/// O id do papel desta empresa para um papel de fábrica, se já existe (o de fábrica nasce na
+/// primeira vez que é usado). O Administrador é o do primeiro acesso (não-sistema, mantido
+/// completo).
+#[cfg(feature = "sqlite")]
+pub(crate) fn papel_existente(
+    c: &rusqlite::Connection,
+    empresa: Id,
+    fabrica: PapelDeFabrica,
+) -> Resultado<Option<Id>> {
+    use rusqlite::OptionalExtension;
+
+    let sistema = i64::from(fabrica != PapelDeFabrica::Administrador);
+    let existente: Option<Vec<u8>> = c
+        .query_row(
+            "SELECT id FROM nucleo_papel
+             WHERE nome = ?1 AND sistema = ?2 AND (empresa = ?3 OR empresa IS NULL)
+             ORDER BY empresa IS NULL LIMIT 1",
+            rusqlite::params![fabrica.nome(), sistema, empresa.em_bytes().as_slice()],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| Erro::novo(CodigoErro::FALHA_INTERNA, e.to_string()))?;
+    Ok(existente
+        .and_then(|b| <[u8; 16]>::try_from(b).ok())
+        .map(Id::de_bytes))
+}
+
 /// O id do papel desta empresa para um papel de fábrica — criando-o, contra o catálogo atual,
 /// na primeira vez.
 #[cfg(feature = "sqlite")]
@@ -161,23 +241,9 @@ fn papel_da_empresa(
     fabrica: PapelDeFabrica,
 ) -> Resultado<Id> {
     use cardeal_auth::RepositorioAuth;
-    use rusqlite::OptionalExtension;
 
-    // O Administrador da empresa é o do primeiro acesso (não-sistema, mantido completo).
-    let sistema = i64::from(fabrica != PapelDeFabrica::Administrador);
-    let existente: Option<Vec<u8>> = uow
-        .conexao()
-        .query_row(
-            "SELECT id FROM nucleo_papel
-             WHERE nome = ?1 AND sistema = ?2 AND (empresa = ?3 OR empresa IS NULL)
-             ORDER BY empresa IS NULL LIMIT 1",
-            rusqlite::params![fabrica.nome(), sistema, ctx.empresa.em_bytes().as_slice()],
-            |r| r.get(0),
-        )
-        .optional()
-        .map_err(|e| Erro::novo(CodigoErro::FALHA_INTERNA, e.to_string()))?;
-    if let Some(id) = existente.and_then(|b| <[u8; 16]>::try_from(b).ok()) {
-        return Ok(Id::de_bytes(id));
+    if let Some(id) = papel_existente(uow.conexao(), ctx.empresa, fabrica)? {
+        return Ok(id);
     }
     if fabrica == PapelDeFabrica::Administrador {
         return Err(Erro::novo(

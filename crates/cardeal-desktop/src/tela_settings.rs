@@ -11,6 +11,8 @@ use cardeal_ui::organisms::{notificar, ColunaGrade, Grade, LayoutTela, Notificac
 use cardeal_ui::tokens::{Espaco, Tema, TemaUi};
 use eframe::egui;
 
+mod tetos;
+
 const REGIMES: [&str; 4] = ["MEI", "SimplesNacional", "LucroPresumido", "LucroReal"];
 const REGIME_ROTULO: [&str; 4] = ["MEI", "Simples Nacional", "Lucro Presumido", "Lucro Real"];
 
@@ -31,6 +33,8 @@ pub struct EstadoTelaSettings {
     empresa: Option<EmpresaResumo>,
     usuarios: Vec<UsuarioResumo>,
     papeis: Vec<PapelResumo>,
+    /// O teto de desconto de cada papel que vende.
+    tetos: Vec<tetos::LinhaTeto>,
     razao: String,
     fantasia: String,
     regime: usize,
@@ -65,6 +69,7 @@ impl EstadoTelaSettings {
         }
         self.usuarios = motor.usuarios().unwrap_or_default();
         self.papeis = motor.papeis().unwrap_or_default();
+        self.tetos = tetos::carregar(motor, sessao);
 
         match motor.identidade_visual() {
             Ok(id) => {
@@ -126,7 +131,7 @@ pub fn mostrar(
                 Aba::Fiscal => crate::tela_fiscal::mostrar(ui, motor, sessao, &mut estado.fiscal),
                 Aba::Impressao => secao_impressao(ui, motor, sessao, estado),
                 Aba::Aparencia => secao_aparencia(ui, tema),
-                Aba::Acesso => secao_acesso(ui, estado),
+                Aba::Acesso => secao_acesso(ui, motor, sessao, estado),
             }
         },
     );
@@ -441,7 +446,12 @@ fn secao_aparencia(ui: &mut egui::Ui, tema: &mut Tema) {
     });
 }
 
-fn secao_acesso(ui: &mut egui::Ui, estado: &mut EstadoTelaSettings) {
+fn secao_acesso(
+    ui: &mut egui::Ui,
+    motor: &Motor,
+    sessao: &Sessao,
+    estado: &mut EstadoTelaSettings,
+) {
     cartao(ui, |ui| {
         ui.add(Rotulo::titulo_secao("Usuários"));
         ui.add_space(Espaco::E8);
@@ -499,6 +509,14 @@ fn secao_acesso(ui: &mut egui::Ui, estado: &mut EstadoTelaSettings) {
             });
         });
     });
+    ui.add_space(Espaco::E16);
+    let mut gravou = false;
+    cartao(ui, |ui| {
+        gravou = tetos::secao(ui, motor, sessao, &mut estado.tetos)
+    });
+    if gravou {
+        estado.tetos = tetos::carregar(motor, sessao);
+    }
     ui.add_space(Espaco::E12);
     ui.add(Rotulo::apoio(
         "Criar e editar usuários e papéis chega numa próxima versão — hoje o assistente de primeiro acesso cria o administrador.",

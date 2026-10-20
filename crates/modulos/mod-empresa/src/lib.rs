@@ -27,10 +27,14 @@ mod tipos;
 
 pub use cardeal_auth::PapelDeFabrica;
 pub use comandos::{AtualizarDadosEmpresa, DefinirContatoEmpresa, DefinirLogoEmpresa};
-pub use consultas::{DadosDaEmpresa, IdentidadeDaEmpresa, PapeisDaEmpresa, UsuariosDaEmpresa};
+pub use consultas::{
+    DadosDaEmpresa, IdentidadeDaEmpresa, PapeisDaEmpresa, TetosDeDesconto, UsuariosDaEmpresa,
+};
 pub use fiscal::{DadosFiscais, DadosFiscaisDaEmpresa, DefinirDadosFiscaisEmpresa, EnderecoFiscal};
 pub use manifesto::{ID, MANIFESTO};
-pub use membros::{AdicionarUsuario, DesativarUsuario};
+pub use membros::{AdicionarUsuario, DefinirTetoDeDesconto, DesativarUsuario};
 #[cfg(feature = "sqlite")]
 pub use modulo::ModuloEmpresa;
-pub use tipos::{EmpresaResumo, IdentidadeVisual, PapelResumo, UsuarioResumo, TETO_LOGO_BYTES};
+pub use tipos::{
+    EmpresaResumo, IdentidadeVisual, PapelResumo, TetoDeDesconto, UsuarioResumo, TETO_LOGO_BYTES,
+};

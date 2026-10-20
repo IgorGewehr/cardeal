@@ -688,6 +688,13 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
     `PapelDeFabrica::limites_padrao` (teto de desconto: Admin/Gerente ∞, Caixa/Vendedor 10%);
   - `cardeal-motor`: `sincronizar_papeis_de_fabrica` completa os papéis de fábrica gravados
     (permissões e limites, só acrescentando), e a impressão do plano inclui a política deles.
+- **Teto de desconto configurável (2026-10-20):** o padrão de fábrica fica (Admin/Gerente sem teto,
+  Caixa/Vendedor 10%) e o dono ajusta por papel em Configurações › Usuários e acesso:
+  - `mod_empresa`: `DefinirTetoDeDesconto` (`empresa.definir_teto_desconto.v1`) e
+    `TetosDeDesconto` (`empresa.tetos_desconto.v1`, com quantos usuários têm o papel);
+  - `RepositorioAuth::definir_limite` grava o limite inclusive em papel de fábrica (as permissões
+    seguem imutáveis); a sincronização só preenche limite ausente, então o ajuste fica;
+  - desktop: `tela_settings/tetos.rs`.
 - **Inventário com contagem cega (2026-10-13):** migração `estoque` v11 (`estoque_inventario`,
   `estoque_contagem_item`), comandos `criar_inventario`/`iniciar_contagem`/`registrar_contagem`/
   `encerrar_inventario`/`cancelar_inventario` (`.v1`) e consultas `inventarios`/`posicao_do_inventario`.

@@ -98,7 +98,8 @@ português — o admin nunca vê `fin.rec.bx`.
 | Contador | Escritório contábil | Somente leitura + exportações |
 | Auditor | Auditoria | Somente leitura, inclusive auditoria e razão |
 
-Papéis de fábrica são imutáveis (`sistema = 1`); o admin cria cópias para ajustar.
+Papéis de fábrica são imutáveis (`sistema = 1`); o admin cria cópias para ajustar. **Exceção: os
+limites** (§3.4) — o que o papel pode fazer é da fábrica; o tamanho do poder é da empresa.
 
 ### 3.3 Escopo (a parte ABAC)
 
@@ -139,6 +140,13 @@ sem ele o teto é zero e nem o dono conseguia dar desconto. E, por serem imutáv
 a cada mudança de política o motor os completa ao abrir a base (`sincronizar_papeis_de_fabrica`):
 acrescenta o que a política passou a conceder e o limite que ainda não têm — só acrescenta, como já
 fazia com o Administrador.
+
+O teto de desconto de cada papel que vende é ajustável pelo dono em Configurações › Usuários e
+acesso (`empresa.definir_teto_desconto.v1`, permissão `empresa.usuarios.gerenciar`, auditado;
+`empresa.tetos_desconto.v1` lista): de 0% (não dá desconto) a 100%, ou sem teto. O papel de
+fábrica ainda não usado nasce ali, já com o ajuste. Como a sincronização só preenche limite
+ausente, a próxima atualização não desfaz o ajuste. Vale a partir do próximo login de quem tem o
+papel — a sessão carrega os limites no login.
 
 Exceder o limite não é erro: dispara **autorização de supervisor** na hora, que é registrada
 vinculando as duas identidades (quem pediu, quem autorizou).
