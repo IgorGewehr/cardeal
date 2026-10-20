@@ -94,6 +94,19 @@ const SQL_ALERTA_NOTA: &str = r"
 ALTER TABLE compras_nota_entrada ADD COLUMN alerta TEXT;
 ";
 
+// Migração v6 (2026-10-20): as parcelas da nota — as duplicatas do XML (`cobr/dup`) ou as que
+// quem confirmou informou. Viram as parcelas do título a pagar.
+const SQL_PARCELAS_NOTA: &str = r"
+CREATE TABLE compras_nota_parcela (
+    nota        BLOB    NOT NULL REFERENCES compras_nota_entrada(id),
+    ordem       INTEGER NOT NULL,
+    numero      TEXT    NOT NULL,
+    vencimento  INTEGER NOT NULL,
+    valor       INTEGER NOT NULL,
+    PRIMARY KEY (nota, ordem)
+) STRICT, WITHOUT ROWID;
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -123,6 +136,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 5,
         nome: "compras_alerta_da_nota",
         sql: SQL_ALERTA_NOTA,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 6,
+        nome: "compras_parcelas_da_nota",
+        sql: SQL_PARCELAS_NOTA,
         tipo: TipoMigracao::Esquema,
     },
 ];

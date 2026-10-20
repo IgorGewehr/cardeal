@@ -40,6 +40,9 @@ use mod_estoque::{
     SugerirNomeDoProduto,
 };
 
+mod estorno;
+mod parcelas;
+
 /// O formulário "Criar produto novo" de um item não casado: o nome (começa com a sugestão
 /// padronizada pelo dicionário) e o grupo opcional.
 #[derive(Default)]
@@ -116,6 +119,10 @@ pub struct EstadoTelaCompras {
     grupos: Vec<NoArvore>,
     /// "Já foi pago" no diálogo de confirmar entrada — item 2 do briefing.
     pago_no_ato: bool,
+    /// As parcelas da conta a pagar da nota aberta.
+    parcelas: parcelas::EditorParcelas,
+    /// O estorno da entrada da nota aberta (confirmada).
+    estorno: estorno::EstadoEstorno,
     busca: String,
     ordenacao: Ordenacao,
     nova: FormNova,
@@ -205,6 +212,8 @@ impl EstadoTelaCompras {
         self.vinc_produto.clear();
         self.busca_produto.clear();
         self.pago_no_ato = false;
+        self.parcelas = parcelas::EditorParcelas::carregar(motor, sessao, &item);
+        self.estorno = estorno::EstadoEstorno::default();
         self.nota_aberta = Some(item);
         self.dlg = Dlg::Ver;
     }
@@ -764,29 +773,77 @@ fn dialogo_ver(
                     None => {}
                 }
 
-                if matches!(n.estado, EstadoNotaEntrada::Conferida) {
+                // A nota em conferência se confirma quando todo item tem produto (`Conferida`
+                // nunca é alcançada por nenhum comando: esperar por ela escondia o botão).
+                if matches!(
+                    n.estado,
+                    EstadoNotaEntrada::AConferir | EstadoNotaEntrada::Conferida
+                ) {
                     ui.add_space(Espaco::E12);
                     ui.add(Divisor::novo());
                     ui.add_space(Espaco::E12);
                     ui.add(Rotulo::titulo_secao("Confirmar entrada"));
                     ui.add_space(Espaco::E8);
-                    SeletorOpcao::novo("Local que recebe", &mut estado.local_sel)
-                        .opcoes(ops_local.clone())
-                        .mostrar(ui);
-                    ui.add_space(Espaco::E8);
-                    ui.add(Caixa::nova(
-                        &mut estado.pago_no_ato,
-                        "Nota já foi paga — baixar o título a pagar automaticamente",
-                    ));
-                    if estado.pago_no_ato {
+                    let pendentes = estado
+                        .itens_nota
+                        .iter()
+                        .filter(|i| i.estado_casamento != EstadoCasamento::Casado)
+                        .count();
+                    if pendentes > 0 {
                         ui.add(
-                            Rotulo::campo("O título nasce quitado em vez de pendente.")
-                                .cor(ui.cores().positivo),
+                            Rotulo::campo(format!(
+                                "Vincule {} a um produto do estoque para dar entrada.",
+                                if pendentes == 1 {
+                                    "o item que falta".to_owned()
+                                } else {
+                                    format!("os {pendentes} itens que faltam")
+                                }
+                            ))
+                            .quebravel(),
                         );
+                    } else {
+                        SeletorOpcao::novo("Local que recebe", &mut estado.local_sel)
+                            .opcoes(ops_local.clone())
+                            .mostrar(ui);
+                        ui.add_space(Espaco::E8);
+                        ui.add(Caixa::nova(
+                            &mut estado.pago_no_ato,
+                            "Nota já foi paga — baixar o título a pagar automaticamente",
+                        ));
+                        if estado.pago_no_ato {
+                            ui.add(
+                                Rotulo::campo(
+                                    "O título nasce quitado, numa parcela só, em vez de \
+                                     pendente.",
+                                )
+                                .cor(ui.cores().positivo),
+                            );
+                        } else {
+                            ui.add_space(Espaco::E8);
+                            parcelas::secao(
+                                ui,
+                                &mut estado.parcelas,
+                                n.valor_total,
+                                n.data_emissao,
+                            );
+                        }
+                        ui.add_space(Espaco::E12);
+                        if ui.add(Botao::primario("Confirmar entrada")).clicked() {
+                            confirmar(ui.ctx(), motor, sessao, estado, n.nota);
+                        }
                     }
-                    ui.add_space(Espaco::E8);
-                    if ui.add(Botao::primario("Confirmar entrada")).clicked() {
-                        confirmar(ui.ctx(), motor, sessao, estado, n.nota);
+                }
+                if n.estado == EstadoNotaEntrada::Confirmada {
+                    ui.add_space(Espaco::E12);
+                    ui.add(Divisor::novo());
+                    ui.add_space(Espaco::E12);
+                    if estorno::secao(ui, motor, sessao, &mut estado.estorno, n.nota) {
+                        estado.carregar(motor, sessao);
+                        estado.recarregar_itens(motor, sessao, n.nota);
+                        if let Some(aberta) = estado.nota_aberta.clone() {
+                            estado.parcelas =
+                                parcelas::EditorParcelas::carregar(motor, sessao, &aberta);
+                        }
                     }
                 }
             },
@@ -1050,6 +1107,18 @@ fn confirmar(
         );
         return;
     };
+    // Pago no ato: uma parcela só, quitada — as parcelas não vão.
+    let parcelas = if estado.pago_no_ato {
+        None
+    } else {
+        match estado.parcelas.lidas() {
+            Ok(p) => Some(p),
+            Err(e) => {
+                notificar(ctx, Notificacao::aviso(e));
+                return;
+            }
+        }
+    };
     match motor.executar(
         sessao,
         "compras.confirmar_entrada.v1",
@@ -1058,6 +1127,7 @@ fn confirmar(
             local,
             gerar_titulo_a_pagar: None,
             pago_no_ato: Some(estado.pago_no_ato),
+            parcelas,
         },
     ) {
         Ok(saida) => {
@@ -1159,5 +1229,100 @@ mod testes {
             estado.produto_novo.is_empty(),
             "o formulário sai depois de criar"
         );
+    }
+
+    #[test]
+    fn nota_vinculada_confirma_em_parcelas_e_se_estorna_pela_tela() {
+        let t = motor_de_teste();
+        let r: mod_compras::RelatorioImportacao = t
+            .motor
+            .executar(
+                &t.sessao,
+                "compras.importar_nota_de_arquivo_xml.v1",
+                &ImportarNotaDeArquivoXml { xml: XML.into() },
+            )
+            .expect("importa");
+        let mut estado = EstadoTelaCompras::default();
+        estado.carregar(&t.motor, &t.sessao);
+        estado.abrir_nota(&t.motor, &t.sessao, r.nota_entrada);
+        let item = estado.itens_nota[0].clone();
+        let ctx = egui::Context::default();
+        cardeal_ui::tokens::instalar_fontes(&ctx);
+        cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+        let quadro = |estado: &mut EstadoTelaCompras| {
+            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                dialogo_ver(ctx, &t.motor, &t.sessao, estado);
+            });
+        };
+        quadro(&mut estado);
+        // Sem produto vinculado, o diálogo pede o vínculo em vez de oferecer a confirmação.
+        criar_produto_do_item(
+            &ctx,
+            &t.motor,
+            &t.sessao,
+            &mut estado,
+            r.nota_entrada,
+            item.id,
+        );
+        assert_eq!(
+            estado.itens_nota[0].estado_casamento,
+            EstadoCasamento::Casado
+        );
+        // A nota está "A conferir" com tudo vinculado: o diálogo oferece a confirmação.
+        quadro(&mut estado);
+        assert_eq!(
+            estado.parcelas.lidas().unwrap().len(),
+            1,
+            "sem duplicatas, uma parcela na emissão"
+        );
+        estado.parcelas = parcelas::EditorParcelas::carregar(
+            &t.motor,
+            &t.sessao,
+            estado.nota_aberta.as_ref().unwrap(),
+        );
+        let local: mod_estoque::LocalCriado = t
+            .motor
+            .executar(
+                &t.sessao,
+                "estoque.criar_local.v1",
+                &mod_estoque::CriarLocal {
+                    nome: "Depósito".into(),
+                    tipo: mod_estoque::TipoLocal::Deposito,
+                },
+            )
+            .unwrap();
+        estado.local_sel = Some(local.local);
+        confirmar(&ctx, &t.motor, &t.sessao, &mut estado, r.nota_entrada);
+        estado.carregar(&t.motor, &t.sessao);
+        let nota = estado
+            .notas
+            .iter()
+            .find(|n| n.nota == r.nota_entrada)
+            .unwrap();
+        assert_eq!(nota.estado, EstadoNotaEntrada::Confirmada);
+
+        // Estornar: a prévia, o motivo e a nota de volta à conferência.
+        estado.abrir_nota(&t.motor, &t.sessao, r.nota_entrada);
+        quadro(&mut estado);
+        let feito: mod_compras::EntradaFoiEstornada = t
+            .motor
+            .executar(
+                &t.sessao,
+                "compras.estornar_entrada.v1",
+                &mod_compras::EstornarEntrada {
+                    nota_entrada: r.nota_entrada,
+                    motivo: "Quantidade errada na conferência".into(),
+                    estornar_pagamento: false,
+                },
+            )
+            .expect("estorna");
+        assert_eq!(feito.itens, 1);
+        estado.carregar(&t.motor, &t.sessao);
+        assert_eq!(
+            estado.nota_aberta.as_ref().map(|n| n.estado),
+            Some(EstadoNotaEntrada::AConferir)
+        );
+        quadro(&mut estado);
+        quadro(&mut estado);
     }
 }

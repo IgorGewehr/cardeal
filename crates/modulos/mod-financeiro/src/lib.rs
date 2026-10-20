@@ -115,8 +115,8 @@ pub use comandos::lancar_titulo_comum;
 pub use comandos::QuitadoAgora;
 #[cfg(feature = "sqlite")]
 pub use comandos::{
-    baixar_pagamento_comum, baixar_recebimento_comum, estornar_baixa_comum,
-    materializar_recorrencias_pendentes,
+    baixar_pagamento_comum, baixar_recebimento_comum, desfazer_titulo_da_origem_comum,
+    estornar_baixa_comum, materializar_recorrencias_pendentes,
 };
 pub use comandos::{
     AbrirCaixa, AlterarVencimento, BaixaFoiEstornada, BaixarPagamento, BaixarRecebimento,
@@ -127,7 +127,7 @@ pub use comandos::{
     LancarTituloAPagar, LancarTituloAReceber, MaterializarRecorrencias, PagamentoBaixado,
     RecebimentoBaixado, RecorrenciaCriada, RegistrarCheque, RegistrarSangria, RegistrarSuprimento,
     RenegociarTitulo, SangriaFoiRegistrada, SuprimentoFoiRegistrado, TituloAPagarLancado,
-    TituloAReceberLancado, TituloFoiCancelado, TituloFoiRenegociado, TituloGravado,
+    TituloAReceberLancado, TituloDesfeito, TituloFoiCancelado, TituloFoiRenegociado, TituloGravado,
 };
 pub use comandos::{
     BaixarPagamentosEmLote, BaixarRecebimentosEmLote, BaixasEmLoteFeitas, DadosBaixaEmLote,
@@ -148,7 +148,9 @@ pub use conferencia::{
     OrigemDoSaldo, SaldoDoBanco, Soma,
 };
 #[cfg(feature = "sqlite")]
-pub use consultas::{em_aberto_a_receber_do_cliente, titulo_da_origem};
+pub use consultas::{
+    em_aberto_a_receber_do_cliente, situacao_do_titulo_da_origem, titulo_da_origem,
+};
 pub use consultas::{
     BaixasDaParcela, Caixas, Categorias, ContasDeCaixa, ContasDeResultado, ContasDisponiveis,
     ExtratoDisponivel, ItemBaixa, ItemCaixa, ItemContaDisponivel, ItemContaResultado,

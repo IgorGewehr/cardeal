@@ -45,9 +45,10 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   documento criado na venda sem rede, fila, transmissão em segundo plano (tarefa no despacho), conferência
   pela chave antes de reemitir, área Notas fiscais — e o **DANFCE** (80 mm, QR Code), o **cancelamento** e a
   **inutilização** como pedidos na fila, e o **estorno da venda** no PDV com a NFC-e anulada pela fila.
-  O MVP do backlog do `docs/21-licoes-do-gestao-raiz.md` §5 (itens 1–8) está feito. Próximo: o
-  resto do §5 (DFe com OK do usuário, parcelas e estorno da entrada de compra, pacote do contador
-  com XMLs…); a 1ª autorizada no RS espera os dados do usuário.
+  O MVP do backlog do `docs/21-licoes-do-gestao-raiz.md` §5 (itens 1–8) e o item 10 (parcelas e
+  estorno da entrada de compra) estão feitos. Próximo: o resto do §5 (DFe com OK do usuário,
+  pacote do contador com XMLs, prazo de cancelamento visível…); a 1ª autorizada no RS espera os
+  dados do usuário.
 - **Pendência de confiança:** as tabelas do Simples e as alíquotas precisam ser conferidas com o
   contador; o ST/IPI **da nota** já entra no custo (2026-10-13), mas a estimativa de ST pela MVA (sem o valor na
   nota) ainda não.
@@ -695,6 +696,18 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   - `RepositorioAuth::definir_limite` grava o limite inclusive em papel de fábrica (as permissões
     seguem imutáveis); a sincronização só preenche limite ausente, então o ajuste fica;
   - desktop: `tela_settings/tetos.rs`.
+- **Compras: parcelas da nota e estorno da entrada (2026-10-20, item 10 do doc 21):**
+  - `cardeal-fiscal`: `NotaFiscalXml.duplicatas` (`cobr/dup`: número, vencimento, valor);
+  - `mod_compras`: migração v6 `compras_nota_parcela`; `ParcelaCompra` e `conferir_parcelas`;
+    `ConfirmarEntrada.parcelas` (`confirmar_entrada_com_parcelas`); `EstornarEntrada`
+    (`compras.estornar_entrada.v1`, `compras.entrada.estornar`); consultas `ParcelasDaNota` e
+    `PreviaDoEstornoDaEntrada`; evento `compras.entrada_estornada.v1`;
+  - `mod_financeiro`: `DadosLancamentoTitulo.cronograma`, `desfazer_titulo_da_origem_comum`,
+    `situacao_do_titulo_da_origem`; `titulo_da_origem` prefere o título vivo;
+  - `mod_estoque`: `retirar_entradas_da_origem`, `entradas_vivas_da_origem`,
+    `SaldoLocal::estorno_de_entrada`;
+  - desktop: `tela_compras/parcelas.rs` e `tela_compras/estorno.rs`; "Confirmar entrada" aparece
+    na nota em conferência com tudo vinculado (esperava o estado `Conferida`, que nada alcança).
 - **Inventário com contagem cega (2026-10-13):** migração `estoque` v11 (`estoque_inventario`,
   `estoque_contagem_item`), comandos `criar_inventario`/`iniciar_contagem`/`registrar_contagem`/
   `encerrar_inventario`/`cancelar_inventario` (`.v1`) e consultas `inventarios`/`posicao_do_inventario`.

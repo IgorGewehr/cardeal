@@ -11,7 +11,9 @@ use cardeal_storage::UnidadeDeTrabalho;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::casamento::RegraCasamentoAprendida;
-use crate::nota::{EstadoCasamento, EstadoNotaEntrada, ItemNotaEntrada, NotaEntrada};
+use crate::nota::{
+    EstadoCasamento, EstadoNotaEntrada, ItemNotaEntrada, NotaEntrada, ParcelaCompra,
+};
 use crate::preferencias::{PreferenciasCompras, RateioPor};
 
 #[allow(clippy::needless_pass_by_value)] // usado como `.map_err(persist)`
@@ -190,6 +192,44 @@ impl<'a, 'b> RepositorioCompras<'a, 'b> {
             .optional()
             .map_err(persist)
             .map(|opt| opt.map(id_de))
+    }
+
+    /// Troca as parcelas da nota pelas informadas (as do XML na importação; as usadas na
+    /// confirmação).
+    ///
+    /// # Errors
+    /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+    pub fn substituir_parcelas(&mut self, nota: Id, parcelas: &[ParcelaCompra]) -> Resultado<()> {
+        self.conn()
+            .execute(
+                "DELETE FROM compras_nota_parcela WHERE nota = ?1",
+                [blob(nota)],
+            )
+            .map_err(persist)?;
+        for (ordem, p) in parcelas.iter().enumerate() {
+            self.conn()
+                .execute(
+                    "INSERT INTO compras_nota_parcela (nota, ordem, numero, vencimento, valor)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![
+                        blob(nota),
+                        i64::try_from(ordem).unwrap_or(i64::MAX),
+                        p.numero,
+                        dias(p.vencimento),
+                        p.valor.em_centavos(),
+                    ],
+                )
+                .map_err(persist)?;
+        }
+        Ok(())
+    }
+
+    /// As parcelas da nota, em ordem (vazio se a nota não traz cobrança).
+    ///
+    /// # Errors
+    /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+    pub fn parcelas_da_nota(&self, nota: Id) -> Resultado<Vec<ParcelaCompra>> {
+        parcelas_da_nota(self.conn(), nota)
     }
 
     /// Grava um item de nota de entrada.
@@ -497,4 +537,29 @@ fn item_de_linha(r: &rusqlite::Row<'_>) -> rusqlite::Result<ItemNotaEntrada> {
         valor_desconto: Dinheiro::centavos(r.get::<_, i64>(11)?),
         valor_impostos: Dinheiro::centavos(r.get::<_, i64>(12)?),
     })
+}
+
+/// As parcelas de uma nota, em ordem — também para as consultas.
+///
+/// # Errors
+/// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+pub(crate) fn parcelas_da_nota(c: &Connection, nota: Id) -> Resultado<Vec<ParcelaCompra>> {
+    let mut stmt = c
+        .prepare(
+            "SELECT numero, vencimento, valor FROM compras_nota_parcela
+             WHERE nota = ?1 ORDER BY ordem",
+        )
+        .map_err(persist)?;
+    let linhas = stmt
+        .query_map([blob(nota)], |r| {
+            Ok(ParcelaCompra {
+                numero: r.get(0)?,
+                vencimento: data_de(r.get(1)?),
+                valor: Dinheiro::centavos(r.get(2)?),
+            })
+        })
+        .map_err(persist)?;
+    linhas
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(persist)
 }

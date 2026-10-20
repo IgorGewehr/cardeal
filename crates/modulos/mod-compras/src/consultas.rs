@@ -21,6 +21,7 @@ use cardeal_kernel::{Preco, Quantidade};
 use crate::nota::EstadoCasamento;
 use crate::nota::EstadoNotaEntrada;
 use crate::nota::ItemNotaEntrada;
+use crate::nota::ParcelaCompra;
 
 #[cfg(feature = "sqlite")]
 fn blob(id: Id) -> Vec<u8> {
@@ -166,5 +167,106 @@ impl Consulta for ItensDaNota {
         linhas
             .collect::<rusqlite::Result<Vec<_>>>()
             .map_err(persist)
+    }
+}
+
+/// As parcelas da nota: as duplicatas do XML ou as usadas na confirmação — vazio se a nota
+/// não traz cobrança. Para a tela preencher as parcelas antes de confirmar.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParcelasDaNota {
+    /// A nota.
+    pub nota: Id,
+}
+
+impl Consulta for ParcelasDaNota {
+    type Saida = Vec<ParcelaCompra>;
+    const PERMISSAO: &'static str = "compras.entrada.ver";
+
+    #[cfg(feature = "sqlite")]
+    fn executar(self, _ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        crate::repositorio::parcelas_da_nota(conexao, self.nota)
+    }
+}
+
+/// Uma linha de estoque que o estorno tira: o produto, quanto entrou pela nota e quanto há no
+/// local agora.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ItemDoEstorno {
+    /// O produto.
+    pub produto: String,
+    /// Quanto entrou pela nota (e não foi desfeito).
+    pub entrou: cardeal_kernel::Quantidade,
+    /// Quanto há no local agora.
+    pub no_local: cardeal_kernel::Quantidade,
+}
+
+impl ItemDoEstorno {
+    /// Se a mercadoria ainda está toda no local — sem isso a entrada não se estorna.
+    #[must_use]
+    pub fn inteiro(&self) -> bool {
+        self.no_local >= self.entrou
+    }
+}
+
+/// O que o estorno da entrada vai fazer — para a tela mostrar antes de pedir o motivo.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PreviaEstornoEntrada {
+    /// O que sai do estoque.
+    pub itens: Vec<ItemDoEstorno>,
+    /// O valor da conta a pagar que será cancelada, se há.
+    pub titulo: Option<Dinheiro>,
+    /// Quanto dela já foi pago (o estorno exige estornar também).
+    pub pago: Dinheiro,
+}
+
+impl PreviaEstornoEntrada {
+    /// Por que o estorno não dá, se não dá: a mercadoria que já saiu do local.
+    #[must_use]
+    pub fn bloqueio(&self) -> Option<String> {
+        self.itens.iter().find(|i| !i.inteiro()).map(|i| {
+            format!(
+                "{}: entraram {} e só restam {} no local — a mercadoria já foi vendida ou \
+                 movida, e a entrada não se estorna.",
+                i.produto,
+                i.entrou.formatar(0),
+                i.no_local.max(cardeal_kernel::Quantidade::ZERO).formatar(0)
+            )
+        })
+    }
+}
+
+/// A prévia do estorno da entrada de uma nota ([`PreviaEstornoEntrada`]).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PreviaDoEstornoDaEntrada {
+    /// A nota.
+    pub nota: Id,
+}
+
+impl Consulta for PreviaDoEstornoDaEntrada {
+    type Saida = PreviaEstornoEntrada;
+    const PERMISSAO: &'static str = "compras.entrada.ver";
+
+    #[cfg(feature = "sqlite")]
+    fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        let itens =
+            mod_estoque::entradas_vivas_da_origem(conexao, ctx.empresa, "compras", self.nota)?
+                .into_iter()
+                .map(|v| ItemDoEstorno {
+                    produto: v.nome,
+                    entrou: v.quantidade,
+                    no_local: v.disponivel,
+                })
+                .collect();
+        let situacao = mod_financeiro::situacao_do_titulo_da_origem(
+            conexao,
+            ctx.empresa,
+            "compras",
+            self.nota,
+        )?;
+        Ok(PreviaEstornoEntrada {
+            itens,
+            titulo: situacao.map(|(valor, _)| valor),
+            pago: situacao.map_or(Dinheiro::ZERO, |(_, pago)| pago),
+        })
     }
 }

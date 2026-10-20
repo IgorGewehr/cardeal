@@ -200,6 +200,54 @@ impl SaldoLocal {
         Ok(())
     }
 
+    /// Desfaz uma **entrada** (o estorno da entrada de uma nota de compra): tira `quantidade`
+    /// ao custo **dela**, não ao médio — o valor sai do estoque como entrou, e o custo médio
+    /// volta ao que seria sem ela: `(saldo·médio − quantidade·custo) / (saldo − quantidade)`.
+    /// Zerando o local, o médio fica como estava (referência para a próxima entrada). Exige a
+    /// quantidade no local: o que já foi vendido ou movido não se desfaz por aqui.
+    ///
+    /// # Errors
+    /// [`ErroEstoque::QuantidadeInvalida`]; [`ErroEstoque::SaldoInsuficiente`] se o disponível
+    /// não cobre a quantidade.
+    pub fn estorno_de_entrada(
+        &mut self,
+        quantidade: Quantidade,
+        custo_unitario: Preco,
+        agora: Instante,
+    ) -> Result<SaidaAplicada, ErroEstoque> {
+        if !quantidade.e_positiva() {
+            return Err(ErroEstoque::QuantidadeInvalida);
+        }
+        if self.quantidade_disponivel < quantidade {
+            return Err(ErroEstoque::SaldoInsuficiente {
+                disponivel: self.quantidade_disponivel.formatar(0),
+                pedido: quantidade.formatar(0),
+            });
+        }
+        let resto = self.quantidade_disponivel - quantidade;
+        if resto.e_positiva() {
+            let valor = i128::from(self.quantidade_disponivel.unidades_internas())
+                * i128::from(self.custo_medio.unidades_internas())
+                - i128::from(quantidade.unidades_internas())
+                    * i128::from(custo_unitario.unidades_internas()); // 1e-10
+            let den = i128::from(resto.unidades_internas()); // 1e-4
+            let novo = if valor <= 0 {
+                0
+            } else {
+                (2 * valor + den) / (2 * den)
+            };
+            self.custo_medio = Preco::interna(i64::try_from(novo).unwrap_or(i64::MAX));
+        }
+        self.quantidade_disponivel = resto;
+        self.tocar(agora);
+        Ok(SaidaAplicada {
+            quantidade,
+            custo_unitario,
+            custo_total: Dinheiro::de_total(quantidade, custo_unitario, Arredondamento::MeioAcima),
+            gerou_divergencia: false,
+        })
+    }
+
     /// Registra uma saída física (venda/consumo/perda). Não recalcula o custo. A saída é
     /// aceita mesmo sem saldo — a divergência é sinalizada, não bloqueada (§11.2).
     ///
@@ -349,6 +397,38 @@ mod testes {
     use proptest::prelude::*;
 
     use super::*;
+
+    #[test]
+    fn estorno_de_entrada_tira_ao_custo_dela_e_o_medio_volta() {
+        let agora = Instante::EPOCA;
+        let mut s = SaldoLocal::zerado(Id::novo(), Id::novo(), None, Id::novo(), agora);
+        s.entrada(Quantidade::unidades(10), Preco::reais(5), agora)
+            .unwrap();
+        s.entrada(Quantidade::unidades(10), Preco::reais(7), agora)
+            .unwrap();
+        assert_eq!(s.custo_medio, Preco::reais(6));
+        let a = s
+            .estorno_de_entrada(Quantidade::unidades(10), Preco::reais(7), agora)
+            .unwrap();
+        assert_eq!(a.custo_total, Dinheiro::reais(70));
+        assert_eq!(s.quantidade_disponivel, Quantidade::unidades(10));
+        assert_eq!(
+            s.custo_medio,
+            Preco::reais(5),
+            "o médio de antes da entrada"
+        );
+        // O que já saiu não se desfaz.
+        s.saida(Quantidade::unidades(4), agora).unwrap();
+        assert!(matches!(
+            s.estorno_de_entrada(Quantidade::unidades(10), Preco::reais(5), agora),
+            Err(ErroEstoque::SaldoInsuficiente { .. })
+        ));
+        // Zerando, o médio fica como referência.
+        s.estorno_de_entrada(Quantidade::unidades(6), Preco::reais(5), agora)
+            .unwrap();
+        assert!(s.quantidade_disponivel.e_zero());
+        assert_eq!(s.custo_medio, Preco::reais(5));
+    }
 
     fn agora() -> Instante {
         Instante::agora()

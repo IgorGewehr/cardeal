@@ -982,3 +982,93 @@ impl Consulta for LotesDisponiveisDoProduto {
         lotes_disponiveis_do_produto(conexao, self.produto)
     }
 }
+
+/// O que uma origem pôs no estoque e ainda não foi desfeito, por produto e local — as entradas
+/// dela menos as saídas dela (um estorno anterior), ao custo dessas entradas — e quanto há
+/// no local agora.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EntradaViva {
+    /// O produto.
+    pub produto: Id,
+    /// O nome do produto.
+    pub nome: String,
+    /// O local.
+    pub local: Id,
+    /// Quanto entrou (e não foi desfeito).
+    pub quantidade: Quantidade,
+    /// O custo unitário dessas entradas.
+    pub custo_unitario: Preco,
+    /// O disponível no local agora.
+    pub disponivel: Quantidade,
+}
+
+impl EntradaViva {
+    /// Se a mercadoria ainda está toda no local — sem isso a entrada não se desfaz.
+    #[must_use]
+    pub fn inteira_no_local(&self) -> bool {
+        self.disponivel >= self.quantidade
+    }
+}
+
+/// As [`EntradaViva`]s de uma origem (a entrada de uma nota de compra), na ordem em que
+/// entraram.
+///
+/// # Errors
+/// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+#[cfg(feature = "sqlite")]
+pub fn entradas_vivas_da_origem(
+    conexao: &Connection,
+    empresa: Id,
+    origem_modulo: &str,
+    origem_id: Id,
+) -> Resultado<Vec<EntradaViva>> {
+    use crate::saldo::TipoMovimento;
+
+    // (produto, local) → (quantidade 1e-4, valor 1e-10), na ordem da primeira entrada.
+    let mut ordem: Vec<(Id, Id)> = Vec::new();
+    let mut somas: std::collections::HashMap<(Id, Id), (i128, i128)> =
+        std::collections::HashMap::new();
+    for m in movimentos_da_origem(conexao, empresa, origem_modulo, origem_id)? {
+        let sinal = match m.tipo {
+            TipoMovimento::Entrada => 1,
+            TipoMovimento::Saida => -1,
+            _ => continue,
+        };
+        let chave = (m.produto, m.local);
+        if !somas.contains_key(&chave) {
+            ordem.push(chave);
+        }
+        let q = i128::from(m.quantidade.unidades_internas());
+        let c = i128::from(m.custo_unitario.map_or(0, Preco::unidades_internas));
+        let s = somas.entry(chave).or_insert((0, 0));
+        s.0 += sinal * q;
+        s.1 += sinal * q * c;
+    }
+    let mut vivas = Vec::new();
+    for (produto, local) in ordem {
+        let (q, v) = somas[&(produto, local)];
+        if q <= 0 {
+            continue;
+        }
+        let custo = if v <= 0 { 0 } else { (2 * v + q) / (2 * q) };
+        let (nome, disponivel): (String, i64) = conexao
+            .query_row(
+                "SELECT p.nome, COALESCE(s.quantidade_disponivel, 0)
+                   FROM estoque_produto p
+                   LEFT JOIN estoque_saldo_local s ON s.produto = p.id AND s.local = ?2
+                  WHERE p.id = ?1",
+                [blob(produto), blob(local)],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .map_err(persist)?;
+        vivas.push(EntradaViva {
+            produto,
+            nome,
+            local,
+            quantidade: Quantidade::interna(i64::try_from(q).unwrap_or(i64::MAX)),
+            custo_unitario: Preco::interna(i64::try_from(custo).unwrap_or(i64::MAX)),
+            disponivel: Quantidade::interna(disponivel),
+        });
+    }
+    Ok(vivas)
+}

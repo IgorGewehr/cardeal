@@ -44,9 +44,8 @@
 //!
 //! Cotação e pedido de compra (o doc original tem o spec; esta versão vai direto da nota ao
 //! estoque, como o `gestao-raiz` faz — mas sem copiar a ausência de pedido formal dele, só
-//! adiando); devolução ao fornecedor; leitura de condições de pagamento do XML (`cobr/dup`)
-//! — hoje `ConfirmarEntrada` sempre gera um título de parcela única vencendo na emissão;
-//! `ApiFiscalHttp` de verdade (hoje só `FiscalSimulado`); e `Ctx::porta()` em
+//! adiando); devolução ao fornecedor; `ApiFiscalHttp` de verdade (hoje só
+//! `FiscalSimulado`); e `Ctx::porta()` em
 //! `cardeal-modkit`, que destrava `verificar_notas_na_sefaz` virar um comando de despacho de
 //! verdade em vez de função chamada por fora.
 
@@ -72,19 +71,28 @@ mod repositorio;
 
 pub use casamento::{casar, RegraCasamentoAprendida, ResultadoCasamento, LIMIAR_SUGESTAO_FORTE};
 #[cfg(feature = "sqlite")]
-pub use comandos::{confirmar_entrada_comum, importar_nota_da_sefaz, verificar_notas_na_sefaz};
+pub use comandos::{
+    confirmar_entrada_com_parcelas, confirmar_entrada_comum, importar_nota_da_sefaz,
+    verificar_notas_na_sefaz,
+};
 pub use comandos::{
     ConfirmacaoEntrada, ConfirmarEntrada, DefinirPreferenciasCompras, EntradaConfirmada,
-    ImportarNotaDeArquivoXml, ItemNotaManual, LancarNotaManual, RelatorioImportacao,
-    VincularProdutoManual,
+    EntradaFoiEstornada, EstornarEntrada, ImportarNotaDeArquivoXml, ItemNotaManual,
+    LancarNotaManual, RelatorioImportacao, VincularProdutoManual, MOTIVO_MINIMO_ESTORNO,
 };
 pub use comandos::{CriarProdutoDoItem, ProdutoDoItemCriado};
-pub use consultas::{ItemNota, ItensDaNota, NotasRecentes};
+pub use consultas::{
+    ItemDoEstorno, ItemNota, ItensDaNota, NotasRecentes, ParcelasDaNota, PreviaDoEstornoDaEntrada,
+    PreviaEstornoEntrada,
+};
 pub use erros::ErroCompras;
 pub use manifesto::{manifesto, MANIFESTO};
 #[cfg(feature = "sqlite")]
 pub use modulo::ModuloCompras;
-pub use nota::{EstadoCasamento, EstadoNotaEntrada, ItemNotaEntrada, NotaEntrada};
+pub use nota::{
+    conferir_parcelas, EstadoCasamento, EstadoNotaEntrada, ItemNotaEntrada, NotaEntrada,
+    ParcelaCompra,
+};
 pub use preferencias::{PreferenciasCompras, RateioPor};
 #[cfg(feature = "sqlite")]
 pub use repositorio::RepositorioCompras;

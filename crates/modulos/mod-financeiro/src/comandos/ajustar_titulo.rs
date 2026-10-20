@@ -42,7 +42,7 @@ const ORIGENS_DO_FINANCEIRO: &[&str] = &[
 #[cfg(feature = "sqlite")]
 fn origem_por_extenso(origem: &str) -> &'static str {
     match origem {
-        "compras" => "da entrada de uma nota de compra",
+        "compras" => "da entrada de uma nota de compra (estorne a entrada em Compras)",
         "vendas" => "de uma venda",
         "pdv" => "do PDV",
         "os" | "os_peca" => "de uma ordem de serviço",
@@ -113,52 +113,133 @@ impl Comando for CancelarTitulo {
             }
         }
 
-        // 3. Lançar: estorna o `Confirmado` de cada parcela (um lançamento pode cobrir mais
-        //    de uma — estorna cada um uma vez).
+        // 3–5. Estorna, cancela e publica.
         let historico = format!("Cancelamento de título — {motivo}");
-        let mut estornados: Vec<Id> = Vec::new();
-        for lancamento in parcelas
-            .iter()
-            .filter(|p| p.estado == EstadoParcela::Aberta)
-            .filter_map(|p| p.lancamento)
-        {
-            if estornados.contains(&lancamento) {
-                continue;
-            }
-            let mut repo = cardeal_ledger::RepositorioRazao::novo(uow);
-            cardeal_ledger::Razao::estornar(&mut repo, lancamento, &historico, ctx.hoje())
-                .map_err(|e| Erro::de_dominio(&e))?;
-            estornados.push(lancamento);
-        }
-
-        // 4. Persistir — nunca apaga.
-        let mut canceladas = 0;
-        {
-            let mut repo = RepositorioFinanceiro::novo(uow);
-            for mut p in parcelas {
-                if p.estado == EstadoParcela::Aberta {
-                    p.cancelar();
-                    repo.atualizar_parcela(&p)?;
-                    canceladas += 1;
-                }
-            }
-            titulo.cancelar(ctx.agora);
-            repo.atualizar_titulo_cancelado(&titulo)?;
-        }
-
-        // 5. Publicar.
-        uow.publicar(TituloCancelado {
-            titulo: titulo.id,
-            valor: titulo.valor_original,
-            motivo,
-        })
-        .map_err(|e| Erro::de_dominio(&e))?;
-
+        let canceladas = cancelar_sem_baixa(&mut titulo, parcelas, &historico, motivo, ctx, uow)?;
         Ok(TituloFoiCancelado {
             valor: titulo.valor_original,
             parcelas: canceladas,
         })
     }
+}
+
+/// Estorna no Razão o `Confirmado` de cada parcela em aberto (um lançamento pode cobrir mais
+/// de uma — estorna cada um uma vez), cancela parcelas e título (nunca apaga) e publica
+/// [`TituloCancelado`]. Quem chama já garantiu que não sobrou baixa válida. Devolve quantas
+/// parcelas cancelou.
+#[cfg(feature = "sqlite")]
+fn cancelar_sem_baixa(
+    titulo: &mut crate::titulo::Titulo,
+    parcelas: Vec<crate::titulo::Parcela>,
+    historico: &str,
+    motivo: String,
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<usize> {
+    let mut estornados: Vec<Id> = Vec::new();
+    for lancamento in parcelas
+        .iter()
+        .filter(|p| p.estado == EstadoParcela::Aberta)
+        .filter_map(|p| p.lancamento)
+    {
+        if estornados.contains(&lancamento) {
+            continue;
+        }
+        let mut repo = cardeal_ledger::RepositorioRazao::novo(uow);
+        cardeal_ledger::Razao::estornar(&mut repo, lancamento, historico, ctx.hoje())
+            .map_err(|e| Erro::de_dominio(&e))?;
+        estornados.push(lancamento);
+    }
+
+    let mut canceladas = 0;
+    {
+        let mut repo = RepositorioFinanceiro::novo(uow);
+        for mut p in parcelas {
+            if p.estado == EstadoParcela::Aberta {
+                p.cancelar();
+                repo.atualizar_parcela(&p)?;
+                canceladas += 1;
+            }
+        }
+        titulo.cancelar(ctx.agora);
+        repo.atualizar_titulo_cancelado(titulo)?;
+    }
+
+    uow.publicar(TituloCancelado {
+        titulo: titulo.id,
+        valor: titulo.valor_original,
+        motivo,
+    })
+    .map_err(|e| Erro::de_dominio(&e))?;
+    Ok(canceladas)
+}
+
+/// O que [`desfazer_titulo_da_origem_comum`] desfez.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct TituloDesfeito {
+    /// O título cancelado.
+    pub titulo: Id,
+    /// Quantos pagamentos/recebimentos foram estornados antes.
+    pub baixas_estornadas: usize,
+    /// Quanto eles somavam (o dinheiro que volta para a conta).
+    pub valor_estornado: Dinheiro,
+}
+
+/// Desfaz o título que outro módulo lançou (`origem_modulo` + `origem_id`): estorna as baixas
+/// que ele tiver, estorna o lançamento de cada parcela e cancela parcelas e título — o caminho
+/// "pela origem" que o [`CancelarTitulo`] aponta (o estorno da entrada de uma nota de compra).
+/// Nunca apaga. Quem chama decide antes se estornar pagamento é aceitável. `Ok(None)` se a
+/// origem não tem título vivo.
+///
+/// # Errors
+/// [`ErroFinanceiro::TituloComMovimento`] se alguma parcela foi renegociada (a dívida vive no
+/// título novo); os erros de [`super::estornar_baixa_comum`] e do Razão.
+#[cfg(feature = "sqlite")]
+pub fn desfazer_titulo_da_origem_comum(
+    origem_modulo: &str,
+    origem_id: Id,
+    historico: &str,
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<Option<TituloDesfeito>> {
+    let Some(mut titulo) =
+        crate::consultas::titulo_da_origem(uow.conexao(), ctx.empresa, origem_modulo, origem_id)?
+            .filter(|t| !t.esta_cancelado())
+    else {
+        return Ok(None);
+    };
+    let parcelas = RepositorioFinanceiro::novo(uow).parcelas_do_titulo(titulo.id)?;
+    if parcelas
+        .iter()
+        .any(|p| p.estado == EstadoParcela::Renegociada)
+    {
+        return Err(Erro::de_dominio(&ErroFinanceiro::TituloComMovimento(
+            "parcela renegociada (cancele o título novo da renegociação)",
+        )));
+    }
+    let valor_estornado: Dinheiro = parcelas.iter().map(|p| p.valor_baixado).sum();
+    let mut baixas_estornadas = 0;
+    for p in &parcelas {
+        for baixa in RepositorioFinanceiro::novo(uow).baixas_nao_estornadas_da_parcela(p.id)? {
+            super::estornar_baixa_comum(baixa, historico, ctx, uow)?;
+            baixas_estornadas += 1;
+        }
+    }
+    // As parcelas voltaram a `Aberta` com o estorno das baixas: relê antes de cancelar.
+    let parcelas = RepositorioFinanceiro::novo(uow).parcelas_do_titulo(titulo.id)?;
+    cancelar_sem_baixa(
+        &mut titulo,
+        parcelas,
+        historico,
+        historico.to_owned(),
+        ctx,
+        uow,
+    )?;
+    Ok(Some(TituloDesfeito {
+        titulo: titulo.id,
+        baixas_estornadas,
+        valor_estornado,
+    }))
 }
 
 /// Muda o vencimento de uma parcela em aberto (ou com baixa parcial) — o fornecedor que

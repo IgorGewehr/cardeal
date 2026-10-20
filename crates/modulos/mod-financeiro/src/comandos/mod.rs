@@ -33,7 +33,9 @@ mod registrar_suprimento;
 mod renegociar_titulo;
 
 pub use abrir_caixa::{AbrirCaixa, CaixaFoiAberto};
-pub use ajustar_titulo::{AlterarVencimento, CancelarTitulo, TituloFoiCancelado};
+#[cfg(feature = "sqlite")]
+pub use ajustar_titulo::desfazer_titulo_da_origem_comum;
+pub use ajustar_titulo::{AlterarVencimento, CancelarTitulo, TituloDesfeito, TituloFoiCancelado};
 pub use baixar_em_lote::{
     BaixarPagamentosEmLote, BaixarRecebimentosEmLote, BaixasEmLoteFeitas, DadosBaixaEmLote,
 };
@@ -141,6 +143,9 @@ pub struct DadosLancamentoTitulo {
     pub primeiro_vencimento: Data,
     /// Dias entre parcelas consecutivas.
     pub intervalo_dias: i32,
+    /// As parcelas uma a uma (vencimento, valor) — as duplicatas de uma nota de compra.
+    /// Quando informado, substitui `parcelas`/`primeiro_vencimento`/`intervalo_dias`.
+    pub cronograma: Option<Vec<(Data, Dinheiro)>>,
     /// Observação livre.
     pub observacao: Option<String>,
     /// Categoria de relatório, opcional (`docs/modulos/financeiro.md` §11.9) — não afeta a
@@ -192,6 +197,9 @@ pub fn lancar_titulo_comum(
         dados.primeiro_vencimento,
         dados.intervalo_dias,
     );
+    if let Some(cronograma) = dados.cronograma {
+        construtor = construtor.cronograma(cronograma);
+    }
     if let Some(obs) = dados.observacao {
         construtor = construtor.observacao(obs);
     }

@@ -327,6 +327,72 @@ pub fn devolver_saidas_da_origem(
         .collect()
 }
 
+/// Desfaz o que uma origem pôs no estoque — o estorno da entrada de uma nota de compra. Para
+/// cada [`crate::EntradaViva`] da origem, uma saída no mesmo local, na mesma quantidade e **ao
+/// custo da entrada** (não ao médio): é exatamente o valor que o chamador estorna no Razão, e
+/// o custo médio volta ao que seria sem a entrada. Recusa se a mercadoria já não está toda no
+/// local (vendida, movida): desfazer então deixaria o estoque negativo e o custo errado.
+///
+/// # Errors
+/// [`crate::ErroEstoque::EntradaJaConsumida`]; local travado por inventário em contagem.
+#[cfg(feature = "sqlite")]
+pub fn retirar_entradas_da_origem(
+    origem_modulo: &'static str,
+    origem_id: Id,
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<Vec<SaidaGravada>> {
+    let vivas = crate::consultas::entradas_vivas_da_origem(
+        uow.conexao(),
+        ctx.empresa,
+        origem_modulo,
+        origem_id,
+    )?;
+    if let Some(v) = vivas.iter().find(|v| !v.inteira_no_local()) {
+        return Err(Erro::de_dominio(
+            &crate::erros::ErroEstoque::EntradaJaConsumida {
+                produto: v.nome.clone(),
+                entrou: v.quantidade.formatar(0),
+                resta: v.disponivel.max(Quantidade::ZERO).formatar(0),
+            },
+        ));
+    }
+    let mut saidas = Vec::with_capacity(vivas.len());
+    for v in vivas {
+        crate::repositorio_inventario::exigir_local_livre(uow.conexao(), v.local)?;
+        let mut repo = RepositorioEstoque::novo(uow);
+        let mut saldo = repo
+            .buscar_saldo(v.produto, v.local)?
+            .ok_or_else(|| Erro::nao_encontrado("saldo do produto no local"))?;
+        let aplicada = saldo
+            .estorno_de_entrada(v.quantidade, v.custo_unitario, ctx.agora)
+            .map_err(|e| Erro::de_dominio(&e))?;
+        repo.atualizar_saldo(&saldo)?;
+        let movimento = Movimento {
+            id: Id::novo(),
+            empresa: ctx.empresa,
+            produto: v.produto,
+            variacao: None,
+            local: v.local,
+            tipo: TipoMovimento::Saida,
+            quantidade: v.quantidade,
+            custo_unitario: Some(v.custo_unitario),
+            lote: None,
+            origem_modulo: origem_modulo.to_string(),
+            origem_id: Some(origem_id),
+            lancamento: None,
+            criado_em: ctx.agora,
+            criado_por: ctx.usuario,
+        };
+        repo.inserir_movimento(&movimento)?;
+        saidas.push(SaidaGravada {
+            movimento: movimento.id,
+            aplicada,
+        });
+    }
+    Ok(saidas)
+}
+
 /// Como [`registrar_entrada_comum`], mas cria também um [`Lote`] rastreável (o código do
 /// post-it) para esta entrada — o que `RegistrarEntrada` usa quando a peça precisa de
 /// rastreabilidade individual (`docs/modulos/estoque.md` §3). Função própria, em vez de mais

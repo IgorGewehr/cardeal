@@ -14,12 +14,13 @@ use cardeal_storage::UnidadeDeTrabalho;
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "sqlite")]
-use crate::comandos::confirmar_entrada_comum;
+use crate::comandos::confirmar_entrada_com_parcelas;
+use crate::nota::ParcelaCompra;
 #[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioCompras;
 
 /// Confirma a entrada de uma nota com todos os itens já casados.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConfirmarEntrada {
     /// A nota de entrada.
     pub nota_entrada: Id,
@@ -32,6 +33,11 @@ pub struct ConfirmarEntrada {
     /// de deixá-lo pendente no Contas a Pagar. `None` usa a preferência da empresa
     /// (`PreferenciasCompras::pago_no_ato_padrao`). Sem efeito se nenhum título for gerado.
     pub pago_no_ato: Option<bool>,
+    /// As parcelas do título a pagar — vencimento e valor de cada, somando o total da nota.
+    /// `None` usa as da nota (as duplicatas do XML; sem elas, uma parcela na emissão). Pago no
+    /// ato ignora: uma parcela só, quitada.
+    #[serde(default)]
+    pub parcelas: Option<Vec<ParcelaCompra>>,
 }
 
 /// O que o comando devolve.
@@ -57,11 +63,12 @@ impl Comando for ConfirmarEntrada {
             .gerar_titulo_a_pagar
             .unwrap_or(preferencias.gera_titulo_a_pagar);
         let pago_no_ato = self.pago_no_ato.unwrap_or(preferencias.pago_no_ato_padrao);
-        let confirmacao = confirmar_entrada_comum(
+        let confirmacao = confirmar_entrada_com_parcelas(
             self.nota_entrada,
             self.local,
             gerar_titulo,
             pago_no_ato,
+            self.parcelas,
             ctx,
             uow,
         )?;

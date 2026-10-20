@@ -6,10 +6,10 @@ use cardeal_modkit::{Manifesto, Modulo, Registro};
 use cardeal_storage::ConjuntoMigracoes;
 
 use crate::comandos::{
-    ConfirmarEntrada, DefinirPreferenciasCompras, ImportarNotaDeArquivoXml, LancarNotaManual,
-    VincularProdutoManual,
+    ConfirmarEntrada, DefinirPreferenciasCompras, EstornarEntrada, ImportarNotaDeArquivoXml,
+    LancarNotaManual, VincularProdutoManual,
 };
-use crate::consultas::{ItensDaNota, NotasRecentes};
+use crate::consultas::{ItensDaNota, NotasRecentes, ParcelasDaNota, PreviaDoEstornoDaEntrada};
 use crate::manifesto::MANIFESTO;
 use crate::migracoes;
 
@@ -31,10 +31,13 @@ impl Modulo for ModuloCompras {
             .comando::<VincularProdutoManual>("compras.vincular_produto_manual.v1")
             .comando::<crate::CriarProdutoDoItem>("compras.criar_produto_do_item.v1")
             .comando::<ConfirmarEntrada>("compras.confirmar_entrada.v1")
+            .comando::<EstornarEntrada>("compras.estornar_entrada.v1")
             .comando::<LancarNotaManual>("compras.lancar_nota_manual.v1")
             .comando::<ImportarNotaDeArquivoXml>("compras.importar_nota_de_arquivo_xml.v1")
             .consulta::<NotasRecentes>("compras.notas_recentes.v1")
-            .consulta::<ItensDaNota>("compras.itens_da_nota.v1");
+            .consulta::<ItensDaNota>("compras.itens_da_nota.v1")
+            .consulta::<ParcelasDaNota>("compras.parcelas_da_nota.v1")
+            .consulta::<PreviaDoEstornoDaEntrada>("compras.previa_estorno_entrada.v1");
         Ok(())
     }
 }

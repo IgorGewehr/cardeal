@@ -89,6 +89,23 @@ impl NotaEntrada {
         self.versao = self.versao.proxima();
     }
 
+    /// Estorna a entrada: `Confirmada` → `AConferir`. A nota volta para a conferência, com os
+    /// itens como estavam casados, para corrigir (revincular um produto, mudar as parcelas)
+    /// e confirmar de novo.
+    ///
+    /// # Errors
+    /// [`ErroCompras::EstadoDeNotaInvalido`] se a nota não está confirmada.
+    pub fn estornar(&mut self) -> Result<(), ErroCompras> {
+        if self.estado != EstadoNotaEntrada::Confirmada {
+            return Err(ErroCompras::EstadoDeNotaInvalido {
+                atual: self.estado.rotulo(),
+                esperado: EstadoNotaEntrada::Confirmada.rotulo(),
+            });
+        }
+        self.transitar(EstadoNotaEntrada::AConferir);
+        Ok(())
+    }
+
     /// Confirma a entrada: `AConferir`/`Conferida` → `Confirmada`.
     ///
     /// # Errors
@@ -103,6 +120,48 @@ impl NotaEntrada {
         self.transitar(EstadoNotaEntrada::Confirmada);
         Ok(())
     }
+}
+
+/// Uma parcela de como o fornecedor cobra a nota: a duplicata do XML (`cobr/dup`) ou a que
+/// quem confirma informou. Vira uma parcela do título a pagar.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ParcelaCompra {
+    /// O número da duplicata (`"001"`…), vazio quando informada à mão.
+    pub numero: String,
+    /// O vencimento.
+    pub vencimento: Data,
+    /// O valor.
+    pub valor: Dinheiro,
+}
+
+/// Confere as parcelas de uma nota: de 1 a 360, cada uma com valor, nenhuma vencendo antes
+/// da emissão, e a soma fechando com o total da nota (o título a pagar é o total).
+///
+/// # Errors
+/// [`ErroCompras::ParcelaInvalida`], [`ErroCompras::ParcelasNaoFecham`].
+pub fn conferir_parcelas(
+    parcelas: &[ParcelaCompra],
+    total: Dinheiro,
+    emissao: Data,
+) -> Result<(), ErroCompras> {
+    if parcelas.is_empty() || parcelas.len() > 360 {
+        return Err(ErroCompras::ParcelaInvalida("de 1 a 360 parcelas"));
+    }
+    if parcelas.iter().any(|p| !p.valor.e_positivo()) {
+        return Err(ErroCompras::ParcelaInvalida(
+            "toda parcela precisa de valor maior que zero",
+        ));
+    }
+    if parcelas.iter().any(|p| p.vencimento < emissao) {
+        return Err(ErroCompras::ParcelaInvalida(
+            "uma parcela vence antes da emissão da nota",
+        ));
+    }
+    let soma: Dinheiro = parcelas.iter().map(|p| p.valor).sum();
+    if soma != total {
+        return Err(ErroCompras::ParcelasNaoFecham { soma, total });
+    }
+    Ok(())
 }
 
 /// Um item de uma [`NotaEntrada`].
@@ -219,6 +278,46 @@ mod testes {
             alerta: None,
             versao: Versao::INICIAL,
         }
+    }
+
+    #[test]
+    fn estornar_volta_a_nota_confirmada_para_a_conferencia() {
+        let mut n = nota();
+        assert!(matches!(
+            n.estornar(),
+            Err(ErroCompras::EstadoDeNotaInvalido { .. })
+        ));
+        n.confirmar().unwrap();
+        n.estornar().unwrap();
+        assert_eq!(n.estado, EstadoNotaEntrada::AConferir);
+        n.confirmar().unwrap();
+        assert_eq!(n.estado, EstadoNotaEntrada::Confirmada);
+    }
+
+    #[test]
+    fn parcelas_fecham_com_o_total_e_nao_vencem_antes_da_emissao() {
+        let emissao = Data::de_ymd(2026, 10, 1).unwrap();
+        let p = |m, d, reais| ParcelaCompra {
+            numero: String::new(),
+            vencimento: Data::de_ymd(2026, m, d).unwrap(),
+            valor: Dinheiro::reais(reais),
+        };
+        let total = Dinheiro::reais(100);
+        assert!(conferir_parcelas(&[p(10, 31, 40), p(11, 30, 60)], total, emissao).is_ok());
+        assert!(conferir_parcelas(&[p(10, 1, 100)], total, emissao).is_ok());
+        assert!(matches!(
+            conferir_parcelas(&[p(10, 31, 40), p(11, 30, 50)], total, emissao),
+            Err(ErroCompras::ParcelasNaoFecham { .. })
+        ));
+        assert!(matches!(
+            conferir_parcelas(&[p(9, 30, 100)], total, emissao),
+            Err(ErroCompras::ParcelaInvalida(_))
+        ));
+        assert!(matches!(
+            conferir_parcelas(&[p(10, 31, 100), p(11, 30, 0)], total, emissao),
+            Err(ErroCompras::ParcelaInvalida(_))
+        ));
+        assert!(conferir_parcelas(&[], total, emissao).is_err());
     }
 
     #[test]

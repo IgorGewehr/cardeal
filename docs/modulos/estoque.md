@@ -334,6 +334,13 @@ stateDiagram-v2
 > orçada/não aplicada com o saldo real via esta porta pública, sem nunca ler
 > `estoque_saldo_local` direto.
 
+> **Nota (2026-10-20):** `retirar_entradas_da_origem` desfaz o que uma origem pôs no estoque (o
+> estorno da entrada de uma nota de compra): sai **ao custo da entrada**, não ao médio
+> (`SaldoLocal::estorno_de_entrada` — o médio volta a `(saldo·médio − q·custo) / (saldo − q)`), e
+> é recusado se a mercadoria já não está toda no local (`EntradaJaConsumida`). Só o que está vivo
+> sai: entradas da origem menos as saídas dela (`entradas_vivas_da_origem`), então a nota
+> estornada, corrigida e confirmada de novo se estorna de novo.
+
 ## 6. Consultas
 
 | Consulta | Permissão | Uso na UI | Índice que a sustenta |

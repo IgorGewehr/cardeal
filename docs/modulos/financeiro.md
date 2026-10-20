@@ -342,7 +342,7 @@ stateDiagram-v2
 > vem depois.
 | `EstornarBaixa` ✅ | `financeiro.receber.estornar` | Alto | Estorna o lançamento `Realizado` (`Razao::estornar`), reabre a parcela (`Parcial` ou `Aberta` conforme sobra saldo baixado) | `BaixaJaEstornada` |
 | `RenegociarTitulo` ✅ | `financeiro.receber.renegociar` | Alto | Marca as parcelas em aberto como `Renegociada`, cria um `Titulo` novo com o saldo consolidado e as condições novas — **sem** lançamento novo (ver nota abaixo) | `SemSaldoParaRenegociar` |
-| `CancelarTitulo` ✅ (2026-10-15, `financeiro.cancelar_titulo.v1`) | `financeiro.titulo.cancelar` | Alto | Cancela a conta lançada errado: estorna no Razão o `Confirmado` de cada parcela e marca parcelas e título como cancelados (nunca apaga). Só para título lançado **no financeiro** (avulso, de recorrência ou importado na implantação): o que veio de compra, venda, PDV, OS ou renegociação se desfaz pela origem. Recusa título com baixa válida (estornar um recebimento de verdade é decisão à parte, `EstornarBaixa`). Motivo ≥ 10 caracteres. Parcela cancelada não aceita baixa | `TituloJaCancelado`, `TituloDeOutraOrigem`, `TituloComMovimento`, `MotivoDoCancelamentoCurto` |
+| `CancelarTitulo` ✅ (2026-10-15, `financeiro.cancelar_titulo.v1`) | `financeiro.titulo.cancelar` | Alto | Cancela a conta lançada errado: estorna no Razão o `Confirmado` de cada parcela e marca parcelas e título como cancelados (nunca apaga). Só para título lançado **no financeiro** (avulso, de recorrência ou importado na implantação): o que veio de compra, venda, PDV, OS ou renegociação se desfaz pela origem. Recusa título com baixa válida (estornar um recebimento de verdade é decisão à parte, `EstornarBaixa`). Motivo ≥ 10 caracteres. Parcela cancelada não aceita baixa. O caminho "pela origem" é `desfazer_titulo_da_origem_comum` (2026-10-20, usado pelo estorno da entrada de compra): estorna as baixas, o lançamento de cada parcela e cancela — quem chama decide antes se estornar pagamento é aceitável | `TituloJaCancelado`, `TituloDeOutraOrigem`, `TituloComMovimento`, `MotivoDoCancelamentoCurto` |
 | `AlterarVencimento` ✅ (2026-10-15, `financeiro.alterar_vencimento.v1`) | `financeiro.titulo.editar` | Médio | Muda o vencimento de uma parcela `Aberta`/`Parcial`, de título de qualquer origem (o fornecedor que prorrogou). A parcela é a fonte do vencimento para listas, aging, projeção e régua; o lançamento do Razão não se edita | `ParcelaNaoBaixavel`, `VencimentoAntesDaEmissao` |
 | `CriarRecorrencia` ✅ | `financeiro.recorrencia.criar` | Médio | Grava a regra (`categoria` opcional); não gera título imediatamente | `RegraDeRecorrenciaInvalida` |
 | `MaterializarRecorrencia` ✅ | (tarefa agendada, sem permissão de usuário) | Baixo | `materializar_recorrencias_pendentes` — gera `Titulo` real quando falta `antecedencia_geracao_dias`, idempotente por `(origem_id, emissao)` | — |
@@ -398,6 +398,14 @@ stateDiagram-v2
 > campo é opcional e sem custo extra torná-lo disponível em qualquer lançamento, o que serve
 > melhor o objetivo final (acompanhar receita por projeto/cliente mês a mês, mesmo quando o
 > lançamento em si é avulso).
+
+> **Nota (2026-10-20):** `DadosLancamentoTitulo.cronograma` (e `ConstrutorTitulo::cronograma`)
+> dá as parcelas uma a uma — vencimento e valor de cada, como as duplicatas de uma nota de
+> compra —, no lugar de N parcelas iguais a cada X dias; a soma precisa fechar com o título
+> (`CronogramaNaoFecha`). E `titulo_da_origem` passou a devolver o título **vivo** antes do
+> cancelado: desfeita e refeita no mesmo dia, a origem tem dois títulos com a mesma emissão, e o
+> empate podia devolver o cancelado (o desfaturamento de uma OS refaturada no mesmo dia não
+> cancelaria o título novo).
 
 ## 6. Consultas
 

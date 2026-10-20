@@ -117,7 +117,7 @@ pub use comandos::{completar_ncm_se_vazio, criar_peca_rapida_comum};
 #[cfg(feature = "sqlite")]
 pub use comandos::{
     devolver_saidas_da_origem, registrar_entrada_com_lote_comum, registrar_entrada_comum,
-    registrar_saida_comum, registrar_saida_de_lote_comum,
+    registrar_saida_comum, registrar_saida_de_lote_comum, retirar_entradas_da_origem,
 };
 pub use comandos::{
     AjustarSaldo, AparelhoOrigemRegistrado, CriarGrupoProduto, CriarLocal, CriarProduto,
@@ -148,15 +148,15 @@ pub use comandos::{MotivoPerda, PerdaRegistrada, RegistrarPerda};
 pub use comandos::{TransferenciaFeita, TransferirEntreLocais};
 #[cfg(feature = "sqlite")]
 pub use consultas::{
-    melhor_local_de_saida, movimentos_da_origem, movimentos_do_produto,
+    entradas_vivas_da_origem, melhor_local_de_saida, movimentos_da_origem, movimentos_do_produto,
     produtos_abaixo_do_ponto_pedido, saldo_disponivel_do_produto,
 };
 pub use consultas::{
-    AparelhoOrigemResumo, ArvoreGruposProduto, DetalheDoLotePorCodigo, DetalheLote, GruposProduto,
-    ItemAbaixoDoPontoPedido, ItemGrupoProduto, ItemLocal, ItemLoteDisponivel, ItemProdutoComSaldo,
-    ItemUnidade, Locais, LotesDisponiveisDoProduto, MovimentosDoProduto, NoArvoreGrupo,
-    ProdutoPorCodigoBarras, ProdutoPorId, ProdutosAbaixoDoPontoPedido, ProdutosComSaldo,
-    SaldoDisponivelDoProduto, Unidades,
+    AparelhoOrigemResumo, ArvoreGruposProduto, DetalheDoLotePorCodigo, DetalheLote, EntradaViva,
+    GruposProduto, ItemAbaixoDoPontoPedido, ItemGrupoProduto, ItemLocal, ItemLoteDisponivel,
+    ItemProdutoComSaldo, ItemUnidade, Locais, LotesDisponiveisDoProduto, MovimentosDoProduto,
+    NoArvoreGrupo, ProdutoPorCodigoBarras, ProdutoPorId, ProdutosAbaixoDoPontoPedido,
+    ProdutosComSaldo, SaldoDisponivelDoProduto, Unidades,
 };
 pub use consultas_analise::AnaliseDeEstoque;
 pub use consultas_compras::HistoricoDeCompras;

@@ -154,6 +154,12 @@ const PERMISSOES: &[Permissao] = &[
         None,
     ),
     perm(
+        "compras.entrada.estornar",
+        "Estornar a entrada de uma nota (tira do estoque e cancela a conta a pagar)",
+        Risco::Alto,
+        None,
+    ),
+    perm(
         "compras.entrada.preferencias",
         "Definir preferências de importação",
         Risco::Medio,
@@ -200,6 +206,7 @@ const CONTAS_REQUERIDAS: &[ContaPadrao] = &[
 const EVENTOS_PUBLICADOS: &[&str] = &[
     "compras.nota_confirmada.v1",
     "compras.entrada_a_conferir.v1",
+    "compras.entrada_estornada.v1",
     "compras.devolucao_concluida.v1",
 ];
 

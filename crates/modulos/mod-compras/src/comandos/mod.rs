@@ -9,6 +9,7 @@
 mod confirmar_entrada;
 mod criar_produto_do_item;
 mod definir_preferencias_compras;
+mod estornar_entrada;
 mod importar_nota_de_arquivo_xml;
 mod lancar_nota_manual;
 mod vincular_produto_manual;
@@ -16,6 +17,7 @@ mod vincular_produto_manual;
 pub use confirmar_entrada::{ConfirmarEntrada, EntradaConfirmada};
 pub use criar_produto_do_item::{CriarProdutoDoItem, ProdutoDoItemCriado};
 pub use definir_preferencias_compras::DefinirPreferenciasCompras;
+pub use estornar_entrada::{EntradaFoiEstornada, EstornarEntrada, MOTIVO_MINIMO_ESTORNO};
 pub use importar_nota_de_arquivo_xml::ImportarNotaDeArquivoXml;
 pub use lancar_nota_manual::{ItemNotaManual, LancarNotaManual};
 pub use vincular_produto_manual::VincularProdutoManual;
@@ -54,7 +56,9 @@ use crate::erros::ErroCompras;
 use crate::eventos::{EntradaAConferir, NotaConfirmada};
 use crate::nota::EstadoNotaEntrada;
 #[cfg(feature = "sqlite")]
-use crate::nota::{EstadoCasamento, ItemNotaEntrada, NotaEntrada};
+use crate::nota::ParcelaCompra;
+#[cfg(feature = "sqlite")]
+use crate::nota::{conferir_parcelas, EstadoCasamento, ItemNotaEntrada, NotaEntrada};
 #[cfg(feature = "sqlite")]
 use crate::preferencias::{PreferenciasCompras, RateioPor};
 #[cfg(feature = "sqlite")]
@@ -169,6 +173,32 @@ fn nota_do_xml(nota_xml: &cardeal_fiscal::NotaFiscalXml, fornecedor: Id, ctx: &C
     }
 }
 
+/// As duplicatas do XML como parcelas da nota.
+#[cfg(feature = "sqlite")]
+fn parcelas_do_xml(nota_xml: &cardeal_fiscal::NotaFiscalXml) -> Vec<ParcelaCompra> {
+    nota_xml
+        .duplicatas
+        .iter()
+        .map(|d| ParcelaCompra {
+            numero: d.numero.clone(),
+            vencimento: d.vencimento,
+            valor: d.valor,
+        })
+        .collect()
+}
+
+/// O aviso quando as duplicatas não servem como estão (não fecham com o total, vencem antes
+/// da emissão): a nota não se confirma sozinha, e quem confere acerta as parcelas.
+#[cfg(feature = "sqlite")]
+fn alerta_de_parcelas(parcelas: &[ParcelaCompra], nota: &NotaEntrada) -> Option<String> {
+    if parcelas.is_empty() {
+        return None;
+    }
+    conferir_parcelas(parcelas, nota.valor_total, nota.data_emissao)
+        .err()
+        .map(|e| format!("Confira as parcelas antes de dar entrada — duplicatas do XML: {e}."))
+}
+
 /// O aviso para quem confere quando algum item tem CFOP que não é venda de mercadoria: a
 /// remessa de um aparelho para conserto, a bonificação, a consignação e o faturamento de
 /// entrega futura não podem virar estoque com conta a pagar sem alguém olhar.
@@ -252,7 +282,14 @@ pub(crate) fn importar_nota_interpretada(
     )?;
     let preferencias = RepositorioCompras::novo(uow).preferencias(ctx.empresa)?;
 
-    let nota = nota_do_xml(nota_xml, fornecedor, ctx);
+    let mut nota = nota_do_xml(nota_xml, fornecedor, ctx);
+    let parcelas = parcelas_do_xml(nota_xml);
+    if let Some(aviso) = alerta_de_parcelas(&parcelas, &nota) {
+        nota.alerta = Some(match nota.alerta.take() {
+            Some(cfop) => format!("{cfop} {aviso}"),
+            None => aviso,
+        });
+    }
     let despesas = nota_xml.valor_frete + nota_xml.valor_seguro + nota_xml.valor_outras_despesas;
 
     let pesos: Vec<i64> = match preferencias.rateio_por {
@@ -297,6 +334,7 @@ pub(crate) fn importar_nota_interpretada(
         for item in &itens {
             repo.inserir_item(item)?;
         }
+        repo.substituir_parcelas(nota.id, &parcelas)?;
     }
 
     let itens_nao_casados = itens
@@ -540,9 +578,9 @@ pub struct ConfirmacaoEntrada {
 /// opcionalmente, gera o título a pagar no financeiro com
 /// `mod_financeiro::lancar_titulo_comum` — D Estoque / C Fornecedores por parcela
 /// (`docs/modulos/compras.md` §7), o mesmo receituário simples que o helper já produz para
-/// a espécie `Pagar` quando `papel_resultado = EstoqueMercadorias`. Sem parcelamento por
-/// duplicata ainda (assume um único vencimento na emissão) — o XML de condições de
-/// pagamento (`cobr/dup`) não é lido nesta versão.
+/// a espécie `Pagar` quando `papel_resultado = EstoqueMercadorias`. As parcelas do título são
+/// as da nota (as duplicatas do XML, `cobr/dup`); sem elas, uma parcela vencendo na emissão.
+/// Para informar outras, [`confirmar_entrada_com_parcelas`].
 ///
 /// Quando `gerar_titulo` e `pago_no_ato` são ambos verdadeiros — a compra já foi paga à
 /// vista, na hora —, a mesma transação também dá baixa completa no título recém-criado, na
@@ -566,6 +604,56 @@ pub fn confirmar_entrada_comum(
     local: Id,
     gerar_titulo: bool,
     pago_no_ato: bool,
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<ConfirmacaoEntrada> {
+    confirmar_entrada_com_parcelas(nota_id, local, gerar_titulo, pago_no_ato, None, ctx, uow)
+}
+
+/// As parcelas do título a pagar: as informadas (vazias = uma só, na emissão) ou, sem elas, as
+/// da nota; conferidas contra o total e gravadas na nota como as usadas. A compra paga no ato
+/// tem uma parcela só, quitada na hora — as duplicatas ficam de lado.
+#[cfg(feature = "sqlite")]
+fn cronograma_da_entrada(
+    nota: &NotaEntrada,
+    informadas: Option<Vec<ParcelaCompra>>,
+    pago_no_ato: bool,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<Option<Vec<(cardeal_kernel::Data, Dinheiro)>>> {
+    if pago_no_ato {
+        return Ok(None);
+    }
+    let parcelas = match informadas {
+        Some(p) => p,
+        None => RepositorioCompras::novo(uow).parcelas_da_nota(nota.id)?,
+    };
+    if parcelas.is_empty() {
+        return Ok(None);
+    }
+    conferir_parcelas(&parcelas, nota.valor_total, nota.data_emissao)
+        .map_err(|e| Erro::de_dominio(&e))?;
+    RepositorioCompras::novo(uow).substituir_parcelas(nota.id, &parcelas)?;
+    Ok(Some(
+        parcelas.iter().map(|p| (p.vencimento, p.valor)).collect(),
+    ))
+}
+
+/// Como [`confirmar_entrada_comum`], com as parcelas do título informadas por quem confirma
+/// (`None` = as da nota).
+///
+/// # Errors
+/// Os de [`confirmar_entrada_comum`]; [`ErroCompras::ParcelasNaoFecham`] e
+/// [`ErroCompras::ParcelaInvalida`].
+///
+/// # Panics
+/// Nunca, na prática — ver [`confirmar_entrada_comum`].
+#[cfg(feature = "sqlite")]
+pub fn confirmar_entrada_com_parcelas(
+    nota_id: Id,
+    local: Id,
+    gerar_titulo: bool,
+    pago_no_ato: bool,
+    parcelas: Option<Vec<ParcelaCompra>>,
     ctx: &Ctx,
     uow: &mut UnidadeDeTrabalho,
 ) -> Resultado<ConfirmacaoEntrada> {
@@ -602,6 +690,7 @@ pub fn confirmar_entrada_comum(
     }
 
     let (titulo, pago) = if gerar_titulo {
+        let cronograma = cronograma_da_entrada(&nota, parcelas, pago_no_ato, uow)?;
         let gravado = lancar_titulo_comum(
             DadosLancamentoTitulo {
                 especie: EspecieTitulo::Pagar,
@@ -611,6 +700,7 @@ pub fn confirmar_entrada_comum(
                 parcelas: 1,
                 primeiro_vencimento: nota.data_emissao,
                 intervalo_dias: 0,
+                cronograma,
                 observacao: Some(format!("Nota de entrada {}/{}", nota.numero, nota.serie)),
                 categoria: None,
                 origem_modulo: "compras",

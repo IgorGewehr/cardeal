@@ -22,6 +22,19 @@ pub enum ErroFinanceiro {
     #[error("Um título tem de 1 a 360 parcelas; {0} está fora da faixa")]
     NumeroDeParcelasInvalido(u16),
 
+    /// As parcelas informadas uma a uma não somam o valor do título.
+    #[error("As parcelas somam {soma}, mas o título é de {total}")]
+    CronogramaNaoFecha {
+        /// A soma das parcelas.
+        soma: Dinheiro,
+        /// O valor do título.
+        total: Dinheiro,
+    },
+
+    /// Uma parcela informada uma a uma sem valor.
+    #[error("Toda parcela precisa de valor maior que zero")]
+    ParcelaSemValor,
+
     /// A política de juros exige uma taxa, e ela não foi informada (ou veio zerada).
     #[error("A política de juros \"{0}\" exige uma taxa maior que zero")]
     TaxaDeJurosAusente(&'static str),
@@ -192,6 +205,8 @@ impl ErroDominio for ErroFinanceiro {
         match self {
             Self::ValorInvalido
             | Self::NumeroDeParcelasInvalido(_)
+            | Self::CronogramaNaoFecha { .. }
+            | Self::ParcelaSemValor
             | Self::TaxaDeJurosAusente(_)
             | Self::RegraDeRecorrenciaInvalida(_)
             | Self::ContaDeCaixaInvalida

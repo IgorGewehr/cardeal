@@ -1,6 +1,6 @@
 //! Erros do módulo de compras.
 
-use cardeal_kernel::{CodigoErro, Detalhes, ErroDominio};
+use cardeal_kernel::{CodigoErro, Detalhes, Dinheiro, ErroDominio};
 
 /// Tudo que pode dar errado na entrada de nota, no casamento de produto e na confirmação.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -38,6 +38,29 @@ pub enum ErroCompras {
     /// cliente, nota de entrada do emitente) — nunca vira entrada de estoque com conta a pagar.
     #[error("Esta nota não é uma compra: {0}")]
     NaoECompra(&'static str),
+
+    /// As parcelas não somam o total da nota.
+    #[error("As parcelas somam {soma}, mas a nota é de {total}")]
+    ParcelasNaoFecham {
+        /// A soma das parcelas.
+        soma: Dinheiro,
+        /// O total da nota.
+        total: Dinheiro,
+    },
+
+    /// Uma parcela que não vale (sem valor, vencendo antes da emissão…).
+    #[error("Parcelas: {0}")]
+    ParcelaInvalida(&'static str),
+
+    /// O motivo do estorno vai ao histórico: ao menos 10 caracteres.
+    #[error("Explique o motivo do estorno (ao menos 10 caracteres)")]
+    MotivoDoEstornoCurto,
+
+    /// A conta a pagar da nota já tem pagamento, e quem estorna não pediu para estorná-lo.
+    #[error(
+        "A conta desta nota já tem {0} pago — para estornar a entrada, estorne também o pagamento"
+    )]
+    EntradaComPagamento(Dinheiro),
 }
 
 impl ErroDominio for ErroCompras {
@@ -48,7 +71,12 @@ impl ErroDominio for ErroCompras {
                 CodigoErro::REGRA_VIOLADA
             }
             Self::EstadoDeNotaInvalido { .. } => CodigoErro::ESTADO_INVALIDO,
-            Self::ItemNaoPertenceANota | Self::NaoECompra(_) => CodigoErro::ENTRADA_INVALIDA,
+            Self::ItemNaoPertenceANota
+            | Self::NaoECompra(_)
+            | Self::ParcelasNaoFecham { .. }
+            | Self::ParcelaInvalida(_)
+            | Self::MotivoDoEstornoCurto => CodigoErro::ENTRADA_INVALIDA,
+            Self::EntradaComPagamento(_) => CodigoErro::REGRA_VIOLADA,
         }
     }
 

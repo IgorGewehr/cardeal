@@ -59,6 +59,8 @@ stateDiagram-v2
     [*] --> AConferir: XML recebido via DFe ou digitado
     AConferir --> Conferida: todos os itens casados e quantidade validada
     Conferida --> Confirmada: ConfirmarEntrada (estoque + razão + título a pagar)
+    AConferir --> Confirmada: ConfirmarEntrada (todo item Casado)
+    Confirmada --> AConferir: EstornarEntrada (estoque ao custo da nota, título cancelado)
     Confirmada --> Devolvida: DevolverAoFornecedor (parcial ou total)
 ```
 
@@ -86,7 +88,8 @@ stateDiagram-v2
 | `CriarProdutoDoItem` ✅ (2026-10-13, `compras.criar_produto_do_item.v1`) | `compras.entrada.conferir` **e** `estoque.produto.criar` (`ctx.concede`) | Baixo | Item que não casou com nada: cria o produto (nome escolhido pelo usuário — a sugestão padronizada de `estoque.sugerir_nome_do_produto.v1`, possivelmente corrigida —, NCM e código de barras da nota, grupo opcional ou "Sem grupo", unidade `UN`) via `mod_estoque::criar_produto_de_compra_comum`, vincula o item, grava a `RegraCasamentoAprendida` e ensina ao dicionário DE/PARA de nomes o que a correção explica | `NotaJaConfirmada`, `SEM_PERMISSAO`, grupo inexistente |
 | `RatearDespesas` | `compras.entrada.conferir` | Baixo | Ainda não é um comando separado — o rateio acontece dentro de `importar_nota_da_sefaz`, não como passo manual | `ReferenciaInvalida` |
 | `ConferirQuantidade` | `compras.entrada.conferir` | Baixo | Ainda não implementado (não há `PedidoCompra` para comparar) | `QuantidadeDivergente` (aviso) |
-| `ConfirmarEntrada` ✅ | `compras.entrada.confirmar` | Alto | Exige todo item `Casado`; `mod_estoque::registrar_entrada_comum` por item e, se a preferência (ou o campo `gerar_titulo_a_pagar`) mandar, `mod_financeiro::lancar_titulo_comum` — chamados **direto, na mesma transação** (não via despacho — `docs/contratos-internos.md` §7 regra 2). Quando `pago_no_ato` (campo do comando, ou a preferência `pago_no_ato_padrao`) também é verdadeiro, a mesma transação já dá baixa completa no título recém-criado com `mod_financeiro::baixar_pagamento_comum`, na data da confirmação — a compra paga à vista nunca aparece "em aberto" no Contas a Pagar. Quando as preferências permitem e a varredura de `verificar_notas_na_sefaz` já casou tudo por GTIN ou regra aprendida, isto roda sozinho (`confirmar_entrada_comum`, mesma função por trás do comando) | `ItemNaoCasado`, `NotaJaConfirmada`, `EstadoDeNotaInvalido` |
+| `ConfirmarEntrada` ✅ | `compras.entrada.confirmar` | Alto | Exige todo item `Casado`; `mod_estoque::registrar_entrada_comum` por item e, se a preferência (ou o campo `gerar_titulo_a_pagar`) mandar, `mod_financeiro::lancar_titulo_comum` — chamados **direto, na mesma transação** (não via despacho — `docs/contratos-internos.md` §7 regra 2). Quando `pago_no_ato` (campo do comando, ou a preferência `pago_no_ato_padrao`) também é verdadeiro, a mesma transação já dá baixa completa no título recém-criado com `mod_financeiro::baixar_pagamento_comum`, na data da confirmação — a compra paga à vista nunca aparece "em aberto" no Contas a Pagar. Quando as preferências permitem e a varredura de `verificar_notas_na_sefaz` já casou tudo por GTIN ou regra aprendida, isto roda sozinho (`confirmar_entrada_comum`, mesma função por trás do comando). **Parcelas (2026-10-20):** o título a pagar nasce com as parcelas da nota — as duplicatas do XML (`cobr/dup`, guardadas na importação em `compras_nota_parcela`) ou as do campo `parcelas` (vencimento e valor de cada; a tela preenche com as duplicatas, divide em N a cada X dias ou acrescenta). Sem nenhuma, uma parcela vencendo na emissão. As parcelas precisam somar o total da nota e não vencer antes da emissão; as usadas ficam gravadas na nota. Duplicatas que não fecham com o total viram **aviso** na importação (a nota não se confirma sozinha). Pago no ato ignora as parcelas: uma só, quitada | `ItemNaoCasado`, `NotaJaConfirmada`, `EstadoDeNotaInvalido`, `ParcelasNaoFecham`, `ParcelaInvalida` |
+| `EstornarEntrada` ✅ (2026-10-20, `compras.estornar_entrada.v1`; prévia `compras.previa_estorno_entrada.v1`) | `compras.entrada.estornar` | Alto | Desfaz a entrada confirmada para corrigir (lição do `revertNoteImport` do `gestao-raiz`), numa transação: a mercadoria sai do estoque **ao custo da nota** (`mod_estoque::retirar_entradas_da_origem` — o custo médio volta ao que seria sem a entrada), o lançamento D Estoque / C Fornecedores é estornado e o título cancelado (`mod_financeiro::desfazer_titulo_da_origem_comum`), e a nota volta para `AConferir` com os itens casados como estavam — corrige-se o vínculo ou as parcelas e confirma de novo. **Recusa** se a mercadoria já não está toda no local (vendida, movida) e, se a conta já tem pagamento, exige `estornar_pagamento` (o pagamento é estornado e o dinheiro volta para a conta de onde saiu). Parcela renegociada bloqueia. Motivo ≥ 10 caracteres, que vai ao histórico do Razão. Nunca apaga | `EstadoDeNotaInvalido`, `MotivoDoEstornoCurto`, `EntradaComPagamento`, `EntradaJaConsumida`, `TituloComMovimento` |
 | `DevolverAoFornecedor` | `compras.devolucao.criar` | Alto | Ainda não implementado | `ValorSuperaOriginal` |
 
 > **Nota (2026-09-13):** casamento por GTIN, importação por arquivo local e pago-no-ato
@@ -153,6 +156,11 @@ stateDiagram-v2
 > valor (compra interestadual com antecipação, compra sem nota) — depende das tabelas por UF/NCM e de
 > conferência com o contador.
 
+> **Nota (2026-10-20):** a tela só mostrava "Confirmar entrada" para nota `Conferida` — estado
+> que nenhum comando alcança. Na prática, a nota que não se confirmava sozinha não tinha como
+> ser confirmada pela tela. Agora a confirmação aparece na nota em conferência quando todo item
+> tem produto (`ConfirmarEntrada` já aceitava `AConferir`).
+
 ## 6. Consultas
 
 | Consulta | Permissão | Uso na UI | Índice que a sustenta |
@@ -161,6 +169,8 @@ stateDiagram-v2
 | `CotacoesAbertas` | `compras.cotacao.ver` | Painel de cotação | `compras_cotacao(empresa, estado)` |
 | `PedidosPendentesDeRecebimento` | `compras.pedido.ver` | Painel de recebimento | `compras_pedido_compra(empresa, estado)` |
 | `SugestaoDeCasamento` | `compras.entrada.conferir` | Tela de conferência | `compras_regra_casamento(fornecedor, codigo_fornecedor)` |
+| `ParcelasDaNota` ✅ (2026-10-20) | `compras.entrada.ver` | As parcelas no "Confirmar entrada" | `compras_nota_parcela(nota, ordem)` |
+| `PreviaDoEstornoDaEntrada` ✅ (2026-10-20) | `compras.entrada.ver` | O que o estorno faz: o que sai do estoque (e quanto há no local), a conta cancelada, o pagamento | movimentos da origem + `financeiro::situacao_do_titulo_da_origem` |
 
 > **Nota (2026-09-13):** a fatia implementada (`crates/modulos/mod-compras/src/consultas.rs`)
 > tem `NotasRecentes` (as 200 notas mais recentes da empresa, com `estado` — a UI filtra por
@@ -189,7 +199,8 @@ stateDiagram-v2
 ## 8. Eventos
 
 **Publicados:** `compras.nota_confirmada.v1` (assinado por `financeiro`, que gera o `Titulo` a
-pagar), `compras.entrada_a_conferir.v1`, `compras.devolucao_concluida.v1`.
+pagar), `compras.entrada_a_conferir.v1`, `compras.entrada_estornada.v1` (2026-10-20),
+`compras.devolucao_concluida.v1`.
 
 **Assinados:** `estoque.abaixo_ponto_pedido.v1` → sugere criação de cotação/pedido no radar.
 
@@ -201,6 +212,7 @@ pagar), `compras.entrada_a_conferir.v1`, `compras.devolucao_concluida.v1`.
 | `compras.pedido.ver` / `.criar` | Pedido de compra | Baixo |
 | `compras.entrada.ver` / `.importar` / `.conferir` | Entrada de nota | Baixo |
 | `compras.entrada.confirmar` | Confirmar entrada (gera estoque e título) | Alto |
+| `compras.entrada.estornar` | Estornar a entrada (tira do estoque e cancela a conta a pagar) | Alto |
 | `compras.devolucao.criar` | Devolver ao fornecedor | Alto |
 
 ## 10. Telas

@@ -270,6 +270,7 @@ pub struct ConstrutorTitulo {
     n_parcelas: u16,
     primeiro_vencimento: Option<Data>,
     intervalo_dias: i32,
+    cronograma: Option<Vec<(Data, Dinheiro)>>,
     politica_juros: PoliticaJuros,
     taxa_juros: Option<Percentual>,
     multa: Option<Percentual>,
@@ -303,6 +304,7 @@ impl ConstrutorTitulo {
             n_parcelas: 1,
             primeiro_vencimento: None,
             intervalo_dias: 30,
+            cronograma: None,
             politica_juros: PoliticaJuros::Nenhum,
             taxa_juros: None,
             multa: None,
@@ -363,6 +365,14 @@ impl ConstrutorTitulo {
         self
     }
 
+    /// As parcelas uma a uma — vencimento e valor de cada, como as duplicatas de uma nota de
+    /// compra. Substitui [`Self::parcelas`]; a soma precisa fechar com o valor do título.
+    #[must_use]
+    pub fn cronograma(mut self, parcelas: Vec<(Data, Dinheiro)>) -> Self {
+        self.cronograma = Some(parcelas);
+        self
+    }
+
     /// Define a política e a taxa de juros de mora aplicadas a todas as parcelas.
     #[must_use]
     pub const fn juros(mut self, politica: PoliticaJuros, taxa: Percentual) -> Self {
@@ -400,6 +410,22 @@ impl ConstrutorTitulo {
         if self.n_parcelas < 1 || self.n_parcelas > 360 {
             return Err(ErroFinanceiro::NumeroDeParcelasInvalido(self.n_parcelas));
         }
+        if let Some(cronograma) = &self.cronograma {
+            let n = u16::try_from(cronograma.len()).unwrap_or(u16::MAX);
+            if !(1..=360).contains(&n) {
+                return Err(ErroFinanceiro::NumeroDeParcelasInvalido(n));
+            }
+            if cronograma.iter().any(|(_, v)| !v.e_positivo()) {
+                return Err(ErroFinanceiro::ParcelaSemValor);
+            }
+            let soma: Dinheiro = cronograma.iter().map(|(_, v)| *v).sum();
+            if soma != self.valor_total {
+                return Err(ErroFinanceiro::CronogramaNaoFecha {
+                    soma,
+                    total: self.valor_total,
+                });
+            }
+        }
         let taxa_juros = if self.politica_juros.exige_taxa() {
             match self.taxa_juros {
                 Some(t) if !t.e_zero() => Some(t),
@@ -415,31 +441,43 @@ impl ConstrutorTitulo {
 
         let titulo_id = Id::novo();
         let primeiro_vencimento = self.primeiro_vencimento.unwrap_or(self.emissao);
-        let valores = self.valor_total.ratear(self.n_parcelas as usize);
+        let agenda: Vec<(Data, Dinheiro)> = match self.cronograma {
+            Some(c) => c,
+            None => self
+                .valor_total
+                .ratear(self.n_parcelas as usize)
+                .into_iter()
+                .enumerate()
+                .map(|(i, valor)| {
+                    let k = i32::try_from(i).unwrap_or(i32::MAX);
+                    (
+                        primeiro_vencimento.mais_dias(k * self.intervalo_dias),
+                        valor,
+                    )
+                })
+                .collect(),
+        };
 
-        let parcelas = valores
+        let parcelas = agenda
             .into_iter()
             .enumerate()
-            .map(|(i, valor)| {
-                let k = i32::try_from(i).unwrap_or(i32::MAX);
-                Parcela {
-                    id: Id::novo(),
-                    empresa: self.empresa,
-                    titulo: titulo_id,
-                    numero: u16::try_from(i + 1).unwrap_or(u16::MAX),
-                    vencimento: primeiro_vencimento.mais_dias(k * self.intervalo_dias),
-                    valor,
-                    estado: EstadoParcela::Aberta,
-                    valor_baixado: Dinheiro::ZERO,
-                    lancamento: None,
-                    nosso_numero: None,
-                    politica_juros: self.politica_juros,
-                    taxa_juros,
-                    multa: self.multa,
-                    desconto_ate_data: self.desconto_ate_data,
-                    desconto_valor: self.desconto_valor,
-                    versao: Versao::INICIAL,
-                }
+            .map(|(i, (vencimento, valor))| Parcela {
+                id: Id::novo(),
+                empresa: self.empresa,
+                titulo: titulo_id,
+                numero: u16::try_from(i + 1).unwrap_or(u16::MAX),
+                vencimento,
+                valor,
+                estado: EstadoParcela::Aberta,
+                valor_baixado: Dinheiro::ZERO,
+                lancamento: None,
+                nosso_numero: None,
+                politica_juros: self.politica_juros,
+                taxa_juros,
+                multa: self.multa,
+                desconto_ate_data: self.desconto_ate_data,
+                desconto_valor: self.desconto_valor,
+                versao: Versao::INICIAL,
             })
             .collect();
 
@@ -483,6 +521,51 @@ mod testes {
             valor,
             hoje(),
         )
+    }
+
+    #[test]
+    fn cronograma_da_as_datas_e_valores_e_precisa_fechar() {
+        let d = |m, dia| Data::de_ymd(2026, m, dia).unwrap();
+        let tcp = construtor(Dinheiro::reais(100))
+            .cronograma(vec![
+                (d(11, 10), Dinheiro::reais(40)),
+                (d(12, 7), Dinheiro::reais(60)),
+            ])
+            .construir()
+            .unwrap();
+        let p: Vec<_> = tcp
+            .parcelas
+            .iter()
+            .map(|p| (p.numero, p.vencimento, p.valor))
+            .collect();
+        assert_eq!(
+            p,
+            vec![
+                (1, d(11, 10), Dinheiro::reais(40)),
+                (2, d(12, 7), Dinheiro::reais(60))
+            ]
+        );
+        let nao_fecha = construtor(Dinheiro::reais(100))
+            .cronograma(vec![(d(11, 10), Dinheiro::reais(40))])
+            .construir();
+        assert!(matches!(
+            nao_fecha,
+            Err(ErroFinanceiro::CronogramaNaoFecha { .. })
+        ));
+        let zerada = construtor(Dinheiro::reais(100))
+            .cronograma(vec![
+                (d(11, 10), Dinheiro::reais(100)),
+                (d(12, 7), Dinheiro::ZERO),
+            ])
+            .construir();
+        assert!(matches!(zerada, Err(ErroFinanceiro::ParcelaSemValor)));
+        let vazio = construtor(Dinheiro::reais(100))
+            .cronograma(vec![])
+            .construir();
+        assert!(matches!(
+            vazio,
+            Err(ErroFinanceiro::NumeroDeParcelasInvalido(0))
+        ));
     }
 
     #[test]

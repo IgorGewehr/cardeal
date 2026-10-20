@@ -16,7 +16,7 @@
 | Área | gestao-raiz | Cardeal |
 |---|---|---|
 | Fiscal | NF-e, NFC-e (síncrona, sem contingência), MDF-e, CC-e, cancelamento, DANFE, notas recebidas (DFe + manifestação) | NFC-e assíncrona com fila (offline-first), DANFCE, cancelamento, inutilização. Sem NF-e, CC-e e DFe real |
-| Compras | XML/SEFAZ, classificação da nota, custo com rateio, parcelas, estornar importação | XML de arquivo, casamento em cascata, rateio, ST/IPI no custo. Parcela única, sem estorno, sem DFe real |
+| Compras | XML/SEFAZ, classificação da nota, custo com rateio, parcelas, estornar importação | XML de arquivo, casamento em cascata, rateio, ST/IPI no custo, parcelas da nota (duplicatas), estorno da entrada. Sem DFe real |
 | Estoque | Matéria-prima com FEFO, embalagens, produto acabado, rastreabilidade e recall | Árvore mercadológica, markup com imposto, inventário cego, transferência, perdas e validade |
 | PDV | Grade de produtos, desconto no item e no total, pagamento misto, boleto/cheque a receber, vendas do dia, **cancelar venda**, comprovante em 80/58 mm/A4 | Teclado, diário do carrinho, sessão de caixa, consulta de preço, NFC-e em fila. Ver §3 |
 | Vendas B2B | Pedido em etapas (aprovar, pagar, preparar, faturar, enviar, entregar), app do revendedor, comissão | Pedido, tabela e regra de preço, promoção, comissão apurada e paga |
@@ -183,8 +183,28 @@ O que eles têm e o Cardeal não, com o que aprenderam:
    status). O código é TypeScript e pode ser levado quase direto para lá (`/nfe/distribuicao` e
    `/nfe/manifestar`). Depois disso, `verificar_notas_na_sefaz` vira uma tarefa do despacho. Mexe no
    `sefaz-api`: só com o OK do usuário.
-10. **Compras:** parcelas da nota (`cobr/dup`; lá cada parcela tem um id determinístico, então refazer
-    a importação cria só o que falta) e **estornar a entrada** de uma nota (`revertNoteImport`).
+10. ~~**Compras:** parcelas da nota (`cobr/dup`; lá cada parcela tem um id determinístico, então refazer
+    a importação cria só o que falta) e **estornar a entrada** de uma nota (`revertNoteImport`).~~
+    **Feito (2026-10-20).**
+
+    Lá:
+    - as parcelas vêm de quem importa (quantas, intervalo, 1º vencimento), divididas em partes
+      iguais; o XML de compra não é lido para isso;
+    - reverter apaga lotes e contas a pagar (devolvendo o saldo do banco) e recusa se algum lote
+      já foi liberado ou consumido.
+
+    Aqui:
+    - as **duplicatas do XML** viram as parcelas, com vencimento e valor de cada; a tela as
+      mostra para ajustar, dividir em N ou acrescentar, e confere a soma; duplicatas que não
+      fecham com o total viram aviso (a nota não entra sozinha);
+    - o estorno tira a mercadoria **ao custo da nota** (o custo médio volta ao de antes), estorna
+      o lançamento e cancela o título — nada se apaga; pagamento só se estorna marcando; e a
+      mercadoria já vendida ou movida bloqueia.
+
+    Achado no caminho, corrigido: a tela de Compras só mostrava "Confirmar entrada" para nota
+    "Conferida", estado que nada alcança — a nota que não se confirmava sozinha não tinha como
+    entrar pela tela. E o `titulo_da_origem` podia devolver o título cancelado quando a origem
+    era desfeita e refeita no mesmo dia (afetaria o desfaturamento de OS).
 11. **Fechamento do mês para o contador com os XMLs**: emitidas, canceladas, inutilizadas e recebidas,
     mais os DANFEs, o SPED EFD e os relatórios, num ZIP. Se faltar algum XML na base, ele é baixado da
     SEFAZ antes. Isso pede guardar o **XML do evento de cancelamento**, que hoje só fica com o

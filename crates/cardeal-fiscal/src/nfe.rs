@@ -85,6 +85,20 @@ pub struct NotaFiscalXml {
     pub finalidade: FinalidadeNfe,
     /// O documento do destinatário (`dest/CNPJ` ou `dest/CPF`, só dígitos), quando há.
     pub destinatario: Option<String>,
+    /// As duplicatas (`cobr/dup`): como o fornecedor vai cobrar — vencimento e valor de cada
+    /// parcela. Vazio quando a nota não traz cobrança (paga à vista, ou boleto à parte).
+    pub duplicatas: Vec<Duplicata>,
+}
+
+/// Uma duplicata da nota (`cobr/dup`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Duplicata {
+    /// O número (`nDup`), como veio — `"001"`, `"1234/1"`… Vazio se ausente.
+    pub numero: String,
+    /// O vencimento (`dVenc`).
+    pub vencimento: Data,
+    /// O valor (`vDup`).
+    pub valor: Dinheiro,
 }
 
 /// A finalidade da NF-e (`ide/finNFe`).
@@ -277,6 +291,7 @@ pub fn interpretar(xml: &str) -> Result<NotaFiscalXml, ErroFiscal> {
     let mut valor_total = None;
     let mut itens = Vec::new();
     let mut ide = Identificacao::default();
+    let mut cobranca = Cobranca::default();
 
     // Pilha de nomes de tag abertos — dá contexto para tags de nome repetido em seções
     // diferentes (nenhuma colide aqui, mas a pilha deixa o parser honesto sobre onde está).
@@ -305,6 +320,7 @@ pub fn interpretar(xml: &str) -> Result<NotaFiscalXml, ErroFiscal> {
                 if nome == "det" {
                     item_atual = Some(ItemParcial::default());
                 }
+                cobranca.abrir(&nome, &pilha);
                 pilha.push(nome);
             }
             Event::End(e) => {
@@ -314,6 +330,7 @@ pub fn interpretar(xml: &str) -> Result<NotaFiscalXml, ErroFiscal> {
                         itens.push(parcial.finalizar()?);
                     }
                 }
+                cobranca.fechar(&nome)?;
                 pilha.pop();
             }
             Event::Text(t) => {
@@ -322,6 +339,9 @@ pub fn interpretar(xml: &str) -> Result<NotaFiscalXml, ErroFiscal> {
                     continue;
                 }
                 let caminho: Vec<&str> = pilha.iter().map(String::as_str).collect();
+                if cobranca.ler(&caminho, &texto)? {
+                    continue;
+                }
                 processar_texto(
                     &caminho,
                     &texto,
@@ -360,7 +380,75 @@ pub fn interpretar(xml: &str) -> Result<NotaFiscalXml, ErroFiscal> {
         entrada_do_emitente: ide.entrada_do_emitente,
         finalidade: ide.finalidade,
         destinatario: ide.destinatario,
+        duplicatas: cobranca.duplicatas,
     })
+}
+
+/// As duplicatas (`cobr/dup`) sendo lidas.
+#[derive(Default)]
+struct Cobranca {
+    duplicatas: Vec<Duplicata>,
+    atual: Option<DuplicataParcial>,
+}
+
+impl Cobranca {
+    fn abrir(&mut self, nome: &str, pilha: &[String]) {
+        if nome == "dup" && pilha.last().is_some_and(|p| p == "cobr") {
+            self.atual = Some(DuplicataParcial::default());
+        }
+    }
+
+    fn fechar(&mut self, nome: &str) -> Result<(), ErroFiscal> {
+        if nome == "dup" {
+            if let Some(parcial) = self.atual.take() {
+                self.duplicatas.push(parcial.finalizar()?);
+            }
+        }
+        Ok(())
+    }
+
+    /// Lê o texto quando ele é de uma duplicata; `true` se era.
+    fn ler(&mut self, caminho: &[&str], texto: &str) -> Result<bool, ErroFiscal> {
+        match &mut self.atual {
+            Some(dup) => dup.ler(caminho, texto).map(|()| true),
+            None => Ok(false),
+        }
+    }
+}
+
+/// Uma duplicata sendo lida.
+#[derive(Default)]
+struct DuplicataParcial {
+    numero: String,
+    vencimento: Option<Data>,
+    valor: Option<Dinheiro>,
+}
+
+impl DuplicataParcial {
+    fn ler(&mut self, caminho: &[&str], texto: &str) -> Result<(), ErroFiscal> {
+        match caminho {
+            [.., "dup", "nDup"] => texto.trim().clone_into(&mut self.numero),
+            [.., "dup", "dVenc"] => {
+                self.vencimento =
+                    Some(data_de_dh_emi(texto.trim()).map_err(|_| {
+                        ErroFiscal::XmlInvalido(format!("dVenc inválido: {texto}"))
+                    })?);
+            }
+            [.., "dup", "vDup"] => self.valor = Some(dinheiro_de(texto, "vDup")?),
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn finalizar(self) -> Result<Duplicata, ErroFiscal> {
+        Ok(Duplicata {
+            numero: self.numero,
+            vencimento: self
+                .vencimento
+                .ok_or_else(|| campo_ausente("cobr/dup/dVenc"))?,
+            valor: self.valor.ok_or_else(|| campo_ausente("cobr/dup/vDup"))?,
+        })
+    }
 }
 
 /// Tipo, finalidade e destinatário — o que diz se a nota é mesmo uma compra.
@@ -660,6 +748,35 @@ mod testes {
                 &format!("<NCM>22021000</NCM><CFOP>{cfop}</CFOP>"),
             );
         interpretar(&xml).unwrap()
+    }
+
+    #[test]
+    fn le_as_duplicatas_da_cobranca() {
+        let xml = XML_EXEMPLO.replace(
+            "</total>",
+            "</total><cobr><fat><nFat>123</nFat><vOrig>100.00</vOrig><vLiq>100.00</vLiq></fat>\
+             <dup><nDup>001</nDup><dVenc>2024-10-12</dVenc><vDup>40.00</vDup></dup>\
+             <dup><nDup>002</nDup><dVenc>2024-11-12</dVenc><vDup>60.00</vDup></dup></cobr>",
+        );
+        let n = interpretar(&xml).unwrap();
+        assert_eq!(
+            n.duplicatas,
+            vec![
+                Duplicata {
+                    numero: "001".into(),
+                    vencimento: Data::de_ymd(2024, 10, 12).unwrap(),
+                    valor: Dinheiro::reais(40),
+                },
+                Duplicata {
+                    numero: "002".into(),
+                    vencimento: Data::de_ymd(2024, 11, 12).unwrap(),
+                    valor: Dinheiro::reais(60),
+                },
+            ]
+        );
+        assert!(interpretar(XML_EXEMPLO).unwrap().duplicatas.is_empty());
+        let sem_valor = xml.replace("<vDup>60.00</vDup>", "");
+        assert!(interpretar(&sem_valor).is_err(), "duplicata sem valor");
     }
 
     #[test]
