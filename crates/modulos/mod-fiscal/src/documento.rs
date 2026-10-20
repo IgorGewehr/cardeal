@@ -166,12 +166,141 @@ pub struct DocumentoResumo {
 }
 
 impl DocumentoResumo {
+    /// Onde a nota autorizada está em relação ao prazo de cancelamento, em `agora` — `None` se
+    /// ela não está autorizada (ou não se sabe quando foi).
+    #[must_use]
+    pub fn prazo_de_cancelamento(&self, agora: Instante) -> Option<PrazoDeCancelamento> {
+        if self.estado != EstadoDocumento::Autorizada {
+            return None;
+        }
+        let autorizado = self.autorizado_em?;
+        Some(PrazoDeCancelamento {
+            modelo: self.modelo,
+            decorrido_segundos: (autorizado.micros_ate(agora) / 1_000_000).max(0),
+        })
+    }
+
     /// A venda foi desfeita, mas a nota ainda vale na SEFAZ e nada mais está em curso para
     /// mudar isso — o cancelamento foi recusado (fora do prazo, em geral). Pede uma NFC-e de
     /// devolução ou a ajuda do contador.
     #[must_use]
     pub fn anulacao_pendente(&self) -> bool {
         self.anulada && self.estado == EstadoDocumento::Autorizada && self.pedido.is_none()
+    }
+}
+
+/// Onde uma nota autorizada está em relação ao prazo de cancelamento (30 minutos para a
+/// NFC-e, 24 horas para a NF-e). O `gestao-raiz` **bloqueia** o pedido fora do prazo; aqui ele
+/// só avisa: algumas UFs aceitam fora do prazo (155), e quem decide é a SEFAZ — recusado (501),
+/// a nota continua autorizada com o motivo e a saída é uma nota de devolução.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PrazoDeCancelamento {
+    /// O modelo da nota (o prazo dele).
+    pub modelo: ModeloFiscal,
+    /// Quanto tempo passou desde a autorização.
+    pub decorrido_segundos: i64,
+}
+
+/// Faltando menos que isso, o aviso lembra que o pedido vai pela fila.
+const POUCO_TEMPO_SEGUNDOS: i64 = 5 * 60;
+
+impl PrazoDeCancelamento {
+    /// O prazo do modelo, em segundos.
+    #[must_use]
+    pub const fn prazo_segundos(self) -> i64 {
+        self.modelo.prazo_de_cancelamento_segundos()
+    }
+
+    /// Ainda dentro do prazo.
+    #[must_use]
+    pub const fn dentro(self) -> bool {
+        self.decorrido_segundos <= self.prazo_segundos()
+    }
+
+    /// Quanto falta para o prazo acabar (zero, se acabou).
+    #[must_use]
+    pub const fn restante_segundos(self) -> i64 {
+        let r = self.prazo_segundos() - self.decorrido_segundos;
+        if r > 0 {
+            r
+        } else {
+            0
+        }
+    }
+
+    /// Há quanto tempo foi autorizada (`"12 min"`, `"2 h 05 min"`).
+    #[must_use]
+    pub fn ha(self) -> String {
+        duracao(self.decorrido_segundos)
+    }
+
+    /// Quanto falta (`"18 min"`).
+    #[must_use]
+    pub fn falta(self) -> String {
+        duracao(self.restante_segundos())
+    }
+
+    /// O prazo do modelo (`"30 min"`, `"24 h"`).
+    #[must_use]
+    pub fn prazo(self) -> String {
+        duracao(self.prazo_segundos())
+    }
+
+    /// Se falta pouco (5 minutos ou menos) — o pedido vai pela fila, e sem internet ele espera.
+    #[must_use]
+    pub const fn falta_pouco(self) -> bool {
+        self.dentro() && self.restante_segundos() <= POUCO_TEMPO_SEGUNDOS
+    }
+
+    /// O aviso curto, para uma etiqueta: "cancela por mais 18 min" / "fora do prazo".
+    #[must_use]
+    pub fn curto(self) -> String {
+        if self.dentro() {
+            format!("cancela por mais {}", duracao(self.restante_segundos()))
+        } else {
+            "fora do prazo de cancelamento".to_owned()
+        }
+    }
+
+    /// O aviso inteiro, para quem vai pedir o cancelamento.
+    #[must_use]
+    pub fn aviso(self) -> String {
+        let ha = duracao(self.decorrido_segundos);
+        let prazo = duracao(self.prazo_segundos());
+        if self.dentro() {
+            let mut t = format!(
+                "Autorizada há {ha} — dá para cancelar por mais {} (o prazo é de {prazo}).",
+                duracao(self.restante_segundos())
+            );
+            if self.falta_pouco() {
+                t.push_str(
+                    " Falta pouco: o pedido vai pela fila e, sem internet, espera — o prazo \
+                     continua correndo.",
+                );
+            }
+            t
+        } else {
+            format!(
+                "Autorizada há {ha} — passou o prazo de {prazo}. A SEFAZ pode recusar o \
+                 cancelamento (algumas UFs aceitam fora do prazo); se recusar, a nota continua \
+                 valendo e a saída é uma nota de devolução."
+            )
+        }
+    }
+}
+
+/// `"menos de 1 min"`, `"18 min"`, `"2 h 05 min"`, `"3 dias"`.
+fn duracao(segundos: i64) -> String {
+    let minutos = segundos / 60;
+    match minutos {
+        m if m < 1 => "menos de 1 min".to_owned(),
+        m if m < 60 => format!("{m} min"),
+        m if m <= 24 * 60 => match m % 60 {
+            0 => format!("{} h", m / 60),
+            r => format!("{} h {r:02} min", m / 60),
+        },
+        m if m < 2 * 24 * 60 => "1 dia".to_owned(),
+        m => format!("{} dias", m / (24 * 60)),
     }
 }
 
@@ -514,6 +643,60 @@ mod testes {
             xml: Some("<nfeProc/>".into()),
             erros: vec![],
         })
+    }
+
+    #[test]
+    fn prazo_de_cancelamento_avisa_sem_bloquear() {
+        let autorizado = Instante::de_micros(1_000_000_000_000);
+        let mut d = DocumentoResumo {
+            id: Id::novo(),
+            modelo: ModeloFiscal::Nfce,
+            serie: 1,
+            numero: 42,
+            ambiente: AmbienteFiscal::Homologacao,
+            estado: EstadoDocumento::Autorizada,
+            total: Dinheiro::reais(10),
+            chave: None,
+            protocolo: None,
+            codigo: None,
+            motivo: None,
+            origem: Id::novo(),
+            tentativas: 1,
+            criado_em: autorizado,
+            autorizado_em: Some(autorizado),
+            pedido: None,
+            anulada: false,
+        };
+        let em = |d: &DocumentoResumo, min: i64| {
+            d.prazo_de_cancelamento(autorizado.mais_segundos(min * 60))
+        };
+        let doze = em(&d, 12).unwrap();
+        assert!(doze.dentro());
+        assert_eq!(doze.restante_segundos(), 18 * 60);
+        assert_eq!(doze.curto(), "cancela por mais 18 min");
+        assert!(doze
+            .aviso()
+            .starts_with("Autorizada há 12 min — dá para cancelar por mais 18 min"));
+        assert!(!doze.aviso().contains("Falta pouco"));
+        assert!(em(&d, 27).unwrap().aviso().contains("Falta pouco"));
+        let fora = em(&d, 125).unwrap();
+        assert!(!fora.dentro());
+        assert_eq!(fora.restante_segundos(), 0);
+        assert!(fora
+            .aviso()
+            .starts_with("Autorizada há 2 h 05 min — passou o prazo de 30 min"));
+        // A NF-e tem 24 horas.
+        d.modelo = ModeloFiscal::Nfe;
+        assert!(em(&d, 125).unwrap().dentro());
+        assert!(em(&d, 25 * 60)
+            .unwrap()
+            .aviso()
+            .contains("passou o prazo de 24 h"));
+        // Só a autorizada tem prazo.
+        d.estado = EstadoDocumento::Cancelada;
+        assert!(em(&d, 1).is_none());
+        assert_eq!(duracao(30), "menos de 1 min");
+        assert_eq!(duracao(3 * 24 * 3600), "3 dias");
     }
 
     use EstadoDocumento::{Autorizada, Cancelada, Denegada, Incerta, Pendente, Rejeitada};

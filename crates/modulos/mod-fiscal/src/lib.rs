@@ -47,7 +47,7 @@ pub use comandos::{DefinirAmbienteFiscal, InstalarCertificado, RemoverCertificad
 pub use consultas::{SituacaoFiscal, StatusDaSefaz};
 pub use documento::{
     decidir, decidir_evento, espera, pedido_da_anulacao, Desfecho, DocumentoResumo,
-    EstadoDocumento, Mudanca, PedidoDocumento, ResumoFiscal,
+    EstadoDocumento, Mudanca, PedidoDocumento, PrazoDeCancelamento, ResumoFiscal,
 };
 pub use erros::ErroModuloFiscal;
 pub use explicacao::explicar;

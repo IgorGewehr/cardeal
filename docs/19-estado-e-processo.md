@@ -45,9 +45,9 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   documento criado na venda sem rede, fila, transmissão em segundo plano (tarefa no despacho), conferência
   pela chave antes de reemitir, área Notas fiscais — e o **DANFCE** (80 mm, QR Code), o **cancelamento** e a
   **inutilização** como pedidos na fila, e o **estorno da venda** no PDV com a NFC-e anulada pela fila.
-  O MVP do backlog do `docs/21-licoes-do-gestao-raiz.md` §5 (itens 1–8) e o item 10 (parcelas e
-  estorno da entrada de compra) estão feitos. Próximo: o resto do §5 (DFe com OK do usuário,
-  pacote do contador com XMLs, prazo de cancelamento visível…); a 1ª autorizada no RS espera os
+  O MVP do backlog do `docs/21-licoes-do-gestao-raiz.md` §5 (itens 1–8) e os itens 10 (parcelas e
+  estorno da entrada de compra) e 12 (prazo de cancelamento visível) estão feitos. Próximo: o resto
+  do §5 (pacote do contador com XMLs; DFe com OK do usuário…); a 1ª autorizada no RS espera os
   dados do usuário.
 - **Pendência de confiança:** as tabelas do Simples e as alíquotas precisam ser conferidas com o
   contador; o ST/IPI **da nota** já entra no custo (2026-10-13), mas a estimativa de ST pela MVA (sem o valor na
@@ -708,6 +708,9 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
     `SaldoLocal::estorno_de_entrada`;
   - desktop: `tela_compras/parcelas.rs` e `tela_compras/estorno.rs`; "Confirmar entrada" aparece
     na nota em conferência com tudo vinculado (esperava o estado `Conferida`, que nada alcança).
+- **Prazo de cancelamento visível (2026-10-20, item 12 do doc 21):** `ModeloFiscal::prazo_de_cancelamento_segundos`
+  e `DocumentoResumo::prazo_de_cancelamento` → `mod_fiscal::PrazoDeCancelamento`; o detalhe em Notas
+  fiscais e o `F11` do PDV mostram o tempo e avisam fora do prazo, sem bloquear.
 - **Inventário com contagem cega (2026-10-13):** migração `estoque` v11 (`estoque_inventario`,
   `estoque_contagem_item`), comandos `criar_inventario`/`iniciar_contagem`/`registrar_contagem`/
   `encerrar_inventario`/`cancelar_inventario` (`.v1`) e consultas `inventarios`/`posicao_do_inventario`.

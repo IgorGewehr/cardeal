@@ -177,6 +177,16 @@ Se a SEFAZ recusar o cancelamento (fora do prazo), a nota continua autorizada e
 `DocumentoResumo::anulacao_pendente` a mostra como "cancelamento recusado" (no PDV e em Notas
 fiscais), com a orientação de emitir uma NFC-e de devolução; a fila não insiste. A venda estornada
 antes de a NFC-e existir não gera nota (o `EmitirNfceDoCupom` exige venda `Finalizado`).
+
+**O prazo de cancelamento fica à vista (2026-10-20).** `ModeloFiscal::prazo_de_cancelamento_segundos`
+(30 minutos para a NFC-e, 24 horas para a NF-e) e `DocumentoResumo::prazo_de_cancelamento(agora)` →
+`PrazoDeCancelamento` (quanto passou, quanto falta, o aviso). Em Notas fiscais, o detalhe da nota
+autorizada mostra "cancela por mais 18 min" ou "fora do prazo de cancelamento", e o pedido de
+cancelamento traz o aviso inteiro (vermelho fora do prazo). No `F11` do PDV, a venda selecionada diz se
+o cancelamento da NFC-e ainda vai dentro do prazo e, faltando 5 minutos ou menos, lembra que sem
+internet o pedido espera na fila enquanto o prazo corre. **Avisa, não bloqueia** — o `gestao-raiz`
+bloqueia, mas algumas UFs homologam fora do prazo (155) e quem decide é a SEFAZ; recusado (501), vale o
+"cancelamento recusado" acima.
 `DocumentosDasVendas` (`fiscal.documentos_das_vendas.v1`) devolve as NFC-e de várias vendas numa
 consulta, para a lista do dia.
 

@@ -209,9 +209,17 @@ O que eles têm e o Cardeal não, com o que aprenderam:
     mais os DANFEs, o SPED EFD e os relatórios, num ZIP. Se faltar algum XML na base, ele é baixado da
     SEFAZ antes. Isso pede guardar o **XML do evento de cancelamento**, que hoje só fica com o
     protocolo; a guarda é obrigatória por 5 anos.
-12. **Prazo de cancelamento visível**: 30 minutos para NFC-e e 24 horas para NF-e. Lá o prazo bloqueia o
+12. ~~**Prazo de cancelamento visível**: 30 minutos para NFC-e e 24 horas para NF-e. Lá o prazo bloqueia o
     pedido; aqui a SEFAZ responde 501. Proposta: mostrar o tempo decorrido e avisar, sem bloquear,
-    porque algumas UFs aceitam fora do prazo (155).
+    porque algumas UFs aceitam fora do prazo (155).~~ **Feito (2026-10-20).**
+
+    Lá: o pedido fora do prazo é recusado antes de ir à SEFAZ; o diálogo de cancelar venda avisa
+    "prazo: 30 min".
+
+    Aqui: o detalhe da nota e o `F11` mostram quanto passou e quanto falta, o pedido de
+    cancelamento traz o aviso (vermelho fora do prazo), e faltando 5 minutos o aviso lembra que, sem
+    internet, o pedido espera na fila enquanto o prazo corre. Não bloqueia: recusado (501), a nota
+    fica como "cancelamento recusado", com a orientação de emitir uma devolução.
 13. **Orçamento** por categoria, **resumo do Simples** e **score/tier de cliente**: úteis, mas depois do
     básico.
 

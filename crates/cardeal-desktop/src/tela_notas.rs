@@ -3,7 +3,7 @@
 //! nota rejeitada depois de corrigir e se manda transmitir na hora.
 
 use cardeal_cliente::{Motor, Sessao};
-use cardeal_kernel::{Fuso, Id};
+use cardeal_kernel::{Fuso, Id, Instante};
 use cardeal_modkit::Icone;
 use cardeal_ui::atoms::{Botao, Etiqueta, Rotulo, Tom, ValorDinheiro};
 use cardeal_ui::molecules::{dado, Abas, Campo, CartaoKpi, EstadoVazio};
@@ -326,11 +326,29 @@ fn grade(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoN
     }
 }
 
+/// O que o pedido de cancelamento diz, com o prazo (30 minutos para a NFC-e).
+fn texto_do_cancelamento(prazo: Option<mod_fiscal::PrazoDeCancelamento>) -> String {
+    let inicio = prazo.map_or_else(
+        || "Cancelar esta NFC-e na SEFAZ.".to_owned(),
+        mod_fiscal::PrazoDeCancelamento::aviso,
+    );
+    format!("{inicio} A venda em si não é desfeita aqui.")
+}
+
 fn detalhe(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoNotas) {
     let Some(d) = estado.detalhe.clone() else {
         return;
     };
     let pode_cancelar = sessao.concede("fiscal.cancelar") && d.resumo.pedido.is_none();
+    // O prazo de cancelamento corre: avisa, não bloqueia (algumas UFs aceitam fora dele).
+    let prazo = d
+        .resumo
+        .prazo_de_cancelamento(Instante::agora())
+        .filter(|_| d.resumo.pedido.is_none() && !d.resumo.anulada);
+    if prazo.is_some_and(|p| p.dentro()) {
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_secs(30));
+    }
     let mut fechar = false;
     let mut imprimir = None;
     let mut abrir_pedido = None;
@@ -359,6 +377,17 @@ fn detalhe(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estad
             }
             if let Some(p) = &d.resumo.protocolo {
                 dado(ui, "Protocolo", p);
+                ui.add_space(Espaco::E8);
+            }
+            if let Some(p) = prazo {
+                ui.add(Rotulo::sobrelinha("Prazo de cancelamento"));
+                ui.add(
+                    Rotulo::interface(p.curto()).cor(if p.dentro() {
+                        ui.cores().texto
+                    } else {
+                        ui.cores().atencao
+                    }),
+                );
                 ui.add_space(Espaco::E8);
             }
             if let Some(m) = &d.resumo.motivo {
@@ -396,13 +425,17 @@ fn detalhe(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estad
                 ui.add_space(Espaco::E8);
             }
             if let Some((pedido, justificativa)) = estado.pedindo.as_mut() {
-                Painel::novo().realce(Tom::Atencao).mostrar(ui, |ui| {
+                let fora_do_prazo = prazo.is_some_and(|p| !p.dentro());
+                let tom = if *pedido == PedidoDocumento::Cancelar && fora_do_prazo {
+                    Tom::Negativo
+                } else {
+                    Tom::Atencao
+                };
+                Painel::novo().realce(tom).mostrar(ui, |ui| {
                     ui.add(Rotulo::interface(match pedido {
-                        PedidoDocumento::Cancelar => {
-                            "Cancelar esta NFC-e na SEFAZ (em geral até 30 minutos depois de autorizada). A venda em si não é desfeita aqui."
-                        }
+                        PedidoDocumento::Cancelar => texto_do_cancelamento(prazo),
                         PedidoDocumento::Inutilizar => {
-                            "Inutilizar o número desta nota, que não vai mais ser enviada — sem isso ele fica como um buraco na série."
+                            "Inutilizar o número desta nota, que não vai mais ser enviada — sem isso ele fica como um buraco na série.".to_owned()
                         }
                     }).quebravel());
                     ui.add_space(Espaco::E8);
@@ -575,8 +608,20 @@ mod testes {
         let (m, s) = (&t.motor, &t.sessao);
         let mut estado = EstadoNotas::default();
         estado.carregar(m, s);
+        // Autorizada há 45 minutos: passou o prazo da NFC-e — o pedido avisa, não bloqueia.
+        let mut resumo = documento(EstadoDocumento::Autorizada, 9);
+        resumo.autorizado_em = Some(Instante::agora().mais_segundos(-45 * 60));
+        let prazo = resumo.prazo_de_cancelamento(Instante::agora());
+        assert!(prazo.is_some_and(|p| !p.dentro()));
+        let texto = texto_do_cancelamento(prazo);
+        assert!(texto.contains("passou o prazo de 30 min"), "{texto}");
+        assert!(texto.ends_with("A venda em si não é desfeita aqui."));
+        assert_eq!(
+            texto_do_cancelamento(None),
+            "Cancelar esta NFC-e na SEFAZ. A venda em si não é desfeita aqui."
+        );
         estado.detalhe = Some(DetalheDocumento {
-            resumo: documento(EstadoDocumento::Autorizada, 9),
+            resumo,
             nota: None,
             xml: None,
         });

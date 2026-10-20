@@ -4,8 +4,11 @@
 
 use std::collections::HashMap;
 
-use cardeal_kernel::{Data, Fuso};
-use mod_fiscal::{AnularDocumentoDaVenda, DocumentoResumo, DocumentosDasVendas, EstadoDocumento};
+use cardeal_kernel::{Data, Fuso, Instante};
+use mod_fiscal::{
+    AnularDocumentoDaVenda, DocumentoResumo, DocumentosDasVendas, EstadoDocumento,
+    PrazoDeCancelamento,
+};
 use mod_pdv::{
     EstadoCupom, EstornarVenda, FormaPagamentoPdv, VendaDoPeriodo, VendaFoiEstornada,
     VendasDoPeriodo,
@@ -128,6 +131,46 @@ fn etiqueta_nota(nota: Option<&DocumentoResumo>) -> Etiqueta {
     }
 }
 
+/// O prazo de cancelamento da NFC-e da venda selecionada, se ela ainda vale e pode ser
+/// estornada — a SEFAZ dá 30 minutos depois da autorização.
+fn prazo_da_nota(v: &EstadoVendasDoDia, agora: Instante) -> Option<PrazoDeCancelamento> {
+    let venda = v.venda_sel()?;
+    if venda.estado != EstadoCupom::Finalizado {
+        return None;
+    }
+    v.nota_sel()
+        .filter(|d| !d.anulada && d.pedido.is_none())
+        .and_then(|d| d.prazo_de_cancelamento(agora))
+}
+
+/// O que o prazo diz para quem vai estornar a venda: dentro dele, o cancelamento da NFC-e vai
+/// junto; fora, a venda se desfaz, mas a SEFAZ pode recusar a nota (não bloqueia: algumas UFs
+/// aceitam fora do prazo).
+fn aviso_do_prazo(p: PrazoDeCancelamento) -> String {
+    if p.dentro() {
+        let mut t = format!(
+            "NFC-e autorizada há {}: estornando agora, o cancelamento vai dentro do prazo \
+             (faltam {}).",
+            p.ha(),
+            p.falta()
+        );
+        if p.falta_pouco() {
+            t.push_str(
+                " Falta pouco — sem internet, o pedido espera na fila e o prazo continua correndo.",
+            );
+        }
+        t
+    } else {
+        format!(
+            "NFC-e autorizada há {}: passou o prazo de cancelamento ({}). O estorno desfaz a \
+             venda, mas a SEFAZ pode recusar o cancelamento da nota — aí a saída é uma NFC-e de \
+             devolução.",
+            p.ha(),
+            p.prazo()
+        )
+    }
+}
+
 /// A justificativa que vai à SEFAZ (15 a 255 caracteres): o motivo tem ao menos 10, então o
 /// prefixo garante o mínimo.
 fn justificativa(numero: i64, motivo: &str) -> String {
@@ -218,6 +261,7 @@ pub(super) fn estornar(
     if !autorizador.concede(PERMISSAO_ESTORNAR) {
         return Err(format!("{login} não pode autorizar o estorno de venda."));
     }
+    let fora_do_prazo = prazo_da_nota(dlg, Instante::agora()).is_some_and(|p| !p.dentro());
     let estorno: VendaFoiEstornada = motor
         .executar(
             &autorizador,
@@ -230,6 +274,12 @@ pub(super) fn estornar(
         )
         .map_err(|e| e.mensagem)?;
     let mut frase = frase_da_devolucao(venda.numero, &estorno);
+    if fora_do_prazo {
+        frase.push_str(
+            " A NFC-e passou do prazo de cancelamento: se a SEFAZ recusar, emita uma NFC-e de \
+             devolução.",
+        );
+    }
     if let Err(e) = anular_nfce(
         ctx,
         motor,
@@ -440,6 +490,22 @@ fn corpo(
             e.motivo
         )));
     }
+    if let Some(p) = prazo_da_nota(v, Instante::agora()) {
+        if p.dentro() {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_secs(30));
+        }
+        ui.add_space(Espaco::E8);
+        ui.add(
+            Rotulo::apoio(aviso_do_prazo(p))
+                .quebravel()
+                .cor(if p.dentro() {
+                    ui.cores().texto_fraco
+                } else {
+                    ui.cores().atencao
+                }),
+        );
+    }
     if v.nota_sel().is_some_and(DocumentoResumo::anulacao_pendente) {
         ui.add_space(Espaco::E8);
         ui.add(
@@ -525,6 +591,21 @@ fn rodape(ui: &mut egui::Ui, v: &EstadoVendasDoDia, acao: &mut Option<AcaoVendas
 #[cfg(test)]
 pub(super) mod testes {
     use super::*;
+
+    #[test]
+    fn o_prazo_da_nfce_avisa_quem_estorna() {
+        let p = |min: i64| PrazoDeCancelamento {
+            modelo: mod_fiscal::ModeloFiscal::Nfce,
+            decorrido_segundos: min * 60,
+        };
+        assert_eq!(
+            aviso_do_prazo(p(12)),
+            "NFC-e autorizada há 12 min: estornando agora, o cancelamento vai dentro do prazo \
+             (faltam 18 min)."
+        );
+        assert!(aviso_do_prazo(p(27)).contains("Falta pouco"));
+        assert!(aviso_do_prazo(p(45)).contains("passou o prazo de cancelamento (30 min)"));
+    }
 
     #[test]
     fn justificativa_cabe_na_sefaz() {

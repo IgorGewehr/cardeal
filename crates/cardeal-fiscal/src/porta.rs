@@ -39,6 +39,17 @@ impl ModeloFiscal {
             Self::Nfce => "65",
         }
     }
+
+    /// O prazo nacional para cancelar depois da autorização, em segundos: 30 minutos para a
+    /// NFC-e, 24 horas para a NF-e. Fora dele a SEFAZ recusa (501) — algumas UFs aceitam, e
+    /// homologam fora do prazo (155).
+    #[must_use]
+    pub const fn prazo_de_cancelamento_segundos(self) -> i64 {
+        match self {
+            Self::Nfe => 24 * 60 * 60,
+            Self::Nfce => 30 * 60,
+        }
+    }
 }
 
 /// Homologação (testes, sem valor fiscal) ou produção.
