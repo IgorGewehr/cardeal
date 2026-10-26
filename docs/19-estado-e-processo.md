@@ -48,8 +48,8 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   O MVP do backlog do `docs/21-licoes-do-gestao-raiz.md` §5 (itens 1–8) e os itens 10 (parcelas e
   estorno da entrada de compra), 11 (XMLs no pacote do contador) e 12 (prazo de cancelamento visível)
   estão feitos, o `sefaz-api` devolve o XML do evento (2026-10-26, com a busca do que falta) e as notas
-  de compra chegam pela SEFAZ (DFe, item 9, 2026-10-26). Próximo: o 13; a 1ª autorizada no RS espera os
-  dados do usuário. O `sefaz-api` publicado precisa ser atualizado para as mudanças valerem em
+  de compra chegam pela SEFAZ (DFe, item 9, 2026-10-26); o 13 (Simples, orçamento, score) também.
+  Próximo: a contingência offline da NFC-e; a 1ª autorizada no RS espera os dados do usuário. O `sefaz-api` publicado precisa ser atualizado para as mudanças valerem em
   produção, e o DFe ainda não foi conferido contra o Ambiente Nacional (pede o certificado com a
   senha).
 - **Pendência de confiança:** as tabelas do Simples e as alíquotas precisam ser conferidas com o
@@ -727,6 +727,12 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   - desktop (`pacote_contador.rs`): `XMLs AAAA-MM.zip`, as seções "Notas fiscais do mês" e
     "Pendências do mês" no PDF, e as abas "Notas emitidas" e "Notas de entrada" na planilha;
   - `cardeal-pdf`: o sinal de menos (U+2212) sai como traço, não como "?".
+- **Score e curva de clientes (2026-10-26, fecha o item 13 do doc 21):** `mod_financeiro::pagamento`
+  (`avaliar`, `PerfisDePagamento`, `perfis_de_pagamento` — só a prazo, tolerância de 3 dias, nota
+  0–1000, selos), `mod_vendas::vendas_por_cliente`, `mod_pdv::CurvaDeClientes` (`montar_curva`:
+  ABC relativa, ritmo, Sumido/Novo/Ativo/Esporádico, ação), permissão nova `pdv.clientes.ver`
+  (negada ao Operador de Caixa); desktop: Clientes › "Curva de clientes" e o selo de pagamento na
+  ficha. Desvio do `clientes.md`: o score é calculado na hora no financeiro, não gravado por evento.
 - **Orçamento por conta (2026-10-26, item 13 do doc 21, segunda parte):** `mod_financeiro::orcamento`
   (`OrcamentoDoAno`, `DefinirOrcamentoDaConta`, `CopiarOrcamentoDoAno`, `desvio` no sentido do
   resultado), migração `financeiro` v14 (`financeiro_orcamento`), permissão

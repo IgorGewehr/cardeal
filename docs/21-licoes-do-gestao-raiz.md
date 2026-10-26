@@ -273,8 +273,16 @@ O que eles têm e o Cardeal não, com o que aprenderam:
     cancelamento traz o aviso (vermelho fora do prazo), e faltando 5 minutos o aviso lembra que, sem
     internet, o pedido espera na fila enquanto o prazo corre. Não bloqueia: recusado (501), a nota
     fica como "cancelamento recusado", com a orientação de emitir uma devolução.
-13. ~~**Orçamento** por categoria~~, ~~**resumo do Simples**~~ e **score/tier de cliente**: úteis, mas depois do
-    básico. **O resumo do Simples e o orçamento estão feitos (2026-10-26).**
+13. ~~**Orçamento** por categoria, **resumo do Simples** e **score/tier de cliente**: úteis, mas depois do
+    básico.~~ **Feito (2026-10-26).**
+
+    Score/tier — lá (`client-crm.service.ts`): notas de lealdade, valor e risco de churn por faixas
+    **fixas** (R$ 100 a R$ 10 mil gastos; 30, 60, 90, 180 dias sem comprar), as mesmas para
+    qualquer empresa, gravadas no cadastro e recalculadas em lote, sem olhar a pontualidade. Aqui:
+    a pontualidade sai das parcelas a prazo (`mod_financeiro::pagamento`: nota 0–1000 e selo, na
+    ficha do cliente); a curva de clientes do PDV (`CurvaDeClientes`) junta balcão e pedidos, dá a
+    classe ABC **relativa à carteira**, mede o sumiço contra o **ritmo do próprio cliente** e diz o
+    que fazer (cobrar, procurar). Tudo calculado na hora.
 
     Orçamento — lá (`financial_budgets`): anual por conta do plano, 12 meses, DRE com orçado e
     variação, "copiar do ano anterior". Mas a variação é `realizado ÷ orçado − 1` em toda linha: a

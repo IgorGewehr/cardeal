@@ -81,3 +81,54 @@ pub use preco::{preco_vigente, AlvoRegra, RegraPreco, TabelaPreco, TipoTabela};
 pub use receita::ReceitaPorProduto;
 #[cfg(feature = "sqlite")]
 pub use repositorio::RepositorioVendas;
+
+/// As vendas faturadas de cada cliente desde `desde` (cliente, dia, total) — a porta pública para
+/// a curva de clientes do PDV, que junta as vendas do balcão às dos pedidos.
+///
+/// # Errors
+/// Erro do SQLite.
+#[cfg(feature = "sqlite")]
+pub fn vendas_por_cliente(
+    c: &rusqlite::Connection,
+    empresa: cardeal_kernel::Id,
+    desde: cardeal_kernel::Data,
+) -> cardeal_kernel::Resultado<
+    Vec<(
+        cardeal_kernel::Id,
+        cardeal_kernel::Data,
+        cardeal_kernel::Dinheiro,
+    )>,
+> {
+    use cardeal_kernel::{CodigoErro, Data, Dinheiro, Erro, Id};
+    let falha = |e: rusqlite::Error| Erro::novo(CodigoErro::FALHA_INTERNA, e.to_string());
+    let mut stmt = c
+        .prepare(
+            "SELECT cliente, data, total FROM vendas_pedido
+             WHERE empresa = ?1 AND estado IN ('Faturado','EmEntrega','Concluido') AND data >= ?2",
+        )
+        .map_err(falha)?;
+    let v = stmt
+        .query_map(
+            rusqlite::params![empresa.em_bytes().as_slice(), i64::from(desde.em_dias())],
+            |r| {
+                Ok((
+                    r.get::<_, Vec<u8>>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, i64>(2)?,
+                ))
+            },
+        )
+        .map_err(falha)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(falha)?
+        .into_iter()
+        .map(|(cliente, data, total)| {
+            (
+                <[u8; 16]>::try_from(cliente).map_or(Id::NULO, Id::de_bytes),
+                Data::de_dias(i32::try_from(data).unwrap_or(0)),
+                Dinheiro::centavos(total),
+            )
+        })
+        .collect();
+    Ok(v)
+}

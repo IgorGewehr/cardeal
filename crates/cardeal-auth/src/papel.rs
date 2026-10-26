@@ -235,7 +235,14 @@ impl PapelDeFabrica {
             },
             Self::OperadorCaixa => PoliticaPapel {
                 tudo: false,
-                nega_prefixo: &["estoque.custo", "vendas.margem", "pdv.margem", "relatorio"],
+                // `pdv.clientes`: a curva de clientes mostra quanto cada um compra e como paga.
+                nega_prefixo: &[
+                    "estoque.custo",
+                    "vendas.margem",
+                    "pdv.margem",
+                    "pdv.clientes",
+                    "relatorio",
+                ],
                 modulos: &["pdv"],
                 // `fiscal.ver`/`fiscal.emitir`: sem eles a venda do caixa sai sem NFC-e, em
                 // silêncio (o PDV só emite com as duas). Cancelar e configurar, não.

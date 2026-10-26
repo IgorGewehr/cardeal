@@ -111,6 +111,8 @@ fn sessao_completa(empresa: Id) -> Sessao {
         "pdv.impressao.configurar",
         "clientes.credito.definir_limite",
         "financeiro.receber.baixar",
+        "financeiro.receber.ver",
+        "pdv.clientes.ver",
     ] {
         papel = papel.com_permissao(p);
     }
@@ -1467,4 +1469,103 @@ fn desconto_no_total_respeita_o_teto_da_venda_e_vai_para_os_itens_ao_finalizar()
         .unwrap();
     assert_eq!((desconto_itens, regra), (500, None));
     assert_eq!(saldo_do_papel(&arm, empresa, "DescontosConcedidos"), 500);
+}
+
+#[test]
+fn a_curva_de_clientes_soma_o_balcao_e_diz_quem_cobrar() {
+    use mod_financeiro::pagamento::SeloDePagamento;
+    use mod_pdv::{ClasseDoCliente, ClienteNaCurva, CurvaDeClientes, SituacaoDoCliente};
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[
+        &ModuloClientes,
+        &ModuloEstoque,
+        &ModuloFinanceiro,
+        &ModuloVendas,
+        &ModuloPdv,
+    ])
+    .unwrap();
+    let s = sessao_completa(empresa);
+    let amb = ambiente(empresa);
+    let cen = montar_cenario(&d, &s, &amb, &arm, empresa, 25);
+    let finalizar = |cupom: Id, pagamentos: Vec<PagamentoInformado>| {
+        d.executar_comando(
+            "pdv.finalizar_venda.v1",
+            &carga(&FinalizarVenda { cupom, pagamentos }),
+            &s,
+            &amb,
+            arm.escritor(),
+        )
+        .unwrap();
+    };
+    // R$ 50 a prazo para o cliente; uma venda sem cliente não entra na curva.
+    let venda = cupom_com(&d, &s, &amb, &arm, &cen, Some(cen.cliente), 2);
+    finalizar(venda, vec![a_prazo(Dinheiro::reais(50), 2)]);
+    let anonima = cupom_com(&d, &s, &amb, &arm, &cen, None, 1);
+    finalizar(
+        anonima,
+        vec![PagamentoInformado {
+            forma: FormaPagamentoPdv::Pix,
+            valor: Dinheiro::reais(25),
+            prazo: None,
+        }],
+    );
+    let curva = || -> Vec<ClienteNaCurva> {
+        postcard::from_bytes(
+            &d.executar_consulta(
+                "pdv.curva_de_clientes.v1",
+                &carga(&CurvaDeClientes),
+                &s,
+                &amb,
+                arm.leitor(),
+            )
+            .unwrap(),
+        )
+        .unwrap()
+    };
+    let c = curva();
+    assert_eq!(c.len(), 1);
+    assert_eq!(c[0].cliente, cen.cliente);
+    assert_eq!(c[0].faturamento, Dinheiro::reais(50));
+    assert_eq!(
+        (c[0].classe, c[0].situacao),
+        (ClasseDoCliente::A, SituacaoDoCliente::Novo)
+    );
+    // As parcelas ainda não venceram: sem histórico de pagamento.
+    let pagamento = c[0]
+        .pagamento
+        .clone()
+        .expect("quem vê o a receber vê o pagamento");
+    assert_eq!(pagamento.selo, SeloDePagamento::SemHistorico);
+    assert_eq!(pagamento.a_vencer, Dinheiro::reais(50));
+
+    // A primeira parcela venceu há 40 dias e não foi paga: inadimplente, e a ação é cobrar.
+    arm.escritor()
+        .executar(
+            ContextoEscrita::novo(empresa, Id::novo(), Id::novo(), Id::novo()),
+            move |uow| {
+                let vencida = Data::hoje(Fuso::BRASILIA).mais_dias(-40).em_dias();
+                // A venda foi há 70 dias, com a primeira parcela para 30 dias depois.
+                let c = uow.conexao();
+                c.execute(
+                    "UPDATE financeiro_titulo SET emissao = ?1",
+                    [i64::from(vencida - 30)],
+                )
+                .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))?;
+                c.execute(
+                    "UPDATE financeiro_parcela SET vencimento = ?1 WHERE numero = 1",
+                    [i64::from(vencida)],
+                )
+                .map(|_| ())
+                .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+            },
+        )
+        .unwrap();
+    let c = curva();
+    let pagamento = c[0].pagamento.clone().unwrap();
+    assert_eq!(pagamento.selo, SeloDePagamento::Inadimplente);
+    assert_eq!(pagamento.maior_atraso_dias, 40);
+    assert_eq!(
+        c[0].acao.as_deref(),
+        Some("Cobrar: R$ 25,00 vencido há 40 dias")
+    );
 }

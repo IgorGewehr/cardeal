@@ -155,6 +155,12 @@ const PERMISSOES: &[Permissao] = &[
         None,
     ),
     perm(
+        "pdv.clientes.ver",
+        "Ver a curva de clientes (faturamento, recência e pontualidade de cada um)",
+        Risco::Medio,
+        None,
+    ),
+    perm(
         "pdv.tef.operar",
         "Iniciar pagamento por TEF",
         Risco::Medio,

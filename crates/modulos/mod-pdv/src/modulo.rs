@@ -41,7 +41,8 @@ impl Modulo for ModuloPdv {
             .comando::<IdentificarCliente>("pdv.identificar_cliente.v1")
             .consulta::<PrecoDoProduto>("pdv.preco_do_produto.v1")
             .consulta::<VendasDoPeriodo>("pdv.vendas_do_periodo.v1")
-            .consulta::<crate::ReceitaPorProduto>("pdv.receita_por_produto.v1");
+            .consulta::<crate::ReceitaPorProduto>("pdv.receita_por_produto.v1")
+            .consulta::<crate::CurvaDeClientes>("pdv.curva_de_clientes.v1");
         Ok(())
     }
 }

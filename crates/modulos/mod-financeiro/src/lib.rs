@@ -89,6 +89,7 @@ pub mod migracoes;
 #[cfg(feature = "sqlite")]
 mod modulo;
 pub mod orcamento;
+pub mod pagamento;
 pub mod pessoal;
 mod plano;
 mod projecao;

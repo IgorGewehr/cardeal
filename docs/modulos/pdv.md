@@ -177,6 +177,7 @@ itens e pagamentos.
 | `ImpressaoDoPdv` ✅ (2026-10-15, `pdv.impressao.v1`) | `pdv.venda.editar` | A impressão configurada (padrão: 80 mm, sem comprovante automático) | `pdv_preferencias(empresa)` |
 | `VendasDoPeriodo` ✅ (2026-10-15, `pdv.vendas_do_periodo.v1`) | `pdv.venda.ver` | `F11` Vendas de hoje: cupons `Finalizado` e `Estornado` abertos no período (fuso da empresa), com pagamentos e o estorno; até 1.000 | `pdv_cupom(empresa, abertura)` (migração v2) |
 | `FaixaAtual` | `pdv.venda.ver` | Faixa de estoque do FaixaEstado (topo da tela) | `pdv_faixa_numeracao(terminal) WHERE proximo <= numero_final` |
+| `CurvaDeClientes` ✅ (2026-10-26, `pdv.curva_de_clientes.v1`) | `pdv.clientes.ver` | Clientes › "Curva de clientes": quem comprou quanto nos últimos 12 meses (cupons finalizados não estornados com o cliente identificado + pedidos faturados de `vendas`, por `mod_vendas::vendas_por_cliente`), classe ABC relativa à carteira (80%/95%), o ritmo (intervalo médio entre as compras), a situação (Novo até 60 dias da 1ª compra; Sumido passado o dobro do ritmo e 30 dias; Ativo; Esporádico), o pagamento (`mod_financeiro::pagamento`, com `financeiro.receber.ver`) e o que fazer (cobrar o inadimplente; procurar o A/B sumido). Lição do gestao-raiz: lá as faixas de valor e de dias são fixas, iguais para qualquer empresa, e a pontualidade não entra | `pdv_cupom(empresa, estado, abertura)` + `vendas_pedido` + parcelas a receber |
 | `ReceitaPorProduto` ✅ (2026-10-12, `pdv.receita_por_produto.v1`) | `pdv.margem.ver` | Rentabilidade por nível (aba do Estoque): receita por produto dos cupons `Finalizado` abertos no período, sem itens cancelados | `pdv_cupom(empresa, estado, abertura)` + `pdv_item_cupom(cupom)` |
 
 `pdv.receita_por_produto.v1` recebe um `Periodo` e devolve `Vec<ReceitaDoProduto>` (tipo de
@@ -235,6 +236,7 @@ exemplo canônico do [doc 01 §3](../01-arquitetura-geral.md#3-o-caminho-de-um-c
 | `pdv.desconto.aplicar` | Aplicar desconto no item (`F5`) e no total (`Shift+F5`) | Médio |
 | `pdv.preco.consultar` | Consulta de preço sem abrir venda (`F10`) | Baixo |
 | `pdv.margem.ver` | Ver a receita por produto vendida no balcão (rentabilidade) | Médio |
+| `pdv.clientes.ver` | Ver a curva de clientes — o Operador de Caixa não tem (`nega_prefixo` "pdv.clientes", 2026-10-26) | Médio |
 | `pdv.tef.operar` | Iniciar pagamento por TEF | Médio |
 
 `F12` (abrir/fechar caixa) e `F9` (sangria) usam as permissões de `financeiro` diretamente

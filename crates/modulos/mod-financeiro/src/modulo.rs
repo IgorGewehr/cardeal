@@ -35,6 +35,8 @@ impl Modulo for ModuloFinanceiro {
         migracoes::conjunto()
     }
 
+    // A lista de registro cresce com o módulo: uma linha por comando, consulta ou tarefa.
+    #[allow(clippy::too_many_lines)]
     fn registrar(&self, registro: &mut Registro) -> Resultado<()> {
         registro
             .comando::<LancarTituloAReceber>("financeiro.lancar_titulo_a_receber.v1")
@@ -119,6 +121,7 @@ impl Modulo for ModuloFinanceiro {
             .consulta::<crate::DreDoPeriodo>("financeiro.dre_do_periodo.v1")
             .consulta::<crate::DreComparativa>("financeiro.dre_comparativa.v1")
             .consulta::<crate::orcamento::OrcamentoDoAno>("financeiro.orcamento_do_ano.v1")
+            .consulta::<crate::pagamento::PerfisDePagamento>("financeiro.perfis_de_pagamento.v1")
             .comando::<crate::orcamento::DefinirOrcamentoDaConta>(
                 "financeiro.definir_orcamento_da_conta.v1",
             )
