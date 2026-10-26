@@ -115,6 +115,48 @@ const SQL_XML_NOTA: &str = r"
 ALTER TABLE compras_nota_entrada ADD COLUMN xml TEXT;
 ";
 
+/// v8: as notas que chegam pela SEFAZ (distribuição `DFe`). O estado da busca passa a ser por
+/// **ambiente** (o NSU de homologação não serve na produção) e ganha a hora da próxima consulta
+/// (a SEFAZ barra quem pede antes — 656) e o resumo da última rodada. O NSU antigo não é
+/// copiado: só o simulador o gravava (o `sefaz-api` não tinha a distribuição). A tabela das
+/// notas guarda o resumo que espera a Ciência da Operação, a ciência dada e, da nota que não
+/// importou, o XML.
+const SQL_V8: &str = r"
+DROP TABLE compras_estado_dfe;
+CREATE TABLE compras_dfe_estado (
+    empresa           BLOB    NOT NULL,
+    ambiente          TEXT    NOT NULL CHECK (ambiente IN ('homologacao','producao')),
+    ultimo_nsu        INTEGER NOT NULL DEFAULT 0,
+    proxima_consulta  INTEGER NOT NULL DEFAULT 0,
+    ultima_consulta   INTEGER,
+    ultimo_resultado  TEXT,
+    PRIMARY KEY (empresa, ambiente)
+) STRICT, WITHOUT ROWID;
+CREATE TABLE compras_dfe_nota (
+    empresa            BLOB    NOT NULL,
+    chave              TEXT    NOT NULL,
+    ambiente           TEXT    NOT NULL CHECK (ambiente IN ('homologacao','producao')),
+    nsu                INTEGER NOT NULL,
+    emitente_documento TEXT    NOT NULL,
+    emitente_nome      TEXT    NOT NULL,
+    emissao            INTEGER,
+    valor              INTEGER NOT NULL,
+    situacao           INTEGER NOT NULL CHECK (situacao IN (1,2,3)),
+    estado             TEXT    NOT NULL
+                       CHECK (estado IN ('Aguardando','Baixada','Ignorada','Erro')),
+    motivo             TEXT,
+    xml                TEXT,
+    ciencia_em         INTEGER,
+    ciencia_protocolo  TEXT,
+    ciencia_xml        TEXT,
+    tentativas         INTEGER NOT NULL DEFAULT 0,
+    proxima_tentativa  INTEGER NOT NULL DEFAULT 0,
+    recebida_em        INTEGER NOT NULL,
+    PRIMARY KEY (empresa, chave)
+) STRICT, WITHOUT ROWID;
+CREATE INDEX compras_dfe_nota_espera ON compras_dfe_nota(empresa, ambiente, estado, proxima_tentativa);
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -156,6 +198,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 7,
         nome: "compras_xml_da_nota",
         sql: SQL_XML_NOTA,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 8,
+        nome: "compras_notas_da_sefaz",
+        sql: SQL_V8,
         tipo: TipoMigracao::Esquema,
     },
 ];

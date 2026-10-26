@@ -69,7 +69,7 @@ pub use nfce::{
 };
 pub use provedor::ProvedorFiscal;
 #[cfg(feature = "sqlite")]
-pub use provedor::{porta_da_empresa, porta_da_empresa_no_ambiente};
+pub use provedor::{ambiente_da_empresa, porta_da_empresa, porta_da_empresa_no_ambiente};
 pub use tipos::{
     CertificadoResumo, PendenciaFiscal, SituacaoFiscalDaEmpresa, ALERTA_VENCIMENTO_DIAS,
 };

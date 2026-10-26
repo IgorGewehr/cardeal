@@ -1,10 +1,6 @@
 //! Os comandos de compras (`docs/modulos/compras.md` §5). Um arquivo, um comando — mais a
-//! parte que não é comando: a varredura da distribuição `DFe` é uma tarefa agendada no spec
-//! (§5, sequência), não uma ação de usuário, então vive aqui como função `pub` comum
-//! ([`verificar_notas_na_sefaz`]/[`importar_nota_da_sefaz`]), chamável direto por quem tiver
-//! um `PortaFiscal` em mãos (hoje, só teste de integração com `FiscalSimulado`; quando
-//! `cardeal-modkit::Ctx::porta()` existir, um agendador de verdade chama a mesma função —
-//! ver `docs/19-estado-e-processo.md` §1.2/§4).
+//! importação de um XML que chegou da SEFAZ ([`importar_nota_da_sefaz`]), que a busca de notas
+//! (a tarefa de `crate::dfe`, fora de transação) chama nota a nota.
 
 mod confirmar_entrada;
 mod criar_produto_do_item;
@@ -22,8 +18,6 @@ pub use importar_nota_de_arquivo_xml::ImportarNotaDeArquivoXml;
 pub use lancar_nota_manual::{ItemNotaManual, LancarNotaManual};
 pub use vincular_produto_manual::VincularProdutoManual;
 
-#[cfg(feature = "sqlite")]
-use cardeal_fiscal::{Nsu, PortaFiscal};
 use cardeal_kernel::Id;
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::{Cnpj, Dinheiro, Erro, Resultado, Versao};
@@ -128,9 +122,8 @@ pub struct RelatorioImportacao {
     pub titulo_pago: bool,
 }
 
-/// Interpreta um XML já baixado (via `PortaFiscal`/`DFe`) e importa a nota — só um envelope
-/// fino sobre [`importar_nota_interpretada`], mantido para a assinatura que
-/// [`verificar_notas_na_sefaz`] já usava.
+/// Interpreta um XML já baixado da SEFAZ (a busca de notas, `crate::dfe`) e importa a nota —
+/// um envelope fino sobre [`importar_nota_interpretada`].
 ///
 /// # Errors
 /// Erro de domínio (`ErroFiscal::XmlInvalido` já vem tratado pelo chamador — este recebe o
@@ -521,50 +514,6 @@ fn montar_item_casado(
         ResultadoCasamento::Nenhum => {}
     }
     Ok(item)
-}
-
-/// Varre a distribuição `DFe` desde o último NSU visto, baixa e importa cada nota nova.
-/// Idempotente: reimportar a mesma chave nunca duplica (`importar_nota_da_sefaz`).
-///
-/// # Errors
-/// Erro de domínio ou de infraestrutura — de qualquer nota individual (interrompe a
-/// varredura na primeira falha; o NSU só avança para as notas processadas com sucesso).
-#[cfg(feature = "sqlite")]
-pub fn verificar_notas_na_sefaz(
-    porta: &dyn PortaFiscal,
-    ctx: &Ctx,
-    uow: &mut UnidadeDeTrabalho,
-) -> Resultado<Vec<RelatorioImportacao>> {
-    let cnpj_empresa = RepositorioCompras::novo(uow).cnpj_da_empresa(ctx.empresa)?;
-    let ultimo_nsu = RepositorioCompras::novo(uow).ultimo_nsu(ctx.empresa)?;
-
-    let resumos = porta.distribuicao_dfe(&cnpj_empresa, Nsu(ultimo_nsu))?;
-    let mut relatorios = Vec::with_capacity(resumos.len());
-    let mut maior_nsu = ultimo_nsu;
-
-    for resumo in resumos {
-        maior_nsu = maior_nsu.max(resumo.nsu.0);
-        if RepositorioCompras::novo(uow)
-            .buscar_nota_por_chave(ctx.empresa, resumo.chave_acesso.como_str())?
-            .is_some()
-        {
-            continue;
-        }
-        let xml_bruto = porta.baixar_xml(&resumo.chave_acesso)?;
-        let nota_xml =
-            cardeal_fiscal::interpretar(&xml_bruto.0).map_err(|e| Erro::de_dominio(&e))?;
-        // A distribuição também traz notas em que a empresa aparece sem ser compradora
-        // (transportadora, autorizada a baixar o XML, devolução de cliente): essas ficam de
-        // fora, sem travar a varredura.
-        if nota_xml.classificar_para(&cnpj_empresa) != cardeal_fiscal::ClassificacaoEntrada::Compra
-        {
-            continue;
-        }
-        relatorios.push(importar_nota_da_sefaz(&nota_xml, &xml_bruto.0, ctx, uow)?);
-    }
-
-    RepositorioCompras::novo(uow).atualizar_ultimo_nsu(ctx.empresa, maior_nsu)?;
-    Ok(relatorios)
 }
 
 /// O que [`confirmar_entrada_comum`] devolve: o título gerado (se algum) e se ele já nasceu

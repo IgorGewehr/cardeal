@@ -1,5 +1,4 @@
-//! O ciclo completo de importação de nota de entrada: `FiscalSimulado` no lugar da SEFAZ
-//! real, resolução automática do fornecedor por CNPJ, cascata de casamento de produto,
+//! O ciclo completo de importação de nota de entrada: o XML como a SEFAZ entrega, resolução automática do fornecedor por CNPJ, cascata de casamento de produto,
 //! rateio de frete, e os dois caminhos — confirmação totalmente automática (regra aprendida
 //! e preferências) e revisão manual (`VincularProdutoManual` e `ConfirmarEntrada`) — cada
 //! um terminando num movimento de estoque e (quando a preferência manda) um título a pagar
@@ -8,15 +7,14 @@
 #![allow(clippy::result_large_err)] // `ErroArmazenamento` carrega detalhes de propósito
 
 use cardeal_auth::{AutorizacoesEfetivas, EmissaoSessao, Escopo, Sessao};
-use cardeal_fiscal::{ChaveAcesso, FiscalSimulado};
 use cardeal_kernel::{Cnpj, Fuso, Id, Instante};
 use cardeal_ledger::semear_plano_padrao;
 use cardeal_modkit::{Ambiente, Ctx, Despachante, Modulo, PedidoAtivacao, RegistroModulos};
 use cardeal_storage::{Armazenamento, ConfigArmazenamento, ContextoEscrita, ErroArmazenamento};
 use mod_compras::{
-    confirmar_entrada_comum, importar_nota_da_sefaz, verificar_notas_na_sefaz, EstadoNotaEntrada,
-    ImportarNotaDeArquivoXml, ItemNotaManual, LancarNotaManual, ModuloCompras, PreferenciasCompras,
-    RateioPor, RelatorioImportacao, RepositorioCompras,
+    confirmar_entrada_comum, importar_nota_da_sefaz, EstadoNotaEntrada, ImportarNotaDeArquivoXml,
+    ItemNotaManual, LancarNotaManual, ModuloCompras, PreferenciasCompras, RateioPor,
+    RelatorioImportacao, RepositorioCompras,
 };
 use mod_estoque::{ModuloEstoque, RepositorioEstoque};
 use tempfile::TempDir;
@@ -57,10 +55,9 @@ fn base() -> (TempDir, Armazenamento, Id) {
 }
 
 /// Um `Ctx` de verdade — empresa, conjunto efetivo e autorizações reais — montado sem
-/// passar pelo lookup por nome do `Despachante`. É o que `verificar_notas_na_sefaz`,
-/// `importar_nota_da_sefaz` e `confirmar_entrada_comum` esperam: elas não são `Comando`
-/// (dependem de `PortaFiscal`, que o despacho ainda não injeta — ver `mod_compras::lib`),
-/// mas continuam exigindo a mesma `UnidadeDeTrabalho` transacional de sempre.
+/// passar pelo lookup por nome do `Despachante`. É o que `importar_nota_da_sefaz` e
+/// `confirmar_entrada_comum` esperam: não são `Comando` (a primeira é o miolo da busca na
+/// SEFAZ, que roda como tarefa), mas exigem a mesma `UnidadeDeTrabalho` transacional.
 fn ctx(empresa: Id) -> Ctx {
     let mut rm = RegistroModulos::novo();
     rm.registrar(&mod_clientes::MANIFESTO).unwrap();
@@ -198,25 +195,16 @@ fn conta_titulos_a_pagar(arm: &Armazenamento, empresa: Id) -> i64 {
 }
 
 #[test]
-fn varredura_da_sefaz_confirma_sozinha_quando_tudo_ja_foi_aprendido() {
+fn nota_da_sefaz_confirma_sozinha_quando_tudo_ja_foi_aprendido() {
     let (_dir, arm, empresa) = base();
     let produto = cadastrar_produto(&arm, empresa, "Parafuso Sextavado M6", "73181500");
     let local = cadastrar_local(&arm, empresa);
     let chave = "1".repeat(44);
 
-    let sim = std::sync::Arc::new(FiscalSimulado::novo());
-    let cnpj_empresa = Cnpj::novo(CNPJ_EMPRESA).unwrap();
     let cnpj_fornecedor = Cnpj::novo(CNPJ_FORNECEDOR).unwrap();
-    let chave_acesso = ChaveAcesso::nova(&chave).unwrap();
-    sim.semear(
-        cnpj_empresa,
-        1,
-        &chave_acesso,
-        xml_nota(&chave, "PAR-M6", "PARAF SEXT M6 ZINC", "73181500"),
-    );
-
-    let sim_1 = std::sync::Arc::clone(&sim);
-    let sim_2 = std::sync::Arc::clone(&sim);
+    let xml = xml_nota(&chave, "PAR-M6", "PARAF SEXT M6 ZINC", "73181500");
+    let nota = cardeal_fiscal::interpretar(&xml).unwrap();
+    let (xml_2, nota_2) = (xml.clone(), nota.clone());
     let ctx_escrita = ContextoEscrita::novo(empresa, Id::novo(), Id::novo(), Id::novo());
     arm.escritor()
         .executar(ctx_escrita, move |uow| {
@@ -273,15 +261,14 @@ fn varredura_da_sefaz_confirma_sozinha_quando_tudo_ja_foi_aprendido() {
                 })
                 .map_err(cardeal_storage::ErroArmazenamento::Dominio)?;
 
-            let relatorios = verificar_notas_na_sefaz(sim_1.as_ref(), &ctx(empresa), uow)
+            let relatorio = importar_nota_da_sefaz(&nota, &xml, &ctx(empresa), uow)
                 .map_err(cardeal_storage::ErroArmazenamento::Dominio)?;
-            assert_eq!(relatorios.len(), 1);
-            assert_eq!(relatorios[0].estado, EstadoNotaEntrada::Confirmada);
-            assert_eq!(relatorios[0].itens_nao_casados, 0);
-            assert!(relatorios[0].titulo.is_some());
+            assert_eq!(relatorio.estado, EstadoNotaEntrada::Confirmada);
+            assert_eq!(relatorio.itens_nao_casados, 0);
+            assert!(relatorio.titulo.is_some());
             // `pago_no_ato_padrao` não foi ligado nas preferências deste teste — o título
             // nasce em aberto, não pago.
-            assert!(!relatorios[0].titulo_pago);
+            assert!(!relatorio.titulo_pago);
             Ok(())
         })
         .unwrap();
@@ -289,13 +276,13 @@ fn varredura_da_sefaz_confirma_sozinha_quando_tudo_ja_foi_aprendido() {
     assert_eq!(conta_movimentos_estoque(&arm, empresa), 1);
     assert_eq!(conta_titulos_a_pagar(&arm, empresa), 1);
 
-    // Varrer de novo não duplica nada — a mesma chave já foi importada.
+    // Importar de novo não duplica nada — a mesma chave já foi importada.
     let ctx_escrita2 = ContextoEscrita::novo(empresa, Id::novo(), Id::novo(), Id::novo());
     arm.escritor()
         .executar(ctx_escrita2, move |uow| {
-            let relatorios = verificar_notas_na_sefaz(sim_2.as_ref(), &ctx(empresa), uow)
+            let relatorio = importar_nota_da_sefaz(&nota_2, &xml_2, &ctx(empresa), uow)
                 .map_err(cardeal_storage::ErroArmazenamento::Dominio)?;
-            assert!(relatorios.is_empty());
+            assert!(relatorio.titulo.is_none());
             Ok(())
         })
         .unwrap();
@@ -1130,48 +1117,4 @@ fn cfop_que_nao_e_venda_fica_a_conferir_com_aviso_mesmo_com_tudo_casado() {
         1,
         "só a venda gerou título"
     );
-}
-
-#[test]
-fn varredura_da_sefaz_pula_o_que_nao_e_compra_sem_travar() {
-    let (_dir, arm, empresa) = base();
-    let sim = std::sync::Arc::new(FiscalSimulado::novo());
-    let cnpj_empresa = Cnpj::novo(CNPJ_EMPRESA).unwrap();
-    let nos = format!("<CNPJ>{CNPJ_EMPRESA}</CNPJ>");
-    let outra = "4".repeat(44);
-    let compra = "5".repeat(44);
-    sim.semear(
-        cnpj_empresa,
-        1,
-        &ChaveAcesso::nova(&outra).unwrap(),
-        xml_variante(
-            &outra,
-            "1",
-            "1",
-            "<CNPJ>12345678000195</CNPJ>",
-            "5102",
-            CNPJ_FORNECEDOR,
-        ),
-    );
-    sim.semear(
-        cnpj_empresa,
-        2,
-        &ChaveAcesso::nova(&compra).unwrap(),
-        xml_variante(&compra, "1", "1", &nos, "5102", CNPJ_FORNECEDOR),
-    );
-    let ctx_escrita = ContextoEscrita::novo(empresa, Id::novo(), Id::novo(), Id::novo());
-    arm.escritor()
-        .executar(ctx_escrita, move |uow| {
-            let relatorios = verificar_notas_na_sefaz(sim.as_ref(), &ctx(empresa), uow)
-                .map_err(cardeal_storage::ErroArmazenamento::Dominio)?;
-            assert_eq!(
-                relatorios.len(),
-                1,
-                "a nota de outro destinatário ficou de fora"
-            );
-            Ok(())
-        })
-        .unwrap();
-    assert_eq!(conta_notas_com_chave(&arm, empresa, &outra), 0);
-    assert_eq!(conta_notas_com_chave(&arm, empresa, &compra), 1);
 }

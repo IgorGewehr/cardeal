@@ -15,15 +15,15 @@ use std::time::Duration;
 use base64::Engine as _;
 use cardeal_kernel::{Cnpj, Erro, Resultado, Uf};
 use cardeal_storage::Segredo;
+use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::chave::ChaveAcesso;
+use crate::dfe::{DocumentoDfe, Manifestacao, PaginaDfe, TipoDfe};
 use crate::emissao::{Csc, ItemDocumento, Nfce, PedidoInutilizacao, RetornoSefaz, SituacaoRetorno};
 use crate::erros::ErroFiscal;
-use crate::porta::{
-    AmbienteFiscal, ModeloFiscal, Nsu, PortaFiscal, ResumoDfe, StatusSefaz, XmlNota,
-};
+use crate::porta::{AmbienteFiscal, ModeloFiscal, Nsu, PortaFiscal, StatusSefaz};
 
 /// Onde está o `sefaz-api` e com que chave falar com ele.
 #[derive(Debug, Clone)]
@@ -123,8 +123,8 @@ impl ApiFiscalHttp {
         corpo
     }
 
-    /// Faz um `POST` e devolve a resposta no formato `SefazResponse` do `sefaz-api`.
-    fn postar(&self, caminho: &str, corpo: &Value) -> Result<RespostaSefazApi, ErroFiscal> {
+    /// Faz um `POST` e lê a resposta (o `SefazResponse` do `sefaz-api`, ou o da distribuição).
+    fn postar<T: DeserializeOwned>(&self, caminho: &str, corpo: &Value) -> Result<T, ErroFiscal> {
         let url = format!("{}{caminho}", self.config.url);
         let config = &self.config;
         let enviar = || -> Result<(u16, String), ErroFiscal> {
@@ -400,8 +400,80 @@ struct RespostaDeErro {
     error: String,
 }
 
+/// A resposta da distribuição `DFe` do `sefaz-api` (`DfeResponse`).
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct RespostaDfe {
+    status: String,
+    #[serde(rename = "codigoStatus")]
+    codigo_status: String,
+    #[serde(rename = "motivoStatus")]
+    motivo_status: String,
+    #[serde(rename = "ultNSU")]
+    ult_nsu: String,
+    #[serde(rename = "maxNSU")]
+    max_nsu: String,
+    documentos: Vec<DocumentoDaApi>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+struct DocumentoDaApi {
+    nsu: String,
+    tipo: String,
+    chave_acesso: String,
+    xml: String,
+}
+
+impl RespostaDfe {
+    /// Em [`PaginaDfe`]. A resposta que não serve (sem NSU, falha da API) é
+    /// `ServicoIndisponivel` — nunca uma página que faça o NSU andar (ou voltar).
+    fn em_pagina(self, exige_nsu: bool) -> Result<PaginaDfe, ErroFiscal> {
+        let nsu = |s: &str| s.parse::<u64>().ok().map(Nsu);
+        match self.status.as_str() {
+            "ok" => {
+                let ultimo = nsu(&self.ult_nsu);
+                if exige_nsu && ultimo.is_none() {
+                    return Err(ErroFiscal::ServicoIndisponivel);
+                }
+                let ultimo = ultimo.unwrap_or_default();
+                Ok(PaginaDfe {
+                    consumo_indevido: false,
+                    ultimo_nsu: ultimo,
+                    maior_nsu: nsu(&self.max_nsu).unwrap_or(ultimo),
+                    documentos: self
+                        .documentos
+                        .into_iter()
+                        .map(|d| DocumentoDfe {
+                            nsu: nsu(&d.nsu).unwrap_or_default(),
+                            tipo: match d.tipo.as_str() {
+                                "resNFe" => TipoDfe::ResumoDaNota,
+                                "procNFe" => TipoDfe::Nota,
+                                "resEvento" => TipoDfe::ResumoDeEvento,
+                                "procEventoNFe" => TipoDfe::Evento,
+                                _ => TipoDfe::Outro,
+                            },
+                            chave: ChaveAcesso::nova(&d.chave_acesso).ok(),
+                            xml: d.xml,
+                        })
+                        .collect(),
+                })
+            }
+            "consumo_indevido" => Ok(PaginaDfe {
+                consumo_indevido: true,
+                ..PaginaDfe::default()
+            }),
+            "rejeitado" => Err(ErroFiscal::ApiFiscalRecusou(format!(
+                "a SEFAZ recusou a consulta das notas recebidas ({}): {}",
+                self.codigo_status, self.motivo_status
+            ))),
+            _ => Err(ErroFiscal::ServicoIndisponivel),
+        }
+    }
+}
+
 /// Traduz o status HTTP e o corpo numa resposta ou num [`ErroFiscal`].
-fn interpretar_resposta(status: u16, texto: &str) -> Result<RespostaSefazApi, ErroFiscal> {
+fn interpretar_resposta<T: DeserializeOwned>(status: u16, texto: &str) -> Result<T, ErroFiscal> {
     let mensagem = || {
         serde_json::from_str::<RespostaDeErro>(texto)
             .map_or_else(|_| texto.chars().take(200).collect(), |e| e.error)
@@ -426,16 +498,48 @@ fn interpretar_resposta(status: u16, texto: &str) -> Result<RespostaSefazApi, Er
 }
 
 impl PortaFiscal for ApiFiscalHttp {
-    fn distribuicao_dfe(&self, _cnpj: &Cnpj, _desde: Nsu) -> Resultado<Vec<ResumoDfe>> {
-        Err(Erro::de_dominio(&ErroFiscal::NaoSuportadoPeloProvedor(
-            "a distribuição de notas de entrada (DFe)".into(),
-        )))
+    fn distribuicao_dfe(&self, cnpj: &Cnpj, uf: Uf, desde: Nsu) -> Resultado<PaginaDfe> {
+        let mut corpo = self.corpo_base();
+        corpo.insert("cnpj".into(), Value::from(cnpj.sem_mascara()));
+        corpo.insert("ufAutor".into(), Value::from(uf.sigla()));
+        corpo.insert("ultNSU".into(), Value::from(desde.0.to_string()));
+        self.postar::<RespostaDfe>("/nfe/dfe/distribuicao", &Value::Object(corpo))
+            .and_then(|r| r.em_pagina(true))
+            .map_err(|e| Erro::de_dominio(&e))
     }
 
-    fn baixar_xml(&self, _chave: &ChaveAcesso) -> Resultado<XmlNota> {
-        Err(Erro::de_dominio(&ErroFiscal::NaoSuportadoPeloProvedor(
-            "o download de notas de entrada (DFe)".into(),
-        )))
+    fn consultar_dfe_por_chave(
+        &self,
+        cnpj: &Cnpj,
+        uf: Uf,
+        chave: &ChaveAcesso,
+    ) -> Resultado<PaginaDfe> {
+        let mut corpo = self.corpo_base();
+        corpo.insert("cnpj".into(), Value::from(cnpj.sem_mascara()));
+        corpo.insert("ufAutor".into(), Value::from(uf.sigla()));
+        corpo.insert("chaveAcesso".into(), Value::from(chave.como_str()));
+        self.postar::<RespostaDfe>("/nfe/dfe/consulta-chave", &Value::Object(corpo))
+            .and_then(|r| r.em_pagina(false))
+            .map_err(|e| Erro::de_dominio(&e))
+    }
+
+    fn manifestar(
+        &self,
+        cnpj: &Cnpj,
+        chave: &ChaveAcesso,
+        tipo: Manifestacao,
+        justificativa: Option<&str>,
+    ) -> Resultado<RetornoSefaz> {
+        let mut corpo = self.corpo_base();
+        corpo.insert("cnpj".into(), Value::from(cnpj.sem_mascara()));
+        corpo.insert("chaveAcesso".into(), Value::from(chave.como_str()));
+        corpo.insert("tipo".into(), Value::from(tipo.na_api()));
+        if let Some(j) = justificativa {
+            corpo.insert("justificativa".into(), Value::from(j));
+        }
+        self.postar("/nfe/manifestacao", &Value::Object(corpo))
+            .map(RespostaSefazApi::em_retorno)
+            .map_err(|e| Erro::de_dominio(&e))
     }
 
     fn emitir_nfce(&self, nota: &Nfce, csc: &Csc) -> Resultado<RetornoSefaz> {
@@ -502,7 +606,7 @@ impl PortaFiscal for ApiFiscalHttp {
         let mut corpo = self.corpo_base();
         corpo.insert("ufEmitente".into(), Value::from(uf.sigla()));
         corpo.insert("modelo".into(), Value::from(modelo.codigo()));
-        let r = self
+        let r: RespostaSefazApi = self
             .postar("/nfe/status", &Value::Object(corpo))
             .map_err(|e| Erro::de_dominio(&e))?;
         Ok(StatusSefaz {
@@ -692,6 +796,100 @@ mod testes {
     }
 
     #[test]
+    fn a_distribuicao_manda_o_nsu_e_le_a_pagina() {
+        let (url, tarefa) = servidor(
+            200,
+            r#"{"success":true,"status":"ok","codigoStatus":"138","motivoStatus":"Documento(s) localizado(s)","ultNSU":"000000000000012","maxNSU":"000000000000020","documentos":[{"nsu":"000000000000011","schema":"resNFe_v1.01.xsd","tipo":"resNFe","chaveAcesso":"43261011222333000181550010000001231000000010","xml":"<resNFe/>"},{"nsu":"000000000000012","schema":"x","tipo":"procNFe","chaveAcesso":"","xml":"<nfeProc/>"}]}"#,
+        );
+        let cnpj = Cnpj::novo("11222333000181").unwrap();
+        let p = cliente(&url)
+            .distribuicao_dfe(&cnpj, Uf::Rs, Nsu(10))
+            .unwrap();
+        assert!(!p.consumo_indevido);
+        assert_eq!((p.ultimo_nsu, p.maior_nsu), (Nsu(12), Nsu(20)));
+        assert_eq!(p.documentos.len(), 2);
+        assert_eq!(p.documentos[0].tipo, TipoDfe::ResumoDaNota);
+        assert_eq!(p.documentos[0].nsu, Nsu(11));
+        assert!(p.documentos[0].chave.is_some());
+        assert_eq!(p.documentos[1].tipo, TipoDfe::Nota);
+        assert_eq!(p.documentos[1].chave, None);
+        let recebido = tarefa.join().unwrap();
+        assert!(
+            recebido.starts_with("POST /nfe/dfe/distribuicao "),
+            "{recebido}"
+        );
+        let corpo: Value = serde_json::from_str(recebido.rsplit('\n').next().unwrap()).unwrap();
+        assert_eq!(corpo["cnpj"], "11222333000181");
+        assert_eq!(corpo["ufAutor"], "RS");
+        assert_eq!(corpo["ultNSU"], "10");
+    }
+
+    #[test]
+    fn resposta_da_distribuicao_que_nao_serve_nao_anda_o_nsu() {
+        let pagina = |json: &str| {
+            serde_json::from_str::<RespostaDfe>(json)
+                .unwrap()
+                .em_pagina(true)
+        };
+        // Sem NSU, ou a API sem resposta da SEFAZ: indisponível (tenta depois).
+        assert_eq!(
+            pagina(r#"{"status":"ok","codigoStatus":"138","ultNSU":""}"#).unwrap_err(),
+            ErroFiscal::ServicoIndisponivel
+        );
+        assert_eq!(
+            pagina(r#"{"status":"erro","codigoStatus":"ERR"}"#).unwrap_err(),
+            ErroFiscal::ServicoIndisponivel
+        );
+        // 656: a página diz "espere".
+        assert!(
+            pagina(r#"{"status":"consumo_indevido","codigoStatus":"656"}"#)
+                .unwrap()
+                .consumo_indevido
+        );
+        // Recusa da SEFAZ: o motivo vai para a tela.
+        let ErroFiscal::ApiFiscalRecusou(m) = pagina(
+            r#"{"status":"rejeitado","codigoStatus":"593","motivoStatus":"CNPJ-Base difere"}"#,
+        )
+        .unwrap_err() else {
+            panic!("esperava recusa")
+        };
+        assert!(m.contains("593") && m.contains("CNPJ-Base difere"));
+        // A consulta por chave não exige NSU.
+        let chave = serde_json::from_str::<RespostaDfe>(r#"{"status":"ok","codigoStatus":"138"}"#)
+            .unwrap()
+            .em_pagina(false)
+            .unwrap();
+        assert_eq!(chave.ultimo_nsu, Nsu(0));
+    }
+
+    #[test]
+    fn a_manifestacao_manda_o_tipo() {
+        let (url, tarefa) = servidor(
+            200,
+            r#"{"success":true,"status":"autorizado","codigoStatus":"135","motivoStatus":"Evento registrado","protocolo":"891260000000001","xml":"<procEventoNFe/>"}"#,
+        );
+        let chave = ChaveAcesso::nova("43261011222333000181550010000001231000000010").unwrap();
+        let r = cliente(&url)
+            .manifestar(
+                &Cnpj::novo("11222333000181").unwrap(),
+                &chave,
+                Manifestacao::Ciencia,
+                None,
+            )
+            .unwrap();
+        assert_eq!(r.situacao, SituacaoRetorno::Autorizado);
+        assert_eq!(r.xml.as_deref(), Some("<procEventoNFe/>"));
+        let recebido = tarefa.join().unwrap();
+        assert!(
+            recebido.starts_with("POST /nfe/manifestacao "),
+            "{recebido}"
+        );
+        let corpo: Value = serde_json::from_str(recebido.rsplit('\n').next().unwrap()).unwrap();
+        assert_eq!(corpo["tipo"], "ciencia");
+        assert!(corpo.get("justificativa").is_none());
+    }
+
+    #[test]
     fn a_consulta_leva_o_xml_assinado_quando_ha() {
         let (url, tarefa) = servidor(
             200,
@@ -721,11 +919,12 @@ mod testes {
     #[test]
     fn erros_da_api_viram_erros_que_a_tela_explica() {
         assert_eq!(
-            interpretar_resposta(403, r#"{"error":"API key inválida"}"#).unwrap_err(),
+            interpretar_resposta::<RespostaSefazApi>(403, r#"{"error":"API key inválida"}"#)
+                .unwrap_err(),
             ErroFiscal::CredencialDaApiFiscal
         );
         assert_eq!(
-            interpretar_resposta(
+            interpretar_resposta::<RespostaSefazApi>(
                 403,
                 r#"{"error":"CNPJ do certificado não corresponde ao CNPJ do emitente"}"#
             )
@@ -735,14 +934,14 @@ mod testes {
             )
         );
         assert_eq!(
-            interpretar_resposta(502, "Bad gateway").unwrap_err(),
+            interpretar_resposta::<RespostaSefazApi>(502, "Bad gateway").unwrap_err(),
             ErroFiscal::ServicoIndisponivel
         );
         assert_eq!(
-            interpretar_resposta(429, "{}").unwrap_err(),
+            interpretar_resposta::<RespostaSefazApi>(429, "{}").unwrap_err(),
             ErroFiscal::ServicoIndisponivel
         );
-        let rejeitado = interpretar_resposta(
+        let rejeitado = interpretar_resposta::<RespostaSefazApi>(
             422,
             r#"{"success":false,"status":"rejeitado","codigoStatus":"539","motivoStatus":"Duplicidade"}"#,
         )

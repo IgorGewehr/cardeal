@@ -7,6 +7,11 @@
 //! aceite em um clique → quando `Conferida`, confirmar a entrada (baixa no estoque + título a
 //! pagar, opcionalmente já baixado quando a compra foi paga na hora).
 //!
+//! As notas que a SEFAZ entrega ao CNPJ (distribuição `DFe`) chegam sozinhas: a busca roda em
+//! segundo plano (`crate::compras_fundo`) e o botão "Buscar na SEFAZ" a dispara na hora. A
+//! seção "Notas que chegaram pela SEFAZ" mostra a última busca e as que pedem atenção (à espera
+//! da SEFAZ liberar a nota completa, as que não importaram, as ignoradas e por quê).
+//!
 //! Revisão de 2026-09-13 (mesma rodada de modernização de estoque/clientes/OS/financeiro):
 //! busca + ordenação por coluna na lista, `Etiqueta` colorida por estado (nota e casamento de
 //! item), diálogo de conferência decoupled do índice da lista (guarda a nota aberta por valor,
@@ -16,7 +21,7 @@
 use std::collections::HashMap;
 
 use cardeal_cliente::{Motor, Sessao};
-use cardeal_kernel::{Dinheiro, Id};
+use cardeal_kernel::{Dinheiro, Fuso, Id};
 use cardeal_modkit::Icone;
 use cardeal_ui::atoms::{Botao, Caixa, Divisor, Etiqueta, Rotulo, Tom, ValorDinheiro, ATALHO_NOVO};
 use cardeal_ui::molecules::{
@@ -31,9 +36,10 @@ use cardeal_ui::tokens::{Espaco, TemaUi};
 use eframe::egui;
 use mod_clientes::{Papel, PessoasPorPapel};
 use mod_compras::{
-    ConfirmarEntrada, CriarProdutoDoItem, EstadoCasamento, EstadoNotaEntrada,
-    ImportarNotaDeArquivoXml, ItemNota, ItemNotaEntrada, ItemNotaManual, ItensDaNota,
-    LancarNotaManual, NotasRecentes, ProdutoDoItemCriado, VincularProdutoManual,
+    ConfirmarEntrada, CriarProdutoDoItem, EstadoCasamento, EstadoNaSefaz, EstadoNotaEntrada,
+    ImportarDeNovoDaSefaz, ImportarNotaDeArquivoXml, ItemNota, ItemNotaEntrada, ItemNotaManual,
+    ItensDaNota, LancarNotaManual, NotasNaSefaz, NotasRecentes, ProdutoDoItemCriado,
+    RelatorioImportacao, SituacaoDaBusca, VincularProdutoManual,
 };
 use mod_estoque::{
     ArvoreGruposProduto, ItemLocal, ItemProdutoComSaldo, Locais, ProdutosComSaldo,
@@ -42,6 +48,9 @@ use mod_estoque::{
 
 mod estorno;
 mod parcelas;
+
+/// O fuso das datas e horas da tela.
+const FUSO: Fuso = Fuso::BRASILIA;
 
 /// O formulário "Criar produto novo" de um item não casado: o nome (começa com a sugestão
 /// padronizada pelo dicionário) e o grupo opcional.
@@ -128,11 +137,21 @@ pub struct EstadoTelaCompras {
     nova: FormNova,
     erro: Option<String>,
     dlg: Dlg,
+    /// A busca de notas na SEFAZ: a última rodada e as notas que pedem atenção.
+    sefaz: Option<SituacaoDaBusca>,
+    /// A rodada da busca que a tela já mostrou (`crate::compras_fundo::geracao`).
+    geracao_sefaz: u64,
+    /// O usuário pediu a busca: avisa o resultado quando a rodada terminar.
+    busca_pedida: bool,
 }
 
 impl EstadoTelaCompras {
     /// Recarrega notas, fornecedores, produtos e locais.
     pub fn carregar(&mut self, motor: &Motor, sessao: &Sessao) {
+        self.geracao_sefaz = crate::compras_fundo::geracao();
+        self.sefaz = motor
+            .consultar(sessao, "compras.notas_na_sefaz.v1", &NotasNaSefaz)
+            .ok();
         match motor.consultar(sessao, "compras.notas_recentes.v1", &NotasRecentes) {
             Ok(n) => {
                 self.notas = n;
@@ -234,6 +253,19 @@ impl EstadoTelaCompras {
 
 /// Desenha a tela inteira.
 pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTelaCompras) {
+    // A busca na SEFAZ terminou uma rodada: as notas novas aparecem; quem pediu, sabe o que deu.
+    if estado.geracao_sefaz != crate::compras_fundo::geracao() {
+        estado.carregar(motor, sessao);
+        if std::mem::take(&mut estado.busca_pedida) {
+            match crate::compras_fundo::ultimo_resultado() {
+                Some(Ok(r)) => notificar(ui.ctx(), Notificacao::sucesso(format!("SEFAZ: {r}"))),
+                Some(Err(e)) => {
+                    notificar(ui.ctx(), Notificacao::erro(format!("Busca na SEFAZ: {e}")))
+                }
+                None => {}
+            }
+        }
+    }
     LayoutTela::nova("Compras").mostrar(
         ui,
         estado,
@@ -251,6 +283,20 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
             if ui.add(Botao::secundario("Importar pasta")).clicked() {
                 importar_pasta_xml(ui.ctx(), motor, sessao, estado);
             }
+            if sessao.concede("compras.entrada.importar") {
+                let rodando = crate::compras_fundo::rodando();
+                if ui
+                    .add(
+                        Botao::secundario("Buscar na SEFAZ")
+                            .carregando(rodando)
+                            .habilitado(!rodando),
+                    )
+                    .clicked()
+                    && crate::compras_fundo::disparar(ui.ctx(), motor, sessao)
+                {
+                    estado.busca_pedida = true;
+                }
+            }
         },
         |ui, estado| {
             if let Some(erro) = &estado.erro {
@@ -261,6 +307,7 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
                 );
                 ui.add_space(Espaco::E12);
             }
+            notas_na_sefaz(ui, motor, sessao, estado);
             lista(ui, motor, sessao, estado);
         },
     );
@@ -504,6 +551,118 @@ fn lista(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoT
     if let Some(i) = resposta.linha_clicada {
         let id = estado.notas[indices[i]].nota;
         estado.abrir_nota(motor, sessao, id);
+    }
+}
+
+/// A seção das notas que chegaram pela SEFAZ: a última busca e as notas que pedem atenção.
+/// Some enquanto a empresa nunca buscou.
+fn notas_na_sefaz(
+    ui: &mut egui::Ui,
+    motor: &Motor,
+    sessao: &Sessao,
+    estado: &mut EstadoTelaCompras,
+) {
+    let Some(s) = estado.sefaz.as_ref() else {
+        return;
+    };
+    if s.ultima_consulta.is_none() && s.notas.is_empty() {
+        return;
+    }
+    let pedem_atencao = s
+        .notas
+        .iter()
+        .filter(|n| matches!(n.estado, EstadoNaSefaz::Aguardando | EstadoNaSefaz::Erro))
+        .count();
+    let pode_importar = sessao.concede("compras.entrada.importar");
+    let mut de_novo: Option<String> = None;
+    SecaoExpansivel::nova("Notas que chegaram pela SEFAZ")
+        .aberta_por_padrao(pedem_atencao > 0)
+        .mostrar(ui, |ui| {
+            if let Some(quando) = s.ultima_consulta {
+                ui.add(
+                    Rotulo::campo(format!(
+                        "Última busca: {} — {}",
+                        quando.formatar(FUSO),
+                        s.ultimo_resultado.as_deref().unwrap_or("sem resumo")
+                    ))
+                    .quebravel(),
+                );
+            }
+            if let Some(p) = s.proxima_consulta {
+                ui.add(Rotulo::campo(format!(
+                    "A SEFAZ aceita a próxima busca a partir das {}.",
+                    p.hora(FUSO).formatar()
+                )));
+            }
+            if s.notas.is_empty() {
+                return;
+            }
+            ui.add_space(Espaco::E8);
+            Grade::nova(vec![
+                ColunaGrade::nova("Fornecedor"),
+                ColunaGrade::nova("Emissão").largura(110.0),
+                ColunaGrade::nova("Valor").largura(120.0).numero(),
+                ColunaGrade::nova("Situação").largura(170.0),
+                ColunaGrade::nova("Por quê"),
+                ColunaGrade::nova("").largura(160.0),
+            ])
+            .com_acoes()
+            .id_salt("compras-notas-na-sefaz")
+            .mostrar(ui, s.notas.len(), |i, row| {
+                let n = &s.notas[i];
+                row.col(|ui| {
+                    let nome = if n.emitente.is_empty() {
+                        n.chave.clone()
+                    } else {
+                        n.emitente.clone()
+                    };
+                    ui.add(Rotulo::interface(nome));
+                });
+                row.col(|ui| {
+                    ui.add(Rotulo::campo(
+                        n.emissao.map(|d| d.formatar()).unwrap_or_default(),
+                    ));
+                });
+                row.col(|ui| {
+                    ui.add(ValorDinheiro::novo(n.valor).neutro());
+                });
+                row.col(|ui| {
+                    let etiqueta = match n.estado {
+                        EstadoNaSefaz::Aguardando => Etiqueta::atencao(n.estado.rotulo()),
+                        EstadoNaSefaz::Baixada => Etiqueta::positiva(n.estado.rotulo()),
+                        EstadoNaSefaz::Ignorada => Etiqueta::neutra(n.estado.rotulo()),
+                        EstadoNaSefaz::Erro => Etiqueta::negativa(n.estado.rotulo()),
+                    };
+                    ui.add(etiqueta);
+                });
+                row.col(|ui| {
+                    ui.add(Rotulo::campo(n.motivo.clone().unwrap_or_default()).quebravel());
+                });
+                row.col(|ui| {
+                    if n.estado == EstadoNaSefaz::Erro
+                        && pode_importar
+                        && ui
+                            .add(Botao::primario("Importar de novo").pequeno())
+                            .clicked()
+                    {
+                        de_novo = Some(n.chave.clone());
+                    }
+                });
+            });
+        });
+    if let Some(chave) = de_novo {
+        let r: Result<RelatorioImportacao, _> = motor.executar(
+            sessao,
+            "compras.importar_de_novo_da_sefaz.v1",
+            &ImportarDeNovoDaSefaz { chave },
+        );
+        match r {
+            Ok(_) => {
+                notificar(ui.ctx(), Notificacao::sucesso("Nota importada"));
+                estado.carregar(motor, sessao);
+            }
+            Err(e) => notificar(ui.ctx(), Notificacao::erro(e.mensagem)),
+        }
     }
 }
 

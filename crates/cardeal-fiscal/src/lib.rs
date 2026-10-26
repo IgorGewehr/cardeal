@@ -35,6 +35,7 @@
 mod certificado;
 mod chave;
 mod der;
+mod dfe;
 mod emissao;
 mod erros;
 mod nfe;
@@ -46,6 +47,10 @@ pub use certificado::{
     ler_certificado_a1, preparar_certificado_a1, CertificadoPreparado, InfoCertificado,
 };
 pub use chave::ChaveAcesso;
+pub use dfe::{
+    ler_evento, ler_resumo_nfe, DocumentoDfe, EventoDfe, Manifestacao, PaginaDfe, ResumoNfe,
+    SituacaoDoResumo, TipoDfe,
+};
 pub use emissao::{
     Consumidor, ContribuicaoItem, Crt, Csc, DocumentoConsumidor, Emitente, EnderecoEmitente,
     IcmsItem, ImpostosItem, ItemDocumento, MeioPagamento, Nfce, PagamentoDocumento,
@@ -54,6 +59,6 @@ pub use emissao::{
 pub use erros::ErroFiscal;
 pub use nfe::{cfop_de_venda, descrever_cfop, ClassificacaoEntrada, FinalidadeNfe};
 pub use nfe::{interpretar, Duplicata, ItemNfe, NotaFiscalXml};
-pub use porta::{AmbienteFiscal, ModeloFiscal, Nsu, PortaFiscal, ResumoDfe, StatusSefaz, XmlNota};
+pub use porta::{AmbienteFiscal, ModeloFiscal, Nsu, PortaFiscal, StatusSefaz};
 pub use sefaz_api::{ApiFiscalHttp, CertificadoA1, ConfigApiFiscal};
 pub use simulado::FiscalSimulado;

@@ -5,7 +5,7 @@
 //! (XML que o fornecedor mandou por e-mail, nota de uma filial sem certificado configurado
 //! ainda, XML salvo de outro sistema).
 //!
-//! Ao contrário de [`super::importar_nota_da_sefaz`]/[`super::verificar_notas_na_sefaz`],
+//! Ao contrário da busca de notas na SEFAZ (`crate::dfe`, que usa [`super::importar_nota_da_sefaz`]),
 //! este **é** um `Comando` de despacho de verdade: não depende de `PortaFiscal` nenhum, só
 //! interpreta o texto do XML (`cardeal_fiscal::interpretar`, puro, sem rede) e roda o mesmo
 //! miolo comum ([`super::importar_nota_interpretada`]) que a importação por SEFAZ usa —

@@ -7,11 +7,13 @@
 //! Ordens de Serviço e Estoque; as demais mostram `tela_em_construcao` (backend já responde).
 
 mod aviso_defasados;
+mod compras_fundo;
 mod comprovante;
 mod danfce;
 #[cfg(feature = "demo")]
 mod demo_app;
 mod fiscal_fundo;
+mod fundo;
 mod importacao_planilha;
 mod login;
 mod pagamento;
@@ -960,6 +962,7 @@ impl eframe::App for App {
                     let Some(motor) = &self.motor else { return };
                     // As NFC-e que ficaram na fila saem sozinhas, em segundo plano.
                     fiscal_fundo::vigiar(ui.ctx(), motor, &estado.sessao);
+                    compras_fundo::vigiar(ui.ctx(), motor, &estado.sessao);
                     match estado.area {
                         Area::Fiscal => {
                             tela_notas::mostrar(ui, motor, &estado.sessao, &mut estado.notas);

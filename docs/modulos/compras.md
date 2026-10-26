@@ -19,8 +19,9 @@
 
 - **Não guarda saldo nem calcula custo médio.** Confirmar a entrada é um comando que chama
   `estoque.RegistrarEntrada`; o custo médio pós-entrada é responsabilidade de `estoque`.
-- **Não assina nem transmite XML.** Recebe o XML já autorizado via `PortaFiscal::baixar_xml`; emissão
-  e assinatura são do provedor externo (ver [doc 10](../10-modulo-fiscal.md)).
+- **Não assina nem transmite XML.** Recebe o XML já autorizado pela distribuição `DFe` da SEFAZ
+  (`PortaFiscal::distribuicao_dfe`, pelo `sefaz-api`) ou por arquivo; emissão e assinatura são do
+  provedor externo (ver [doc 10](../10-modulo-fiscal.md)).
 - **Não paga o fornecedor.** Confirmar a entrada gera o `Titulo` a pagar por evento; a baixa é do
   `financeiro` — mesmo quando a compra já foi paga à vista (`pago_no_ato`), quem executa a baixa
   é `mod_financeiro::baixar_pagamento_comum`, chamado direto pela mesma transação; `compras` não
@@ -80,7 +81,8 @@ stateDiagram-v2
 | `RegistrarPropostaFornecedor` | `compras.cotacao.editar` | Baixo | Ainda não implementado | `CotacaoDecidida` |
 | `DecidirCotacao` | `compras.cotacao.decidir` | Médio | Ainda não implementado | — |
 | `CriarPedidoCompra` | `compras.pedido.criar` | Baixo | Ainda não implementado | — |
-| `importar_nota_da_sefaz` ✅ / `verificar_notas_na_sefaz` ✅ | `compras.entrada.importar` | Baixo | **Não são `Comando`** (dependem de `PortaFiscal`, que o despacho ainda não injeta — ver nota abaixo). `verificar_notas_na_sefaz` varre a distribuição `DFe` desde o último NSU e chama `importar_nota_da_sefaz` por nota nova: interpreta o XML (`cardeal_fiscal::interpretar`), resolve/cadastra o fornecedor por CNPJ, roda o casamento em cascata por item (GTIN → regra aprendida → NCM+similaridade) e rateia frete/seguro/outras despesas | `ChaveJaImportada` |
+| Tarefa `compras.buscar_notas_na_sefaz` ✅ (2026-10-26) | `compras.entrada.importar` | Baixo | As notas que a SEFAZ entrega ao CNPJ (distribuição `DFe`), **fora de transação**, como a transmissão da NFC-e (ver a nota abaixo). Chama `importar_nota_da_sefaz` por nota completa: interpreta o XML (`cardeal_fiscal::interpretar`), resolve/cadastra o fornecedor por CNPJ, roda o casamento em cascata por item (GTIN → regra aprendida → NCM+similaridade) e rateia frete/seguro/outras despesas | — |
+| `ImportarDeNovoDaSefaz` ✅ (2026-10-26) | `compras.entrada.importar` | Baixo | A nota que chegou da SEFAZ e não importou (o XML ficou guardado) entra de novo, depois de cadastrar o que faltava | o erro da importação |
 | `ImportarNotaDeArquivoXml` ✅ (não estava no spec original) | `compras.entrada.importar` | Baixo | Mesmo XML de NF-e de `importar_nota_da_sefaz`, mas lido de um arquivo local (a UI escolhe o arquivo via `rfd`; este comando só recebe o texto já em UTF-8) em vez de baixado da distribuição `DFe` — não depende de `PortaFiscal`, então **é** um `Comando` de despacho de verdade. Corpo compartilhado com `importar_nota_da_sefaz` (`importar_nota_interpretada`, `pub(crate)`): mesma resolução de fornecedor, cascata de casamento, rateio e idempotência por `(empresa, chave_acesso)` | `ChaveJaImportada` (idempotente: reimportar não duplica, devolve o relatório da nota existente) |
 | `LancarNotaManual` ✅ (não estava no spec original) | `compras.entrada.importar` | Baixo | Compra sem nota fiscal formal — mesma cascata de casamento/rateio de `importar_nota_da_sefaz`, mas os itens vêm digitados (`ItemNotaManual`, com `codigo_barras` opcional para entrar na cascata por GTIN também) em vez de um XML, e `chave_acesso` fica `None` (o índice `UNIQUE` do SQLite trata múltiplos `NULL` como distintos, então não colide com a idempotência das notas importadas) | — |
 | `DefinirPreferenciasCompras` ✅ (não estava no spec original) | `compras.entrada.preferencias` | Médio | Grava `PreferenciasCompras` — confirmação automática, geração de título a pagar, rateio por valor/peso, local padrão, `pago_no_ato_padrao` — a resposta desta versão ao pedido do usuário por "vários ajustes de preferências" e por "permitir gerar ou não registro automático no financeiro seja algo pago ou não" | — |
@@ -119,6 +121,22 @@ stateDiagram-v2
 > porta em mãos chama a função direto, montando o `Ctx` com `cardeal_modkit::Ctx::de_sessao`
 > (novo). `Manifesto::depende_de` declara `clientes`/`estoque`/`financeiro` — sem essas três
 > ativas o módulo não sobe (o código chama `pub fn` delas incondicionalmente).
+
+> **Nota (2026-10-26) — as notas que chegam pela SEFAZ (item 9 do doc 21).** A varredura que era
+> uma função chamada por fora (`verificar_notas_na_sefaz`, dentro de uma transação) virou a tarefa
+> `compras.buscar_notas_na_sefaz`, sobre as rotas novas do `sefaz-api` (distribuição, consulta por
+> chave, manifestação). Lições do `gestao-raiz`, em produção: o **NSU nunca volta** (resposta ruim
+> não grava NSU; a base guarda o maior); em dia ou com 656, a próxima consulta **só depois de uma
+> hora**; uma rodada por vez por empresa — a vez é tomada **na base**, para dois terminais não
+> consultarem juntos; documento que não importa **não trava a fila** (fica guardado com o XML e o
+> motivo, e `ImportarDeNovoDaSefaz` tenta de novo); o resumo (`resNFe`) recebe a **Ciência da
+> Operação** sozinho e a nota completa vem pela consulta por chave ou pelo NSU seguinte; ciência
+> fora do prazo (596, 10 dias da emissão) pede o XML ao fornecedor. Aqui, além disso: o NSU é **por
+> ambiente** (passar de homologação para produção não pula nota); nota de homologação não entra no
+> estoque; o cancelamento pelo fornecedor tira a nota da espera, ou vira aviso se ela já entrou.
+> O desktop busca sozinho (`compras_fundo`, a cada minuto confere se a hora chegou) e tem o botão
+> "Buscar na SEFAZ". Ficaram para depois: as manifestações conclusivas (confirmação ao confirmar a
+> entrada, desconhecimento), e conferir contra o Ambiente Nacional de homologação.
 
 > **Nota (2026-09-15) — importação em lote e validação mais dura:** pedido explícito do
 > usuário — a burocracia que sobrava era repetir "escolher arquivo → conferir → fechar" uma
@@ -172,6 +190,8 @@ stateDiagram-v2
 | `ParcelasDaNota` ✅ (2026-10-20) | `compras.entrada.ver` | As parcelas no "Confirmar entrada" | `compras_nota_parcela(nota, ordem)` |
 | `PreviaDoEstornoDaEntrada` ✅ (2026-10-20) | `compras.entrada.ver` | O que o estorno faz: o que sai do estoque (e quanto há no local), a conta cancelada, o pagamento | movimentos da origem + `financeiro::situacao_do_titulo_da_origem` |
 | `NotasDeEntradaDoMes` ✅ (2026-10-20, `compras.notas_do_mes.v1`) | `compras.entrada.ver` | O pacote do contador: as notas emitidas no mês (pela emissão, o dia em que a compra entra no Razão) com o fornecedor, a situação e o **XML original** | `compras_nota_entrada(empresa, data_emissao)` (varredura do mês) |
+| `NotasNaSefaz` ✅ (2026-10-26, `compras.notas_na_sefaz.v1`) | `compras.entrada.ver` | Compras › "Notas que chegaram pela SEFAZ": a última busca, quando a SEFAZ aceita a próxima, e as notas que pedem atenção (à espera, que não importaram, ignoradas e por quê) | `compras_dfe_estado(empresa, ambiente)`, `compras_dfe_nota(empresa, chave)` |
+| `HoraDeBuscarNaSefaz` ✅ (2026-10-26) | `compras.entrada.importar` | A vigia do desktop (a cada minuto): a hora da próxima busca chegou | `compras_dfe_estado(empresa, ambiente)` |
 
 > **Nota (2026-09-13):** a fatia implementada (`crates/modulos/mod-compras/src/consultas.rs`)
 > tem `NotasRecentes` (as 200 notas mais recentes da empresa, com `estado` — a UI filtra por
@@ -278,6 +298,11 @@ fornecedor.
 caminho de `ConfirmarEntrada` em modo autônomo, então não há conflito possível nesse comando.
 
 ## 13. Tabelas
+
+> **Nota (2026-10-26):** a migração v8 troca `compras_estado_dfe` por `compras_dfe_estado` (por
+> empresa **e ambiente**, com a hora da próxima consulta e o resumo da última) — o NSU antigo não é
+> copiado, só o simulador o gravava — e cria `compras_dfe_nota` (o resumo que espera a ciência, a
+> ciência dada com o protocolo e o XML do evento, e o XML da nota que não importou).
 
 > **Nota (2026-10-20):** a migração v7 dá a `compras_nota_entrada` a coluna `xml`: o XML original da
 > nota, como veio do fornecedor. A lei manda guardar por 5 anos, e o contador o recebe no pacote do mês.

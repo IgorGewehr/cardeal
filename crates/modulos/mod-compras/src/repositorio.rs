@@ -2,7 +2,7 @@
 //! strings SQL, sempre colunas explícitas, sempre parâmetros posicionais.
 //!
 //! [`RepositorioCompras`] grava e lê `compras_nota_entrada`/`compras_item_nota_entrada`/
-//! `compras_regra_casamento`/`compras_preferencias`/`compras_estado_dfe` sobre a
+//! `compras_regra_casamento`/`compras_preferencias` sobre a
 //! [`UnidadeDeTrabalho`](cardeal_storage::UnidadeDeTrabalho) do escritor único — mesmo
 //! padrão do `RepositorioFinanceiro`.
 
@@ -482,37 +482,6 @@ impl<'a, 'b> RepositorioCompras<'a, 'b> {
                 "CNPJ cadastrado da empresa é inválido",
             )
         })
-    }
-
-    /// O último NSU visto na distribuição `DFe` para a empresa (`0` se nunca varrida).
-    ///
-    /// # Errors
-    /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
-    pub fn ultimo_nsu(&self, empresa: Id) -> Resultado<u64> {
-        self.conn()
-            .query_row(
-                "SELECT ultimo_nsu FROM compras_estado_dfe WHERE empresa = ?1",
-                [blob(empresa)],
-                |r| r.get::<_, i64>(0),
-            )
-            .optional()
-            .map_err(persist)
-            .map(|opt| opt.and_then(|n| u64::try_from(n).ok()).unwrap_or(0))
-    }
-
-    /// Grava o novo cursor de NSU depois de uma varredura.
-    ///
-    /// # Errors
-    /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
-    pub fn atualizar_ultimo_nsu(&mut self, empresa: Id, nsu: u64) -> Resultado<()> {
-        self.conn()
-            .execute(
-                "INSERT INTO compras_estado_dfe (empresa, ultimo_nsu) VALUES (?1,?2)
-                 ON CONFLICT (empresa) DO UPDATE SET ultimo_nsu = excluded.ultimo_nsu",
-                params![blob(empresa), i64::try_from(nsu).unwrap_or(i64::MAX)],
-            )
-            .map_err(persist)?;
-        Ok(())
     }
 }
 

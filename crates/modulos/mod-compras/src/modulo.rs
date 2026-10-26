@@ -40,7 +40,15 @@ impl Modulo for ModuloCompras {
             .consulta::<ItensDaNota>("compras.itens_da_nota.v1")
             .consulta::<ParcelasDaNota>("compras.parcelas_da_nota.v1")
             .consulta::<PreviaDoEstornoDaEntrada>("compras.previa_estorno_entrada.v1")
-            .consulta::<NotasDeEntradaDoMes>("compras.notas_do_mes.v1");
+            .consulta::<NotasDeEntradaDoMes>("compras.notas_do_mes.v1")
+            .consulta::<crate::NotasNaSefaz>("compras.notas_na_sefaz.v1")
+            .consulta::<crate::HoraDeBuscarNaSefaz>("compras.hora_de_buscar_na_sefaz.v1")
+            .comando::<crate::ImportarDeNovoDaSefaz>("compras.importar_de_novo_da_sefaz.v1")
+            .tarefa(
+                crate::TAREFA_BUSCAR_NA_SEFAZ,
+                "compras.entrada.importar",
+                crate::dfe::sqlite::buscar_notas_na_sefaz,
+            );
         Ok(())
     }
 }

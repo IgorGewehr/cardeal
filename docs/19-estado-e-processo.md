@@ -47,10 +47,11 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   **inutilização** como pedidos na fila, e o **estorno da venda** no PDV com a NFC-e anulada pela fila.
   O MVP do backlog do `docs/21-licoes-do-gestao-raiz.md` §5 (itens 1–8) e os itens 10 (parcelas e
   estorno da entrada de compra), 11 (XMLs no pacote do contador) e 12 (prazo de cancelamento visível)
-  estão feitos, e o `sefaz-api` devolve o XML do evento (2026-10-26, com a busca do que falta). Próximo
-  (OK do usuário para mexer no `sefaz-api` dado em 2026-10-26): o DFe (9); depois, o 13; a 1ª autorizada
-  no RS espera os dados do usuário. O `sefaz-api` publicado precisa ser atualizado para as mudanças
-  valerem em produção.
+  estão feitos, o `sefaz-api` devolve o XML do evento (2026-10-26, com a busca do que falta) e as notas
+  de compra chegam pela SEFAZ (DFe, item 9, 2026-10-26). Próximo: o 13; a 1ª autorizada no RS espera os
+  dados do usuário. O `sefaz-api` publicado precisa ser atualizado para as mudanças valerem em
+  produção, e o DFe ainda não foi conferido contra o Ambiente Nacional (pede o certificado com a
+  senha).
 - **Pendência de confiança:** as tabelas do Simples e as alíquotas precisam ser conferidas com o
   contador; o ST/IPI **da nota** já entra no custo (2026-10-13), mas a estimativa de ST pela MVA (sem o valor na
   nota) ainda não.
@@ -726,6 +727,19 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   - desktop (`pacote_contador.rs`): `XMLs AAAA-MM.zip`, as seções "Notas fiscais do mês" e
     "Pendências do mês" no PDF, e as abas "Notas emitidas" e "Notas de entrada" na planilha;
   - `cardeal-pdf`: o sinal de menos (U+2212) sai como traço, não como "?".
+- **Notas de compra pela SEFAZ — DFe (2026-10-26, item 9 do doc 21):**
+  - `sefaz-api` (842576f): `/nfe/dfe/distribuicao`, `/nfe/dfe/consulta-chave`, `/nfe/manifestacao`;
+  - `cardeal-fiscal`: `PortaFiscal::distribuicao_dfe(cnpj, uf, desde) -> PaginaDfe`,
+    `consultar_dfe_por_chave`, `manifestar`; `ler_resumo_nfe`/`ler_evento`; saem `ResumoDfe`,
+    `XmlNota` e `baixar_xml`; o simulado entrega como a SEFAZ (resumo, ciência, NSU novo, 656);
+  - `mod-fiscal`: `ambiente_da_empresa`;
+  - `mod-compras`: migração v8 (`compras_dfe_estado` por ambiente, `compras_dfe_nota`), a tarefa
+    `compras.buscar_notas_na_sefaz`, `NotasNaSefaz`, `HoraDeBuscarNaSefaz`, `ImportarDeNovoDaSefaz`;
+    sai `verificar_notas_na_sefaz` (rodava a rede dentro de uma transação); passa a depender de
+    `mod-fiscal` e `mod-empresa` (só com o SQLite);
+  - desktop: `fundo::TarefaDeFundo` (a transmissão fiscal passou a usar), `compras_fundo` (a vigia de
+    minuto em minuto), e em Compras o botão "Buscar na SEFAZ" e a seção "Notas que chegaram pela
+    SEFAZ".
 - **XML do evento e busca do que falta (2026-10-26, fecha o item 11 do doc 21):**
   - `sefaz-api` (bc58e77, outro repositório): `procEventoNFe` no cancelamento e na CC-e,
     `procInutNFe` na inutilização, `xmlAssinado` no desfecho incerto, o `nfeProc` da denegada, e na

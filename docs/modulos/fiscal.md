@@ -32,7 +32,8 @@ O motor fiscal próprio da operação (`IgorGewehr/sefaz-api`, publicado em
 | PFX com RC2 | O TLS dele (Node/OpenSSL 3) recusa: "Unsupported PKCS12 PFX data" | Regravado na instalação (§3) |
 | Numeração | O emissor manda o `numero`; o `cNF` é sorteado a cada chamada | Numeração é nossa; **nunca reenviar sem consultar a chave devolvida** (re-emitir o mesmo número gera outra chave → rejeição 539) |
 | Cobertura | NF-e, NFC-e (com contingência offline `prepare`/`transmit`), cancelamento, CC-e, inutilização, consulta, status, NFS-e (Nacional/ADN, Betha SC/RS, Paulistana), MDF-e | Porta `PortaFiscal` cresce fatia a fatia |
-| Não tem | Distribuição DFe, manifestação, DANFE, SPED, cálculo de tributos | DFe/manifestação: a criar no `sefaz-api` (com OK do dono). DANFE e SPED: no Cardeal |
+| Não tinha | Distribuição DFe e manifestação do destinatário — criadas em 2026-10-26 (842576f: `/nfe/dfe/distribuicao`, `/nfe/dfe/consulta-chave`, `/nfe/manifestacao`) | A busca de notas de compra, em `mod-compras` ([compras.md](compras.md) §5) |
+| Não tem | DANFE, SPED, cálculo de tributos | DANFE e SPED: no Cardeal |
 
 A branch `feat/nestjs-fiscal-engine` (v2 multi-tenant, guarda certificado, DANFE, SPED) está parada
 desde 2026-05-07 e sem as correções que a `main` recebeu depois — o Cardeal fala com a `main`.
@@ -297,7 +298,9 @@ Cancelar e configurar continuam fora do papel.
 5. NF-e de venda e devolução; CC-e.
 6. NFS-e da OS.
 7. SPED gerado no Cardeal.
-8. DFe e manifestação — dependem de rotas novas no `sefaz-api` (OK do usuário em 2026-10-26).
+8. ~~DFe e manifestação~~ — feito em 2026-10-26 (sefaz-api 842576f; a busca de notas em
+   `mod-compras`). Falta conferir contra o Ambiente Nacional de homologação, que pede o
+   certificado com a senha; e as manifestações conclusivas (confirmação, desconhecimento).
 9. ~~O `sefaz-api` devolver o XML do evento e a nota assinada da emissão incerta~~ — feito em
    2026-10-26 (sefaz-api bc58e77; aqui, a busca do que falta). Para valer em produção, o `sefaz-api`
    publicado precisa ser atualizado (o servidor dele não é desta máquina).

@@ -29,10 +29,12 @@ pub trait PortaFiscal: Send + Sync {
     async fn carta_correcao(&self, chave: &ChaveAcesso, texto: &str) -> Resultado<RetornoCce>;
     async fn inutilizar(&self, faixa: FaixaNumeracao, justificativa: &str) -> Resultado<RetornoInutilizacao>;
 
-    // Entrada (compras)
-    async fn distribuicao_dfe(&self, cnpj: &Cnpj, desde: Nsu) -> Resultado<Vec<ResumoDfe>>;
-    async fn baixar_xml(&self, chave: &ChaveAcesso) -> Resultado<XmlNota>;
-    async fn manifestar(&self, chave: &ChaveAcesso, m: Manifestacao) -> Resultado<()>;
+    // Entrada (compras) — como ficou em 2026-10-26 (síncrona, ver crates/cardeal-fiscal/src/porta.rs):
+    // distribuicao_dfe(cnpj, uf, desde) -> PaginaDfe; consultar_dfe_por_chave(cnpj, uf, chave)
+    // -> PaginaDfe; manifestar(cnpj, chave, Manifestacao, justificativa) -> RetornoSefaz.
+    async fn distribuicao_dfe(&self, cnpj: &Cnpj, uf: Uf, desde: Nsu) -> Resultado<PaginaDfe>;
+    async fn consultar_dfe_por_chave(&self, cnpj: &Cnpj, uf: Uf, chave: &ChaveAcesso) -> Resultado<PaginaDfe>;
+    async fn manifestar(&self, cnpj: &Cnpj, chave: &ChaveAcesso, m: Manifestacao, just: Option<&str>) -> Resultado<RetornoSefaz>;
 
     // Obrigações
     async fn gerar_sped(&self, tipo: TipoSped, periodo: Periodo) -> Resultado<ArquivoSped>;
@@ -113,9 +115,9 @@ sequenceDiagram
     participant E as mod-estoque
     participant R as Razão
 
-    J->>F: distribuicao_dfe(cnpj, ultimo_nsu)
-    F-->>J: 4 resumos novos
-    J->>F: baixar_xml de cada
+    J->>F: distribuicao_dfe(cnpj, uf, ultimo_nsu)
+    F-->>J: notas completas e resumos (resNFe)
+    J->>F: manifestar(Ciencia) de cada resumo, e consultar_dfe_por_chave
     J->>C: cria Nota de Entrada em "A conferir"
     Note over C: casamento automático:<br/>fornecedor por CNPJ,<br/>produto por GTIN → código do fornecedor → NCM+descrição
     C-->>U: notifica "4 notas para conferir"

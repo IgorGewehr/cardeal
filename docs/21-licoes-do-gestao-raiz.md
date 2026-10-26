@@ -172,17 +172,27 @@ O que eles têm e o Cardeal não, com o que aprenderam:
      prazo). Agora vê e cadastra;
    - **papéis de fábrica gravados ficavam congelados**: a correção do caixa no item 1 (fiscal) não
      chegava a bases existentes. Agora o motor os completa ao abrir.
-9. **Notas recebidas pela SEFAZ (DFe) e manifestação.** Fluxo deles (`lib/fiscal/sefaz-distribuicao.ts`):
+9. ~~**Notas recebidas pela SEFAZ (DFe) e manifestação.**~~ **Feito (2026-10-26)**: rotas no
+   `sefaz-api` (842576f) e a tarefa `compras.buscar_notas_na_sefaz` (ver
+   [compras.md](modulos/compras.md), nota de 2026-10-26). Fluxo deles (`lib/fiscal/sefaz-distribuicao.ts`):
    - a distribuição por NSU;
    - se só vier o resumo (`resNFe`), registram a **Ciência da Operação** sozinhos e baixam o XML completo;
    - se a manifestação vier com 596 (passaram os 10 dias), salvam o resumo e pedem o XML ao fornecedor
      (upload manual);
    - na conexão mTLS usam o **trust store ICP-Brasil**, nunca `rejectUnauthorized:false`.
 
-   **O `sefaz-api` não tem essas rotas** (só emissão, consulta, cancelamento, CC-e, inutilização e
-   status). O código é TypeScript e pode ser levado quase direto para lá (`/nfe/distribuicao` e
-   `/nfe/manifestar`). Depois disso, `verificar_notas_na_sefaz` vira uma tarefa do despacho. Mexe no
-   `sefaz-api`: só com o OK do usuário.
+   Aqui (com o OK do usuário para mexer no `sefaz-api`):
+   - `/nfe/dfe/distribuicao`, `/nfe/dfe/consulta-chave` e `/nfe/manifestacao` no `sefaz-api`, sem
+     estado; resposta sem `cStat` ou sem `ultNSU` volta como erro e **sem NSU**, para o cliente nunca
+     gravar um NSU ruim;
+   - a busca virou tarefa (fora de transação), com a vez tomada na base, o NSU **por ambiente** e
+     nunca para trás, a hora da próxima consulta respeitada (1 hora em dia ou com 656), a ciência
+     automática, o 596 pedindo o XML ao fornecedor, a nota que não importa guardada sem travar a
+     fila, e o cancelamento pelo fornecedor tirando a nota da espera (ou avisando, se já entrou);
+   - nota de homologação não entra no estoque.
+
+   Falta: conferir contra o Ambiente Nacional de homologação (pede o certificado com a senha) e as
+   manifestações conclusivas.
 10. ~~**Compras:** parcelas da nota (`cobr/dup`; lá cada parcela tem um id determinístico, então refazer
     a importação cria só o que falta) e **estornar a entrada** de uma nota (`revertNoteImport`).~~
     **Feito (2026-10-20).**
