@@ -26,6 +26,7 @@ mod recorrencias;
 mod regua;
 mod renegociar;
 mod saude;
+mod simples;
 #[cfg(test)]
 mod testes;
 mod visao;
@@ -438,8 +439,12 @@ pub struct EstadoTelaFinanceiro {
     dfc_indireto: Option<mod_financeiro::dfc::DfcIndireto>,
     /// A aba do DFC mostra o método indireto.
     dfc_metodo_indireto: bool,
-    /// Dentro de Resultado: 0 = DRE, 1 = DFC, 2 = balancete.
+    /// Dentro de Resultado: 0 = DRE, 1 = DFC, 2 = balancete, 3 = Simples.
     visao_resultado: u8,
+    /// O resumo do Simples do mês (`None`: sem a permissão).
+    simples: Option<Result<mod_estoque::simples::ResumoDoSimples, String>>,
+    /// O formulário do mês de abertura e do faturamento de antes do Cardeal.
+    form_simples: simples::FormHistoricoSimples,
     /// O balancete do mês (aba Resultado › Balancete).
     balancete: Option<Vec<cardeal_ledger::LinhaBalancete>>,
     projecao: Vec<mod_financeiro::ItemProjecaoCategoria>,

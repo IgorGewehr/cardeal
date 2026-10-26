@@ -273,8 +273,20 @@ O que eles têm e o Cardeal não, com o que aprenderam:
     cancelamento traz o aviso (vermelho fora do prazo), e faltando 5 minutos o aviso lembra que, sem
     internet, o pedido espera na fila enquanto o prazo corre. Não bloqueia: recusado (501), a nota
     fica como "cancelamento recusado", com a orientação de emitir uma devolução.
-13. **Orçamento** por categoria, **resumo do Simples** e **score/tier de cliente**: úteis, mas depois do
-    básico.
+13. **Orçamento** por categoria, ~~**resumo do Simples**~~ e **score/tier de cliente**: úteis, mas depois do
+    básico. **O resumo do Simples está feito (2026-10-26).**
+
+    Lá (`api/industrial/financial/tax-summary`):
+    - a alíquota é a **nominal** da faixa (não a efetiva, com a parcela a deduzir);
+    - a receita é o acumulado **do ano** (não os 12 meses anteriores) e pelo **recebido** (não pela
+      competência);
+    - o MEI paga 5% sobre a receita (paga um DAS fixo);
+    - o padrão, sem configuração, é o Anexo II (indústria).
+
+    Aqui: o RBT12 da lei (12 meses anteriores, competência, anualização do primeiro ano, receita de
+    antes do Cardeal informável), a alíquota efetiva que o preço já usava, o DAS estimado mês a mês,
+    os avisos de sublimite e limite, o MEI pelo limite do ano — e o preço sugerido passa a usar o
+    mesmo RBT12 (antes: a janela até hoje, com o mês corrente).
 
 ## 6. Checklist para a NF-e (modelo 55), quando chegar a vez
 

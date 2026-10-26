@@ -108,6 +108,13 @@ impl Modulo for ModuloEstoque {
             .consulta::<crate::SugerirNomeDoProduto>("estoque.sugerir_nome_do_produto.v1")
             .consulta::<crate::SaldosDoProdutoPorLocal>("estoque.saldos_do_produto_por_local.v1")
             .consulta::<ParametrosDePreco>("estoque.parametros_de_preco.v1")
+            .consulta::<crate::simples::ResumoDoSimplesDoMes>("estoque.resumo_do_simples.v1")
+            .consulta::<crate::simples::HistoricoDoSimplesDaEmpresa>(
+                "estoque.historico_do_simples.v1",
+            )
+            .comando::<crate::simples::DefinirHistoricoDoSimples>(
+                "estoque.definir_historico_do_simples.v1",
+            )
             .consulta::<PrecoSugeridoDoProduto>("estoque.preco_sugerido_do_produto.v1")
             .consulta::<PrecosSugeridosDoGrupo>("estoque.precos_sugeridos_do_grupo.v1")
             .consulta::<PerfilFiscalDoProduto>("estoque.perfil_fiscal_do_produto.v1")

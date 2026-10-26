@@ -234,6 +234,12 @@ const PERMISSOES: &[Permissao] = &[
         Risco::Alto,
         None,
     ),
+    perm(
+        "estoque.preco.simples.ver",
+        "Ver o resumo do Simples (faturamento de 12 meses, alíquota e DAS estimado)",
+        Risco::Baixo,
+        None,
+    ),
 ];
 
 const MENU: &[EntradaMenu] = &[

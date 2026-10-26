@@ -107,6 +107,7 @@ pub(crate) mod repositorio_preco;
 #[cfg(feature = "sqlite")]
 pub(crate) mod repositorio_transferencia;
 mod saldo;
+pub mod simples;
 pub mod transferencia;
 
 pub use aparelho_origem::AparelhoOrigem;

@@ -403,7 +403,29 @@ const MIGRACOES: &[Migracao] = &[
         sql: SQL_DICIONARIO_NOME,
         tipo: TipoMigracao::Esquema,
     },
+    Migracao {
+        versao: 14,
+        nome: "estoque_simples_historico",
+        sql: SQL_SIMPLES_HISTORICO,
+        tipo: TipoMigracao::Esquema,
+    },
 ];
+
+/// v14: o que o Cardeal não sabe sozinho para o RBT12 do Simples — o mês de abertura da empresa
+/// (anualizar a receita no primeiro ano) e a receita bruta de meses de antes do Cardeal (o
+/// Razão começa na migração). Ver `simples.rs`.
+const SQL_SIMPLES_HISTORICO: &str = "
+CREATE TABLE estoque_simples_historico (
+    empresa          BLOB    PRIMARY KEY,
+    inicio_atividade INTEGER
+) STRICT, WITHOUT ROWID;
+CREATE TABLE estoque_simples_receita_anterior (
+    empresa     BLOB    NOT NULL,
+    competencia INTEGER NOT NULL,
+    valor       INTEGER NOT NULL CHECK (valor >= 0),
+    PRIMARY KEY (empresa, competencia)
+) STRICT, WITHOUT ROWID;
+";
 
 /// O conjunto de migrações do módulo de estoque.
 #[must_use]

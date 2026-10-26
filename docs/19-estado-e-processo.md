@@ -727,6 +727,12 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   - desktop (`pacote_contador.rs`): `XMLs AAAA-MM.zip`, as seções "Notas fiscais do mês" e
     "Pendências do mês" no PDF, e as abas "Notas emitidas" e "Notas de entrada" na planilha;
   - `cardeal-pdf`: o sinal de menos (U+2212) sai como traço, não como "?".
+- **Resumo do Simples (2026-10-26, item 13 do doc 21, primeira parte):** `mod_estoque::simples`
+  (puro: `rbt12` pela lei — 12 meses anteriores, anualização do primeiro ano, histórico curto —,
+  `resumir`, avisos de sublimite/limite/MEI), migração `estoque` v14 (`estoque_simples_historico`,
+  `estoque_simples_receita_anterior`), `ResumoDoSimplesDoMes`, `HistoricoDoSimplesDaEmpresa`,
+  `DefinirHistoricoDoSimples`, permissão nova `estoque.preco.simples.ver`; o preço sugerido passa a
+  usar o mesmo RBT12; desktop: Financeiro › Resultado › "Simples Nacional".
 - **Notas de compra pela SEFAZ — DFe (2026-10-26, item 9 do doc 21):**
   - `sefaz-api` (842576f): `/nfe/dfe/distribuicao`, `/nfe/dfe/consulta-chave`, `/nfe/manifestacao`;
   - `cardeal-fiscal`: `PortaFiscal::distribuicao_dfe(cnpj, uf, desde) -> PaginaDfe`,
@@ -797,8 +803,8 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   entrada vira bruto − desconto + rateio + ST + IPI e o total da nota passa a ser o `vNF`. **Corrige um erro real:**
   o título a pagar saía menor que o boleto em toda nota com ST ou IPI. A conferência mostra a composição do
   custo. Testes: 1 do leitor + 1 de integração (custo médio e título com o `vNF`).
-- **Dívidas conhecidas:** tabelas do Simples a conferir com o contador; a 6ª faixa e a anualização de
-  RBT12 (ver ADR-0018); o PDV só avisa preço abaixo do mínimo de empate (etiqueta "abaixo do mínimo" na linha do
+- **Dívidas conhecidas:** tabelas do Simples a conferir com o contador; a 6ª faixa (ver ADR-0018; a
+  anualização do RBT12 foi feita em 2026-10-26); o PDV só avisa preço abaixo do mínimo de empate (etiqueta "abaixo do mínimo" na linha do
   cupom, depois do desconto); não bloqueia a venda e não é o painel de margem completo.
 
 ## 2. Decisão estratégica registrada: por que Rust, não C#/.NET

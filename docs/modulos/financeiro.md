@@ -434,6 +434,17 @@ stateDiagram-v2
 | `TotalPorCategoriaNoPeriodo` ✅ | `financeiro.categoria.ver` | Gráfico de custo/receita por categoria e mês (churn, MRR por projeto) | agregação em memória sobre `financeiro_baixa` join `financeiro_titulo`, filtrando por `data` |
 | `TituloDaOrigem` ✅ (novo, 2026-09-11) | `financeiro.receber.ver` | Detalhe de OS (`os`)/vendas/compras faturada: "qual título isto gerou" | `financeiro_titulo(empresa, origem_modulo, origem_id)` — o par de correlação que `Titulo` já carregava desde a origem; usado por outro módulo pela consulta pública, nunca por SQL direto em `financeiro_titulo` (`docs/contratos-internos.md` §7 regra 2) |
 
+## 6.6 Resumo do Simples Nacional (2026-10-26, item 13 do doc 21)
+
+Resultado ganha a visão **Simples Nacional** (com `estoque.preco.simples.ver`; a consulta é de
+`mod-estoque`, dono do regime e das tabelas do Simples — ADR-0018): o faturamento do mês e dos 12
+meses anteriores, a alíquota efetiva, o DAS estimado, a faixa (e onde começa a próxima), os 12
+meses um a um e os avisos de limite. O RBT12 é o da lei — os 12 meses **anteriores** ao mês, pela
+competência —, com a anualização do primeiro ano e a receita de antes do Cardeal, que a seção "Mês
+de abertura e faturamento de antes do Cardeal" deixa informar (`estoque.tributario.editar`). O
+preço sugerido usa o mesmo RBT12. É estimativa: não separa as vendas com ST ou monofásico (que
+pagam menos no Anexo I); a guia é do contador. O MEI vê o faturamento do ano contra o limite.
+
 ## 6.5 Régua de cobrança (2026-10-14)
 
 `mod_financeiro::regua`: as etapas da empresa (dias contados do vencimento — negativo = lembrete antes, 0 = no

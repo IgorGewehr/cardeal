@@ -694,6 +694,19 @@ fn aba_resultado_apura_o_mes_pelo_razao_e_navega_entre_meses() {
             painel_dre(ui, &t.motor, &t.sessao, &mut estado);
         });
     });
+    // O resumo do Simples do mês carrega junto: a receita de 250, e desenha.
+    let simples = estado
+        .simples
+        .clone()
+        .expect("o dono vê o Simples")
+        .expect("o resumo");
+    assert_eq!(simples.mes.receita, Dinheiro::reais(250));
+    estado.visao_resultado = 3;
+    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            painel_dre(ui, &t.motor, &t.sessao, &mut estado);
+        });
+    });
     estado.visao_resultado = 0;
 
     // Mês passado: nada lançado.

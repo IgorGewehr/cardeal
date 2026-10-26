@@ -49,6 +49,7 @@ impl EstadoTelaFinanceiro {
             },
         );
         self.balancete = self.anotar(r);
+        self.carregar_simples(motor, sessao);
     }
 }
 
@@ -127,18 +128,26 @@ pub(super) fn painel_dre(
     ui.add_space(Espaco::E12);
 
     ui.add_space(Espaco::E8);
-    if let Some(v) = Abas::nova(&[
+    let mut visoes = vec![
         (0_u8, "DRE · resultado"),
         (1, "DFC · fluxo de caixa"),
         (2, "Balancete"),
-    ])
-    .selecionada(estado.visao_resultado)
-    .id_salt("dre-visao")
-    .mostrar(ui)
+    ];
+    if sessao.concede(super::simples::PERMISSAO_VER) {
+        visoes.push((3, "Simples Nacional"));
+    }
+    if let Some(v) = Abas::nova(&visoes)
+        .selecionada(estado.visao_resultado)
+        .id_salt("dre-visao")
+        .mostrar(ui)
     {
         estado.visao_resultado = v;
     }
     ui.add_space(Espaco::E12);
+    if estado.visao_resultado == 3 {
+        super::simples::painel_simples(ui, motor, sessao, estado);
+        return;
+    }
     if estado.visao_resultado == 2 {
         match &estado.balancete {
             Some(b) => super::balancete::tabela_balancete(ui, b),
