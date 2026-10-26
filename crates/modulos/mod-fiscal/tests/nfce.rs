@@ -32,11 +32,12 @@ use mod_financeiro::{
     AbrirCaixa, CadastrarCaixa, CaixaCadastrado, CaixaFoiAberto, ModuloFinanceiro,
 };
 use mod_fiscal::{
-    AmbienteFiscal, AnularDocumentoDaVenda, CancelarNfce, ConfigurarNfce, DefinirAmbienteFiscal,
-    DetalheDocumento, DocumentoFiscal, DocumentoResumo, EmitirNfceDoCupom, EstadoDocumento,
-    InstalarCertificado, InutilizarNumero, ModuloFiscal, NotasDoMes, NotasFiscaisDoMes,
-    PedidoDocumento, ProvedorFiscal, ReenviarDocumento, ResumoDaFilaFiscal, ResumoFiscal,
-    SituacaoFiscal, SituacaoFiscalDaEmpresa, SituacaoNoMes, XmlQueFalta, TAREFA_TRANSMITIR,
+    AmbienteFiscal, AnularDocumentoDaVenda, BuscarXmlsQueFaltam, CancelarNfce, ConfigurarNfce,
+    DefinirAmbienteFiscal, DetalheDocumento, DocumentoFiscal, DocumentoResumo, EmitirNfceDoCupom,
+    EstadoDocumento, InstalarCertificado, InutilizarNumero, ModuloFiscal, NotasDoMes,
+    NotasFiscaisDoMes, PedidoDocumento, ProvedorFiscal, ReenviarDocumento, ResumoDaFilaFiscal,
+    ResumoFiscal, SituacaoFiscal, SituacaoFiscalDaEmpresa, SituacaoNoMes, XmlQueFalta,
+    TAREFA_TRANSMITIR,
 };
 use mod_pdv::{
     AbrirCupom, AdicionarItem, CupomAberto, EstornarVenda, FinalizarVenda, ModuloPdv,
@@ -502,6 +503,8 @@ fn retorno(situacao: SituacaoRetorno, codigo: &str) -> RetornoSefaz {
         protocolo: None,
         recebido_em: None,
         xml: None,
+        xml_assinado: None,
+        xml_cancelamento: None,
         erros: vec![],
     }
 }
@@ -714,7 +717,8 @@ fn notas_do_mes_vao_ao_contador_com_os_xmls() {
     )
     .unwrap();
     assert!(m.transmitir().contains("1 inutilizada"));
-    // A resposta se perdeu: a consulta confirma, mas não devolve o XML da nota.
+    // A resposta se perdeu: a nota assinada fica guardada, e a consulta com ela devolve o
+    // nfeProc.
     let d = m.emitir(m.vender(&cen, cen.produto, 1, false));
     m.sim
         .programar(retorno(SituacaoRetorno::Processando, "TIMEOUT"));
@@ -757,11 +761,10 @@ fn notas_do_mes_vao_ao_contador_com_os_xmls() {
         .unwrap()
         .starts_with("<procInutNFe"));
     assert_eq!(n.notas[0].data, Data::hoje(Fuso::BRASILIA));
-    // Só a nota confirmada pela consulta fica sem XML — e o pacote diz por quê.
-    assert_eq!(
-        n.faltas(),
-        vec![(XmlQueFalta::NotaConfirmadaPelaConsulta, 1)]
-    );
+    // Nenhum XML falta: até a nota confirmada pela consulta tem o seu.
+    let confirmada = n.notas[3].xml.as_deref().unwrap();
+    assert!(confirmada.starts_with("<nfeProc") && confirmada.contains("<dhEmi>"));
+    assert_eq!(n.faltas(), vec![]);
     assert_eq!(n.total_autorizado(), a.total + d.total);
     let sem_desfecho: Vec<Id> = n.sem_desfecho.iter().map(|x| x.id).collect();
     assert_eq!(sem_desfecho, vec![e.id]);
@@ -774,6 +777,106 @@ fn notas_do_mes_vao_ao_contador_com_os_xmls() {
         },
     );
     assert_eq!(antes, NotasDoMes::default());
+}
+
+#[test]
+fn o_xml_do_cancelamento_que_nao_veio_e_buscado_na_consulta() {
+    let m = Mundo::novo();
+    let cen = m.cenario();
+    m.configurar(1);
+    m.rodar(
+        "fiscal.definir_ambiente.v1",
+        &DefinirAmbienteFiscal {
+            ambiente: AmbienteFiscal::Producao,
+        },
+    )
+    .unwrap();
+    let a = m.emitir(m.vender(&cen, cen.produto, 1, false));
+    let b = m.emitir(m.vender(&cen, cen.produto, 2, false));
+    assert!(m.transmitir().starts_with("2 autorizada"));
+    for doc in [a.id, b.id] {
+        m.rodar(
+            "fiscal.cancelar_nfce.v1",
+            &CancelarNfce {
+                documento: doc,
+                justificativa: "Venda registrada em duplicidade no caixa".into(),
+            },
+        )
+        .unwrap();
+    }
+    // a: o provedor (antigo) aceitou o cancelamento sem devolver o XML; b: o cancelamento já
+    // estava registrado — a resposta do primeiro pedido se perdeu.
+    m.sim.programar(retorno(SituacaoRetorno::Autorizado, "135"));
+    m.sim.programar(retorno(SituacaoRetorno::Rejeitado, "573"));
+    assert!(m.transmitir().contains("2 cancelada"));
+    let resumo: ResumoFiscal = m.consultar("fiscal.resumo_da_fila.v1", &ResumoDaFilaFiscal);
+    assert_eq!(resumo.xmls_a_buscar, 2);
+
+    // A consulta das duas: canceladas; a de `a` já traz o XML do cancelamento, a de `b` ainda
+    // não (a SEFAZ não tinha) — a busca encerra assim mesmo.
+    let chave = |id| m.documento(id).resumo.chave.unwrap();
+    let (ca, cb) = (chave(a.id), chave(b.id));
+    let evento = |c: &str, protocolo: &str| {
+        format!(
+            "<procEventoNFe><evento/><retEvento><infEvento><chNFe>{c}</chNFe>\
+             <cStat>135</cStat><nProt>{protocolo}</nProt></infEvento></retEvento></procEventoNFe>"
+        )
+    };
+    let cancelada = |c: &str, xml: Option<String>| RetornoSefaz {
+        situacao: SituacaoRetorno::Cancelado,
+        codigo: "101".into(),
+        motivo: "Cancelamento de NF-e homologado".into(),
+        chave: Some(c.into()),
+        protocolo: Some("143".into()),
+        recebido_em: None,
+        xml: None,
+        xml_assinado: None,
+        xml_cancelamento: xml,
+        erros: vec![],
+    };
+    m.sim
+        .definir_consulta(&ca, cancelada(&ca, Some(evento(&ca, "135260000000011"))));
+    m.sim.definir_consulta(&cb, cancelada(&cb, None));
+    let r = m.transmitir();
+    assert!(r.contains("1 XML(s) recuperado(s) na SEFAZ"), "{r}");
+    let mes = Data::hoje(Fuso::BRASILIA).competencia();
+    let n: NotasDoMes = m.consultar("fiscal.notas_do_mes.v1", &NotasFiscaisDoMes { mes });
+    assert_eq!(
+        n.notas[0].xml_evento.as_deref(),
+        Some(evento(&ca, "135260000000011").as_str())
+    );
+    assert_eq!(
+        n.notas[0].protocolo_evento.as_deref(),
+        Some("135260000000011")
+    );
+    assert_eq!(n.faltas(), vec![(XmlQueFalta::EventoDeCancelamento, 1)]);
+    // A busca encerrou: nada mais na fila (e a vigia não dispara por ela).
+    assert_eq!(m.transmitir(), "nada na fila");
+    let resumo: ResumoFiscal = m.consultar("fiscal.resumo_da_fila.v1", &ResumoDaFilaFiscal);
+    assert_eq!(resumo.xmls_a_buscar, 0);
+
+    // O pacote do contador pede de novo, e agora a SEFAZ tem o de `b`. A mesma chave só é
+    // consultada de novo depois de uma hora (a SEFAZ barra consulta repetida).
+    m.sim
+        .definir_consulta(&cb, cancelada(&cb, Some(evento(&cb, "135260000000012"))));
+    let buscando: u32 = m
+        .executar("fiscal.buscar_xmls_que_faltam.v1", &BuscarXmlsQueFaltam)
+        .unwrap();
+    assert_eq!(buscando, 1);
+    assert_eq!(m.transmitir(), "nada na fila");
+    m.tentar_ja();
+    assert!(m.transmitir().contains("1 XML(s) recuperado(s)"));
+    let n: NotasDoMes = m.consultar("fiscal.notas_do_mes.v1", &NotasFiscaisDoMes { mes });
+    assert_eq!(n.faltas(), vec![]);
+    assert_eq!(
+        n.notas[1].protocolo_evento.as_deref(),
+        Some("135260000000012")
+    );
+    // Nada mais a buscar.
+    let buscando: u32 = m
+        .executar("fiscal.buscar_xmls_que_faltam.v1", &BuscarXmlsQueFaltam)
+        .unwrap();
+    assert_eq!(buscando, 0);
 }
 
 #[test]

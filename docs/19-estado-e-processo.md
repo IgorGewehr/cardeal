@@ -47,8 +47,10 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   **inutilização** como pedidos na fila, e o **estorno da venda** no PDV com a NFC-e anulada pela fila.
   O MVP do backlog do `docs/21-licoes-do-gestao-raiz.md` §5 (itens 1–8) e os itens 10 (parcelas e
   estorno da entrada de compra), 11 (XMLs no pacote do contador) e 12 (prazo de cancelamento visível)
-  estão feitos. Próximo, com OK do usuário: o `sefaz-api` devolver o XML do evento, e o DFe (9); depois,
-  o 13; a 1ª autorizada no RS espera os dados do usuário.
+  estão feitos, e o `sefaz-api` devolve o XML do evento (2026-10-26, com a busca do que falta). Próximo
+  (OK do usuário para mexer no `sefaz-api` dado em 2026-10-26): o DFe (9); depois, o 13; a 1ª autorizada
+  no RS espera os dados do usuário. O `sefaz-api` publicado precisa ser atualizado para as mudanças
+  valerem em produção.
 - **Pendência de confiança:** as tabelas do Simples e as alíquotas precisam ser conferidas com o
   contador; o ST/IPI **da nota** já entra no custo (2026-10-13), mas a estimativa de ST pela MVA (sem o valor na
   nota) ainda não.
@@ -724,6 +726,22 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   - desktop (`pacote_contador.rs`): `XMLs AAAA-MM.zip`, as seções "Notas fiscais do mês" e
     "Pendências do mês" no PDF, e as abas "Notas emitidas" e "Notas de entrada" na planilha;
   - `cardeal-pdf`: o sinal de menos (U+2212) sai como traço, não como "?".
+- **XML do evento e busca do que falta (2026-10-26, fecha o item 11 do doc 21):**
+  - `sefaz-api` (bc58e77, outro repositório): `procEventoNFe` no cancelamento e na CC-e,
+    `procInutNFe` na inutilização, `xmlAssinado` no desfecho incerto, o `nfeProc` da denegada, e na
+    consulta `xml` (com o `xmlAssinado`, conferido pela chave e pelo digest) e `xmlCancelamento`; a
+    consulta da cancelada volta `cancelado` com o 101. Testes com a assinatura conferida dentro do
+    envelope;
+  - `cardeal-fiscal`: `RetornoSefaz.xml_assinado`/`xml_cancelamento`; `consultar_documento` leva a
+    nota assinada; o simulado imita tudo isso;
+  - `mod_fiscal`: migração v6 (`xml_assinado`, `xml_a_buscar`); `Mudanca.xml_assinado`/`buscar_xml`;
+    `decidir_busca` e `Busca` (puras); a fila busca os XMLs de documentos fechados sem mudar o estado;
+    `BuscarXmlsQueFaltam` (`fiscal.buscar_xmls_que_faltam.v1`); `ResumoFiscal::xmls_a_buscar`;
+    `XmlQueFalta::NotaABuscar`;
+  - desktop: o pacote do contador pede a busca e dispara a fila; a vigia dispara quando há busca na
+    hora;
+  - achado: um texto das pendências saía com o recuo do código no meio (faltava a continuação de
+    linha) — corrigido, com teste.
 - **Inventário com contagem cega (2026-10-13):** migração `estoque` v11 (`estoque_inventario`,
   `estoque_contagem_item`), comandos `criar_inventario`/`iniciar_contagem`/`registrar_contagem`/
   `encerrar_inventario`/`cancelar_inventario` (`.v1`) e consultas `inventarios`/`posicao_do_inventario`.

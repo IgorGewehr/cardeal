@@ -1158,8 +1158,8 @@ fn pacote_do_contador_grava_pdf_e_planilha_do_mes() {
     let gravado = super::pacote_contador::gravar(&t.motor, &t.sessao, &estado, dir.path())
         .expect("gravar o pacote");
     assert_eq!(
-        (gravado.xmls, gravado.pendencias),
-        (0, 0),
+        (gravado.xmls, gravado.pendencias, gravado.buscando),
+        (0, 0, 0),
         "mês sem notas: sem ZIP"
     );
     let mut arquivos: Vec<std::path::PathBuf> = std::fs::read_dir(&gravado.pasta)
@@ -1286,6 +1286,7 @@ fn pacote_do_contador_resume_as_notas_e_lista_as_pendencias() {
         total: Dinheiro::reais(10),
         xml: Some("<nfeProc/>".into()),
         xml_evento: None,
+        nota_assinada_guardada: false,
     };
     let rejeitada = DocumentoResumo {
         id: Id::novo(),

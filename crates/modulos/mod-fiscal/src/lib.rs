@@ -47,8 +47,9 @@ pub use cardeal_fiscal::{AmbienteFiscal, ModeloFiscal, StatusSefaz};
 pub use comandos::{DefinirAmbienteFiscal, InstalarCertificado, RemoverCertificado};
 pub use consultas::{SituacaoFiscal, StatusDaSefaz};
 pub use documento::{
-    decidir, decidir_evento, espera, pedido_da_anulacao, Desfecho, DocumentoResumo,
-    EstadoDocumento, Mudanca, PedidoDocumento, PrazoDeCancelamento, ResumoFiscal,
+    decidir, decidir_busca, decidir_evento, espera, pedido_da_anulacao, protocolo_no_evento, Busca,
+    Desfecho, DocumentoResumo, EstadoDocumento, Mudanca, PedidoDocumento, PrazoDeCancelamento,
+    ResumoFiscal, TENTATIVAS_DA_BUSCA,
 };
 pub use erros::ErroModuloFiscal;
 pub use explicacao::explicar;
@@ -61,9 +62,10 @@ pub use modulo::ModuloFiscal;
 #[cfg(feature = "sqlite")]
 pub use montagem::{marcar_homologacao, DESCRICAO_HOMOLOGACAO};
 pub use nfce::{
-    AnularDocumentoDaVenda, CancelarNfce, ConfiguracaoDaNfce, ConfiguracaoNfce, ConfigurarNfce,
-    DetalheDocumento, DocumentoDaVenda, DocumentoFiscal, DocumentosDasVendas, DocumentosFiscais,
-    EmitirNfceDoCupom, InutilizarNumero, ReenviarDocumento, ResumoDaFilaFiscal, TAREFA_TRANSMITIR,
+    AnularDocumentoDaVenda, BuscarXmlsQueFaltam, CancelarNfce, ConfiguracaoDaNfce,
+    ConfiguracaoNfce, ConfigurarNfce, DetalheDocumento, DocumentoDaVenda, DocumentoFiscal,
+    DocumentosDasVendas, DocumentosFiscais, EmitirNfceDoCupom, InutilizarNumero, ReenviarDocumento,
+    ResumoDaFilaFiscal, TAREFA_TRANSMITIR,
 };
 pub use provedor::ProvedorFiscal;
 #[cfg(feature = "sqlite")]

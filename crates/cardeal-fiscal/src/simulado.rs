@@ -121,12 +121,21 @@ impl PortaFiscal for FiscalSimulado {
             protocolo: Some(format!("143{:012}", nota.numero)),
             recebido_em: Some("2026-10-14T12:00:00-03:00".into()),
             xml: Some(xml_simulado(&chave, nota)),
+            xml_assinado: None,
+            xml_cancelamento: None,
             erros: Vec::new(),
         };
         let retorno = match travar(&self.programados).pop_front() {
             Some(mut r) => {
                 if r.chave.is_none() && r.situacao != SituacaoRetorno::Rejeitado {
                     r.chave = Some(chave.clone());
+                }
+                // Como o `sefaz-api`: o desfecho incerto devolve a nota assinada.
+                if matches!(
+                    r.situacao,
+                    SituacaoRetorno::Processando | SituacaoRetorno::Erro
+                ) {
+                    r.xml_assinado = Some(nfe_assinada(&chave, nota));
                 }
                 r
             }
@@ -145,7 +154,12 @@ impl PortaFiscal for FiscalSimulado {
         Ok(retorno)
     }
 
-    fn consultar_documento(&self, chave: &ChaveAcesso, _uf: Uf) -> Resultado<RetornoSefaz> {
+    fn consultar_documento(
+        &self,
+        chave: &ChaveAcesso,
+        _uf: Uf,
+        xml_assinado: Option<&str>,
+    ) -> Resultado<RetornoSefaz> {
         if self.fora_do_ar.load(std::sync::atomic::Ordering::SeqCst) {
             return Err(Erro::de_dominio(&ErroFiscal::ServicoIndisponivel));
         }
@@ -161,11 +175,22 @@ impl PortaFiscal for FiscalSimulado {
                     protocolo: None,
                     recebido_em: None,
                     xml: None,
+                    xml_assinado: None,
+                    xml_cancelamento: None,
                     erros: Vec::new(),
                 },
                 |mut r| {
-                    // A consulta devolve o protocolo, não o XML da nota.
-                    r.xml = None;
+                    // A consulta devolve o protocolo, não o XML da nota — salvo se recebeu a
+                    // nota assinada daquela chave: aí devolve o `nfeProc` (como o sefaz-api).
+                    r.xml = xml_assinado
+                        .filter(|x| x.contains(&format!("NFe{}", chave.como_str())))
+                        .map(|x| {
+                            format!(
+                                "<nfeProc versao=\"4.00\">{x}<protNFe><infProt><chNFe>{}</chNFe>\
+                                 <cStat>100</cStat></infProt></protNFe></nfeProc>",
+                                chave.como_str()
+                            )
+                        });
                     r
                 },
             ))
@@ -197,9 +222,19 @@ impl PortaFiscal for FiscalSimulado {
         if justificativa.chars().count() < 15 {
             return Ok(rejeicao("400", "justificativa curta"));
         }
+        let protocolo = "135260000000001";
+        let evento = format!(
+            "<procEventoNFe versao=\"1.00\"><evento><infEvento Id=\"ID110111{c}01\">\
+             <chNFe>{c}</chNFe><tpEvento>110111</tpEvento><detEvento><xJust>{justificativa}\
+             </xJust></detEvento></infEvento></evento><retEvento><infEvento><cStat>135</cStat>\
+             <nProt>{protocolo}</nProt></infEvento></retEvento></procEventoNFe>",
+            c = chave.como_str()
+        );
+        // Daqui em diante a consulta diz "cancelada" e traz o evento.
+        nota.situacao = SituacaoRetorno::Cancelado;
         nota.codigo = "101".into();
         nota.motivo = "Cancelamento de NF-e homologado".into();
-        let protocolo = "135260000000001";
+        nota.xml_cancelamento = Some(evento.clone());
         Ok(RetornoSefaz {
             situacao: SituacaoRetorno::Autorizado,
             codigo: "135".into(),
@@ -207,13 +242,9 @@ impl PortaFiscal for FiscalSimulado {
             chave: Some(chave.como_str().to_string()),
             protocolo: Some(protocolo.into()),
             recebido_em: None,
-            xml: Some(format!(
-                "<procEventoNFe versao=\"1.00\"><evento><infEvento Id=\"ID110111{c}01\">\
-                 <chNFe>{c}</chNFe><tpEvento>110111</tpEvento><detEvento><xJust>{justificativa}\
-                 </xJust></detEvento></infEvento></evento><retEvento><infEvento><cStat>135</cStat>\
-                 <nProt>{protocolo}</nProt></infEvento></retEvento></procEventoNFe>",
-                c = chave.como_str()
-            )),
+            xml: Some(evento),
+            xml_assinado: None,
+            xml_cancelamento: None,
             erros: Vec::new(),
         })
     }
@@ -245,6 +276,8 @@ impl PortaFiscal for FiscalSimulado {
                 p.inicio,
                 p.fim
             )),
+            xml_assinado: None,
+            xml_cancelamento: None,
             erros: Vec::new(),
         })
     }
@@ -273,6 +306,8 @@ fn rejeicao(codigo: &str, motivo: &str) -> RetornoSefaz {
         protocolo: None,
         recebido_em: None,
         xml: None,
+        xml_assinado: None,
+        xml_cancelamento: None,
         erros: Vec::new(),
     }
 }
@@ -281,16 +316,25 @@ fn travar<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// Um `nfeProc` mínimo, com a emissão (agora, em Brasília) e o grupo do QR Code — o bastante
-/// para guardar, imprimir e mandar ao contador em teste.
+/// Um `nfeProc` mínimo: a nota "assinada" com o protocolo.
 fn xml_simulado(chave: &str, nota: &Nfce) -> String {
+    format!(
+        "<nfeProc versao=\"4.00\">{}<protNFe><infProt><chNFe>{chave}</chNFe><cStat>100</cStat>\
+         </infProt></protNFe></nfeProc>",
+        nfe_assinada(chave, nota)
+    )
+}
+
+/// A `NFe` mínima, com a emissão (agora, em Brasília) e o grupo do QR Code — o bastante para
+/// guardar, imprimir e mandar ao contador em teste.
+fn nfe_assinada(chave: &str, nota: &Nfce) -> String {
     let agora = cardeal_kernel::Instante::agora();
     let fuso = cardeal_kernel::Fuso::BRASILIA;
     format!(
-        "<nfeProc versao=\"4.00\"><NFe><infNFe Id=\"NFe{chave}\"><ide><nNF>{}</nNF><serie>{}</serie>\
+        "<NFe><infNFe Id=\"NFe{chave}\"><ide><nNF>{}</nNF><serie>{}</serie>\
          <dhEmi>{}T{}-03:00</dhEmi></ide><total><ICMSTot><vNF>{}</vNF></ICMSTot></total></infNFe><infNFeSupl><qrCode>\
          https://homologacao.simulado/nfce?p={chave}|3|2</qrCode><urlChave>https://homologacao.simulado/nfce</urlChave>\
-         </infNFeSupl></NFe><protNFe><infProt><chNFe>{chave}</chNFe><cStat>100</cStat></infProt></protNFe></nfeProc>",
+         </infNFeSupl></NFe>",
         nota.numero,
         nota.serie,
         agora.data(fuso).formatar_iso(),
@@ -332,6 +376,8 @@ mod testes {
             protocolo: None,
             recebido_em: None,
             xml: None,
+            xml_assinado: None,
+            xml_cancelamento: None,
             erros: vec![],
         }
     }
@@ -351,7 +397,9 @@ mod testes {
         assert_eq!(chave.numero(), 42);
         assert!(ok.xml.as_deref().unwrap().contains("<qrCode>"));
         assert_eq!(
-            sim.consultar_documento(&chave, Uf::Rs).unwrap().situacao,
+            sim.consultar_documento(&chave, Uf::Rs, None)
+                .unwrap()
+                .situacao,
             SituacaoRetorno::Autorizado
         );
 
@@ -359,16 +407,23 @@ mod testes {
         sim.programar(retorno(SituacaoRetorno::Rejeitado, "778"));
         assert_eq!(sim.emitir_nfce(&nota, &csc).unwrap().codigo, "778");
 
-        // "Processando": a resposta se perdeu, mas a consulta acha autorizada (sem o XML).
+        // "Processando": a resposta se perdeu (com a nota assinada), mas a consulta acha
+        // autorizada — sem o XML, ou com ele, se recebe a nota assinada.
         sim.programar(retorno(SituacaoRetorno::Processando, "TIMEOUT"));
         let perdida = sim.emitir_nfce(&nota, &csc).unwrap();
+        let assinada = perdida.xml_assinado.clone().unwrap();
         let chave = ChaveAcesso::nova(perdida.chave.as_deref().unwrap()).unwrap();
-        let consulta = sim.consultar_documento(&chave, Uf::Rs).unwrap();
+        let consulta = sim.consultar_documento(&chave, Uf::Rs, None).unwrap();
         assert_eq!(consulta.situacao, SituacaoRetorno::Autorizado);
         assert!(consulta.xml.is_none());
+        let com_xml = sim
+            .consultar_documento(&chave, Uf::Rs, Some(&assinada))
+            .unwrap();
+        let nfe_proc = com_xml.xml.unwrap();
+        assert!(nfe_proc.starts_with("<nfeProc") && nfe_proc.contains("<dhEmi>"));
         let desconhecida = ChaveAcesso::nova(&"4".repeat(44)).unwrap();
         assert_eq!(
-            sim.consultar_documento(&desconhecida, Uf::Rs)
+            sim.consultar_documento(&desconhecida, Uf::Rs, Some(&assinada))
                 .unwrap()
                 .codigo,
             "217"
@@ -392,6 +447,11 @@ mod testes {
             .unwrap();
         let evento = c.xml.unwrap();
         assert!(evento.starts_with("<procEventoNFe") && evento.contains(chave.como_str()));
+        // A consulta da cancelada diz "cancelada" e traz o mesmo evento.
+        let consulta = sim.consultar_documento(&chave, Uf::Rs, None).unwrap();
+        assert_eq!(consulta.situacao, SituacaoRetorno::Cancelado);
+        assert_eq!(consulta.codigo, "101");
+        assert_eq!(consulta.xml_cancelamento.as_deref(), Some(evento.as_str()));
         let i = sim
             .inutilizar(&PedidoInutilizacao {
                 cnpj: Cnpj::novo("11.222.333/0001-81").unwrap(),

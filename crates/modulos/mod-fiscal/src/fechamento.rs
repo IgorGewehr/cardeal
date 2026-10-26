@@ -77,12 +77,16 @@ impl SituacaoNoMes {
 /// Por que um XML não está no pacote.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum XmlQueFalta {
-    /// A nota foi confirmada pela consulta à SEFAZ (a resposta da emissão se perdeu), e a
-    /// consulta devolve o protocolo, não o XML.
+    /// A nota foi confirmada pela consulta à SEFAZ (a resposta da emissão se perdeu) e a nota
+    /// assinada não ficou guardada — sem ela, a consulta não tem como devolver o XML.
     NotaConfirmadaPelaConsulta,
-    /// O emissor não devolveu o XML do cancelamento (o `sefaz-api` ainda não devolve).
+    /// A nota foi confirmada pela consulta e a nota assinada ficou guardada: a busca na SEFAZ
+    /// devolve o XML.
+    NotaABuscar,
+    /// O XML do cancelamento não veio (provedor antigo, ou a resposta se perdeu): a consulta
+    /// da nota cancelada o traz.
     EventoDeCancelamento,
-    /// O emissor não devolveu o XML da inutilização.
+    /// O XML da inutilização não veio — e não há consulta que o devolva.
     EventoDeInutilizacao,
 }
 
@@ -92,14 +96,14 @@ impl XmlQueFalta {
     pub const fn explicar(self) -> &'static str {
         match self {
             Self::NotaConfirmadaPelaConsulta => {
-                "XML de nota confirmada pela consulta à SEFAZ — a resposta da emissão se perdeu,                  e a consulta devolve só o protocolo"
+                "XML de nota confirmada pela consulta à SEFAZ — a resposta da emissão se perdeu e \
+                 a nota assinada não ficou guardada"
             }
-            Self::EventoDeCancelamento => {
-                "XML do cancelamento — o emissor fiscal ainda não o devolve"
+            Self::NotaABuscar => {
+                "XML de nota confirmada pela consulta à SEFAZ — o Cardeal busca na SEFAZ"
             }
-            Self::EventoDeInutilizacao => {
-                "XML da inutilização — o emissor fiscal ainda não o devolve"
-            }
+            Self::EventoDeCancelamento => "XML do cancelamento — não veio na resposta da SEFAZ",
+            Self::EventoDeInutilizacao => "XML da inutilização — não veio na resposta da SEFAZ",
         }
     }
 
@@ -110,8 +114,14 @@ impl XmlQueFalta {
             Self::NotaConfirmadaPelaConsulta => {
                 "Baixe o XML no portal da SEFAZ, com o certificado, e mande junto."
             }
-            Self::EventoDeCancelamento | Self::EventoDeInutilizacao => {
-                "A planilha traz o protocolo de cada um, que comprova o evento na SEFAZ."
+            Self::NotaABuscar => "Gere o pacote de novo depois que a fila fiscal transmitir.",
+            Self::EventoDeCancelamento => {
+                "O Cardeal busca na consulta da nota: gere o pacote de novo depois que a fila \
+                 fiscal transmitir. Se continuar faltando, a planilha traz o protocolo, que \
+                 comprova o cancelamento."
+            }
+            Self::EventoDeInutilizacao => {
+                "A planilha traz o protocolo de cada uma, que comprova a inutilização na SEFAZ."
             }
         }
     }
@@ -121,6 +131,7 @@ impl XmlQueFalta {
     pub const fn curto(self) -> &'static str {
         match self {
             Self::NotaConfirmadaPelaConsulta => "falta o XML da nota",
+            Self::NotaABuscar => "XML da nota: buscando na SEFAZ",
             Self::EventoDeCancelamento => "falta o XML do cancelamento",
             Self::EventoDeInutilizacao => "falta o XML da inutilização",
         }
@@ -152,6 +163,8 @@ pub struct NotaDoMes {
     pub xml: Option<String>,
     /// O XML do evento (`procEventoNFe`, `procInutNFe`).
     pub xml_evento: Option<String>,
+    /// Sem o `nfeProc`, mas com a nota assinada guardada: a busca na SEFAZ o recupera.
+    pub nota_assinada_guardada: bool,
 }
 
 impl NotaDoMes {
@@ -195,13 +208,16 @@ impl NotaDoMes {
     pub fn faltas(&self) -> Vec<XmlQueFalta> {
         let mut v = Vec::new();
         let sem_nota = self.xml.is_none();
+        let nota = if self.nota_assinada_guardada {
+            XmlQueFalta::NotaABuscar
+        } else {
+            XmlQueFalta::NotaConfirmadaPelaConsulta
+        };
         match self.situacao {
-            SituacaoNoMes::Autorizada | SituacaoNoMes::Denegada if sem_nota => {
-                v.push(XmlQueFalta::NotaConfirmadaPelaConsulta);
-            }
+            SituacaoNoMes::Autorizada | SituacaoNoMes::Denegada if sem_nota => v.push(nota),
             SituacaoNoMes::Cancelada => {
                 if sem_nota {
-                    v.push(XmlQueFalta::NotaConfirmadaPelaConsulta);
+                    v.push(nota);
                 }
                 if self.xml_evento.is_none() {
                     v.push(XmlQueFalta::EventoDeCancelamento);
@@ -325,6 +341,7 @@ impl Consulta for NotasFiscaisDoMes {
                     total: l.resumo.total,
                     xml: l.xml,
                     xml_evento: l.xml_evento,
+                    nota_assinada_guardada: l.xml_assinado_guardado,
                 })
             })
             .collect();
@@ -361,6 +378,7 @@ mod testes {
             total: Dinheiro::reais(10),
             xml: xml.then(|| "<nfeProc/>".to_owned()),
             xml_evento: evento.then(|| "<evento/>".to_owned()),
+            nota_assinada_guardada: false,
         }
     }
 
@@ -423,11 +441,30 @@ mod testes {
 
     #[test]
     fn o_que_falta_guardar_e_dito_com_o_porque() {
-        use XmlQueFalta::{EventoDeCancelamento, EventoDeInutilizacao, NotaConfirmadaPelaConsulta};
+        use XmlQueFalta::{
+            EventoDeCancelamento, EventoDeInutilizacao, NotaABuscar, NotaConfirmadaPelaConsulta,
+        };
         assert_eq!(
             nota(SituacaoNoMes::Autorizada, false, false).faltas(),
             vec![NotaConfirmadaPelaConsulta]
         );
+        // Com a nota assinada guardada, a busca recupera o XML.
+        let a_buscar = NotaDoMes {
+            nota_assinada_guardada: true,
+            ..nota(SituacaoNoMes::Cancelada, false, false)
+        };
+        assert_eq!(a_buscar.faltas(), vec![NotaABuscar, EventoDeCancelamento]);
+        // Nenhum texto sai com o recuo do código no meio.
+        for f in [
+            NotaConfirmadaPelaConsulta,
+            NotaABuscar,
+            EventoDeCancelamento,
+            EventoDeInutilizacao,
+        ] {
+            for t in [f.explicar(), f.o_que_fazer(), f.curto()] {
+                assert!(!t.contains("  "), "{t}");
+            }
+        }
         assert_eq!(
             nota(SituacaoNoMes::Cancelada, true, false).faltas(),
             vec![EventoDeCancelamento]
@@ -452,5 +489,6 @@ mod testes {
         // A cancelada não soma.
         assert_eq!(mes.total_autorizado(), Dinheiro::reais(10));
         assert!(EventoDeCancelamento.o_que_fazer().contains("protocolo"));
+        assert!(EventoDeCancelamento.o_que_fazer().contains("busca"));
     }
 }

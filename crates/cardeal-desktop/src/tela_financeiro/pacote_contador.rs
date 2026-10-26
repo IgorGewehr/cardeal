@@ -18,7 +18,7 @@ use mod_compras::{EstadoNotaEntrada, NotaDeEntradaDoMes, NotasDeEntradaDoMes};
 use mod_financeiro::dfc::{BlocoDfc, Dfc, DfcIndireto};
 use mod_financeiro::dre::TipoLinhaDre;
 use mod_financeiro::{ComparativoDre, DiarioDoPeriodo};
-use mod_fiscal::{ModeloFiscal, NotasDoMes, NotasFiscaisDoMes, SituacaoNoMes};
+use mod_fiscal::{BuscarXmlsQueFaltam, ModeloFiscal, NotasDoMes, NotasFiscaisDoMes, SituacaoNoMes};
 
 /// As notas fiscais emitidas no mês — ou por que não entraram no pacote.
 pub(super) type NotasEmitidas = Result<NotasDoMes, String>;
@@ -718,6 +718,8 @@ pub(super) struct PacoteGravado {
     pub(super) pasta: PathBuf,
     /// Quantos XMLs foram no ZIP.
     pub(super) xmls: usize,
+    /// Quantas notas estão na busca de XML na SEFAZ (a fila fiscal busca).
+    pub(super) buscando: u32,
     /// Quantas pendências o PDF lista.
     pub(super) pendencias: usize,
 }
@@ -743,6 +745,20 @@ pub(super) fn gravar(
             },
         )
         .map_err(|e| e.mensagem)?;
+    // Antes de montar o mês, o que dá para recuperar na SEFAZ (o XML do cancelamento que não
+    // veio, a nota confirmada pela consulta) entra na busca — a fila fiscal busca, e o pacote
+    // gerado de novo já os leva. Sem a permissão de emitir, fica para quem tem.
+    let buscando = if sessao.concede("fiscal.emitir") {
+        motor
+            .executar(
+                sessao,
+                "fiscal.buscar_xmls_que_faltam.v1",
+                &BuscarXmlsQueFaltam,
+            )
+            .unwrap_or(0)
+    } else {
+        0
+    };
     // As notas do mês: cada parte só com a permissão de vê-la; sem ela (ou com erro), o PDF diz
     // por que a parte ficou de fora, e o resto do pacote sai.
     let emitidas: NotasEmitidas = if sessao.concede("fiscal.ver") {
@@ -808,6 +824,7 @@ pub(super) fn gravar(
     Ok(PacoteGravado {
         pasta,
         xmls: xmls.len(),
+        buscando,
         pendencias: pendencias(&emitidas, &entradas).len(),
     })
 }
@@ -833,12 +850,20 @@ pub(super) fn botao(
     };
     match gravar(motor, sessao, estado, &destino) {
         Ok(p) => {
+            if p.buscando > 0 {
+                crate::fiscal_fundo::disparar(ui.ctx(), motor, sessao);
+            }
             let aviso = match (p.xmls, p.pendencias) {
                 (_, 0) if p.xmls > 0 => Notificacao::sucesso(format!(
                     "Pacote do contador gravado: PDF, planilha e {} XML(s) do mês",
                     p.xmls
                 )),
                 (0, 0) => Notificacao::sucesso("Pacote do contador gravado: PDF e planilha do mês"),
+                (_, n) if p.buscando > 0 => Notificacao::aviso(format!(
+                    "Pacote do contador gravado, com {n} pendência(s) — o Cardeal está buscando {} \
+                     XML(s) na SEFAZ: gere o pacote de novo daqui a pouco",
+                    p.buscando
+                )),
                 (_, n) => Notificacao::aviso(format!(
                     "Pacote do contador gravado, com {n} pendência(s) — veja o fim do PDF"
                 )),

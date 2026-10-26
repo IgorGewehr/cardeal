@@ -478,6 +478,11 @@ A planilha ganha as abas **Notas emitidas** e **Notas de entrada**, nota a nota,
 e a situação do XML. Cada parte só entra com a permissão de vê-la (`fiscal.ver`, `compras.entrada.ver`);
 sem ela, o PDF diz por que ficou de fora e o resto do pacote sai.
 
+Antes de montar o mês, o pacote põe na busca o que dá para recuperar na SEFAZ (2026-10-26:
+`fiscal.buscar_xmls_que_faltam.v1`, com `fiscal.emitir`) — o XML do cancelamento que não veio e o da
+nota confirmada pela consulta com a nota assinada guardada — e dispara a fila fiscal. O aviso diz quantos
+estão sendo buscados; gerado de novo depois da transmissão, o pacote já os leva.
+
 Fica de fora, por decisão (doc 21, §5, item 11):
 - o **DANFE** de cada nota: o documento fiscal é o XML, e o sistema do contador importa XML, não PDF;
 - o **SPED EFD**: a empresa do Simples em geral é dispensada da EFD ICMS/IPI, e o contador a gera dos

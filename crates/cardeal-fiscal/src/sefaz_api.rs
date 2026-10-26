@@ -176,6 +176,8 @@ pub(crate) struct RespostaSefazApi {
     pub protocolo: Option<String>,
     pub data_recebimento: Option<String>,
     pub xml: Option<String>,
+    pub xml_assinado: Option<String>,
+    pub xml_cancelamento: Option<String>,
     pub erros: Option<Vec<String>>,
 }
 
@@ -204,7 +206,9 @@ impl RespostaSefazApi {
             chave: self.chave_acesso.filter(|c| !c.is_empty()),
             protocolo: self.protocolo.filter(|p| !p.is_empty()),
             recebido_em: self.data_recebimento.filter(|d| !d.is_empty()),
-            xml: self.xml,
+            xml: self.xml.filter(|x| !x.is_empty()),
+            xml_assinado: self.xml_assinado.filter(|x| !x.is_empty()),
+            xml_cancelamento: self.xml_cancelamento.filter(|x| !x.is_empty()),
             erros: self.erros.unwrap_or_default(),
         }
     }
@@ -442,10 +446,18 @@ impl PortaFiscal for ApiFiscalHttp {
             .map_err(|e| Erro::de_dominio(&e))
     }
 
-    fn consultar_documento(&self, chave: &ChaveAcesso, uf: Uf) -> Resultado<RetornoSefaz> {
+    fn consultar_documento(
+        &self,
+        chave: &ChaveAcesso,
+        uf: Uf,
+        xml_assinado: Option<&str>,
+    ) -> Resultado<RetornoSefaz> {
         let mut corpo = self.corpo_base();
         corpo.insert("chaveAcesso".into(), Value::from(chave.como_str()));
         corpo.insert("ufEmitente".into(), Value::from(uf.sigla()));
+        if let Some(xml) = xml_assinado {
+            corpo.insert("xmlAssinado".into(), Value::from(xml));
+        }
         self.postar("/nfe/consultar", &Value::Object(corpo))
             .map(RespostaSefazApi::em_retorno)
             .map_err(|e| Erro::de_dominio(&e))
@@ -657,6 +669,53 @@ mod testes {
         let retorno = completo.em_retorno();
         assert_eq!(retorno.protocolo.as_deref(), Some("143260000000001"));
         assert_eq!(retorno.xml.as_deref(), Some("<nfeProc/>"));
+        assert_eq!(retorno.xml_assinado, None);
+        // A emissão incerta devolve a nota assinada; a consulta da cancelada, o cancelamento.
+        let incerta: RespostaSefazApi = serde_json::from_str(
+            r#"{"success":false,"status":"erro","codigoStatus":"ERR","motivoStatus":"socket hang up","chaveAcesso":"43261011222333000181650010000000421100000001","xmlAssinado":"<NFe/>"}"#,
+        )
+        .unwrap();
+        let incerta = incerta.em_retorno();
+        assert_eq!(incerta.situacao, SituacaoRetorno::Erro);
+        assert_eq!(incerta.xml_assinado.as_deref(), Some("<NFe/>"));
+        let cancelada: RespostaSefazApi = serde_json::from_str(
+            r#"{"success":false,"status":"cancelado","codigoStatus":"101","motivoStatus":"Cancelamento de NF-e homologado","protocolo":"143260000000001","xml":"","xmlCancelamento":"<procEventoNFe/>"}"#,
+        )
+        .unwrap();
+        let cancelada = cancelada.em_retorno();
+        assert_eq!(cancelada.situacao, SituacaoRetorno::Cancelado);
+        assert_eq!(cancelada.xml, None, "XML vazio não é XML");
+        assert_eq!(
+            cancelada.xml_cancelamento.as_deref(),
+            Some("<procEventoNFe/>")
+        );
+    }
+
+    #[test]
+    fn a_consulta_leva_o_xml_assinado_quando_ha() {
+        let (url, tarefa) = servidor(
+            200,
+            r#"{"success":true,"status":"autorizado","codigoStatus":"100","motivoStatus":"Autorizado o uso da NF-e","xml":"<nfeProc/>"}"#,
+        );
+        let chave = ChaveAcesso::nova("43261011222333000181650010000000421100000001").unwrap();
+        let r = cliente(&url)
+            .consultar_documento(&chave, Uf::Rs, Some("<NFe>assinada</NFe>"))
+            .unwrap();
+        assert_eq!(r.xml.as_deref(), Some("<nfeProc/>"));
+        let recebido = tarefa.join().unwrap();
+        assert!(recebido.starts_with("POST /nfe/consultar "), "{recebido}");
+        let corpo: Value = serde_json::from_str(recebido.rsplit('\n').next().unwrap()).unwrap();
+        assert_eq!(corpo["chaveAcesso"], chave.como_str());
+        assert_eq!(corpo["xmlAssinado"], "<NFe>assinada</NFe>");
+
+        // Sem o XML, o campo nem vai.
+        let (url, tarefa) = servidor(200, r#"{"success":true,"status":"autorizado"}"#);
+        cliente(&url)
+            .consultar_documento(&chave, Uf::Rs, None)
+            .unwrap();
+        let recebido = tarefa.join().unwrap();
+        let corpo: Value = serde_json::from_str(recebido.rsplit('\n').next().unwrap()).unwrap();
+        assert!(corpo.get("xmlAssinado").is_none());
     }
 
     #[test]
@@ -799,7 +858,7 @@ mod testes {
         );
         if let Some(chave) = &r.chave {
             let consulta = api
-                .consultar_documento(&ChaveAcesso::nova(chave).unwrap(), uf)
+                .consultar_documento(&ChaveAcesso::nova(chave).unwrap(), uf, None)
                 .unwrap();
             eprintln!(
                 "consulta: {:?} {} {}",

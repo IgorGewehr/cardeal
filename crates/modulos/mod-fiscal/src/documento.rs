@@ -334,6 +334,8 @@ pub struct ResumoFiscal {
     pub autorizadas_hoje: u32,
     /// Desde quando há documento esperando (o mais antigo na fila ou conferindo).
     pub esperando_desde: Option<Instante>,
+    /// Notas fechadas com XML a buscar na SEFAZ, já na hora (a fila busca).
+    pub xmls_a_buscar: u32,
 }
 
 impl ResumoFiscal {
@@ -389,6 +391,11 @@ pub struct Mudanca {
     pub protocolo_evento: Option<String>,
     /// O XML do evento aceito (`procEventoNFe`, `procInutNFe`), quando o provedor devolve.
     pub xml_evento: Option<String>,
+    /// A nota assinada que foi à SEFAZ, quando o desfecho ficou incerto — guardada até chegar o
+    /// `nfeProc`, vai na consulta.
+    pub xml_assinado: Option<String>,
+    /// Buscar depois, na consulta da nota, o XML do cancelamento que não veio.
+    pub buscar_xml: bool,
 }
 
 /// Depois de tantas tentativas com erro do emissor (não de rede), a nota sai da fila como
@@ -428,6 +435,8 @@ pub fn decidir(estado: EstadoDocumento, tentativas: u32, desfecho: Desfecho) -> 
         limpar_pedido: false,
         protocolo_evento: None,
         xml_evento: None,
+        xml_assinado: None,
+        buscar_xml: false,
     };
     let r = match desfecho {
         Desfecho::Indisponivel(m) => {
@@ -447,12 +456,14 @@ pub fn decidir(estado: EstadoDocumento, tentativas: u32, desfecho: Desfecho) -> 
     };
     let motivo = Some(explicar(&r.codigo, &r.motivo));
     let codigo = Some(r.codigo.clone());
+    // A nota assinada (quando a emissão a devolveu) fica guardada para a consulta.
     let incerta = |chave: Option<String>, espera_segundos| Mudanca {
         chave,
         trocar_chave: true,
         codigo: codigo.clone(),
         motivo: motivo.clone(),
         espera_segundos,
+        xml_assinado: r.xml_assinado.clone(),
         ..base(EstadoDocumento::Incerta)
     };
     let final_ = |estado| Mudanca {
@@ -473,9 +484,15 @@ pub fn decidir(estado: EstadoDocumento, tentativas: u32, desfecho: Desfecho) -> 
     }
     if estado == EstadoDocumento::Incerta {
         return match r.situacao {
-            _ if matches!(r.codigo.as_str(), "101" | "151" | "155") => {
-                final_(EstadoDocumento::Cancelada)
-            }
+            // Cancelada: a consulta traz o protocolo da autorização, o XML do cancelamento e,
+            // se foi com a nota assinada, o da nota.
+            _ if matches!(r.codigo.as_str(), "101" | "151" | "155") => Mudanca {
+                protocolo: r.protocolo.clone(),
+                xml: r.xml.clone(),
+                protocolo_evento: r.xml_cancelamento.as_deref().and_then(protocolo_no_evento),
+                xml_evento: r.xml_cancelamento.clone(),
+                ..final_(EstadoDocumento::Cancelada)
+            },
             SituacaoRetorno::Autorizado => Mudanca {
                 protocolo: r.protocolo.clone(),
                 xml: r.xml.clone(),
@@ -489,7 +506,10 @@ pub fn decidir(estado: EstadoDocumento, tentativas: u32, desfecho: Desfecho) -> 
                 motivo,
                 ..base(EstadoDocumento::Pendente)
             },
-            SituacaoRetorno::Denegado => final_(EstadoDocumento::Denegada),
+            SituacaoRetorno::Denegado => Mudanca {
+                xml: r.xml.clone(),
+                ..final_(EstadoDocumento::Denegada)
+            },
             SituacaoRetorno::Processando | SituacaoRetorno::Erro => Mudanca {
                 codigo,
                 motivo,
@@ -519,7 +539,10 @@ pub fn decidir(estado: EstadoDocumento, tentativas: u32, desfecho: Desfecho) -> 
         SituacaoRetorno::Rejeitado | SituacaoRetorno::Cancelado => {
             final_(EstadoDocumento::Rejeitada)
         }
-        SituacaoRetorno::Denegado => final_(EstadoDocumento::Denegada),
+        SituacaoRetorno::Denegado => Mudanca {
+            xml: r.xml.clone(),
+            ..final_(EstadoDocumento::Denegada)
+        },
         SituacaoRetorno::Erro if tentativas + 1 >= TENTATIVAS_COM_ERRO => Mudanca {
             motivo: Some(format!(
                 "o emissor falhou {} vezes seguidas — {}",
@@ -563,6 +586,8 @@ pub fn decidir_evento(
         limpar_pedido: false,
         protocolo_evento: None,
         xml_evento: None,
+        xml_assinado: None,
+        buscar_xml: false,
     };
     let (aceito, ja_feito, nome) = match pedido {
         PedidoDocumento::Cancelar => (
@@ -595,20 +620,28 @@ pub fn decidir_evento(
     };
     let codigo = Some(r.codigo.clone());
     match r.situacao {
-        SituacaoRetorno::Autorizado => Mudanca {
-            estado: aceito,
-            codigo,
-            motivo: Some(explicar(&r.codigo, &r.motivo)),
-            limpar_pedido: true,
-            protocolo_evento: r.protocolo.clone().filter(|p| !p.is_empty()),
-            xml_evento: r.xml.clone().filter(|x| !x.is_empty()),
-            ..base
-        },
+        SituacaoRetorno::Autorizado => {
+            let xml_evento = r.xml.clone().filter(|x| !x.is_empty());
+            Mudanca {
+                estado: aceito,
+                codigo,
+                motivo: Some(explicar(&r.codigo, &r.motivo)),
+                limpar_pedido: true,
+                protocolo_evento: r.protocolo.clone().filter(|p| !p.is_empty()),
+                // Sem o XML (provedor antigo): a consulta da nota cancelada o traz.
+                buscar_xml: xml_evento.is_none() && pedido == PedidoDocumento::Cancelar,
+                xml_evento,
+                ..base
+            }
+        }
+        // Já feito (a resposta do primeiro pedido se perdeu): o XML do cancelamento vem da
+        // consulta da nota; o da inutilização não tem consulta que o devolva.
         SituacaoRetorno::Rejeitado if ja_feito.contains(&r.codigo.as_str()) => Mudanca {
             estado: aceito,
             codigo,
             motivo: Some(explicar(&r.codigo, &r.motivo)),
             limpar_pedido: true,
+            buscar_xml: pedido == PedidoDocumento::Cancelar,
             ..base
         },
         SituacaoRetorno::Rejeitado | SituacaoRetorno::Denegado | SituacaoRetorno::Cancelado => {
@@ -631,6 +664,85 @@ pub fn decidir_evento(
     }
 }
 
+/// O protocolo do evento dentro do `procEventoNFe` — o `nProt` do `retEvento`.
+#[must_use]
+pub fn protocolo_no_evento(xml: &str) -> Option<String> {
+    let ret = &xml[xml.find("<retEvento")?..];
+    let i = ret.find("<nProt>")? + "<nProt>".len();
+    let fim = ret[i..].find('<')?;
+    Some(ret[i..i + fim].trim().to_owned()).filter(|p| !p.is_empty())
+}
+
+/// Quantas vezes a busca de um XML tenta, quando a SEFAZ responde com erro (a API fora do ar
+/// não conta) — depois desiste, até ser pedida de novo (o pacote do contador pede).
+pub const TENTATIVAS_DA_BUSCA: u32 = 3;
+
+/// A espera depois de uma busca que a SEFAZ respondeu com erro (a API fora do ar espera menos).
+const ESPERA_DA_BUSCA_COM_ERRO: i64 = 15 * 60;
+const ESPERA_DA_BUSCA_SEM_API: i64 = 5 * 60;
+
+/// O que fazer depois de buscar, na consulta da nota, os XMLs que faltam a um documento já
+/// fechado (o cancelamento que não veio; a nota confirmada pela consulta, com a nota assinada
+/// guardada). A busca não muda o estado do documento: só guarda o que veio.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Busca {
+    /// Guardar o que veio (pode não ter vindo nada: a SEFAZ não tinha) e encerrar.
+    Encerrar {
+        /// O `nfeProc`.
+        xml: Option<String>,
+        /// O `procEventoNFe` do cancelamento.
+        xml_evento: Option<String>,
+        /// O protocolo do cancelamento (de dentro do XML dele).
+        protocolo_evento: Option<String>,
+    },
+    /// Tentar de novo depois de `espera_segundos`; `gasta` conta como tentativa (a SEFAZ
+    /// respondeu com erro — a API fora do ar não conta).
+    TentarDeNovo {
+        /// Segundos até a próxima.
+        espera_segundos: i64,
+        /// Se gasta uma das [`TENTATIVAS_DA_BUSCA`].
+        gasta: bool,
+    },
+}
+
+/// Decide o que fazer com a consulta feita para buscar XMLs.
+#[must_use]
+pub fn decidir_busca(desfecho: Desfecho) -> Busca {
+    let r = match desfecho {
+        Desfecho::Indisponivel(_) => {
+            return Busca::TentarDeNovo {
+                espera_segundos: ESPERA_DA_BUSCA_SEM_API,
+                gasta: false,
+            }
+        }
+        Desfecho::Recusado(_) => {
+            return Busca::Encerrar {
+                xml: None,
+                xml_evento: None,
+                protocolo_evento: None,
+            }
+        }
+        Desfecho::Resposta(r) => r,
+    };
+    let paralisada = matches!(r.codigo.as_str(), "108" | "109");
+    if paralisada
+        || matches!(
+            r.situacao,
+            SituacaoRetorno::Processando | SituacaoRetorno::Erro
+        )
+    {
+        return Busca::TentarDeNovo {
+            espera_segundos: ESPERA_DA_BUSCA_COM_ERRO,
+            gasta: true,
+        };
+    }
+    Busca::Encerrar {
+        protocolo_evento: r.xml_cancelamento.as_deref().and_then(protocolo_no_evento),
+        xml: r.xml,
+        xml_evento: r.xml_cancelamento,
+    }
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;
@@ -646,6 +758,8 @@ mod testes {
             protocolo: Some("143".into()),
             recebido_em: None,
             xml: Some("<nfeProc/>".into()),
+            xml_assinado: None,
+            xml_cancelamento: None,
             erros: vec![],
         })
     }
@@ -763,6 +877,8 @@ mod testes {
             protocolo: None,
             recebido_em: None,
             xml: None,
+            xml_assinado: None,
+            xml_cancelamento: None,
             erros: vec![],
         });
         let m = decidir(Pendente, 0, desfecho);
@@ -884,5 +1000,123 @@ mod testes {
         assert!(r.frase().starts_with("3 nota(s) na fila"));
         r.rejeitadas = 1;
         assert!(r.frase().contains("rejeitada"));
+    }
+
+    fn resposta(situacao: SituacaoRetorno, codigo: &str) -> RetornoSefaz {
+        let Desfecho::Resposta(mut r) = r(situacao, codigo, Some(CHAVE)) else {
+            unreachable!()
+        };
+        r.xml = None;
+        r
+    }
+
+    const EVENTO: &str =
+        "<procEventoNFe><evento><infEvento><nProt>NAO</nProt></infEvento></evento>\
+                          <retEvento><infEvento><cStat>135</cStat><nProt>135260000000777</nProt>\
+                          </infEvento></retEvento></procEventoNFe>";
+
+    #[test]
+    fn a_emissao_incerta_guarda_a_nota_assinada_para_a_consulta() {
+        let mut r = resposta(Erro, "ERR");
+        r.xml_assinado = Some("<NFe/>".into());
+        let m = decidir(Pendente, 0, Desfecho::Resposta(r));
+        assert_eq!(m.estado, Incerta);
+        assert_eq!(m.xml_assinado.as_deref(), Some("<NFe/>"));
+        // A consulta com ela devolve o nfeProc, que fica.
+        let mut c = resposta(Autorizado, "100");
+        c.xml = Some("<nfeProc/>".into());
+        let m = decidir(Incerta, 1, Desfecho::Resposta(c));
+        assert_eq!(m.estado, Autorizada);
+        assert_eq!(m.xml.as_deref(), Some("<nfeProc/>"));
+        // A denegada também guarda o XML (o da denegação).
+        let mut d = resposta(Denegado, "302");
+        d.xml = Some("<nfeProc>denegada</nfeProc>".into());
+        assert_eq!(
+            decidir(Pendente, 0, Desfecho::Resposta(d)).xml.as_deref(),
+            Some("<nfeProc>denegada</nfeProc>")
+        );
+    }
+
+    #[test]
+    fn a_consulta_da_cancelada_traz_o_cancelamento() {
+        let mut c = resposta(Cancelado, "101");
+        c.xml_cancelamento = Some(EVENTO.into());
+        let m = decidir(Incerta, 1, Desfecho::Resposta(c));
+        assert_eq!(m.estado, Cancelada);
+        assert_eq!(m.protocolo.as_deref(), Some("143"));
+        assert_eq!(m.xml_evento.as_deref(), Some(EVENTO));
+        assert_eq!(m.protocolo_evento.as_deref(), Some("135260000000777"));
+        assert_eq!(protocolo_no_evento("<procEventoNFe/>"), None);
+    }
+
+    #[test]
+    fn cancelamento_sem_o_xml_vai_buscar_na_consulta() {
+        use PedidoDocumento::{Cancelar, Inutilizar};
+        // Aceito com o XML: nada a buscar.
+        let mut com = resposta(Autorizado, "135");
+        com.xml = Some(EVENTO.into());
+        assert!(!decidir_evento(Cancelar, Autorizada, 0, Desfecho::Resposta(com)).buscar_xml);
+        // Aceito sem o XML (provedor antigo) ou já registrado (573): busca.
+        let sem = decidir_evento(
+            Cancelar,
+            Autorizada,
+            0,
+            Desfecho::Resposta(resposta(Autorizado, "135")),
+        );
+        assert!(sem.buscar_xml && sem.xml_evento.is_none());
+        let ja = decidir_evento(
+            Cancelar,
+            Autorizada,
+            0,
+            Desfecho::Resposta(resposta(Rejeitado, "573")),
+        );
+        assert_eq!(ja.estado, Cancelada);
+        assert!(ja.buscar_xml);
+        // A inutilização não tem consulta que devolva o XML.
+        let inut = decidir_evento(
+            Inutilizar,
+            Rejeitada,
+            0,
+            Desfecho::Resposta(resposta(Rejeitado, "563")),
+        );
+        assert_eq!(inut.estado, EstadoDocumento::Inutilizada);
+        assert!(!inut.buscar_xml);
+    }
+
+    #[test]
+    fn a_busca_guarda_o_que_veio_e_insiste_pouco() {
+        let mut c = resposta(Cancelado, "101");
+        c.xml = Some("<nfeProc/>".into());
+        c.xml_cancelamento = Some(EVENTO.into());
+        assert_eq!(
+            decidir_busca(Desfecho::Resposta(c)),
+            Busca::Encerrar {
+                xml: Some("<nfeProc/>".into()),
+                xml_evento: Some(EVENTO.into()),
+                protocolo_evento: Some("135260000000777".into()),
+            }
+        );
+        // A SEFAZ não tinha: encerra sem nada (o pacote diz o que falta).
+        assert_eq!(
+            decidir_busca(Desfecho::Resposta(resposta(Autorizado, "100"))),
+            Busca::Encerrar {
+                xml: None,
+                xml_evento: None,
+                protocolo_evento: None
+            }
+        );
+        // API fora do ar não gasta tentativa; erro da SEFAZ gasta.
+        assert!(matches!(
+            decidir_busca(Desfecho::Indisponivel("fora".into())),
+            Busca::TentarDeNovo { gasta: false, .. }
+        ));
+        assert!(matches!(
+            decidir_busca(Desfecho::Resposta(resposta(Erro, "ERR"))),
+            Busca::TentarDeNovo { gasta: true, .. }
+        ));
+        assert!(matches!(
+            decidir_busca(Desfecho::Resposta(resposta(Rejeitado, "108"))),
+            Busca::TentarDeNovo { gasta: true, .. }
+        ));
     }
 }

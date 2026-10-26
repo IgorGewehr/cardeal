@@ -140,6 +140,22 @@ const SQL_V5: &str = "
 ALTER TABLE fiscal_documento ADD COLUMN xml_evento TEXT;
 ";
 
+/// v6: a nota assinada da emissão incerta (vai na consulta, que devolve o `nfeProc`) e a busca
+/// dos XMLs que faltam a notas fechadas — `xml_a_buscar` é quantas tentativas a busca ainda
+/// tem (0 = nada a buscar). Os cancelamentos que ficaram sem o XML (o `sefaz-api` não o
+/// devolvia) já entram na busca: a consulta da nota cancelada o traz.
+const SQL_V6: &str = "
+ALTER TABLE fiscal_documento ADD COLUMN xml_assinado TEXT;
+ALTER TABLE fiscal_documento ADD COLUMN xml_a_buscar INTEGER NOT NULL DEFAULT 0
+    CHECK (xml_a_buscar BETWEEN 0 AND 9);
+UPDATE fiscal_documento SET xml_a_buscar = 3
+ WHERE ambiente = 'producao' AND estado = 'Cancelada' AND xml_evento IS NULL
+   AND chave IS NOT NULL;
+DROP INDEX fiscal_documento_fila;
+CREATE INDEX fiscal_documento_fila ON fiscal_documento(empresa, proxima_tentativa)
+    WHERE estado IN ('Pendente','Incerta') OR pedido IS NOT NULL OR xml_a_buscar > 0;
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -169,6 +185,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 5,
         nome: "fiscal_xml_do_evento",
         sql: SQL_V5,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 6,
+        nome: "fiscal_nota_assinada_e_busca_de_xml",
+        sql: SQL_V6,
         tipo: TipoMigracao::Esquema,
     },
 ];

@@ -132,11 +132,11 @@ pura (`decidir`):
 |---|---|
 | Autorizada (100/150) | `Autorizada` — chave, protocolo, XML |
 | Rejeitada pela SEFAZ (inclui as de código < 200, ex.: SP 178) | `Rejeitada` — corrigir e reenviar |
-| Denegada | `Denegada` (o número foi consumido) |
-| Resposta sem resultado (timeout, erro com chave) | `Incerta` — **consultar pela chave** antes de qualquer reemissão |
+| Denegada | `Denegada` (o número foi consumido) — com o XML da denegação, que também se guarda |
+| Resposta sem resultado (timeout, erro com chave) | `Incerta` — **consultar pela chave** antes de qualquer reemissão; a nota assinada que foi à SEFAZ fica guardada (`xml_assinado`) e vai na consulta, que devolve o `nfeProc` |
 | Duplicidade 539 (a chave da nota que existe vem no motivo) / 204 | `Incerta` — conferir essa chave |
 | Consulta: não consta (217) | `Pendente` — emitir de novo, já |
-| Consulta: 101/151/155 | `Cancelada` (o `sefaz-api` diz "autorizado" para o 101) |
+| Consulta: 101/151/155 | `Cancelada` — com o protocolo da autorização e o XML do cancelamento (o `sefaz-api` dizia "autorizado" para o 101 até bc58e77) |
 | API fora do ar / SEFAZ paralisada (108/109) | continua, espera 30 s → 1, 2, 4, 8 → 15 min |
 | Recusa do provedor/instalação (CNPJ, credencial, cofre) | `Rejeitada` com a mensagem |
 | Erro do emissor repetido 6 vezes | `Rejeitada` — não gira na fila para sempre |
@@ -208,12 +208,26 @@ inutilização. `NotaDoMes::arquivos` dá os nomes do pacote, os que os sistemas
 conhecem: `Saidas/NFC-e/<situação>/<chave>-nfe.xml`, `110111<chave>01-procEventoNFe.xml` e
 `serieNNN-numeroNNNNNNNNN-procInutNFe.xml`. `NotaDoMes::faltas` diz o que não está guardado, com o
 porquê (`XmlQueFalta`):
-- a nota confirmada pela consulta depois de uma resposta perdida (a consulta devolve o protocolo, não o
-  XML);
-- o evento que o provedor não devolveu.
+- a nota confirmada pela consulta sem a nota assinada guardada (as de antes de 2026-10-26): a consulta não
+  tem como devolver o XML — baixa-se no portal da SEFAZ;
+- a nota confirmada pela consulta com a nota assinada guardada: a busca recupera;
+- o cancelamento que não veio: a busca recupera, pela consulta da nota cancelada;
+- a inutilização que não veio (a resposta se perdeu): não há consulta que a devolva — o protocolo comprova.
 
-**O `sefaz-api` ainda não devolve o XML do evento**: o cancelamento e a inutilização respondem só o
-protocolo. O Cardeal já guarda o que vier; a mudança lá é o item 9 do §11.
+**O XML do evento e a busca do que falta (2026-10-26).** O `sefaz-api` (bc58e77) passou a devolver o
+`procEventoNFe` no cancelamento e na CC-e, o `procInutNFe` na inutilização, a nota assinada no desfecho
+incerto da emissão (`xmlAssinado`) e, na consulta, o `nfeProc` (se recebe a nota assinada, conferida pela
+chave e pelo digest do protocolo) e o `procEventoNFe` do cancelamento (`xmlCancelamento`). O Cardeal
+guarda cada um quando vem. O que não veio vai para a **busca** (migração v6, `xml_a_buscar` = tentativas
+restantes): a fila consulta a nota e guarda o que a SEFAZ devolver, sem mudar o estado do documento
+(`decidir_busca`, pura). Entram na busca o cancelamento aceito sem o XML ou já registrado (573/218, a
+resposta do primeiro pedido se perdeu) e, pelo comando `BuscarXmlsQueFaltam`
+(`fiscal.buscar_xmls_que_faltam.v1`, `fiscal.emitir`), que o pacote do contador roda antes de montar o mês,
+todo documento de produção que tenha o que recuperar. A migração já pôs na busca os cancelamentos que
+ficaram sem o XML. A busca encerra na primeira resposta da SEFAZ, com ou sem o XML; o erro da SEFAZ gasta
+uma das 3 tentativas (a API fora do ar não gasta); e a mesma chave só volta a ser consultada depois de uma
+hora (a SEFAZ barra consulta repetida — "consumo indevido", 656). A vigia do desktop também dispara a
+transmissão quando há busca na hora (`ResumoFiscal::xmls_a_buscar`).
 
 **DANFCE** (`cardeal_pdf::gerar_danfce`): bobina de 80 ou 58 mm (Configurações › Impressão; no de 58 mm a
 fonte e a margem encolhem e o QR Code fica com 28 mm, acima dos 25 mm do manual) com a altura do cupom, no leiaute do manual
@@ -269,6 +283,9 @@ Cancelar e configurar continuam fora do papel.
 - v4: `fiscal_documento.anulada` — a venda foi desfeita (estorno no PDV).
 - v5: `fiscal_documento.xml_evento` — o XML do cancelamento (`procEventoNFe`) ou da inutilização
   (`procInutNFe`), para a guarda de 5 anos e o pacote do contador.
+- v6: `fiscal_documento.xml_assinado` (a nota assinada da emissão incerta, apagada quando chega o
+  `nfeProc`) e `xml_a_buscar` (tentativas restantes da busca de XML; 0 = nada a buscar); o índice da fila
+  passa a cobrir a busca, e os cancelamentos sem o XML já entram nela.
 
 ## 11. Próximas fatias da onda 7
 
@@ -280,8 +297,7 @@ Cancelar e configurar continuam fora do papel.
 5. NF-e de venda e devolução; CC-e.
 6. NFS-e da OS.
 7. SPED gerado no Cardeal.
-8. DFe e manifestação — dependem de rotas novas no `sefaz-api`.
-9. O `sefaz-api` devolver o **XML do evento** (o `procEventoNFe` no cancelamento, o `procInutNFe` na
-   inutilização) e o XML assinado na emissão sem resposta, para montar o `nfeProc` quando a consulta
-   confirma a autorização. Mexe no `sefaz-api`, então depende do OK do usuário; o Cardeal já guarda o
-   que vier.
+8. DFe e manifestação — dependem de rotas novas no `sefaz-api` (OK do usuário em 2026-10-26).
+9. ~~O `sefaz-api` devolver o XML do evento e a nota assinada da emissão incerta~~ — feito em
+   2026-10-26 (sefaz-api bc58e77; aqui, a busca do que falta). Para valer em produção, o `sefaz-api`
+   publicado precisa ser atualizado (o servidor dele não é desta máquina).

@@ -208,8 +208,8 @@ O que eles têm e o Cardeal não, com o que aprenderam:
 11. ~~**Fechamento do mês para o contador com os XMLs**: emitidas, canceladas, inutilizadas e recebidas,
     mais os DANFEs, o SPED EFD e os relatórios, num ZIP. Se faltar algum XML na base, ele é baixado da
     SEFAZ antes. Isso pede guardar o **XML do evento de cancelamento**, que hoje só fica com o
-    protocolo; a guarda é obrigatória por 5 anos.~~ **Feito (2026-10-20), menos o XML do evento, que
-    depende do `sefaz-api`.**
+    protocolo; a guarda é obrigatória por 5 anos.~~ **Feito (2026-10-20); o XML do evento, em
+    2026-10-26, com o `sefaz-api` (bc58e77).**
 
     Lá (`accounting-export.service.ts`), na prática:
     - o mês da nota é o da criação, não o da emissão;
@@ -237,13 +237,18 @@ O que eles têm e o Cardeal não, com o que aprenderam:
     - o **DANFE**, porque o documento é o XML e o contador importa XML;
     - o **SPED**, porque a empresa do Simples em geral é dispensada da EFD ICMS/IPI e o contador a gera
       dos XMLs;
-    - **baixar o que falta da SEFAZ**: a consulta não devolve o XML, e o emitente não baixa a própria
-      nota pela distribuição.
+    - **baixar a nota sem XML da SEFAZ**: a consulta não devolve a nota que não se guardou assinada, e o
+      emitente não baixa a própria nota pela distribuição — o pacote diz para baixar no portal.
 
-    **Depende do `sefaz-api` (OK do usuário):** devolver o `procEventoNFe` no cancelamento e o
-    `procInutNFe` na inutilização, e o XML assinado na emissão sem resposta, para montar o `nfeProc`
-    quando a consulta confirma. Até lá, o pacote diz que esses XMLs faltam e a planilha traz o
-    protocolo de cada evento.
+    **O `sefaz-api` (2026-10-26, bc58e77, com o OK do usuário)** passou a devolver o `procEventoNFe` no
+    cancelamento e na CC-e, o `procInutNFe` na inutilização, a nota assinada no desfecho incerto e, na
+    consulta, o `nfeProc` (com a nota assinada) e o XML do cancelamento. E corrigiu a consulta da nota
+    cancelada, que voltava "autorizado" com o cStat 100 do protocolo da autorização — o `saas-erp` e o
+    `gestao-raiz` já esperavam o 101. Aqui, o que não veio vai para a **busca**: a fila consulta a nota e
+    guarda o que a SEFAZ devolver (o cancelamento já registrado — 573 —, o aceito sem o XML, e os
+    antigos, que a migração pôs na busca); o pacote do contador pede a busca antes de montar o mês. O
+    `gestao-raiz` passa a receber os mesmos XMLs sem mudar nada lá — o "baixar da SEFAZ se faltar" dele
+    só funciona se mandar o XML assinado na consulta.
 
     Achado no caminho, corrigido: o PDF trocava o sinal de menos da DRE ("(−) Deduções") por "?", porque
     o caractere não existe na codificação da fonte padrão.

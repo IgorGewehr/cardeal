@@ -127,11 +127,18 @@ pub trait PortaFiscal: Send + Sync {
     fn emitir_nfce(&self, nota: &Nfce, csc: &Csc) -> Resultado<RetornoSefaz>;
 
     /// Consulta a situação de um documento pela chave — o passo obrigatório antes de reenviar
-    /// uma nota cujo resultado não chegou.
+    /// uma nota cujo resultado não chegou. Com o `xml_assinado` (o que a emissão incerta
+    /// devolveu), a nota autorizada ou denegada volta com o `nfeProc`; a cancelada volta
+    /// `Cancelado` (101/151/155) e com o XML do cancelamento.
     ///
     /// # Errors
     /// Como [`Self::emitir_nfce`].
-    fn consultar_documento(&self, chave: &ChaveAcesso, uf: Uf) -> Resultado<RetornoSefaz>;
+    fn consultar_documento(
+        &self,
+        chave: &ChaveAcesso,
+        uf: Uf,
+        xml_assinado: Option<&str>,
+    ) -> Resultado<RetornoSefaz>;
 
     /// Cancela um documento autorizado (evento 110111). Aceito vem como `Autorizado` (135,
     /// 136, 155); recusado (prazo, por exemplo) como `Rejeitado`.
@@ -171,8 +178,13 @@ impl<T: PortaFiscal + ?Sized> PortaFiscal for std::sync::Arc<T> {
         (**self).emitir_nfce(nota, csc)
     }
 
-    fn consultar_documento(&self, chave: &ChaveAcesso, uf: Uf) -> Resultado<RetornoSefaz> {
-        (**self).consultar_documento(chave, uf)
+    fn consultar_documento(
+        &self,
+        chave: &ChaveAcesso,
+        uf: Uf,
+        xml_assinado: Option<&str>,
+    ) -> Resultado<RetornoSefaz> {
+        (**self).consultar_documento(chave, uf, xml_assinado)
     }
 
     fn cancelar(

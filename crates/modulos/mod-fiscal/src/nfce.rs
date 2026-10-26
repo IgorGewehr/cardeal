@@ -276,7 +276,24 @@ impl Consulta for ResumoDaFilaFiscal {
             cardeal_kernel::Hora::MEIA_NOITE,
             ctx.fuso,
         );
-        crate::sql_documento::resumo(c, ctx.empresa, inicio)
+        crate::sql_documento::resumo(c, ctx.empresa, inicio, ctx.agora)
+    }
+}
+
+/// Põe na fila a busca, na consulta da nota, dos XMLs que faltam às notas de produção: o do
+/// cancelamento que não veio na resposta (ou cuja resposta se perdeu) e o da nota confirmada
+/// pela consulta cuja nota assinada ficou guardada. O pacote do contador pede antes de montar o
+/// mês. Devolve quantas notas estão na busca; quem busca é a transmissão.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+pub struct BuscarXmlsQueFaltam;
+
+impl Comando for BuscarXmlsQueFaltam {
+    type Saida = u32;
+    const PERMISSAO: &'static str = "fiscal.emitir";
+
+    #[cfg(feature = "sqlite")]
+    fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<u32> {
+        crate::sql_documento::marcar_xmls_a_buscar(uow.conexao(), ctx.empresa)
     }
 }
 
@@ -351,7 +368,8 @@ pub(crate) mod sqlite {
 
     use super::{ConfiguracaoNfce, ConfigurarNfce};
     use crate::documento::{
-        decidir, decidir_evento, Desfecho, DocumentoResumo, EstadoDocumento, PedidoDocumento,
+        decidir, decidir_busca, decidir_evento, Busca, Desfecho, DocumentoResumo, EstadoDocumento,
+        PedidoDocumento,
     };
     use crate::montagem::{marcar_homologacao, montar_nfce, DadosDaVenda, ItemDaVenda};
     use crate::sql_documento as sqld;
@@ -909,10 +927,23 @@ pub(crate) mod sqlite {
         })?;
         let mut eventos = (0_u32, 0_u32, 0_u32); // cancelados, inutilizados, recusados
         let mut contagem: HashMap<EstadoDocumento, u32> = HashMap::new();
+        let mut recuperados = 0_u32;
         for doc in fila {
             let Some(porta) = portas.get(&doc.ambiente) else {
                 continue;
             };
+            // Documento fechado com XML a buscar: só a consulta, sem mudar o estado.
+            let fechado = !matches!(
+                doc.estado,
+                EstadoDocumento::Pendente | EstadoDocumento::Incerta
+            );
+            if doc.pedido.is_none() && doc.buscar_xml && fechado {
+                match buscar_xmls(t, porta.as_ref(), &doc, uf)? {
+                    Some(n) => recuperados += n,
+                    None => break,
+                }
+                continue;
+            }
             let desfecho = match doc.pedido {
                 Some(pedido) => {
                     desfecho_do_pedido(porta.as_ref(), pedido, &doc, uf, cnpj, t.ctx.fuso)
@@ -970,6 +1001,15 @@ pub(crate) mod sqlite {
                 break;
             }
         }
+        Ok(resumo_da_rodada(&contagem, eventos, recuperados))
+    }
+
+    /// A frase do fim da rodada: as emissões, os pedidos e os XMLs recuperados.
+    fn resumo_da_rodada(
+        contagem: &HashMap<EstadoDocumento, u32>,
+        (cancelados, inutilizados, recusados): (u32, u32, u32),
+        recuperados: u32,
+    ) -> String {
         let n = |e| contagem.get(&e).copied().unwrap_or(0);
         let mut resumo = format!(
             "{} autorizada(s), {} rejeitada(s), {} na fila",
@@ -977,14 +1017,53 @@ pub(crate) mod sqlite {
             n(EstadoDocumento::Rejeitada) + n(EstadoDocumento::Denegada),
             n(EstadoDocumento::Pendente) + n(EstadoDocumento::Incerta)
         );
-        let (cancelados, inutilizados, recusados) = eventos;
         if cancelados + inutilizados + recusados > 0 {
             let _ = write!(
                 resumo,
                 "; {cancelados} cancelada(s), {inutilizados} inutilizada(s), {recusados} pedido(s) recusado(s)"
             );
         }
-        Ok(resumo)
+        if recuperados > 0 {
+            let _ = write!(resumo, "; {recuperados} XML(s) recuperado(s) na SEFAZ");
+        }
+        resumo
+    }
+
+    /// Busca os XMLs que faltam a um documento fechado e grava o que veio: devolve quantos
+    /// vieram, ou `None` se a API não respondeu (a rodada para).
+    fn buscar_xmls(
+        t: &ContextoTarefa<'_>,
+        porta: &dyn PortaFiscal,
+        doc: &sqld::NaFila,
+        uf: Option<Uf>,
+    ) -> Resultado<Option<u32>> {
+        let busca = decidir_busca(desfecho_da_busca(porta, doc, uf));
+        let vieram = match &busca {
+            Busca::Encerrar {
+                xml, xml_evento, ..
+            } => Some(u32::from(xml.is_some()) + u32::from(xml_evento.is_some())),
+            Busca::TentarDeNovo { gasta: true, .. } => Some(0),
+            Busca::TentarDeNovo { gasta: false, .. } => None,
+        };
+        let (empresa, id) = (t.ctx.empresa, doc.id);
+        t.escrever(move |uow| {
+            sqld::aplicar_busca(uow.conexao(), empresa, id, &busca, Instante::agora())
+        })?;
+        Ok(vieram)
+    }
+
+    /// Consulta um documento fechado para buscar os XMLs que faltam (com a nota assinada, se
+    /// ficou guardada).
+    fn desfecho_da_busca(porta: &dyn PortaFiscal, doc: &sqld::NaFila, uf: Option<Uf>) -> Desfecho {
+        let (Some(chave), Some(uf)) = (doc.chave.as_deref(), uf) else {
+            return Desfecho::Recusado("sem a chave da nota ou a UF da empresa".into());
+        };
+        match ChaveAcesso::nova(chave) {
+            Ok(chave) => {
+                desfecho(porta.consultar_documento(&chave, uf, doc.xml_assinado.as_deref()))
+            }
+            Err(e) => Desfecho::Recusado(e.to_string()),
+        }
     }
 
     /// Emite (pendente) ou consulta (incerta) um documento.
@@ -1006,7 +1085,9 @@ pub(crate) mod sqlite {
             ),
             (EstadoDocumento::Incerta, _, Some(chave), _, Some(uf)) => {
                 match ChaveAcesso::nova(chave) {
-                    Ok(chave) => desfecho(porta.consultar_documento(&chave, uf)),
+                    Ok(chave) => {
+                        desfecho(porta.consultar_documento(&chave, uf, doc.xml_assinado.as_deref()))
+                    }
                     Err(e) => Desfecho::Recusado(e.to_string()),
                 }
             }

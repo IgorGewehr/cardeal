@@ -9,9 +9,9 @@ use crate::consultas::{SituacaoFiscal, StatusDaSefaz};
 use crate::fechamento::NotasFiscaisDoMes;
 use crate::manifesto::MANIFESTO;
 use crate::nfce::{
-    AnularDocumentoDaVenda, CancelarNfce, ConfiguracaoDaNfce, ConfigurarNfce, DocumentoDaVenda,
-    DocumentoFiscal, DocumentosDasVendas, DocumentosFiscais, EmitirNfceDoCupom, InutilizarNumero,
-    ReenviarDocumento, ResumoDaFilaFiscal, TAREFA_TRANSMITIR,
+    AnularDocumentoDaVenda, BuscarXmlsQueFaltam, CancelarNfce, ConfiguracaoDaNfce, ConfigurarNfce,
+    DocumentoDaVenda, DocumentoFiscal, DocumentosDasVendas, DocumentosFiscais, EmitirNfceDoCupom,
+    InutilizarNumero, ReenviarDocumento, ResumoDaFilaFiscal, TAREFA_TRANSMITIR,
 };
 
 /// O módulo, para registrar no [`Despachante`](cardeal_modkit::Despachante).
@@ -46,6 +46,7 @@ impl Modulo for ModuloFiscal {
             .consulta::<DocumentoDaVenda>("fiscal.documento_da_venda.v1")
             .consulta::<DocumentosDasVendas>("fiscal.documentos_das_vendas.v1")
             .consulta::<NotasFiscaisDoMes>("fiscal.notas_do_mes.v1")
+            .comando::<BuscarXmlsQueFaltam>("fiscal.buscar_xmls_que_faltam.v1")
             .tarefa(
                 TAREFA_TRANSMITIR,
                 "fiscal.emitir",
