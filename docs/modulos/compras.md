@@ -171,6 +171,7 @@ stateDiagram-v2
 | `SugestaoDeCasamento` | `compras.entrada.conferir` | Tela de conferência | `compras_regra_casamento(fornecedor, codigo_fornecedor)` |
 | `ParcelasDaNota` ✅ (2026-10-20) | `compras.entrada.ver` | As parcelas no "Confirmar entrada" | `compras_nota_parcela(nota, ordem)` |
 | `PreviaDoEstornoDaEntrada` ✅ (2026-10-20) | `compras.entrada.ver` | O que o estorno faz: o que sai do estoque (e quanto há no local), a conta cancelada, o pagamento | movimentos da origem + `financeiro::situacao_do_titulo_da_origem` |
+| `NotasDeEntradaDoMes` ✅ (2026-10-20, `compras.notas_do_mes.v1`) | `compras.entrada.ver` | O pacote do contador: as notas emitidas no mês (pela emissão, o dia em que a compra entra no Razão) com o fornecedor, a situação e o **XML original** | `compras_nota_entrada(empresa, data_emissao)` (varredura do mês) |
 
 > **Nota (2026-09-13):** a fatia implementada (`crates/modulos/mod-compras/src/consultas.rs`)
 > tem `NotasRecentes` (as 200 notas mais recentes da empresa, com `estado` — a UI filtra por
@@ -277,6 +278,11 @@ fornecedor.
 caminho de `ConfirmarEntrada` em modo autônomo, então não há conflito possível nesse comando.
 
 ## 13. Tabelas
+
+> **Nota (2026-10-20):** a migração v7 dá a `compras_nota_entrada` a coluna `xml`: o XML original da
+> nota, como veio do fornecedor. A lei manda guardar por 5 anos, e o contador o recebe no pacote do mês.
+> As duas importações (arquivo e `DFe`) o gravam. A nota importada antes disso ganha o XML ao importar o
+> mesmo arquivo de novo, sem duplicar. A nota lançada à mão não tem XML.
 
 > **Nota (2026-09-05):** este é o esquema-alvo completo. A fatia implementada
 > (`crates/modulos/mod-compras/src/migracoes.rs`) tem só `compras_nota_entrada`/

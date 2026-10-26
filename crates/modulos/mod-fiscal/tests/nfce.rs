@@ -32,10 +32,11 @@ use mod_financeiro::{
     AbrirCaixa, CadastrarCaixa, CaixaCadastrado, CaixaFoiAberto, ModuloFinanceiro,
 };
 use mod_fiscal::{
-    AnularDocumentoDaVenda, CancelarNfce, ConfigurarNfce, DetalheDocumento, DocumentoFiscal,
-    DocumentoResumo, EmitirNfceDoCupom, EstadoDocumento, InstalarCertificado, InutilizarNumero,
-    ModuloFiscal, PedidoDocumento, ProvedorFiscal, ReenviarDocumento, ResumoDaFilaFiscal,
-    ResumoFiscal, SituacaoFiscal, SituacaoFiscalDaEmpresa, TAREFA_TRANSMITIR,
+    AmbienteFiscal, AnularDocumentoDaVenda, CancelarNfce, ConfigurarNfce, DefinirAmbienteFiscal,
+    DetalheDocumento, DocumentoFiscal, DocumentoResumo, EmitirNfceDoCupom, EstadoDocumento,
+    InstalarCertificado, InutilizarNumero, ModuloFiscal, NotasDoMes, NotasFiscaisDoMes,
+    PedidoDocumento, ProvedorFiscal, ReenviarDocumento, ResumoDaFilaFiscal, ResumoFiscal,
+    SituacaoFiscal, SituacaoFiscalDaEmpresa, SituacaoNoMes, XmlQueFalta, TAREFA_TRANSMITIR,
 };
 use mod_pdv::{
     AbrirCupom, AdicionarItem, CupomAberto, EstornarVenda, FinalizarVenda, ModuloPdv,
@@ -671,6 +672,108 @@ fn rejeicao_resposta_perdida_e_api_fora_do_ar() {
         .map(|id| m.documento(*id).resumo.numero)
         .collect();
     assert_eq!(numeros, vec![1, 2, 3]);
+}
+
+#[test]
+fn notas_do_mes_vao_ao_contador_com_os_xmls() {
+    let m = Mundo::novo();
+    let cen = m.cenario();
+    m.configurar(1);
+    // Uma nota de teste em homologação, antes de ir para produção: não vai ao contador.
+    m.emitir(m.vender(&cen, cen.produto, 1, false));
+    assert!(m.transmitir().starts_with("1 autorizada"));
+    m.rodar(
+        "fiscal.definir_ambiente.v1",
+        &DefinirAmbienteFiscal {
+            ambiente: AmbienteFiscal::Producao,
+        },
+    )
+    .unwrap();
+
+    // Autorizada e cancelada: o cancelamento guarda o XML do evento.
+    let a = m.emitir(m.vender(&cen, cen.produto, 1, false));
+    let b = m.emitir(m.vender(&cen, cen.produto, 2, false));
+    assert!(m.transmitir().starts_with("2 autorizada"));
+    m.rodar(
+        "fiscal.cancelar_nfce.v1",
+        &CancelarNfce {
+            documento: b.id,
+            justificativa: "Venda registrada em duplicidade no caixa".into(),
+        },
+    )
+    .unwrap();
+    assert!(m.transmitir().contains("1 cancelada"));
+    // A rejeitada que não vai sair: inutilizada, com o XML da inutilização.
+    let c = m.emitir(m.vender(&cen, cen.sem_ncm, 1, false));
+    m.rodar(
+        "fiscal.inutilizar_numero.v1",
+        &InutilizarNumero {
+            documento: c.id,
+            justificativa: "Produto sem NCM, venda refeita em outra nota".into(),
+        },
+    )
+    .unwrap();
+    assert!(m.transmitir().contains("1 inutilizada"));
+    // A resposta se perdeu: a consulta confirma, mas não devolve o XML da nota.
+    let d = m.emitir(m.vender(&cen, cen.produto, 1, false));
+    m.sim
+        .programar(retorno(SituacaoRetorno::Processando, "TIMEOUT"));
+    m.transmitir();
+    m.tentar_ja();
+    assert!(m.transmitir().starts_with("1 autorizada"));
+    // E uma rejeitada sem desfecho: o número é um buraco até alguém resolver.
+    let e = m.emitir(m.vender(&cen, cen.sem_ncm, 1, false));
+    assert_eq!(e.estado, EstadoDocumento::Rejeitada);
+
+    let mes = Data::hoje(Fuso::BRASILIA).competencia();
+    let n: NotasDoMes = m.consultar("fiscal.notas_do_mes.v1", &NotasFiscaisDoMes { mes });
+    assert_eq!(n.de_homologacao, 1);
+    let situacoes: Vec<(u64, SituacaoNoMes)> =
+        n.notas.iter().map(|x| (x.numero, x.situacao)).collect();
+    assert_eq!(
+        situacoes,
+        vec![
+            (a.numero, SituacaoNoMes::Autorizada),
+            (b.numero, SituacaoNoMes::Cancelada),
+            (c.numero, SituacaoNoMes::Inutilizada),
+            (d.numero, SituacaoNoMes::Autorizada),
+        ]
+    );
+    let cancelada = &n.notas[1];
+    assert!(cancelada.xml.as_deref().unwrap().starts_with("<nfeProc"));
+    assert!(cancelada
+        .xml_evento
+        .as_deref()
+        .unwrap()
+        .starts_with("<procEventoNFe"));
+    assert_eq!(
+        cancelada.protocolo_evento.as_deref(),
+        Some("135260000000001")
+    );
+    assert_eq!(cancelada.arquivos().len(), 2);
+    assert!(n.notas[2]
+        .xml_evento
+        .as_deref()
+        .unwrap()
+        .starts_with("<procInutNFe"));
+    assert_eq!(n.notas[0].data, Data::hoje(Fuso::BRASILIA));
+    // Só a nota confirmada pela consulta fica sem XML — e o pacote diz por quê.
+    assert_eq!(
+        n.faltas(),
+        vec![(XmlQueFalta::NotaConfirmadaPelaConsulta, 1)]
+    );
+    assert_eq!(n.total_autorizado(), a.total + d.total);
+    let sem_desfecho: Vec<Id> = n.sem_desfecho.iter().map(|x| x.id).collect();
+    assert_eq!(sem_desfecho, vec![e.id]);
+
+    // O mês anterior não tem nada disso (nem a pendência, criada depois dele).
+    let antes: NotasDoMes = m.consultar(
+        "fiscal.notas_do_mes.v1",
+        &NotasFiscaisDoMes {
+            mes: mes.anterior(),
+        },
+    );
+    assert_eq!(antes, NotasDoMes::default());
 }
 
 #[test]

@@ -320,7 +320,9 @@ pub struct RetornoSefaz {
     pub protocolo: Option<String>,
     /// Quando a SEFAZ recebeu.
     pub recebido_em: Option<String>,
-    /// O XML autorizado (`nfeProc`), quando autorizado.
+    /// O XML autorizado (`nfeProc`), quando autorizado. No cancelamento e na inutilização, o
+    /// XML do evento (`procEventoNFe`, `procInutNFe`) — a guarda dele é obrigatória por 5
+    /// anos —, quando o provedor o devolve (o `sefaz-api` ainda não devolve).
     pub xml: Option<String>,
     /// Os erros de validação do provedor.
     pub erros: Vec<String>,

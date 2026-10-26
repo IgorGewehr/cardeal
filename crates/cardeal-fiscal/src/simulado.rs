@@ -199,14 +199,21 @@ impl PortaFiscal for FiscalSimulado {
         }
         nota.codigo = "101".into();
         nota.motivo = "Cancelamento de NF-e homologado".into();
+        let protocolo = "135260000000001";
         Ok(RetornoSefaz {
             situacao: SituacaoRetorno::Autorizado,
             codigo: "135".into(),
             motivo: "Evento registrado e vinculado a NF-e".into(),
             chave: Some(chave.como_str().to_string()),
-            protocolo: Some("135260000000001".into()),
+            protocolo: Some(protocolo.into()),
             recebido_em: None,
-            xml: None,
+            xml: Some(format!(
+                "<procEventoNFe versao=\"1.00\"><evento><infEvento Id=\"ID110111{c}01\">\
+                 <chNFe>{c}</chNFe><tpEvento>110111</tpEvento><detEvento><xJust>{justificativa}\
+                 </xJust></detEvento></infEvento></evento><retEvento><infEvento><cStat>135</cStat>\
+                 <nProt>{protocolo}</nProt></infEvento></retEvento></procEventoNFe>",
+                c = chave.como_str()
+            )),
             erros: Vec::new(),
         })
     }
@@ -221,14 +228,23 @@ impl PortaFiscal for FiscalSimulado {
         if p.inicio > p.fim || p.justificativa.chars().count() < 15 {
             return Ok(rejeicao("400", "faixa ou justificativa inválida"));
         }
+        let protocolo = "102260000000001";
         Ok(RetornoSefaz {
             situacao: SituacaoRetorno::Autorizado,
             codigo: "102".into(),
             motivo: "Inutilização de número homologado".into(),
             chave: None,
-            protocolo: Some("102260000000001".into()),
+            protocolo: Some(protocolo.into()),
             recebido_em: None,
-            xml: None,
+            xml: Some(format!(
+                "<procInutNFe versao=\"4.00\"><inutNFe><infInut><mod>{}</mod><serie>{}</serie>\
+                 <nNFIni>{}</nNFIni><nNFFin>{}</nNFFin></infInut></inutNFe><retInutNFe><infInut>\
+                 <cStat>102</cStat><nProt>{protocolo}</nProt></infInut></retInutNFe></procInutNFe>",
+                p.modelo.codigo(),
+                p.serie,
+                p.inicio,
+                p.fim
+            )),
             erros: Vec::new(),
         })
     }
@@ -265,15 +281,20 @@ fn travar<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// Um `nfeProc` mínimo, com o grupo do QR Code — o bastante para guardar e imprimir em teste.
+/// Um `nfeProc` mínimo, com a emissão (agora, em Brasília) e o grupo do QR Code — o bastante
+/// para guardar, imprimir e mandar ao contador em teste.
 fn xml_simulado(chave: &str, nota: &Nfce) -> String {
+    let agora = cardeal_kernel::Instante::agora();
+    let fuso = cardeal_kernel::Fuso::BRASILIA;
     format!(
         "<nfeProc versao=\"4.00\"><NFe><infNFe Id=\"NFe{chave}\"><ide><nNF>{}</nNF><serie>{}</serie>\
-         </ide><total><ICMSTot><vNF>{}</vNF></ICMSTot></total></infNFe><infNFeSupl><qrCode>\
+         <dhEmi>{}T{}-03:00</dhEmi></ide><total><ICMSTot><vNF>{}</vNF></ICMSTot></total></infNFe><infNFeSupl><qrCode>\
          https://homologacao.simulado/nfce?p={chave}|3|2</qrCode><urlChave>https://homologacao.simulado/nfce</urlChave>\
          </infNFeSupl></NFe><protNFe><infProt><chNFe>{chave}</chNFe><cStat>100</cStat></infProt></protNFe></nfeProc>",
         nota.numero,
         nota.serie,
+        agora.data(fuso).formatar_iso(),
+        agora.hora(fuso).formatar_com_segundos(),
         {
             let c = nota.total().em_centavos();
             format!("{}.{:02}", c / 100, c % 100)
@@ -353,6 +374,37 @@ mod testes {
             "217"
         );
         assert_eq!(sim.emissoes.load(std::sync::atomic::Ordering::SeqCst), 3);
+    }
+
+    #[test]
+    fn cancelamento_e_inutilizacao_devolvem_o_xml_do_evento() {
+        let sim = FiscalSimulado::novo();
+        let nota = crate::emissao::exemplo();
+        let csc = Csc {
+            id: "1".into(),
+            token: cardeal_storage::Segredo::novo("t".into()),
+        };
+        let ok = sim.emitir_nfce(&nota, &csc).unwrap();
+        assert!(ok.xml.as_deref().unwrap().contains("<dhEmi>"));
+        let chave = ChaveAcesso::nova(ok.chave.as_deref().unwrap()).unwrap();
+        let c = sim
+            .cancelar(&chave, "1", "Venda registrada em duplicidade", Uf::Rs)
+            .unwrap();
+        let evento = c.xml.unwrap();
+        assert!(evento.starts_with("<procEventoNFe") && evento.contains(chave.como_str()));
+        let i = sim
+            .inutilizar(&PedidoInutilizacao {
+                cnpj: Cnpj::novo("11.222.333/0001-81").unwrap(),
+                modelo: ModeloFiscal::Nfce,
+                serie: 1,
+                inicio: 7,
+                fim: 7,
+                ano: 26,
+                justificativa: "Número pulado por falha do sistema".into(),
+                uf: Uf::Rs,
+            })
+            .unwrap();
+        assert!(i.xml.unwrap().contains("<nNFIni>7</nNFIni>"));
     }
 
     #[test]

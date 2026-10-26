@@ -153,6 +153,9 @@ clap        = { version = "4", features = ["derive", "env"] }
 mimalloc    = { version = "0.1", default-features = false }
 walkdir     = "2"
 base64      = "0.22"
+# O deflate do pacote de XMLs do contador (`cardeal-planilha::zip`): os XMLs encolhem umas dez
+# vezes. Já estava no grafo (pelo `png`) — nenhum crate novo.
+miniz_oxide = "0.8"
 
 # --- documentos / PDF -------------------------------------------------------
 # O escritor de PDF de `cardeal-pdf` é próprio (PDF 1.7 mínimo, fontes padrão) —

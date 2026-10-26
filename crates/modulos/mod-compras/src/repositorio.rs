@@ -194,6 +194,21 @@ impl<'a, 'b> RepositorioCompras<'a, 'b> {
             .map(|opt| opt.map(id_de))
     }
 
+    /// Guarda o XML original da nota, se ela ainda não tem — o da importação, ou o da
+    /// reimportação do mesmo arquivo para a nota importada antes de o XML ser guardado.
+    ///
+    /// # Errors
+    /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+    pub fn guardar_xml(&mut self, nota: Id, xml: &str) -> Resultado<()> {
+        self.conn()
+            .execute(
+                "UPDATE compras_nota_entrada SET xml = ?2 WHERE id = ?1 AND xml IS NULL",
+                params![blob(nota), xml],
+            )
+            .map(|_| ())
+            .map_err(persist)
+    }
+
     /// Troca as parcelas da nota pelas informadas (as do XML na importação; as usadas na
     /// confirmação).
     ///

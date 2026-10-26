@@ -461,6 +461,28 @@ XML), sem dependência externa — dinheiro como número `#.##0,00`, datas como 
 congelado; conferido no Excel (amostra) e pelo leitor de pacotes Open XML do .NET (o pacote real). "Envio" é
 manual: o usuário anexa a pasta no e-mail/WhatsApp — SMTP e o Portal do Contador (onda 8) ficam para depois.
 
+**Com as notas do mês (2026-10-20, item 11 do doc 21).** O pacote ganha um terceiro arquivo,
+`XMLs AAAA-MM.zip`, comprimido (`cardeal_planilha::zip::empacotar_comprimido`; o deflate é do
+`miniz_oxide`, que já vinha no grafo pelo `png`):
+- as notas emitidas em `Saidas/<modelo>/<situação>/`: autorizadas; canceladas com a nota e o evento;
+  inutilizadas com o evento; denegadas;
+- as notas de entrada em `Entradas/`, com o XML como veio do fornecedor.
+
+O PDF ganha duas seções:
+- **Notas fiscais do mês**: quantidade e valor por modelo e situação, as notas de entrada e os XMLs no
+  pacote; as de homologação ficam de fora, contadas;
+- **Pendências do mês**, quando há, cada uma com o que fazer: a nota sem desfecho, o XML que falta e
+  por quê, a nota de entrada importada antes de o XML ser guardado.
+
+A planilha ganha as abas **Notas emitidas** e **Notas de entrada**, nota a nota, com chave, protocolos
+e a situação do XML. Cada parte só entra com a permissão de vê-la (`fiscal.ver`, `compras.entrada.ver`);
+sem ela, o PDF diz por que ficou de fora e o resto do pacote sai.
+
+Fica de fora, por decisão (doc 21, §5, item 11):
+- o **DANFE** de cada nota: o documento fiscal é o XML, e o sistema do contador importa XML, não PDF;
+- o **SPED EFD**: a empresa do Simples em geral é dispensada da EFD ICMS/IPI, e o contador a gera dos
+  XMLs no sistema dele.
+
 ## 6.3 Lançamento pré-preenchido pelo último da pessoa (2026-10-14)
 
 `UltimoLancamentoAReceber`/`UltimoLancamentoAPagar` (`financeiro.ultimo_lancamento_a_receber.v1`/

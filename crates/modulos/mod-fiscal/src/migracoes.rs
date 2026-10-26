@@ -133,6 +133,13 @@ ALTER TABLE fiscal_documento ADD COLUMN anulada INTEGER NOT NULL DEFAULT 0
     CHECK (anulada IN (0,1));
 ";
 
+/// v5: o XML do evento — o `procEventoNFe` do cancelamento ou o `procInutNFe` da inutilização,
+/// que a lei manda guardar por 5 anos junto com o da nota e que o contador recebe no pacote do
+/// mês. Antes só o protocolo ficava.
+const SQL_V5: &str = "
+ALTER TABLE fiscal_documento ADD COLUMN xml_evento TEXT;
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -156,6 +163,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 4,
         nome: "fiscal_documento_anulado_pela_venda",
         sql: SQL_V4,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 5,
+        nome: "fiscal_xml_do_evento",
+        sql: SQL_V5,
         tipo: TipoMigracao::Esquema,
     },
 ];

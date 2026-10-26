@@ -9,7 +9,9 @@ use crate::comandos::{
     ConfirmarEntrada, DefinirPreferenciasCompras, EstornarEntrada, ImportarNotaDeArquivoXml,
     LancarNotaManual, VincularProdutoManual,
 };
-use crate::consultas::{ItensDaNota, NotasRecentes, ParcelasDaNota, PreviaDoEstornoDaEntrada};
+use crate::consultas::{
+    ItensDaNota, NotasDeEntradaDoMes, NotasRecentes, ParcelasDaNota, PreviaDoEstornoDaEntrada,
+};
 use crate::manifesto::MANIFESTO;
 use crate::migracoes;
 
@@ -37,7 +39,8 @@ impl Modulo for ModuloCompras {
             .consulta::<NotasRecentes>("compras.notas_recentes.v1")
             .consulta::<ItensDaNota>("compras.itens_da_nota.v1")
             .consulta::<ParcelasDaNota>("compras.parcelas_da_nota.v1")
-            .consulta::<PreviaDoEstornoDaEntrada>("compras.previa_estorno_entrada.v1");
+            .consulta::<PreviaDoEstornoDaEntrada>("compras.previa_estorno_entrada.v1")
+            .consulta::<NotasDeEntradaDoMes>("compras.notas_do_mes.v1");
         Ok(())
     }
 }

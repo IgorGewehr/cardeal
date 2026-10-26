@@ -46,6 +46,6 @@ impl Comando for ImportarNotaDeArquivoXml {
     #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         let nota_xml = cardeal_fiscal::interpretar(&self.xml).map_err(|e| Erro::de_dominio(&e))?;
-        importar_nota_interpretada(&nota_xml, ctx, uow)
+        importar_nota_interpretada(&nota_xml, &self.xml, ctx, uow)
     }
 }

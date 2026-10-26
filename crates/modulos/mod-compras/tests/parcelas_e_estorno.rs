@@ -6,14 +6,15 @@
 #![allow(clippy::result_large_err)] // `ErroArmazenamento` carrega detalhes de propósito
 
 use cardeal_auth::{AutorizacoesEfetivas, EmissaoSessao, Escopo, Sessao};
-use cardeal_kernel::{CodigoErro, Data, Dinheiro, Erro, Id, Instante, Quantidade};
+use cardeal_kernel::{CodigoErro, Competencia, Data, Dinheiro, Erro, Id, Instante, Quantidade};
 use cardeal_ledger::semear_plano_padrao;
 use cardeal_modkit::{Ambiente, Ctx, Despachante, Modulo, PedidoAtivacao, RegistroModulos};
 use cardeal_storage::{Armazenamento, ConfigArmazenamento, ContextoEscrita, ErroArmazenamento};
 use mod_compras::{
     ConfirmarEntrada, EntradaConfirmada, EntradaFoiEstornada, EstadoNotaEntrada, EstornarEntrada,
-    ImportarNotaDeArquivoXml, ItensDaNota, ModuloCompras, ParcelaCompra, ParcelasDaNota,
-    PreviaDoEstornoDaEntrada, PreviaEstornoEntrada, RelatorioImportacao, VincularProdutoManual,
+    ImportarNotaDeArquivoXml, ItensDaNota, ModuloCompras, NotaDeEntradaDoMes, NotasDeEntradaDoMes,
+    ParcelaCompra, ParcelasDaNota, PreviaDoEstornoDaEntrada, PreviaEstornoEntrada,
+    RelatorioImportacao, VincularProdutoManual,
 };
 use mod_estoque::{ModuloEstoque, RepositorioEstoque};
 use serde::de::DeserializeOwned;
@@ -560,4 +561,64 @@ fn estorno_com_o_pagamento_devolve_o_dinheiro_e_zera_o_razao() {
     );
     assert_eq!(b.estado_da_nota(r.nota_entrada), "AConferir");
     let _ = EstadoNotaEntrada::AConferir;
+}
+
+#[test]
+fn a_nota_guarda_o_xml_original_e_vai_ao_contador_no_mes_da_emissao() {
+    let b = Base::nova();
+    let original = xml('7', &[]);
+    let r: RelatorioImportacao = b
+        .executar(
+            "compras.importar_nota_de_arquivo_xml.v1",
+            &ImportarNotaDeArquivoXml {
+                xml: original.clone(),
+            },
+        )
+        .unwrap();
+    let do_mes = |mes| -> Vec<NotaDeEntradaDoMes> {
+        b.consultar("compras.notas_do_mes.v1", &NotasDeEntradaDoMes { mes })
+    };
+    let setembro = do_mes(Competencia::nova(2026, 9));
+    assert_eq!(setembro.len(), 1);
+    let n = &setembro[0];
+    assert_eq!(n.nota, r.nota_entrada);
+    assert_eq!(n.xml.as_deref(), Some(original.as_str()), "o XML como veio");
+    assert_eq!(n.chave.as_deref(), Some("7".repeat(44).as_str()));
+    assert_eq!(n.fornecedor, "Distribuidora Alfa LTDA");
+    assert_eq!((n.numero.as_str(), n.data_emissao), ("4598", dia(9, 1)));
+    assert_eq!(n.valor_total, Dinheiro::reais(50));
+    assert_eq!(n.estado, EstadoNotaEntrada::AConferir);
+    assert!(do_mes(Competencia::nova(2026, 10)).is_empty());
+
+    // Nota importada antes de o XML ser guardado: importar o mesmo arquivo de novo o guarda,
+    // sem duplicar a nota.
+    let nota = r.nota_entrada;
+    b.arm
+        .escritor()
+        .executar(
+            ContextoEscrita::novo(b.empresa, Id::novo(), Id::novo(), Id::novo()),
+            move |uow| {
+                uow.conexao()
+                    .execute(
+                        "UPDATE compras_nota_entrada SET xml = NULL WHERE id = ?1",
+                        [nota.em_bytes().as_slice()],
+                    )
+                    .map(|_| ())
+                    .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+            },
+        )
+        .unwrap();
+    assert!(do_mes(Competencia::nova(2026, 9))[0].xml.is_none());
+    let de_novo: RelatorioImportacao = b
+        .executar(
+            "compras.importar_nota_de_arquivo_xml.v1",
+            &ImportarNotaDeArquivoXml {
+                xml: original.clone(),
+            },
+        )
+        .unwrap();
+    assert_eq!(de_novo.nota_entrada, nota);
+    let setembro = do_mes(Competencia::nova(2026, 9));
+    assert_eq!(setembro.len(), 1);
+    assert_eq!(setembro[0].xml.as_deref(), Some(original.as_str()));
 }

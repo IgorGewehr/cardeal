@@ -22,7 +22,7 @@
 | Vendas B2B | Pedido em etapas (aprovar, pagar, preparar, faturar, enviar, entregar), app do revendedor, comissão | Pedido, tabela e regra de preço, promoção, comissão apurada e paga |
 | Clientes / CRM | Cadastro, CEP → IBGE, importação, score/tier automático, interações | Pessoa única com papéis, limite de crédito, contatos e endereços. Sem score e sem importação |
 | Financeiro | Portadores com saldo inicial, **transferências**, cancelar/editar/excluir título, parcelar, importar títulos, DRE mensal e anual, orçamento anual, resumo do Simples | Razão de partidas dobradas, caixa, OFX, conciliação, DFC, balancete, aging, cheques, régua, recorrências, renegociação. Ver §4 |
-| Contábil | **Fechamento do mês**: ZIP com XMLs emitidos e recebidos, DANFEs, SPED EFD e relatórios, enviado por e-mail/WhatsApp | Pacote do contador (PDF + `.xlsx`), ainda sem XMLs e sem SPED |
+| Contábil | **Fechamento do mês**: ZIP com XMLs emitidos e recebidos, DANFEs, SPED EFD e relatórios, enviado por e-mail/WhatsApp | Pacote do contador: PDF, `.xlsx` e o ZIP dos XMLs do mês (emitidas, canceladas com o evento, inutilizadas, de entrada), com as pendências. Sem SPED |
 | Indústria | Fórmulas, OP, MRP, PCP, rendimento, qualidade/SGQ, ANVISA, rotulagem, estabilidade, pragas | `mod-industria` ainda é spec. Fora do foco atual |
 | IA | Assistente, onboarding por chat, agente | Fora (Fase 7) |
 
@@ -205,10 +205,48 @@ O que eles têm e o Cardeal não, com o que aprenderam:
     "Conferida", estado que nada alcança — a nota que não se confirmava sozinha não tinha como
     entrar pela tela. E o `titulo_da_origem` podia devolver o título cancelado quando a origem
     era desfeita e refeita no mesmo dia (afetaria o desfaturamento de OS).
-11. **Fechamento do mês para o contador com os XMLs**: emitidas, canceladas, inutilizadas e recebidas,
+11. ~~**Fechamento do mês para o contador com os XMLs**: emitidas, canceladas, inutilizadas e recebidas,
     mais os DANFEs, o SPED EFD e os relatórios, num ZIP. Se faltar algum XML na base, ele é baixado da
     SEFAZ antes. Isso pede guardar o **XML do evento de cancelamento**, que hoje só fica com o
-    protocolo; a guarda é obrigatória por 5 anos.
+    protocolo; a guarda é obrigatória por 5 anos.~~ **Feito (2026-10-20), menos o XML do evento, que
+    depende do `sefaz-api`.**
+
+    Lá (`accounting-export.service.ts`), na prática:
+    - o mês da nota é o da criação, não o da emissão;
+    - só autorizadas e canceladas entram; a inutilizada fica de fora;
+    - o XML do cancelamento é guardado se vier, mas não vai no pacote. E não vem: o `sefaz-api`
+      responde ao cancelamento só com o protocolo;
+    - "baixar da SEFAZ se faltar" lê o `xml` da consulta, que o `sefaz-api` nunca preenche (a consulta
+      devolve o protocolo). O XML que falta continua faltando, em silêncio;
+    - gera DANFE para cada nota e o SPED EFD.
+
+    Aqui:
+    - o pacote do contador ganha `XMLs AAAA-MM.zip` (comprimido): emitidas em
+      `Saidas/<modelo>/<situação>/` (as canceladas com a nota e o evento, as inutilizadas com o evento)
+      e as de entrada em `Entradas/`;
+    - o mês é o da **emissão** (`dhEmi` do XML), e o da inutilizada é o da inutilização;
+    - só **produção** vai ao contador; as notas de homologação são contadas e ficam de fora;
+    - o PDF resume as notas e lista as **pendências**, cada uma com o que fazer: a nota sem desfecho (um
+      buraco na série), o XML que falta e por quê, a nota de entrada sem XML;
+    - a planilha lista nota a nota, com chave e protocolos;
+    - a nota de compra passa a **guardar o XML original**, e a importada antes ganha o XML ao importar o
+      mesmo arquivo de novo;
+    - a base guarda o XML do evento (`xml_evento`) quando o provedor o devolve.
+
+    De fora, por decisão:
+    - o **DANFE**, porque o documento é o XML e o contador importa XML;
+    - o **SPED**, porque a empresa do Simples em geral é dispensada da EFD ICMS/IPI e o contador a gera
+      dos XMLs;
+    - **baixar o que falta da SEFAZ**: a consulta não devolve o XML, e o emitente não baixa a própria
+      nota pela distribuição.
+
+    **Depende do `sefaz-api` (OK do usuário):** devolver o `procEventoNFe` no cancelamento e o
+    `procInutNFe` na inutilização, e o XML assinado na emissão sem resposta, para montar o `nfeProc`
+    quando a consulta confirma. Até lá, o pacote diz que esses XMLs faltam e a planilha traz o
+    protocolo de cada evento.
+
+    Achado no caminho, corrigido: o PDF trocava o sinal de menos da DRE ("(−) Deduções") por "?", porque
+    o caractere não existe na codificação da fonte padrão.
 12. ~~**Prazo de cancelamento visível**: 30 minutos para NFC-e e 24 horas para NF-e. Lá o prazo bloqueia o
     pedido; aqui a SEFAZ responde 501. Proposta: mostrar o tempo decorrido e avisar, sem bloquear,
     porque algumas UFs aceitam fora do prazo (155).~~ **Feito (2026-10-20).**

@@ -323,7 +323,7 @@ fn nota_sem_casamento_fica_a_conferir_ate_vinculo_manual() {
                 let nota_xml = cardeal_fiscal::interpretar(&xml)
                     .map_err(|e| cardeal_kernel::Erro::de_dominio(&e))
                     .map_err(cardeal_storage::ErroArmazenamento::Dominio)?;
-                let relatorio = importar_nota_da_sefaz(&nota_xml, &ctx(empresa), uow)
+                let relatorio = importar_nota_da_sefaz(&nota_xml, &xml, &ctx(empresa), uow)
                     .map_err(cardeal_storage::ErroArmazenamento::Dominio)?;
                 assert_eq!(relatorio.estado, EstadoNotaEntrada::AConferir);
                 assert_eq!(relatorio.itens_nao_casados, 1);
@@ -756,7 +756,7 @@ fn pago_no_ato_da_baixa_completa_no_titulo_na_mesma_transacao() {
                 let nota_xml = cardeal_fiscal::interpretar(&xml)
                     .map_err(|e| cardeal_kernel::Erro::de_dominio(&e))
                     .map_err(cardeal_storage::ErroArmazenamento::Dominio)?;
-                let relatorio = importar_nota_da_sefaz(&nota_xml, &ctx(empresa), uow)
+                let relatorio = importar_nota_da_sefaz(&nota_xml, &xml, &ctx(empresa), uow)
                     .map_err(cardeal_storage::ErroArmazenamento::Dominio)?;
                 let itens = RepositorioCompras::novo(uow)
                     .itens_da_nota(relatorio.nota_entrada)
@@ -821,7 +821,7 @@ fn sem_pago_no_ato_titulo_nasce_em_aberto() {
                 let nota_xml = cardeal_fiscal::interpretar(&xml)
                     .map_err(|e| cardeal_kernel::Erro::de_dominio(&e))
                     .map_err(cardeal_storage::ErroArmazenamento::Dominio)?;
-                let relatorio = importar_nota_da_sefaz(&nota_xml, &ctx(empresa), uow)
+                let relatorio = importar_nota_da_sefaz(&nota_xml, &xml, &ctx(empresa), uow)
                     .map_err(cardeal_storage::ErroArmazenamento::Dominio)?;
                 let itens = RepositorioCompras::novo(uow)
                     .itens_da_nota(relatorio.nota_entrada)
@@ -885,7 +885,7 @@ fn icms_st_ipi_e_desconto_entram_no_custo_e_o_titulo_bate_com_o_vnf() {
             let nota_xml = cardeal_fiscal::interpretar(&xml)
                 .map_err(|e| cardeal_kernel::Erro::de_dominio(&e))
                 .map_err(cardeal_storage::ErroArmazenamento::Dominio)?;
-            let relatorio = importar_nota_da_sefaz(&nota_xml, &ctx(empresa), uow)
+            let relatorio = importar_nota_da_sefaz(&nota_xml, &xml, &ctx(empresa), uow)
                 .map_err(cardeal_storage::ErroArmazenamento::Dominio)?;
             let itens = RepositorioCompras::novo(uow)
                 .itens_da_nota(relatorio.nota_entrada)

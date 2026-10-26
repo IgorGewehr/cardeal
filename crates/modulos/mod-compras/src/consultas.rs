@@ -6,7 +6,7 @@
 
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::{CodigoErro, Erro, Resultado};
-use cardeal_kernel::{Data, Dinheiro, Id};
+use cardeal_kernel::{Competencia, Data, Dinheiro, Id};
 use cardeal_modkit::Consulta;
 #[cfg(feature = "sqlite")]
 use cardeal_modkit::Ctx;
@@ -121,6 +121,93 @@ impl Consulta for NotasRecentes {
         linhas
             .collect::<rusqlite::Result<Vec<_>>>()
             .map_err(persist)
+    }
+}
+
+/// Uma nota de entrada do mês, para o contador: o cabeçalho e o XML original.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NotaDeEntradaDoMes {
+    /// A nota.
+    pub nota: Id,
+    /// O nome do fornecedor.
+    pub fornecedor: String,
+    /// A chave de acesso (`None` na nota lançada à mão).
+    pub chave: Option<String>,
+    /// Número da nota.
+    pub numero: String,
+    /// Série.
+    pub serie: String,
+    /// Data de emissão.
+    pub data_emissao: Data,
+    /// Valor total da nota.
+    pub valor_total: Dinheiro,
+    /// O estado atual.
+    pub estado: EstadoNotaEntrada,
+    /// O XML original (`None` na nota lançada à mão ou importada antes de o XML ser guardado).
+    pub xml: Option<String>,
+}
+
+/// As notas de entrada emitidas no mês, com o XML original — para o pacote do contador. O mês é
+/// o da emissão, o mesmo dia em que a compra entra no Razão.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct NotasDeEntradaDoMes {
+    /// O mês.
+    pub mes: Competencia,
+}
+
+impl Consulta for NotasDeEntradaDoMes {
+    type Saida = Vec<NotaDeEntradaDoMes>;
+    const PERMISSAO: &'static str = "compras.entrada.ver";
+
+    #[cfg(feature = "sqlite")]
+    fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        let mut stmt = conexao
+            .prepare(
+                "SELECT id, fornecedor, chave_acesso, numero, serie, data_emissao, valor_total,
+                        estado, xml
+                 FROM compras_nota_entrada
+                 WHERE empresa = ?1 AND data_emissao BETWEEN ?2 AND ?3
+                 ORDER BY data_emissao, numero, id",
+            )
+            .map_err(persist)?;
+        let linhas = stmt
+            .query_map(
+                rusqlite::params![
+                    blob(ctx.empresa),
+                    self.mes.primeiro_dia().em_dias(),
+                    self.mes.ultimo_dia().em_dias()
+                ],
+                |r| {
+                    Ok((
+                        id_de(r.get::<_, Vec<u8>>(1)?),
+                        NotaDeEntradaDoMes {
+                            nota: id_de(r.get::<_, Vec<u8>>(0)?),
+                            fornecedor: String::new(),
+                            chave: r.get(2)?,
+                            numero: r.get(3)?,
+                            serie: r.get(4)?,
+                            data_emissao: Data::de_dias(
+                                i32::try_from(r.get::<_, i64>(5)?).unwrap_or(0),
+                            ),
+                            valor_total: Dinheiro::centavos(r.get::<_, i64>(6)?),
+                            estado: estado_de(&r.get::<_, String>(7)?),
+                            xml: r.get(8)?,
+                        },
+                    ))
+                },
+            )
+            .map_err(persist)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(persist)?;
+        let ids: Vec<Id> = linhas.iter().map(|(f, _)| *f).collect();
+        let nomes = mod_clientes::nomes_das_pessoas(conexao, &ids)?;
+        Ok(linhas
+            .into_iter()
+            .map(|(f, mut n)| {
+                n.fornecedor = nomes.get(&f).cloned().unwrap_or_default();
+                n
+            })
+            .collect())
     }
 }
 

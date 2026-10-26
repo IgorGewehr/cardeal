@@ -107,6 +107,14 @@ CREATE TABLE compras_nota_parcela (
 ) STRICT, WITHOUT ROWID;
 ";
 
+// Migração v7 (2026-10-20): o XML original da nota (o que o fornecedor emitiu, como veio) —
+// a lei manda guardar por 5 anos e o contador o recebe no pacote do mês. Antes ele só servia
+// para importar e era descartado; a nota importada antes disso ganha o XML ao importar o mesmo
+// arquivo de novo.
+const SQL_XML_NOTA: &str = r"
+ALTER TABLE compras_nota_entrada ADD COLUMN xml TEXT;
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -142,6 +150,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 6,
         nome: "compras_parcelas_da_nota",
         sql: SQL_PARCELAS_NOTA,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 7,
+        nome: "compras_xml_da_nota",
+        sql: SQL_XML_NOTA,
         tipo: TipoMigracao::Esquema,
     },
 ];

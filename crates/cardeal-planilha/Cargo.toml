@@ -1,6 +1,6 @@
 [package]
 name         = "cardeal-planilha"
-description  = "Planilhas .xlsx do Cardeal (o pacote do contador), sem dependência externa."
+description  = "Planilhas .xlsx do Cardeal e o ZIP do pacote do contador, escritos à mão (só o deflate é de fora)."
 version.workspace      = true
 edition.workspace      = true
 rust-version.workspace = true
@@ -10,3 +10,4 @@ repository.workspace   = true
 
 [dependencies]
 cardeal-kernel.workspace = true
+miniz_oxide.workspace = true

@@ -1155,9 +1155,14 @@ fn pacote_do_contador_grava_pdf_e_planilha_do_mes() {
     };
     estado.carregar(&t.motor, &t.sessao);
     let dir = tempfile::tempdir().unwrap();
-    let pasta = super::pacote_contador::gravar(&t.motor, &t.sessao, &estado, dir.path())
+    let gravado = super::pacote_contador::gravar(&t.motor, &t.sessao, &estado, dir.path())
         .expect("gravar o pacote");
-    let mut arquivos: Vec<std::path::PathBuf> = std::fs::read_dir(&pasta)
+    assert_eq!(
+        (gravado.xmls, gravado.pendencias),
+        (0, 0),
+        "mês sem notas: sem ZIP"
+    );
+    let mut arquivos: Vec<std::path::PathBuf> = std::fs::read_dir(&gravado.pasta)
         .unwrap()
         .map(|e| e.unwrap().path())
         .collect();
@@ -1187,6 +1192,229 @@ fn pacote_do_contador_grava_pdf_e_planilha_do_mes() {
             .unwrap();
         }
     }
+}
+
+#[test]
+fn pacote_do_contador_leva_os_xmls_do_mes_num_zip() {
+    let t = motor_de_teste();
+    let hoje = Data::hoje(Fuso::BRASILIA);
+    let chave = "4".repeat(44);
+    let xml = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe"><NFe>
+<infNFe Id="NFe{chave}" versao="4.00">
+  <ide><nNF>77</nNF><serie>1</serie><dhEmi>{}T09:00:00-03:00</dhEmi></ide>
+  <emit><CNPJ>45543915000181</CNPJ><xNome>Atacado Beta LTDA</xNome></emit>
+  <det nItem="1"><prod><cProd>FER-10</cProd><xProd>FERM BIOLOGICO 10G</xProd><NCM>21021090</NCM>
+    <qCom>24.0000</qCom><vUnCom>1.500000</vUnCom><vProd>36.00</vProd></prod></det>
+  <total><ICMSTot><vProd>36.00</vProd><vFrete>0.00</vFrete><vSeg>0.00</vSeg><vOutro>0.00</vOutro>
+    <vNF>36.00</vNF></ICMSTot></total>
+</infNFe></NFe></nfeProc>"#,
+        hoje.formatar_iso()
+    );
+    let _: mod_compras::RelatorioImportacao = t
+        .motor
+        .executar(
+            &t.sessao,
+            "compras.importar_nota_de_arquivo_xml.v1",
+            &mod_compras::ImportarNotaDeArquivoXml { xml: xml.clone() },
+        )
+        .expect("importa a nota de compra");
+    let mut estado = EstadoTelaFinanceiro {
+        aba: Aba::Resultado,
+        ..Default::default()
+    };
+    estado.carregar(&t.motor, &t.sessao);
+    let dir = tempfile::tempdir().unwrap();
+    let gravado = super::pacote_contador::gravar(&t.motor, &t.sessao, &estado, dir.path())
+        .expect("gravar o pacote");
+    assert_eq!((gravado.xmls, gravado.pendencias), (1, 0));
+    let mes = hoje.competencia();
+    let aaaamm = format!("{}-{:02}", mes.ano(), mes.mes());
+    let zip = std::fs::read(gravado.pasta.join(format!("XMLs {aaaamm}.zip"))).unwrap();
+    assert_eq!(
+        cardeal_planilha::zip::ler(&zip),
+        vec![(format!("Entradas/{chave}-nfe.xml"), xml.into_bytes())],
+        "o XML como veio do fornecedor"
+    );
+    let xlsx = std::fs::read(gravado.pasta.join(format!("Contabilidade {aaaamm}.xlsx"))).unwrap();
+    let texto = String::from_utf8_lossy(&xlsx);
+    assert!(texto.contains("name=\"Notas de entrada\""));
+    assert!(texto.contains("Atacado Beta LTDA"));
+    assert!(
+        !texto.contains("name=\"Notas emitidas\""),
+        "nenhuma nota emitida: sem a aba"
+    );
+    // Para conferir o ZIP num descompactador de verdade: CARDEAL_SALVAR_PACOTE=<pasta> cargo test …
+    if let Ok(destino) = std::env::var("CARDEAL_SALVAR_PACOTE") {
+        for e in std::fs::read_dir(&gravado.pasta).unwrap() {
+            let a = e.unwrap().path();
+            std::fs::copy(
+                &a,
+                std::path::Path::new(&destino).join(a.file_name().unwrap()),
+            )
+            .unwrap();
+        }
+    }
+}
+
+#[test]
+fn pacote_do_contador_resume_as_notas_e_lista_as_pendencias() {
+    use super::pacote_contador::{
+        arquivos_xml, pendencias, planilha, relatorio, DadosDoPacote, NotasDeEntrada, NotasEmitidas,
+    };
+    use mod_fiscal::{
+        AmbienteFiscal, DocumentoResumo, EstadoDocumento, ModeloFiscal, NotaDoMes, NotasDoMes,
+        PedidoDocumento, SituacaoNoMes,
+    };
+    let t = motor_de_teste();
+    let mut estado = EstadoTelaFinanceiro {
+        aba: Aba::Resultado,
+        ..Default::default()
+    };
+    estado.carregar(&t.motor, &t.sessao);
+    let hoje = Data::hoje(Fuso::BRASILIA);
+    let nota = |situacao, numero: u64| NotaDoMes {
+        modelo: ModeloFiscal::Nfce,
+        serie: 1,
+        numero,
+        situacao,
+        data: hoje,
+        chave: Some(format!("{numero:044}")),
+        protocolo: Some("143260000000001".into()),
+        protocolo_evento: None,
+        total: Dinheiro::reais(10),
+        xml: Some("<nfeProc/>".into()),
+        xml_evento: None,
+    };
+    let rejeitada = DocumentoResumo {
+        id: Id::novo(),
+        modelo: ModeloFiscal::Nfce,
+        serie: 1,
+        numero: 9,
+        ambiente: AmbienteFiscal::Producao,
+        estado: EstadoDocumento::Rejeitada,
+        total: Dinheiro::reais(5),
+        chave: None,
+        protocolo: None,
+        codigo: None,
+        motivo: None,
+        origem: Id::novo(),
+        tentativas: 1,
+        criado_em: cardeal_kernel::Instante::agora(),
+        autorizado_em: None,
+        pedido: None,
+        anulada: false,
+    };
+    let emitidas: NotasEmitidas = Ok(NotasDoMes {
+        notas: vec![
+            nota(SituacaoNoMes::Autorizada, 1),
+            nota(SituacaoNoMes::Cancelada, 2),
+        ],
+        sem_desfecho: vec![
+            rejeitada.clone(),
+            // A venda estornada já pôs a inutilização na fila: falta transmitir.
+            DocumentoResumo {
+                numero: 10,
+                pedido: Some(PedidoDocumento::Inutilizar),
+                ..rejeitada
+            },
+        ],
+        de_homologacao: 3,
+    });
+    let entradas: NotasDeEntrada = Ok(vec![mod_compras::NotaDeEntradaDoMes {
+        nota: Id::novo(),
+        fornecedor: "Atacado Beta LTDA".into(),
+        chave: Some("5".repeat(44)),
+        numero: "12".into(),
+        serie: "1".into(),
+        data_emissao: hoje,
+        valor_total: Dinheiro::reais(36),
+        estado: mod_compras::EstadoNotaEntrada::Confirmada,
+        xml: None,
+    }]);
+
+    // O que precisa de atenção, com o que fazer.
+    let p = pendencias(&emitidas, &entradas);
+    assert_eq!(p.len(), 4, "{p:?}");
+    assert!(p[0].0.starts_with("NFC-e série 1 nº 9 — rejeitada"));
+    assert!(p[0].1.contains("inutilize"));
+    assert_eq!(
+        p[1].1,
+        "Inutilização na fila — transmita em Notas fiscais e gere o pacote de novo."
+    );
+    assert!(p[2].0.starts_with("1 × XML do cancelamento"));
+    assert!(p[3].1.contains("Importe o arquivo XML de novo"));
+    // No ZIP: as duas notas (a cancelada sem o evento); a entrada não tem XML.
+    assert_eq!(arquivos_xml(&emitidas, &entradas).len(), 2);
+
+    let dados = DadosDoPacote {
+        mes: hoje.competencia(),
+        dre: estado.dre.as_ref().unwrap(),
+        direto: estado.dfc.as_ref().unwrap(),
+        indireto: estado.dfc_indireto.as_ref().unwrap(),
+        balancete: estado.balancete.as_deref().unwrap(),
+        diario: &[],
+        emitidas: &emitidas,
+        entradas: &entradas,
+    };
+    let r = relatorio(&dados);
+    let notas = r
+        .secoes
+        .iter()
+        .find(|s| s.titulo == "Notas fiscais do mês")
+        .expect("a seção das notas");
+    let linhas: Vec<Vec<String>> = notas.linhas.iter().map(|l| l.celulas.clone()).collect();
+    assert_eq!(linhas[0], vec!["NFC-e autorizadas", "1", "R$ 10,00"]);
+    assert_eq!(
+        linhas[1][..2],
+        ["NFC-e canceladas".to_owned(), "1".to_owned()]
+    );
+    assert_eq!(linhas[2], vec!["Notas de entrada", "1", "R$ 36,00"]);
+    assert_eq!(
+        linhas[3][..2],
+        ["XMLs no pacote".to_owned(), "2".to_owned()]
+    );
+    assert!(notas
+        .nota
+        .as_deref()
+        .unwrap()
+        .contains("3 nota(s) de homologação"));
+    assert!(r.secoes.iter().any(|s| s.titulo == "Pendências do mês"));
+    let pdf = cardeal_pdf::gerar_relatorio(
+        &cardeal_pdf::IdentidadeEmpresa::default(),
+        &r,
+        cardeal_kernel::Instante::agora(),
+    )
+    .expect("o PDF");
+    assert!(pdf.starts_with(b"%PDF-1."));
+    let xlsx = planilha(&dados).gerar();
+    let texto = String::from_utf8_lossy(&xlsx);
+    assert!(texto.contains("name=\"Notas emitidas\""));
+    assert!(texto.contains("Sem desfecho (rejeitada)"));
+    assert!(texto.contains("falta o XML do cancelamento"));
+    assert!(texto.contains("importe o arquivo XML de novo"));
+
+    // Sem permissão para ver as notas: o PDF diz por quê, e nada vai no ZIP.
+    let sem: NotasEmitidas = Err("o seu usuário não vê as notas fiscais".into());
+    let nada: NotasDeEntrada = Ok(Vec::new());
+    assert!(arquivos_xml(&sem, &nada).is_empty());
+    let r = relatorio(&DadosDoPacote {
+        emitidas: &sem,
+        entradas: &nada,
+        ..dados
+    });
+    let notas = r
+        .secoes
+        .iter()
+        .find(|s| s.titulo == "Notas fiscais do mês")
+        .unwrap();
+    assert!(notas
+        .nota
+        .as_deref()
+        .unwrap()
+        .contains("Notas emitidas: o seu usuário não vê as notas fiscais."));
+    assert!(!r.secoes.iter().any(|s| s.titulo == "Pendências do mês"));
 }
 
 #[test]

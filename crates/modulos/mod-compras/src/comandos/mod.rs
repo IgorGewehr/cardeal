@@ -138,10 +138,11 @@ pub struct RelatorioImportacao {
 #[cfg(feature = "sqlite")]
 pub fn importar_nota_da_sefaz(
     nota_xml: &cardeal_fiscal::NotaFiscalXml,
+    xml_bruto: &str,
     ctx: &Ctx,
     uow: &mut UnidadeDeTrabalho,
 ) -> Resultado<RelatorioImportacao> {
-    importar_nota_interpretada(nota_xml, ctx, uow)
+    importar_nota_interpretada(nota_xml, xml_bruto, ctx, uow)
 }
 
 /// O cabeçalho da nota a partir do XML. O total é o que o fornecedor cobra (o `vNF`): produtos −
@@ -253,6 +254,7 @@ fn exigir_compra(
 #[cfg(feature = "sqlite")]
 pub(crate) fn importar_nota_interpretada(
     nota_xml: &cardeal_fiscal::NotaFiscalXml,
+    xml_bruto: &str,
     ctx: &Ctx,
     uow: &mut UnidadeDeTrabalho,
 ) -> Resultado<RelatorioImportacao> {
@@ -260,6 +262,8 @@ pub(crate) fn importar_nota_interpretada(
     if let Some(existente) =
         RepositorioCompras::novo(uow).buscar_nota_por_chave(ctx.empresa, chave)?
     {
+        // A nota importada antes de o XML ser guardado ganha o XML agora.
+        RepositorioCompras::novo(uow).guardar_xml(existente, xml_bruto)?;
         let nota = carregar_nota(uow, existente)?;
         let pendentes = RepositorioCompras::novo(uow).contar_itens_nao_casados(nota.id)?;
         return Ok(RelatorioImportacao {
@@ -331,6 +335,7 @@ pub(crate) fn importar_nota_interpretada(
     {
         let mut repo = RepositorioCompras::novo(uow);
         repo.inserir_nota(&nota)?;
+        repo.guardar_xml(nota.id, xml_bruto)?;
         for item in &itens {
             repo.inserir_item(item)?;
         }
@@ -555,7 +560,7 @@ pub fn verificar_notas_na_sefaz(
         {
             continue;
         }
-        relatorios.push(importar_nota_da_sefaz(&nota_xml, ctx, uow)?);
+        relatorios.push(importar_nota_da_sefaz(&nota_xml, &xml_bruto.0, ctx, uow)?);
     }
 
     RepositorioCompras::novo(uow).atualizar_ultimo_nsu(ctx.empresa, maior_nsu)?;

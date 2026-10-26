@@ -26,6 +26,7 @@ mod consultas;
 mod documento;
 mod erros;
 mod explicacao;
+mod fechamento;
 mod manifesto;
 #[cfg(feature = "sqlite")]
 mod migracoes;
@@ -51,6 +52,9 @@ pub use documento::{
 };
 pub use erros::ErroModuloFiscal;
 pub use explicacao::explicar;
+pub use fechamento::{
+    dia_da_emissao, NotaDoMes, NotasDoMes, NotasFiscaisDoMes, SituacaoNoMes, XmlQueFalta,
+};
 pub use manifesto::{ID, MANIFESTO};
 #[cfg(feature = "sqlite")]
 pub use modulo::ModuloFiscal;

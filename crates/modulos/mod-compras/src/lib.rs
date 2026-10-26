@@ -82,8 +82,8 @@ pub use comandos::{
 };
 pub use comandos::{CriarProdutoDoItem, ProdutoDoItemCriado};
 pub use consultas::{
-    ItemDoEstorno, ItemNota, ItensDaNota, NotasRecentes, ParcelasDaNota, PreviaDoEstornoDaEntrada,
-    PreviaEstornoEntrada,
+    ItemDoEstorno, ItemNota, ItensDaNota, NotaDeEntradaDoMes, NotasDeEntradaDoMes, NotasRecentes,
+    ParcelasDaNota, PreviaDoEstornoDaEntrada, PreviaEstornoEntrada,
 };
 pub use erros::ErroCompras;
 pub use manifesto::{manifesto, MANIFESTO};

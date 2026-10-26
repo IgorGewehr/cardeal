@@ -192,6 +192,29 @@ consulta, para a lista do dia.
 
 A venda **a prazo** do PDV vai na NFC-e como `tPag 05` (crédito loja).
 
+**As notas do mês para o contador (2026-10-20).** `NotasFiscaisDoMes` (`fiscal.notas_do_mes.v1`,
+`fiscal.ver`) devolve `NotasDoMes`, com três partes:
+- **as notas de produção que fecharam no mês** (autorizadas, canceladas, inutilizadas, denegadas), com o
+  XML da nota e o **XML do evento** (migração v5, `xml_evento`: o `procEventoNFe` do cancelamento ou o
+  `procInutNFe` da inutilização, gravado no aceite quando o provedor o devolve; a guarda é obrigatória
+  por 5 anos);
+- **as que ainda não tiveram desfecho** (na fila, conferindo, rejeitadas), criadas até o fim do mês:
+  cada uma é um buraco na série até ser autorizada ou inutilizada;
+- **quantas de homologação** ficaram de fora (não têm valor fiscal).
+
+O mês da nota é o da **emissão** (`dia_da_emissao`: o `dhEmi` do XML; sem XML, o dia da autorização),
+para que a venda das 23:59 do dia 31 autorizada à 0:00 fique no mês certo; o da inutilizada é o da
+inutilização. `NotaDoMes::arquivos` dá os nomes do pacote, os que os sistemas de contabilidade
+conhecem: `Saidas/NFC-e/<situação>/<chave>-nfe.xml`, `110111<chave>01-procEventoNFe.xml` e
+`serieNNN-numeroNNNNNNNNN-procInutNFe.xml`. `NotaDoMes::faltas` diz o que não está guardado, com o
+porquê (`XmlQueFalta`):
+- a nota confirmada pela consulta depois de uma resposta perdida (a consulta devolve o protocolo, não o
+  XML);
+- o evento que o provedor não devolveu.
+
+**O `sefaz-api` ainda não devolve o XML do evento**: o cancelamento e a inutilização respondem só o
+protocolo. O Cardeal já guarda o que vier; a mudança lá é o item 9 do §11.
+
 **DANFCE** (`cardeal_pdf::gerar_danfce`): bobina de 80 ou 58 mm (Configurações › Impressão; no de 58 mm a
 fonte e a margem encolhem e o QR Code fica com 28 mm, acima dos 25 mm do manual) com a altura do cupom, no leiaute do manual
 (emitente, itens, totais, pagamentos e troco, chave em 11 grupos com o endereço de consulta, consumidor,
@@ -244,6 +267,8 @@ Cancelar e configurar continuam fora do papel.
 - v3: `fiscal_documento` recriada (o SQLite não muda `CHECK`) com o estado `Inutilizada` e o pedido
   (`pedido`, `justificativa`, `protocolo_evento`, `evento_em`).
 - v4: `fiscal_documento.anulada` — a venda foi desfeita (estorno no PDV).
+- v5: `fiscal_documento.xml_evento` — o XML do cancelamento (`procEventoNFe`) ou da inutilização
+  (`procInutNFe`), para a guarda de 5 anos e o pacote do contador.
 
 ## 11. Próximas fatias da onda 7
 
@@ -256,3 +281,7 @@ Cancelar e configurar continuam fora do papel.
 6. NFS-e da OS.
 7. SPED gerado no Cardeal.
 8. DFe e manifestação — dependem de rotas novas no `sefaz-api`.
+9. O `sefaz-api` devolver o **XML do evento** (o `procEventoNFe` no cancelamento, o `procInutNFe` na
+   inutilização) e o XML assinado na emissão sem resposta, para montar o `nfeProc` quando a consulta
+   confirma a autorização. Mexe no `sefaz-api`, então depende do OK do usuário; o Cardeal já guarda o
+   que vier.

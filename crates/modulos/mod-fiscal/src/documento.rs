@@ -387,6 +387,8 @@ pub struct Mudanca {
     pub limpar_pedido: bool,
     /// O protocolo do evento (cancelamento/inutilização) aceito.
     pub protocolo_evento: Option<String>,
+    /// O XML do evento aceito (`procEventoNFe`, `procInutNFe`), quando o provedor devolve.
+    pub xml_evento: Option<String>,
 }
 
 /// Depois de tantas tentativas com erro do emissor (não de rede), a nota sai da fila como
@@ -425,6 +427,7 @@ pub fn decidir(estado: EstadoDocumento, tentativas: u32, desfecho: Desfecho) -> 
         espera_segundos: 0,
         limpar_pedido: false,
         protocolo_evento: None,
+        xml_evento: None,
     };
     let r = match desfecho {
         Desfecho::Indisponivel(m) => {
@@ -559,6 +562,7 @@ pub fn decidir_evento(
         espera_segundos: 0,
         limpar_pedido: false,
         protocolo_evento: None,
+        xml_evento: None,
     };
     let (aceito, ja_feito, nome) = match pedido {
         PedidoDocumento::Cancelar => (
@@ -597,6 +601,7 @@ pub fn decidir_evento(
             motivo: Some(explicar(&r.codigo, &r.motivo)),
             limpar_pedido: true,
             protocolo_evento: r.protocolo.clone().filter(|p| !p.is_empty()),
+            xml_evento: r.xml.clone().filter(|x| !x.is_empty()),
             ..base
         },
         SituacaoRetorno::Rejeitado if ja_feito.contains(&r.codigo.as_str()) => Mudanca {
@@ -821,6 +826,9 @@ mod testes {
         let m = decidir_evento(Cancelar, Autorizada, 0, r(Autorizado, "135", Some(CHAVE)));
         assert_eq!((m.estado, m.limpar_pedido), (Cancelada, true));
         assert_eq!(m.protocolo_evento.as_deref(), Some("143"));
+        // O XML do evento vem junto, para guardar (aqui o `r` de teste traz um).
+        assert_eq!(m.xml_evento.as_deref(), Some("<nfeProc/>"));
+        assert!(m.xml.is_none(), "o XML da nota não muda no cancelamento");
         // Já cancelada antes (duplicidade de evento): está cancelada.
         assert_eq!(
             decidir_evento(Cancelar, Autorizada, 0, r(Rejeitado, "573", None)).estado,

@@ -995,6 +995,7 @@ name = "cardeal-planilha"
 version = "0.2.0"
 dependencies = [
  "cardeal-kernel",
+ "miniz_oxide 0.8.9",
 ]
 
 [[package]]

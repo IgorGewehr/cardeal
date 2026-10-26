@@ -459,7 +459,8 @@ pub(crate) fn aplicar_mudanca(
            atualizado_em = ?13,
            pedido = CASE WHEN ?14 THEN NULL ELSE pedido END,
            protocolo_evento = COALESCE(?15, protocolo_evento),
-           evento_em = CASE WHEN ?15 IS NULL THEN evento_em ELSE ?13 END
+           evento_em = CASE WHEN ?15 IS NULL THEN evento_em ELSE ?13 END,
+           xml_evento = COALESCE(?16, xml_evento)
          WHERE empresa = ?1 AND id = ?2 AND estado = ?3",
         params![
             empresa.em_bytes().as_slice(),
@@ -477,9 +478,112 @@ pub(crate) fn aplicar_mudanca(
             agora.em_micros(),
             m.limpar_pedido,
             m.protocolo_evento,
+            m.xml_evento,
         ],
     )
     .map(|n| n > 0)
+    .map_err(falha)
+}
+
+/// Um documento que fechou (autorizado, cancelado, inutilizado, denegado), com os XMLs.
+pub(crate) struct DocumentoFechado {
+    pub resumo: DocumentoResumo,
+    pub xml: Option<String>,
+    pub xml_evento: Option<String>,
+    pub protocolo_evento: Option<String>,
+    /// Quando o evento (cancelamento, inutilização) foi aceito — ou a última mudança.
+    pub evento_em: Instante,
+}
+
+/// Os documentos de produção que fecharam entre `de` e `ate` (exclusive): a inutilizada pela
+/// hora da inutilização, os outros pela da autorização (ou da criação).
+pub(crate) fn fechados_entre(
+    c: &Connection,
+    empresa: Id,
+    de: Instante,
+    ate: Instante,
+) -> Resultado<Vec<DocumentoFechado>> {
+    let mut stmt = c
+        .prepare(&format!(
+            "SELECT {COLUNAS}, xml, xml_evento, protocolo_evento,
+                    COALESCE(evento_em, atualizado_em)
+             FROM fiscal_documento
+             WHERE empresa = ?1 AND ambiente = 'producao'
+               AND estado IN ('Autorizada','Cancelada','Inutilizada','Denegada')
+               AND CASE WHEN estado = 'Inutilizada' THEN COALESCE(evento_em, atualizado_em)
+                        ELSE COALESCE(autorizado_em, criado_em) END >= ?2
+               AND CASE WHEN estado = 'Inutilizada' THEN COALESCE(evento_em, atualizado_em)
+                        ELSE COALESCE(autorizado_em, criado_em) END < ?3"
+        ))
+        .map_err(falha)?;
+    let linhas = stmt
+        .query_map(
+            params![
+                empresa.em_bytes().as_slice(),
+                de.em_micros(),
+                ate.em_micros()
+            ],
+            |r| {
+                Ok(DocumentoFechado {
+                    resumo: resumo_de(r)?,
+                    xml: r.get(17)?,
+                    xml_evento: r.get(18)?,
+                    protocolo_evento: r.get(19)?,
+                    evento_em: Instante::de_micros(r.get(20)?),
+                })
+            },
+        )
+        .map_err(falha)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(falha);
+    linhas
+}
+
+/// Os documentos de produção criados antes de `ate` que ainda não tiveram desfecho, por série
+/// e número.
+pub(crate) fn sem_desfecho_ate(
+    c: &Connection,
+    empresa: Id,
+    ate: Instante,
+) -> Resultado<Vec<DocumentoResumo>> {
+    let mut stmt = c
+        .prepare(&format!(
+            "SELECT {COLUNAS} FROM fiscal_documento
+             WHERE empresa = ?1 AND ambiente = 'producao'
+               AND estado IN ('Pendente','Incerta','Rejeitada') AND criado_em < ?2
+             ORDER BY modelo, serie, numero"
+        ))
+        .map_err(falha)?;
+    let linhas = stmt
+        .query_map(
+            params![empresa.em_bytes().as_slice(), ate.em_micros()],
+            resumo_de,
+        )
+        .map_err(falha)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(falha);
+    linhas
+}
+
+/// Quantos documentos de homologação o período teve (pela autorização ou criação).
+pub(crate) fn de_homologacao_entre(
+    c: &Connection,
+    empresa: Id,
+    de: Instante,
+    ate: Instante,
+) -> Resultado<u32> {
+    c.query_row(
+        "SELECT COUNT(*) FROM fiscal_documento
+         WHERE empresa = ?1 AND ambiente = 'homologacao'
+           AND COALESCE(autorizado_em, criado_em) >= ?2
+           AND COALESCE(autorizado_em, criado_em) < ?3",
+        params![
+            empresa.em_bytes().as_slice(),
+            de.em_micros(),
+            ate.em_micros()
+        ],
+        |r| r.get(0),
+    )
     .map_err(falha)
 }
 
