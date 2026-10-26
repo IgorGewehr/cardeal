@@ -88,6 +88,7 @@ mod meio_pagamento;
 pub mod migracoes;
 #[cfg(feature = "sqlite")]
 mod modulo;
+pub mod orcamento;
 pub mod pessoal;
 mod plano;
 mod projecao;

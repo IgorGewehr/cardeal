@@ -375,6 +375,12 @@ const PERMISSOES: &[Permissao] = &[
         Risco::Medio,
         Some("dre"),
     ),
+    perm(
+        "financeiro.orcamento.editar",
+        "Orçar receitas e despesas por conta",
+        Risco::Medio,
+        Some("dre"),
+    ),
 ];
 
 const MENU: &[EntradaMenu] = &[

@@ -425,6 +425,7 @@ stateDiagram-v2
 | `DfcIndiretoDoPeriodo` ✅ (2026-10-14, `financeiro.dfc_indireto_do_periodo.v1`) | `financeiro.dre.ver` | Aba Resultado e caixa › DFC › "Método indireto": o **lucro líquido da DRE** e, com o sinal trocado, a variação de cada conta patrimonial fora do caixa nos mesmos lançamentos da DRE (Confirmado/Realizado/Estornado, pela competência) — ativo que cresce prendeu dinheiro, passivo que cresce o soltou. Classificação: depreciação/amortização (pelo nome) nas operacionais; senão o grupo de fluxo da conta; senão o papel (Empréstimos, Capital, Retiradas, Lucros acumulados → financiamento; Aplicações → investimento); senão o imobilizado pelo código (1.4 → investimento); o resto, operacional, com rótulos como "(Aumento) redução de contas a receber". Termina na **mesma variação** do método direto; se um lançamento tem competência num período e liquidação noutro, a sobra aparece numa linha própria ("Diferença de datas"), nunca some — zero no caso normal (testado com venda e compra a prazo, baixas, depreciação, máquina à vista, empréstimo e retirada) | `cardeal_ledger::variacoes_patrimoniais` + `resultado_por_conta` + `movimentos_de_caixa` |
 | `CarteiraDeCheques` ✅ (2026-10-14, `financeiro.carteira_de_cheques.v1`) | `financeiro.cheque.ver` | Aba Cheques: os cheques (filtro por estado) com o cliente e a descrição do título, o "bom para" mais antigo primeiro; a tela soma em carteira, os que já podem ir ao banco e os devolvidos | `financeiro_cheque(empresa, estado, bom_para)` (migração v11) |
 | `BalanceteDoPeriodo` ✅ (2026-10-14, `financeiro.balancete_do_periodo.v1`) | `financeiro.dre.ver` | Aba Resultado e caixa › Balancete: cada conta com saldo anterior, débitos, créditos e saldo atual (D/C), agrupadoras somadas, ordem numérica dos códigos. Pela competência (Confirmado/Realizado/Estornado), então sempre fecha. Sem encerramento de exercício no sistema, as contas de resultado acumulam só o **ano**; o resultado dos anos anteriores entra numa linha do PL ("Resultado de exercícios anteriores (não encerrado)") | `cardeal_ledger::balancete` |
+| `OrcamentoDoAno` ✅ (2026-10-26, `financeiro.orcamento_do_ano.v1`) | `financeiro.dre.ver` | Resultado › Orçamento: cada conta de resultado (analítica, ativa) com o orçado e o realizado de cada mês no sentido em que se orça | `financeiro_orcamento(empresa, conta, competencia)` + `resultado_por_conta` por mês |
 | `DiarioDoPeriodo` ✅ (2026-10-14, `financeiro.diario_do_periodo.v1`) | `financeiro.dre.ver` | O diário do período: cada lançamento (número, competência, histórico, estado) com as partidas — para o pacote do contador | `cardeal_ledger::diario` |
 | `DreDoPeriodo` / `DreComparativa` ✅ (2026-10-09; no lugar de `DreDoMes`) | `financeiro.dre.ver` | Aba Resultado: DRE de um período; comparativo mês × mês anterior × mesmo mês do ano anterior. Estrutura: receita bruta › deduções (descontos, devoluções, impostos sobre venda) › receita líquida › CMV/CSV › lucro bruto › outras receitas e despesas operacionais › EBITDA › resultado financeiro › lucro líquido. Cada linha é uma **contribuição com sinal**, então o lucro líquido é sempre receitas − despesas do Razão (propriedade testada). Conta aberta pelo usuário herda o papel da sintética; sem papel conhecido cai em "outras", nunca some. Entram `Confirmado`/`Realizado`/`Estornado` pela competência; `Previsto` não | `razao_lancamento(empresa, competencia, estado)` + `razao_partida(conta)` (`cardeal_ledger::resultado_por_conta`) |
 | `PosicaoPorCentroCusto` | `financeiro.centro_custo.ver` | Relatório de centro de custo | `razao_partida_cc(centro_custo, lancamento)` |
@@ -433,6 +434,24 @@ stateDiagram-v2
 | `Categorias` ✅ | `financeiro.categoria.ver` | Seletor de categoria ao lançar título/recorrência | `financeiro_categoria(empresa, nome) WHERE ativa = 1` |
 | `TotalPorCategoriaNoPeriodo` ✅ | `financeiro.categoria.ver` | Gráfico de custo/receita por categoria e mês (churn, MRR por projeto) | agregação em memória sobre `financeiro_baixa` join `financeiro_titulo`, filtrando por `data` |
 | `TituloDaOrigem` ✅ (novo, 2026-09-11) | `financeiro.receber.ver` | Detalhe de OS (`os`)/vendas/compras faturada: "qual título isto gerou" | `financeiro_titulo(empresa, origem_modulo, origem_id)` — o par de correlação que `Titulo` já carregava desde a origem; usado por outro módulo pela consulta pública, nunca por SQL direto em `financeiro_titulo` (`docs/contratos-internos.md` §7 regra 2) |
+
+## 6.7 Orçamento por conta (2026-10-26, item 13 do doc 21)
+
+O orçado de cada conta do resultado, mês a mês (`orcamento.rs`, migração v14
+`financeiro_orcamento`, valor positivo no sentido em que a conta se comporta):
+- `DefinirOrcamentoDaConta` (`financeiro.definir_orcamento_da_conta.v1`) grava os 12 meses de uma
+  conta (só conta de receita ou despesa analítica);
+- `CopiarOrcamentoDoAno` (`financeiro.copiar_orcamento_do_ano.v1`) copia de um ano para outro com
+  reajuste, **só nas contas ainda sem orçamento** no destino (não apaga o que foi feito);
+- a `DreComparativa` ganha `orcado` (a DRE do orçamento do mês, montada com a mesma regra de sinais):
+  a tela mostra "Orçado" e "Real × orçado", e a conta orçada sem movimento aparece zerada;
+- Resultado › **Orçamento**: as contas com o orçado no ano, o orçado e o realizado até o mês e o
+  desvio; clicar abre os 12 meses (com "o mesmo valor em todo mês"); "Copiar de {ano − 1}" com o
+  reajuste. Permissão nova `financeiro.orcamento.editar` (Médio).
+
+Lição do `gestao-raiz` (`financial_budgets`): lá a variação é `realizado ÷ orçado − 1` em toda linha —
+a despesa que estoura o orçado aparece **positiva**, como se fosse bom. Aqui o desvio segue o sinal
+do resultado: positivo é sempre melhor.
 
 ## 6.6 Resumo do Simples Nacional (2026-10-26, item 13 do doc 21)
 

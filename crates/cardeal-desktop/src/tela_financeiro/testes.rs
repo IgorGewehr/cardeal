@@ -707,6 +707,43 @@ fn aba_resultado_apura_o_mes_pelo_razao_e_navega_entre_meses() {
             painel_dre(ui, &t.motor, &t.sessao, &mut estado);
         });
     });
+    // O orçamento: orçar a conta da receita no mês põe o orçado na DRE; as duas visões desenham.
+    let o = estado
+        .orcamento
+        .clone()
+        .expect("o orçamento")
+        .expect("carregou");
+    let conta = o
+        .linhas
+        .iter()
+        .find(|l| !l.realizado_ate(12).e_zero())
+        .expect("a conta da receita")
+        .conta;
+    let mut meses = [Dinheiro::ZERO; 12];
+    meses[estado.mes_dre().mes() as usize - 1] = Dinheiro::reais(300);
+    let _: () = t
+        .motor
+        .executar(
+            &t.sessao,
+            "financeiro.definir_orcamento_da_conta.v1",
+            &mod_financeiro::orcamento::DefinirOrcamentoDaConta {
+                conta,
+                ano: estado.mes_dre().ano(),
+                meses,
+            },
+        )
+        .unwrap();
+    estado.carregar_dre(&t.motor, &t.sessao);
+    let orcado = estado.dre.clone().unwrap().orcado.expect("orçado na DRE");
+    assert_eq!(orcado.lucro_liquido, Dinheiro::reais(300));
+    for visao in [0, 4] {
+        estado.visao_resultado = visao;
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                painel_dre(ui, &t.motor, &t.sessao, &mut estado);
+            });
+        });
+    }
     estado.visao_resultado = 0;
 
     // Mês passado: nada lançado.

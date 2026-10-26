@@ -19,6 +19,7 @@ mod dre;
 mod fluxo;
 mod importacao;
 mod lancar;
+mod orcamento;
 mod pacote_contador;
 mod pessoal;
 mod plano_contas;
@@ -439,12 +440,16 @@ pub struct EstadoTelaFinanceiro {
     dfc_indireto: Option<mod_financeiro::dfc::DfcIndireto>,
     /// A aba do DFC mostra o método indireto.
     dfc_metodo_indireto: bool,
-    /// Dentro de Resultado: 0 = DRE, 1 = DFC, 2 = balancete, 3 = Simples.
+    /// Dentro de Resultado: 0 = DRE, 1 = DFC, 2 = balancete, 3 = Simples, 4 = orçamento.
     visao_resultado: u8,
     /// O resumo do Simples do mês (`None`: sem a permissão).
     simples: Option<Result<mod_estoque::simples::ResumoDoSimples, String>>,
     /// O formulário do mês de abertura e do faturamento de antes do Cardeal.
     form_simples: simples::FormHistoricoSimples,
+    /// O orçamento do ano do mês escolhido (Resultado › Orçamento).
+    orcamento: Option<Result<mod_financeiro::orcamento::OrcamentoAnual, String>>,
+    /// O editor do orçamento de uma conta e a cópia do ano anterior.
+    form_orcamento: orcamento::FormOrcamento,
     /// O balancete do mês (aba Resultado › Balancete).
     balancete: Option<Vec<cardeal_ledger::LinhaBalancete>>,
     projecao: Vec<mod_financeiro::ItemProjecaoCategoria>,

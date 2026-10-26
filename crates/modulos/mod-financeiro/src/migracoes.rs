@@ -411,7 +411,27 @@ const MIGRACOES: &[Migracao] = &[
         sql: SQL_TRANSFERENCIA,
         tipo: TipoMigracao::Esquema,
     },
+    Migracao {
+        versao: 14,
+        nome: "financeiro_orcamento",
+        sql: SQL_ORCAMENTO,
+        tipo: TipoMigracao::Esquema,
+    },
 ];
+
+/// v14: o orçamento por conta do resultado e mês (`orcamento.rs`). O valor é positivo, no
+/// sentido em que a conta se comporta (a receita vendida, a despesa gasta); mês sem orçamento
+/// não tem linha.
+const SQL_ORCAMENTO: &str = "
+CREATE TABLE financeiro_orcamento (
+    empresa     BLOB    NOT NULL,
+    conta       BLOB    NOT NULL,
+    competencia INTEGER NOT NULL,
+    valor       INTEGER NOT NULL CHECK (valor > 0),
+    PRIMARY KEY (empresa, conta, competencia)
+) STRICT, WITHOUT ROWID;
+CREATE INDEX financeiro_orcamento_mes ON financeiro_orcamento(empresa, competencia);
+";
 
 /// O conjunto de migrações do módulo financeiro.
 #[must_use]

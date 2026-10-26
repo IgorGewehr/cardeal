@@ -8,7 +8,7 @@
 //! a soma das linhas acima dele — e o Lucro Líquido bate com receitas menos despesas do
 //! Razão por construção (há um teste que prova isso para qualquer mistura de contas).
 
-use cardeal_kernel::{Dinheiro, Percentual, Periodo};
+use cardeal_kernel::{Dinheiro, Id, Percentual, Periodo};
 use cardeal_ledger::{LinhaResultado, Natureza, PapelConta};
 use serde::{Deserialize, Serialize};
 
@@ -133,9 +133,69 @@ fn contribuicao(l: &LinhaResultado, bloco: Bloco) -> Dinheiro {
     }
 }
 
+/// O rótulo do bloco da DRE em que a conta entra.
+#[must_use]
+pub fn rotulo_do_bloco(l: &LinhaResultado) -> &'static str {
+    match bloco_de(l) {
+        Bloco::ReceitaBruta => "Receita bruta",
+        Bloco::Deducoes => "(−) Deduções",
+        Bloco::Cmv => "(−) CMV / custo do serviço",
+        Bloco::OutrasReceitas => "(+) Outras receitas",
+        Bloco::DespesasOperacionais => "(−) Despesas operacionais",
+        Bloco::ReceitaFinanceira => "(+) Receitas financeiras",
+        Bloco::DespesaFinanceira => "(−) Despesas financeiras",
+    }
+}
+
+/// Se a conta soma no resultado (receitas) ou subtrai (deduções, custos, despesas).
+#[must_use]
+pub fn soma_no_resultado(l: &LinhaResultado) -> bool {
+    matches!(
+        bloco_de(l),
+        Bloco::ReceitaBruta | Bloco::OutrasReceitas | Bloco::ReceitaFinanceira
+    )
+}
+
+/// O realizado da conta no sentido em que se orça: positivo no comportamento normal dela
+/// (a receita vendida, a despesa gasta, o desconto concedido).
+#[must_use]
+pub fn no_sentido_do_orcado(l: &LinhaResultado) -> Dinheiro {
+    let c = contribuicao(l, bloco_de(l));
+    if soma_no_resultado(l) {
+        c
+    } else {
+        -c
+    }
+}
+
+/// A linha de resultado de uma conta com o valor orçado (positivo) no lugar do realizado —
+/// para montar a DRE do orçamento com a mesma regra de sinais.
+#[must_use]
+pub fn linha_orcada(conta: &LinhaResultado, orcado: Dinheiro) -> LinhaResultado {
+    let mut l = conta.clone();
+    let contribuicao_desejada = if soma_no_resultado(conta) {
+        orcado
+    } else {
+        -orcado
+    };
+    // `contribuicao` devolve `valor` ou `−valor` conforme o bloco e a natureza.
+    l.valor = orcado;
+    if contribuicao(&l, bloco_de(&l)) != contribuicao_desejada {
+        l.valor = -orcado;
+    }
+    l
+}
+
 /// Monta a DRE do período a partir do resultado por conta.
 #[must_use]
 pub fn montar(periodo: Periodo, linhas: &[LinhaResultado]) -> Dre {
+    montar_mantendo(periodo, linhas, &[])
+}
+
+/// Como [`montar`], mantendo as linhas das contas `sempre` mesmo zeradas (as orçadas, para o
+/// orçado × realizado mostrar a conta orçada que não teve movimento).
+#[must_use]
+pub fn montar_mantendo(periodo: Periodo, linhas: &[LinhaResultado], sempre: &[Id]) -> Dre {
     let mut dre = Dre {
         periodo,
         linhas: Vec::new(),
@@ -151,7 +211,7 @@ pub fn montar(periodo: Periodo, linhas: &[LinhaResultado]) -> Dre {
             .iter()
             .filter(|l| bloco_de(l) == qual)
             .map(|l| (l, contribuicao(l, qual)))
-            .filter(|(_, v)| !v.e_zero())
+            .filter(|(l, v)| !v.e_zero() || sempre.contains(&l.conta))
             .collect();
         itens.sort_by(|a, b| a.0.codigo.cmp(&b.0.codigo));
         let total: Dinheiro = itens.iter().map(|(_, v)| *v).sum();

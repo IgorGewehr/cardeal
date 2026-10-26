@@ -727,6 +727,12 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   - desktop (`pacote_contador.rs`): `XMLs AAAA-MM.zip`, as seções "Notas fiscais do mês" e
     "Pendências do mês" no PDF, e as abas "Notas emitidas" e "Notas de entrada" na planilha;
   - `cardeal-pdf`: o sinal de menos (U+2212) sai como traço, não como "?".
+- **Orçamento por conta (2026-10-26, item 13 do doc 21, segunda parte):** `mod_financeiro::orcamento`
+  (`OrcamentoDoAno`, `DefinirOrcamentoDaConta`, `CopiarOrcamentoDoAno`, `desvio` no sentido do
+  resultado), migração `financeiro` v14 (`financeiro_orcamento`), permissão
+  `financeiro.orcamento.editar`; `ComparativoDre.orcado`; `dre::montar_mantendo`/`linha_orcada`;
+  `cardeal_ledger::contas_de_resultado`; desktop: colunas "Orçado"/"Real × orçado" na DRE e a visão
+  Resultado › Orçamento.
 - **Resumo do Simples (2026-10-26, item 13 do doc 21, primeira parte):** `mod_estoque::simples`
   (puro: `rbt12` pela lei — 12 meses anteriores, anualização do primeiro ano, histórico curto —,
   `resumir`, avisos de sublimite/limite/MEI), migração `estoque` v14 (`estoque_simples_historico`,

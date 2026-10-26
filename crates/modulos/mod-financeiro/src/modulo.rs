@@ -118,6 +118,13 @@ impl Modulo for ModuloFinanceiro {
             .consulta::<crate::DiarioDoPeriodo>("financeiro.diario_do_periodo.v1")
             .consulta::<crate::DreDoPeriodo>("financeiro.dre_do_periodo.v1")
             .consulta::<crate::DreComparativa>("financeiro.dre_comparativa.v1")
+            .consulta::<crate::orcamento::OrcamentoDoAno>("financeiro.orcamento_do_ano.v1")
+            .comando::<crate::orcamento::DefinirOrcamentoDaConta>(
+                "financeiro.definir_orcamento_da_conta.v1",
+            )
+            .comando::<crate::orcamento::CopiarOrcamentoDoAno>(
+                "financeiro.copiar_orcamento_do_ano.v1",
+            )
             .consulta::<crate::projecao::ProjecaoPorCategoria>(
                 "financeiro.projecao_por_categoria.v1",
             )

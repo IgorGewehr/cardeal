@@ -273,8 +273,16 @@ O que eles têm e o Cardeal não, com o que aprenderam:
     cancelamento traz o aviso (vermelho fora do prazo), e faltando 5 minutos o aviso lembra que, sem
     internet, o pedido espera na fila enquanto o prazo corre. Não bloqueia: recusado (501), a nota
     fica como "cancelamento recusado", com a orientação de emitir uma devolução.
-13. **Orçamento** por categoria, ~~**resumo do Simples**~~ e **score/tier de cliente**: úteis, mas depois do
-    básico. **O resumo do Simples está feito (2026-10-26).**
+13. ~~**Orçamento** por categoria~~, ~~**resumo do Simples**~~ e **score/tier de cliente**: úteis, mas depois do
+    básico. **O resumo do Simples e o orçamento estão feitos (2026-10-26).**
+
+    Orçamento — lá (`financial_budgets`): anual por conta do plano, 12 meses, DRE com orçado e
+    variação, "copiar do ano anterior". Mas a variação é `realizado ÷ orçado − 1` em toda linha: a
+    despesa que estoura o orçado aparece positiva. Aqui: por conta do resultado (a "categoria" do
+    Cardeal vira conta), o desvio no sentido do resultado (positivo é melhor), a cópia com reajuste
+    só nas contas ainda sem orçamento, e a conta orçada sem movimento aparece na DRE.
+
+    Resumo do Simples:
 
     Lá (`api/industrial/financial/tax-summary`):
     - a alíquota é a **nominal** da faixa (não a efetiva, com a parcela a deduzir);

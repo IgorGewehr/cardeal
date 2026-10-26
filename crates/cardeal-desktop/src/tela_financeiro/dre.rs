@@ -50,6 +50,7 @@ impl EstadoTelaFinanceiro {
         );
         self.balancete = self.anotar(r);
         self.carregar_simples(motor, sessao);
+        self.carregar_orcamento(motor, sessao);
     }
 }
 
@@ -85,6 +86,22 @@ fn celula_valor(ui: &mut egui::Ui, v: Dinheiro) {
         ui.add(Rotulo::interface("—").cor(ui.cores().texto_fraco));
     } else {
         ui.add(ValorDinheiro::novo(v).neutro());
+    }
+}
+
+fn celula_variacao(ui: &mut egui::Ui, v: Option<(String, bool)>) {
+    match v {
+        Some((texto, melhorou)) => {
+            let cores = ui.cores();
+            ui.add(Rotulo::interface(texto).cor(if melhorou {
+                cores.positivo
+            } else {
+                cores.negativo
+            }));
+        }
+        None => {
+            ui.add(Rotulo::interface("—").cor(ui.cores().texto_fraco));
+        }
     }
 }
 
@@ -136,6 +153,7 @@ pub(super) fn painel_dre(
     if sessao.concede(super::simples::PERMISSAO_VER) {
         visoes.push((3, "Simples Nacional"));
     }
+    visoes.push((4, "Orçamento"));
     if let Some(v) = Abas::nova(&visoes)
         .selecionada(estado.visao_resultado)
         .id_salt("dre-visao")
@@ -146,6 +164,10 @@ pub(super) fn painel_dre(
     ui.add_space(Espaco::E12);
     if estado.visao_resultado == 3 {
         super::simples::painel_simples(ui, motor, sessao, estado);
+        return;
+    }
+    if estado.visao_resultado == 4 {
+        super::orcamento::painel_orcamento(ui, motor, sessao, estado);
         return;
     }
     if estado.visao_resultado == 2 {
@@ -339,7 +361,7 @@ fn kpis(ui: &mut egui::Ui, c: &ComparativoDre) {
 
 fn tabela(ui: &mut egui::Ui, c: &ComparativoDre) {
     let linhas = &c.atual.linhas;
-    if linhas.iter().all(|l| l.valor.e_zero()) {
+    if linhas.iter().all(|l| l.valor.e_zero()) && c.orcado.is_none() {
         EstadoVazio::novo(
             Icone::Dinheiro,
             "Nenhum lançamento de receita ou despesa neste mês.",
@@ -347,47 +369,66 @@ fn tabela(ui: &mut egui::Ui, c: &ComparativoDre) {
         .mostrar(ui);
         return;
     }
-    Grade::nova(vec![
-        ColunaGrade::nova("").largura(340.0),
-        ColunaGrade::nova("Mês").largura(160.0).numero(),
-        ColunaGrade::nova("Mês anterior").largura(160.0).numero(),
-        ColunaGrade::nova("Variação").largura(120.0).numero(),
-        ColunaGrade::nova("Ano anterior").largura(160.0).numero(),
-    ])
-    .id_salt("dre")
-    .mostrar(ui, linhas.len(), |i, row| {
-        let l = &linhas[i];
-        let anterior = valor_equivalente(&c.mes_anterior, l);
-        let ano_antes = valor_equivalente(&c.mesmo_mes_ano_anterior, l);
-        row.col(|ui| match l.tipo {
-            TipoLinhaDre::Conta => {
-                ui.add_space(Espaco::E16);
-                ui.add(Rotulo::interface(l.rotulo.clone()));
+    // Com orçamento no mês, as colunas "Orçado" e "Real × orçado" (positivo é melhor, como a
+    // variação). Outra grade (outro sal): o número de colunas muda.
+    let orcado = c.orcado.as_ref();
+    let mut colunas = vec![
+        ColunaGrade::nova("").largura(320.0),
+        ColunaGrade::nova("Mês").largura(150.0).numero(),
+    ];
+    if orcado.is_some() {
+        colunas.push(ColunaGrade::nova("Orçado").largura(150.0).numero());
+        colunas.push(ColunaGrade::nova("Real × orçado").largura(120.0).numero());
+    }
+    colunas.extend([
+        ColunaGrade::nova("Mês anterior").largura(150.0).numero(),
+        ColunaGrade::nova("Variação").largura(110.0).numero(),
+        ColunaGrade::nova("Ano anterior").largura(150.0).numero(),
+    ]);
+    Grade::nova(colunas)
+        .id_salt(if orcado.is_some() {
+            "dre-com-orcado"
+        } else {
+            "dre"
+        })
+        .mostrar(ui, linhas.len(), |i, row| {
+            let l = &linhas[i];
+            let anterior = valor_equivalente(&c.mes_anterior, l);
+            let ano_antes = valor_equivalente(&c.mesmo_mes_ano_anterior, l);
+            let do_orcado = orcado.map(|o| valor_equivalente(o, l));
+            row.col(|ui| match l.tipo {
+                TipoLinhaDre::Conta => {
+                    ui.add_space(Espaco::E16);
+                    ui.add(Rotulo::interface(l.rotulo.clone()));
+                }
+                TipoLinhaDre::Bloco => {
+                    ui.add(Rotulo::campo(l.rotulo.clone()));
+                }
+                TipoLinhaDre::Resultado => {
+                    ui.add(Rotulo::novo(Papel::TituloSecao, l.rotulo.clone()));
+                }
+            });
+            row.col(|ui| celula_valor(ui, l.valor));
+            if let Some(o) = do_orcado {
+                row.col(|ui| celula_valor(ui, o));
+                row.col(|ui| celula_variacao(ui, variacao(l.valor, o)));
             }
-            TipoLinhaDre::Bloco => {
-                ui.add(Rotulo::campo(l.rotulo.clone()));
-            }
-            TipoLinhaDre::Resultado => {
-                ui.add(Rotulo::novo(Papel::TituloSecao, l.rotulo.clone()));
-            }
+            row.col(|ui| celula_valor(ui, anterior));
+            row.col(|ui| match variacao(l.valor, anterior) {
+                Some((texto, melhorou)) => {
+                    let cores = ui.cores();
+                    ui.add(Rotulo::interface(texto).cor(if melhorou {
+                        cores.positivo
+                    } else {
+                        cores.negativo
+                    }));
+                }
+                None => {
+                    ui.add(Rotulo::interface("—").cor(ui.cores().texto_fraco));
+                }
+            });
+            row.col(|ui| celula_valor(ui, ano_antes));
         });
-        row.col(|ui| celula_valor(ui, l.valor));
-        row.col(|ui| celula_valor(ui, anterior));
-        row.col(|ui| match variacao(l.valor, anterior) {
-            Some((texto, melhorou)) => {
-                let cores = ui.cores();
-                ui.add(Rotulo::interface(texto).cor(if melhorou {
-                    cores.positivo
-                } else {
-                    cores.negativo
-                }));
-            }
-            None => {
-                ui.add(Rotulo::interface("—").cor(ui.cores().texto_fraco));
-            }
-        });
-        row.col(|ui| celula_valor(ui, ano_antes));
-    });
 }
 
 #[cfg(test)]
