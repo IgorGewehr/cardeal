@@ -151,7 +151,13 @@ pub(super) fn secao(
             let r = estado
                 .impressora()
                 .map_err(str::to_owned)
-                .and_then(|impressora| crate::maquina::salvar(Maquina { impressora }));
+                .and_then(|impressora| {
+                    // Só a impressora muda: a identidade do terminal fica.
+                    crate::maquina::salvar(Maquina {
+                        impressora,
+                        ..crate::maquina::atual()
+                    })
+                });
             match r {
                 Ok(()) => notificar(
                     ui.ctx(),

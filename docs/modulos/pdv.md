@@ -104,7 +104,7 @@
 |---|---|---|---|
 | `id` | Id | sim | |
 | `terminal` | Id | sim | |
-| `serie_fiscal` | Quantidade (inteiro) | sim | uma série por terminal — nunca compartilhada |
+| `serie_fiscal` | Quantidade (inteiro) | sim | uma série por terminal — nunca compartilhada. **Nota (2026-10-27):** a série da NFC-e quem decide é o fiscal (`fiscal_serie_terminal`, pelo `terminal` do cupom; sem série própria, a da empresa) — este campo segue gravado, mas a nota não o lê. O `terminal` passou a ser a identidade **persistente** da máquina (`maquina.json` no desktop): antes era um novo a cada abertura do app, e o número da venda (`numero_terminal`) recomeçava do 1 toda vez |
 | `numero_inicial` / `numero_final` | Quantidade (inteiro) | sim | intervalo reservado na abertura de caixa |
 | `proximo` | Quantidade (inteiro) | sim | |
 | `reservada_em` | Instante | sim | |

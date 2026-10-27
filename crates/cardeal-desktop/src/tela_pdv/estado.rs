@@ -254,7 +254,7 @@ pub struct EstadoTelaPdv {
 impl Default for EstadoTelaPdv {
     fn default() -> Self {
         Self {
-            terminal: Id::novo(),
+            terminal: crate::maquina::terminal(),
             caixas: Vec::new(),
             contas_caixa: Vec::new(),
             tabelas: Vec::new(),

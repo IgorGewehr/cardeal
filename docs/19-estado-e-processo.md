@@ -727,6 +727,12 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   - desktop (`pacote_contador.rs`): `XMLs AAAA-MM.zip`, as seções "Notas fiscais do mês" e
     "Pendências do mês" no PDF, e as abas "Notas emitidas" e "Notas de entrada" na planilha;
   - `cardeal-pdf`: o sinal de menos (U+2212) sai como traço, não como "?".
+- **Série da NFC-e por caixa (2026-10-27, fiscal.md §11 item 4):** `mod-fiscal` `terminal.rs`
+  (`DefinirSerieDoTerminal`, `SeriesDosTerminais`, migração v8), a emissão pela série do terminal do
+  cupom, `ConfigurarNfce` recusando a série de um caixa; desktop: `maquina::terminal()` (a
+  identidade persistente da máquina) no PDV e Configurações › Fiscal › Série da NFC-e por caixa.
+  Achado: o terminal do PDV era um `Id::novo()` a cada abertura do app — o número da venda
+  recomeçava do 1 toda vez.
 - **Impressão direta na térmica (2026-10-27, fiscal.md §11 item 2):** `cardeal-pdf` ganhou a interface
   `Escrita` (o layout da bobina escreve nela; `Cursor` é o PDF) e o `escpos` (`danfce_escpos`,
   `comprovante_escpos`, `teste_escpos`, `OpcoesEscPos`; QR em `GS v 0`, PC860 opcional). Desktop:

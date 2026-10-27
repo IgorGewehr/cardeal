@@ -36,8 +36,8 @@ use mod_fiscal::{
     DefinirAmbienteFiscal, DetalheDocumento, DocumentoFiscal, DocumentoResumo, EmitirNfceDoCupom,
     EstadoDocumento, InstalarCertificado, InutilizarNumero, ModuloFiscal, NotasDoMes,
     NotasFiscaisDoMes, PedidoDocumento, ProvedorFiscal, ReenviarDocumento, ResumoDaFilaFiscal,
-    ResumoFiscal, SituacaoFiscal, SituacaoFiscalDaEmpresa, SituacaoNoMes, XmlQueFalta,
-    TAREFA_TRANSMITIR,
+    ResumoFiscal, SerieDoTerminal, SituacaoFiscal, SituacaoFiscalDaEmpresa, SituacaoNoMes,
+    XmlQueFalta, TAREFA_TRANSMITIR,
 };
 use mod_pdv::{
     AbrirCupom, AdicionarItem, CupomAberto, EstornarVenda, FinalizarVenda, ModuloPdv,
@@ -398,12 +398,17 @@ impl Mundo {
 
     /// Uma venda finalizada de `qtd` × R$ 25 do produto, em dinheiro; devolve o cupom.
     fn vender(&self, cen: &Cenario, produto: Id, qtd: i64, cliente: bool) -> Id {
+        self.vender_no(Id::novo(), cen, produto, qtd, cliente)
+    }
+
+    /// Uma venda no terminal dado.
+    fn vender_no(&self, terminal: Id, cen: &Cenario, produto: Id, qtd: i64, cliente: bool) -> Id {
         let cupom: CupomAberto = self
             .executar(
                 "pdv.abrir_cupom.v1",
                 &AbrirCupom {
                     sessao_caixa: cen.caixa,
-                    terminal: Id::novo(),
+                    terminal,
                     serie_fiscal: 1,
                     cliente: cliente.then_some(cen.cliente),
                     tabela_preco: cen.tabela,
@@ -1211,4 +1216,85 @@ fn sefaz_fora_a_nota_sai_em_contingencia_e_e_transmitida_quando_ela_volta() {
         m.documento(sem_api.id).resumo.estado,
         EstadoDocumento::Pendente
     );
+}
+
+#[test]
+fn cada_caixa_numera_na_sua_serie() {
+    use mod_fiscal::{DefinirSerieDoTerminal, SeriesDosTerminais};
+    let m = Mundo::novo();
+    let cen = m.cenario();
+    m.configurar(1);
+    let (caixa1, caixa2) = (Id::novo(), Id::novo());
+    let definir = |terminal: Id, nome: &str, serie: Option<u32>, proximo: Option<u64>| {
+        m.executar::<Vec<SerieDoTerminal>>(
+            "fiscal.definir_serie_do_terminal.v1",
+            &DefinirSerieDoTerminal {
+                terminal,
+                nome: nome.into(),
+                serie,
+                proximo_numero: proximo,
+            },
+        )
+    };
+    // A série da empresa (1) é a dos caixas sem série própria: não vira de um terminal.
+    let erro = definir(caixa2, "Caixa 2", Some(1), None).unwrap_err();
+    assert_eq!(erro.campo.as_deref(), Some("serie"));
+    assert!(
+        erro.mensagem.contains("é a da empresa"),
+        "{}",
+        erro.mensagem
+    );
+    // O caixa 2 na série 2, começando do 100 (a série já tinha sido usada em outro sistema).
+    let series = definir(caixa2, " Caixa 2 ", Some(2), Some(100)).unwrap();
+    assert_eq!(
+        series,
+        vec![SerieDoTerminal {
+            terminal: caixa2,
+            nome: "Caixa 2".into(),
+            serie: 2,
+            proximo_numero: 100,
+        }]
+    );
+    // A série é de um terminal só; e a da empresa não pode virar a de um terminal.
+    let erro = definir(Id::novo(), "Caixa 3", Some(2), None).unwrap_err();
+    assert!(
+        erro.mensagem.contains("já é do Caixa 2"),
+        "{}",
+        erro.mensagem
+    );
+    let erro = m
+        .executar::<mod_fiscal::ConfiguracaoNfce>(
+            "fiscal.configurar_nfce.v1",
+            &ConfigurarNfce {
+                emitir_nas_vendas: true,
+                serie: 2,
+                proximo_numero: 1,
+                csc_id: "000001".into(),
+                csc_token: None,
+            },
+        )
+        .unwrap_err();
+    assert!(
+        erro.mensagem.contains("é a do Caixa 2"),
+        "{}",
+        erro.mensagem
+    );
+
+    // As vendas: o caixa 2 na série 2 (100, 101); o caixa 1, sem série própria, na da empresa.
+    let nota = |terminal| m.emitir(m.vender_no(terminal, &cen, cen.produto, 1, false));
+    let a = nota(caixa2);
+    let b = nota(caixa1);
+    let c = nota(caixa2);
+    assert_eq!((a.serie, a.numero), (2, 100));
+    assert_eq!((b.serie, b.numero), (1, 1));
+    assert_eq!((c.serie, c.numero), (2, 101));
+    assert!(m.transmitir().starts_with("3 autorizada"));
+    let series: Vec<SerieDoTerminal> =
+        m.consultar("fiscal.series_dos_terminais.v1", &SeriesDosTerminais);
+    assert_eq!(series[0].proximo_numero, 102);
+
+    // Sem série própria de novo: volta à da empresa.
+    assert!(definir(caixa2, "", None, None).unwrap().is_empty());
+    let d = nota(caixa2);
+    assert_eq!((d.serie, d.numero), (1, 2));
 }

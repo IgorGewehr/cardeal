@@ -429,6 +429,7 @@ pub(crate) mod sqlite {
             )
             .no_campo("csc_id"));
         }
+        crate::terminal::sqlite::exigir_serie_livre(c, ctx.empresa, cmd.serie)?;
         let ambiente = crate::sql::ambiente(c, ctx.empresa)?;
         if let Some(maior) = sqld::maior_numero(c, ctx.empresa, MODELO, cmd.serie, ambiente)? {
             if cmd.proximo_numero <= maior {
@@ -653,10 +654,19 @@ pub(crate) mod sqlite {
         if let Some(d) = sqld::documento_da_origem(uow.conexao(), ctx.empresa, ORIGEM_PDV, cupom)? {
             return Ok(d);
         }
+        // A série do terminal que vendeu, se ele tiver uma; senão a da empresa.
+        let terminal = mod_pdv::RepositorioPdv::novo(uow)
+            .buscar_cupom(cupom)?
+            .map(|c| c.terminal);
         let (serie, ambiente) = {
             let c = uow.conexao();
+            let do_terminal = match terminal {
+                Some(t) => crate::terminal::sqlite::serie_do_terminal(c, ctx.empresa, t)?,
+                None => None,
+            };
             (
-                sqld::config_nfce(c, ctx.empresa)?.serie,
+                do_terminal
+                    .map_or_else(|| sqld::config_nfce(c, ctx.empresa).map(|c| c.serie), Ok)?,
                 crate::sql::ambiente(c, ctx.empresa)?,
             )
         };

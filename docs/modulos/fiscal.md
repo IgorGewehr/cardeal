@@ -153,6 +153,17 @@ recusada só por cadastro (178, a Tensorroot saiu de SP) — o que levou à regr
 < 200. Falta a primeira **autorizada**: pede a IE do RS e o CSC de homologação da SEFAZ-RS
 (`cardeal-fiscal`, teste ignorado `homologacao_nfce_real`).
 
+**Série por caixa** (migração v8, 2026-10-27): `DefinirSerieDoTerminal` (`fiscal.definir_serie_do_terminal.v1`,
+`fiscal.configurar`) dá a um terminal a sua série (1 a 889, com nome e, se a série já foi usada em outro
+sistema, o próximo número); `serie: None` o devolve à série da empresa. `SeriesDosTerminais`
+(`fiscal.series_dos_terminais.v1`) lista os caixas com série e o próximo número de cada. A NFC-e da venda sai na
+série do terminal do cupom — ou na da empresa, para quem não tem série própria. Regras: a série da empresa é
+"a dos caixas sem série própria" e não vira a de um terminal (nem o contrário: `ConfigurarNfce` recusa a série
+de um caixa); uma série é de um terminal só. Com dois caixas na mesma série a numeração não colide (o número
+é reservado na transação), mas fica intercalada; e o modo autônomo (caixa sem servidor) vai exigir séries
+separadas. O gestao-raiz tem uma série por empresa. Desktop: Configurações › Fiscal › "Série da NFC-e por
+caixa" (este computador: nome, série, próximo número; a lista dos outros caixas, com "Tirar a série").
+
 **Contingência off-line** (`tpEmis = 9`, migração v7, 2026-10-27). Com a SEFAZ fora e o `sefaz-api` no
 ar, a nota pendente que **com certeza** não chegou à SEFAZ é assinada lá (`/nfe/nfce/contingencia/prepare`:
 chave própria, `dhCont` e `xJust` no `ide`, o QR Code no `infNFeSupl`) e vai a `Contingencia`, com a nota
@@ -324,6 +335,7 @@ Cancelar e configurar continuam fora do papel.
 - v6: `fiscal_documento.xml_assinado` (a nota assinada da emissão incerta, apagada quando chega o
   `nfeProc`) e `xml_a_buscar` (tentativas restantes da busca de XML; 0 = nada a buscar); o índice da fila
   passa a cobrir a busca, e os cancelamentos sem o XML já entram nela.
+- v8: `fiscal_serie_terminal` (empresa, terminal, nome, série; uma série é de um terminal só).
 - v7: `fiscal_documento` recriada com o estado `Contingencia` e `contingencia_em` (o `dhCont`); o índice
   da fila cobre a contingência.
 
@@ -335,7 +347,7 @@ Cancelar e configurar continuam fora do papel.
 3. ~~**Contingência offline**~~ — feita em 2026-10-27 (§7; `sefaz-api` 7d7faa6). Falta: a nota incerta
    (pode ter chegado) ir em contingência com **outro número** e a original ser cancelada por substituição
    (110112) ou inutilizada; e a conferência na SEFAZ de verdade.
-4. Série por terminal (hoje uma série por empresa).
+4. ~~Série por terminal~~ — feita em 2026-10-27 (§7, "Série por caixa").
 5. NF-e de venda e devolução; CC-e.
 6. NFS-e da OS.
 7. SPED gerado no Cardeal.

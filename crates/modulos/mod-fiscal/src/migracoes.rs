@@ -214,6 +214,19 @@ CREATE INDEX fiscal_documento_fila ON fiscal_documento(empresa, proxima_tentativ
 CREATE INDEX fiscal_documento_criado ON fiscal_documento(empresa, criado_em);
 ";
 
+/// v8: a série da NFC-e por terminal (caixa) — uma série é de um terminal só; o terminal sem série
+/// própria usa a da empresa (`fiscal_configuracao.serie_nfce`).
+const SQL_V8: &str = "
+CREATE TABLE fiscal_serie_terminal (
+    empresa  BLOB    NOT NULL REFERENCES nucleo_empresa(id),
+    terminal BLOB    NOT NULL,
+    nome     TEXT    NOT NULL,
+    serie    INTEGER NOT NULL CHECK (serie BETWEEN 1 AND 889),
+    PRIMARY KEY (empresa, terminal),
+    UNIQUE (empresa, serie)
+) STRICT;
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -255,6 +268,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 7,
         nome: "fiscal_contingencia_offline",
         sql: SQL_V7,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 8,
+        nome: "fiscal_serie_por_terminal",
+        sql: SQL_V8,
         tipo: TipoMigracao::Esquema,
     },
 ];

@@ -40,6 +40,7 @@ mod provedor;
 mod sql;
 #[cfg(feature = "sqlite")]
 mod sql_documento;
+mod terminal;
 mod tipos;
 mod tributacao;
 
@@ -71,6 +72,7 @@ pub use nfce::{
 pub use provedor::ProvedorFiscal;
 #[cfg(feature = "sqlite")]
 pub use provedor::{ambiente_da_empresa, porta_da_empresa, porta_da_empresa_no_ambiente};
+pub use terminal::{DefinirSerieDoTerminal, SerieDoTerminal, SeriesDosTerminais};
 pub use tipos::{
     CertificadoResumo, PendenciaFiscal, SituacaoFiscalDaEmpresa, ALERTA_VENCIMENTO_DIAS,
 };

@@ -19,6 +19,8 @@ use mod_fiscal::{
     SituacaoFiscalDaEmpresa, StatusDaSefaz, StatusSefaz, ALERTA_VENCIMENTO_DIAS,
 };
 
+mod caixa;
+
 const FUSO: Fuso = Fuso::BRASILIA;
 
 /// O formulário dos dados fiscais (texto livre; o comando normaliza e confere).
@@ -88,6 +90,8 @@ pub struct EstadoFiscal {
     pub erro: Option<String>,
     /// O formulário da NFC-e.
     pub nfce: FormNfce,
+    /// A série deste caixa e a lista dos caixas com série.
+    pub caixa: caixa::EstadoCaixa,
 }
 
 /// O formulário da NFC-e. O token do CSC nunca volta da base: vazio = manter o guardado.
@@ -192,6 +196,7 @@ impl EstadoFiscal {
         if let Ok(c) = motor.consultar(sessao, "fiscal.configuracao_nfce.v1", &ConfiguracaoDaNfce) {
             self.nfce = FormNfce::de(&c);
         }
+        self.caixa.carregar(motor, sessao);
     }
 
     fn erro_em(&self, campo: &str) -> Option<String> {
@@ -301,6 +306,8 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
     secao_certificado(ui, motor, sessao, estado, pode_configurar);
     ui.add_space(Espaco::E16);
     secao_nfce(ui, motor, sessao, estado, pode_configurar);
+    ui.add_space(Espaco::E16);
+    caixa::secao(ui, motor, sessao, &mut estado.caixa, pode_configurar);
     ui.add_space(Espaco::E16);
     secao_conexao(ui, motor, sessao, estado, pode_configurar);
 }
