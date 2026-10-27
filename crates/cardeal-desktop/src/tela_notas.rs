@@ -167,7 +167,16 @@ pub fn reenviar(
     Ok(d)
 }
 
-fn etiqueta(d: &DocumentoResumo) -> Etiqueta {
+/// "NFC-e" ou "NF-e".
+const fn nome_do_modelo(m: mod_fiscal::ModeloFiscal) -> &'static str {
+    match m {
+        mod_fiscal::ModeloFiscal::Nfce => "NFC-e",
+        mod_fiscal::ModeloFiscal::Nfe => "NF-e",
+    }
+}
+
+/// A etiqueta da situação do documento.
+pub(crate) fn etiqueta(d: &DocumentoResumo) -> Etiqueta {
     let rotulo = d.estado.rotulo();
     match d.estado {
         EstadoDocumento::Autorizada => Etiqueta::positiva(rotulo),
@@ -301,7 +310,12 @@ fn grade(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoN
     .mostrar(ui, linhas.len(), |i, row| {
         let d = &linhas[i];
         row.col(|ui| {
-            ui.add(Rotulo::interface(format!("{}-{}", d.serie, d.numero)));
+            ui.add(Rotulo::interface(format!(
+                "{} {}-{}",
+                nome_do_modelo(d.modelo),
+                d.serie,
+                d.numero
+            )));
         });
         row.col(|ui| {
             ui.add(Rotulo::campo(d.criado_em.data(FUSO).formatar()));
@@ -395,7 +409,12 @@ fn detalhe(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estad
     let mut desistir = false;
     ui.add_space(Espaco::E12);
     Painel::novo()
-        .titulo(format!("NFC-e {}-{}", d.resumo.serie, d.resumo.numero))
+        .titulo(format!(
+            "{} {}-{}",
+            nome_do_modelo(d.resumo.modelo),
+            d.resumo.serie,
+            d.resumo.numero
+        ))
         .mostrar(ui, |ui| {
             ui.columns(3, |c| {
                 dado(&mut c[0], "Situação", d.resumo.estado.rotulo());
@@ -499,16 +518,23 @@ fn detalhe(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estad
                 ui.add_space(Espaco::E8);
             }
             ui.horizontal(|ui| {
-                if matches!(
-                    d.resumo.estado,
-                    EstadoDocumento::Autorizada | EstadoDocumento::Contingencia
-                ) && ui.add(Botao::secundario("Imprimir cupom fiscal")).clicked()
+                if d.resumo.modelo == mod_fiscal::ModeloFiscal::Nfce
+                    && matches!(
+                        d.resumo.estado,
+                        EstadoDocumento::Autorizada | EstadoDocumento::Contingencia
+                    )
+                    && ui.add(Botao::secundario("Imprimir cupom fiscal")).clicked()
                 {
                     imprimir = Some(d.resumo.id);
                 }
                 if pode_cancelar && estado.pedindo.is_none() {
                     if d.resumo.estado == EstadoDocumento::Autorizada
-                        && ui.add(Botao::fantasma("Cancelar NFC-e")).clicked()
+                        && ui
+                            .add(Botao::fantasma(match d.resumo.modelo {
+                                mod_fiscal::ModeloFiscal::Nfe => "Cancelar NF-e",
+                                mod_fiscal::ModeloFiscal::Nfce => "Cancelar NFC-e",
+                            }))
+                            .clicked()
                     {
                         abrir_pedido = Some(PedidoDocumento::Cancelar);
                     }
@@ -664,6 +690,7 @@ mod testes {
         estado.detalhe = Some(DetalheDocumento {
             resumo: rejeitada,
             nota: None,
+            nfe: None,
             xml: None,
             xml_assinado: None,
         });
@@ -702,6 +729,7 @@ mod testes {
         estado.detalhe = Some(DetalheDocumento {
             resumo,
             nota: None,
+            nfe: None,
             xml: None,
             xml_assinado: None,
         });

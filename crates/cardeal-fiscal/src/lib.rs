@@ -57,6 +57,7 @@ pub use emissao::{
     IcmsItem, ImpostosItem, ItemDocumento, MeioPagamento, Nfce, PagamentoDocumento,
     PedidoInutilizacao, RetornoSefaz, SituacaoRetorno,
 };
+pub use emissao::{Destinatario, IndicadorIe, Nfe};
 pub use erros::ErroFiscal;
 pub use nfe::{cfop_de_venda, descrever_cfop, ClassificacaoEntrada, FinalidadeNfe};
 pub use nfe::{interpretar, Duplicata, ItemNfe, NotaFiscalXml};

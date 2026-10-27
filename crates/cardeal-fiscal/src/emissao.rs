@@ -229,6 +229,91 @@ pub struct Consumidor {
     pub nome: Option<String>,
 }
 
+/// Se o destinatário da NF-e é contribuinte do ICMS (`indIEDest`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum IndicadorIe {
+    /// 1 — contribuinte, com a inscrição estadual.
+    Contribuinte,
+    /// 2 — contribuinte isento de inscrição.
+    Isento,
+    /// 9 — não contribuinte (o consumidor; quem não tem IE).
+    NaoContribuinte,
+}
+
+impl IndicadorIe {
+    /// O código `indIEDest`.
+    #[must_use]
+    pub const fn codigo(self) -> &'static str {
+        match self {
+            Self::Contribuinte => "1",
+            Self::Isento => "2",
+            Self::NaoContribuinte => "9",
+        }
+    }
+}
+
+/// O destinatário da NF-e.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Destinatario {
+    /// CPF ou CNPJ.
+    pub documento: DocumentoConsumidor,
+    /// O nome (ou a razão social).
+    pub nome: String,
+    /// Se é contribuinte do ICMS.
+    pub indicador_ie: IndicadorIe,
+    /// A inscrição estadual (do contribuinte).
+    pub inscricao_estadual: Option<String>,
+    /// O endereço, com o código IBGE do município.
+    pub endereco: EnderecoEmitente,
+    /// O e-mail (a SEFAZ manda o XML para ele).
+    pub email: Option<String>,
+}
+
+/// Uma NF-e (modelo 55) pronta para emitir — sem certificado.
+// Os quatro `bool` são os indicadores da nota (`tpNF`, `indFinal`, `indPres`, `indPag`).
+#[allow(clippy::struct_excessive_bools)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Nfe {
+    /// O emitente.
+    pub emitente: Emitente,
+    /// O destinatário.
+    pub destinatario: Destinatario,
+    /// Os itens.
+    pub itens: Vec<ItemDocumento>,
+    /// A natureza da operação ("Venda de mercadoria").
+    pub natureza: String,
+    /// Saída (`tpNF = 1`) ou entrada (`0`, a devolução que a empresa recebe).
+    pub saida: bool,
+    /// A finalidade.
+    pub finalidade: crate::nfe::FinalidadeNfe,
+    /// As chaves das notas referenciadas (obrigatórias na devolução).
+    pub referencias: Vec<String>,
+    /// Operação com consumidor final (`indFinal`).
+    pub consumidor_final: bool,
+    /// Presencial (`indPres = 1`) ou não (`9`).
+    pub presencial: bool,
+    /// Os pagamentos.
+    pub pagamentos: Vec<PagamentoDocumento>,
+    /// A prazo (`indPag = 1`): com as duplicatas.
+    pub a_prazo: bool,
+    /// As duplicatas (`cobr/dup`).
+    pub duplicatas: Vec<crate::nfe::Duplicata>,
+    /// A série.
+    pub serie: u32,
+    /// O número.
+    pub numero: u64,
+    /// Informações complementares.
+    pub informacoes: Option<String>,
+}
+
+impl Nfe {
+    /// O total da nota (`vNF` = soma dos líquidos).
+    #[must_use]
+    pub fn total(&self) -> Dinheiro {
+        self.itens.iter().map(ItemDocumento::valor_liquido).sum()
+    }
+}
+
 /// Uma NFC-e (modelo 65) pronta para emitir — sem certificado nem CSC.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Nfce {

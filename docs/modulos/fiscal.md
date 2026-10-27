@@ -153,6 +153,36 @@ recusada só por cadastro (178, a Tensorroot saiu de SP) — o que levou à regr
 < 200. Falta a primeira **autorizada**: pede a IE do RS e o CSC de homologação da SEFAZ-RS
 (`cardeal-fiscal`, teste ignorado `homologacao_nfce_real`).
 
+**NF-e de venda** (modelo 55; migração v10; 2026-10-27). `EmitirNfeDoPedido`
+(`fiscal.emitir_nfe_do_pedido.v1`, `fiscal.emitir`) cria a NF-e de um pedido de vendas **faturado**, sem rede,
+e ela vai pela mesma fila (o `sefaz-api` faz o lote e o polling; `PortaFiscal::emitir_nfe`). Repetir devolve o
+mesmo documento; `DocumentoDoPedido` (`fiscal.documento_do_pedido.v1`) acha a nota do pedido; a rejeitada se
+reenvia com o mesmo número depois de corrigir o cadastro. A montagem (`montar_nfe`, pura) reaproveita os itens e a
+tributação da NFC-e e acrescenta:
+
+- **Destinatário** do cadastro do cliente (`destinatario_do_cliente`): CNPJ antes do CPF; a inscrição estadual
+  decide o `indIEDest` (com IE, contribuinte; "ISENTO", isento; sem, não contribuinte — e aí `indFinal = 1`); o
+  endereço principal, com o **código IBGE do município achado pelo nome da cidade** (a tabela do IBGE vai
+  embutida: `cardeal_kernel::municipio`, 5.571 municípios, sem rede) — o cadastro de clientes não pede o código;
+  o e-mail principal.
+- **Venda para outra UF**: o CFOP vai para o interestadual (`5xxx` → `6xxx`; `5405` → `6404`). No Simples
+  Nacional sai (o ICMS vai no DAS, sem destaque); no **regime normal ainda não** — a alíquota interestadual e o
+  DIFAL não estão no cálculo, e a nota nasce rejeitada dizendo isso.
+- **Pagamento**: à vista, `indPag = 0`; a prazo (o faturamento lançou o título a receber do pedido), `indPag = 1`
+  e as parcelas viram as **duplicatas** (`cobr/dup`, numeradas 001, 002…), que precisam fechar com o total. O
+  meio vai como "outros" (`tPag = 99`) com a descrição "À vista"/"A prazo": o pedido não diz se vai ser boleto,
+  Pix ou depósito.
+- `indPres = 9` (não presencial) e `modFrete = 9` (sem frete) por padrão; natureza "Venda de mercadoria".
+- **Simples Nacional**: as informações complementares levam o texto que a Resolução CGSN 140/2018 (art. 59)
+  exige ("documento emitido por ME ou EPP optante pelo Simples Nacional; não gera direito a crédito fiscal de
+  IPI").
+
+A série e o próximo número da NF-e (`ConfigurarNfe`/`ConfiguracaoDaNfe`) são separados dos da NFC-e. A
+contingência off-line e a substituição são só da NFC-e (a contingência da NF-e é outra, a SVC). Desktop: Vendas ›
+pedido faturado › **Emitir NF-e** (com a situação e o "Reenviar"); Configurações › Fiscal › NF-e de venda; as
+Notas fiscais mostram o modelo. Lição do gestao-raiz: lá a NF-e sai também de um formulário em que se digitam o
+destinatário e os itens; aqui só do pedido faturado — o cadastro é a fonte. Falta o DANFE A4.
+
 **Série por caixa** (migração v8, 2026-10-27): `DefinirSerieDoTerminal` (`fiscal.definir_serie_do_terminal.v1`,
 `fiscal.configurar`) dá a um terminal a sua série (1 a 889, com nome e, se a série já foi usada em outro
 sistema, o próximo número); `serie: None` o devolve à série da empresa. `SeriesDosTerminais`
@@ -351,6 +381,7 @@ Cancelar e configurar continuam fora do papel.
 - v6: `fiscal_documento.xml_assinado` (a nota assinada da emissão incerta, apagada quando chega o
   `nfeProc`) e `xml_a_buscar` (tentativas restantes da busca de XML; 0 = nada a buscar); o índice da fila
   passa a cobrir a busca, e os cancelamentos sem o XML já entram nela.
+- v10: `fiscal_configuracao.serie_nfe` — a série da NF-e (modelo 55), separada da da NFC-e.
 - v9: `fiscal_documento` recriada com `substitui`/`substituida_por`, o pedido `cancelar_substituicao` e a
   origem única só entre as vigentes (índice parcial `fiscal_documento_origem`).
 - v8: `fiscal_serie_terminal` (empresa, terminal, nome, série; uma série é de um terminal só).
@@ -366,7 +397,7 @@ Cancelar e configurar continuam fora do papel.
    nota incerta (outro número em contingência; a original cancelada por substituição, 110112, ou inutilizada;
    `sefaz-api` 43c98f0). Falta a conferência na SEFAZ de verdade.
 4. ~~Série por terminal~~ — feita em 2026-10-27 (§7, "Série por caixa").
-5. NF-e de venda e devolução; CC-e.
+5. NF-e: ~~a de venda~~ (2026-10-27, §7 "NF-e de venda"); falta o DANFE A4, a devolução e a CC-e.
 6. NFS-e da OS.
 7. SPED gerado no Cardeal.
 8. ~~DFe e manifestação~~ — feito em 2026-10-26 (sefaz-api 842576f; a busca de notas em

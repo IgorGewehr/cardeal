@@ -277,6 +277,7 @@ mod testes {
                 substituida_por: None,
             },
             nota: Some(nota),
+            nfe: None,
             xml: Some(format!(
                 "<nfeProc><infNFeSupl><qrCode>https://x/q?p={chave}|3|2</qrCode><urlChave>www.sefaz.rs.gov.br/nfce/consulta</urlChave></infNFeSupl></nfeProc>"
             )),

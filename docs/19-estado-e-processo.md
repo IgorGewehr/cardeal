@@ -727,6 +727,13 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   - desktop (`pacote_contador.rs`): `XMLs AAAA-MM.zip`, as seções "Notas fiscais do mês" e
     "Pendências do mês" no PDF, e as abas "Notas emitidas" e "Notas de entrada" na planilha;
   - `cardeal-pdf`: o sinal de menos (U+2212) sai como traço, não como "?".
+- **NF-e de venda (2026-10-27, fiscal.md §11 item 5, primeira parte):** `cardeal_kernel::municipio` (a
+  tabela do IBGE embutida — o código do município pelo nome, sem rede); `cardeal-fiscal`: `Nfe`,
+  `Destinatario`, `IndicadorIe`, `PortaFiscal::emitir_nfe` (HTTP `/nfe/emitir` e simulado); `mod-fiscal`:
+  `nfe_venda.rs` (`EmitirNfeDoPedido`, `DocumentoDoPedido`, `ConfigurarNfe`, `ConfiguracaoDaNfe`), migração
+  v10, `montar_nfe`/`destinatario_do_cliente`/`cfop_interestadual`, a fila pelos dois modelos (NF-e sem
+  contingência nem substituição), `DetalheDocumento.nfe`; desktop: Emitir NF-e no pedido faturado e a série em
+  Configurações › Fiscal. Falta o DANFE A4.
 - **Substituição da NFC-e sem resposta (2026-10-27, fecha o fiscal.md §11 item 3):** `sefaz-api`
   43c98f0 (o `/nfe/cancelar` com `chaveSubstituta` = evento 110112); `cardeal-fiscal`
   `PortaFiscal::cancelar_por_substituicao`; `mod-fiscal`: migração v9, `pede_substituicao`,

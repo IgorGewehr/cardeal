@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use crate::chave::ChaveAcesso;
 use crate::dfe::{Manifestacao, PaginaDfe};
 use crate::emissao::{
-    Csc, EntradaEmContingencia, Nfce, NotaEmContingencia, PedidoInutilizacao, RetornoSefaz,
+    Csc, EntradaEmContingencia, Nfce, Nfe, NotaEmContingencia, PedidoInutilizacao, RetornoSefaz,
 };
 
 /// O modelo do documento fiscal eletrônico.
@@ -125,6 +125,14 @@ pub trait PortaFiscal: Send + Sync {
     /// [`crate::ErroFiscal::ServicoIndisponivel`] se a API fiscal não responde; os erros de
     /// credencial/certificado que ela devolver.
     fn status_servico(&self, uf: Uf, modelo: ModeloFiscal) -> Resultado<StatusSefaz>;
+
+    /// Emite uma NF-e (modelo 55; o `sefaz-api` faz o lote e o polling). Como
+    /// [`Self::emitir_nfce`]: rejeição e denegação em `Ok`; o resultado que não chegou vem
+    /// `Processando`/`Erro` com a chave, para consultar.
+    ///
+    /// # Errors
+    /// Como [`Self::emitir_nfce`].
+    fn emitir_nfe(&self, nota: &Nfe) -> Resultado<RetornoSefaz>;
 
     /// Emite uma NFC-e (síncrona na SEFAZ). Rejeição e denegação voltam em `Ok`, no
     /// [`RetornoSefaz`]; `Err` é não ter conseguido falar com a API.
@@ -240,6 +248,10 @@ impl<T: PortaFiscal + ?Sized> PortaFiscal for std::sync::Arc<T> {
 
     fn emitir_nfce(&self, nota: &Nfce, csc: &Csc) -> Resultado<RetornoSefaz> {
         (**self).emitir_nfce(nota, csc)
+    }
+
+    fn emitir_nfe(&self, nota: &Nfe) -> Resultado<RetornoSefaz> {
+        (**self).emitir_nfe(nota)
     }
 
     fn consultar_documento(

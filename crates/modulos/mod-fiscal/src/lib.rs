@@ -35,6 +35,7 @@ mod modulo;
 #[cfg(feature = "sqlite")]
 mod montagem;
 mod nfce;
+mod nfe_venda;
 mod provedor;
 #[cfg(feature = "sqlite")]
 mod sql;
@@ -70,6 +71,10 @@ pub use nfce::{
     ConfiguracaoNfce, ConfigurarNfce, DetalheDocumento, DocumentoDaVenda, DocumentoFiscal,
     DocumentosDasVendas, DocumentosFiscais, EmitirNfceDoCupom, InutilizarNumero, ReenviarDocumento,
     ResumoDaFilaFiscal, TAREFA_TRANSMITIR,
+};
+pub use nfe_venda::{
+    ConfiguracaoDaNfe, ConfiguracaoNfe, ConfigurarNfe, DocumentoDoPedido, EmitirNfeDoPedido,
+    ORIGEM_VENDAS,
 };
 pub use provedor::ProvedorFiscal;
 #[cfg(feature = "sqlite")]

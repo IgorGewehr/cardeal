@@ -77,6 +77,30 @@ pub(crate) fn gravar_config_nfce(
     .map_err(falha)
 }
 
+/// A série da NF-e (1, se nada foi configurado).
+pub(crate) fn serie_nfe(c: &Connection, empresa: Id) -> Resultado<u32> {
+    Ok(c.query_row(
+        "SELECT serie_nfe FROM fiscal_configuracao WHERE empresa = ?1",
+        [empresa.em_bytes().as_slice()],
+        |r| r.get(0),
+    )
+    .optional()
+    .map_err(falha)?
+    .unwrap_or(1))
+}
+
+/// Grava a série da NF-e.
+pub(crate) fn gravar_serie_nfe(c: &Connection, empresa: Id, serie: u32) -> Resultado<()> {
+    c.execute(
+        "INSERT INTO fiscal_configuracao (empresa, ambiente, serie_nfe)
+         VALUES (?1, 'homologacao', ?2)
+         ON CONFLICT(empresa) DO UPDATE SET serie_nfe = excluded.serie_nfe",
+        params![empresa.em_bytes().as_slice(), serie],
+    )
+    .map(|_| ())
+    .map_err(falha)
+}
+
 /// O maior número já usado na série (no ambiente).
 pub(crate) fn maior_numero(
     c: &Connection,
@@ -418,6 +442,8 @@ pub(crate) fn documentos(
 /// Um documento na fila de transmissão.
 pub(crate) struct NaFila {
     pub id: Id,
+    /// NFC-e ou NF-e.
+    pub modelo: ModeloFiscal,
     pub ambiente: AmbienteFiscal,
     pub pedido: Option<PedidoDocumento>,
     pub justificativa: Option<String>,
@@ -456,7 +482,7 @@ pub(crate) fn fila(
         .prepare(
             "SELECT id, estado, tentativas, chave, nota, ambiente, pedido, justificativa, protocolo,
                     serie, numero, criado_em, anulada, xml_assinado, xml_a_buscar, origem_id,
-                    origem_modulo, total, substitui, substituida_por
+                    origem_modulo, total, substitui, substituida_por, modelo
              FROM fiscal_documento
              WHERE empresa = ?1
                AND (estado IN ('Pendente','Incerta','Contingencia') OR pedido IS NOT NULL
@@ -498,6 +524,11 @@ pub(crate) fn fila(
                     total: Dinheiro::centavos(r.get(17)?),
                     substitui: r.get::<_, Option<Vec<u8>>>(18)?.map(|b| id_de(&b)),
                     substituida_por: r.get::<_, Option<Vec<u8>>>(19)?.map(|b| id_de(&b)),
+                    modelo: if r.get::<_, String>(20)? == "55" {
+                        ModeloFiscal::Nfe
+                    } else {
+                        ModeloFiscal::Nfce
+                    },
                 })
             },
         )

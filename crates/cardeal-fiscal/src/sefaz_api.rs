@@ -22,7 +22,7 @@ use serde_json::{json, Value};
 use crate::chave::ChaveAcesso;
 use crate::dfe::{DocumentoDfe, Manifestacao, PaginaDfe, TipoDfe};
 use crate::emissao::{
-    Csc, EntradaEmContingencia, ItemDocumento, Nfce, NotaEmContingencia, PedidoInutilizacao,
+    Csc, EntradaEmContingencia, ItemDocumento, Nfce, Nfe, NotaEmContingencia, PedidoInutilizacao,
     RetornoSefaz, SituacaoRetorno,
 };
 use crate::erros::ErroFiscal;
@@ -343,9 +343,8 @@ fn item_json(numero: usize, item: &ItemDocumento) -> Value {
 }
 
 /// O corpo do `POST /nfe/nfce/emitir` (sem certificado e ambiente, que o adaptador põe).
-pub(crate) fn nfce_json(nota: &Nfce, csc: &Csc) -> serde_json::Map<String, Value> {
-    let e = &nota.emitente;
-    let en = &e.endereco;
+/// O endereço no formato do `sefaz-api` (emitente e destinatário).
+fn endereco_json(en: &crate::emissao::EnderecoEmitente) -> Value {
     let mut endereco = json!({
         "logradouro": en.logradouro,
         "numero": en.numero,
@@ -361,17 +360,147 @@ pub(crate) fn nfce_json(nota: &Nfce, csc: &Csc) -> serde_json::Map<String, Value
     if let Some(t) = &en.telefone {
         endereco["telefone"] = Value::from(t.as_str());
     }
+    endereco
+}
+
+/// O emitente no formato do `sefaz-api`.
+fn emitente_json(e: &crate::emissao::Emitente) -> Value {
     let mut emitente = json!({
         "cnpj": e.cnpj.sem_mascara(),
         "nome": e.razao_social,
         "nomeFantasia": e.nome_fantasia,
         "inscricaoEstadual": e.inscricao_estadual,
         "crt": e.crt.codigo(),
-        "endereco": endereco,
+        "endereco": endereco_json(&e.endereco),
     });
     if let Some(im) = &e.inscricao_municipal {
         emitente["inscricaoMunicipal"] = Value::from(im.as_str());
     }
+    emitente
+}
+
+/// O destinatário no formato do `sefaz-api`.
+fn destinatario_json(d: &crate::emissao::Destinatario) -> Value {
+    let mut destinatario = match &d.documento {
+        crate::emissao::DocumentoConsumidor::Cpf(cpf) => json!({ "cpf": cpf.sem_mascara() }),
+        crate::emissao::DocumentoConsumidor::Cnpj(cnpj) => json!({ "cnpj": cnpj.sem_mascara() }),
+    };
+    destinatario["nome"] = Value::from(d.nome.as_str());
+    destinatario["indicadorIE"] = Value::from(d.indicador_ie.codigo());
+    if let Some(ie) = &d.inscricao_estadual {
+        destinatario["inscricaoEstadual"] = Value::from(ie.as_str());
+    }
+    if let Some(email) = &d.email {
+        destinatario["email"] = Value::from(email.as_str());
+    }
+    destinatario["endereco"] = endereco_json(&d.endereco);
+    destinatario
+}
+
+/// A cobrança (fatura e duplicatas) no formato do `sefaz-api`.
+fn cobranca_json(nota: &Nfe) -> Value {
+    let total: cardeal_kernel::Dinheiro = nota.duplicatas.iter().map(|d| d.valor).sum();
+    json!({
+        "fatura": {
+            "numero": nota.numero.to_string(),
+            "valorOriginal": reais(total),
+            "valorLiquido": reais(total),
+        },
+        "duplicatas": nota.duplicatas.iter().map(|d| json!({
+            "numero": d.numero,
+            "vencimento": d.vencimento.formatar_iso(),
+            "valor": reais(d.valor),
+        })).collect::<Vec<_>>(),
+    })
+}
+
+/// O corpo da NF-e (`NFeRequest` do `sefaz-api`), sem o certificado.
+pub(crate) fn nfe_json(nota: &Nfe) -> serde_json::Map<String, Value> {
+    // Sem o meio de verdade (o pedido não diz como vai ser pago), "outros" com a descrição.
+    let formas: Vec<Value> = nota
+        .pagamentos
+        .iter()
+        .map(|p| {
+            let mut f = json!({ "tipo": p.meio.codigo(), "valor": reais(p.valor) });
+            if p.meio.exige_grupo_cartao() {
+                f["cartao"] = json!({ "tipoIntegracao": "2" });
+            }
+            if p.meio == crate::emissao::MeioPagamento::Outros {
+                f["descricao"] = Value::from(if nota.a_prazo { "A prazo" } else { "A vista" });
+            }
+            f
+        })
+        .collect();
+    let mut corpo = serde_json::Map::new();
+    corpo.insert("emitente".into(), emitente_json(&nota.emitente));
+    corpo.insert("destinatario".into(), destinatario_json(&nota.destinatario));
+    corpo.insert(
+        "itens".into(),
+        Value::Array(
+            nota.itens
+                .iter()
+                .enumerate()
+                .map(|(i, it)| item_json(i + 1, it))
+                .collect(),
+        ),
+    );
+    corpo.insert(
+        "naturezaOperacao".into(),
+        Value::from(nota.natureza.as_str()),
+    );
+    corpo.insert(
+        "tipoOperacao".into(),
+        Value::from(if nota.saida { "1" } else { "0" }),
+    );
+    corpo.insert("finalidade".into(), Value::from(nota.finalidade.codigo()));
+    if !nota.referencias.is_empty() {
+        corpo.insert(
+            "referencias".into(),
+            Value::Array(
+                nota.referencias
+                    .iter()
+                    .map(|r| json!({ "refNFe": r }))
+                    .collect(),
+            ),
+        );
+    }
+    corpo.insert(
+        "consumidorFinal".into(),
+        Value::from(if nota.consumidor_final { "1" } else { "0" }),
+    );
+    corpo.insert(
+        "presencaComprador".into(),
+        Value::from(if nota.presencial { "1" } else { "9" }),
+    );
+    corpo.insert("transporte".into(), json!({ "modFrete": "9" }));
+    corpo.insert(
+        "pagamento".into(),
+        json!({
+            "indicadorPagamento": if nota.a_prazo { "1" } else { "0" },
+            "formas": formas,
+        }),
+    );
+    if !nota.duplicatas.is_empty() {
+        corpo.insert("cobranca".into(), cobranca_json(nota));
+    }
+    if let Some(info) = &nota.informacoes {
+        corpo.insert(
+            "informacoesAdicionais".into(),
+            json!({ "contribuinte": info }),
+        );
+    }
+    corpo.insert("serie".into(), Value::from(nota.serie.to_string()));
+    corpo.insert("numero".into(), Value::from(nota.numero));
+    corpo.insert(
+        "ufEmitente".into(),
+        Value::from(nota.emitente.endereco.uf.sigla()),
+    );
+    corpo
+}
+
+pub(crate) fn nfce_json(nota: &Nfce, csc: &Csc) -> serde_json::Map<String, Value> {
+    let e = &nota.emitente;
+    let en = &e.endereco;
     let formas: Vec<Value> = nota
         .pagamentos
         .iter()
@@ -391,7 +520,7 @@ pub(crate) fn nfce_json(nota: &Nfce, csc: &Csc) -> serde_json::Map<String, Value
         pagamento["troco"] = Value::from(reais(nota.troco));
     }
     let mut corpo = serde_json::Map::new();
-    corpo.insert("emitente".into(), emitente);
+    corpo.insert("emitente".into(), emitente_json(e));
     corpo.insert(
         "itens".into(),
         Value::Array(
@@ -575,6 +704,14 @@ impl PortaFiscal for ApiFiscalHttp {
             corpo.insert("justificativa".into(), Value::from(j));
         }
         self.postar("/nfe/manifestacao", &Value::Object(corpo))
+            .map(RespostaSefazApi::em_retorno)
+            .map_err(|e| Erro::de_dominio(&e))
+    }
+
+    fn emitir_nfe(&self, nota: &Nfe) -> Resultado<RetornoSefaz> {
+        let mut corpo = self.corpo_base();
+        corpo.extend(nfe_json(nota));
+        self.postar("/nfe/emitir", &Value::Object(corpo))
             .map(RespostaSefazApi::em_retorno)
             .map_err(|e| Erro::de_dominio(&e))
     }
@@ -1101,6 +1238,78 @@ mod testes {
             "{}",
             erro.mensagem
         );
+    }
+
+    #[test]
+    fn a_nfe_de_venda_a_prazo_leva_destinatario_e_duplicatas() {
+        use crate::emissao::{Destinatario, DocumentoConsumidor, IndicadorIe, MeioPagamento};
+        let base = crate::emissao::exemplo();
+        let mut endereco = base.emitente.endereco.clone();
+        endereco.municipio = "Caxias do Sul".into();
+        endereco.codigo_municipio = "4305108".into();
+        let nota = Nfe {
+            emitente: base.emitente.clone(),
+            destinatario: Destinatario {
+                documento: DocumentoConsumidor::Cnpj(
+                    cardeal_kernel::Cnpj::novo("11222333000181").unwrap(),
+                ),
+                nome: "CLIENTE LTDA".into(),
+                indicador_ie: IndicadorIe::Contribuinte,
+                inscricao_estadual: Some("0290000000".into()),
+                endereco,
+                email: Some("compras@cliente.com.br".into()),
+            },
+            itens: base.itens.clone(),
+            natureza: "Venda de mercadoria".into(),
+            saida: true,
+            finalidade: crate::nfe::FinalidadeNfe::Normal,
+            referencias: Vec::new(),
+            consumidor_final: false,
+            presencial: false,
+            pagamentos: vec![crate::emissao::PagamentoDocumento {
+                meio: MeioPagamento::Outros,
+                valor: base.total(),
+            }],
+            a_prazo: true,
+            duplicatas: vec![crate::nfe::Duplicata {
+                numero: "001".into(),
+                vencimento: cardeal_kernel::Data::de_ymd(2026, 11, 26).unwrap(),
+                valor: base.total(),
+            }],
+            serie: 1,
+            numero: 12,
+            informacoes: None,
+        };
+        let corpo = Value::Object(nfe_json(&nota));
+        let d = &corpo["destinatario"];
+        assert_eq!(d["cnpj"], "11222333000181");
+        assert_eq!(d["indicadorIE"], "1");
+        assert_eq!(d["inscricaoEstadual"], "0290000000");
+        assert_eq!(d["endereco"]["codigoMunicipio"], "4305108");
+        assert_eq!(corpo["naturezaOperacao"], "Venda de mercadoria");
+        assert_eq!(corpo["tipoOperacao"], "1");
+        assert_eq!(corpo["finalidade"], "1");
+        assert_eq!(corpo["consumidorFinal"], "0");
+        assert_eq!(corpo["presencaComprador"], "9");
+        assert_eq!(corpo["pagamento"]["indicadorPagamento"], "1");
+        assert_eq!(corpo["pagamento"]["formas"][0]["tipo"], "99");
+        assert_eq!(corpo["pagamento"]["formas"][0]["descricao"], "A prazo");
+        assert_eq!(
+            corpo["cobranca"]["duplicatas"][0]["vencimento"],
+            "2026-11-26"
+        );
+        assert_eq!(corpo["numero"], 12);
+        assert!(corpo.get("csc").is_none() && corpo.get("referencias").is_none());
+
+        // A devolução referencia a nota de origem.
+        let mut devolucao = nota;
+        devolucao.finalidade = crate::nfe::FinalidadeNfe::Devolucao;
+        devolucao.referencias = vec!["4".repeat(44)];
+        devolucao.duplicatas.clear();
+        let corpo = Value::Object(nfe_json(&devolucao));
+        assert_eq!(corpo["finalidade"], "4");
+        assert_eq!(corpo["referencias"][0]["refNFe"], "4".repeat(44));
+        assert!(corpo.get("cobranca").is_none());
     }
 
     #[test]

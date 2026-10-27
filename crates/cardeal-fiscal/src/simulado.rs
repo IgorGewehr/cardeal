@@ -9,7 +9,7 @@ use cardeal_kernel::{Cnpj, Erro, Resultado, Uf};
 use crate::chave::ChaveAcesso;
 use crate::dfe::{DocumentoDfe, Manifestacao, PaginaDfe, TipoDfe};
 use crate::emissao::{
-    Csc, EntradaEmContingencia, Nfce, NotaEmContingencia, PedidoInutilizacao, RetornoSefaz,
+    Csc, EntradaEmContingencia, Nfce, Nfe, NotaEmContingencia, PedidoInutilizacao, RetornoSefaz,
     SituacaoRetorno,
 };
 use crate::erros::ErroFiscal;
@@ -107,6 +107,68 @@ impl FiscalSimulado {
     /// O que a consulta desta chave vai responder.
     pub fn definir_consulta(&self, chave: &str, retorno: RetornoSefaz) {
         travar(&self.emitidas).insert(chave.to_string(), retorno);
+    }
+
+    /// A emissão simulada de uma NFC-e (`"65"`) ou NF-e (`"55"`).
+    fn emitir_modelo(&self, nota: &Nfce, modelo: &str) -> Resultado<RetornoSefaz> {
+        self.api_fora()?;
+        if let Some(r) = self.sem_sefaz() {
+            return Ok(r);
+        }
+        self.emissoes
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let n = travar(&self.emitidas).len();
+        let chave = ChaveAcesso::montar(
+            nota.emitente.endereco.uf.codigo_ibge(),
+            "2610",
+            &nota.emitente.cnpj.sem_mascara(),
+            modelo,
+            nota.serie,
+            nota.numero,
+            1,
+            u32::try_from(n).unwrap_or(0) + 10_000_000,
+        );
+        let chave = chave.como_str().to_string();
+        let autorizado = RetornoSefaz {
+            situacao: SituacaoRetorno::Autorizado,
+            codigo: "100".into(),
+            motivo: "Autorizado o uso da NF-e".into(),
+            chave: Some(chave.clone()),
+            protocolo: Some(format!("143{:012}", nota.numero)),
+            recebido_em: Some("2026-10-14T12:00:00-03:00".into()),
+            xml: Some(xml_simulado(&chave, nota)),
+            xml_assinado: None,
+            xml_cancelamento: None,
+            erros: Vec::new(),
+            nao_enviado: false,
+        };
+        let retorno = match travar(&self.programados).pop_front() {
+            Some(mut r) => {
+                if r.chave.is_none() && r.situacao != SituacaoRetorno::Rejeitado {
+                    r.chave = Some(chave.clone());
+                }
+                // Como o `sefaz-api`: o desfecho incerto devolve a nota assinada.
+                if matches!(
+                    r.situacao,
+                    SituacaoRetorno::Processando | SituacaoRetorno::Erro
+                ) {
+                    r.xml_assinado = Some(nfe_assinada(&chave, nota));
+                }
+                r
+            }
+            None => autorizado.clone(),
+        };
+        // Na consulta: o que foi autorizado (ou se perdeu no caminho) consta autorizado; o
+        // rejeitado não consta.
+        if matches!(
+            retorno.situacao,
+            SituacaoRetorno::Autorizado | SituacaoRetorno::Processando | SituacaoRetorno::Erro
+        ) {
+            travar(&self.emitidas).insert(chave, autorizado);
+        } else if retorno.situacao == SituacaoRetorno::Denegado {
+            travar(&self.emitidas).insert(chave, retorno.clone());
+        }
+        Ok(retorno)
     }
 
     /// O cancelamento (110111) ou, com a substituta, o por substituição (110112): a substituta
@@ -376,65 +438,24 @@ impl PortaFiscal for FiscalSimulado {
         })
     }
 
+    fn emitir_nfe(&self, nota: &Nfe) -> Resultado<RetornoSefaz> {
+        // A NF-e é emitida como a NFC-e, com o modelo 55 na chave (o simulador não confere o
+        // destinatário).
+        let como_nfce = Nfce {
+            emitente: nota.emitente.clone(),
+            itens: nota.itens.clone(),
+            pagamentos: nota.pagamentos.clone(),
+            troco: cardeal_kernel::Dinheiro::ZERO,
+            consumidor: None,
+            serie: nota.serie,
+            numero: nota.numero,
+            informacoes: nota.informacoes.clone(),
+        };
+        self.emitir_modelo(&como_nfce, "55")
+    }
+
     fn emitir_nfce(&self, nota: &Nfce, _csc: &Csc) -> Resultado<RetornoSefaz> {
-        self.api_fora()?;
-        if let Some(r) = self.sem_sefaz() {
-            return Ok(r);
-        }
-        self.emissoes
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let n = travar(&self.emitidas).len();
-        let chave = ChaveAcesso::montar(
-            nota.emitente.endereco.uf.codigo_ibge(),
-            "2610",
-            &nota.emitente.cnpj.sem_mascara(),
-            "65",
-            nota.serie,
-            nota.numero,
-            1,
-            u32::try_from(n).unwrap_or(0) + 10_000_000,
-        );
-        let chave = chave.como_str().to_string();
-        let autorizado = RetornoSefaz {
-            situacao: SituacaoRetorno::Autorizado,
-            codigo: "100".into(),
-            motivo: "Autorizado o uso da NF-e".into(),
-            chave: Some(chave.clone()),
-            protocolo: Some(format!("143{:012}", nota.numero)),
-            recebido_em: Some("2026-10-14T12:00:00-03:00".into()),
-            xml: Some(xml_simulado(&chave, nota)),
-            xml_assinado: None,
-            xml_cancelamento: None,
-            erros: Vec::new(),
-            nao_enviado: false,
-        };
-        let retorno = match travar(&self.programados).pop_front() {
-            Some(mut r) => {
-                if r.chave.is_none() && r.situacao != SituacaoRetorno::Rejeitado {
-                    r.chave = Some(chave.clone());
-                }
-                // Como o `sefaz-api`: o desfecho incerto devolve a nota assinada.
-                if matches!(
-                    r.situacao,
-                    SituacaoRetorno::Processando | SituacaoRetorno::Erro
-                ) {
-                    r.xml_assinado = Some(nfe_assinada(&chave, nota));
-                }
-                r
-            }
-            None => autorizado.clone(),
-        };
-        // Na consulta: o que foi autorizado (ou se perdeu no caminho) consta autorizado; o
-        // rejeitado não consta.
-        if matches!(
-            retorno.situacao,
-            SituacaoRetorno::Autorizado | SituacaoRetorno::Processando | SituacaoRetorno::Erro
-        ) {
-            travar(&self.emitidas).insert(chave, autorizado);
-        } else if retorno.situacao == SituacaoRetorno::Denegado {
-            travar(&self.emitidas).insert(chave, retorno.clone());
-        }
-        Ok(retorno)
+        self.emitir_modelo(nota, "65")
     }
 
     fn consultar_documento(

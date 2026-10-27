@@ -289,6 +289,12 @@ CREATE INDEX fiscal_documento_fila ON fiscal_documento(empresa, proxima_tentativ
 CREATE INDEX fiscal_documento_criado ON fiscal_documento(empresa, criado_em);
 ";
 
+/// v10: a série da NF-e (modelo 55), separada da da NFC-e — a numeração é por modelo e série.
+const SQL_V10: &str = "
+ALTER TABLE fiscal_configuracao ADD COLUMN serie_nfe INTEGER NOT NULL DEFAULT 1
+    CHECK (serie_nfe BETWEEN 1 AND 889);
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -342,6 +348,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 9,
         nome: "fiscal_substituicao_da_nfce",
         sql: SQL_V9,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 10,
+        nome: "fiscal_serie_da_nfe",
+        sql: SQL_V10,
         tipo: TipoMigracao::Esquema,
     },
 ];

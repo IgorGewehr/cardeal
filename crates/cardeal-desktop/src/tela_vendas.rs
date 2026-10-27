@@ -6,6 +6,7 @@
 //! produto. As comissões do mês (apurar e pagar) ficam no diálogo "Comissões".
 
 mod comissoes;
+mod nfe;
 
 use std::collections::HashMap;
 
@@ -67,6 +68,8 @@ pub struct EstadoTelaVendas {
     regra_produto: Option<Id>,
     regra_preco: String,
     comissoes: comissoes::EstadoComissoes,
+    /// A NF-e do pedido aberto.
+    nfe: nfe::NfeDoPedido,
 }
 
 impl EstadoTelaVendas {
@@ -563,7 +566,7 @@ fn acoes(
                             pedido: p.pedido,
                             a_vista: true,
                         },
-                        "Pedido faturado — NFC-e emitida",
+                        "Pedido faturado",
                     );
                 }
                 if ui.add(Botao::secundario("Faturar a prazo")).clicked() {
@@ -593,10 +596,10 @@ fn acoes(
                 }
             });
         }
-        EstadoPedido::Faturado
-        | EstadoPedido::EmEntrega
-        | EstadoPedido::Concluido
-        | EstadoPedido::Cancelado => {
+        EstadoPedido::Faturado | EstadoPedido::EmEntrega | EstadoPedido::Concluido => {
+            nfe::secao(ui, motor, sessao, &mut estado.nfe, p.pedido);
+        }
+        EstadoPedido::Cancelado => {
             ui.add(Rotulo::campo("Sem ações disponíveis neste estado."));
         }
     }

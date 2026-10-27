@@ -2,7 +2,7 @@
 //! criado na hora da venda (rápido, sem rede — **a venda nunca espera a SEFAZ**, `docs/10` §3)
 //! e a **tarefa** que transmite a fila fora de qualquer transação.
 
-use cardeal_fiscal::{AmbienteFiscal, Nfce};
+use cardeal_fiscal::{AmbienteFiscal, Nfce, Nfe};
 use cardeal_kernel::Id;
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::Resultado;
@@ -302,8 +302,10 @@ impl Comando for BuscarXmlsQueFaltam {
 pub struct DetalheDocumento {
     /// O resumo.
     pub resumo: DocumentoResumo,
-    /// A nota como foi montada (`None` se a montagem falhou).
+    /// A NFC-e como foi montada (`None` se a montagem falhou, ou se é uma NF-e).
     pub nota: Option<Nfce>,
+    /// A NF-e como foi montada (`None` se a montagem falhou, ou se é uma NFC-e).
+    pub nfe: Option<Nfe>,
     /// O XML autorizado.
     pub xml: Option<String>,
     /// A nota assinada em contingência (ou na emissão incerta), enquanto o XML autorizado não
@@ -326,9 +328,20 @@ impl Consulta for DocumentoFiscal {
     fn executar(self, ctx: &Ctx, c: &Connection) -> Resultado<DetalheDocumento> {
         let d = crate::sql_documento::documento(c, ctx.empresa, self.documento)?
             .ok_or_else(|| cardeal_kernel::Erro::nao_encontrado("documento fiscal"))?;
+        // A nota guardada é de um tipo ou de outro, conforme o modelo.
+        let nfe = d.resumo.modelo == cardeal_fiscal::ModeloFiscal::Nfe;
         Ok(DetalheDocumento {
+            nota: d
+                .nota
+                .as_deref()
+                .filter(|_| !nfe)
+                .and_then(|b| postcard::from_bytes(b).ok()),
+            nfe: d
+                .nota
+                .as_deref()
+                .filter(|_| nfe)
+                .and_then(|b| postcard::from_bytes(b).ok()),
             resumo: d.resumo,
-            nota: d.nota.and_then(|b| postcard::from_bytes(&b).ok()),
             xml: d.xml,
             xml_assinado: d.xml_assinado,
         })
@@ -732,29 +745,32 @@ pub(crate) mod sqlite {
                 "Esta nota não se reenvia: a venda foi desfeita ou o número já vai ser inutilizado",
             ));
         }
-        if origem_modulo != ORIGEM_PDV {
+        let (total, blob, motivo) = if origem_modulo == ORIGEM_PDV {
+            let (total, nota) = montar_do_cupom(
+                ctx,
+                uow,
+                resumo.origem,
+                resumo.serie,
+                resumo.numero,
+                resumo.ambiente,
+            )?;
+            let (blob, motivo) = blob_ou_motivo(nota)?;
+            (total, blob, motivo)
+        } else if origem_modulo == crate::nfe_venda::ORIGEM_VENDAS {
+            let (total, nota) = crate::nfe_venda::sqlite::montar_do_pedido(
+                ctx,
+                uow,
+                resumo.origem,
+                resumo.serie,
+                resumo.numero,
+            )?;
+            let (blob, motivo) = blob_ou_motivo(nota)?;
+            (total, blob, motivo)
+        } else {
             return Err(Erro::novo(
                 CodigoErro::ESTADO_INVALIDO,
                 "Origem do documento desconhecida",
             ));
-        }
-        let (total, nota) = montar_do_cupom(
-            ctx,
-            uow,
-            resumo.origem,
-            resumo.serie,
-            resumo.numero,
-            resumo.ambiente,
-        )?;
-        let (blob, motivo) = match nota {
-            Ok(n) => (
-                Some(
-                    postcard::to_stdvec(&n)
-                        .map_err(|e| Erro::novo(CodigoErro::FALHA_INTERNA, e.to_string()))?,
-                ),
-                None,
-            ),
-            Err(p) => (None, Some(p.join("; "))),
         };
         let c = uow.conexao();
         sqld::remontar(
@@ -769,6 +785,22 @@ pub(crate) mod sqlite {
         sqld::documento(c, ctx.empresa, documento)?
             .map(|d| d.resumo)
             .ok_or_else(|| Erro::nao_encontrado("documento fiscal"))
+    }
+
+    /// A nota em postcard — ou o que impede, numa frase.
+    fn blob_ou_motivo<T: serde::Serialize>(
+        nota: Result<T, Vec<String>>,
+    ) -> Resultado<(Option<Vec<u8>>, Option<String>)> {
+        Ok(match nota {
+            Ok(n) => (
+                Some(
+                    postcard::to_stdvec(&n)
+                        .map_err(|e| Erro::novo(CodigoErro::FALHA_INTERNA, e.to_string()))?,
+                ),
+                None,
+            ),
+            Err(p) => (None, Some(p.join("; "))),
+        })
     }
 
     /// A justificativa da SEFAZ: de 15 a 255 caracteres.
@@ -1022,6 +1054,7 @@ pub(crate) mod sqlite {
         // A incerta que segue sem resposta, com o cliente ainda no balcão: a substituta.
         let idade = doc.criado_em.micros_ate(Instante::agora()) / 1_000_000;
         let substituir = doc.pedido.is_none()
+            && doc.modelo == ModeloFiscal::Nfce
             && doc.nota.is_some()
             && pede_substituicao(
                 doc.estado,
@@ -1237,7 +1270,8 @@ pub(crate) mod sqlite {
         desfecho: Desfecho,
         fuso: cardeal_kernel::Fuso,
     ) -> Mudanca {
-        if pede_contingencia(doc.estado, &desfecho) {
+        // A contingência off-line é da NFC-e (a da NF-e é outra, a SVC).
+        if doc.modelo == ModeloFiscal::Nfce && pede_contingencia(doc.estado, &desfecho) {
             contingencia(porta, doc, csc, desfecho, fuso)
         } else {
             decidir(doc.estado, doc.tentativas, desfecho)
@@ -1370,6 +1404,13 @@ pub(crate) mod sqlite {
         uf: Option<Uf>,
     ) -> Desfecho {
         match (doc.estado, &doc.nota, &doc.chave, csc, uf) {
+            // A NF-e não tem CSC.
+            (EstadoDocumento::Pendente, Some(blob), _, _, _) if doc.modelo == ModeloFiscal::Nfe => {
+                match postcard::from_bytes::<cardeal_fiscal::Nfe>(blob) {
+                    Ok(nota) => desfecho(porta.emitir_nfe(&nota)),
+                    Err(e) => Desfecho::Recusado(format!("a nota guardada está ilegível: {e}")),
+                }
+            }
             (EstadoDocumento::Pendente, Some(blob), _, Some(csc), _) => {
                 match postcard::from_bytes::<Nfce>(blob) {
                     Ok(nota) => desfecho(porta.emitir_nfce(&nota, csc)),
@@ -1453,7 +1494,7 @@ pub(crate) mod sqlite {
                     u16::try_from(doc.criado_em.data(fuso).ano().rem_euclid(100)).unwrap_or(0);
                 desfecho(porta.inutilizar(&cardeal_fiscal::PedidoInutilizacao {
                     cnpj,
-                    modelo: MODELO,
+                    modelo: doc.modelo,
                     serie: doc.serie,
                     inicio: doc.numero,
                     fim: doc.numero,

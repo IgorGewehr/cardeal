@@ -13,6 +13,7 @@ use crate::nfce::{
     DocumentoDaVenda, DocumentoFiscal, DocumentosDasVendas, DocumentosFiscais, EmitirNfceDoCupom,
     InutilizarNumero, ReenviarDocumento, ResumoDaFilaFiscal, TAREFA_TRANSMITIR,
 };
+use crate::nfe_venda::{ConfiguracaoDaNfe, ConfigurarNfe, DocumentoDoPedido, EmitirNfeDoPedido};
 use crate::terminal::{DefinirSerieDoTerminal, SeriesDosTerminais};
 
 /// O módulo, para registrar no [`Despachante`](cardeal_modkit::Despachante).
@@ -41,6 +42,10 @@ impl Modulo for ModuloFiscal {
             .comando::<InutilizarNumero>("fiscal.inutilizar_numero.v1")
             .comando::<AnularDocumentoDaVenda>("fiscal.anular_documento_da_venda.v1")
             .comando::<DefinirSerieDoTerminal>("fiscal.definir_serie_do_terminal.v1")
+            .comando::<ConfigurarNfe>("fiscal.configurar_nfe.v1")
+            .consulta::<ConfiguracaoDaNfe>("fiscal.configuracao_nfe.v1")
+            .comando::<EmitirNfeDoPedido>("fiscal.emitir_nfe_do_pedido.v1")
+            .consulta::<DocumentoDoPedido>("fiscal.documento_do_pedido.v1")
             .consulta::<SeriesDosTerminais>("fiscal.series_dos_terminais.v1")
             .consulta::<ConfiguracaoDaNfce>("fiscal.configuracao_nfce.v1")
             .consulta::<DocumentosFiscais>("fiscal.documentos.v1")

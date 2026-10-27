@@ -143,6 +143,11 @@ impl Mundo {
             "fiscal.emitir",
             "fiscal.cancelar",
             "fiscal.configurar",
+            "vendas.pedido.criar",
+            "vendas.pedido.editar",
+            "vendas.pedido.confirmar",
+            "vendas.pedido.faturar",
+            "clientes.pessoa.editar",
         ] {
             papel = papel.com_permissao(p);
         }
@@ -1391,4 +1396,148 @@ fn a_nota_sem_resposta_ganha_substituta_em_contingencia() {
         emissoes,
         "a original não foi emitida de novo"
     );
+}
+
+#[test]
+fn o_pedido_faturado_vira_nfe_com_destinatario_e_duplicatas() {
+    use mod_fiscal::{ConfiguracaoNfe, ConfigurarNfe, DocumentoDoPedido, EmitirNfeDoPedido};
+    use mod_vendas::{
+        AdicionarItemPedido, ConfirmarPedido, CriarPedido, FaturarPedido, ItemFoiAdicionado,
+        PedidoCriado, PedidoFoiFaturado,
+    };
+    let m = Mundo::novo();
+    let cen = m.cenario();
+    m.configurar(1);
+    // A NF-e numera na sua série, separada da NFC-e.
+    let cfg: ConfiguracaoNfe = m
+        .executar(
+            "fiscal.configurar_nfe.v1",
+            &ConfigurarNfe {
+                serie: 2,
+                proximo_numero: 50,
+            },
+        )
+        .unwrap();
+    assert_eq!((cfg.serie, cfg.proximo_numero), (2, 50));
+    let pedido_faturado = |a_vista: bool| -> Id {
+        let p: PedidoCriado = m
+            .executar(
+                "vendas.criar_pedido.v1",
+                &CriarPedido {
+                    cliente: cen.cliente,
+                    vendedor: Id::novo(),
+                    condicao_pagamento: Id::novo(),
+                    tabela_preco: cen.tabela,
+                    local_expedicao: cen.local,
+                },
+            )
+            .unwrap();
+        let _: ItemFoiAdicionado = m
+            .executar(
+                "vendas.adicionar_item_pedido.v1",
+                &AdicionarItemPedido {
+                    pedido: p.pedido,
+                    produto: cen.produto,
+                    variacao: None,
+                    quantidade: Quantidade::unidades(2),
+                    desconto_percentual: Percentual::ZERO,
+                },
+            )
+            .unwrap();
+        m.rodar(
+            "vendas.confirmar_pedido.v1",
+            &ConfirmarPedido { pedido: p.pedido },
+        )
+        .unwrap();
+        let _: PedidoFoiFaturado = m
+            .executar(
+                "vendas.faturar_pedido.v1",
+                &FaturarPedido {
+                    pedido: p.pedido,
+                    a_vista,
+                },
+            )
+            .unwrap();
+        p.pedido
+    };
+    let emitir = |pedido: Id| -> DocumentoResumo {
+        m.executar(
+            "fiscal.emitir_nfe_do_pedido.v1",
+            &EmitirNfeDoPedido { pedido },
+        )
+        .unwrap()
+    };
+
+    // O cliente sem endereço: a nota nasce rejeitada, com o que corrigir.
+    let sem_endereco = pedido_faturado(false);
+    let d = emitir(sem_endereco);
+    assert_eq!(d.estado, EstadoDocumento::Rejeitada);
+    assert!(d.motivo.unwrap().contains("sem endereço"));
+
+    // Com o endereço (em Caxias do Sul — o código IBGE sai pelo nome), a prazo.
+    m.rodar(
+        "clientes.adicionar_endereco.v1",
+        &mod_clientes::AdicionarEndereco {
+            pessoa: cen.cliente,
+            tipo: mod_clientes::TipoEndereco::Residencial,
+            logradouro: "Rua Sinimbu".into(),
+            numero: "100".into(),
+            complemento: None,
+            bairro: "Centro".into(),
+            cidade: "caxias do sul".into(),
+            uf: "RS".into(),
+            cep: "95020000".into(),
+            principal: true,
+        },
+    )
+    .unwrap();
+    let a_prazo = pedido_faturado(false);
+    let doc = emitir(a_prazo);
+    assert_eq!(doc.estado, EstadoDocumento::Pendente, "{:?}", doc.motivo);
+    assert_eq!(
+        (doc.modelo, doc.serie, doc.numero),
+        (mod_fiscal::ModeloFiscal::Nfe, 2, 51)
+    );
+    let nfe = m.documento(doc.id).nfe.expect("a NF-e guardada");
+    assert_eq!(nfe.destinatario.endereco.codigo_municipio, "4305108");
+    assert_eq!(nfe.destinatario.endereco.municipio, "Caxias do Sul");
+    assert_eq!(
+        nfe.destinatario.indicador_ie,
+        cardeal_fiscal::IndicadorIe::NaoContribuinte
+    );
+    assert!(nfe.consumidor_final && nfe.a_prazo);
+    assert_eq!(nfe.duplicatas.len(), 1);
+    assert_eq!(nfe.duplicatas[0].valor, nfe.total());
+    assert_eq!(nfe.itens[0].cfop, "5102", "dentro do RS");
+    // Repetir devolve o mesmo documento; a fila autoriza, com a chave do modelo 55.
+    assert_eq!(emitir(a_prazo).id, doc.id);
+    assert!(m.transmitir().contains("autorizada"));
+    let autorizada = m.documento(doc.id).resumo;
+    assert_eq!(autorizada.estado, EstadoDocumento::Autorizada);
+    assert_eq!(&autorizada.chave.unwrap()[20..22], "55");
+    let do_pedido: Option<DocumentoResumo> = m.consultar(
+        "fiscal.documento_do_pedido.v1",
+        &DocumentoDoPedido { pedido: a_prazo },
+    );
+    assert_eq!(do_pedido.unwrap().id, doc.id);
+
+    // À vista: sem duplicatas. E a NFC-e segue na série dela.
+    let a_vista = emitir(pedido_faturado(true));
+    let nfe = m.documento(a_vista.id).nfe.unwrap();
+    assert!(!nfe.a_prazo && nfe.duplicatas.is_empty());
+    assert_eq!(a_vista.numero, 52);
+    let nfce = m.emitir(m.vender(&cen, cen.produto, 1, false));
+    assert_eq!(
+        (nfce.modelo, nfce.numero),
+        (mod_fiscal::ModeloFiscal::Nfce, 1)
+    );
+
+    // A rejeitada se reenvia depois de corrigir o cadastro: mesmo número, agora pendente.
+    let de_novo: DocumentoResumo = m
+        .executar(
+            "fiscal.reenviar_documento.v1",
+            &ReenviarDocumento { documento: d.id },
+        )
+        .unwrap();
+    assert_eq!(de_novo.estado, EstadoDocumento::Pendente);
 }

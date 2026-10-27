@@ -9,6 +9,7 @@
 use cardeal_kernel::{Cnpj, Data, Dinheiro, Preco, Quantidade};
 use quick_xml::events::Event;
 use quick_xml::reader::Reader;
+use serde::{Deserialize, Serialize};
 
 use crate::chave::ChaveAcesso;
 use crate::erros::ErroFiscal;
@@ -91,7 +92,7 @@ pub struct NotaFiscalXml {
 }
 
 /// Uma duplicata da nota (`cobr/dup`).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Duplicata {
     /// O número (`nDup`), como veio — `"001"`, `"1234/1"`… Vazio se ausente.
     pub numero: String,
@@ -102,7 +103,7 @@ pub struct Duplicata {
 }
 
 /// A finalidade da NF-e (`ide/finNFe`).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FinalidadeNfe {
     /// 1 — normal.
     #[default]
@@ -116,6 +117,17 @@ pub enum FinalidadeNfe {
 }
 
 impl FinalidadeNfe {
+    /// O código `finNFe`.
+    #[must_use]
+    pub const fn codigo(self) -> &'static str {
+        match self {
+            Self::Normal => "1",
+            Self::Complementar => "2",
+            Self::Ajuste => "3",
+            Self::Devolucao => "4",
+        }
+    }
+
     fn de_codigo(codigo: &str) -> Self {
         match codigo.trim() {
             "2" => Self::Complementar,

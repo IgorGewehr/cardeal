@@ -21,6 +21,8 @@ sqlite = [
     "mod-pdv/sqlite",
     "mod-estoque/sqlite",
     "mod-clientes/sqlite",
+    "mod-vendas/sqlite",
+    "mod-financeiro/sqlite",
 ]
 
 [dependencies]
@@ -31,6 +33,8 @@ mod-empresa     = { path = "../mod-empresa", default-features = false }
 mod-pdv         = { path = "../mod-pdv", default-features = false }
 mod-estoque     = { path = "../mod-estoque", default-features = false }
 mod-clientes    = { path = "../mod-clientes", default-features = false }
+mod-vendas      = { path = "../mod-vendas", default-features = false }
+mod-financeiro  = { path = "../mod-financeiro", default-features = false }
 cardeal-storage = { workspace = true, optional = true }
 rusqlite        = { workspace = true, optional = true }
 postcard        = { workspace = true, optional = true }
@@ -41,7 +45,5 @@ zeroize.workspace   = true
 [dev-dependencies]
 cardeal-auth.workspace = true
 cardeal-ledger.workspace = true
-mod-financeiro.workspace = true
-mod-vendas.workspace     = true
 postcard.workspace     = true
 tempfile.workspace     = true
