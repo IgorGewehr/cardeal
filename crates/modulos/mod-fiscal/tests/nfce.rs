@@ -1698,3 +1698,112 @@ fn a_nfe_autorizada_recebe_cartas_de_correcao_pela_fila() {
     assert!(arquivo.ends_with("01-procEventoNFe.xml"), "{arquivo}");
     assert!(xml.contains("<tpEvento>110110</tpEvento>"));
 }
+
+#[test]
+fn a_devolucao_de_compra_vira_nfe_que_se_remonta_e_transmite() {
+    use cardeal_fiscal::{DevolucaoDoItem, FinalidadeNfe};
+    use mod_fiscal::devolucao_compra::{
+        emitir_nfe_de_devolucao_comum, DadosDaDevolucao, DocumentoDaDevolucao, ItemDevolvidoNaNota,
+    };
+    let m = Mundo::novo();
+    let cen = m.cenario();
+    m.configurar(1);
+    m.rodar(
+        "clientes.adicionar_endereco.v1",
+        &mod_clientes::AdicionarEndereco {
+            pessoa: cen.cliente,
+            tipo: mod_clientes::TipoEndereco::Comercial,
+            logradouro: "Rua Sinimbu".into(),
+            numero: "100".into(),
+            complemento: None,
+            bairro: "Centro".into(),
+            cidade: "Caxias do Sul".into(),
+            uf: "RS".into(),
+            cep: "95020000".into(),
+            principal: true,
+        },
+    )
+    .unwrap();
+    let devolucao = Id::novo();
+    let fornecedor = cen.cliente;
+    let mut dados = DadosDaDevolucao {
+        chave_da_compra: None,
+        numero_da_compra: "4600".into(),
+        serie_da_compra: "1".into(),
+        emissao_da_compra: Data::de_ymd(2026, 9, 1).unwrap(),
+        motivo: "Produto com a embalagem avariada".into(),
+        itens: vec![ItemDevolvidoNaNota {
+            produto: cen.produto,
+            ncm: String::new(),
+            quantidade: Quantidade::unidades(4),
+            valor_unitario: Preco::de_str("4").unwrap(),
+            valor_bruto: Dinheiro::reais(16),
+            desconto: Dinheiro::ZERO,
+            origem: 0,
+            icms: Some((Dinheiro::reais(20), Percentual::de_str("12").unwrap())),
+            com_st: true,
+            devolvido: DevolucaoDoItem {
+                modalidade_st: Some("4".into()),
+                base_st: Dinheiro::reais(28),
+                aliquota_st: Some(Percentual::de_str("17").unwrap()),
+                valor_st: Dinheiro::centavos(236),
+                percentual_devolvido: Percentual::de_str("40").unwrap(),
+                ipi_devolvido: Dinheiro::centavos(80),
+                frete: Dinheiro::reais(4),
+                ..DevolucaoDoItem::default()
+            },
+        }],
+    };
+    let emitir = |d: &DadosDaDevolucao| -> DocumentoResumo {
+        let ctx = cardeal_modkit::Ctx::de_sessao(&m.sessao, &m.amb);
+        let d = d.clone();
+        m.arm
+            .escritor()
+            .executar(
+                ContextoEscrita::novo(m.empresa, Id::novo(), Id::novo(), Id::novo()),
+                move |uow| {
+                    emitir_nfe_de_devolucao_comum(devolucao, fornecedor, &d, &ctx, uow)
+                        .map_err(ErroArmazenamento::Dominio)
+                },
+            )
+            .unwrap()
+            .valor
+    };
+
+    // A nota de compra lançada à mão (sem chave): rejeitada já, com o porquê.
+    let rejeitada = emitir(&dados);
+    assert_eq!(rejeitada.estado, EstadoDocumento::Rejeitada);
+    assert!(rejeitada
+        .motivo
+        .as_deref()
+        .is_some_and(|m| m.contains("4600/1 não tem chave de acesso")));
+    // Pelas Notas fiscais não se reenvia: é pela devolução.
+    let reenvio: Result<DocumentoResumo, _> = m.executar(
+        "fiscal.reenviar_documento.v1",
+        &ReenviarDocumento {
+            documento: rejeitada.id,
+        },
+    );
+    assert!(reenvio.unwrap_err().mensagem.contains("em Compras"));
+
+    // Com a chave, remonta no mesmo número e vai para a fila; de novo, é a mesma nota.
+    dados.chave_da_compra = Some("4".repeat(44));
+    let pendente = emitir(&dados);
+    assert_eq!(
+        (pendente.id, pendente.numero),
+        (rejeitada.id, rejeitada.numero)
+    );
+    assert_eq!(pendente.estado, EstadoDocumento::Pendente);
+    assert_eq!(emitir(&dados).id, pendente.id);
+    assert!(m.transmitir().contains("1 autorizada"));
+    let doc: Option<DocumentoResumo> = m.consultar(
+        "fiscal.documento_da_devolucao.v1",
+        &DocumentoDaDevolucao { devolucao },
+    );
+    assert_eq!(doc.unwrap().estado, EstadoDocumento::Autorizada);
+    let nfe = m.documento(pendente.id).nfe.unwrap();
+    assert_eq!(nfe.finalidade, FinalidadeNfe::Devolucao);
+    assert_eq!(nfe.referencias, vec!["4".repeat(44)]);
+    assert_eq!(nfe.itens[0].cfop, "5411");
+    assert_eq!(nfe.total(), Dinheiro::centavos(2_316));
+}

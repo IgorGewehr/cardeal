@@ -342,6 +342,41 @@ fn item_json(numero: usize, item: &ItemDocumento) -> Value {
     })
 }
 
+/// O ST, o FCP do ST e o IPI devolvidos no item da devolução.
+fn devolvido_json(item: &mut Value, d: &crate::emissao::DevolucaoDoItem) {
+    for (campo, v) in [
+        ("valorFrete", d.frete),
+        ("valorSeguro", d.seguro),
+        ("valorOutro", d.outras),
+    ] {
+        if !v.e_zero() {
+            item["produto"][campo] = Value::from(reais(v));
+        }
+    }
+    let icms = &mut item["imposto"]["icms"];
+    if !d.valor_st.e_zero() {
+        icms["modBCST"] = Value::from(d.modalidade_st.clone().unwrap_or_else(|| "4".into()));
+        if let Some(m) = d.mva_st {
+            icms["mvaST"] = Value::from(numero_percentual(m));
+        }
+        icms["valorBCST"] = Value::from(reais(d.base_st));
+        icms["aliquotaST"] = Value::from(numero_percentual(d.aliquota_st.unwrap_or_default()));
+        icms["valorST"] = Value::from(reais(d.valor_st));
+    }
+    if !d.valor_fcp_st.e_zero() {
+        icms["valorBCFCPST"] = Value::from(reais(d.base_fcp_st));
+        icms["aliquotaFCPST"] =
+            Value::from(numero_percentual(d.aliquota_fcp_st.unwrap_or_default()));
+        icms["valorFCPST"] = Value::from(reais(d.valor_fcp_st));
+    }
+    if !d.ipi_devolvido.e_zero() {
+        item["impostoDevol"] = json!({
+            "percentualDevolvido": numero_percentual(d.percentual_devolvido),
+            "valorIPIDevolvido": reais(d.ipi_devolvido),
+        });
+    }
+}
+
 /// O corpo do `POST /nfe/nfce/emitir` (sem certificado e ambiente, que o adaptador põe).
 /// O endereço no formato do `sefaz-api` (emitente e destinatário).
 fn endereco_json(en: &crate::emissao::EnderecoEmitente) -> Value {
@@ -416,8 +451,10 @@ fn cobranca_json(nota: &Nfe) -> Value {
 
 /// O corpo da NF-e (`NFeRequest` do `sefaz-api`), sem o certificado.
 pub(crate) fn nfe_json(nota: &Nfe) -> serde_json::Map<String, Value> {
-    // Sem o meio de verdade (o pedido não diz como vai ser pago), "outros" com a descrição.
-    let formas: Vec<Value> = nota
+    let devolucao = nota.finalidade == crate::nfe::FinalidadeNfe::Devolucao;
+    // Sem o meio de verdade (o pedido não diz como vai ser pago), "outros" com a descrição. A
+    // devolução não tem pagamento: tPag 90 com zero (rejeição 871 com qualquer outro).
+    let mut formas: Vec<Value> = nota
         .pagamentos
         .iter()
         .map(|p| {
@@ -431,6 +468,9 @@ pub(crate) fn nfe_json(nota: &Nfe) -> serde_json::Map<String, Value> {
             f
         })
         .collect();
+    if devolucao || formas.is_empty() {
+        formas = vec![json!({ "tipo": "90", "valor": 0 })];
+    }
     let mut corpo = serde_json::Map::new();
     corpo.insert("emitente".into(), emitente_json(&nota.emitente));
     corpo.insert("destinatario".into(), destinatario_json(&nota.destinatario));
@@ -440,7 +480,13 @@ pub(crate) fn nfe_json(nota: &Nfe) -> serde_json::Map<String, Value> {
             nota.itens
                 .iter()
                 .enumerate()
-                .map(|(i, it)| item_json(i + 1, it))
+                .map(|(i, it)| {
+                    let mut v = item_json(i + 1, it);
+                    if let Some(d) = nota.devolvidos.get(i) {
+                        devolvido_json(&mut v, d);
+                    }
+                    v
+                })
                 .collect(),
         ),
     );
@@ -470,7 +516,14 @@ pub(crate) fn nfe_json(nota: &Nfe) -> serde_json::Map<String, Value> {
     );
     corpo.insert(
         "presencaComprador".into(),
-        Value::from(if nota.presencial { "1" } else { "9" }),
+        // A devolução não é presencial nem não presencial: "não se aplica" (0).
+        Value::from(if devolucao {
+            "0"
+        } else if nota.presencial {
+            "1"
+        } else {
+            "9"
+        }),
     );
     corpo.insert("transporte".into(), json!({ "modFrete": "9" }));
     corpo.insert(
@@ -1257,14 +1310,14 @@ mod testes {
         );
     }
 
-    #[test]
-    fn a_nfe_de_venda_a_prazo_leva_destinatario_e_duplicatas() {
+    /// A NF-e de venda a prazo do teste.
+    fn nfe_a_prazo() -> Nfe {
         use crate::emissao::{Destinatario, DocumentoConsumidor, IndicadorIe, MeioPagamento};
         let base = crate::emissao::exemplo();
         let mut endereco = base.emitente.endereco.clone();
         endereco.municipio = "Caxias do Sul".into();
         endereco.codigo_municipio = "4305108".into();
-        let nota = Nfe {
+        Nfe {
             emitente: base.emitente.clone(),
             destinatario: Destinatario {
                 documento: DocumentoConsumidor::Cnpj(
@@ -1296,7 +1349,13 @@ mod testes {
             serie: 1,
             numero: 12,
             informacoes: None,
-        };
+            devolvidos: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_nfe_de_venda_a_prazo_leva_destinatario_e_duplicatas() {
+        let nota = nfe_a_prazo();
         let corpo = Value::Object(nfe_json(&nota));
         let d = &corpo["destinatario"];
         assert_eq!(d["cnpj"], "11222333000181");
@@ -1317,16 +1376,57 @@ mod testes {
         );
         assert_eq!(corpo["numero"], 12);
         assert!(corpo.get("csc").is_none() && corpo.get("referencias").is_none());
+    }
 
+    #[test]
+    fn a_devolucao_leva_a_referencia_o_st_o_ipi_e_o_frete_sem_pagamento() {
+        let nota = nfe_a_prazo();
+        let base = crate::emissao::exemplo();
         // A devolução referencia a nota de origem.
         let mut devolucao = nota;
         devolucao.finalidade = crate::nfe::FinalidadeNfe::Devolucao;
         devolucao.referencias = vec!["4".repeat(44)];
         devolucao.duplicatas.clear();
+        devolucao.devolvidos = vec![crate::emissao::DevolucaoDoItem {
+            modalidade_st: Some("4".into()),
+            mva_st: Some(cardeal_kernel::Percentual::de_str("40").unwrap()),
+            base_st: cardeal_kernel::Dinheiro::centavos(2_520),
+            aliquota_st: Some(cardeal_kernel::Percentual::de_str("17").unwrap()),
+            valor_st: cardeal_kernel::Dinheiro::centavos(212),
+            base_fcp_st: cardeal_kernel::Dinheiro::centavos(2_520),
+            aliquota_fcp_st: Some(cardeal_kernel::Percentual::de_str("2").unwrap()),
+            valor_fcp_st: cardeal_kernel::Dinheiro::centavos(50),
+            percentual_devolvido: cardeal_kernel::Percentual::de_str("50").unwrap(),
+            ipi_devolvido: cardeal_kernel::Dinheiro::centavos(150),
+            frete: cardeal_kernel::Dinheiro::centavos(300),
+            seguro: cardeal_kernel::Dinheiro::ZERO,
+            outras: cardeal_kernel::Dinheiro::ZERO,
+        }];
         let corpo = Value::Object(nfe_json(&devolucao));
         assert_eq!(corpo["finalidade"], "4");
         assert_eq!(corpo["referencias"][0]["refNFe"], "4".repeat(44));
         assert!(corpo.get("cobranca").is_none());
+        assert_eq!(corpo["presencaComprador"], "0");
+        assert_eq!(
+            corpo["pagamento"]["formas"],
+            json!([{ "tipo": "90", "valor": 0 }])
+        );
+        let icms = &corpo["itens"][0]["imposto"]["icms"];
+        assert_eq!(icms["modBCST"], "4");
+        assert_eq!(icms["mvaST"], 40.0);
+        assert_eq!(icms["valorBCST"], 25.2);
+        assert_eq!(icms["valorST"], 2.12);
+        assert_eq!(icms["valorFCPST"], 0.5);
+        assert_eq!(
+            corpo["itens"][0]["impostoDevol"],
+            json!({ "percentualDevolvido": 50.0, "valorIPIDevolvido": 1.5 })
+        );
+        assert_eq!(corpo["itens"][0]["produto"]["valorFrete"], 3.0);
+        assert!(corpo["itens"][0]["produto"].get("valorSeguro").is_none());
+        assert_eq!(
+            devolucao.total(),
+            base.total() + cardeal_kernel::Dinheiro::centavos(712)
+        );
     }
 
     #[test]

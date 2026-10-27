@@ -209,6 +209,22 @@ impl<'a, 'b> RepositorioCompras<'a, 'b> {
             .map_err(persist)
     }
 
+    /// O XML original da nota, se guardado.
+    ///
+    /// # Errors
+    /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+    pub fn xml_da_nota(&self, nota: Id) -> Resultado<Option<String>> {
+        self.conn()
+            .query_row(
+                "SELECT xml FROM compras_nota_entrada WHERE id = ?1",
+                [blob(nota)],
+                |r| r.get(0),
+            )
+            .optional()
+            .map(Option::flatten)
+            .map_err(persist)
+    }
+
     /// Troca as parcelas da nota pelas informadas (as do XML na importação; as usadas na
     /// confirmação).
     ///

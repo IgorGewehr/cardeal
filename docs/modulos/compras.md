@@ -92,7 +92,8 @@ stateDiagram-v2
 | `ConferirQuantidade` | `compras.entrada.conferir` | Baixo | Ainda não implementado (não há `PedidoCompra` para comparar) | `QuantidadeDivergente` (aviso) |
 | `ConfirmarEntrada` ✅ | `compras.entrada.confirmar` | Alto | Exige todo item `Casado`; `mod_estoque::registrar_entrada_comum` por item e, se a preferência (ou o campo `gerar_titulo_a_pagar`) mandar, `mod_financeiro::lancar_titulo_comum` — chamados **direto, na mesma transação** (não via despacho — `docs/contratos-internos.md` §7 regra 2). Quando `pago_no_ato` (campo do comando, ou a preferência `pago_no_ato_padrao`) também é verdadeiro, a mesma transação já dá baixa completa no título recém-criado com `mod_financeiro::baixar_pagamento_comum`, na data da confirmação — a compra paga à vista nunca aparece "em aberto" no Contas a Pagar. Quando as preferências permitem e a varredura de `verificar_notas_na_sefaz` já casou tudo por GTIN ou regra aprendida, isto roda sozinho (`confirmar_entrada_comum`, mesma função por trás do comando). **Parcelas (2026-10-20):** o título a pagar nasce com as parcelas da nota — as duplicatas do XML (`cobr/dup`, guardadas na importação em `compras_nota_parcela`) ou as do campo `parcelas` (vencimento e valor de cada; a tela preenche com as duplicatas, divide em N a cada X dias ou acrescenta). Sem nenhuma, uma parcela vencendo na emissão. As parcelas precisam somar o total da nota e não vencer antes da emissão; as usadas ficam gravadas na nota. Duplicatas que não fecham com o total viram **aviso** na importação (a nota não se confirma sozinha). Pago no ato ignora as parcelas: uma só, quitada | `ItemNaoCasado`, `NotaJaConfirmada`, `EstadoDeNotaInvalido`, `ParcelasNaoFecham`, `ParcelaInvalida` |
 | `EstornarEntrada` ✅ (2026-10-20, `compras.estornar_entrada.v1`; prévia `compras.previa_estorno_entrada.v1`) | `compras.entrada.estornar` | Alto | Desfaz a entrada confirmada para corrigir (lição do `revertNoteImport` do `gestao-raiz`), numa transação: a mercadoria sai do estoque **ao custo da nota** (`mod_estoque::retirar_entradas_da_origem` — o custo médio volta ao que seria sem a entrada), o lançamento D Estoque / C Fornecedores é estornado e o título cancelado (`mod_financeiro::desfazer_titulo_da_origem_comum`), e a nota volta para `AConferir` com os itens casados como estavam — corrige-se o vínculo ou as parcelas e confirma de novo. **Recusa** se a mercadoria já não está toda no local (vendida, movida) e, se a conta já tem pagamento, exige `estornar_pagamento` (o pagamento é estornado e o dinheiro volta para a conta de onde saiu). Parcela renegociada bloqueia. Motivo ≥ 10 caracteres, que vai ao histórico do Razão. Nunca apaga | `EstadoDeNotaInvalido`, `MotivoDoEstornoCurto`, `EntradaComPagamento`, `EntradaJaConsumida`, `TituloComMovimento` |
-| `DevolverAoFornecedor` | `compras.devolucao.criar` | Alto | Ainda não implementado | `ValorSuperaOriginal` |
+| `DevolverAoFornecedor` ✅ (2026-10-27, `compras.devolver_ao_fornecedor.v1`; `compras.devolucoes_da_nota.v1`) | `compras.devolucao.criar` | Alto | Parte ou toda a mercadoria de uma nota **confirmada** volta, item a item (a nota pode voltar em várias devoluções). Numa transação: a mercadoria sai do estoque ao valor da compra, só se ainda está no local (`mod_estoque::devolver_parte_da_entrada`, com a mesma origem da entrada — o que voltou deixa de ser entrada viva); a conta a pagar da nota é **abatida** das parcelas em aberto, da que vence primeiro em diante (`mod_financeiro::abater_titulo_da_origem_comum`: D Fornecedores / C Estoque, sem caixa, sem juros); o que não couber (a conta já paga) vira **crédito com o fornecedor**, um título a receber dele (origem `compras_devolucao`). O valor de cada item é a parte dele no custo da nota (produto − desconto + frete/seguro/outras rateados + ST e IPI), na proporção; a última devolução do item leva o resto, e a soma fecha ao centavo. Devolvida toda, a nota vira `Devolvida`. A nota com devolução não se estorna mais (`NotaComDevolucao`). Motivo ≥ 10 caracteres (vai na NF-e). Sem aprovação em duas etapas (a spec previa `Solicitada` → `Concluida`): o comando é auditado | `EstadoDeNotaInvalido`, `DevolucaoVazia`, `DevolveMaisQueEntrou`, `MotivoDaDevolucaoCurto`, `DevolucaoMaiorQueOResto` (estoque) |
+| `EmitirNfeDaDevolucao` ✅ (2026-10-27, `compras.emitir_nfe_da_devolucao.v1`) | `fiscal.emitir` | Médio | A NF-e de devolução (finalidade 4) da devolução: o compras junta a nota, os itens e o XML da compra e o `mod-fiscal` monta e põe na fila (`docs/modulos/fiscal.md` §7). A rejeitada se emite de novo por aqui, depois de corrigir (no mesmo número) | os da NF-e |
 
 > **Nota (2026-09-13):** casamento por GTIN, importação por arquivo local e pago-no-ato
 > entraram nesta rodada — ver o histórico de "Nota (2026-09-05)" abaixo para o que já vinha de
@@ -214,8 +215,13 @@ stateDiagram-v2
 | Confirmação de entrada (NF de compra) | Estoque (1.3.01) | Fornecedores (2.1.01) | Confirmado |
 | Frete/seguro/outras despesas rateados | Estoque (já embutido no custo unitário) | Fornecedores/Caixa (conforme quem cobrou) | Confirmado |
 | Crédito de ICMS/PIS/COFINS na compra | Impostos a recuperar (1.2.05) | Estoque | Confirmado |
-| Devolução ao fornecedor (nota ainda não paga) | Fornecedores | Estoque | Confirmado (estorno proporcional) |
-| Devolução ao fornecedor (nota já paga) | Adiantamentos a fornecedores (1.2.04) | Estoque | Realizado |
+| Devolução ao fornecedor (nota ainda não paga) | Fornecedores | Estoque | Realizado (o abatimento é uma baixa sem dinheiro) |
+| Devolução ao fornecedor (nota já paga) | Clientes a receber (o fornecedor como contraparte) | Estoque | Confirmado (título a receber do fornecedor) |
+
+> **Desvio (2026-10-27):** a spec punha o crédito da nota já paga em Adiantamentos a fornecedores
+> (1.2.04). Fica em Clientes a receber: a baixa do financeiro credita sempre o papel padrão (Clientes a
+> receber), e um título em 1.2.04 deixaria as duas contas erradas quando o fornecedor devolvesse o
+> dinheiro. Levar para 1.2.04 pede a baixa pela conta do próprio título.
 
 ## 8. Eventos
 
@@ -406,14 +412,25 @@ CREATE TABLE compras_regra_casamento (
     PRIMARY KEY (empresa, fornecedor, codigo_fornecedor)
 ) STRICT, WITHOUT ROWID;
 
-CREATE TABLE compras_devolucao_fornecedor (
-    id                   BLOB PRIMARY KEY,
-    empresa              BLOB    NOT NULL,
-    nota_entrada_origem  BLOB    NOT NULL REFERENCES compras_nota_entrada(id),
-    fornecedor           BLOB    NOT NULL,
-    data                 INTEGER NOT NULL,
-    motivo               TEXT    NOT NULL,
-    valor_total          INTEGER NOT NULL,
-    estado               TEXT    NOT NULL CHECK (estado IN ('Solicitada','Concluida'))
+-- v9 (2026-10-27): a devolução ao fornecedor, item a item.
+CREATE TABLE compras_devolucao (
+    id           BLOB PRIMARY KEY,
+    empresa      BLOB    NOT NULL REFERENCES nucleo_empresa(id),
+    nota_entrada BLOB    NOT NULL REFERENCES compras_nota_entrada(id),
+    fornecedor   BLOB    NOT NULL,
+    data         INTEGER NOT NULL,
+    motivo       TEXT    NOT NULL,
+    valor_total  INTEGER NOT NULL,
+    abatido      INTEGER NOT NULL,   -- quanto abateu da conta a pagar
+    credito      BLOB,               -- o título a receber do fornecedor, se sobrou
+    criada_em    INTEGER NOT NULL,
+    criada_por   BLOB    NOT NULL
 ) STRICT;
+CREATE TABLE compras_devolucao_item (
+    devolucao  BLOB    NOT NULL REFERENCES compras_devolucao(id),
+    item       BLOB    NOT NULL REFERENCES compras_item_nota_entrada(id),
+    quantidade INTEGER NOT NULL CHECK (quantidade > 0),
+    valor      INTEGER NOT NULL,
+    PRIMARY KEY (devolucao, item)
+) STRICT, WITHOUT ROWID;
 ```

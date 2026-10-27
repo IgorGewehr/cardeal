@@ -24,6 +24,7 @@
 mod comandos;
 mod consultas;
 pub mod correcao;
+pub mod devolucao_compra;
 mod documento;
 mod erros;
 mod explicacao;

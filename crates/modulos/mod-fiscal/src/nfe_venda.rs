@@ -181,8 +181,9 @@ pub(crate) mod sqlite {
         configuracao(ctx.empresa, c)
     }
 
-    /// O destinatário a partir do cadastro do cliente.
-    fn destinatario(
+    /// O destinatário a partir do cadastro da pessoa (o cliente do pedido, o fornecedor da
+    /// devolução).
+    pub(crate) fn destinatario(
         c: &Connection,
         cliente: Id,
     ) -> Resultado<Result<cardeal_fiscal::Destinatario, Vec<String>>> {

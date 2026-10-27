@@ -393,6 +393,95 @@ pub fn retirar_entradas_da_origem(
     Ok(saidas)
 }
 
+/// Devolve **parte** do que uma origem pôs no estoque — a devolução ao fornecedor de parte de
+/// uma nota de compra. Uma saída do produto no local da entrada, com a mesma origem (assim o que
+/// volta deixa de ser entrada viva: a nota não se estorna depois como se tudo estivesse lá), ao
+/// custo `valor / quantidade` — o valor que o chamador credita no Razão, para estoque e
+/// contabilidade andarem juntos.
+///
+/// # Errors
+/// [`crate::ErroEstoque::DevolucaoMaiorQueOResto`] se o local não tem a quantidade (ou a origem
+/// não pôs o produto no estoque); local travado por inventário em contagem.
+#[cfg(feature = "sqlite")]
+pub fn devolver_parte_da_entrada(
+    origem_modulo: &'static str,
+    origem_id: Id,
+    produto: Id,
+    quantidade: Quantidade,
+    valor: cardeal_kernel::Dinheiro,
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<SaidaGravada> {
+    let viva = crate::consultas::entradas_vivas_da_origem(
+        uow.conexao(),
+        ctx.empresa,
+        origem_modulo,
+        origem_id,
+    )?
+    .into_iter()
+    .filter(|v| v.produto == produto)
+    .max_by_key(|v| v.quantidade.min(v.disponivel));
+    let resta = viva
+        .as_ref()
+        .map_or(Quantidade::ZERO, |v| v.quantidade.min(v.disponivel));
+    let Some(viva) = viva.filter(|_| resta >= quantidade) else {
+        return Err(Erro::de_dominio(
+            &crate::erros::ErroEstoque::DevolucaoMaiorQueOResto {
+                produto: uow
+                    .conexao()
+                    .query_row(
+                        "SELECT nome FROM estoque_produto WHERE id = ?1",
+                        [produto.em_bytes().as_slice()],
+                        |r| r.get::<_, String>(0),
+                    )
+                    .unwrap_or_default(),
+                pedido: quantidade.formatar(0),
+                resta: resta.max(Quantidade::ZERO).formatar(0),
+            },
+        ));
+    };
+    crate::repositorio_inventario::exigir_local_livre(uow.conexao(), viva.local)?;
+    let custo = preco_por_unidade_do_valor(valor, quantidade);
+    let mut repo = RepositorioEstoque::novo(uow);
+    let mut saldo = repo
+        .buscar_saldo(produto, viva.local)?
+        .ok_or_else(|| Erro::nao_encontrado("saldo do produto no local"))?;
+    let aplicada = saldo
+        .estorno_de_entrada(quantidade, custo, ctx.agora)
+        .map_err(|e| Erro::de_dominio(&e))?;
+    repo.atualizar_saldo(&saldo)?;
+    let movimento = Movimento {
+        id: Id::novo(),
+        empresa: ctx.empresa,
+        produto,
+        variacao: None,
+        local: viva.local,
+        tipo: TipoMovimento::Saida,
+        quantidade,
+        custo_unitario: Some(custo),
+        lote: None,
+        origem_modulo: origem_modulo.to_string(),
+        origem_id: Some(origem_id),
+        lancamento: None,
+        criado_em: ctx.agora,
+        criado_por: ctx.usuario,
+    };
+    repo.inserir_movimento(&movimento)?;
+    Ok(SaidaGravada {
+        movimento: movimento.id,
+        aplicada,
+    })
+}
+
+/// O preço unitário de um valor total (`valor / quantidade`, na precisão do [`Preco`]).
+#[cfg(feature = "sqlite")]
+fn preco_por_unidade_do_valor(valor: cardeal_kernel::Dinheiro, quantidade: Quantidade) -> Preco {
+    // Como o custo da nota em `compras` (`preco_por_unidade`): centavos × 1e8 / q interna.
+    let q = i128::from(quantidade.unidades_internas()).max(1);
+    let v = i128::from(valor.em_centavos()) * 100_000_000;
+    Preco::interna(i64::try_from((2 * v + q) / (2 * q)).unwrap_or(i64::MAX))
+}
+
 /// Como [`registrar_entrada_comum`], mas cria também um [`Lote`] rastreável (o código do
 /// post-it) para esta entrada — o que `RegistrarEntrada` usa quando a peça precisa de
 /// rastreabilidade individual (`docs/modulos/estoque.md` §3). Função própria, em vez de mais

@@ -49,6 +49,7 @@
 mod casamento;
 mod comandos;
 mod consultas;
+pub mod devolucao;
 mod dfe;
 mod erros;
 pub mod eventos;
@@ -76,6 +77,12 @@ pub use comandos::{CriarProdutoDoItem, ProdutoDoItemCriado};
 pub use consultas::{
     ItemDoEstorno, ItemNota, ItensDaNota, NotaDeEntradaDoMes, NotasDeEntradaDoMes, NotasRecentes,
     ParcelasDaNota, PreviaDoEstornoDaEntrada, PreviaEstornoEntrada,
+};
+#[cfg(feature = "sqlite")]
+pub use devolucao::EmitirNfeDaDevolucao;
+pub use devolucao::{
+    valor_devolvido, DevolucaoAoFornecedor, DevolucaoFeita, DevolucoesDaNota, DevolverAoFornecedor,
+    ItemADevolver, ItemDevolvido, MOTIVO_MINIMO_DEVOLUCAO,
 };
 pub use dfe::{
     EstadoNaSefaz, HoraDeBuscarNaSefaz, ImportarDeNovoDaSefaz, NotaNaSefaz, NotasNaSefaz,

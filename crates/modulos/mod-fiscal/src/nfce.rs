@@ -768,6 +768,13 @@ pub(crate) mod sqlite {
             )?;
             let (blob, motivo) = blob_ou_motivo(nota)?;
             (total, blob, motivo)
+        } else if origem_modulo == crate::devolucao_compra::ORIGEM_DEVOLUCAO_COMPRA {
+            // Os dados da devolução são do compras: a nota se remonta por lá.
+            return Err(Erro::novo(
+                CodigoErro::ESTADO_INVALIDO,
+                "A NF-e de devolução se reenvia pela devolução, em Compras (Emitir NF-e de \
+                 devolução de novo, depois de corrigir)",
+            ));
         } else {
             return Err(Erro::novo(
                 CodigoErro::ESTADO_INVALIDO,

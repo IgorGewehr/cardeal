@@ -213,6 +213,33 @@ registrada; o XML do evento é guardado "se der" (aqui vai na mesma escrita do r
 Junto, o pacote passou a dar ao cancelamento por substituição o nome com o tipo dele
 (`110112<chave>01-procEventoNFe.xml`) — saía como 110111.
 
+**NF-e de devolução de compra** (`mod_fiscal::devolucao_compra`, 2026-10-27): a mercadoria que volta ao
+fornecedor (`docs/modulos/compras.md`, `DevolverAoFornecedor`) sai numa NF-e de finalidade 4, com a nota
+de compra referenciada (`refNFe`) e, na proporção do que volta, o que a compra destacou — para o fornecedor
+recuperar o crédito:
+- o ICMS próprio (CSOSN 900, a base na proporção e a alíquota da compra; o valor sai da base × alíquota,
+  como a SEFAZ confere);
+- o ST e o FCP do ST (`vBCST`, `pICMSST`, `vICMSST`, `pMVAST`, `vBCFCPST`, `pFCPST`, `vFCPST`);
+- o IPI que o comércio pagou, no `impostoDevol` (`pDevol`, `vIPIDevol` — NT 2016.002);
+- o frete, o seguro e as outras despesas: o que fecha o valor da devolução, repartido como na nota.
+
+Os campos vêm do XML guardado da compra (`cardeal_fiscal::TributosDaCompra`, lidos campo a campo na
+importação). CFOP 5202/6202, ou 5411/6411 quando a compra veio com ST (cobrado nela ou retido antes);
+natureza "Devolução de compra para comercialização"; sem pagamento (tPag 90); indPres 0 (não se aplica);
+indFinal pelo cadastro do fornecedor; nas informações complementares, a nota de origem (número, série,
+data, chave), o motivo, o IPI devolvido e o texto do Simples. A NF-e soma o líquido dos itens com o
+devolvido (`Nfe.devolvidos`), e fecha ao centavo com o valor da devolução no compras.
+
+Recusada (vira rejeitada, com o porquê): no **regime normal** (o estorno do crédito de ICMS, PIS e COFINS da
+compra não está no cálculo) e na nota de compra **lançada à mão**, sem chave. Quem junta os dados é o
+compras (o fiscal não lê tabela de outro módulo); por isso a rejeitada se emite de novo pela devolução —
+o Reenviar das Notas fiscais explica isso. Comparado com o gestao-raiz: lá a devolução é o formulário
+genérico de NF-e (finalidade 4, a chave referenciada digitada), sem os tributos da compra.
+
+O `sefaz-api` ganhou o `impostoDevol` e o FCP do ST (8075fde) — e, de quebra, uma correção: a validação
+exigia `vICMSST = vBCST × pICMSST`, mas o ST é esse produto **menos** o ICMS próprio; todo ST de verdade
+era recusado. Agora o ST só não pode passar do produto.
+
 **Série por caixa** (migração v8, 2026-10-27): `DefinirSerieDoTerminal` (`fiscal.definir_serie_do_terminal.v1`,
 `fiscal.configurar`) dá a um terminal a sua série (1 a 889, com nome e, se a série já foi usada em outro
 sistema, o próximo número); `serie: None` o devolve à série da empresa. `SeriesDosTerminais`
@@ -430,7 +457,8 @@ Cancelar e configurar continuam fora do papel.
    nota incerta (outro número em contingência; a original cancelada por substituição, 110112, ou inutilizada;
    `sefaz-api` 43c98f0). Falta a conferência na SEFAZ de verdade.
 4. ~~Série por terminal~~ — feita em 2026-10-27 (§7, "Série por caixa").
-5. NF-e: ~~a de venda, o DANFE A4 e a carta de correção~~ (2026-10-27, §7); falta a devolução.
+5. NF-e: ~~a de venda, o DANFE A4, a carta de correção e a devolução de compra~~ (2026-10-27, §7); falta
+   a de devolução de venda (a entrada da mercadoria que o cliente devolve).
 6. NFS-e da OS.
 7. SPED gerado no Cardeal.
 8. ~~DFe e manifestação~~ — feito em 2026-10-26 (sefaz-api 842576f; a busca de notas em

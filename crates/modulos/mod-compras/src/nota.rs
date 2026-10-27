@@ -106,6 +106,21 @@ impl NotaEntrada {
         Ok(())
     }
 
+    /// A nota voltou inteira ao fornecedor: `Confirmada` → `Devolvida`.
+    ///
+    /// # Errors
+    /// [`ErroCompras::EstadoDeNotaInvalido`] se a nota não está confirmada.
+    pub fn devolver(&mut self) -> Result<(), ErroCompras> {
+        if self.estado != EstadoNotaEntrada::Confirmada {
+            return Err(ErroCompras::EstadoDeNotaInvalido {
+                atual: self.estado.rotulo(),
+                esperado: EstadoNotaEntrada::Confirmada.rotulo(),
+            });
+        }
+        self.transitar(EstadoNotaEntrada::Devolvida);
+        Ok(())
+    }
+
     /// Confirma a entrada: `AConferir`/`Conferida` → `Confirmada`.
     ///
     /// # Errors

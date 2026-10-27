@@ -61,6 +61,30 @@ pub enum ErroCompras {
         "A conta desta nota já tem {0} pago — para estornar a entrada, estorne também o pagamento"
     )]
     EntradaComPagamento(Dinheiro),
+
+    /// O motivo da devolução vai à NF-e: ao menos 10 caracteres.
+    #[error("Explique o motivo da devolução (ao menos 10 caracteres)")]
+    MotivoDaDevolucaoCurto,
+
+    /// Nada a devolver.
+    #[error("Escolha o que volta ao fornecedor (ao menos um item com quantidade)")]
+    DevolucaoVazia,
+
+    /// Mais do que entrou (descontado o que já voltou).
+    #[error("{item}: só restam {resta} a devolver desta nota")]
+    DevolveMaisQueEntrou {
+        /// A descrição do item.
+        item: String,
+        /// O que ainda pode voltar.
+        resta: String,
+    },
+
+    /// A entrada com devolução não se estorna: a devolução já mexeu no estoque e na conta.
+    #[error(
+        "Esta nota tem devolução ao fornecedor — a entrada não se estorna mais (corrija com \
+         outra devolução)"
+    )]
+    NotaComDevolucao,
 }
 
 impl ErroDominio for ErroCompras {
@@ -75,8 +99,11 @@ impl ErroDominio for ErroCompras {
             | Self::NaoECompra(_)
             | Self::ParcelasNaoFecham { .. }
             | Self::ParcelaInvalida(_)
-            | Self::MotivoDoEstornoCurto => CodigoErro::ENTRADA_INVALIDA,
-            Self::EntradaComPagamento(_) => CodigoErro::REGRA_VIOLADA,
+            | Self::MotivoDoEstornoCurto
+            | Self::MotivoDaDevolucaoCurto
+            | Self::DevolucaoVazia
+            | Self::DevolveMaisQueEntrou { .. } => CodigoErro::ENTRADA_INVALIDA,
+            Self::EntradaComPagamento(_) | Self::NotaComDevolucao => CodigoErro::REGRA_VIOLADA,
         }
     }
 

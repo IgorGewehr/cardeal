@@ -79,6 +79,9 @@ impl Comando for EstornarEntrada {
             return Err(Erro::de_dominio(&ErroCompras::MotivoDoEstornoCurto));
         }
         nota.estornar().map_err(|e| Erro::de_dominio(&e))?;
+        if crate::devolucao::sqlite::tem_devolucao(uow.conexao(), nota.id)? {
+            return Err(Erro::de_dominio(&ErroCompras::NotaComDevolucao));
+        }
         if let Some((_, pago)) = mod_financeiro::situacao_do_titulo_da_origem(
             uow.conexao(),
             ctx.empresa,

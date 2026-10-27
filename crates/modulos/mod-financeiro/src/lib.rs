@@ -114,11 +114,13 @@ pub use categoria::CategoriaFinanceira;
 pub use comandos::lancar_conta_a_pagar_avulsa;
 #[cfg(feature = "sqlite")]
 pub use comandos::lancar_titulo_comum;
+pub use comandos::AbatimentoFeito;
 pub use comandos::QuitadoAgora;
 #[cfg(feature = "sqlite")]
 pub use comandos::{
-    baixar_pagamento_comum, baixar_recebimento_comum, desfazer_titulo_da_origem_comum,
-    estornar_baixa_comum, materializar_recorrencias_pendentes,
+    abater_titulo_da_origem_comum, baixar_pagamento_comum, baixar_recebimento_comum,
+    desfazer_titulo_da_origem_comum, estornar_baixa_comum, materializar_recorrencias_pendentes,
+    DadosAbatimento,
 };
 pub use comandos::{
     AbrirCaixa, AlterarVencimento, BaixaFoiEstornada, BaixarPagamento, BaixarRecebimento,

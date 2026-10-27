@@ -57,10 +57,10 @@ pub use emissao::{
     IcmsItem, ImpostosItem, ItemDocumento, MeioPagamento, Nfce, PagamentoDocumento,
     PedidoInutilizacao, RetornoSefaz, SituacaoRetorno,
 };
-pub use emissao::{Destinatario, IndicadorIe, Nfe};
+pub use emissao::{Destinatario, DevolucaoDoItem, IndicadorIe, Nfe};
 pub use erros::ErroFiscal;
 pub use nfe::{cfop_de_venda, descrever_cfop, ClassificacaoEntrada, FinalidadeNfe};
-pub use nfe::{interpretar, Duplicata, ItemNfe, NotaFiscalXml};
+pub use nfe::{interpretar, Duplicata, ItemNfe, NotaFiscalXml, TributosDaCompra};
 pub use porta::{AmbienteFiscal, ModeloFiscal, Nsu, PortaFiscal, StatusSefaz};
 pub use sefaz_api::{ApiFiscalHttp, CertificadoA1, ConfigApiFiscal};
 pub use simulado::FiscalSimulado;

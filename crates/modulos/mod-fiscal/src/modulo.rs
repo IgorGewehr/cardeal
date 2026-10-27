@@ -46,6 +46,9 @@ impl Modulo for ModuloFiscal {
             .comando::<ConfigurarNfe>("fiscal.configurar_nfe.v1")
             .comando::<EmitirCartaDeCorrecao>("fiscal.emitir_carta_de_correcao.v1")
             .consulta::<CartasDeCorrecao>("fiscal.cartas_de_correcao.v1")
+            .consulta::<crate::devolucao_compra::DocumentoDaDevolucao>(
+                "fiscal.documento_da_devolucao.v1",
+            )
             .consulta::<ConfiguracaoDaNfe>("fiscal.configuracao_nfe.v1")
             .comando::<EmitirNfeDoPedido>("fiscal.emitir_nfe_do_pedido.v1")
             .consulta::<DocumentoDoPedido>("fiscal.documento_do_pedido.v1")

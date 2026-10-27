@@ -304,13 +304,65 @@ pub struct Nfe {
     pub numero: u64,
     /// Informações complementares.
     pub informacoes: Option<String>,
+    /// Na devolução, o que cada item devolve além do ICMS próprio (alinhado com `itens`;
+    /// vazio na venda).
+    pub devolvidos: Vec<DevolucaoDoItem>,
 }
 
 impl Nfe {
-    /// O total da nota (`vNF` = soma dos líquidos).
+    /// O total da nota (`vNF`): os líquidos dos itens, mais o ST, o FCP do ST e o IPI
+    /// devolvidos.
     #[must_use]
     pub fn total(&self) -> Dinheiro {
-        self.itens.iter().map(ItemDocumento::valor_liquido).sum()
+        let itens: Dinheiro = self.itens.iter().map(ItemDocumento::valor_liquido).sum();
+        itens + self.devolvidos.iter().map(DevolucaoDoItem::soma).sum()
+    }
+}
+
+/// O que um item da NF-e de devolução devolve além do ICMS próprio: o ST e o FCP do ST que a
+/// compra destacou e o IPI que o comércio pagou (`impostoDevol`, NT 2016.002) — na proporção do
+/// que volta.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DevolucaoDoItem {
+    /// A modalidade da base do ST (`modBCST`), quando há ST.
+    pub modalidade_st: Option<String>,
+    /// A margem do ST (`pMVAST`).
+    pub mva_st: Option<Percentual>,
+    /// A base do ST.
+    pub base_st: Dinheiro,
+    /// A alíquota do ST.
+    pub aliquota_st: Option<Percentual>,
+    /// O ST.
+    pub valor_st: Dinheiro,
+    /// A base do FCP do ST.
+    pub base_fcp_st: Dinheiro,
+    /// A alíquota do FCP do ST.
+    pub aliquota_fcp_st: Option<Percentual>,
+    /// O FCP do ST.
+    pub valor_fcp_st: Dinheiro,
+    /// Quanto da mercadoria da compra volta (`pDevol`).
+    pub percentual_devolvido: Percentual,
+    /// O IPI devolvido (`vIPIDevol`).
+    pub ipi_devolvido: Dinheiro,
+    /// O frete da compra que volta com o item (`vFrete`).
+    pub frete: Dinheiro,
+    /// O seguro (`vSeg`).
+    pub seguro: Dinheiro,
+    /// As outras despesas (`vOutro`).
+    pub outras: Dinheiro,
+}
+
+impl DevolucaoDoItem {
+    /// O que soma no total da nota além do líquido do item: ST, FCP do ST, IPI devolvido,
+    /// frete, seguro e outras despesas.
+    #[must_use]
+    pub fn soma(&self) -> Dinheiro {
+        self.valor_st
+            + self.valor_fcp_st
+            + self.ipi_devolvido
+            + self.frete
+            + self.seguro
+            + self.outras
     }
 }
 

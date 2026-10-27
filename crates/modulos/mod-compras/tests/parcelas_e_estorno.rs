@@ -11,10 +11,11 @@ use cardeal_ledger::semear_plano_padrao;
 use cardeal_modkit::{Ambiente, Ctx, Despachante, Modulo, PedidoAtivacao, RegistroModulos};
 use cardeal_storage::{Armazenamento, ConfigArmazenamento, ContextoEscrita, ErroArmazenamento};
 use mod_compras::{
-    ConfirmarEntrada, EntradaConfirmada, EntradaFoiEstornada, EstadoNotaEntrada, EstornarEntrada,
-    ImportarNotaDeArquivoXml, ItensDaNota, ModuloCompras, NotaDeEntradaDoMes, NotasDeEntradaDoMes,
-    ParcelaCompra, ParcelasDaNota, PreviaDoEstornoDaEntrada, PreviaEstornoEntrada,
-    RelatorioImportacao, VincularProdutoManual,
+    ConfirmarEntrada, DevolucaoAoFornecedor, DevolucaoFeita, DevolucoesDaNota,
+    DevolverAoFornecedor, EntradaConfirmada, EntradaFoiEstornada, EstadoNotaEntrada,
+    EstornarEntrada, ImportarNotaDeArquivoXml, ItemADevolver, ItensDaNota, ModuloCompras,
+    NotaDeEntradaDoMes, NotasDeEntradaDoMes, ParcelaCompra, ParcelasDaNota,
+    PreviaDoEstornoDaEntrada, PreviaEstornoEntrada, RelatorioImportacao, VincularProdutoManual,
 };
 use mod_estoque::{ModuloEstoque, RepositorioEstoque};
 use serde::de::DeserializeOwned;
@@ -79,6 +80,7 @@ impl Base {
             "compras.entrada.conferir",
             "compras.entrada.confirmar",
             "compras.entrada.estornar",
+            "compras.devolucao.criar",
         ] {
             papel = papel.com_permissao(p);
         }
@@ -297,6 +299,86 @@ impl Base {
         )
     }
 
+    fn devolver(&self, nota: Id, item: Id, quantidade: i64) -> Result<DevolucaoFeita, Erro> {
+        self.executar(
+            "compras.devolver_ao_fornecedor.v1",
+            &DevolverAoFornecedor {
+                nota_entrada: nota,
+                itens: vec![ItemADevolver {
+                    item,
+                    quantidade: Quantidade::unidades(quantidade),
+                }],
+                motivo: "Produto com a embalagem avariada".into(),
+            },
+        )
+    }
+
+    /// Paga o que falta da parcela `numero` do título da nota, no vencimento (Pix).
+    fn pagar_parcela(&self, nota: Id, numero: i64) {
+        let ctx = self.ctx();
+        self.arm
+            .escritor()
+            .executar(
+                ContextoEscrita::novo(self.empresa, Id::novo(), Id::novo(), Id::novo()),
+                move |uow| {
+                    let (id, valor, baixado, vencimento): (Vec<u8>, i64, i64, i32) = uow
+                        .conexao()
+                        .query_row(
+                            "SELECT p.id, p.valor, p.valor_baixado, p.vencimento
+                             FROM financeiro_parcela p
+                             JOIN financeiro_titulo t ON t.id = p.titulo
+                             WHERE t.origem_modulo = 'compras' AND t.origem_id = ?1
+                               AND p.numero = ?2",
+                            rusqlite::params![nota.em_bytes().as_slice(), numero],
+                            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+                        )
+                        .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))?;
+                    mod_financeiro::baixar_pagamento_comum(
+                        Id::de_bytes(id.try_into().unwrap()),
+                        Dinheiro::centavos(valor - baixado),
+                        Data::de_dias(vencimento),
+                        mod_financeiro::MeioPagamento::Pix,
+                        None,
+                        &ctx,
+                        uow,
+                    )
+                    .map_err(ErroArmazenamento::Dominio)
+                },
+            )
+            .unwrap();
+    }
+
+    /// As parcelas do título vivo da nota: (valor, já baixado, estado).
+    fn baixas(&self, nota: Id) -> Vec<(Dinheiro, Dinheiro, String)> {
+        let nota = nota.em_bytes().to_vec();
+        self.arm
+            .leitor()
+            .consultar(move |c| {
+                let mut st = c
+                    .prepare(
+                        "SELECT p.valor, p.valor_baixado, p.estado FROM financeiro_parcela p
+                         JOIN financeiro_titulo t ON t.id = p.titulo
+                         WHERE t.origem_modulo = 'compras' AND t.origem_id = ?1
+                           AND t.cancelado_em IS NULL
+                         ORDER BY p.numero",
+                    )
+                    .unwrap();
+                let l = st
+                    .query_map([&nota], |r| {
+                        Ok((
+                            Dinheiro::centavos(r.get(0)?),
+                            Dinheiro::centavos(r.get(1)?),
+                            r.get::<_, String>(2)?,
+                        ))
+                    })
+                    .unwrap()
+                    .collect::<Result<Vec<_>, _>>()
+                    .unwrap();
+                Ok(l)
+            })
+            .unwrap()
+    }
+
     fn estado_da_nota(&self, nota: Id) -> String {
         self.sql(
             "SELECT estado FROM compras_nota_entrada WHERE id = ?1",
@@ -345,6 +427,31 @@ fn xml(chave: char, duplicatas: &[(&str, &str)]) -> String {
   <total><ICMSTot><vProd>40.00</vProd><vFrete>10.00</vFrete><vSeg>0.00</vSeg><vOutro>0.00</vOutro>
     <vNF>50.00</vNF></ICMSTot></total>
   {cobr}
+</infNFe></NFe></nfeProc>"#
+    )
+}
+
+/// A nota da devolução: 10 × R$ 4,00 com ICMS próprio (base 50,00 a 12%), ST (base 70,00 a
+/// 17%: R$ 5,90), IPI de R$ 2,00 e R$ 10,00 de frete — R$ 57,90 em duas duplicatas.
+fn xml_com_impostos() -> String {
+    let chave: String = std::iter::repeat_n('7', 44).collect();
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe"><NFe>
+<infNFe Id="NFe{chave}" versao="4.00">
+  <ide><nNF>4600</nNF><serie>1</serie><dhEmi>2026-09-01T09:00:00-03:00</dhEmi></ide>
+  <emit><CNPJ>{CNPJ_FORNECEDOR}</CNPJ><xNome>Distribuidora Alfa LTDA</xNome></emit>
+  <det nItem="1"><prod><cProd>REF-1</cProd><xProd>REFRIG COLA PET 2L</xProd><NCM>22021000</NCM>
+    <qCom>10.0000</qCom><vUnCom>4.000000</vUnCom><vProd>40.00</vProd><vFrete>10.00</vFrete></prod>
+    <imposto><ICMS><ICMS10><orig>0</orig><CST>10</CST><modBC>3</modBC><vBC>50.00</vBC>
+      <pICMS>12.00</pICMS><vICMS>6.00</vICMS><modBCST>4</modBCST><pMVAST>40.00</pMVAST>
+      <vBCST>70.00</vBCST><pICMSST>17.00</pICMSST><vICMSST>5.90</vICMSST></ICMS10></ICMS>
+      <IPI><IPITrib><vIPI>2.00</vIPI></IPITrib></IPI></imposto></det>
+  <total><ICMSTot><vProd>40.00</vProd><vST>5.90</vST><vIPI>2.00</vIPI><vFrete>10.00</vFrete>
+    <vSeg>0.00</vSeg><vOutro>0.00</vOutro><vNF>57.90</vNF></ICMSTot></total>
+  <cobr><fat><nFat>4600</nFat></fat>
+    <dup><nDup>001</nDup><dVenc>2026-10-01</dVenc><vDup>28.95</vDup></dup>
+    <dup><nDup>002</nDup><dVenc>2026-11-01</dVenc><vDup>28.95</vDup></dup></cobr>
 </infNFe></NFe></nfeProc>"#
     )
 }
@@ -621,4 +728,129 @@ fn a_nota_guarda_o_xml_original_e_vai_ao_contador_no_mes_da_emissao() {
     let setembro = do_mes(Competencia::nova(2026, 9));
     assert_eq!(setembro.len(), 1);
     assert_eq!(setembro[0].xml.as_deref(), Some(original.as_str()));
+}
+
+#[test]
+fn devolver_ao_fornecedor_abate_a_conta_e_o_que_sobra_vira_credito() {
+    let b = Base::nova();
+    let (produto, local) = b.produto_e_local();
+    let r = b.importar_e_vincular(xml_com_impostos(), produto);
+    b.confirmar(r.nota_entrada, local, false, None).unwrap();
+    let itens: Vec<mod_compras::ItemNotaEntrada> = b.consultar(
+        "compras.itens_da_nota.v1",
+        &ItensDaNota {
+            nota: r.nota_entrada,
+        },
+    );
+    let item = itens[0].id;
+    assert_eq!(itens[0].custo_total(), Dinheiro::centavos(5_790));
+
+    // Mais do que entrou: recusado.
+    assert_eq!(
+        b.devolver(r.nota_entrada, item, 11).unwrap_err().codigo,
+        CodigoErro::ENTRADA_INVALIDA
+    );
+
+    // 4 de 10 voltam: R$ 23,16 (40% de 57,90) abatem a primeira parcela.
+    let primeira = b.devolver(r.nota_entrada, item, 4).unwrap();
+    assert_eq!(primeira.valor_total, Dinheiro::centavos(2_316));
+    assert_eq!(primeira.abatido, primeira.valor_total);
+    assert_eq!((primeira.credito, primeira.nota_devolvida), (None, false));
+    assert_eq!(b.saldo_no_local(produto, local), Quantidade::unidades(6));
+    assert_eq!(
+        b.baixas(r.nota_entrada),
+        vec![
+            (
+                Dinheiro::centavos(2_895),
+                Dinheiro::centavos(2_316),
+                "Parcial".to_owned()
+            ),
+            (
+                Dinheiro::centavos(2_895),
+                Dinheiro::ZERO,
+                "Aberta".to_owned()
+            ),
+        ]
+    );
+    assert_eq!(b.estado_da_nota(r.nota_entrada), "Confirmada");
+    assert_eq!(
+        b.estornar(r.nota_entrada, false).unwrap_err().codigo,
+        CodigoErro::REGRA_VIOLADA,
+        "com devolução, a entrada não se estorna"
+    );
+
+    // A NF-e de devolução fecha com o valor: produto 16,00 + ST 2,36 + IPI 0,80 + frete 4,00.
+    let devolucoes: Vec<DevolucaoAoFornecedor> = b.consultar(
+        "compras.devolucoes_da_nota.v1",
+        &DevolucoesDaNota {
+            nota_entrada: r.nota_entrada,
+        },
+    );
+    assert_eq!(devolucoes.len(), 1);
+    assert_eq!(devolucoes[0].itens[0].quantidade, Quantidade::unidades(4));
+    let nota_id = r.nota_entrada;
+    let (nota, todos) = b
+        .arm
+        .escritor()
+        .executar(
+            ContextoEscrita::novo(b.empresa, Id::novo(), Id::novo(), Id::novo()),
+            move |uow| {
+                let repo = mod_compras::RepositorioCompras::novo(uow);
+                let nota = repo
+                    .buscar_nota(nota_id)
+                    .map_err(ErroArmazenamento::Dominio)?
+                    .unwrap();
+                let itens = repo
+                    .itens_da_nota(nota_id)
+                    .map_err(ErroArmazenamento::Dominio)?;
+                Ok((nota, itens))
+            },
+        )
+        .unwrap()
+        .valor;
+    let xml = cardeal_fiscal::interpretar(&xml_com_impostos()).unwrap();
+    let dados = mod_compras::devolucao::dados_da_nfe(&nota, &todos, &devolucoes[0], Some(&xml));
+    let i = &dados.itens[0];
+    assert_eq!(i.valor_bruto, Dinheiro::reais(16));
+    assert_eq!(
+        i.icms,
+        Some((
+            Dinheiro::reais(20),
+            cardeal_kernel::Percentual::de_str("12").unwrap()
+        ))
+    );
+    assert!(i.com_st);
+    assert_eq!(i.devolvido.valor_st, Dinheiro::centavos(236));
+    assert_eq!(i.devolvido.base_st, Dinheiro::reais(28));
+    assert_eq!(i.devolvido.ipi_devolvido, Dinheiro::centavos(80));
+    assert_eq!(i.devolvido.frete, Dinheiro::reais(4));
+    assert_eq!(
+        i.valor_bruto - i.desconto + i.devolvido.soma(),
+        primeira.valor_total,
+        "a NF-e fecha com a devolução"
+    );
+    assert_eq!(dados.chave_da_compra, Some("7".repeat(44)));
+
+    // A segunda parcela é paga; os 6 que restam voltam: R$ 34,74 — abatem os R$ 5,79 em
+    // aberto e o resto (R$ 28,95) vira crédito com o fornecedor.
+    b.pagar_parcela(r.nota_entrada, 2);
+    let segunda = b.devolver(r.nota_entrada, item, 6).unwrap();
+    assert_eq!(segunda.valor_total, Dinheiro::centavos(3_474));
+    assert_eq!(segunda.abatido, Dinheiro::centavos(579));
+    assert!(segunda.credito.is_some() && segunda.nota_devolvida);
+    assert!(b.saldo_no_local(produto, local).e_zero());
+    assert_eq!(b.estado_da_nota(r.nota_entrada), "Devolvida");
+    let credito: i64 = b.sql(
+        "SELECT p.valor FROM financeiro_parcela p JOIN financeiro_titulo t ON t.id = p.titulo
+         WHERE t.especie = 'Receber' AND t.origem_modulo = 'compras_devolucao'",
+        vec![],
+    );
+    assert_eq!(credito, 2_895);
+    // Estoque e fornecedores zerados no Razão: sobram o banco (o que se pagou) e o crédito.
+    assert_eq!(b.contas_com_saldo(), 2);
+    assert_eq!(
+        b.devolver(r.nota_entrada, item, 1).unwrap_err().codigo,
+        CodigoErro::ESTADO_INVALIDO,
+        "a nota devolvida não volta de novo"
+    );
 }

@@ -46,6 +46,7 @@ use mod_estoque::{
     SugerirNomeDoProduto,
 };
 
+mod devolucao;
 mod estorno;
 mod parcelas;
 
@@ -132,6 +133,8 @@ pub struct EstadoTelaCompras {
     parcelas: parcelas::EditorParcelas,
     /// O estorno da entrada da nota aberta (confirmada).
     estorno: estorno::EstadoEstorno,
+    /// As devoluções ao fornecedor da nota aberta.
+    devolucao: devolucao::EstadoDevolucao,
     busca: String,
     ordenacao: Ordenacao,
     nova: FormNova,
@@ -233,6 +236,7 @@ impl EstadoTelaCompras {
         self.pago_no_ato = false;
         self.parcelas = parcelas::EditorParcelas::carregar(motor, sessao, &item);
         self.estorno = estorno::EstadoEstorno::default();
+        self.devolucao = devolucao::EstadoDevolucao::default();
         self.nota_aberta = Some(item);
         self.dlg = Dlg::Ver;
     }
@@ -992,6 +996,29 @@ fn dialogo_ver(
                         }
                     }
                 }
+                if matches!(
+                    n.estado,
+                    EstadoNotaEntrada::Confirmada | EstadoNotaEntrada::Devolvida
+                ) {
+                    ui.add_space(Espaco::E12);
+                    ui.add(Divisor::novo());
+                    ui.add_space(Espaco::E12);
+                    let itens = estado.itens_nota.clone();
+                    if devolucao::secao(
+                        ui,
+                        motor,
+                        sessao,
+                        &mut estado.devolucao,
+                        n.nota,
+                        &itens,
+                        n.estado == EstadoNotaEntrada::Confirmada,
+                    ) {
+                        estado.carregar(motor, sessao);
+                        if let Some(aberta) = estado.notas.iter().find(|x| x.nota == n.nota) {
+                            estado.nota_aberta = Some(aberta.clone());
+                        }
+                    }
+                }
                 if n.estado == EstadoNotaEntrada::Confirmada {
                     ui.add_space(Espaco::E12);
                     ui.add(Divisor::novo());
@@ -1481,6 +1508,106 @@ mod testes {
             estado.nota_aberta.as_ref().map(|n| n.estado),
             Some(EstadoNotaEntrada::AConferir)
         );
+        quadro(&mut estado);
+        quadro(&mut estado);
+    }
+
+    #[test]
+    fn nota_confirmada_volta_ao_fornecedor_pela_tela() {
+        let t = motor_de_teste();
+        let r: mod_compras::RelatorioImportacao = t
+            .motor
+            .executar(
+                &t.sessao,
+                "compras.importar_nota_de_arquivo_xml.v1",
+                &ImportarNotaDeArquivoXml { xml: XML.into() },
+            )
+            .expect("importa");
+        let mut estado = EstadoTelaCompras::default();
+        estado.carregar(&t.motor, &t.sessao);
+        estado.abrir_nota(&t.motor, &t.sessao, r.nota_entrada);
+        let item = estado.itens_nota[0].clone();
+        let ctx = egui::Context::default();
+        cardeal_ui::tokens::instalar_fontes(&ctx);
+        cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+        let quadro = |estado: &mut EstadoTelaCompras| {
+            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                dialogo_ver(ctx, &t.motor, &t.sessao, estado);
+            });
+        };
+        quadro(&mut estado);
+        criar_produto_do_item(
+            &ctx,
+            &t.motor,
+            &t.sessao,
+            &mut estado,
+            r.nota_entrada,
+            item.id,
+        );
+        quadro(&mut estado);
+        estado.parcelas = parcelas::EditorParcelas::carregar(
+            &t.motor,
+            &t.sessao,
+            estado.nota_aberta.as_ref().unwrap(),
+        );
+        let local: mod_estoque::LocalCriado = t
+            .motor
+            .executar(
+                &t.sessao,
+                "estoque.criar_local.v1",
+                &mod_estoque::CriarLocal {
+                    nome: "Depósito".into(),
+                    tipo: mod_estoque::TipoLocal::Deposito,
+                },
+            )
+            .unwrap();
+        estado.local_sel = Some(local.local);
+        confirmar(&ctx, &t.motor, &t.sessao, &mut estado, r.nota_entrada);
+        estado.carregar(&t.motor, &t.sessao);
+        estado.abrir_nota(&t.motor, &t.sessao, r.nota_entrada);
+        quadro(&mut estado);
+        quadro(&mut estado);
+
+        // Tudo volta: a nota fica "Devolvida", e a devolução aparece com a NF-e a emitir.
+        let feito: mod_compras::DevolucaoFeita = t
+            .motor
+            .executar(
+                &t.sessao,
+                "compras.devolver_ao_fornecedor.v1",
+                &mod_compras::DevolverAoFornecedor {
+                    nota_entrada: r.nota_entrada,
+                    itens: vec![mod_compras::ItemADevolver {
+                        item: item.id,
+                        quantidade: item.quantidade,
+                    }],
+                    motivo: "Produto com a validade vencida".into(),
+                },
+            )
+            .expect("devolve");
+        assert!(feito.nota_devolvida);
+        assert_eq!(feito.abatido, feito.valor_total, "a conta a pagar abatida");
+        estado.carregar(&t.motor, &t.sessao);
+        estado.abrir_nota(&t.motor, &t.sessao, r.nota_entrada);
+        assert_eq!(
+            estado.nota_aberta.as_ref().map(|n| n.estado),
+            Some(EstadoNotaEntrada::Devolvida)
+        );
+        quadro(&mut estado);
+        quadro(&mut estado);
+        // Sem a empresa pronta para emitir, a NF-e de devolução nasce rejeitada, com o porquê.
+        let doc: mod_fiscal::DocumentoResumo = t
+            .motor
+            .executar(
+                &t.sessao,
+                "compras.emitir_nfe_da_devolucao.v1",
+                &mod_compras::EmitirNfeDaDevolucao {
+                    devolucao: feito.devolucao,
+                },
+            )
+            .expect("cria a NF-e");
+        assert_eq!(doc.estado, mod_fiscal::EstadoDocumento::Rejeitada);
+        assert!(doc.motivo.is_some());
+        estado.abrir_nota(&t.motor, &t.sessao, r.nota_entrada);
         quadro(&mut estado);
         quadro(&mut estado);
     }

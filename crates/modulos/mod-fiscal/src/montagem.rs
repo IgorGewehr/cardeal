@@ -359,6 +359,7 @@ pub fn montar_nfe(
         emitente,
         destinatario,
         itens,
+        devolvidos: Vec::new(),
         natureza: "Venda de mercadoria".into(),
         saida: true,
         finalidade: FinalidadeNfe::Normal,

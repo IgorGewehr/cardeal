@@ -741,6 +741,15 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   cartas depois das notas, `ResumoFiscal.cartas_pendentes` (a vigia de fundo conta), `NotasDoMes.cartas`;
   o pacote do contador leva as cartas e dá o nome 110112 ao cancelamento por substituição; desktop: Carta
   de correção no detalhe da NF-e.
+- **Devolução ao fornecedor + NF-e de devolução (2026-10-27, compras.md §5, fiscal.md §7):** `sefaz-api`
+  8075fde (`impostoDevol`, FCP do ST, o vNF com os dois; a validação do ST pelo teto); `cardeal-fiscal`:
+  `TributosDaCompra` (o leitor do XML guarda ICMS/ST/FCP-ST campo a campo), `DevolucaoDoItem` e
+  `Nfe.devolvidos`; `mod-estoque`: `devolver_parte_da_entrada`; `mod-financeiro`:
+  `abater_titulo_da_origem_comum`; `mod-compras`: `devolucao.rs` (`DevolverAoFornecedor`,
+  `EmitirNfeDaDevolucao`, `DevolucoesDaNota`, `dados_da_nfe`), migração v9, o estorno recusa nota com
+  devolução; `mod-fiscal`: `devolucao_compra.rs` (`montar_nfe_de_devolucao`,
+  `emitir_nfe_de_devolucao_comum`, `DocumentoDaDevolucao`); desktop: Compras › nota › Devolver ao
+  fornecedor, a lista das devoluções com a NF-e (emitir, situação, DANFE) e o DANFE com ST/IPI devolvidos.
 - **Substituição da NFC-e sem resposta (2026-10-27, fecha o fiscal.md §11 item 3):** `sefaz-api`
   43c98f0 (o `/nfe/cancelar` com `chaveSubstituta` = evento 110112); `cardeal-fiscal`
   `PortaFiscal::cancelar_por_substituicao`; `mod-fiscal`: migração v9, `pede_substituicao`,

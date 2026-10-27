@@ -117,8 +117,9 @@ pub use comandos::criar_produto_de_compra_comum;
 pub use comandos::{completar_ncm_se_vazio, criar_peca_rapida_comum};
 #[cfg(feature = "sqlite")]
 pub use comandos::{
-    devolver_saidas_da_origem, registrar_entrada_com_lote_comum, registrar_entrada_comum,
-    registrar_saida_comum, registrar_saida_de_lote_comum, retirar_entradas_da_origem,
+    devolver_parte_da_entrada, devolver_saidas_da_origem, registrar_entrada_com_lote_comum,
+    registrar_entrada_comum, registrar_saida_comum, registrar_saida_de_lote_comum,
+    retirar_entradas_da_origem,
 };
 pub use comandos::{
     AjustarSaldo, AparelhoOrigemRegistrado, CriarGrupoProduto, CriarLocal, CriarProduto,

@@ -68,13 +68,22 @@ fn item(i: &ItemDocumento) -> ItemDanfe {
 
 fn totais(n: &Nfe) -> TotaisDanfe {
     let soma = |f: &dyn Fn(&ItemDocumento) -> Dinheiro| n.itens.iter().map(f).sum::<Dinheiro>();
+    // Na devolução: o ST, o IPI, o frete, o seguro e as outras despesas que voltam.
+    let devolvido = |f: &dyn Fn(&cardeal_fiscal::DevolucaoDoItem) -> Dinheiro| {
+        n.devolvidos.iter().map(f).sum::<Dinheiro>()
+    };
     TotaisDanfe {
         base_icms: soma(&|i| i.impostos.icms.base.unwrap_or(Dinheiro::ZERO)),
         valor_icms: soma(&|i| i.impostos.icms.valor.unwrap_or(Dinheiro::ZERO)),
+        base_icms_st: devolvido(&|d| d.base_st),
+        valor_icms_st: devolvido(&|d| d.valor_st + d.valor_fcp_st),
         produtos: soma(&|i| i.valor_bruto),
+        frete: devolvido(&|d| d.frete),
+        seguro: devolvido(&|d| d.seguro),
         desconto: soma(&|i| i.desconto),
+        outras: devolvido(&|d| d.outras),
+        ipi: devolvido(&|d| d.ipi_devolvido),
         total: n.total(),
-        ..TotaisDanfe::default()
     }
 }
 
@@ -234,6 +243,7 @@ mod testes {
             serie: 2,
             numero: 51,
             informacoes: Some("DOCUMENTO EMITIDO POR ME OU EPP".into()),
+            devolvidos: Vec::new(),
         });
         d.resumo.modelo = ModeloFiscal::Nfe;
         d.resumo.serie = 2;

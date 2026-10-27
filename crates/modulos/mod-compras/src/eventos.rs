@@ -54,6 +54,33 @@ impl EventoDominio for NotaConfirmada {
     }
 }
 
+/// Mercadoria de uma nota voltou ao fornecedor: saiu do estoque, abateu a conta a pagar (e o
+/// que sobrou virou crédito com ele).
+#[derive(Debug, Serialize)]
+pub struct DevolucaoConcluida {
+    /// A devolução.
+    pub devolucao: Id,
+    /// A nota.
+    pub nota_entrada: Id,
+    /// O fornecedor.
+    pub fornecedor: Id,
+    /// O valor devolvido.
+    pub valor_total: Dinheiro,
+    /// Quanto abateu da conta a pagar.
+    pub abatido: Dinheiro,
+    /// O crédito com o fornecedor (título a receber), se houve.
+    pub credito: Option<Id>,
+}
+
+#[cfg(feature = "sqlite")]
+impl EventoDominio for DevolucaoConcluida {
+    const TIPO: &'static str = "compras.devolucao_concluida.v1";
+
+    fn agregado(&self) -> Option<Id> {
+        Some(self.nota_entrada)
+    }
+}
+
 /// A entrada de uma nota foi estornada: a mercadoria saiu do estoque ao custo da nota, a conta
 /// a pagar foi cancelada (e o pagamento estornado, se havia) e a nota voltou à conferência.
 #[derive(Debug, Serialize)]

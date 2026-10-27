@@ -59,7 +59,7 @@ use crate::preferencias::{PreferenciasCompras, RateioPor};
 use crate::repositorio::RepositorioCompras;
 
 #[cfg(feature = "sqlite")]
-fn carregar_nota(uow: &mut UnidadeDeTrabalho, id: Id) -> Resultado<NotaEntrada> {
+pub(crate) fn carregar_nota(uow: &mut UnidadeDeTrabalho, id: Id) -> Resultado<NotaEntrada> {
     RepositorioCompras::novo(uow)
         .buscar_nota(id)?
         .ok_or_else(|| Erro::nao_encontrado("nota de entrada"))

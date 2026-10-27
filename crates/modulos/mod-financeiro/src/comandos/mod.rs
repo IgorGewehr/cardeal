@@ -8,6 +8,7 @@
 //! `baixar_parcela_comum` deste módulo — a diferença entre receber e pagar é só a espécie,
 //! os papéis de conta e a permissão.
 
+mod abatimento;
 mod abrir_caixa;
 mod ajustar_titulo;
 mod baixar_em_lote;
@@ -32,6 +33,9 @@ mod registrar_sangria;
 mod registrar_suprimento;
 mod renegociar_titulo;
 
+pub use abatimento::AbatimentoFeito;
+#[cfg(feature = "sqlite")]
+pub use abatimento::{abater_titulo_da_origem_comum, DadosAbatimento};
 pub use abrir_caixa::{AbrirCaixa, CaixaFoiAberto};
 #[cfg(feature = "sqlite")]
 pub use ajustar_titulo::desfazer_titulo_da_origem_comum;

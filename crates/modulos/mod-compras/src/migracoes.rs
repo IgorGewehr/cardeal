@@ -157,6 +157,31 @@ CREATE TABLE compras_dfe_nota (
 CREATE INDEX compras_dfe_nota_espera ON compras_dfe_nota(empresa, ambiente, estado, proxima_tentativa);
 ";
 
+/// v9: a devolução ao fornecedor, item a item (a nota pode voltar em partes).
+const SQL_V9: &str = "
+CREATE TABLE compras_devolucao (
+    id           BLOB PRIMARY KEY,
+    empresa      BLOB    NOT NULL REFERENCES nucleo_empresa(id),
+    nota_entrada BLOB    NOT NULL REFERENCES compras_nota_entrada(id),
+    fornecedor   BLOB    NOT NULL,
+    data         INTEGER NOT NULL,
+    motivo       TEXT    NOT NULL,
+    valor_total  INTEGER NOT NULL,
+    abatido      INTEGER NOT NULL,
+    credito      BLOB,
+    criada_em    INTEGER NOT NULL,
+    criada_por   BLOB    NOT NULL
+) STRICT;
+CREATE INDEX compras_devolucao_nota ON compras_devolucao(nota_entrada);
+CREATE TABLE compras_devolucao_item (
+    devolucao  BLOB    NOT NULL REFERENCES compras_devolucao(id),
+    item       BLOB    NOT NULL REFERENCES compras_item_nota_entrada(id),
+    quantidade INTEGER NOT NULL CHECK (quantidade > 0),
+    valor      INTEGER NOT NULL,
+    PRIMARY KEY (devolucao, item)
+) STRICT, WITHOUT ROWID;
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -204,6 +229,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 8,
         nome: "compras_notas_da_sefaz",
         sql: SQL_V8,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 9,
+        nome: "compras_devolucao_ao_fornecedor",
+        sql: SQL_V9,
         tipo: TipoMigracao::Esquema,
     },
 ];

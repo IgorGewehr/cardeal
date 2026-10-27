@@ -6,7 +6,7 @@
 //! padrão (tag essencial ausente, chave malformada) vira [`ErroFiscal::XmlInvalido`], nunca
 //! panic.
 
-use cardeal_kernel::{Cnpj, Data, Dinheiro, Preco, Quantidade};
+use cardeal_kernel::{Cnpj, Data, Dinheiro, Percentual, Preco, Quantidade};
 use quick_xml::events::Event;
 use quick_xml::reader::Reader;
 use serde::{Deserialize, Serialize};
@@ -44,6 +44,40 @@ pub struct ItemNfe {
     pub valor_ipi: Dinheiro,
     /// O CFOP do item (`det/prod/CFOP`), na ótica de quem emitiu.
     pub cfop: Option<String>,
+    /// O ICMS, o ST e o FCP do ST destacados no item, campo a campo — o que a devolução
+    /// devolve na proporção.
+    pub tributos: TributosDaCompra,
+}
+
+/// Os tributos destacados num item da nota de compra (`det/imposto/ICMS/*` e o IPI).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TributosDaCompra {
+    /// A origem da mercadoria (`orig`).
+    pub origem: u8,
+    /// O CST ou o CSOSN, como veio.
+    pub situacao: Option<String>,
+    /// A base do ICMS próprio (`vBC`).
+    pub base_icms: Dinheiro,
+    /// A alíquota do ICMS próprio (`pICMS`).
+    pub aliquota_icms: Option<Percentual>,
+    /// O ICMS próprio (`vICMS`).
+    pub valor_icms: Dinheiro,
+    /// A modalidade da base do ST (`modBCST`).
+    pub modalidade_st: Option<String>,
+    /// A margem do ST (`pMVAST`).
+    pub mva_st: Option<Percentual>,
+    /// A base do ST (`vBCST`).
+    pub base_st: Dinheiro,
+    /// A alíquota do ST (`pICMSST`).
+    pub aliquota_st: Option<Percentual>,
+    /// O ST (`vICMSST`), sem o FCP.
+    pub valor_st: Dinheiro,
+    /// A base do FCP do ST (`vBCFCPST`).
+    pub base_fcp_st: Dinheiro,
+    /// A alíquota do FCP do ST (`pFCPST`).
+    pub aliquota_fcp_st: Option<Percentual>,
+    /// O FCP do ST (`vFCPST`).
+    pub valor_fcp_st: Dinheiro,
 }
 
 impl ItemNfe {
@@ -484,6 +518,7 @@ struct ItemParcial {
     valor_icms_st: Dinheiro,
     valor_ipi: Dinheiro,
     cfop: Option<String>,
+    tributos: TributosDaCompra,
 }
 
 /// O literal que a NF-e usa em `cEAN`/`cEANTrib` para "este produto não tem código de
@@ -514,6 +549,7 @@ impl ItemParcial {
             valor_icms_st: self.valor_icms_st,
             valor_ipi: self.valor_ipi,
             cfop: self.cfop,
+            tributos: self.tributos,
         })
     }
 }
@@ -604,13 +640,84 @@ fn processar_texto(
             set_item(item_atual, |i| i.valor_desconto = v);
         }
         // ST cobrado nesta nota (ICMS10/30/70/90, ICMSSN201/202/900, ICMSPart) e o FCP dele.
-        [.., "imposto", "ICMS", _, "vICMSST" | "vFCPST"] => {
+        [.., "imposto", "ICMS", _, "vICMSST"] => {
             let v = dinheiro_de(texto, "vICMSST")?;
-            set_item(item_atual, |i| i.valor_icms_st += v);
+            set_item(item_atual, |i| {
+                i.valor_icms_st += v;
+                i.tributos.valor_st = v;
+            });
         }
+        [.., "imposto", "ICMS", _, "vFCPST"] => {
+            let v = dinheiro_de(texto, "vFCPST")?;
+            set_item(item_atual, |i| {
+                i.valor_icms_st += v;
+                i.tributos.valor_fcp_st = v;
+            });
+        }
+        [.., "imposto", "ICMS", _, campo] => tributo_do_icms(item_atual, campo, texto)?,
         [.., "imposto", "IPI", "IPITrib", "vIPI"] => {
             let v = dinheiro_de(texto, "vIPI")?;
             set_item(item_atual, |i| i.valor_ipi = v);
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Os campos do grupo de ICMS do item que a devolução usa.
+fn tributo_do_icms(
+    item_atual: &mut Option<ItemParcial>,
+    campo: &str,
+    texto: &str,
+) -> Result<(), ErroFiscal> {
+    let percentual = || {
+        Percentual::de_str(texto)
+            .map_err(|_| ErroFiscal::XmlInvalido(format!("{campo} inválido: {texto}")))
+    };
+    match campo {
+        "orig" => {
+            let o = texto.trim().parse::<u8>().unwrap_or(0);
+            set_item(item_atual, |i| i.tributos.origem = o);
+        }
+        "CST" | "CSOSN" => {
+            let s = texto.trim().to_owned();
+            set_item(item_atual, |i| i.tributos.situacao = Some(s));
+        }
+        "vBC" => {
+            let v = dinheiro_de(texto, campo)?;
+            set_item(item_atual, |i| i.tributos.base_icms = v);
+        }
+        "pICMS" => {
+            let p = percentual()?;
+            set_item(item_atual, |i| i.tributos.aliquota_icms = Some(p));
+        }
+        "vICMS" => {
+            let v = dinheiro_de(texto, campo)?;
+            set_item(item_atual, |i| i.tributos.valor_icms = v);
+        }
+        "modBCST" => {
+            let m = texto.trim().to_owned();
+            set_item(item_atual, |i| i.tributos.modalidade_st = Some(m));
+        }
+        "pMVAST" => {
+            let p = percentual()?;
+            set_item(item_atual, |i| i.tributos.mva_st = Some(p));
+        }
+        "vBCST" => {
+            let v = dinheiro_de(texto, campo)?;
+            set_item(item_atual, |i| i.tributos.base_st = v);
+        }
+        "pICMSST" => {
+            let p = percentual()?;
+            set_item(item_atual, |i| i.tributos.aliquota_st = Some(p));
+        }
+        "vBCFCPST" => {
+            let v = dinheiro_de(texto, campo)?;
+            set_item(item_atual, |i| i.tributos.base_fcp_st = v);
+        }
+        "pFCPST" => {
+            let p = percentual()?;
+            set_item(item_atual, |i| i.tributos.aliquota_fcp_st = Some(p));
         }
         _ => {}
     }
@@ -638,7 +745,10 @@ mod testes {
     <prod><cProd>A</cProd><xProd>CERVEJA</xProd><NCM>22030000</NCM><qCom>12</qCom>
       <vUnCom>5.00</vUnCom><vProd>60.00</vProd><vDesc>6.00</vDesc></prod>
     <imposto>
-      <ICMS><ICMS10><vICMS>10.80</vICMS><vICMSST>9.50</vICMSST><vFCPST>1.20</vFCPST></ICMS10></ICMS>
+      <ICMS><ICMS10><orig>1</orig><CST>10</CST><modBC>3</modBC><vBC>60.00</vBC><pICMS>18.00</pICMS>
+        <vICMS>10.80</vICMS><modBCST>4</modBCST><pMVAST>40.00</pMVAST><vBCST>84.00</vBCST>
+        <pICMSST>24.00</pICMSST><vICMSST>9.50</vICMSST><vBCFCPST>84.00</vBCFCPST>
+        <pFCPST>2.00</pFCPST><vFCPST>1.20</vFCPST></ICMS10></ICMS>
       <IPI><IPITrib><vIPI>3.00</vIPI></IPITrib></IPI>
     </imposto>
   </det>
@@ -656,6 +766,24 @@ mod testes {
         assert_eq!(a.valor_icms_st, Dinheiro::centavos(1_070));
         assert_eq!(a.valor_ipi, Dinheiro::reais(3));
         assert_eq!(a.valor_na_nota(), Dinheiro::centavos(6_770));
+        // Campo a campo, para a devolução.
+        let t = &a.tributos;
+        assert_eq!((t.origem, t.situacao.as_deref()), (1, Some("10")));
+        assert_eq!(
+            (t.base_icms, t.valor_icms),
+            (Dinheiro::reais(60), Dinheiro::centavos(1_080))
+        );
+        assert_eq!(t.aliquota_icms, Some(Percentual::de_str("18").unwrap()));
+        assert_eq!(t.modalidade_st.as_deref(), Some("4"));
+        assert_eq!(t.mva_st, Some(Percentual::de_str("40").unwrap()));
+        assert_eq!(
+            (t.base_st, t.valor_st),
+            (Dinheiro::reais(84), Dinheiro::centavos(950))
+        );
+        assert_eq!(t.aliquota_st, Some(Percentual::de_str("24").unwrap()));
+        assert_eq!(t.valor_fcp_st, Dinheiro::centavos(120));
+        assert_eq!(t.aliquota_fcp_st, Some(Percentual::de_str("2").unwrap()));
+        assert_eq!(n.itens[1].tributos.situacao.as_deref(), None);
         let b = &n.itens[1];
         assert_eq!(
             b.valor_icms_st,

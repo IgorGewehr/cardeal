@@ -94,6 +94,20 @@ pub enum ErroEstoque {
         resta: String,
     },
 
+    /// Devolver ao fornecedor mais do que ainda está no local, da entrada daquela nota.
+    #[error(
+        "{produto}: para devolver {pedido}, só restam {resta} desta entrada no local — o resto \
+         já foi vendido ou movido"
+    )]
+    DevolucaoMaiorQueOResto {
+        /// O produto.
+        produto: String,
+        /// O que se quer devolver.
+        pedido: String,
+        /// O que resta.
+        resta: String,
+    },
+
     /// Transferência sem nenhum produto.
     #[error("A transferência precisa de pelo menos um produto")]
     TransferenciaSemItens,
@@ -184,6 +198,7 @@ impl ErroDominio for ErroEstoque {
             | Self::LoteDeOutroProduto => CodigoErro::REGRA_VIOLADA,
             Self::SaldoInsuficiente { .. }
             | Self::EntradaJaConsumida { .. }
+            | Self::DevolucaoMaiorQueOResto { .. }
             | Self::LoteSaldoInsuficiente { .. }
             | Self::SaldoInsuficienteNaOrigem { .. }
             | Self::PerdaAcimaDoSaldo { .. } => CodigoErro::ESTOQUE_INSUFICIENTE,
