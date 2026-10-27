@@ -67,9 +67,10 @@ impl SituacaoNoMes {
             EstadoDocumento::Cancelada => Some(Self::Cancelada),
             EstadoDocumento::Inutilizada => Some(Self::Inutilizada),
             EstadoDocumento::Denegada => Some(Self::Denegada),
-            EstadoDocumento::Pendente | EstadoDocumento::Incerta | EstadoDocumento::Rejeitada => {
-                None
-            }
+            EstadoDocumento::Pendente
+            | EstadoDocumento::Incerta
+            | EstadoDocumento::Contingencia
+            | EstadoDocumento::Rejeitada => None,
         }
     }
 }

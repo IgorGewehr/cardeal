@@ -134,11 +134,12 @@ pura (`decidir`):
 | Autorizada (100/150) | `Autorizada` — chave, protocolo, XML |
 | Rejeitada pela SEFAZ (inclui as de código < 200, ex.: SP 178) | `Rejeitada` — corrigir e reenviar |
 | Denegada | `Denegada` (o número foi consumido) — com o XML da denegação, que também se guarda |
+| **SEFAZ fora e a nota não chegou a ela** (108/109, ou o `naoEnviado` do provedor: circuito aberto, sem conexão, 503) | `Contingencia` — assinada em contingência off-line, já (ver abaixo); se a assinatura falha, continua `Pendente` e espera |
 | Resposta sem resultado (timeout, erro com chave) | `Incerta` — **consultar pela chave** antes de qualquer reemissão; a nota assinada que foi à SEFAZ fica guardada (`xml_assinado`) e vai na consulta, que devolve o `nfeProc` |
 | Duplicidade 539 (a chave da nota que existe vem no motivo) / 204 | `Incerta` — conferir essa chave |
-| Consulta: não consta (217) | `Pendente` — emitir de novo, já |
+| Consulta: não consta (217) | `Pendente` — emitir de novo, já (a de contingência, chave com `tpEmis` 9, volta a `Contingencia`: o mesmo XML) |
 | Consulta: 101/151/155 | `Cancelada` — com o protocolo da autorização e o XML do cancelamento (o `sefaz-api` dizia "autorizado" para o 101 até bc58e77) |
-| API fora do ar / SEFAZ paralisada (108/109) | continua, espera 30 s → 1, 2, 4, 8 → 15 min |
+| API fora do ar (sem quem assine) | continua `Pendente`, espera 30 s → 1, 2, 4, 8 → 15 min |
 | Recusa do provedor/instalação (CNPJ, credencial, cofre) | `Rejeitada` com a mensagem |
 | Erro do emissor repetido 6 vezes | `Rejeitada` — não gira na fila para sempre |
 
@@ -151,6 +152,31 @@ de balcão (`explicar`: o que houve e onde corrigir).
 recusada só por cadastro (178, a Tensorroot saiu de SP) — o que levou à regra das rejeições com código
 < 200. Falta a primeira **autorizada**: pede a IE do RS e o CSC de homologação da SEFAZ-RS
 (`cardeal-fiscal`, teste ignorado `homologacao_nfce_real`).
+
+**Contingência off-line** (`tpEmis = 9`, migração v7, 2026-10-27). Com a SEFAZ fora e o `sefaz-api` no
+ar, a nota pendente que **com certeza** não chegou à SEFAZ é assinada lá (`/nfe/nfce/contingencia/prepare`:
+chave própria, `dhCont` e `xJust` no `ide`, o QR Code no `infNFeSupl`) e vai a `Contingencia`, com a nota
+assinada em `xml_assinado` e o `dhCont` em `contingencia_em`. O DANFCE sai na hora com "EMITIDA EM
+CONTINGÊNCIA" e "Pendente de autorização" — o consumidor leva o cupom fiscal. A fila transmite **o mesmo
+XML** (`/transmit`) quando a SEFAZ voltar, sem limite de tentativas (o prazo de 24 h aparece na faixa e nas
+Notas fiscais): autorizada → `Autorizada` com o `nfeProc` (a nota assinada sai); 204 (a mesma chave já
+chegou) → `Incerta`, consulta com a nota assinada; 539 → confere a chave que existe; rejeitada → `Rejeitada`
+(reenviar volta à emissão normal, com o mesmo número). A venda desfeita enquanto isso espera a autorização e
+recebe o cancelamento.
+
+Decisões:
+- **Só a nota que com certeza não chegou** vai em contingência. O `sefaz-api` passou a distinguir
+  (`naoEnviado`, 7d7faa6): circuito aberto, conexão ou TLS que não se completou, 503 e redirecionamento —
+  antes, toda falha voltava com a chave, como incerta. A nota que **pode** ter chegado (timeout depois do
+  envio, 500/502/504) fica `Incerta`: o mesmo número com outra chave daria duplicidade (539), e um número
+  novo pede o cancelamento por substituição da original (evento 110112) — ainda não feito.
+- **Automática**, sem chave na tela: a contingência é o que a lei prevê para a SEFAZ fora, e a alternativa
+  era o consumidor sair sem cupom fiscal. O `xJust` é o que a SEFAZ (ou a falta dela) respondeu.
+- **Sem internet nenhuma, nada muda**: a nota espera na fila. Assinar no Cardeal (XMLDSig, o XML inteiro
+  em Rust) seria trazer o `sefaz-api` para dentro — não vale enquanto o caso real é a SEFAZ fora.
+- O prazo de **24 horas** é o mais estrito entre as UFs (o manual fala em "até o primeiro dia útil").
+- Não conferido contra a SEFAZ de verdade (falta a primeira autorizada no RS); os testes usam o
+  `FiscalSimulado` (`simular_sefaz_fora`) e servidores locais no `sefaz-api`.
 
 **Cancelamento e inutilização são pedidos na fila** (migração v3): `CancelarNfce`
 (`fiscal.cancelar_nfce.v1`) numa autorizada e `InutilizarNumero` (`fiscal.inutilizar_numero.v1`) numa
@@ -256,7 +282,9 @@ situação da NFC-e (com o que corrigir, se rejeitada). Área nova **Notas fisca
 Financeiro): indicadores (na fila, conferindo, rejeitadas, autorizadas hoje), filtro, grade com
 **Reenviar** e **Detalhes** (chave, protocolo, itens com NCM/CFOP, consumidor; **Imprimir cupom fiscal**,
 **Cancelar NFC-e** e **Inutilizar número** com a justificativa) e **Transmitir agora**. No PDV, a venda
-autorizada ganha **Imprimir cupom fiscal**.
+autorizada ganha **Imprimir cupom fiscal**. A nota em contingência também (o DANFCE com o aviso), tem a
+etiqueta "Em contingência" e, nas Notas fiscais, entra em "Atenção" com o prazo de transmissão; a vigia de
+fundo a transmite como as da fila.
 
 ## 9. Permissões
 
@@ -287,13 +315,16 @@ Cancelar e configurar continuam fora do papel.
 - v6: `fiscal_documento.xml_assinado` (a nota assinada da emissão incerta, apagada quando chega o
   `nfeProc`) e `xml_a_buscar` (tentativas restantes da busca de XML; 0 = nada a buscar); o índice da fila
   passa a cobrir a busca, e os cancelamentos sem o XML já entram nela.
+- v7: `fiscal_documento` recriada com o estado `Contingencia` e `contingencia_em` (o `dhCont`); o índice
+  da fila cobre a contingência.
 
 ## 11. Próximas fatias da onda 7
 
 1. **Primeira NFC-e autorizada no RS** (falta a IE, o endereço e o CSC de homologação da SEFAZ-RS).
 2. A impressão direta na térmica (ESC/POS) e o DANFCE em 58 mm.
-3. **Contingência offline** (`tpEmis=9`, `prepare`/`transmit` do `sefaz-api`): exige a API alcançável — sem
-   internet nenhuma, a nota espera na fila (assinar localmente seria trazer a assinatura para o Cardeal).
+3. ~~**Contingência offline**~~ — feita em 2026-10-27 (§7; `sefaz-api` 7d7faa6). Falta: a nota incerta
+   (pode ter chegado) ir em contingência com **outro número** e a original ser cancelada por substituição
+   (110112) ou inutilizada; e a conferência na SEFAZ de verdade.
 4. Série por terminal (hoje uma série por empresa).
 5. NF-e de venda e devolução; CC-e.
 6. NFS-e da OS.

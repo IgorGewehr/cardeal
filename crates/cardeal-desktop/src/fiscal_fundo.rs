@@ -40,7 +40,7 @@ pub fn ultimo_resultado() -> Option<Result<String, String>> {
 }
 
 /// Chamada a cada quadro da sessão: uma vez por minuto confere a fila e, se houver nota
-/// esperando (ou XML a buscar na SEFAZ), transmite. Pede um quadro novo para o próximo minuto.
+/// esperando — na fila, conferindo ou em contingência — (ou XML a buscar na SEFAZ), transmite. Pede um quadro novo para o próximo minuto.
 pub fn vigiar(ctx: &egui::Context, motor: &Motor, sessao: &Sessao) {
     TRANSMISSAO.vigiar(ctx, motor, sessao, INTERVALO_DA_VIGIA, || {
         motor
@@ -49,7 +49,7 @@ pub fn vigiar(ctx: &egui::Context, motor: &Motor, sessao: &Sessao) {
                 "fiscal.resumo_da_fila.v1",
                 &mod_fiscal::ResumoDaFilaFiscal,
             )
-            .is_ok_and(|r| r.pendentes + r.incertas + r.xmls_a_buscar > 0)
+            .is_ok_and(|r| r.pendentes + r.incertas + r.em_contingencia + r.xmls_a_buscar > 0)
     });
 }
 

@@ -212,7 +212,7 @@ pub(crate) fn inserir_documento(c: &Connection, d: &NovoDocumento<'_>) -> Result
 const COLUNAS: &str =
     "id, modelo, serie, numero, ambiente, estado, total, chave, protocolo, codigo,
                        motivo, origem_id, tentativas, criado_em, autorizado_em, pedido,
-                       anulada";
+                       anulada, contingencia_em";
 
 fn resumo_de(r: &Row<'_>) -> rusqlite::Result<DocumentoResumo> {
     Ok(DocumentoResumo {
@@ -245,6 +245,7 @@ fn resumo_de(r: &Row<'_>) -> rusqlite::Result<DocumentoResumo> {
             .as_deref()
             .and_then(PedidoDocumento::de_str),
         anulada: r.get::<_, i64>(16)? != 0,
+        contingencia_em: r.get::<_, Option<i64>>(17)?.map(Instante::de_micros),
     })
 }
 
@@ -311,6 +312,8 @@ pub(crate) struct DocumentoGuardado {
     pub nota: Option<Vec<u8>>,
     pub xml: Option<String>,
     pub origem_modulo: String,
+    /// A nota assinada (a da contingência, ou da emissão incerta) enquanto o `nfeProc` não vem.
+    pub xml_assinado: Option<String>,
 }
 
 /// O documento, a nota guardada e o XML autorizado.
@@ -321,16 +324,17 @@ pub(crate) fn documento(
 ) -> Resultado<Option<DocumentoGuardado>> {
     c.query_row(
         &format!(
-            "SELECT {COLUNAS}, nota, xml, origem_modulo FROM fiscal_documento
+            "SELECT {COLUNAS}, nota, xml, origem_modulo, xml_assinado FROM fiscal_documento
              WHERE empresa = ?1 AND id = ?2"
         ),
         params![empresa.em_bytes().as_slice(), id.em_bytes().as_slice()],
         |r| {
             Ok(DocumentoGuardado {
                 resumo: resumo_de(r)?,
-                nota: r.get(17)?,
-                xml: r.get(18)?,
-                origem_modulo: r.get(19)?,
+                nota: r.get(18)?,
+                xml: r.get(19)?,
+                origem_modulo: r.get(20)?,
+                xml_assinado: r.get(21)?,
             })
         },
     )
@@ -402,7 +406,8 @@ pub(crate) fn fila(
                     serie, numero, criado_em, anulada, xml_assinado, xml_a_buscar
              FROM fiscal_documento
              WHERE empresa = ?1
-               AND (estado IN ('Pendente','Incerta') OR pedido IS NOT NULL OR xml_a_buscar > 0)
+               AND (estado IN ('Pendente','Incerta','Contingencia') OR pedido IS NOT NULL
+                    OR xml_a_buscar > 0)
                AND proxima_tentativa <= ?2
              ORDER BY criado_em LIMIT ?3",
         )
@@ -473,7 +478,8 @@ pub(crate) fn aplicar_mudanca(
            evento_em = CASE WHEN ?15 IS NULL THEN evento_em ELSE ?13 END,
            xml_evento = COALESCE(?16, xml_evento),
            xml_assinado = CASE WHEN ?8 IS NOT NULL THEN NULL ELSE COALESCE(?17, xml_assinado) END,
-           xml_a_buscar = COALESCE(?18, xml_a_buscar)
+           xml_a_buscar = COALESCE(?18, xml_a_buscar),
+           contingencia_em = COALESCE(?19, contingencia_em)
          WHERE empresa = ?1 AND id = ?2 AND estado = ?3",
         params![
             empresa.em_bytes().as_slice(),
@@ -494,6 +500,7 @@ pub(crate) fn aplicar_mudanca(
             m.xml_evento,
             m.xml_assinado,
             m.buscar_xml.then_some(TENTATIVAS_DA_BUSCA),
+            m.contingencia_em.map(Instante::em_micros),
         ],
     )
     .map(|n| n > 0)
@@ -621,11 +628,11 @@ pub(crate) fn fechados_entre(
             |r| {
                 Ok(DocumentoFechado {
                     resumo: resumo_de(r)?,
-                    xml: r.get(17)?,
-                    xml_evento: r.get(18)?,
-                    protocolo_evento: r.get(19)?,
-                    evento_em: Instante::de_micros(r.get(20)?),
-                    xml_assinado_guardado: r.get(21)?,
+                    xml: r.get(18)?,
+                    xml_evento: r.get(19)?,
+                    protocolo_evento: r.get(20)?,
+                    evento_em: Instante::de_micros(r.get(21)?),
+                    xml_assinado_guardado: r.get(22)?,
                 })
             },
         )
@@ -646,7 +653,8 @@ pub(crate) fn sem_desfecho_ate(
         .prepare(&format!(
             "SELECT {COLUNAS} FROM fiscal_documento
              WHERE empresa = ?1 AND ambiente = 'producao'
-               AND estado IN ('Pendente','Incerta','Rejeitada') AND criado_em < ?2
+               AND estado IN ('Pendente','Incerta','Contingencia','Rejeitada')
+               AND criado_em < ?2
              ORDER BY modelo, serie, numero"
         ))
         .map_err(falha)?;
@@ -757,7 +765,8 @@ pub(crate) fn remontar(
     };
     c.execute(
         "UPDATE fiscal_documento SET estado = ?3, nota = ?4, total = ?5, motivo = ?6, codigo = NULL,
-           chave = NULL, tentativas = 0, proxima_tentativa = 0, atualizado_em = ?7
+           chave = NULL, xml_assinado = NULL, contingencia_em = NULL, tentativas = 0,
+           proxima_tentativa = 0, atualizado_em = ?7
          WHERE empresa = ?1 AND id = ?2 AND estado = 'Rejeitada'",
         params![
             empresa.em_bytes().as_slice(),
@@ -788,7 +797,9 @@ pub(crate) fn resumo(
            COALESCE(SUM(estado = 'Rejeitada'), 0),
            COALESCE(SUM(estado = 'Autorizada' AND autorizado_em >= ?2), 0),
            MIN(CASE WHEN estado IN ('Pendente','Incerta') THEN criado_em END),
-           COALESCE(SUM(xml_a_buscar > 0 AND proxima_tentativa <= ?3), 0)
+           COALESCE(SUM(xml_a_buscar > 0 AND proxima_tentativa <= ?3), 0),
+           COALESCE(SUM(estado = 'Contingencia'), 0),
+           MIN(CASE WHEN estado = 'Contingencia' THEN contingencia_em END)
          FROM fiscal_documento WHERE empresa = ?1",
         params![
             empresa.em_bytes().as_slice(),
@@ -803,6 +814,8 @@ pub(crate) fn resumo(
                 autorizadas_hoje: r.get(3)?,
                 esperando_desde: r.get::<_, Option<i64>>(4)?.map(Instante::de_micros),
                 xmls_a_buscar: r.get(5)?,
+                em_contingencia: r.get(6)?,
+                contingencia_desde: r.get::<_, Option<i64>>(7)?.map(Instante::de_micros),
             })
         },
     )

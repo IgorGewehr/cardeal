@@ -73,6 +73,9 @@ pub struct DanfcePdf {
     pub qr_code: Option<String>,
     /// Emitida em homologação (sem valor fiscal).
     pub homologacao: bool,
+    /// Emitida em contingência off-line: o aviso vai no topo e, até a autorização, o
+    /// "pendente de autorização" no lugar do protocolo.
+    pub contingencia: bool,
     /// O fuso das datas impressas.
     pub fuso: Fuso,
 }
@@ -157,6 +160,10 @@ fn compor(c: &mut Cursor, d: &DanfcePdf, qr: Option<&QrCode>) {
         c.espaco(1.0);
         c.centro(homologacao, Fonte::Negrito, pequeno);
     }
+    if d.contingencia {
+        c.espaco(1.0);
+        c.centro("EMITIDA EM CONTINGÊNCIA", Fonte::Negrito, pequeno);
+    }
     c.tracejado();
 
     itens_e_totais(c, d);
@@ -193,6 +200,9 @@ fn compor(c: &mut Cursor, d: &DanfcePdf, qr: Option<&QrCode>) {
             Fonte::Regular,
             pequeno,
         );
+    } else if d.contingencia {
+        c.centro("EMITIDA EM CONTINGÊNCIA", Fonte::Negrito, pequeno);
+        c.centro("Pendente de autorização", Fonte::Negrito, pequeno);
     }
     if let Some(a) = d.autorizacao {
         c.centro(
@@ -287,6 +297,7 @@ mod testes {
                     .into(),
             ),
             homologacao: true,
+            contingencia: false,
             fuso: Fuso::BRASILIA,
         }
     }
@@ -309,6 +320,23 @@ mod testes {
         assert!(texto.contains("Protocolo de autoriza"));
         // O QR Code são retângulos pretos.
         assert!(texto.matches(" re f").count() > 50);
+    }
+
+    #[test]
+    fn em_contingencia_avisa_e_diz_que_falta_a_autorizacao() {
+        let mut d = exemplo();
+        d.contingencia = true;
+        d.protocolo = None;
+        d.autorizacao = None;
+        let pdf = String::from_utf8_lossy(&gerar_danfce(&d, Bobina::Mm80).unwrap()).into_owned();
+        assert!(pdf.contains("EMITIDA EM CONTING"));
+        assert!(pdf.contains("Pendente de autoriza"));
+        assert!(!pdf.contains("Protocolo de autoriza"));
+        // Autorizada depois: o protocolo no lugar do "pendente"; o aviso do topo fica.
+        d.protocolo = Some("143260000000042".into());
+        let pdf = String::from_utf8_lossy(&gerar_danfce(&d, Bobina::Mm80).unwrap()).into_owned();
+        assert!(pdf.contains("EMITIDA EM CONTING"));
+        assert!(!pdf.contains("Pendente de autoriza"));
     }
 
     #[test]

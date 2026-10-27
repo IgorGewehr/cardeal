@@ -8,7 +8,10 @@ use cardeal_kernel::{Cnpj, Erro, Resultado, Uf};
 
 use crate::chave::ChaveAcesso;
 use crate::dfe::{DocumentoDfe, Manifestacao, PaginaDfe, TipoDfe};
-use crate::emissao::{Csc, Nfce, PedidoInutilizacao, RetornoSefaz, SituacaoRetorno};
+use crate::emissao::{
+    Csc, EntradaEmContingencia, Nfce, NotaEmContingencia, PedidoInutilizacao, RetornoSefaz,
+    SituacaoRetorno,
+};
 use crate::erros::ErroFiscal;
 use crate::porta::{ModeloFiscal, Nsu, PortaFiscal, StatusSefaz};
 
@@ -41,6 +44,10 @@ pub struct FiscalSimulado {
     emitidas: Mutex<std::collections::HashMap<String, RetornoSefaz>>,
     /// Quantas emissões chegaram.
     pub emissoes: std::sync::atomic::AtomicUsize,
+    /// A SEFAZ fora (a API no ar): emissão, consulta e transmissão voltam "não enviado".
+    sefaz_fora: std::sync::atomic::AtomicBool,
+    /// Quantas notas foram assinadas em contingência.
+    pub contingencias: std::sync::atomic::AtomicUsize,
 }
 
 impl FiscalSimulado {
@@ -106,6 +113,38 @@ impl FiscalSimulado {
     pub fn simular_fora_do_ar(&self, fora: bool) {
         self.fora_do_ar
             .store(fora, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Faz a SEFAZ ficar fora (a API continua respondendo, com "não enviado"), ou voltar.
+    pub fn simular_sefaz_fora(&self, fora: bool) {
+        self.sefaz_fora
+            .store(fora, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    fn api_fora(&self) -> Resultado<()> {
+        if self.fora_do_ar.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(Erro::de_dominio(&ErroFiscal::ServicoIndisponivel));
+        }
+        Ok(())
+    }
+
+    /// Com a SEFAZ fora, o retorno "não enviado" do `sefaz-api` (sem chave).
+    fn sem_sefaz(&self) -> Option<RetornoSefaz> {
+        self.sefaz_fora
+            .load(std::sync::atomic::Ordering::SeqCst)
+            .then(|| RetornoSefaz {
+                situacao: SituacaoRetorno::Erro,
+                codigo: "ERR".into(),
+                motivo: "Erro de conexão com SEFAZ: connect ETIMEDOUT".into(),
+                chave: None,
+                protocolo: None,
+                recebido_em: None,
+                xml: None,
+                xml_assinado: None,
+                xml_cancelamento: None,
+                erros: Vec::new(),
+                nao_enviado: true,
+            })
     }
 }
 
@@ -227,12 +266,14 @@ impl PortaFiscal for FiscalSimulado {
             xml_assinado: None,
             xml_cancelamento: None,
             erros: Vec::new(),
+            nao_enviado: false,
         })
     }
 
     fn emitir_nfce(&self, nota: &Nfce, _csc: &Csc) -> Resultado<RetornoSefaz> {
-        if self.fora_do_ar.load(std::sync::atomic::Ordering::SeqCst) {
-            return Err(Erro::de_dominio(&ErroFiscal::ServicoIndisponivel));
+        self.api_fora()?;
+        if let Some(r) = self.sem_sefaz() {
+            return Ok(r);
         }
         self.emissoes
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -259,6 +300,7 @@ impl PortaFiscal for FiscalSimulado {
             xml_assinado: None,
             xml_cancelamento: None,
             erros: Vec::new(),
+            nao_enviado: false,
         };
         let retorno = match travar(&self.programados).pop_front() {
             Some(mut r) => {
@@ -295,8 +337,9 @@ impl PortaFiscal for FiscalSimulado {
         _uf: Uf,
         xml_assinado: Option<&str>,
     ) -> Resultado<RetornoSefaz> {
-        if self.fora_do_ar.load(std::sync::atomic::Ordering::SeqCst) {
-            return Err(Erro::de_dominio(&ErroFiscal::ServicoIndisponivel));
+        self.api_fora()?;
+        if let Some(r) = self.sem_sefaz() {
+            return Ok(r);
         }
         Ok(travar(&self.emitidas)
             .get(chave.como_str())
@@ -313,6 +356,7 @@ impl PortaFiscal for FiscalSimulado {
                     xml_assinado: None,
                     xml_cancelamento: None,
                     erros: Vec::new(),
+                    nao_enviado: false,
                 },
                 |mut r| {
                     // A consulta devolve o protocolo, não o XML da nota — salvo se recebeu a
@@ -381,6 +425,7 @@ impl PortaFiscal for FiscalSimulado {
             xml_assinado: None,
             xml_cancelamento: None,
             erros: Vec::new(),
+            nao_enviado: false,
         })
     }
 
@@ -414,7 +459,90 @@ impl PortaFiscal for FiscalSimulado {
             xml_assinado: None,
             xml_cancelamento: None,
             erros: Vec::new(),
+            nao_enviado: false,
         })
+    }
+
+    fn preparar_nfce_em_contingencia(
+        &self,
+        nota: &Nfce,
+        _csc: &Csc,
+        entrada: &EntradaEmContingencia,
+    ) -> Resultado<NotaEmContingencia> {
+        self.api_fora()?;
+        let n = self
+            .contingencias
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let chave = ChaveAcesso::montar(
+            nota.emitente.endereco.uf.codigo_ibge(),
+            "2610",
+            &nota.emitente.cnpj.sem_mascara(),
+            "65",
+            nota.serie,
+            nota.numero,
+            9,
+            u32::try_from(n).unwrap_or(0) + 90_000_000,
+        );
+        let chave = chave.como_str().to_string();
+        // A nota assinada, com o `dhCont`/`xJust` no `ide` (como o sefaz-api monta).
+        let xml = nfe_assinada(&chave, nota).replacen(
+            "</ide>",
+            &format!(
+                "<tpEmis>9</tpEmis><dhCont>{}</dhCont><xJust>{}</xJust></ide>",
+                entrada.inicio.formatar_iso(),
+                entrada.justificativa
+            ),
+            1,
+        );
+        Ok(NotaEmContingencia { chave, xml })
+    }
+
+    fn transmitir_nfce_em_contingencia(
+        &self,
+        xml_assinado: &str,
+        _uf: Uf,
+    ) -> Resultado<RetornoSefaz> {
+        self.api_fora()?;
+        let chave = xml_assinado
+            .find("Id=\"NFe")
+            .map(|i| xml_assinado[i + 7..].chars().take(44).collect::<String>())
+            .unwrap_or_default();
+        if let Some(mut r) = self.sem_sefaz() {
+            r.chave = Some(chave);
+            return Ok(r);
+        }
+        if let Some(mut r) = travar(&self.programados).pop_front() {
+            if r.chave.is_none() {
+                r.chave = Some(chave);
+            }
+            return Ok(r);
+        }
+        let mut emitidas = travar(&self.emitidas);
+        // A mesma chave outra vez (a resposta da primeira se perdeu): duplicidade.
+        if emitidas.contains_key(&chave) {
+            let mut r = rejeicao("204", "Rejeição: Duplicidade de NF-e");
+            r.chave = Some(chave);
+            return Ok(r);
+        }
+        let numero: u64 = chave[25..34].parse().unwrap_or(0);
+        let autorizado = RetornoSefaz {
+            situacao: SituacaoRetorno::Autorizado,
+            codigo: "100".into(),
+            motivo: "Autorizado o uso da NF-e".into(),
+            chave: Some(chave.clone()),
+            protocolo: Some(format!("143{numero:012}")),
+            recebido_em: Some("2026-10-14T12:00:00-03:00".into()),
+            xml: Some(format!(
+                "<nfeProc versao=\"4.00\">{xml_assinado}<protNFe><infProt><chNFe>{chave}</chNFe>\
+                 <cStat>100</cStat></infProt></protNFe></nfeProc>"
+            )),
+            xml_assinado: None,
+            xml_cancelamento: None,
+            erros: Vec::new(),
+            nao_enviado: false,
+        };
+        emitidas.insert(chave, autorizado.clone());
+        Ok(autorizado)
     }
 
     fn status_servico(&self, uf: Uf, modelo: ModeloFiscal) -> Resultado<StatusSefaz> {
@@ -444,6 +572,7 @@ fn rejeicao(codigo: &str, motivo: &str) -> RetornoSefaz {
         xml_assinado: None,
         xml_cancelamento: None,
         erros: Vec::new(),
+        nao_enviado: false,
     }
 }
 
@@ -555,6 +684,7 @@ mod testes {
             xml_assinado: None,
             xml_cancelamento: None,
             erros: vec![],
+            nao_enviado: false,
         }
     }
 

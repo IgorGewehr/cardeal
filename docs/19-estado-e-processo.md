@@ -49,7 +49,7 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   estorno da entrada de compra), 11 (XMLs no pacote do contador) e 12 (prazo de cancelamento visível)
   estão feitos, o `sefaz-api` devolve o XML do evento (2026-10-26, com a busca do que falta) e as notas
   de compra chegam pela SEFAZ (DFe, item 9, 2026-10-26); o 13 (Simples, orçamento, score) também.
-  Próximo: a contingência offline da NFC-e; a 1ª autorizada no RS espera os dados do usuário. O `sefaz-api` publicado precisa ser atualizado para as mudanças valerem em
+  A contingência offline da NFC-e também (2026-10-27). A 1ª autorizada no RS espera os dados do usuário. O `sefaz-api` publicado precisa ser atualizado para as mudanças valerem em
   produção, e o DFe ainda não foi conferido contra o Ambiente Nacional (pede o certificado com a
   senha).
 - **Pendência de confiança:** as tabelas do Simples e as alíquotas precisam ser conferidas com o
@@ -727,6 +727,14 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   - desktop (`pacote_contador.rs`): `XMLs AAAA-MM.zip`, as seções "Notas fiscais do mês" e
     "Pendências do mês" no PDF, e as abas "Notas emitidas" e "Notas de entrada" na planilha;
   - `cardeal-pdf`: o sinal de menos (U+2212) sai como traço, não como "?".
+- **Contingência off-line da NFC-e (2026-10-27, fiscal.md §11 item 3):** `sefaz-api` 7d7faa6 (o
+  `naoEnviado` — o pedido que com certeza não chegou à SEFAZ); `cardeal-fiscal`: `RetornoSefaz::nao_enviado`
+  e `sefaz_fora`, `PortaFiscal::preparar_nfce_em_contingencia`/`transmitir_nfce_em_contingencia`
+  (HTTP e simulado, `simular_sefaz_fora`); `mod-fiscal`: estado `Contingencia` (migração v7),
+  `pede_contingencia`/`em_contingencia`, transmissão do mesmo XML, resumo e faixa com o prazo de 24 h;
+  `cardeal-pdf`: o aviso no DANFCE; desktop: imprimir o cupom da contingência no PDV, nas vendas do dia e
+  nas Notas fiscais. Achado: a vigia de fundo só olhava pendentes e incertas. Pendente: a nota incerta em
+  contingência com outro número (cancelamento por substituição, 110112).
 - **Score e curva de clientes (2026-10-26, fecha o item 13 do doc 21):** `mod_financeiro::pagamento`
   (`avaliar`, `PerfisDePagamento`, `perfis_de_pagamento` — só a prazo, tolerância de 3 dias, nota
   0–1000, selos), `mod_vendas::vendas_por_cliente`, `mod_pdv::CurvaDeClientes` (`montar_curva`:

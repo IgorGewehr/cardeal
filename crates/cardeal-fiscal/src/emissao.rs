@@ -5,7 +5,7 @@
 //! quem converte para o JSON da API é o adaptador ([`crate::ApiFiscalHttp`]). A nota é
 //! guardada (sem segredo nenhum) junto do documento fiscal, como foi emitida.
 
-use cardeal_kernel::{Cnpj, Cpf, Dinheiro, Percentual, Preco, Quantidade, Uf};
+use cardeal_kernel::{Cnpj, Cpf, Dinheiro, Fuso, Instante, Percentual, Preco, Quantidade, Uf};
 use cardeal_storage::Segredo;
 use serde::{Deserialize, Serialize};
 
@@ -333,6 +333,50 @@ pub struct RetornoSefaz {
     pub xml_cancelamento: Option<String>,
     /// Os erros de validação do provedor.
     pub erros: Vec<String>,
+    /// O pedido **com certeza** não chegou à SEFAZ (sem conexão, serviço fora, 503): o
+    /// documento não existe lá e o número continua livre — vem sem chave, não há o que
+    /// consultar.
+    #[serde(default)]
+    pub nao_enviado: bool,
+}
+
+impl RetornoSefaz {
+    /// A SEFAZ está fora e a nota não chegou a ela: paralisada (108, 109) ou inalcançável (o
+    /// provedor diz que não enviou). O número continua livre — é quando a NFC-e pode ir em
+    /// contingência com ele.
+    #[must_use]
+    pub fn sefaz_fora(&self) -> bool {
+        self.nao_enviado || matches!(self.codigo.as_str(), "108" | "109")
+    }
+}
+
+/// A entrada em contingência off-line da NFC-e (`tpEmis = 9`): quando e por quê — vão na nota
+/// (`dhCont`, `xJust`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EntradaEmContingencia {
+    /// Quando a contingência começou (`dhCont`).
+    pub inicio: Instante,
+    /// O motivo, de 15 a 256 caracteres (`xJust`).
+    pub justificativa: String,
+    /// O fuso da empresa (o `dhCont` vai com o deslocamento).
+    pub fuso: Fuso,
+}
+
+/// A NFC-e assinada em contingência: a chave (com `tpEmis = 9`) e o XML com o QR Code — o que
+/// vai impresso no DANFCE e é transmitido depois, sem mudar nada.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NotaEmContingencia {
+    /// A chave de acesso.
+    pub chave: String,
+    /// A nota assinada, com o `infNFeSupl` (QR Code).
+    pub xml: String,
+}
+
+/// O tipo de emissão na chave de acesso (a 35ª posição): `9` é a contingência off-line da
+/// NFC-e.
+#[must_use]
+pub fn chave_de_contingencia(chave: &str) -> bool {
+    chave.len() == 44 && chave.as_bytes()[34] == b'9'
 }
 
 /// Uma NFC-e de exemplo para os testes do crate: dois itens (um com desconto), Simples

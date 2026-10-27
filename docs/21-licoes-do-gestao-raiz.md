@@ -15,7 +15,7 @@
 
 | Área | gestao-raiz | Cardeal |
 |---|---|---|
-| Fiscal | NF-e, NFC-e (síncrona, sem contingência), MDF-e, CC-e, cancelamento, DANFE, notas recebidas (DFe + manifestação) | NFC-e assíncrona com fila (offline-first), DANFCE, cancelamento, inutilização. Sem NF-e, CC-e e DFe real |
+| Fiscal | NF-e, NFC-e (síncrona, sem contingência), MDF-e, CC-e, cancelamento, DANFE, notas recebidas (DFe + manifestação) | NFC-e assíncrona com fila (offline-first) e contingência off-line automática (2026-10-27), DANFCE, cancelamento, inutilização, DFe e manifestação (2026-10-26). Sem NF-e e CC-e |
 | Compras | XML/SEFAZ, classificação da nota, custo com rateio, parcelas, estornar importação | XML de arquivo, casamento em cascata, rateio, ST/IPI no custo, parcelas da nota (duplicatas), estorno da entrada. Sem DFe real |
 | Estoque | Matéria-prima com FEFO, embalagens, produto acabado, rastreabilidade e recall | Árvore mercadológica, markup com imposto, inventário cego, transferência, perdas e validade |
 | PDV | Grade de produtos, desconto no item e no total, pagamento misto, boleto/cheque a receber, vendas do dia, **cancelar venda**, comprovante em 80/58 mm/A4 | Teclado, diário do carrinho, sessão de caixa, consulta de preço, NFC-e em fila. Ver §3 |

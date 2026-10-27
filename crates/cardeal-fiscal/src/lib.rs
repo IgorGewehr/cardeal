@@ -51,6 +51,7 @@ pub use dfe::{
     ler_evento, ler_resumo_nfe, DocumentoDfe, EventoDfe, Manifestacao, PaginaDfe, ResumoNfe,
     SituacaoDoResumo, TipoDfe,
 };
+pub use emissao::{chave_de_contingencia, EntradaEmContingencia, NotaEmContingencia};
 pub use emissao::{
     Consumidor, ContribuicaoItem, Crt, Csc, DocumentoConsumidor, Emitente, EnderecoEmitente,
     IcmsItem, ImpostosItem, ItemDocumento, MeioPagamento, Nfce, PagamentoDocumento,

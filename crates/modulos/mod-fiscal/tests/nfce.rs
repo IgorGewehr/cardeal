@@ -506,6 +506,7 @@ fn retorno(situacao: SituacaoRetorno, codigo: &str) -> RetornoSefaz {
         xml_assinado: None,
         xml_cancelamento: None,
         erros: vec![],
+        nao_enviado: false,
     }
 }
 
@@ -833,6 +834,7 @@ fn o_xml_do_cancelamento_que_nao_veio_e_buscado_na_consulta() {
         xml_assinado: None,
         xml_cancelamento: xml,
         erros: vec![],
+        nao_enviado: false,
     };
     m.sim
         .definir_consulta(&ca, cancelada(&ca, Some(evento(&ca, "135260000000011"))));
@@ -1105,5 +1107,108 @@ fn venda_estornada_anula_a_nfce_conforme_o_estado() {
         m.transmitir(),
         "nada na fila",
         "não insiste num cancelamento recusado"
+    );
+}
+
+#[test]
+fn sefaz_fora_a_nota_sai_em_contingencia_e_e_transmitida_quando_ela_volta() {
+    let m = Mundo::novo();
+    let cen = m.cenario();
+    m.configurar(1);
+    m.sim.simular_sefaz_fora(true);
+
+    // A SEFAZ fora e a API no ar: a nota não chegou, então sai assinada em contingência.
+    let venda = m.vender(&cen, cen.produto, 1, false);
+    let doc = m.emitir(venda);
+    assert!(m.transmitir().contains("1 em contingência"));
+    let d = m.documento(doc.id);
+    assert_eq!(d.resumo.estado, EstadoDocumento::Contingencia);
+    let chave = d.resumo.chave.clone().unwrap();
+    assert_eq!(&chave[34..35], "9", "tpEmis 9 na chave");
+    assert!(d.resumo.contingencia_em.is_some());
+    assert!(d.resumo.prazo_da_contingencia().is_some());
+    let xml = d
+        .xml_assinado
+        .clone()
+        .expect("a nota assinada, para o DANFCE");
+    assert!(xml.contains("<tpEmis>9</tpEmis>") && xml.contains("<qrCode>"));
+    assert!(xml.contains("<xJust>SEFAZ indisponível para autorização"));
+    assert_eq!(d.resumo.numero, doc.numero, "o mesmo número");
+    let resumo: ResumoFiscal = m.consultar("fiscal.resumo_da_fila.v1", &ResumoDaFilaFiscal);
+    assert_eq!(resumo.em_contingencia, 1);
+    assert!(resumo.frase().starts_with("1 nota(s) em contingência"));
+
+    // A venda é desfeita enquanto isso: a nota já está com o consumidor — transmite e cancela.
+    let _: mod_pdv::VendaFoiEstornada = m
+        .executar(
+            "pdv.estornar_venda.v1",
+            &mod_pdv::EstornarVenda {
+                cupom: venda,
+                motivo: "Cliente desistiu da compra".into(),
+                autorizado_por: Id::novo(),
+            },
+        )
+        .unwrap();
+    let anulada: Option<DocumentoResumo> = m
+        .executar(
+            "fiscal.anular_documento_da_venda.v1",
+            &AnularDocumentoDaVenda {
+                cupom: venda,
+                justificativa: "Venda estornada no PDV a pedido do cliente".into(),
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        anulada.unwrap().pedido,
+        None,
+        "espera a contingência se resolver"
+    );
+
+    // Outra venda, ainda com a SEFAZ fora; a primeira continua esperando.
+    let outra = m.emitir(m.vender(&cen, cen.produto, 2, false));
+    m.tentar_ja();
+    m.transmitir();
+    assert_eq!(
+        m.documento(outra.id).resumo.estado,
+        EstadoDocumento::Contingencia
+    );
+    assert_eq!(
+        m.documento(doc.id).resumo.estado,
+        EstadoDocumento::Contingencia
+    );
+    assert_eq!(
+        m.sim
+            .contingencias
+            .load(std::sync::atomic::Ordering::SeqCst),
+        2
+    );
+
+    // A SEFAZ volta: o mesmo XML é transmitido e autorizado, com a mesma chave; a anulada vai
+    // ao cancelamento.
+    m.sim.simular_sefaz_fora(false);
+    m.tentar_ja();
+    assert!(m.transmitir().starts_with("2 autorizada"));
+    let d = m.documento(doc.id);
+    assert_eq!(d.resumo.chave.as_deref(), Some(chave.as_str()));
+    assert!(d.xml.unwrap().starts_with("<nfeProc"));
+    assert!(
+        d.xml_assinado.is_none(),
+        "o nfeProc substitui a nota assinada"
+    );
+    assert_eq!(d.resumo.pedido, Some(PedidoDocumento::Cancelar));
+    m.tentar_ja();
+    assert!(m.transmitir().contains("1 cancelada"));
+    assert_eq!(
+        m.documento(outra.id).resumo.estado,
+        EstadoDocumento::Autorizada
+    );
+
+    // A API fora do ar (não só a SEFAZ): sem quem assine, a nota espera na fila.
+    m.sim.simular_fora_do_ar(true);
+    let sem_api = m.emitir(m.vender(&cen, cen.produto, 1, false));
+    m.transmitir();
+    assert_eq!(
+        m.documento(sem_api.id).resumo.estado,
+        EstadoDocumento::Pendente
     );
 }

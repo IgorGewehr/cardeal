@@ -7,8 +7,20 @@
 //!    │  ▲                  (resposta sem resultado: Incerta)
 //!    │  └──── 217 "não consta" ◀── Incerta ──consultar──▶ Autorizada | Cancelada | Denegada
 //!    └── API fora do ar: continua Pendente, tenta de novo mais tarde (30 s → 15 min)
+//!    └── SEFAZ fora, nota não chegou a ela ──assinar em contingência──▶ Contingencia
+//! Contingencia ──transmitir o mesmo XML──▶ Autorizada | Rejeitada | Denegada
+//!    (204 duplicidade: Incerta, consulta a mesma chave; SEFAZ ainda fora: espera)
 //! Rejeitada ──corrigir e reenviar──▶ Pendente (mesmo número: a rejeição não o consome)
 //! ```
+//!
+//! **Contingência off-line** (`tpEmis = 9`): com a SEFAZ fora e o `sefaz-api` no ar, a nota é
+//! assinada lá (chave própria, QR Code no XML) e o DANFCE sai na hora, com o aviso — o
+//! consumidor leva o cupom fiscal. A fila transmite o mesmo XML quando a SEFAZ voltar (em até
+//! 24 horas). Só vai em contingência a nota que **com certeza** não chegou à SEFAZ (paralisada,
+//! 108/109; ou sem conexão, o "não enviado" do provedor): o número continua livre. A que pode
+//! ter chegado (timeout depois do envio) fica `Incerta` — usar o mesmo número com outra chave
+//! daria duplicidade (539), e um número novo pede o cancelamento por substituição (110112),
+//! que fica para depois.
 //!
 //! **Nunca reenviar às cegas:** o `sefaz-api` sorteia o código numérico a cada emissão, então
 //! reenviar o mesmo número gera outra chave — se a primeira foi autorizada e a resposta se
@@ -16,7 +28,10 @@
 //! é **consultada pela chave** antes de qualquer nova emissão; e a própria 539 traz a chave da
 //! nota que já existe, que passa a ser consultada.
 
-use cardeal_fiscal::{AmbienteFiscal, ModeloFiscal, RetornoSefaz, SituacaoRetorno};
+use cardeal_fiscal::{
+    chave_de_contingencia, AmbienteFiscal, ModeloFiscal, NotaEmContingencia, RetornoSefaz,
+    SituacaoRetorno,
+};
 use cardeal_kernel::{Dinheiro, Id, Instante};
 use serde::{Deserialize, Serialize};
 
@@ -29,6 +44,9 @@ pub enum EstadoDocumento {
     Pendente,
     /// Enviado, mas o resultado não chegou — consultar pela chave antes de reenviar.
     Incerta,
+    /// Assinada em contingência off-line (a SEFAZ estava fora): o DANFCE já vale com o aviso,
+    /// e a fila transmite o XML quando a SEFAZ voltar.
+    Contingencia,
     /// Autorizada.
     Autorizada,
     /// Rejeitada (pela SEFAZ ou antes, por um problema nos dados) — corrigir e reenviar.
@@ -87,6 +105,7 @@ impl EstadoDocumento {
         match self {
             Self::Pendente => "Pendente",
             Self::Incerta => "Incerta",
+            Self::Contingencia => "Contingencia",
             Self::Autorizada => "Autorizada",
             Self::Rejeitada => "Rejeitada",
             Self::Denegada => "Denegada",
@@ -101,6 +120,7 @@ impl EstadoDocumento {
         Some(match s {
             "Pendente" => Self::Pendente,
             "Incerta" => Self::Incerta,
+            "Contingencia" => Self::Contingencia,
             "Autorizada" => Self::Autorizada,
             "Rejeitada" => Self::Rejeitada,
             "Denegada" => Self::Denegada,
@@ -116,6 +136,7 @@ impl EstadoDocumento {
         match self {
             Self::Pendente => "Na fila",
             Self::Incerta => "Conferindo",
+            Self::Contingencia => "Em contingência",
             Self::Autorizada => "Autorizada",
             Self::Rejeitada => "Rejeitada",
             Self::Denegada => "Denegada",
@@ -163,9 +184,22 @@ pub struct DocumentoResumo {
     /// A venda foi desfeita (estorno no PDV): a fila leva a nota ao cancelamento ou à
     /// inutilização, conforme o estado em que ela estiver.
     pub anulada: bool,
+    /// Quando a nota foi assinada em contingência (o `dhCont`) — fica, mesmo depois de
+    /// autorizada.
+    pub contingencia_em: Option<Instante>,
 }
 
 impl DocumentoResumo {
+    /// Até quando a nota em contingência precisa chegar à SEFAZ — `None` se ela não está em
+    /// contingência.
+    #[must_use]
+    pub fn prazo_da_contingencia(&self) -> Option<Instante> {
+        (self.estado == EstadoDocumento::Contingencia)
+            .then_some(self.contingencia_em)
+            .flatten()
+            .map(|i| i.mais_segundos(PRAZO_DA_CONTINGENCIA_SEGUNDOS))
+    }
+
     /// Onde a nota autorizada está em relação ao prazo de cancelamento, em `agora` — `None` se
     /// ela não está autorizada (ou não se sabe quando foi).
     #[must_use]
@@ -321,6 +355,10 @@ pub const fn pedido_da_anulacao(
     }
 }
 
+/// O prazo para a nota em contingência chegar à SEFAZ: 24 horas (o das UFs mais estritas; o
+/// manual da NFC-e fala em "até o primeiro dia útil", e algumas UFs dão mais).
+pub const PRAZO_DA_CONTINGENCIA_SEGUNDOS: i64 = 24 * 60 * 60;
+
 /// O resumo da fila fiscal — a faixa de estado do PDV (`docs/10` §4).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResumoFiscal {
@@ -328,6 +366,10 @@ pub struct ResumoFiscal {
     pub pendentes: u32,
     /// Conferindo.
     pub incertas: u32,
+    /// Em contingência, esperando a SEFAZ voltar.
+    pub em_contingencia: u32,
+    /// Desde quando (a mais antiga em contingência) — o prazo de 24 h corre daí.
+    pub contingencia_desde: Option<Instante>,
     /// Rejeitadas (exigem correção).
     pub rejeitadas: u32,
     /// Autorizadas hoje.
@@ -344,6 +386,12 @@ impl ResumoFiscal {
     pub fn frase(&self) -> String {
         if self.rejeitadas > 0 {
             format!("{} nota(s) rejeitada(s) exigem correção", self.rejeitadas)
+        } else if self.em_contingencia > 0 {
+            format!(
+                "{} nota(s) em contingência — a SEFAZ está fora; a fila transmite quando ela \
+                 voltar (prazo de 24 h)",
+                self.em_contingencia
+            )
         } else if self.pendentes + self.incertas > 0 {
             format!(
                 "{} nota(s) na fila — transmitindo",
@@ -396,6 +444,8 @@ pub struct Mudanca {
     pub xml_assinado: Option<String>,
     /// Buscar depois, na consulta da nota, o XML do cancelamento que não veio.
     pub buscar_xml: bool,
+    /// Quando a nota entrou em contingência (o `dhCont`).
+    pub contingencia_em: Option<Instante>,
 }
 
 /// Depois de tantas tentativas com erro do emissor (não de rede), a nota sai da fila como
@@ -437,6 +487,7 @@ pub fn decidir(estado: EstadoDocumento, tentativas: u32, desfecho: Desfecho) -> 
         xml_evento: None,
         xml_assinado: None,
         buscar_xml: false,
+        contingencia_em: None,
     };
     let r = match desfecho {
         Desfecho::Indisponivel(m) => {
@@ -473,8 +524,9 @@ pub fn decidir(estado: EstadoDocumento, tentativas: u32, desfecho: Desfecho) -> 
         motivo: motivo.clone(),
         ..base(estado)
     };
-    // SEFAZ paralisada (108/109): como API fora do ar.
-    if matches!(r.codigo.as_str(), "108" | "109") {
+    // SEFAZ fora — paralisada (108/109) ou o pedido não chegou a ela: como API fora do ar. (A
+    // nota pendente vai em contingência antes de chegar aqui: `pede_contingencia`.)
+    if r.sefaz_fora() {
         return Mudanca {
             codigo,
             motivo,
@@ -498,6 +550,17 @@ pub fn decidir(estado: EstadoDocumento, tentativas: u32, desfecho: Desfecho) -> 
                 xml: r.xml.clone(),
                 ..final_(EstadoDocumento::Autorizada)
             },
+            // A nota em contingência não consta (a consulta veio de uma duplicidade): volta a
+            // ser transmitida, com o mesmo XML.
+            SituacaoRetorno::Rejeitado
+                if r.codigo == "217" && r.chave.as_deref().is_some_and(chave_de_contingencia) =>
+            {
+                Mudanca {
+                    codigo,
+                    motivo,
+                    ..base(EstadoDocumento::Contingencia)
+                }
+            }
             SituacaoRetorno::Rejeitado if r.codigo == "217" => Mudanca {
                 // Não consta: a emissão anterior não chegou. Emite de novo, já.
                 chave: None,
@@ -519,6 +582,41 @@ pub fn decidir(estado: EstadoDocumento, tentativas: u32, desfecho: Desfecho) -> 
             SituacaoRetorno::Rejeitado | SituacaoRetorno::Cancelado => {
                 final_(EstadoDocumento::Rejeitada)
             }
+        };
+    }
+    if estado == EstadoDocumento::Contingencia {
+        return match r.situacao {
+            SituacaoRetorno::Autorizado => Mudanca {
+                protocolo: r.protocolo.clone(),
+                xml: r.xml.clone(),
+                ..final_(EstadoDocumento::Autorizada)
+            },
+            // A mesma chave já chegou (a resposta de uma transmissão anterior se perdeu):
+            // consulta — com a nota assinada guardada, que vira o `nfeProc`.
+            SituacaoRetorno::Rejeitado if r.codigo == "204" => Mudanca {
+                trocar_chave: false,
+                ..incerta(None, 0)
+            },
+            // Outra nota com o número (539): é ela que vale — conferir.
+            SituacaoRetorno::Rejeitado if r.codigo == "539" => match chave_no_motivo(&r.motivo) {
+                Some(chave) => incerta(Some(chave), 0),
+                None => final_(EstadoDocumento::Rejeitada),
+            },
+            SituacaoRetorno::Rejeitado | SituacaoRetorno::Cancelado => {
+                final_(EstadoDocumento::Rejeitada)
+            }
+            SituacaoRetorno::Denegado => Mudanca {
+                xml: r.xml.clone(),
+                ..final_(EstadoDocumento::Denegada)
+            },
+            // Sem resultado: o mesmo XML vai de novo depois (a chave não muda; sem limite de
+            // tentativas — o prazo de 24 h aparece na tela).
+            SituacaoRetorno::Processando | SituacaoRetorno::Erro => Mudanca {
+                codigo,
+                motivo,
+                espera_segundos: espera(tentativas),
+                ..base(EstadoDocumento::Contingencia)
+            },
         };
     }
     match r.situacao {
@@ -564,6 +662,55 @@ pub fn decidir(estado: EstadoDocumento, tentativas: u32, desfecho: Desfecho) -> 
     }
 }
 
+/// Se a emissão de uma nota pendente pede a contingência: a SEFAZ está fora e a nota **com
+/// certeza** não chegou a ela (paralisada, ou o provedor diz que não enviou) — o número
+/// continua livre. A API respondeu, então pode assinar. A API fora do ar não: sem ela não há
+/// quem assine.
+#[must_use]
+pub fn pede_contingencia(estado: EstadoDocumento, desfecho: &Desfecho) -> bool {
+    estado == EstadoDocumento::Pendente
+        && matches!(desfecho, Desfecho::Resposta(r) if r.sefaz_fora())
+}
+
+/// A justificativa da entrada em contingência (`xJust`, de 15 a 256 caracteres): o que a
+/// SEFAZ (ou a falta dela) respondeu.
+#[must_use]
+pub fn justificativa_da_contingencia(r: &RetornoSefaz) -> String {
+    let motivo = r.motivo.trim();
+    let j = if motivo.is_empty() {
+        format!("SEFAZ indisponível para autorização (código {})", r.codigo)
+    } else {
+        format!("SEFAZ indisponível para autorização: {motivo}")
+    };
+    j.chars().take(256).collect()
+}
+
+/// A nota assinada em contingência em `inicio`: o DANFCE já sai, e a fila a transmite quando
+/// a SEFAZ voltar.
+#[must_use]
+pub fn em_contingencia(nota: NotaEmContingencia, r: &RetornoSefaz, inicio: Instante) -> Mudanca {
+    Mudanca {
+        estado: EstadoDocumento::Contingencia,
+        chave: Some(nota.chave),
+        trocar_chave: true,
+        protocolo: None,
+        xml: None,
+        codigo: Some(r.codigo.clone()),
+        motivo: Some(format!(
+            "Emitida em contingência — {}. O cupom fiscal já vale (com o aviso); a fila transmite \
+             quando a SEFAZ voltar, em até 24 h.",
+            explicar(&r.codigo, &r.motivo)
+        )),
+        espera_segundos: espera(0),
+        limpar_pedido: false,
+        protocolo_evento: None,
+        xml_evento: None,
+        xml_assinado: Some(nota.xml),
+        buscar_xml: false,
+        contingencia_em: Some(inicio),
+    }
+}
+
 /// Decide o que fazer com o desfecho de um pedido (cancelar uma autorizada, inutilizar o
 /// número de uma rejeitada). Aceito, o documento muda de estado; recusado, volta ao que era,
 /// sem o pedido e com o motivo; sem resposta, o pedido espera a próxima rodada.
@@ -588,6 +735,7 @@ pub fn decidir_evento(
         xml_evento: None,
         xml_assinado: None,
         buscar_xml: false,
+        contingencia_em: None,
     };
     let (aceito, ja_feito, nome) = match pedido {
         PedidoDocumento::Cancelar => (
@@ -761,6 +909,7 @@ mod testes {
             xml_assinado: None,
             xml_cancelamento: None,
             erros: vec![],
+            nao_enviado: false,
         })
     }
 
@@ -785,6 +934,7 @@ mod testes {
             autorizado_em: Some(autorizado),
             pedido: None,
             anulada: false,
+            contingencia_em: None,
         };
         let em = |d: &DocumentoResumo, min: i64| {
             d.prazo_de_cancelamento(autorizado.mais_segundos(min * 60))
@@ -880,6 +1030,7 @@ mod testes {
             xml_assinado: None,
             xml_cancelamento: None,
             erros: vec![],
+            nao_enviado: false,
         });
         let m = decidir(Pendente, 0, desfecho);
         assert_eq!(m.estado, Incerta);
@@ -991,6 +1142,118 @@ mod testes {
         assert_eq!(pedido_da_anulacao(Cancelada, 0), None);
     }
 
+    fn fora(codigo: &str, nao_enviado: bool) -> Desfecho {
+        Desfecho::Resposta(RetornoSefaz {
+            situacao: SituacaoRetorno::Erro,
+            codigo: codigo.into(),
+            motivo: "Erro de conexão com SEFAZ: connect ETIMEDOUT".into(),
+            chave: None,
+            protocolo: None,
+            recebido_em: None,
+            xml: None,
+            xml_assinado: None,
+            xml_cancelamento: None,
+            erros: vec![],
+            nao_enviado,
+        })
+    }
+
+    const CHAVE_9: &str = "43261011222333000181650010000000429100000001";
+
+    #[test]
+    fn so_a_nota_que_nao_chegou_a_sefaz_vai_em_contingencia() {
+        use EstadoDocumento::{Incerta, Pendente};
+        assert!(pede_contingencia(Pendente, &fora("ERR", true)));
+        assert!(pede_contingencia(Pendente, &fora("108", false)));
+        // Pode ter chegado (timeout depois do envio): consulta, não contingência.
+        assert!(!pede_contingencia(Pendente, &fora("ERR", false)));
+        // Sem a API não há quem assine; e a incerta, nunca.
+        assert!(!pede_contingencia(
+            Pendente,
+            &Desfecho::Indisponivel("x".into())
+        ));
+        assert!(!pede_contingencia(Incerta, &fora("ERR", true)));
+        // A pendente que não foi em contingência (a assinatura falhou) espera, sem virar
+        // rejeitada — e sem gastar as tentativas de erro.
+        let m = decidir(Pendente, TENTATIVAS_COM_ERRO, fora("ERR", true));
+        assert_eq!(m.estado, Pendente);
+        assert!(m.espera_segundos > 0);
+    }
+
+    #[test]
+    fn a_nota_em_contingencia_guarda_o_xml_e_a_chave_e_tem_prazo() {
+        let Desfecho::Resposta(r) = fora("ERR", true) else {
+            unreachable!()
+        };
+        let j = justificativa_da_contingencia(&r);
+        assert_eq!(
+            j,
+            "SEFAZ indisponível para autorização: Erro de conexão com SEFAZ: connect ETIMEDOUT"
+        );
+        assert!((15..=256).contains(&j.chars().count()));
+        let inicio = Instante::de_micros(1_000_000_000_000);
+        let m = em_contingencia(
+            NotaEmContingencia {
+                chave: CHAVE_9.into(),
+                xml: "<NFe/>".into(),
+            },
+            &r,
+            inicio,
+        );
+        assert_eq!(m.estado, EstadoDocumento::Contingencia);
+        assert_eq!((m.chave.as_deref(), m.trocar_chave), (Some(CHAVE_9), true));
+        assert_eq!(m.xml_assinado.as_deref(), Some("<NFe/>"));
+        assert_eq!(m.contingencia_em, Some(inicio));
+        assert!(m.motivo.unwrap().starts_with("Emitida em contingência"));
+        assert!(chave_de_contingencia(CHAVE_9) && !chave_de_contingencia(CHAVE));
+    }
+
+    #[test]
+    fn a_transmissao_da_contingencia() {
+        use EstadoDocumento::{Autorizada, Contingencia, Incerta, Pendente, Rejeitada};
+        let autorizada = decidir(
+            Contingencia,
+            3,
+            r(SituacaoRetorno::Autorizado, "100", Some(CHAVE_9)),
+        );
+        assert_eq!(autorizada.estado, Autorizada);
+        assert_eq!(autorizada.xml.as_deref(), Some("<nfeProc/>"));
+        // A SEFAZ ainda fora, ou sem resultado: espera, sem limite de tentativas.
+        for d in [fora("ERR", true), fora("109", false), fora("ERR", false)] {
+            let m = decidir(Contingencia, 40, d);
+            assert_eq!(m.estado, Contingencia);
+            assert!(!m.trocar_chave);
+            assert_eq!(m.espera_segundos, 15 * 60);
+        }
+        // 204: a mesma chave já chegou — consulta, mantendo a chave e a nota assinada.
+        let dup = decidir(
+            Contingencia,
+            1,
+            r(SituacaoRetorno::Rejeitado, "204", Some(CHAVE_9)),
+        );
+        assert_eq!((dup.estado, dup.trocar_chave), (Incerta, false));
+        // A consulta dela que não acha a nota devolve à contingência, não à emissão normal.
+        let volta = decidir(
+            Incerta,
+            2,
+            r(SituacaoRetorno::Rejeitado, "217", Some(CHAVE_9)),
+        );
+        assert_eq!((volta.estado, volta.trocar_chave), (Contingencia, false));
+        let normal = decidir(
+            Incerta,
+            2,
+            r(SituacaoRetorno::Rejeitado, "217", Some(CHAVE)),
+        );
+        assert_eq!(normal.estado, Pendente);
+        // Rejeitada: corrigir e reenviar (em emissão normal).
+        assert_eq!(
+            decidir(Contingencia, 1, r(SituacaoRetorno::Rejeitado, "225", None)).estado,
+            Rejeitada
+        );
+        // A anulação espera a contingência se resolver.
+        assert_eq!(pedido_da_anulacao(Contingencia, 1), None);
+    }
+
     #[test]
     fn frase_da_faixa() {
         let mut r = ResumoFiscal::default();
@@ -998,6 +1261,8 @@ mod testes {
         r.pendentes = 2;
         r.incertas = 1;
         assert!(r.frase().starts_with("3 nota(s) na fila"));
+        r.em_contingencia = 2;
+        assert!(r.frase().starts_with("2 nota(s) em contingência"));
         r.rejeitadas = 1;
         assert!(r.frase().contains("rejeitada"));
     }

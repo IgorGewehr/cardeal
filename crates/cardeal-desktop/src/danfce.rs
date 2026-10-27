@@ -33,14 +33,16 @@ fn meio(m: MeioPagamento) -> &'static str {
     }
 }
 
-/// O DANFCE de um documento autorizado.
+/// O DANFCE de um documento autorizado — ou emitido em contingência, com o aviso e o QR Code
+/// da nota assinada.
 ///
 /// # Errors
-/// O documento não está autorizado, ou não tem a nota guardada.
+/// O documento não está autorizado nem em contingência, ou não tem a nota guardada.
 pub fn montar(d: &DetalheDocumento) -> Result<DanfcePdf, String> {
-    if d.resumo.estado != EstadoDocumento::Autorizada {
+    let em_contingencia = d.resumo.estado == EstadoDocumento::Contingencia;
+    if d.resumo.estado != EstadoDocumento::Autorizada && !em_contingencia {
         return Err(format!(
-            "Só a NFC-e autorizada tem cupom fiscal (esta está {})",
+            "Só a NFC-e autorizada (ou emitida em contingência) tem cupom fiscal (esta está {})",
             d.resumo.estado.rotulo()
         ));
     }
@@ -60,7 +62,13 @@ pub fn montar(d: &DetalheDocumento) -> Result<DanfcePdf, String> {
     } else {
         format!(" {}", en.complemento)
     };
-    let xml = d.xml.as_deref().unwrap_or_default();
+    // Em contingência, o QR Code está na nota assinada (o `nfeProc` ainda não veio).
+    let xml = if em_contingencia {
+        d.xml_assinado.as_deref()
+    } else {
+        d.xml.as_deref()
+    }
+    .unwrap_or_default();
     Ok(DanfcePdf {
         razao_social: e.razao_social.clone(),
         cnpj: e.cnpj.formatar(),
@@ -102,12 +110,13 @@ pub fn montar(d: &DetalheDocumento) -> Result<DanfcePdf, String> {
         serie: d.resumo.serie,
         emissao: d.resumo.criado_em,
         chave,
-        protocolo: d.resumo.protocolo.clone(),
-        autorizacao: d.resumo.autorizado_em,
+        protocolo: d.resumo.protocolo.clone().filter(|_| !em_contingencia),
+        autorizacao: d.resumo.autorizado_em.filter(|_| !em_contingencia),
         url_consulta: tag(xml, "urlChave")
             .unwrap_or_else(|| "o portal da NFC-e da SEFAZ do estado".to_owned()),
         qr_code: tag(xml, "qrCode"),
         homologacao: d.resumo.ambiente == AmbienteFiscal::Homologacao,
+        contingencia: d.resumo.contingencia_em.is_some(),
         fuso: Fuso::BRASILIA,
     })
 }
@@ -239,12 +248,31 @@ mod testes {
                 autorizado_em: Some(Instante::agora()),
                 pedido: None,
                 anulada: false,
+                contingencia_em: None,
             },
             nota: Some(nota),
             xml: Some(format!(
                 "<nfeProc><infNFeSupl><qrCode>https://x/q?p={chave}|3|2</qrCode><urlChave>www.sefaz.rs.gov.br/nfce/consulta</urlChave></infNFeSupl></nfeProc>"
             )),
+            xml_assinado: None,
         }
+    }
+
+    #[test]
+    fn o_cupom_da_contingencia_tira_o_qr_da_nota_assinada_e_avisa() {
+        let mut d = detalhe(EstadoDocumento::Contingencia);
+        d.resumo.protocolo = None;
+        d.resumo.contingencia_em = Some(cardeal_kernel::Instante::agora());
+        d.xml = None;
+        d.xml_assinado = Some(
+            "<NFe><infNFeSupl><qrCode>https://x/q?p=4|3|2|9|assinado</qrCode>\
+             <urlChave>www.sefaz.rs.gov.br/nfce/consulta</urlChave></infNFeSupl></NFe>"
+                .into(),
+        );
+        let pdf = montar(&d).unwrap();
+        assert!(pdf.contingencia);
+        assert!(pdf.qr_code.unwrap().ends_with("assinado"));
+        assert_eq!((pdf.protocolo, pdf.autorizacao), (None, None));
     }
 
     #[test]

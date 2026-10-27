@@ -21,7 +21,10 @@ use serde_json::{json, Value};
 
 use crate::chave::ChaveAcesso;
 use crate::dfe::{DocumentoDfe, Manifestacao, PaginaDfe, TipoDfe};
-use crate::emissao::{Csc, ItemDocumento, Nfce, PedidoInutilizacao, RetornoSefaz, SituacaoRetorno};
+use crate::emissao::{
+    Csc, EntradaEmContingencia, ItemDocumento, Nfce, NotaEmContingencia, PedidoInutilizacao,
+    RetornoSefaz, SituacaoRetorno,
+};
 use crate::erros::ErroFiscal;
 use crate::porta::{AmbienteFiscal, ModeloFiscal, Nsu, PortaFiscal, StatusSefaz};
 
@@ -179,9 +182,28 @@ pub(crate) struct RespostaSefazApi {
     pub xml_assinado: Option<String>,
     pub xml_cancelamento: Option<String>,
     pub erros: Option<Vec<String>>,
+    pub nao_enviado: bool,
 }
 
 impl RespostaSefazApi {
+    /// A nota assinada em contingência (`status: "contingencia"`, com a chave e o XML) — ou
+    /// o motivo de não ter vindo.
+    fn em_contingencia(self) -> Result<NotaEmContingencia, ErroFiscal> {
+        match (self.status.as_str(), self.chave_acesso, self.xml) {
+            ("contingencia", Some(chave), Some(xml)) if chave.len() == 44 && !xml.is_empty() => {
+                Ok(NotaEmContingencia { chave, xml })
+            }
+            _ => Err(ErroFiscal::ApiFiscalRecusou(format!(
+                "a API fiscal não assinou a nota em contingência: {}",
+                if self.motivo_status.is_empty() {
+                    "resposta sem a chave ou o XML"
+                } else {
+                    &self.motivo_status
+                }
+            ))),
+        }
+    }
+
     /// Em [`RetornoSefaz`]. A validação do provedor ("erro" com código 400) é uma rejeição: o
     /// número não foi usado e a nota precisa de correção. O `sefaz-api` também chama de "erro"
     /// as rejeições com código abaixo de 200 (algumas UFs usam, ex.: SP 178) — pelo motivo
@@ -210,8 +232,23 @@ impl RespostaSefazApi {
             xml_assinado: self.xml_assinado.filter(|x| !x.is_empty()),
             xml_cancelamento: self.xml_cancelamento.filter(|x| !x.is_empty()),
             erros: self.erros.unwrap_or_default(),
+            nao_enviado: self.nao_enviado,
         }
     }
+}
+
+/// Data e hora como a SEFAZ quer: `AAAA-MM-DDThh:mm:ss-03:00`, no fuso da empresa.
+fn data_hora_sefaz(instante: cardeal_kernel::Instante, fuso: cardeal_kernel::Fuso) -> String {
+    let minutos = fuso.em_minutos();
+    let sinal = if minutos < 0 { '-' } else { '+' };
+    let minutos = minutos.unsigned_abs();
+    format!(
+        "{}T{}{sinal}{:02}:{:02}",
+        instante.data(fuso).formatar_iso(),
+        instante.hora(fuso).formatar_com_segundos(),
+        minutos / 60,
+        minutos % 60
+    )
 }
 
 /// Dinheiro, quantidade, preço e percentual como número JSON (o `sefaz-api` formata as
@@ -546,6 +583,39 @@ impl PortaFiscal for ApiFiscalHttp {
         let mut corpo = self.corpo_base();
         corpo.extend(nfce_json(nota, csc));
         self.postar("/nfe/nfce/emitir", &Value::Object(corpo))
+            .map(RespostaSefazApi::em_retorno)
+            .map_err(|e| Erro::de_dominio(&e))
+    }
+
+    fn preparar_nfce_em_contingencia(
+        &self,
+        nota: &Nfce,
+        csc: &Csc,
+        entrada: &EntradaEmContingencia,
+    ) -> Resultado<NotaEmContingencia> {
+        let mut corpo = self.corpo_base();
+        corpo.extend(nfce_json(nota, csc));
+        corpo.insert(
+            "contingencia".into(),
+            json!({
+                "dhCont": data_hora_sefaz(entrada.inicio, entrada.fuso),
+                "xJust": entrada.justificativa,
+            }),
+        );
+        self.postar::<RespostaSefazApi>("/nfe/nfce/contingencia/prepare", &Value::Object(corpo))
+            .and_then(RespostaSefazApi::em_contingencia)
+            .map_err(|e| Erro::de_dominio(&e))
+    }
+
+    fn transmitir_nfce_em_contingencia(
+        &self,
+        xml_assinado: &str,
+        uf: Uf,
+    ) -> Resultado<RetornoSefaz> {
+        let mut corpo = self.corpo_base();
+        corpo.insert("signedXml".into(), Value::from(xml_assinado));
+        corpo.insert("ufEmitente".into(), Value::from(uf.sigla()));
+        self.postar("/nfe/nfce/contingencia/transmit", &Value::Object(corpo))
             .map(RespostaSefazApi::em_retorno)
             .map_err(|e| Erro::de_dominio(&e))
     }
@@ -961,6 +1031,79 @@ mod testes {
             .status_servico(Uf::Sc, ModeloFiscal::Nfe)
             .unwrap_err();
         assert_eq!(erro.codigo, cardeal_kernel::CodigoErro::FISCAL_INDISPONIVEL);
+    }
+
+    fn csc() -> Csc {
+        Csc {
+            id: "000001".into(),
+            token: Segredo::novo("TOKEN".into()),
+        }
+    }
+
+    #[test]
+    fn contingencia_manda_o_dh_cont_e_a_justificativa_e_le_a_nota_assinada() {
+        let (url, tarefa) = servidor(
+            200,
+            r#"{"success":true,"status":"contingencia","chaveAcesso":"43261011222333000181650010000000429100000001","numero":42,"xml":"<NFe><infNFeSupl><qrCode>q</qrCode></infNFeSupl></NFe>"}"#,
+        );
+        let entrada = EntradaEmContingencia {
+            inicio: cardeal_kernel::Instante::de_micros(1_793_030_400_000_000),
+            justificativa: "SEFAZ indisponível: sem conexão com o webservice".into(),
+            fuso: cardeal_kernel::Fuso::BRASILIA,
+        };
+        let nota = cliente(&url)
+            .preparar_nfce_em_contingencia(&crate::emissao::exemplo(), &csc(), &entrada)
+            .unwrap();
+        assert_eq!(nota.chave, "43261011222333000181650010000000429100000001");
+        assert!(nota.xml.contains("<qrCode>"));
+        let recebido = tarefa.join().unwrap();
+        assert!(
+            recebido.starts_with("POST /nfe/nfce/contingencia/prepare "),
+            "{recebido}"
+        );
+        let corpo: Value = serde_json::from_str(recebido.rsplit('\n').next().unwrap()).unwrap();
+        assert_eq!(corpo["contingencia"]["dhCont"], "2026-10-26T13:00:00-03:00");
+        assert_eq!(
+            corpo["contingencia"]["xJust"],
+            "SEFAZ indisponível: sem conexão com o webservice"
+        );
+        assert_eq!(corpo["numero"], 42);
+
+        // Sem a chave ou o XML: recusa, com o motivo.
+        let (url, _t) = servidor(
+            422,
+            r#"{"success":false,"status":"erro","motivoStatus":"xJust deve ter 15-256 caracteres"}"#,
+        );
+        let erro = cliente(&url)
+            .preparar_nfce_em_contingencia(&crate::emissao::exemplo(), &csc(), &entrada)
+            .unwrap_err();
+        assert!(
+            erro.mensagem.contains("xJust deve ter"),
+            "{}",
+            erro.mensagem
+        );
+    }
+
+    #[test]
+    fn transmitir_a_contingencia_manda_o_xml_e_le_o_nao_enviado() {
+        let (url, tarefa) = servidor(
+            422,
+            r#"{"success":false,"status":"erro","codigoStatus":"ERR","motivoStatus":"Erro de conexão com SEFAZ: connect ETIMEDOUT","chaveAcesso":"43261011222333000181650010000000429100000001","naoEnviado":true}"#,
+        );
+        let r = cliente(&url)
+            .transmitir_nfce_em_contingencia("<NFe>assinada</NFe>", Uf::Rs)
+            .unwrap();
+        assert_eq!(r.situacao, SituacaoRetorno::Erro);
+        assert!(r.nao_enviado && r.sefaz_fora());
+        let recebido = tarefa.join().unwrap();
+        assert!(
+            recebido.starts_with("POST /nfe/nfce/contingencia/transmit "),
+            "{recebido}"
+        );
+        let corpo: Value = serde_json::from_str(recebido.rsplit('\n').next().unwrap()).unwrap();
+        assert_eq!(corpo["signedXml"], "<NFe>assinada</NFe>");
+        assert_eq!(corpo["ufEmitente"], "RS");
+        assert_eq!(corpo["ambiente"], "homologacao");
     }
 
     /// A conferência de verdade, em homologação, contra o `sefaz-api` publicado. Precisa de

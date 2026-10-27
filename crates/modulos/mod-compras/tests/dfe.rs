@@ -550,6 +550,7 @@ fn ciencia_fora_do_prazo_pede_o_xml_ao_fornecedor_e_sai_da_espera_ao_importar() 
         xml_assinado: None,
         xml_cancelamento: None,
         erros: vec![],
+        nao_enviado: false,
     });
     m.buscar().unwrap();
     let s = m.situacao();

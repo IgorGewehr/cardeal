@@ -129,6 +129,7 @@ impl EstadoNotas {
                     d.estado,
                     EstadoDocumento::Pendente
                         | EstadoDocumento::Incerta
+                        | EstadoDocumento::Contingencia
                         | EstadoDocumento::Rejeitada
                 ),
                 Filtro::Autorizadas => d.estado == EstadoDocumento::Autorizada,
@@ -168,8 +169,22 @@ fn etiqueta(d: &DocumentoResumo) -> Etiqueta {
     match d.estado {
         EstadoDocumento::Autorizada => Etiqueta::positiva(rotulo),
         EstadoDocumento::Pendente | EstadoDocumento::Incerta => Etiqueta::info(rotulo),
+        EstadoDocumento::Contingencia => Etiqueta::atencao(rotulo),
         EstadoDocumento::Rejeitada | EstadoDocumento::Denegada => Etiqueta::negativa(rotulo),
         EstadoDocumento::Cancelada | EstadoDocumento::Inutilizada => Etiqueta::neutra(rotulo),
+    }
+}
+
+/// O que a linha da nota diz: a chave da autorizada; o prazo da que está em contingência; o
+/// motivo das outras.
+fn texto_da_linha(d: &DocumentoResumo) -> String {
+    match (d.estado, d.prazo_da_contingencia()) {
+        (EstadoDocumento::Autorizada, _) => d.chave.clone().unwrap_or_default(),
+        (EstadoDocumento::Contingencia, Some(prazo)) => format!(
+            "Cupom fiscal emitido em contingência — a SEFAZ estava fora. Transmitir até {}.",
+            prazo.formatar(cardeal_kernel::Fuso::BRASILIA)
+        ),
+        _ => d.motivo.clone().unwrap_or_default(),
     }
 }
 
@@ -197,13 +212,29 @@ fn corpo(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoN
     }
     let r = estado.resumo.clone().unwrap_or_default();
     let tom_se = |n: u32, tom: Tom| if n == 0 { Tom::Neutro } else { tom };
-    FaixaKpi::nova(vec![
+    let mut cartoes = vec![
         CartaoKpi::contagem("Na fila", r.pendentes).tom(tom_se(r.pendentes, Tom::Atencao)),
         CartaoKpi::contagem("Conferindo", r.incertas).tom(tom_se(r.incertas, Tom::Atencao)),
         CartaoKpi::contagem("Rejeitadas", r.rejeitadas).tom(tom_se(r.rejeitadas, Tom::Negativo)),
         CartaoKpi::contagem("Autorizadas hoje", r.autorizadas_hoje).tom(Tom::Positivo),
-    ])
-    .mostrar(ui);
+    ];
+    // A contingência só aparece quando há: a SEFAZ esteve fora e o prazo de 24 h corre.
+    if r.em_contingencia > 0 {
+        let prazo = r.contingencia_desde.map_or_else(String::new, |d| {
+            format!(
+                "transmitir até {}",
+                d.mais_segundos(mod_fiscal::PRAZO_DA_CONTINGENCIA_SEGUNDOS)
+                    .formatar(cardeal_kernel::Fuso::BRASILIA)
+            )
+        });
+        cartoes.insert(
+            2,
+            CartaoKpi::contagem("Em contingência", r.em_contingencia)
+                .variacao(prazo)
+                .tom(Tom::Atencao),
+        );
+    }
+    FaixaKpi::nova(cartoes).mostrar(ui);
     ui.add_space(Espaco::E12);
     ui.horizontal(|ui| {
         if let Some(f) = Abas::nova(&[
@@ -283,11 +314,7 @@ fn grade(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoN
             });
         });
         row.col(|ui| {
-            let texto = match d.estado {
-                EstadoDocumento::Autorizada => d.chave.clone().unwrap_or_default(),
-                _ => d.motivo.clone().unwrap_or_default(),
-            };
-            ui.add(Rotulo::campo(texto).quebravel());
+            ui.add(Rotulo::campo(texto_da_linha(d)).quebravel());
         });
         row.col(|ui| {
             ui.horizontal(|ui| {
@@ -457,8 +484,10 @@ fn detalhe(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estad
                 ui.add_space(Espaco::E8);
             }
             ui.horizontal(|ui| {
-                if d.resumo.estado == EstadoDocumento::Autorizada
-                    && ui.add(Botao::secundario("Imprimir cupom fiscal")).clicked()
+                if matches!(
+                    d.resumo.estado,
+                    EstadoDocumento::Autorizada | EstadoDocumento::Contingencia
+                ) && ui.add(Botao::secundario("Imprimir cupom fiscal")).clicked()
                 {
                     imprimir = Some(d.resumo.id);
                 }
@@ -544,6 +573,7 @@ mod testes {
             autorizado_em: None,
             pedido: None,
             anulada: false,
+            contingencia_em: None,
         }
     }
 
@@ -558,6 +588,32 @@ mod testes {
                 });
             });
         }
+    }
+
+    #[test]
+    fn a_contingencia_pede_atencao_mostra_o_prazo_e_o_indicador() {
+        let t = motor_de_teste();
+        let (m, s) = (&t.motor, &t.sessao);
+        let mut estado = EstadoNotas::default();
+        estado.carregar(m, s);
+        let desde = cardeal_kernel::Instante::de_micros(1_793_030_400_000_000);
+        let mut d = documento(EstadoDocumento::Contingencia, 4);
+        d.contingencia_em = Some(desde);
+        assert_eq!(
+            texto_da_linha(&d),
+            "Cupom fiscal emitido em contingência — a SEFAZ estava fora. Transmitir até \
+             27/10/2026 13:00."
+        );
+        estado.documentos = vec![d, documento(EstadoDocumento::Autorizada, 5)];
+        assert_eq!(estado.visiveis().len(), 1, "a contingência pede atenção");
+        estado.resumo = Some(ResumoFiscal {
+            em_contingencia: 1,
+            contingencia_desde: Some(desde),
+            ..ResumoFiscal::default()
+        });
+        estado.geracao_vista = fiscal_fundo::geracao();
+        desenhar(m, s, &mut estado);
+        assert_eq!(estado.resumo.map(|r| r.em_contingencia), Some(1));
     }
 
     #[test]
@@ -587,6 +643,7 @@ mod testes {
             resumo: rejeitada,
             nota: None,
             xml: None,
+            xml_assinado: None,
         });
         let ctx = egui::Context::default();
         cardeal_ui::tokens::instalar_fontes(&ctx);
@@ -624,6 +681,7 @@ mod testes {
             resumo,
             nota: None,
             xml: None,
+            xml_assinado: None,
         });
         estado.pedindo = Some((
             PedidoDocumento::Cancelar,

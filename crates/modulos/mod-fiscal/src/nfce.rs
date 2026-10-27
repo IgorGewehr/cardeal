@@ -306,6 +306,9 @@ pub struct DetalheDocumento {
     pub nota: Option<Nfce>,
     /// O XML autorizado.
     pub xml: Option<String>,
+    /// A nota assinada em contingência (ou na emissão incerta), enquanto o XML autorizado não
+    /// vem — o DANFCE da contingência tira dela o QR Code.
+    pub xml_assinado: Option<String>,
 }
 
 /// Um documento fiscal.
@@ -327,6 +330,7 @@ impl Consulta for DocumentoFiscal {
             resumo: d.resumo,
             nota: d.nota.and_then(|b| postcard::from_bytes(&b).ok()),
             xml: d.xml,
+            xml_assinado: d.xml_assinado,
         })
     }
 }
@@ -359,7 +363,7 @@ pub(crate) mod sqlite {
 
     use cardeal_fiscal::{
         AmbienteFiscal, ChaveAcesso, Consumidor, Crt, Csc, DocumentoConsumidor, Emitente,
-        EnderecoEmitente, MeioPagamento, ModeloFiscal, Nfce, PortaFiscal,
+        EnderecoEmitente, EntradaEmContingencia, MeioPagamento, ModeloFiscal, Nfce, PortaFiscal,
     };
     use cardeal_kernel::{CodigoErro, Erro, Id, Instante, Resultado, Uf};
     use cardeal_modkit::{ContextoTarefa, Ctx};
@@ -368,7 +372,8 @@ pub(crate) mod sqlite {
 
     use super::{ConfiguracaoNfce, ConfigurarNfce};
     use crate::documento::{
-        decidir, decidir_busca, decidir_evento, Busca, Desfecho, DocumentoResumo, EstadoDocumento,
+        decidir, decidir_busca, decidir_evento, em_contingencia, justificativa_da_contingencia,
+        pede_contingencia, Busca, Desfecho, DocumentoResumo, EstadoDocumento, Mudanca,
         PedidoDocumento,
     };
     use crate::montagem::{marcar_homologacao, montar_nfce, DadosDaVenda, ItemDaVenda};
@@ -935,7 +940,9 @@ pub(crate) mod sqlite {
             // Documento fechado com XML a buscar: só a consulta, sem mudar o estado.
             let fechado = !matches!(
                 doc.estado,
-                EstadoDocumento::Pendente | EstadoDocumento::Incerta
+                EstadoDocumento::Pendente
+                    | EstadoDocumento::Incerta
+                    | EstadoDocumento::Contingencia
             );
             if doc.pedido.is_none() && doc.buscar_xml && fechado {
                 match buscar_xmls(t, porta.as_ref(), &doc, uf)? {
@@ -952,16 +959,10 @@ pub(crate) mod sqlite {
             };
             let parar = matches!(desfecho, Desfecho::Indisponivel(_));
             let mudanca = if let Some(pedido) = doc.pedido {
-                let m = decidir_evento(pedido, doc.estado, doc.tentativas, desfecho);
-                match m.estado {
-                    EstadoDocumento::Cancelada => eventos.0 += 1,
-                    EstadoDocumento::Inutilizada => eventos.1 += 1,
-                    _ if m.limpar_pedido => eventos.2 += 1,
-                    _ => {}
-                }
-                m
+                mudanca_do_pedido(pedido, &doc, desfecho, &mut eventos)
             } else {
-                let m = decidir(doc.estado, doc.tentativas, desfecho);
+                let m =
+                    mudanca_da_emissao(porta.as_ref(), &doc, csc.as_ref(), desfecho, t.ctx.fuso);
                 *contagem.entry(m.estado).or_default() += 1;
                 m
             };
@@ -1004,6 +1005,84 @@ pub(crate) mod sqlite {
         Ok(resumo_da_rodada(&contagem, eventos, recuperados))
     }
 
+    /// O que gravar depois de levar um pedido (cancelar, inutilizar) — e a conta da rodada:
+    /// cancelados, inutilizados, recusados.
+    fn mudanca_do_pedido(
+        pedido: PedidoDocumento,
+        doc: &sqld::NaFila,
+        desfecho: Desfecho,
+        eventos: &mut (u32, u32, u32),
+    ) -> Mudanca {
+        let m = decidir_evento(pedido, doc.estado, doc.tentativas, desfecho);
+        match m.estado {
+            EstadoDocumento::Cancelada => eventos.0 += 1,
+            EstadoDocumento::Inutilizada => eventos.1 += 1,
+            _ if m.limpar_pedido => eventos.2 += 1,
+            _ => {}
+        }
+        m
+    }
+
+    /// O que gravar depois de emitir, transmitir ou consultar: a decisão — ou, quando a SEFAZ
+    /// está fora e a nota não chegou a ela, a contingência, já.
+    fn mudanca_da_emissao(
+        porta: &dyn PortaFiscal,
+        doc: &sqld::NaFila,
+        csc: Option<&Csc>,
+        desfecho: Desfecho,
+        fuso: cardeal_kernel::Fuso,
+    ) -> Mudanca {
+        if pede_contingencia(doc.estado, &desfecho) {
+            contingencia(porta, doc, csc, desfecho, fuso)
+        } else {
+            decidir(doc.estado, doc.tentativas, desfecho)
+        }
+    }
+
+    /// Assina em contingência a nota pendente que a SEFAZ fora não recebeu. Se a assinatura
+    /// falha, a nota espera como pendente — com o motivo dos dois.
+    fn contingencia(
+        porta: &dyn PortaFiscal,
+        doc: &sqld::NaFila,
+        csc: Option<&Csc>,
+        desfecho: Desfecho,
+        fuso: cardeal_kernel::Fuso,
+    ) -> Mudanca {
+        let assinada = match (&desfecho, &doc.nota, csc) {
+            (Desfecho::Resposta(r), Some(blob), Some(csc)) => {
+                let inicio = Instante::agora();
+                postcard::from_bytes::<Nfce>(blob)
+                    .map_err(|e| e.to_string())
+                    .and_then(|nota| {
+                        porta
+                            .preparar_nfce_em_contingencia(
+                                &nota,
+                                csc,
+                                &EntradaEmContingencia {
+                                    inicio,
+                                    justificativa: justificativa_da_contingencia(r),
+                                    fuso,
+                                },
+                            )
+                            .map_err(|e| e.mensagem)
+                    })
+                    .map(|n| em_contingencia(n, r, inicio))
+            }
+            _ => Err("sem a nota guardada ou o CSC".into()),
+        };
+        match assinada {
+            Ok(m) => m,
+            Err(falha) => {
+                let mut m = decidir(doc.estado, doc.tentativas, desfecho);
+                m.motivo = Some(format!(
+                    "{} — e a contingência não saiu: {falha}",
+                    m.motivo.unwrap_or_default()
+                ));
+                m
+            }
+        }
+    }
+
     /// A frase do fim da rodada: as emissões, os pedidos e os XMLs recuperados.
     fn resumo_da_rodada(
         contagem: &HashMap<EstadoDocumento, u32>,
@@ -1017,6 +1096,13 @@ pub(crate) mod sqlite {
             n(EstadoDocumento::Rejeitada) + n(EstadoDocumento::Denegada),
             n(EstadoDocumento::Pendente) + n(EstadoDocumento::Incerta)
         );
+        if n(EstadoDocumento::Contingencia) > 0 {
+            let _ = write!(
+                resumo,
+                "; {} em contingência",
+                n(EstadoDocumento::Contingencia)
+            );
+        }
         if cancelados + inutilizados + recusados > 0 {
             let _ = write!(
                 resumo,
@@ -1083,6 +1169,14 @@ pub(crate) mod sqlite {
             (EstadoDocumento::Pendente, _, _, None, _) => Desfecho::Recusado(
                 "o CSC da NFC-e não está cadastrado (Configurações › Fiscal)".into(),
             ),
+            // A contingência: o mesmo XML assinado, quantas vezes for preciso.
+            (EstadoDocumento::Contingencia, _, _, _, Some(uf)) => match doc.xml_assinado.as_deref()
+            {
+                Some(xml) => desfecho(porta.transmitir_nfce_em_contingencia(xml, uf)),
+                None => {
+                    Desfecho::Recusado("a nota assinada em contingência não está guardada".into())
+                }
+            },
             (EstadoDocumento::Incerta, _, Some(chave), _, Some(uf)) => {
                 match ChaveAcesso::nova(chave) {
                     Ok(chave) => {

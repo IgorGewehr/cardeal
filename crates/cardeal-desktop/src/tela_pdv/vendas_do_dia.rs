@@ -126,6 +126,7 @@ fn etiqueta_nota(nota: Option<&DocumentoResumo>) -> Etiqueta {
     match d.estado {
         EstadoDocumento::Autorizada => Etiqueta::positiva(rotulo),
         EstadoDocumento::Pendente | EstadoDocumento::Incerta => Etiqueta::info(rotulo),
+        EstadoDocumento::Contingencia => Etiqueta::atencao(rotulo),
         EstadoDocumento::Rejeitada | EstadoDocumento::Denegada => Etiqueta::negativa(rotulo),
         EstadoDocumento::Cancelada | EstadoDocumento::Inutilizada => Etiqueta::neutra(rotulo),
     }
@@ -573,7 +574,12 @@ fn rodape(ui: &mut egui::Ui, v: &EstadoVendasDoDia, acao: &mut Option<AcaoVendas
             *acao = Some(AcaoVendas::Comprovante(v.cupom));
         }
     }
-    if let Some(d) = nota.filter(|d| d.estado == EstadoDocumento::Autorizada && !d.anulada) {
+    if let Some(d) = nota.filter(|d| {
+        matches!(
+            d.estado,
+            EstadoDocumento::Autorizada | EstadoDocumento::Contingencia
+        ) && !d.anulada
+    }) {
         if ui.add(Botao::secundario("Imprimir cupom fiscal")).clicked() {
             *acao = Some(AcaoVendas::Imprimir(d.id));
         }

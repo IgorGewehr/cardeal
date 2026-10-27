@@ -181,18 +181,27 @@ pub(super) fn resultado_venda(ui: &mut egui::Ui, estado: &mut EstadoTelaPdv) {
                     | mod_fiscal::EstadoDocumento::Denegada => {
                         Etiqueta::negativa(n.estado.rotulo())
                     }
+                    mod_fiscal::EstadoDocumento::Contingencia => {
+                        Etiqueta::atencao(n.estado.rotulo())
+                    }
                     _ => Etiqueta::info(n.estado.rotulo()),
                 };
                 ui.add(etiqueta.com_ponto());
-                if n.estado == mod_fiscal::EstadoDocumento::Autorizada
-                    && ui
-                        .add(Botao::secundario("Imprimir cupom fiscal").pequeno())
-                        .clicked()
+                if matches!(
+                    n.estado,
+                    mod_fiscal::EstadoDocumento::Autorizada
+                        | mod_fiscal::EstadoDocumento::Contingencia
+                ) && ui
+                    .add(Botao::secundario("Imprimir cupom fiscal").pequeno())
+                    .clicked()
                 {
                     imprimir = Some(n.id);
                 }
             });
-            if n.estado == mod_fiscal::EstadoDocumento::Rejeitada {
+            if matches!(
+                n.estado,
+                mod_fiscal::EstadoDocumento::Rejeitada | mod_fiscal::EstadoDocumento::Contingencia
+            ) {
                 if let Some(m) = &n.motivo {
                     ui.add(Rotulo::apoio(m.clone()).quebravel());
                 }

@@ -156,6 +156,64 @@ CREATE INDEX fiscal_documento_fila ON fiscal_documento(empresa, proxima_tentativ
     WHERE estado IN ('Pendente','Incerta') OR pedido IS NOT NULL OR xml_a_buscar > 0;
 ";
 
+/// v7: a NFC-e em **contingência off-line** — o estado `Contingencia` (a nota assinada com
+/// `tpEmis = 9`, o DANFCE já impresso, esperando a SEFAZ voltar) e `contingencia_em` (o
+/// `dhCont`). O SQLite não muda um `CHECK`: a tabela é recriada com os dados.
+const SQL_V7: &str = "
+CREATE TABLE fiscal_documento_v7 (
+    id                BLOB PRIMARY KEY,
+    empresa           BLOB    NOT NULL REFERENCES nucleo_empresa(id),
+    modelo            TEXT    NOT NULL CHECK (modelo IN ('55','65')),
+    serie             INTEGER NOT NULL,
+    numero            INTEGER NOT NULL,
+    ambiente          TEXT    NOT NULL CHECK (ambiente IN ('homologacao','producao')),
+    origem_modulo     TEXT    NOT NULL,
+    origem_id         BLOB    NOT NULL,
+    estado            TEXT    NOT NULL CHECK (estado IN
+                          ('Pendente','Incerta','Contingencia','Autorizada','Rejeitada',
+                           'Denegada','Cancelada','Inutilizada')),
+    total             INTEGER NOT NULL,
+    nota              BLOB,
+    chave             TEXT,
+    protocolo         TEXT,
+    codigo            TEXT,
+    motivo            TEXT,
+    xml               TEXT,
+    tentativas        INTEGER NOT NULL DEFAULT 0,
+    proxima_tentativa INTEGER NOT NULL DEFAULT 0,
+    criado_em         INTEGER NOT NULL,
+    atualizado_em     INTEGER NOT NULL,
+    autorizado_em     INTEGER,
+    pedido            TEXT    CHECK (pedido IN ('cancelar','inutilizar')),
+    justificativa     TEXT,
+    protocolo_evento  TEXT,
+    evento_em         INTEGER,
+    anulada           INTEGER NOT NULL DEFAULT 0 CHECK (anulada IN (0,1)),
+    xml_evento        TEXT,
+    xml_assinado      TEXT,
+    xml_a_buscar      INTEGER NOT NULL DEFAULT 0 CHECK (xml_a_buscar BETWEEN 0 AND 9),
+    contingencia_em   INTEGER,
+    UNIQUE (empresa, origem_modulo, origem_id),
+    UNIQUE (empresa, modelo, serie, ambiente, numero)
+) STRICT;
+INSERT INTO fiscal_documento_v7
+    (id, empresa, modelo, serie, numero, ambiente, origem_modulo, origem_id, estado, total, nota,
+     chave, protocolo, codigo, motivo, xml, tentativas, proxima_tentativa, criado_em,
+     atualizado_em, autorizado_em, pedido, justificativa, protocolo_evento, evento_em, anulada,
+     xml_evento, xml_assinado, xml_a_buscar)
+SELECT id, empresa, modelo, serie, numero, ambiente, origem_modulo, origem_id, estado, total, nota,
+       chave, protocolo, codigo, motivo, xml, tentativas, proxima_tentativa, criado_em,
+       atualizado_em, autorizado_em, pedido, justificativa, protocolo_evento, evento_em, anulada,
+       xml_evento, xml_assinado, xml_a_buscar
+FROM fiscal_documento;
+DROP TABLE fiscal_documento;
+ALTER TABLE fiscal_documento_v7 RENAME TO fiscal_documento;
+CREATE INDEX fiscal_documento_fila ON fiscal_documento(empresa, proxima_tentativa)
+    WHERE estado IN ('Pendente','Incerta','Contingencia') OR pedido IS NOT NULL
+       OR xml_a_buscar > 0;
+CREATE INDEX fiscal_documento_criado ON fiscal_documento(empresa, criado_em);
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -191,6 +249,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 6,
         nome: "fiscal_nota_assinada_e_busca_de_xml",
         sql: SQL_V6,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 7,
+        nome: "fiscal_contingencia_offline",
+        sql: SQL_V7,
         tipo: TipoMigracao::Esquema,
     },
 ];

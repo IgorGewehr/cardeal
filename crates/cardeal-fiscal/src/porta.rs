@@ -20,7 +20,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::chave::ChaveAcesso;
 use crate::dfe::{Manifestacao, PaginaDfe};
-use crate::emissao::{Csc, Nfce, PedidoInutilizacao, RetornoSefaz};
+use crate::emissao::{
+    Csc, EntradaEmContingencia, Nfce, NotaEmContingencia, PedidoInutilizacao, RetornoSefaz,
+};
 
 /// O modelo do documento fiscal eletrônico.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -164,6 +166,31 @@ pub trait PortaFiscal: Send + Sync {
     /// # Errors
     /// Como [`Self::emitir_nfce`].
     fn inutilizar(&self, pedido: &PedidoInutilizacao) -> Resultado<RetornoSefaz>;
+
+    /// Assina a NFC-e em **contingência off-line** (`tpEmis = 9`), sem transmitir: a chave e o
+    /// XML com o QR Code, que vai impresso no DANFCE e é transmitido depois, sem mudar
+    /// ([`Self::transmitir_nfce_em_contingencia`]). Para quando a SEFAZ está fora e a API não.
+    ///
+    /// # Errors
+    /// Como [`Self::emitir_nfce`] — a recusa dos dados vem como
+    /// [`crate::ErroFiscal::ApiFiscalRecusou`].
+    fn preparar_nfce_em_contingencia(
+        &self,
+        nota: &Nfce,
+        csc: &Csc,
+        entrada: &EntradaEmContingencia,
+    ) -> Resultado<NotaEmContingencia>;
+
+    /// Transmite a NFC-e assinada em contingência — o mesmo XML, quantas vezes for preciso: a
+    /// chave não muda, e se uma transmissão anterior chegou a SEFAZ responde duplicidade (204).
+    ///
+    /// # Errors
+    /// Como [`Self::emitir_nfce`].
+    fn transmitir_nfce_em_contingencia(
+        &self,
+        xml_assinado: &str,
+        uf: Uf,
+    ) -> Resultado<RetornoSefaz>;
 }
 
 /// Uma porta compartilhada é uma porta (o simulado de um teste, servindo várias empresas).
@@ -220,5 +247,22 @@ impl<T: PortaFiscal + ?Sized> PortaFiscal for std::sync::Arc<T> {
 
     fn inutilizar(&self, pedido: &PedidoInutilizacao) -> Resultado<RetornoSefaz> {
         (**self).inutilizar(pedido)
+    }
+
+    fn preparar_nfce_em_contingencia(
+        &self,
+        nota: &Nfce,
+        csc: &Csc,
+        entrada: &EntradaEmContingencia,
+    ) -> Resultado<NotaEmContingencia> {
+        (**self).preparar_nfce_em_contingencia(nota, csc, entrada)
+    }
+
+    fn transmitir_nfce_em_contingencia(
+        &self,
+        xml_assinado: &str,
+        uf: Uf,
+    ) -> Resultado<RetornoSefaz> {
+        (**self).transmitir_nfce_em_contingencia(xml_assinado, uf)
     }
 }
