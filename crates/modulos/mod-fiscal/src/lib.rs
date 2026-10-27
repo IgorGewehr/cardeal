@@ -48,10 +48,12 @@ pub use cardeal_fiscal::{AmbienteFiscal, ModeloFiscal, StatusSefaz};
 pub use comandos::{DefinirAmbienteFiscal, InstalarCertificado, RemoverCertificado};
 pub use consultas::{SituacaoFiscal, StatusDaSefaz};
 pub use documento::{
-    decidir, decidir_busca, decidir_evento, em_contingencia, espera, justificativa_da_contingencia,
-    pede_contingencia, pedido_da_anulacao, protocolo_no_evento, Busca, Desfecho, DocumentoResumo,
-    EstadoDocumento, Mudanca, PedidoDocumento, PrazoDeCancelamento, ResumoFiscal,
-    PRAZO_DA_CONTINGENCIA_SEGUNDOS, TENTATIVAS_DA_BUSCA,
+    decidir, decidir_busca, decidir_evento, em_contingencia, espera, esperar,
+    justificativa_da_contingencia, nao_reemitir, pede_contingencia, pede_substituicao,
+    pedido_da_anulacao, pedido_da_substituida, protocolo_no_evento, Busca, Desfecho,
+    DocumentoResumo, EstadoDocumento, Mudanca, PedidoDocumento, PrazoDeCancelamento, ResumoFiscal,
+    JANELA_DA_SUBSTITUICAO_SEGUNDOS, JUSTIFICATIVA_DA_SUBSTITUICAO, PRAZO_DA_CONTINGENCIA_SEGUNDOS,
+    TENTATIVAS_DA_BUSCA,
 };
 pub use erros::ErroModuloFiscal;
 pub use explicacao::explicar;

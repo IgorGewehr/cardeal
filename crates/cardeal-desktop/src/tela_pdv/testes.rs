@@ -750,6 +750,8 @@ fn o_cupom_fiscal_sai_sozinho_quando_a_nfce_sai() {
         pedido: None,
         anulada: false,
         contingencia_em: None,
+        substitui: None,
+        substituida_por: None,
     };
     let imprimir = |e: &EstadoTelaPdv| {
         e.pendentes

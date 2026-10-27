@@ -727,6 +727,12 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   - desktop (`pacote_contador.rs`): `XMLs AAAA-MM.zip`, as seções "Notas fiscais do mês" e
     "Pendências do mês" no PDF, e as abas "Notas emitidas" e "Notas de entrada" na planilha;
   - `cardeal-pdf`: o sinal de menos (U+2212) sai como traço, não como "?".
+- **Substituição da NFC-e sem resposta (2026-10-27, fecha o fiscal.md §11 item 3):** `sefaz-api`
+  43c98f0 (o `/nfe/cancelar` com `chaveSubstituta` = evento 110112); `cardeal-fiscal`
+  `PortaFiscal::cancelar_por_substituicao`; `mod-fiscal`: migração v9, `pede_substituicao`,
+  `nao_reemitir`, `pedido_da_substituida`, o pedido `CancelarPorSubstituicao`, a fila em funções
+  menores (`processar`, `decidir_documento`, `criar_substituta`). A substituta sai sempre em
+  contingência; a original é cancelada por substituição ou inutilizada, nunca emitida de novo.
 - **Série da NFC-e por caixa (2026-10-27, fiscal.md §11 item 4):** `mod-fiscal` `terminal.rs`
   (`DefinirSerieDoTerminal`, `SeriesDosTerminais`, migração v8), a emissão pela série do terminal do
   cupom, `ConfigurarNfce` recusando a série de um caixa; desktop: `maquina::terminal()` (a

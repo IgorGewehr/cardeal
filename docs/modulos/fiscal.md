@@ -186,6 +186,22 @@ Decisões:
 - **Sem internet nenhuma, nada muda**: a nota espera na fila. Assinar no Cardeal (XMLDSig, o XML inteiro
   em Rust) seria trazer o `sefaz-api` para dentro — não vale enquanto o caso real é a SEFAZ fora.
 - O prazo de **24 horas** é o mais estrito entre as UFs (o manual fala em "até o primeiro dia útil").
+
+**Substituição da nota sem resposta** (NT 2018.004; migração v9; `sefaz-api` 43c98f0; 2026-10-27). A nota
+`Incerta` cuja consulta segue sem resultado — com a API no ar e até 15 minutos depois da venda, o cliente ainda
+no balcão — ganha uma **substituta**: a mesma nota, outro número da mesma série, que sai **sempre em
+contingência** (a SEFAZ exige `tpEmis` 9 da substituta); uma vez só. A substituta passa a ser a nota da venda
+(a origem é única entre as vigentes: `substituida_por IS NULL`). A original segue o caminho dela:
+
+| A consulta da original | Vai para |
+|---|---|
+| Autorizada | pedido `cancelar_substituicao` — o **cancelamento por substituição** (evento 110112, `chNFeRef` = a substituta), que espera a substituta estar autorizada; prazo de 168 h, que a SEFAZ confere |
+| Não consta (217) | não é emitida de novo: `Rejeitada`, e o número é **inutilizado** |
+| Rejeitada | o número é inutilizado |
+| Sem resultado | segue conferindo, sem outra substituta |
+
+Desfeita a venda, a substituta é a que recebe a anulação; a original resolve-se sozinha como acima. Não
+conferido na SEFAZ de verdade (o leiaute do 110112 segue a NT e os exemplos do ACBr).
 - Não conferido contra a SEFAZ de verdade (falta a primeira autorizada no RS); os testes usam o
   `FiscalSimulado` (`simular_sefaz_fora`) e servidores locais no `sefaz-api`.
 
@@ -335,6 +351,8 @@ Cancelar e configurar continuam fora do papel.
 - v6: `fiscal_documento.xml_assinado` (a nota assinada da emissão incerta, apagada quando chega o
   `nfeProc`) e `xml_a_buscar` (tentativas restantes da busca de XML; 0 = nada a buscar); o índice da fila
   passa a cobrir a busca, e os cancelamentos sem o XML já entram nela.
+- v9: `fiscal_documento` recriada com `substitui`/`substituida_por`, o pedido `cancelar_substituicao` e a
+  origem única só entre as vigentes (índice parcial `fiscal_documento_origem`).
 - v8: `fiscal_serie_terminal` (empresa, terminal, nome, série; uma série é de um terminal só).
 - v7: `fiscal_documento` recriada com o estado `Contingencia` e `contingencia_em` (o `dhCont`); o índice
   da fila cobre a contingência.
@@ -344,9 +362,9 @@ Cancelar e configurar continuam fora do papel.
 1. **Primeira NFC-e autorizada no RS** (falta a IE, o endereço e o CSC de homologação da SEFAZ-RS).
 2. ~~A impressão direta na térmica (ESC/POS) e o DANFCE em 58 mm~~ — feitos (o 58 mm em 2026-10-15, o
    ESC/POS em 2026-10-27; `docs/modulos/pdv.md`, Comprovante).
-3. ~~**Contingência offline**~~ — feita em 2026-10-27 (§7; `sefaz-api` 7d7faa6). Falta: a nota incerta
-   (pode ter chegado) ir em contingência com **outro número** e a original ser cancelada por substituição
-   (110112) ou inutilizada; e a conferência na SEFAZ de verdade.
+3. ~~**Contingência offline**~~ — feita em 2026-10-27 (§7; `sefaz-api` 7d7faa6), com a **substituição** da
+   nota incerta (outro número em contingência; a original cancelada por substituição, 110112, ou inutilizada;
+   `sefaz-api` 43c98f0). Falta a conferência na SEFAZ de verdade.
 4. ~~Série por terminal~~ — feita em 2026-10-27 (§7, "Série por caixa").
 5. NF-e de venda e devolução; CC-e.
 6. NFS-e da OS.

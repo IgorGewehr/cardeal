@@ -227,6 +227,68 @@ CREATE TABLE fiscal_serie_terminal (
 ) STRICT;
 ";
 
+/// v9: a **substituição** (NT 2018.004) — `substitui` (a nota que esta substitui) e
+/// `substituida_por` (a substituta desta), e o pedido `cancelar_substituicao` (evento 110112). A
+/// nota de uma venda é única só entre as vigentes (`substituida_por IS NULL`): a original e a
+/// substituta têm a mesma origem. O SQLite não muda `CHECK` nem `UNIQUE`: a tabela é recriada.
+const SQL_V9: &str = "
+CREATE TABLE fiscal_documento_v9 (
+    id                BLOB PRIMARY KEY,
+    empresa           BLOB    NOT NULL REFERENCES nucleo_empresa(id),
+    modelo            TEXT    NOT NULL CHECK (modelo IN ('55','65')),
+    serie             INTEGER NOT NULL,
+    numero            INTEGER NOT NULL,
+    ambiente          TEXT    NOT NULL CHECK (ambiente IN ('homologacao','producao')),
+    origem_modulo     TEXT    NOT NULL,
+    origem_id         BLOB    NOT NULL,
+    estado            TEXT    NOT NULL CHECK (estado IN
+                          ('Pendente','Incerta','Contingencia','Autorizada','Rejeitada',
+                           'Denegada','Cancelada','Inutilizada')),
+    total             INTEGER NOT NULL,
+    nota              BLOB,
+    chave             TEXT,
+    protocolo         TEXT,
+    codigo            TEXT,
+    motivo            TEXT,
+    xml               TEXT,
+    tentativas        INTEGER NOT NULL DEFAULT 0,
+    proxima_tentativa INTEGER NOT NULL DEFAULT 0,
+    criado_em         INTEGER NOT NULL,
+    atualizado_em     INTEGER NOT NULL,
+    autorizado_em     INTEGER,
+    pedido            TEXT    CHECK (pedido IN ('cancelar','inutilizar','cancelar_substituicao')),
+    justificativa     TEXT,
+    protocolo_evento  TEXT,
+    evento_em         INTEGER,
+    anulada           INTEGER NOT NULL DEFAULT 0 CHECK (anulada IN (0,1)),
+    xml_evento        TEXT,
+    xml_assinado      TEXT,
+    xml_a_buscar      INTEGER NOT NULL DEFAULT 0 CHECK (xml_a_buscar BETWEEN 0 AND 9),
+    contingencia_em   INTEGER,
+    substitui         BLOB,
+    substituida_por   BLOB,
+    UNIQUE (empresa, modelo, serie, ambiente, numero)
+) STRICT;
+INSERT INTO fiscal_documento_v9
+    (id, empresa, modelo, serie, numero, ambiente, origem_modulo, origem_id, estado, total, nota,
+     chave, protocolo, codigo, motivo, xml, tentativas, proxima_tentativa, criado_em,
+     atualizado_em, autorizado_em, pedido, justificativa, protocolo_evento, evento_em, anulada,
+     xml_evento, xml_assinado, xml_a_buscar, contingencia_em)
+SELECT id, empresa, modelo, serie, numero, ambiente, origem_modulo, origem_id, estado, total, nota,
+       chave, protocolo, codigo, motivo, xml, tentativas, proxima_tentativa, criado_em,
+       atualizado_em, autorizado_em, pedido, justificativa, protocolo_evento, evento_em, anulada,
+       xml_evento, xml_assinado, xml_a_buscar, contingencia_em
+FROM fiscal_documento;
+DROP TABLE fiscal_documento;
+ALTER TABLE fiscal_documento_v9 RENAME TO fiscal_documento;
+CREATE UNIQUE INDEX fiscal_documento_origem ON fiscal_documento(empresa, origem_modulo, origem_id)
+    WHERE substituida_por IS NULL;
+CREATE INDEX fiscal_documento_fila ON fiscal_documento(empresa, proxima_tentativa)
+    WHERE estado IN ('Pendente','Incerta','Contingencia') OR pedido IS NOT NULL
+       OR xml_a_buscar > 0;
+CREATE INDEX fiscal_documento_criado ON fiscal_documento(empresa, criado_em);
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -274,6 +336,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 8,
         nome: "fiscal_serie_por_terminal",
         sql: SQL_V8,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 9,
+        nome: "fiscal_substituicao_da_nfce",
+        sql: SQL_V9,
         tipo: TipoMigracao::Esquema,
     },
 ];

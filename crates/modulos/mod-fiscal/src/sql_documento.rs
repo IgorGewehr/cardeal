@@ -181,14 +181,16 @@ pub(crate) struct NovoDocumento<'a> {
     pub nota: Option<Vec<u8>>,
     pub motivo: Option<String>,
     pub agora: Instante,
+    /// A nota que esta substitui.
+    pub substitui: Option<Id>,
 }
 
 pub(crate) fn inserir_documento(c: &Connection, d: &NovoDocumento<'_>) -> Resultado<()> {
     c.execute(
         "INSERT INTO fiscal_documento
            (id, empresa, modelo, serie, numero, ambiente, origem_modulo, origem_id, estado, total,
-            nota, motivo, criado_em, atualizado_em)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?13)",
+            nota, motivo, criado_em, atualizado_em, substitui)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?13,?14)",
         params![
             d.id.em_bytes().as_slice(),
             d.empresa.em_bytes().as_slice(),
@@ -203,16 +205,54 @@ pub(crate) fn inserir_documento(c: &Connection, d: &NovoDocumento<'_>) -> Result
             d.nota,
             d.motivo,
             d.agora.em_micros(),
+            d.substitui.map(|s| s.em_bytes().to_vec()),
         ],
     )
     .map(|_| ())
     .map_err(falha)
 }
 
+/// A nota passa a ser substituída por `por` (só se ainda não era): deixa de ser a vigente da
+/// venda. Devolve se marcou.
+pub(crate) fn marcar_substituida(c: &Connection, empresa: Id, id: Id, por: Id) -> Resultado<bool> {
+    c.execute(
+        "UPDATE fiscal_documento SET substituida_por = ?3
+         WHERE empresa = ?1 AND id = ?2 AND substituida_por IS NULL",
+        params![
+            empresa.em_bytes().as_slice(),
+            id.em_bytes().as_slice(),
+            por.em_bytes().as_slice()
+        ],
+    )
+    .map(|n| n > 0)
+    .map_err(falha)
+}
+
+/// O estado e a chave da substituta.
+pub(crate) fn estado_e_chave(
+    c: &Connection,
+    empresa: Id,
+    id: Id,
+) -> Resultado<Option<(EstadoDocumento, Option<String>)>> {
+    c.query_row(
+        "SELECT estado, chave FROM fiscal_documento WHERE empresa = ?1 AND id = ?2",
+        params![empresa.em_bytes().as_slice(), id.em_bytes().as_slice()],
+        |r| {
+            Ok((
+                EstadoDocumento::de_str(&r.get::<_, String>(0)?)
+                    .unwrap_or(EstadoDocumento::Pendente),
+                r.get(1)?,
+            ))
+        },
+    )
+    .optional()
+    .map_err(falha)
+}
+
 const COLUNAS: &str =
     "id, modelo, serie, numero, ambiente, estado, total, chave, protocolo, codigo,
                        motivo, origem_id, tentativas, criado_em, autorizado_em, pedido,
-                       anulada, contingencia_em";
+                       anulada, contingencia_em, substitui, substituida_por";
 
 fn resumo_de(r: &Row<'_>) -> rusqlite::Result<DocumentoResumo> {
     Ok(DocumentoResumo {
@@ -246,6 +286,8 @@ fn resumo_de(r: &Row<'_>) -> rusqlite::Result<DocumentoResumo> {
             .and_then(PedidoDocumento::de_str),
         anulada: r.get::<_, i64>(16)? != 0,
         contingencia_em: r.get::<_, Option<i64>>(17)?.map(Instante::de_micros),
+        substitui: r.get::<_, Option<Vec<u8>>>(18)?.map(|b| id_de(&b)),
+        substituida_por: r.get::<_, Option<Vec<u8>>>(19)?.map(|b| id_de(&b)),
     })
 }
 
@@ -260,7 +302,8 @@ pub(crate) fn documentos_das_origens(
     let mut stmt = c
         .prepare(&format!(
             "SELECT {COLUNAS} FROM fiscal_documento
-             WHERE empresa = ?1 AND origem_modulo = ?2 AND origem_id = ?3"
+             WHERE empresa = ?1 AND origem_modulo = ?2 AND origem_id = ?3
+               AND substituida_por IS NULL"
         ))
         .map_err(falha)?;
     let mut docs = Vec::new();
@@ -292,7 +335,8 @@ pub(crate) fn documento_da_origem(
     c.query_row(
         &format!(
             "SELECT {COLUNAS} FROM fiscal_documento
-             WHERE empresa = ?1 AND origem_modulo = ?2 AND origem_id = ?3"
+             WHERE empresa = ?1 AND origem_modulo = ?2 AND origem_id = ?3
+               AND substituida_por IS NULL"
         ),
         params![
             empresa.em_bytes().as_slice(),
@@ -331,10 +375,10 @@ pub(crate) fn documento(
         |r| {
             Ok(DocumentoGuardado {
                 resumo: resumo_de(r)?,
-                nota: r.get(18)?,
-                xml: r.get(19)?,
-                origem_modulo: r.get(20)?,
-                xml_assinado: r.get(21)?,
+                nota: r.get(20)?,
+                xml: r.get(21)?,
+                origem_modulo: r.get(22)?,
+                xml_assinado: r.get(23)?,
             })
         },
     )
@@ -390,6 +434,14 @@ pub(crate) struct NaFila {
     pub xml_assinado: Option<String>,
     /// Um documento fechado com XML a buscar na consulta.
     pub buscar_xml: bool,
+    /// A origem (o cupom) e o módulo dela.
+    pub origem: Id,
+    pub origem_modulo: String,
+    pub total: Dinheiro,
+    /// A nota que esta substitui (a substituta sai sempre em contingência).
+    pub substitui: Option<Id>,
+    /// A substituta desta.
+    pub substituida_por: Option<Id>,
 }
 
 /// Os pendentes, os incertos, os pedidos e as buscas de XML cuja hora chegou, os mais antigos
@@ -403,7 +455,8 @@ pub(crate) fn fila(
     let mut stmt = c
         .prepare(
             "SELECT id, estado, tentativas, chave, nota, ambiente, pedido, justificativa, protocolo,
-                    serie, numero, criado_em, anulada, xml_assinado, xml_a_buscar
+                    serie, numero, criado_em, anulada, xml_assinado, xml_a_buscar, origem_id,
+                    origem_modulo, total, substitui, substituida_por
              FROM fiscal_documento
              WHERE empresa = ?1
                AND (estado IN ('Pendente','Incerta','Contingencia') OR pedido IS NOT NULL
@@ -440,6 +493,11 @@ pub(crate) fn fila(
                     anulada: r.get::<_, i64>(12)? != 0,
                     xml_assinado: r.get(13)?,
                     buscar_xml: r.get::<_, i64>(14)? > 0,
+                    origem: id_de(&r.get::<_, Vec<u8>>(15)?),
+                    origem_modulo: r.get(16)?,
+                    total: Dinheiro::centavos(r.get(17)?),
+                    substitui: r.get::<_, Option<Vec<u8>>>(18)?.map(|b| id_de(&b)),
+                    substituida_por: r.get::<_, Option<Vec<u8>>>(19)?.map(|b| id_de(&b)),
                 })
             },
         )
@@ -628,11 +686,11 @@ pub(crate) fn fechados_entre(
             |r| {
                 Ok(DocumentoFechado {
                     resumo: resumo_de(r)?,
-                    xml: r.get(18)?,
-                    xml_evento: r.get(19)?,
-                    protocolo_evento: r.get(20)?,
-                    evento_em: Instante::de_micros(r.get(21)?),
-                    xml_assinado_guardado: r.get(22)?,
+                    xml: r.get(20)?,
+                    xml_evento: r.get(21)?,
+                    protocolo_evento: r.get(22)?,
+                    evento_em: Instante::de_micros(r.get(23)?),
+                    xml_assinado_guardado: r.get(24)?,
                 })
             },
         )

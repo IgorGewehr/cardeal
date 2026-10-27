@@ -167,6 +167,22 @@ pub trait PortaFiscal: Send + Sync {
     /// Como [`Self::emitir_nfce`].
     fn inutilizar(&self, pedido: &PedidoInutilizacao) -> Resultado<RetornoSefaz>;
 
+    /// Cancela **por substituição** (NFC-e, evento 110112): a nota que ficou sem resposta e
+    /// acabou autorizada, quando outra — `substituta`, emitida em contingência e já autorizada,
+    /// com o mesmo total e número de itens — cobriu a venda. Prazo de 168 h. Aceito vem como
+    /// `Autorizado` (135/136/155), como o cancelamento.
+    ///
+    /// # Errors
+    /// Como [`Self::emitir_nfce`].
+    fn cancelar_por_substituicao(
+        &self,
+        chave: &ChaveAcesso,
+        protocolo: &str,
+        justificativa: &str,
+        uf: Uf,
+        substituta: &ChaveAcesso,
+    ) -> Resultado<RetornoSefaz>;
+
     /// Assina a NFC-e em **contingência off-line** (`tpEmis = 9`), sem transmitir: a chave e o
     /// XML com o QR Code, que vai impresso no DANFCE e é transmitido depois, sem mudar
     /// ([`Self::transmitir_nfce_em_contingencia`]). Para quando a SEFAZ está fora e a API não.
@@ -247,6 +263,17 @@ impl<T: PortaFiscal + ?Sized> PortaFiscal for std::sync::Arc<T> {
 
     fn inutilizar(&self, pedido: &PedidoInutilizacao) -> Resultado<RetornoSefaz> {
         (**self).inutilizar(pedido)
+    }
+
+    fn cancelar_por_substituicao(
+        &self,
+        chave: &ChaveAcesso,
+        protocolo: &str,
+        justificativa: &str,
+        uf: Uf,
+        substituta: &ChaveAcesso,
+    ) -> Resultado<RetornoSefaz> {
+        (**self).cancelar_por_substituicao(chave, protocolo, justificativa, uf, substituta)
     }
 
     fn preparar_nfce_em_contingencia(

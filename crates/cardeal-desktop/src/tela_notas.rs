@@ -80,6 +80,9 @@ pub fn pedir(
                 justificativa,
             },
         ),
+        PedidoDocumento::CancelarPorSubstituicao => {
+            return Err("O cancelamento por substituição a fila pede sozinha".to_owned());
+        }
     };
     let d = r.map_err(|e| e.mensagem)?;
     estado.pedindo = None;
@@ -178,6 +181,15 @@ fn etiqueta(d: &DocumentoResumo) -> Etiqueta {
 /// O que a linha da nota diz: a chave da autorizada; o prazo da que está em contingência; o
 /// motivo das outras.
 fn texto_da_linha(d: &DocumentoResumo) -> String {
+    let fechada = matches!(
+        d.estado,
+        EstadoDocumento::Cancelada | EstadoDocumento::Inutilizada
+    );
+    if d.substituida_por.is_some() && !fechada {
+        return "Ficou sem resposta da SEFAZ e foi substituída por outra NFC-e, em contingência — \
+                esta vai ser cancelada por substituição ou inutilizada sozinha."
+            .to_owned();
+    }
     match (d.estado, d.prazo_da_contingencia()) {
         (EstadoDocumento::Autorizada, _) => d.chave.clone().unwrap_or_default(),
         (EstadoDocumento::Contingencia, Some(prazo)) => format!(
@@ -460,7 +472,9 @@ fn detalhe(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estad
                 };
                 Painel::novo().realce(tom).mostrar(ui, |ui| {
                     ui.add(Rotulo::interface(match pedido {
-                        PedidoDocumento::Cancelar => texto_do_cancelamento(prazo),
+                        PedidoDocumento::Cancelar | PedidoDocumento::CancelarPorSubstituicao => {
+                            texto_do_cancelamento(prazo)
+                        }
                         PedidoDocumento::Inutilizar => {
                             "Inutilizar o número desta nota, que não vai mais ser enviada — sem isso ele fica como um buraco na série.".to_owned()
                         }
@@ -474,7 +488,8 @@ fn detalhe(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estad
                     ui.horizontal(|ui| {
                         confirmar = ui
                             .add(Botao::destrutivo(match pedido {
-                                PedidoDocumento::Cancelar => "Confirmar cancelamento",
+                                PedidoDocumento::Cancelar
+                                | PedidoDocumento::CancelarPorSubstituicao => "Confirmar cancelamento",
                                 PedidoDocumento::Inutilizar => "Confirmar inutilização",
                             }))
                             .clicked();
@@ -526,7 +541,9 @@ fn detalhe(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estad
                 Ok(_) => notificar(
                     ui.ctx(),
                     Notificacao::sucesso(match pedido {
-                        PedidoDocumento::Cancelar => "Cancelamento na fila",
+                        PedidoDocumento::Cancelar | PedidoDocumento::CancelarPorSubstituicao => {
+                            "Cancelamento na fila"
+                        }
                         PedidoDocumento::Inutilizar => "Inutilização na fila",
                     }),
                 ),
@@ -574,6 +591,8 @@ mod testes {
             pedido: None,
             anulada: false,
             contingencia_em: None,
+            substitui: None,
+            substituida_por: None,
         }
     }
 
@@ -604,6 +623,9 @@ mod testes {
             "Cupom fiscal emitido em contingência — a SEFAZ estava fora. Transmitir até \
              27/10/2026 13:00."
         );
+        let mut substituida = documento(EstadoDocumento::Incerta, 3);
+        substituida.substituida_por = Some(Id::novo());
+        assert!(texto_da_linha(&substituida).contains("foi substituída por outra NFC-e"));
         estado.documentos = vec![d, documento(EstadoDocumento::Autorizada, 5)];
         assert_eq!(estado.visiveis().len(), 1, "a contingência pede atenção");
         estado.resumo = Some(ResumoFiscal {

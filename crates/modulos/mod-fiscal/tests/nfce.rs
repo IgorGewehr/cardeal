@@ -1298,3 +1298,97 @@ fn cada_caixa_numera_na_sua_serie() {
     let d = nota(caixa2);
     assert_eq!((d.serie, d.numero), (1, 2));
 }
+
+#[test]
+fn a_nota_sem_resposta_ganha_substituta_em_contingencia() {
+    use EstadoDocumento::{Autorizada, Cancelada, Contingencia, Incerta, Inutilizada};
+    let m = Mundo::novo();
+    let cen = m.cenario();
+    m.configurar(1);
+    let rodadas = |n: usize| {
+        for _ in 0..n {
+            m.tentar_ja();
+            m.transmitir();
+        }
+    };
+    let da_venda = |cupom: Id| -> Option<DocumentoResumo> {
+        m.consultar(
+            "fiscal.documento_da_venda.v1",
+            &mod_fiscal::DocumentoDaVenda { cupom },
+        )
+    };
+
+    // A resposta da emissão se perde (o simulador lembra da nota como autorizada).
+    let venda = m.vender(&cen, cen.produto, 1, false);
+    let a = m.emitir(venda);
+    m.sim.programar(retorno(SituacaoRetorno::Erro, "TIMEOUT"));
+    m.transmitir();
+    assert_eq!(m.documento(a.id).resumo.estado, Incerta);
+    // A SEFAZ cai: a consulta não responde, e o cliente ainda está no balcão — a substituta.
+    m.sim.simular_sefaz_fora(true);
+    m.tentar_ja();
+    assert!(
+        m.transmitir().contains("1 sem resposta substituída"),
+        "a consulta sem resultado pede a substituta"
+    );
+    let b_id = m
+        .documento(a.id)
+        .resumo
+        .substituida_por
+        .expect("a substituta");
+    assert_eq!(
+        da_venda(venda).unwrap().id,
+        b_id,
+        "a nota da venda agora é a substituta"
+    );
+    rodadas(1);
+    let b = m.documento(b_id).resumo;
+    assert_eq!((b.estado, b.substitui), (Contingencia, Some(a.id)));
+    assert_eq!((b.numero, b.total), (a.numero + 1, a.total));
+    assert_eq!(&b.chave.unwrap()[34..35], "9");
+    // Uma substituta só, por mais que a consulta siga sem resposta.
+    rodadas(2);
+    assert_eq!(
+        m.sim
+            .contingencias
+            .load(std::sync::atomic::Ordering::SeqCst),
+        1
+    );
+
+    // A SEFAZ volta: a substituta é autorizada; a original, achada autorizada, é cancelada por
+    // substituição — depois de a substituta estar autorizada.
+    m.sim.simular_sefaz_fora(false);
+    rodadas(3);
+    assert_eq!(m.documento(b_id).resumo.estado, Autorizada);
+    let a_fim = m.documento(a.id).resumo;
+    assert_eq!(a_fim.estado, Cancelada, "{:?}", a_fim.motivo);
+    assert_eq!(a_fim.pedido, None);
+
+    // Outra: a original não chegou à SEFAZ (217). Não é emitida de novo; o número é inutilizado.
+    let venda = m.vender(&cen, cen.produto, 1, false);
+    let c = m.emitir(venda);
+    m.sim.programar(retorno(SituacaoRetorno::Erro, "TIMEOUT"));
+    m.transmitir();
+    let chave_c = m.documento(c.id).resumo.chave.unwrap();
+    m.sim.simular_sefaz_fora(true);
+    rodadas(2);
+    let d_id = m
+        .documento(c.id)
+        .resumo
+        .substituida_por
+        .expect("a substituta");
+    let mut nao_consta = retorno(SituacaoRetorno::Rejeitado, "217");
+    nao_consta.chave = Some(chave_c.clone());
+    m.sim.definir_consulta(&chave_c, nao_consta);
+    let emissoes = m.sim.emissoes.load(std::sync::atomic::Ordering::SeqCst);
+    m.sim.simular_sefaz_fora(false);
+    rodadas(3);
+    assert_eq!(m.documento(d_id).resumo.estado, Autorizada);
+    let c_fim = m.documento(c.id).resumo;
+    assert_eq!(c_fim.estado, Inutilizada, "{:?}", c_fim.motivo);
+    assert_eq!(
+        m.sim.emissoes.load(std::sync::atomic::Ordering::SeqCst),
+        emissoes,
+        "a original não foi emitida de novo"
+    );
+}

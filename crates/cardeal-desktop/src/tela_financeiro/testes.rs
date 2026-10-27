@@ -1357,6 +1357,8 @@ fn pacote_do_contador_resume_as_notas_e_lista_as_pendencias() {
         pedido: None,
         anulada: false,
         contingencia_em: None,
+        substitui: None,
+        substituida_por: None,
     };
     let emitidas: NotasEmitidas = Ok(NotasDoMes {
         notas: vec![

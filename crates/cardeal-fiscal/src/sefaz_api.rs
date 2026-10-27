@@ -654,6 +654,25 @@ impl PortaFiscal for ApiFiscalHttp {
             .map_err(|e| Erro::de_dominio(&e))
     }
 
+    fn cancelar_por_substituicao(
+        &self,
+        chave: &ChaveAcesso,
+        protocolo: &str,
+        justificativa: &str,
+        uf: Uf,
+        substituta: &ChaveAcesso,
+    ) -> Resultado<RetornoSefaz> {
+        let mut corpo = self.corpo_base();
+        corpo.insert("chaveAcesso".into(), Value::from(chave.como_str()));
+        corpo.insert("protocolo".into(), Value::from(protocolo));
+        corpo.insert("justificativa".into(), Value::from(justificativa));
+        corpo.insert("ufEmitente".into(), Value::from(uf.sigla()));
+        corpo.insert("chaveSubstituta".into(), Value::from(substituta.como_str()));
+        self.postar("/nfe/cancelar", &Value::Object(corpo))
+            .map(RespostaSefazApi::em_retorno)
+            .map_err(|e| Erro::de_dominio(&e))
+    }
+
     fn inutilizar(&self, p: &PedidoInutilizacao) -> Resultado<RetornoSefaz> {
         let mut corpo = self.corpo_base();
         corpo.insert("cnpj".into(), Value::from(p.cnpj.sem_mascara()));
@@ -1082,6 +1101,31 @@ mod testes {
             "{}",
             erro.mensagem
         );
+    }
+
+    #[test]
+    fn cancelar_por_substituicao_manda_a_chave_da_substituta() {
+        let (url, tarefa) = servidor(
+            200,
+            r#"{"success":true,"status":"autorizado","codigoStatus":"135","motivoStatus":"Evento registrado","protocolo":"135260000000002","xml":"<procEventoNFe/>"}"#,
+        );
+        let chave = ChaveAcesso::nova("43261011222333000181650010000000421100000001").unwrap();
+        let substituta = ChaveAcesso::nova("43261011222333000181650010000000439100000006").unwrap();
+        let r = cliente(&url)
+            .cancelar_por_substituicao(
+                &chave,
+                "143260000000001",
+                "NFC-e sem resposta, substituida em contingencia",
+                Uf::Rs,
+                &substituta,
+            )
+            .unwrap();
+        assert_eq!(r.situacao, SituacaoRetorno::Autorizado);
+        let recebido = tarefa.join().unwrap();
+        assert!(recebido.starts_with("POST /nfe/cancelar "), "{recebido}");
+        let corpo: Value = serde_json::from_str(recebido.rsplit('\n').next().unwrap()).unwrap();
+        assert_eq!(corpo["chaveSubstituta"], substituta.como_str());
+        assert_eq!(corpo["protocolo"], "143260000000001");
     }
 
     #[test]

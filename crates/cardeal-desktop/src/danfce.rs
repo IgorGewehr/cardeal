@@ -273,6 +273,8 @@ mod testes {
                 pedido: None,
                 anulada: false,
                 contingencia_em: None,
+                substitui: None,
+                substituida_por: None,
             },
             nota: Some(nota),
             xml: Some(format!(

@@ -109,6 +109,112 @@ impl FiscalSimulado {
         travar(&self.emitidas).insert(chave.to_string(), retorno);
     }
 
+    /// O cancelamento (110111) ou, com a substituta, o por substituição (110112): a substituta
+    /// precisa estar autorizada, como a SEFAZ exige.
+    fn cancelar_com(
+        &self,
+        chave: &ChaveAcesso,
+        justificativa: &str,
+        substituta: Option<&ChaveAcesso>,
+    ) -> Resultado<RetornoSefaz> {
+        if self.fora_do_ar.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(Erro::de_dominio(&ErroFiscal::ServicoIndisponivel));
+        }
+        if let Some(r) = self.sem_sefaz() {
+            return Ok(r);
+        }
+        if let Some(r) = travar(&self.programados).pop_front() {
+            return Ok(r);
+        }
+        let mut emitidas = travar(&self.emitidas);
+        if let Some(sub) = substituta {
+            let autorizada = emitidas
+                .get(sub.como_str())
+                .is_some_and(|r| r.situacao == SituacaoRetorno::Autorizado);
+            if !autorizada {
+                return Ok(rejeicao("SIM", "Rejeição: NFC-e substituta não autorizada"));
+            }
+        }
+        let tipo = if substituta.is_some() {
+            "110112"
+        } else {
+            "110111"
+        };
+
+        let Some(nota) = emitidas.get_mut(chave.como_str()) else {
+            return Ok(rejeicao(
+                "217",
+                "Rejeição: NF-e não consta na base de dados da SEFAZ",
+            ));
+        };
+        if nota.codigo == "101" {
+            return Ok(rejeicao("573", "Rejeição: Duplicidade de evento"));
+        }
+        if justificativa.chars().count() < 15 {
+            return Ok(rejeicao("400", "justificativa curta"));
+        }
+        let protocolo = "135260000000001";
+        let evento = format!(
+            "<procEventoNFe versao=\"1.00\"><evento><infEvento Id=\"ID{tipo}{c}01\">\
+             <chNFe>{c}</chNFe><tpEvento>{tipo}</tpEvento><detEvento><xJust>{justificativa}\
+             </xJust></detEvento></infEvento></evento><retEvento><infEvento><cStat>135</cStat>\
+             <nProt>{protocolo}</nProt></infEvento></retEvento></procEventoNFe>",
+            c = chave.como_str()
+        );
+        // Daqui em diante a consulta diz "cancelada" e traz o evento.
+        nota.situacao = SituacaoRetorno::Cancelado;
+        nota.codigo = "101".into();
+        nota.motivo = "Cancelamento de NF-e homologado".into();
+        nota.xml_cancelamento = Some(evento.clone());
+        Ok(RetornoSefaz {
+            situacao: SituacaoRetorno::Autorizado,
+            codigo: "135".into(),
+            motivo: "Evento registrado e vinculado a NF-e".into(),
+            chave: Some(chave.como_str().to_string()),
+            protocolo: Some(protocolo.into()),
+            recebido_em: None,
+            xml: Some(evento),
+            xml_assinado: None,
+            xml_cancelamento: None,
+            erros: Vec::new(),
+            nao_enviado: false,
+        })
+    }
+
+    fn inutilizar_numeros(&self, p: &PedidoInutilizacao) -> Resultado<RetornoSefaz> {
+        if self.fora_do_ar.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(Erro::de_dominio(&ErroFiscal::ServicoIndisponivel));
+        }
+        if let Some(r) = travar(&self.programados).pop_front() {
+            return Ok(r);
+        }
+        if p.inicio > p.fim || p.justificativa.chars().count() < 15 {
+            return Ok(rejeicao("400", "faixa ou justificativa inválida"));
+        }
+        let protocolo = "102260000000001";
+        Ok(RetornoSefaz {
+            situacao: SituacaoRetorno::Autorizado,
+            codigo: "102".into(),
+            motivo: "Inutilização de número homologado".into(),
+            chave: None,
+            protocolo: Some(protocolo.into()),
+            recebido_em: None,
+            xml: Some(format!(
+                "<procInutNFe versao=\"4.00\"><inutNFe><infInut><mod>{}</mod><serie>{}</serie>\
+                 <nNFIni>{}</nNFIni><nNFFin>{}</nNFFin></infInut></inutNFe><retInutNFe><infInut>\
+                 <cStat>102</cStat><nProt>{protocolo}</nProt></infInut></retInutNFe></procInutNFe>",
+                p.modelo.codigo(),
+                p.serie,
+                p.inicio,
+                p.fim
+            )),
+            xml_assinado: None,
+            xml_cancelamento: None,
+            erros: Vec::new(),
+            nao_enviado: false,
+        })
+    }
+
     /// Faz a API fiscal simulada parar de responder (ou voltar).
     pub fn simular_fora_do_ar(&self, fora: bool) {
         self.fora_do_ar
@@ -382,85 +488,22 @@ impl PortaFiscal for FiscalSimulado {
         justificativa: &str,
         _uf: Uf,
     ) -> Resultado<RetornoSefaz> {
-        if self.fora_do_ar.load(std::sync::atomic::Ordering::SeqCst) {
-            return Err(Erro::de_dominio(&ErroFiscal::ServicoIndisponivel));
-        }
-        if let Some(r) = travar(&self.programados).pop_front() {
-            return Ok(r);
-        }
-        let mut emitidas = travar(&self.emitidas);
-        let Some(nota) = emitidas.get_mut(chave.como_str()) else {
-            return Ok(rejeicao(
-                "217",
-                "Rejeição: NF-e não consta na base de dados da SEFAZ",
-            ));
-        };
-        if nota.codigo == "101" {
-            return Ok(rejeicao("573", "Rejeição: Duplicidade de evento"));
-        }
-        if justificativa.chars().count() < 15 {
-            return Ok(rejeicao("400", "justificativa curta"));
-        }
-        let protocolo = "135260000000001";
-        let evento = format!(
-            "<procEventoNFe versao=\"1.00\"><evento><infEvento Id=\"ID110111{c}01\">\
-             <chNFe>{c}</chNFe><tpEvento>110111</tpEvento><detEvento><xJust>{justificativa}\
-             </xJust></detEvento></infEvento></evento><retEvento><infEvento><cStat>135</cStat>\
-             <nProt>{protocolo}</nProt></infEvento></retEvento></procEventoNFe>",
-            c = chave.como_str()
-        );
-        // Daqui em diante a consulta diz "cancelada" e traz o evento.
-        nota.situacao = SituacaoRetorno::Cancelado;
-        nota.codigo = "101".into();
-        nota.motivo = "Cancelamento de NF-e homologado".into();
-        nota.xml_cancelamento = Some(evento.clone());
-        Ok(RetornoSefaz {
-            situacao: SituacaoRetorno::Autorizado,
-            codigo: "135".into(),
-            motivo: "Evento registrado e vinculado a NF-e".into(),
-            chave: Some(chave.como_str().to_string()),
-            protocolo: Some(protocolo.into()),
-            recebido_em: None,
-            xml: Some(evento),
-            xml_assinado: None,
-            xml_cancelamento: None,
-            erros: Vec::new(),
-            nao_enviado: false,
-        })
+        self.cancelar_com(chave, justificativa, None)
+    }
+
+    fn cancelar_por_substituicao(
+        &self,
+        chave: &ChaveAcesso,
+        _protocolo: &str,
+        justificativa: &str,
+        _uf: Uf,
+        substituta: &ChaveAcesso,
+    ) -> Resultado<RetornoSefaz> {
+        self.cancelar_com(chave, justificativa, Some(substituta))
     }
 
     fn inutilizar(&self, p: &PedidoInutilizacao) -> Resultado<RetornoSefaz> {
-        if self.fora_do_ar.load(std::sync::atomic::Ordering::SeqCst) {
-            return Err(Erro::de_dominio(&ErroFiscal::ServicoIndisponivel));
-        }
-        if let Some(r) = travar(&self.programados).pop_front() {
-            return Ok(r);
-        }
-        if p.inicio > p.fim || p.justificativa.chars().count() < 15 {
-            return Ok(rejeicao("400", "faixa ou justificativa inválida"));
-        }
-        let protocolo = "102260000000001";
-        Ok(RetornoSefaz {
-            situacao: SituacaoRetorno::Autorizado,
-            codigo: "102".into(),
-            motivo: "Inutilização de número homologado".into(),
-            chave: None,
-            protocolo: Some(protocolo.into()),
-            recebido_em: None,
-            xml: Some(format!(
-                "<procInutNFe versao=\"4.00\"><inutNFe><infInut><mod>{}</mod><serie>{}</serie>\
-                 <nNFIni>{}</nNFIni><nNFFin>{}</nNFFin></infInut></inutNFe><retInutNFe><infInut>\
-                 <cStat>102</cStat><nProt>{protocolo}</nProt></infInut></retInutNFe></procInutNFe>",
-                p.modelo.codigo(),
-                p.serie,
-                p.inicio,
-                p.fim
-            )),
-            xml_assinado: None,
-            xml_cancelamento: None,
-            erros: Vec::new(),
-            nao_enviado: false,
-        })
+        self.inutilizar_numeros(p)
     }
 
     fn preparar_nfce_em_contingencia(

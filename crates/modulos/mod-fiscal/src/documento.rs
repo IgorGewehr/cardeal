@@ -19,8 +19,14 @@
 //! 24 horas). Só vai em contingência a nota que **com certeza** não chegou à SEFAZ (paralisada,
 //! 108/109; ou sem conexão, o "não enviado" do provedor): o número continua livre. A que pode
 //! ter chegado (timeout depois do envio) fica `Incerta` — usar o mesmo número com outra chave
-//! daria duplicidade (539), e um número novo pede o cancelamento por substituição (110112),
-//! que fica para depois.
+//! daria duplicidade (539).
+//!
+//! **Substituição** (NT 2018.004): a nota `Incerta` que segue sem resposta enquanto o cliente ainda
+//! está no balcão (até 15 minutos da venda) ganha uma **substituta** — outra NFC-e, outro número,
+//! sempre em contingência (a SEFAZ exige `tpEmis` 9 da substituta). A original segue o caminho dela:
+//! se a consulta a achar autorizada, é **cancelada por substituição** (evento 110112, até 168 h,
+//! depois de a substituta ser autorizada); se não a achar, não é emitida de novo — o número é
+//! inutilizado.
 //!
 //! **Nunca reenviar às cegas:** o `sefaz-api` sorteia o código numérico a cada emissão, então
 //! reenviar o mesmo número gera outra chave — se a primeira foi autorizada e a resposta se
@@ -66,6 +72,9 @@ pub enum PedidoDocumento {
     Cancelar,
     /// Inutilizar o número de uma nota que nunca foi autorizada.
     Inutilizar,
+    /// Cancelar por substituição (evento 110112) a nota que ficou sem resposta e acabou
+    /// autorizada, quando a substituta (em contingência) já está autorizada.
+    CancelarPorSubstituicao,
 }
 
 impl PedidoDocumento {
@@ -75,6 +84,7 @@ impl PedidoDocumento {
         match self {
             Self::Cancelar => "cancelar",
             Self::Inutilizar => "inutilizar",
+            Self::CancelarPorSubstituicao => "cancelar_substituicao",
         }
     }
 
@@ -84,6 +94,7 @@ impl PedidoDocumento {
         match s {
             "cancelar" => Some(Self::Cancelar),
             "inutilizar" => Some(Self::Inutilizar),
+            "cancelar_substituicao" => Some(Self::CancelarPorSubstituicao),
             _ => None,
         }
     }
@@ -94,6 +105,7 @@ impl PedidoDocumento {
         match self {
             Self::Cancelar => "cancelamento na fila",
             Self::Inutilizar => "inutilização na fila",
+            Self::CancelarPorSubstituicao => "cancelamento por substituição na fila",
         }
     }
 }
@@ -187,6 +199,11 @@ pub struct DocumentoResumo {
     /// Quando a nota foi assinada em contingência (o `dhCont`) — fica, mesmo depois de
     /// autorizada.
     pub contingencia_em: Option<Instante>,
+    /// A nota que esta substitui (a que ficou sem resposta).
+    pub substitui: Option<Id>,
+    /// A substituta desta (que cobriu a venda): esta vai ser cancelada por substituição ou
+    /// inutilizada.
+    pub substituida_por: Option<Id>,
 }
 
 impl DocumentoResumo {
@@ -711,6 +728,83 @@ pub fn em_contingencia(nota: NotaEmContingencia, r: &RetornoSefaz, inicio: Insta
     }
 }
 
+/// Até quanto tempo depois da venda a nota sem resposta ganha uma substituta: o cliente ainda
+/// está no balcão. Depois disso a consulta resolve sozinha, sem pressa.
+pub const JANELA_DA_SUBSTITUICAO_SEGUNDOS: i64 = 15 * 60;
+
+/// A justificativa do cancelamento por substituição (15 a 255 caracteres).
+pub const JUSTIFICATIVA_DA_SUBSTITUICAO: &str =
+    "NFC-e sem resposta da SEFAZ, substituida por outra emitida em contingencia";
+
+/// Se a nota ganha uma substituta agora: estava `Incerta`, a consulta respondeu (a API está no
+/// ar) mas sem resultado, a venda foi há pouco (`idade_segundos`, até
+/// [`JANELA_DA_SUBSTITUICAO_SEGUNDOS`]) e ela ainda não tem substituta.
+#[must_use]
+pub fn pede_substituicao(
+    antes: EstadoDocumento,
+    depois: &Mudanca,
+    api_respondeu: bool,
+    idade_segundos: i64,
+    ja_substituida: bool,
+) -> bool {
+    antes == EstadoDocumento::Incerta
+        && depois.estado == EstadoDocumento::Incerta
+        && api_respondeu
+        && !ja_substituida
+        && (0..=JANELA_DA_SUBSTITUICAO_SEGUNDOS).contains(&idade_segundos)
+}
+
+/// A nota substituída que a consulta não achou na SEFAZ não é emitida de novo — a venda já saiu
+/// na substituta: fica rejeitada, e o número vai ser inutilizado.
+#[must_use]
+pub fn nao_reemitir(m: Mudanca) -> Mudanca {
+    if m.estado != EstadoDocumento::Pendente {
+        return m;
+    }
+    Mudanca {
+        estado: EstadoDocumento::Rejeitada,
+        motivo: Some(
+            "Não chegou à SEFAZ — a venda saiu na NFC-e substituta, e este número vai ser \
+             inutilizado"
+                .into(),
+        ),
+        espera_segundos: 0,
+        ..m
+    }
+}
+
+/// O pedido que a nota substituída recebe quando o destino dela se resolve: autorizada, o
+/// cancelamento por substituição; rejeitada (ou não achada), a inutilização do número.
+#[must_use]
+pub const fn pedido_da_substituida(estado: EstadoDocumento) -> Option<PedidoDocumento> {
+    match estado {
+        EstadoDocumento::Autorizada => Some(PedidoDocumento::CancelarPorSubstituicao),
+        EstadoDocumento::Rejeitada => Some(PedidoDocumento::Inutilizar),
+        _ => None,
+    }
+}
+
+/// Esperar, sem mudar o estado, com o motivo (o pedido que depende de outra nota).
+#[must_use]
+pub fn esperar(estado: EstadoDocumento, tentativas: u32, motivo: &str) -> Mudanca {
+    Mudanca {
+        estado,
+        chave: None,
+        trocar_chave: false,
+        protocolo: None,
+        xml: None,
+        codigo: None,
+        motivo: Some(motivo.to_owned()),
+        espera_segundos: espera(tentativas),
+        limpar_pedido: false,
+        protocolo_evento: None,
+        xml_evento: None,
+        xml_assinado: None,
+        buscar_xml: false,
+        contingencia_em: None,
+    }
+}
+
 /// Decide o que fazer com o desfecho de um pedido (cancelar uma autorizada, inutilizar o
 /// número de uma rejeitada). Aceito, o documento muda de estado; recusado, volta ao que era,
 /// sem o pedido e com o motivo; sem resposta, o pedido espera a próxima rodada.
@@ -742,6 +836,11 @@ pub fn decidir_evento(
             EstadoDocumento::Cancelada,
             &["573", "218"][..],
             "O cancelamento",
+        ),
+        PedidoDocumento::CancelarPorSubstituicao => (
+            EstadoDocumento::Cancelada,
+            &["573", "218"][..],
+            "O cancelamento por substituição",
         ),
         PedidoDocumento::Inutilizar => (
             EstadoDocumento::Inutilizada,
@@ -777,7 +876,7 @@ pub fn decidir_evento(
                 limpar_pedido: true,
                 protocolo_evento: r.protocolo.clone().filter(|p| !p.is_empty()),
                 // Sem o XML (provedor antigo): a consulta da nota cancelada o traz.
-                buscar_xml: xml_evento.is_none() && pedido == PedidoDocumento::Cancelar,
+                buscar_xml: xml_evento.is_none() && pedido != PedidoDocumento::Inutilizar,
                 xml_evento,
                 ..base
             }
@@ -789,7 +888,7 @@ pub fn decidir_evento(
             codigo,
             motivo: Some(explicar(&r.codigo, &r.motivo)),
             limpar_pedido: true,
-            buscar_xml: pedido == PedidoDocumento::Cancelar,
+            buscar_xml: pedido != PedidoDocumento::Inutilizar,
             ..base
         },
         SituacaoRetorno::Rejeitado | SituacaoRetorno::Denegado | SituacaoRetorno::Cancelado => {
@@ -935,6 +1034,8 @@ mod testes {
             pedido: None,
             anulada: false,
             contingencia_em: None,
+            substitui: None,
+            substituida_por: None,
         };
         let em = |d: &DocumentoResumo, min: i64| {
             d.prazo_de_cancelamento(autorizado.mais_segundos(min * 60))
@@ -1252,6 +1353,79 @@ mod testes {
         );
         // A anulação espera a contingência se resolver.
         assert_eq!(pedido_da_anulacao(Contingencia, 1), None);
+    }
+
+    #[test]
+    fn a_substituicao_e_o_destino_da_substituida() {
+        use EstadoDocumento::{Autorizada, Incerta, Pendente, Rejeitada};
+        let sem_resultado = decidir(Incerta, 1, fora("ERR", true));
+        assert_eq!(sem_resultado.estado, Incerta);
+        // Sem resultado, com a API no ar, logo depois da venda, e uma vez só.
+        assert!(pede_substituicao(Incerta, &sem_resultado, true, 90, false));
+        assert!(!pede_substituicao(
+            Incerta,
+            &sem_resultado,
+            false,
+            90,
+            false
+        ));
+        assert!(!pede_substituicao(
+            Incerta,
+            &sem_resultado,
+            true,
+            16 * 60,
+            false
+        ));
+        assert!(!pede_substituicao(Incerta, &sem_resultado, true, 90, true));
+        assert!(!pede_substituicao(
+            Pendente,
+            &sem_resultado,
+            true,
+            90,
+            false
+        ));
+        let autorizada = decidir(
+            Incerta,
+            1,
+            r(SituacaoRetorno::Autorizado, "100", Some(CHAVE)),
+        );
+        assert!(!pede_substituicao(Incerta, &autorizada, true, 90, false));
+        // Não achada na SEFAZ: não volta a ser emitida — vira rejeitada, para inutilizar.
+        let nao_consta = decidir(
+            Incerta,
+            1,
+            r(SituacaoRetorno::Rejeitado, "217", Some(CHAVE)),
+        );
+        assert_eq!(nao_consta.estado, Pendente);
+        let m = nao_reemitir(nao_consta);
+        assert_eq!(m.estado, Rejeitada);
+        assert!(m.motivo.unwrap().contains("inutilizado"));
+        assert_eq!(nao_reemitir(autorizada.clone()).estado, Autorizada);
+        assert_eq!(
+            pedido_da_substituida(Autorizada),
+            Some(PedidoDocumento::CancelarPorSubstituicao)
+        );
+        assert_eq!(
+            pedido_da_substituida(Rejeitada),
+            Some(PedidoDocumento::Inutilizar)
+        );
+        assert_eq!(pedido_da_substituida(Incerta), None);
+        assert!((15..=255).contains(&JUSTIFICATIVA_DA_SUBSTITUICAO.chars().count()));
+        // O cancelamento por substituição aceito: cancelada; sem o XML, busca na consulta.
+        let mut aceito = resposta(SituacaoRetorno::Autorizado, "135");
+        aceito.xml = None;
+        let c = decidir_evento(
+            PedidoDocumento::CancelarPorSubstituicao,
+            Autorizada,
+            0,
+            Desfecho::Resposta(aceito),
+        );
+        assert_eq!(c.estado, EstadoDocumento::Cancelada);
+        assert!(c.limpar_pedido && c.buscar_xml);
+        assert_eq!(
+            PedidoDocumento::de_str(PedidoDocumento::CancelarPorSubstituicao.como_str()),
+            Some(PedidoDocumento::CancelarPorSubstituicao)
+        );
     }
 
     #[test]
