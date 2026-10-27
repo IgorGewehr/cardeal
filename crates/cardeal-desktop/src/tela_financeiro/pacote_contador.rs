@@ -75,6 +75,10 @@ pub(super) fn arquivos_xml(
                 v.push((caminho, xml.as_bytes().to_vec()));
             }
         }
+        for k in &e.cartas {
+            let (caminho, xml) = k.arquivo();
+            v.push((caminho, xml.as_bytes().to_vec()));
+        }
     }
     if let Ok(e) = entradas {
         for n in e {
@@ -91,9 +95,9 @@ pub(super) fn arquivos_xml(
 }
 
 fn quantos_xmls(emitidas: &NotasEmitidas, entradas: &NotasDeEntrada) -> usize {
-    let saidas = emitidas
-        .as_ref()
-        .map_or(0, |e| e.notas.iter().map(|n| n.arquivos().len()).sum());
+    let saidas = emitidas.as_ref().map_or(0, |e| {
+        e.notas.iter().map(|n| n.arquivos().len()).sum::<usize>() + e.cartas.len()
+    });
     let de_entrada = entradas
         .as_ref()
         .map_or(0, |e| e.iter().filter(|n| n.xml.is_some()).count());
@@ -219,6 +223,17 @@ fn secao_das_notas(d: &DadosDoPacote<'_>, aaaamm: &str) -> SecaoRelatorio {
                         u8::from(!autorizada),
                     ));
                 }
+            }
+            if !e.cartas.is_empty() {
+                linhas.push(linha(
+                    vec![
+                        "Cartas de correção (NF-e)".into(),
+                        e.cartas.len().to_string(),
+                        String::new(),
+                    ],
+                    false,
+                    0,
+                ));
             }
             if e.de_homologacao > 0 {
                 nota.push_str(&format!(

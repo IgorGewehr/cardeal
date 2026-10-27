@@ -295,6 +295,29 @@ ALTER TABLE fiscal_configuracao ADD COLUMN serie_nfe INTEGER NOT NULL DEFAULT 1
     CHECK (serie_nfe BETWEEN 1 AND 889);
 ";
 
+/// v11: a carta de correção (CC-e, evento 110110) da NF-e — um pedido que a fila leva à SEFAZ,
+/// até 20 por nota.
+const SQL_V11: &str = "
+CREATE TABLE fiscal_carta_correcao (
+    id                BLOB PRIMARY KEY,
+    empresa           BLOB    NOT NULL REFERENCES nucleo_empresa(id),
+    documento         BLOB    NOT NULL REFERENCES fiscal_documento(id),
+    sequencia         INTEGER NOT NULL CHECK (sequencia BETWEEN 1 AND 20),
+    texto             TEXT    NOT NULL,
+    estado            TEXT    NOT NULL CHECK (estado IN ('Pendente','Registrada','Recusada')),
+    motivo            TEXT,
+    protocolo         TEXT,
+    xml               TEXT,
+    tentativas        INTEGER NOT NULL DEFAULT 0,
+    proxima_tentativa INTEGER NOT NULL DEFAULT 0,
+    criada_em         INTEGER NOT NULL,
+    registrada_em     INTEGER
+) STRICT;
+CREATE INDEX fiscal_carta_documento ON fiscal_carta_correcao(documento);
+CREATE INDEX fiscal_carta_fila ON fiscal_carta_correcao(empresa, proxima_tentativa)
+    WHERE estado = 'Pendente';
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -354,6 +377,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 10,
         nome: "fiscal_serie_da_nfe",
         sql: SQL_V10,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 11,
+        nome: "fiscal_carta_de_correcao",
+        sql: SQL_V11,
         tipo: TipoMigracao::Esquema,
     },
 ];

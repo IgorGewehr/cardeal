@@ -527,6 +527,52 @@ impl PortaFiscal for FiscalSimulado {
         self.inutilizar_numeros(p)
     }
 
+    fn carta_de_correcao(
+        &self,
+        chave: &ChaveAcesso,
+        texto: &str,
+        sequencia: u32,
+        _uf: Uf,
+    ) -> Resultado<RetornoSefaz> {
+        self.api_fora()?;
+        if let Some(r) = self.sem_sefaz() {
+            return Ok(r);
+        }
+        if let Some(r) = travar(&self.programados).pop_front() {
+            return Ok(r);
+        }
+        let autorizada = travar(&self.emitidas)
+            .get(chave.como_str())
+            .is_some_and(|r| r.situacao == SituacaoRetorno::Autorizado);
+        if !autorizada {
+            return Ok(rejeicao(
+                "217",
+                "Rejeição: NF-e não consta na base de dados da SEFAZ",
+            ));
+        }
+        let protocolo = format!("135{sequencia:012}");
+        Ok(RetornoSefaz {
+            situacao: SituacaoRetorno::Autorizado,
+            codigo: "135".into(),
+            motivo: "Evento registrado e vinculado a NF-e".into(),
+            chave: Some(chave.como_str().to_string()),
+            protocolo: Some(protocolo.clone()),
+            recebido_em: None,
+            xml: Some(format!(
+                "<procEventoNFe versao=\"1.00\"><evento><infEvento Id=\"ID110110{c}{sequencia:02}\">\
+                 <chNFe>{c}</chNFe><tpEvento>110110</tpEvento><nSeqEvento>{sequencia}</nSeqEvento>\
+                 <detEvento><xCorrecao>{texto}</xCorrecao></detEvento></infEvento></evento>\
+                 <retEvento><infEvento><cStat>135</cStat><nProt>{protocolo}</nProt></infEvento>\
+                 </retEvento></procEventoNFe>",
+                c = chave.como_str()
+            )),
+            xml_assinado: None,
+            xml_cancelamento: None,
+            erros: Vec::new(),
+            nao_enviado: false,
+        })
+    }
+
     fn preparar_nfce_em_contingencia(
         &self,
         nota: &Nfce,

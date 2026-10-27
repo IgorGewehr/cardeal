@@ -1541,3 +1541,160 @@ fn o_pedido_faturado_vira_nfe_com_destinatario_e_duplicatas() {
         .unwrap();
     assert_eq!(de_novo.estado, EstadoDocumento::Pendente);
 }
+
+#[test]
+fn a_nfe_autorizada_recebe_cartas_de_correcao_pela_fila() {
+    use mod_fiscal::correcao::{
+        CartaDeCorrecao, CartasDeCorrecao, EmitirCartaDeCorrecao, EstadoCarta,
+    };
+    use mod_vendas::{
+        AdicionarItemPedido, ConfirmarPedido, CriarPedido, FaturarPedido, ItemFoiAdicionado,
+        PedidoCriado, PedidoFoiFaturado,
+    };
+    let m = Mundo::novo();
+    let cen = m.cenario();
+    m.configurar(1);
+    m.rodar(
+        "fiscal.definir_ambiente.v1",
+        &DefinirAmbienteFiscal {
+            ambiente: AmbienteFiscal::Producao,
+        },
+    )
+    .unwrap();
+    m.rodar(
+        "clientes.adicionar_endereco.v1",
+        &mod_clientes::AdicionarEndereco {
+            pessoa: cen.cliente,
+            tipo: mod_clientes::TipoEndereco::Residencial,
+            logradouro: "Rua Sinimbu".into(),
+            numero: "100".into(),
+            complemento: None,
+            bairro: "Centro".into(),
+            cidade: "Caxias do Sul".into(),
+            uf: "RS".into(),
+            cep: "95020000".into(),
+            principal: true,
+        },
+    )
+    .unwrap();
+    let p: PedidoCriado = m
+        .executar(
+            "vendas.criar_pedido.v1",
+            &CriarPedido {
+                cliente: cen.cliente,
+                vendedor: Id::novo(),
+                condicao_pagamento: Id::novo(),
+                tabela_preco: cen.tabela,
+                local_expedicao: cen.local,
+            },
+        )
+        .unwrap();
+    let _: ItemFoiAdicionado = m
+        .executar(
+            "vendas.adicionar_item_pedido.v1",
+            &AdicionarItemPedido {
+                pedido: p.pedido,
+                produto: cen.produto,
+                variacao: None,
+                quantidade: Quantidade::unidades(1),
+                desconto_percentual: Percentual::ZERO,
+            },
+        )
+        .unwrap();
+    m.rodar(
+        "vendas.confirmar_pedido.v1",
+        &ConfirmarPedido { pedido: p.pedido },
+    )
+    .unwrap();
+    let _: PedidoFoiFaturado = m
+        .executar(
+            "vendas.faturar_pedido.v1",
+            &FaturarPedido {
+                pedido: p.pedido,
+                a_vista: true,
+            },
+        )
+        .unwrap();
+    let nfe: DocumentoResumo = m
+        .executar(
+            "fiscal.emitir_nfe_do_pedido.v1",
+            &mod_fiscal::EmitirNfeDoPedido { pedido: p.pedido },
+        )
+        .unwrap();
+    assert!(m.transmitir().contains("1 autorizada"));
+    let carta = |documento: Id, texto: &str| {
+        m.executar::<CartaDeCorrecao>(
+            "fiscal.emitir_carta_de_correcao.v1",
+            &EmitirCartaDeCorrecao {
+                documento,
+                texto: texto.into(),
+            },
+        )
+    };
+    let cartas = || -> Vec<CartaDeCorrecao> {
+        m.consultar(
+            "fiscal.cartas_de_correcao.v1",
+            &CartasDeCorrecao { documento: nfe.id },
+        )
+    };
+    // O texto curto e a NFC-e: recusados na hora.
+    assert_eq!(
+        carta(nfe.id, "curto").unwrap_err().campo.as_deref(),
+        Some("texto")
+    );
+    let nfce = m.emitir(m.vender(&cen, cen.produto, 1, false));
+    assert!(carta(nfce.id, "Corrige o nome do consumidor")
+        .unwrap_err()
+        .mensagem
+        .contains("NFC-e não tem carta"));
+
+    // A primeira: na fila, uma por vez.
+    let primeira = carta(nfe.id, "Corrige o bairro do destinatário para Centro").unwrap();
+    assert_eq!(
+        (primeira.sequencia, primeira.estado),
+        (1, EstadoCarta::Pendente)
+    );
+    assert!(carta(nfe.id, "Outra correção qualquer aqui")
+        .unwrap_err()
+        .mensagem
+        .contains("esperando a SEFAZ"));
+    let resumo: ResumoFiscal = m.consultar("fiscal.resumo_da_fila.v1", &ResumoDaFilaFiscal);
+    assert_eq!(resumo.cartas_pendentes, 1);
+    assert!(m
+        .transmitir()
+        .contains("1 carta(s) de correção registrada(s)"));
+    let registrada = &cartas()[0];
+    assert_eq!(registrada.estado, EstadoCarta::Registrada);
+    assert!(registrada.protocolo.is_some() && registrada.registrada_em.is_some());
+
+    // A segunda recusada não gasta a sequência: a terceira volta a ser a 2.
+    m.sim.programar(retorno(SituacaoRetorno::Rejeitado, "501"));
+    assert_eq!(
+        carta(nfe.id, "Corrige o complemento do endereço")
+            .unwrap()
+            .sequencia,
+        2
+    );
+    assert!(m.transmitir().contains("1 recusada(s)"));
+    assert_eq!(cartas()[0].estado, EstadoCarta::Recusada);
+    assert!(cartas()[0].motivo.is_some());
+    assert_eq!(
+        carta(nfe.id, "Corrige o complemento do endereço, de novo")
+            .unwrap()
+            .sequencia,
+        2
+    );
+    m.transmitir();
+
+    // No pacote do contador do mês: as duas registradas, pelo mês do registro.
+    let mes = Data::hoje(Fuso::BRASILIA).competencia();
+    let notas: NotasDoMes = m.consultar("fiscal.notas_do_mes.v1", &NotasFiscaisDoMes { mes });
+    assert_eq!(notas.cartas.len(), 2);
+    let (arquivo, xml) = notas.cartas[0].arquivo();
+    assert!(
+        arquivo.starts_with("Saidas/NF-e/CartasDeCorrecao/110110"),
+        "{arquivo}"
+    );
+    assert!(arquivo.ends_with("01-procEventoNFe.xml"), "{arquivo}");
+    assert!(xml.contains("<tpEvento>110110</tpEvento>"));
+}

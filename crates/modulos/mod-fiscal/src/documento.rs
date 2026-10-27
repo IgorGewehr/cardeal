@@ -395,6 +395,8 @@ pub struct ResumoFiscal {
     pub esperando_desde: Option<Instante>,
     /// Notas fechadas com XML a buscar na SEFAZ, já na hora (a fila busca).
     pub xmls_a_buscar: u32,
+    /// Cartas de correção esperando a fila.
+    pub cartas_pendentes: u32,
 }
 
 impl ResumoFiscal {

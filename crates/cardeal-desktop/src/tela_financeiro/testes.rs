@@ -1375,6 +1375,11 @@ fn pacote_do_contador_resume_as_notas_e_lista_as_pendencias() {
             },
         ],
         de_homologacao: 3,
+        cartas: vec![mod_fiscal::CartaDoMes {
+            chave: "4".repeat(44),
+            sequencia: 1,
+            xml: "<procEventoNFe/>".into(),
+        }],
     });
     let entradas: NotasDeEntrada = Ok(vec![mod_compras::NotaDeEntradaDoMes {
         nota: Id::novo(),
@@ -1399,8 +1404,17 @@ fn pacote_do_contador_resume_as_notas_e_lista_as_pendencias() {
     );
     assert!(p[2].0.starts_with("1 × XML do cancelamento"));
     assert!(p[3].1.contains("Importe o arquivo XML de novo"));
-    // No ZIP: as duas notas (a cancelada sem o evento); a entrada não tem XML.
-    assert_eq!(arquivos_xml(&emitidas, &entradas).len(), 2);
+    // No ZIP: as duas notas (a cancelada sem o evento) e a carta de correção; a entrada não tem
+    // XML.
+    let xmls = arquivos_xml(&emitidas, &entradas);
+    assert_eq!(xmls.len(), 3);
+    assert_eq!(
+        xmls[2].0,
+        format!(
+            "Saidas/NF-e/CartasDeCorrecao/110110{}01-procEventoNFe.xml",
+            "4".repeat(44)
+        )
+    );
 
     let dados = DadosDoPacote {
         mes: hoje.competencia(),
@@ -1424,10 +1438,11 @@ fn pacote_do_contador_resume_as_notas_e_lista_as_pendencias() {
         linhas[1][..2],
         ["NFC-e canceladas".to_owned(), "1".to_owned()]
     );
-    assert_eq!(linhas[2], vec!["Notas de entrada", "1", "R$ 36,00"]);
+    assert_eq!(linhas[2], vec!["Cartas de correção (NF-e)", "1", ""]);
+    assert_eq!(linhas[3], vec!["Notas de entrada", "1", "R$ 36,00"]);
     assert_eq!(
-        linhas[3][..2],
-        ["XMLs no pacote".to_owned(), "2".to_owned()]
+        linhas[4][..2],
+        ["XMLs no pacote".to_owned(), "3".to_owned()]
     );
     assert!(notas
         .nota

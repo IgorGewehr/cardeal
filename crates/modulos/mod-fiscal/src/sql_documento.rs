@@ -905,6 +905,7 @@ pub(crate) fn resumo(
                 xmls_a_buscar: r.get(5)?,
                 em_contingencia: r.get(6)?,
                 contingencia_desde: r.get::<_, Option<i64>>(7)?.map(Instante::de_micros),
+                cartas_pendentes: 0,
             })
         },
     )

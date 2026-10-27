@@ -276,7 +276,9 @@ impl Consulta for ResumoDaFilaFiscal {
             cardeal_kernel::Hora::MEIA_NOITE,
             ctx.fuso,
         );
-        crate::sql_documento::resumo(c, ctx.empresa, inicio, ctx.agora)
+        let mut r = crate::sql_documento::resumo(c, ctx.empresa, inicio, ctx.agora)?;
+        r.cartas_pendentes = crate::correcao::sqlite::quantas_pendentes(c, ctx.empresa)?;
+        Ok(r)
     }
 }
 
@@ -958,11 +960,17 @@ pub(crate) mod sqlite {
         let Some(_guarda) = Guarda::tomar(empresa) else {
             return Ok("já há uma transmissão em andamento".into());
         };
-        let fila = t.ler(|c| sqld::fila(c, empresa, Instante::agora(), 20))?;
-        if fila.is_empty() {
+        let agora = Instante::agora();
+        let fila = t.ler(|c| sqld::fila(c, empresa, agora, 20))?;
+        let cartas = t.ler(|c| crate::correcao::sqlite::pendentes(c, empresa, agora, 10))?;
+        if fila.is_empty() && cartas.is_empty() {
             return Ok("nada na fila".into());
         }
-        let ambientes: HashSet<AmbienteFiscal> = fila.iter().map(|d| d.ambiente).collect();
+        let ambientes: HashSet<AmbienteFiscal> = fila
+            .iter()
+            .map(|d| d.ambiente)
+            .chain(cartas.iter().map(|k| k.ambiente))
+            .collect();
         let (portas, csc, uf): (Portas, Option<Csc>, Option<Uf>) = t.ler(|c| {
             let mut portas = HashMap::new();
             for a in ambientes {
@@ -990,10 +998,57 @@ pub(crate) mod sqlite {
                 cnpj,
             };
             if processar(t, &ctx, doc, &mut rodada)? {
+                return Ok(resumo_da_rodada(&rodada));
+            }
+        }
+        for carta in cartas {
+            let Some(porta) = portas.get(&carta.ambiente) else {
+                continue;
+            };
+            if levar_carta(t, porta.as_ref(), &carta, uf, &mut rodada)? {
                 break;
             }
         }
         Ok(resumo_da_rodada(&rodada))
+    }
+
+    /// Leva uma carta de correção à SEFAZ e grava o que veio. Devolve se a rodada para.
+    fn levar_carta(
+        t: &ContextoTarefa<'_>,
+        porta: &dyn PortaFiscal,
+        carta: &crate::correcao::sqlite::CartaNaFila,
+        uf: Option<Uf>,
+        rodada: &mut Rodada,
+    ) -> Resultado<bool> {
+        use crate::correcao::{decidir_carta, DestinoDaCarta};
+        let desfecho = match (carta.chave.as_deref(), uf) {
+            (Some(chave), Some(uf)) => match ChaveAcesso::nova(chave) {
+                Ok(chave) => {
+                    desfecho(porta.carta_de_correcao(&chave, &carta.texto, carta.sequencia, uf))
+                }
+                Err(e) => Desfecho::Recusado(e.to_string()),
+            },
+            _ => Desfecho::Recusado("a nota não tem chave, ou a empresa não tem a UF".into()),
+        };
+        let parar = matches!(desfecho, Desfecho::Indisponivel(_));
+        let destino = decidir_carta(desfecho);
+        match destino {
+            DestinoDaCarta::Registrada { .. } => rodada.cartas.0 += 1,
+            DestinoDaCarta::Recusada(_) => rodada.cartas.1 += 1,
+            DestinoDaCarta::Esperar(_) => {}
+        }
+        let (empresa, id, tentativas) = (t.ctx.empresa, carta.id, carta.tentativas);
+        t.escrever(move |uow| {
+            crate::correcao::sqlite::aplicar(
+                uow.conexao(),
+                empresa,
+                id,
+                &destino,
+                tentativas,
+                Instante::agora(),
+            )
+        })?;
+        Ok(parar)
     }
 
     /// O que a rodada fez, para o resumo.
@@ -1004,6 +1059,8 @@ pub(crate) mod sqlite {
         contagem: HashMap<EstadoDocumento, u32>,
         recuperados: u32,
         substituidas: u32,
+        /// Cartas de correção registradas e recusadas.
+        cartas: (u32, u32),
     }
 
     /// O que vale para a rodada inteira.
@@ -1344,6 +1401,13 @@ pub(crate) mod sqlite {
             let _ = write!(
                 resumo,
                 "; {cancelados} cancelada(s), {inutilizados} inutilizada(s), {recusados} pedido(s) recusado(s)"
+            );
+        }
+        if rodada.cartas.0 + rodada.cartas.1 > 0 {
+            let _ = write!(
+                resumo,
+                "; {} carta(s) de correção registrada(s), {} recusada(s)",
+                rodada.cartas.0, rodada.cartas.1
             );
         }
         if rodada.substituidas > 0 {

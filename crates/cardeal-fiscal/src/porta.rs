@@ -175,6 +175,20 @@ pub trait PortaFiscal: Send + Sync {
     /// Como [`Self::emitir_nfce`].
     fn inutilizar(&self, pedido: &PedidoInutilizacao) -> Resultado<RetornoSefaz>;
 
+    /// Registra uma **carta de correção** (CC-e, evento 110110) da NF-e autorizada, com a
+    /// `sequencia` (1 a 20 — cada uma substitui a anterior). Registrada vem como `Autorizado`
+    /// (135/136), com o `procEventoNFe`.
+    ///
+    /// # Errors
+    /// Como [`Self::emitir_nfce`].
+    fn carta_de_correcao(
+        &self,
+        chave: &ChaveAcesso,
+        texto: &str,
+        sequencia: u32,
+        uf: Uf,
+    ) -> Resultado<RetornoSefaz>;
+
     /// Cancela **por substituição** (NFC-e, evento 110112): a nota que ficou sem resposta e
     /// acabou autorizada, quando outra — `substituta`, emitida em contingência e já autorizada,
     /// com o mesmo total e número de itens — cobriu a venda. Prazo de 168 h. Aceito vem como
@@ -286,6 +300,16 @@ impl<T: PortaFiscal + ?Sized> PortaFiscal for std::sync::Arc<T> {
         substituta: &ChaveAcesso,
     ) -> Resultado<RetornoSefaz> {
         (**self).cancelar_por_substituicao(chave, protocolo, justificativa, uf, substituta)
+    }
+
+    fn carta_de_correcao(
+        &self,
+        chave: &ChaveAcesso,
+        texto: &str,
+        sequencia: u32,
+        uf: Uf,
+    ) -> Resultado<RetornoSefaz> {
+        (**self).carta_de_correcao(chave, texto, sequencia, uf)
     }
 
     fn preparar_nfce_em_contingencia(

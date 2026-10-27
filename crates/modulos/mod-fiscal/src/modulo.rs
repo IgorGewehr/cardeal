@@ -6,6 +6,7 @@ use cardeal_storage::ConjuntoMigracoes;
 
 use crate::comandos::{DefinirAmbienteFiscal, InstalarCertificado, RemoverCertificado};
 use crate::consultas::{SituacaoFiscal, StatusDaSefaz};
+use crate::correcao::{CartasDeCorrecao, EmitirCartaDeCorrecao};
 use crate::fechamento::NotasFiscaisDoMes;
 use crate::manifesto::MANIFESTO;
 use crate::nfce::{
@@ -43,6 +44,8 @@ impl Modulo for ModuloFiscal {
             .comando::<AnularDocumentoDaVenda>("fiscal.anular_documento_da_venda.v1")
             .comando::<DefinirSerieDoTerminal>("fiscal.definir_serie_do_terminal.v1")
             .comando::<ConfigurarNfe>("fiscal.configurar_nfe.v1")
+            .comando::<EmitirCartaDeCorrecao>("fiscal.emitir_carta_de_correcao.v1")
+            .consulta::<CartasDeCorrecao>("fiscal.cartas_de_correcao.v1")
             .consulta::<ConfiguracaoDaNfe>("fiscal.configuracao_nfe.v1")
             .comando::<EmitirNfeDoPedido>("fiscal.emitir_nfe_do_pedido.v1")
             .consulta::<DocumentoDoPedido>("fiscal.documento_do_pedido.v1")

@@ -191,6 +191,28 @@ o que não cabe segue nas folhas seguintes, com o cabeçalho e "FOLHA n/total") 
 "SEM VALOR FISCAL". A data de emissão sai do `dhEmi` do XML autorizado. Imprimir: Notas fiscais › Detalhes e
 Vendas › pedido › Imprimir DANFE (o PDF no visualizador).
 
+**Carta de correção** (CC-e, evento 110110; `mod_fiscal::correcao`, migração v11, 2026-10-27):
+`EmitirCartaDeCorrecao` (`fiscal.emitir_carta_de_correcao.v1`, `fiscal.emitir`) pede a carta de uma NF-e
+**autorizada** (a NFC-e não tem CC-e), com o texto de 15 a 1000 caracteres (os espaços e as quebras de linha
+viram um espaço só); a **fila** a leva à SEFAZ (`PortaFiscal::carta_de_correcao`, HTTP `/nfe/carta-correcao`),
+como a nota — sem internet, espera, com a mesma espera crescente. Regras:
+- uma por vez: com uma carta esperando a fila, não se pede outra;
+- até **20** registradas por nota;
+- a sequência é a seguinte à **última registrada** (a recusada não a gasta);
+- a resposta 573 ("duplicidade de evento" — a primeira tentativa chegou e a resposta se perdeu) conta como
+  registrada.
+
+Cada carta substitui a anterior, então o formulário já começa com o texto da última registrada. A tela
+explica o que a carta não corrige (valores, quantidades, impostos, CNPJ/CPF, datas — Ajuste SINIEF 01/07).
+`CartasDeCorrecao` (`fiscal.cartas_de_correcao.v1`) lista as da nota. O `procEventoNFe` vai ao pacote do
+contador em `Saidas/NF-e/CartasDeCorrecao/110110<chave><seq>-procEventoNFe.xml`, no mês do **registro**,
+e o relatório conta as cartas. Comparado com o gestao-raiz (`api/fiscal/invoices/[id]/cce`): a mesma
+sequência (a maior aceita + 1; lá a recusada nem é guardada), mas a CC-e vai direto, sem fila — sem internet
+falha, e a resposta perdida faz a nova tentativa voltar com 573, que lá vira erro mesmo com a carta
+registrada; o XML do evento é guardado "se der" (aqui vai na mesma escrita do registro).
+Junto, o pacote passou a dar ao cancelamento por substituição o nome com o tipo dele
+(`110112<chave>01-procEventoNFe.xml`) — saía como 110111.
+
 **Série por caixa** (migração v8, 2026-10-27): `DefinirSerieDoTerminal` (`fiscal.definir_serie_do_terminal.v1`,
 `fiscal.configurar`) dá a um terminal a sua série (1 a 889, com nome e, se a série já foi usada em outro
 sistema, o próximo número); `serie: None` o devolve à série da empresa. `SeriesDosTerminais`
@@ -355,7 +377,8 @@ cabeçalho mostra a faixa da fila ("Fiscal em dia" / "N na fila" / "N rejeitadas
 situação da NFC-e (com o que corrigir, se rejeitada). Área nova **Notas fiscais** (barra lateral, grupo
 Financeiro): indicadores (na fila, conferindo, rejeitadas, autorizadas hoje), filtro, grade com
 **Reenviar** e **Detalhes** (chave, protocolo, itens com NCM/CFOP, consumidor; **Imprimir cupom fiscal**,
-**Cancelar NFC-e** e **Inutilizar número** com a justificativa) e **Transmitir agora**. No PDV, a venda
+**Cancelar NFC-e** e **Inutilizar número** com a justificativa; na NF-e, **Imprimir DANFE**, **Carta de
+correção** e a lista das cartas com a situação) e **Transmitir agora**. No PDV, a venda
 autorizada ganha **Imprimir cupom fiscal**. A nota em contingência também (o DANFCE com o aviso), tem a
 etiqueta "Em contingência" e, nas Notas fiscais, entra em "Atenção" com o prazo de transmissão; a vigia de
 fundo a transmite como as da fila.
@@ -365,7 +388,7 @@ fundo a transmite como as da fila.
 | Permissão | Risco | O que libera |
 |---|---|---|
 | `fiscal.ver` | Baixo | Situação fiscal, notas, teste de conexão |
-| `fiscal.emitir` | Médio | Criar a NFC-e da venda, reenviar, transmitir a fila |
+| `fiscal.emitir` | Médio | Criar a NFC-e da venda, reenviar, transmitir a fila, carta de correção |
 | `fiscal.cancelar` | Alto | Cancelar NFC-e autorizada, inutilizar número |
 
 O papel de fábrica **Operador de Caixa** recebe `fiscal.ver` e `fiscal.emitir` (2026-10-15): sem
@@ -389,6 +412,8 @@ Cancelar e configurar continuam fora do papel.
 - v6: `fiscal_documento.xml_assinado` (a nota assinada da emissão incerta, apagada quando chega o
   `nfeProc`) e `xml_a_buscar` (tentativas restantes da busca de XML; 0 = nada a buscar); o índice da fila
   passa a cobrir a busca, e os cancelamentos sem o XML já entram nela.
+- v11: `fiscal_carta_correcao` (a NF-e, a sequência de 1 a 20, o texto, o estado, o motivo, o protocolo,
+  o XML, as tentativas e a próxima tentativa, quando foi registrada).
 - v10: `fiscal_configuracao.serie_nfe` — a série da NF-e (modelo 55), separada da da NFC-e.
 - v9: `fiscal_documento` recriada com `substitui`/`substituida_por`, o pedido `cancelar_substituicao` e a
   origem única só entre as vigentes (índice parcial `fiscal_documento_origem`).
@@ -405,7 +430,7 @@ Cancelar e configurar continuam fora do papel.
    nota incerta (outro número em contingência; a original cancelada por substituição, 110112, ou inutilizada;
    `sefaz-api` 43c98f0). Falta a conferência na SEFAZ de verdade.
 4. ~~Série por terminal~~ — feita em 2026-10-27 (§7, "Série por caixa").
-5. NF-e: ~~a de venda e o DANFE A4~~ (2026-10-27, §7 "NF-e de venda"); falta a devolução e a CC-e.
+5. NF-e: ~~a de venda, o DANFE A4 e a carta de correção~~ (2026-10-27, §7); falta a devolução.
 6. NFS-e da OS.
 7. SPED gerado no Cardeal.
 8. ~~DFe e manifestação~~ — feito em 2026-10-26 (sefaz-api 842576f; a busca de notas em

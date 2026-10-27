@@ -810,6 +810,23 @@ impl PortaFiscal for ApiFiscalHttp {
             .map_err(|e| Erro::de_dominio(&e))
     }
 
+    fn carta_de_correcao(
+        &self,
+        chave: &ChaveAcesso,
+        texto: &str,
+        sequencia: u32,
+        uf: Uf,
+    ) -> Resultado<RetornoSefaz> {
+        let mut corpo = self.corpo_base();
+        corpo.insert("chaveAcesso".into(), Value::from(chave.como_str()));
+        corpo.insert("correcao".into(), Value::from(texto));
+        corpo.insert("sequencia".into(), Value::from(sequencia));
+        corpo.insert("ufEmitente".into(), Value::from(uf.sigla()));
+        self.postar("/nfe/carta-correcao", &Value::Object(corpo))
+            .map(RespostaSefazApi::em_retorno)
+            .map_err(|e| Erro::de_dominio(&e))
+    }
+
     fn inutilizar(&self, p: &PedidoInutilizacao) -> Resultado<RetornoSefaz> {
         let mut corpo = self.corpo_base();
         corpo.insert("cnpj".into(), Value::from(p.cnpj.sem_mascara()));
@@ -1310,6 +1327,29 @@ mod testes {
         assert_eq!(corpo["finalidade"], "4");
         assert_eq!(corpo["referencias"][0]["refNFe"], "4".repeat(44));
         assert!(corpo.get("cobranca").is_none());
+    }
+
+    #[test]
+    fn a_carta_de_correcao_manda_o_texto_e_a_sequencia() {
+        let (url, tarefa) = servidor(
+            200,
+            r#"{"success":true,"status":"autorizado","codigoStatus":"135","motivoStatus":"Evento registrado","protocolo":"135260000000003","xml":"<procEventoNFe/>"}"#,
+        );
+        let chave = ChaveAcesso::nova("43261011222333000181650010000000421100000001").unwrap();
+        let r = cliente(&url)
+            .carta_de_correcao(&chave, "Corrige o bairro para Centro", 2, Uf::Rs)
+            .unwrap();
+        assert_eq!(r.situacao, SituacaoRetorno::Autorizado);
+        assert_eq!(r.xml.as_deref(), Some("<procEventoNFe/>"));
+        let recebido = tarefa.join().unwrap();
+        assert!(
+            recebido.starts_with("POST /nfe/carta-correcao "),
+            "{recebido}"
+        );
+        let corpo: Value = serde_json::from_str(recebido.rsplit('\n').next().unwrap()).unwrap();
+        assert_eq!(corpo["correcao"], "Corrige o bairro para Centro");
+        assert_eq!(corpo["sequencia"], 2);
+        assert_eq!(corpo["ufEmitente"], "RS");
     }
 
     #[test]

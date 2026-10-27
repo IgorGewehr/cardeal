@@ -12,6 +12,7 @@ use cardeal_ui::organisms::{
 };
 use cardeal_ui::tokens::{Espaco, TemaUi};
 use eframe::egui;
+use mod_fiscal::correcao::{CartaDeCorrecao, CartasDeCorrecao, EmitirCartaDeCorrecao, EstadoCarta};
 use mod_fiscal::{
     AmbienteFiscal, CancelarNfce, DetalheDocumento, DocumentoFiscal, DocumentoResumo,
     DocumentosFiscais, EstadoDocumento, InutilizarNumero, PedidoDocumento, ReenviarDocumento,
@@ -46,7 +47,45 @@ pub struct EstadoNotas {
     pub geracao_vista: u64,
     /// O cancelamento/inutilização sendo pedido no detalhe: o pedido e a justificativa.
     pub pedindo: Option<(PedidoDocumento, String)>,
+    /// As cartas de correção da NF-e aberta no detalhe: a nota e as cartas.
+    pub cartas: Option<(Id, Vec<CartaDeCorrecao>)>,
+    /// A carta de correção sendo escrita no detalhe.
+    pub corrigindo: Option<String>,
 }
+
+/// Pede a carta de correção da NF-e e dispara a transmissão.
+///
+/// # Errors
+/// O erro do comando (texto curto, nota não autorizada, carta já na fila, as 20 usadas).
+pub fn corrigir(
+    ctx: &egui::Context,
+    motor: &Motor,
+    sessao: &Sessao,
+    estado: &mut EstadoNotas,
+    documento: Id,
+    texto: &str,
+) -> Result<CartaDeCorrecao, String> {
+    let carta: CartaDeCorrecao = motor
+        .executar(
+            sessao,
+            "fiscal.emitir_carta_de_correcao.v1",
+            &EmitirCartaDeCorrecao {
+                documento,
+                texto: texto.to_owned(),
+            },
+        )
+        .map_err(|e| e.mensagem)?;
+    estado.corrigindo = None;
+    fiscal_fundo::disparar(ctx, motor, sessao);
+    estado.carregar(motor, sessao);
+    Ok(carta)
+}
+
+/// O que a carta de correção pode e não pode corrigir (Ajuste SINIEF 01/07).
+const SOBRE_A_CARTA: &str = "A carta de correção corrige dados cadastrais, endereço, descrição \
+    e informações complementares. Não corrige valores, quantidades, impostos, o CNPJ/CPF de quem \
+    emite ou recebe nem as datas — para isso, cancele a nota e emita outra. Cada carta substitui a \
+    anterior: escreva todas as correções.";
 
 /// Pede o cancelamento (autorizada) ou a inutilização (rejeitada) do documento e dispara a
 /// transmissão.
@@ -112,6 +151,7 @@ impl EstadoNotas {
         self.resumo = motor
             .consultar(sessao, "fiscal.resumo_da_fila.v1", &ResumoDaFilaFiscal)
             .ok();
+        self.cartas = None;
         if let Some(d) = &self.detalhe {
             let id = d.resumo.id;
             self.detalhe = motor
@@ -402,7 +442,38 @@ fn detalhe(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estad
         ui.ctx()
             .request_repaint_after(std::time::Duration::from_secs(30));
     }
+    let nfe = d.resumo.modelo == mod_fiscal::ModeloFiscal::Nfe;
+    if nfe && estado.cartas.as_ref().map(|c| c.0) != Some(d.resumo.id) {
+        let cartas = motor
+            .consultar(
+                sessao,
+                "fiscal.cartas_de_correcao.v1",
+                &CartasDeCorrecao {
+                    documento: d.resumo.id,
+                },
+            )
+            .unwrap_or_default();
+        estado.cartas = Some((d.resumo.id, cartas));
+    }
+    let cartas = estado
+        .cartas
+        .as_ref()
+        .filter(|c| nfe && c.0 == d.resumo.id)
+        .map(|c| c.1.clone())
+        .unwrap_or_default();
+    let pode_corrigir = nfe
+        && d.resumo.estado == EstadoDocumento::Autorizada
+        && sessao.concede("fiscal.emitir")
+        && !cartas.iter().any(|k| k.estado == EstadoCarta::Pendente)
+        && cartas
+            .iter()
+            .filter(|k| k.estado == EstadoCarta::Registrada)
+            .count()
+            < mod_fiscal::correcao::MAXIMO_DE_CARTAS as usize;
     let mut fechar = false;
+    let mut abrir_carta = false;
+    let mut enviar_carta = false;
+    let mut desistir_carta = false;
     let mut imprimir = None;
     let mut danfe = None;
     let mut abrir_pedido = None;
@@ -483,6 +554,45 @@ fn detalhe(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estad
                 ui.add(Etiqueta::atencao(p.rotulo()).com_ponto());
                 ui.add_space(Espaco::E8);
             }
+            if !cartas.is_empty() {
+                ui.add(Rotulo::sobrelinha("Cartas de correção"));
+                for k in &cartas {
+                    ui.horizontal(|ui| {
+                        ui.add(
+                            match k.estado {
+                                EstadoCarta::Pendente => Etiqueta::atencao(k.estado.rotulo()),
+                                EstadoCarta::Registrada => Etiqueta::positiva(k.estado.rotulo()),
+                                EstadoCarta::Recusada => Etiqueta::negativa(k.estado.rotulo()),
+                            }
+                            .com_ponto(),
+                        );
+                        ui.add(
+                            Rotulo::campo(format!("{}ª — {}", k.sequencia, k.texto)).quebravel(),
+                        );
+                    });
+                    if k.estado != EstadoCarta::Registrada {
+                        if let Some(m) = &k.motivo {
+                            ui.add(Rotulo::apoio(m.clone()).quebravel());
+                        }
+                    }
+                }
+                ui.add_space(Espaco::E8);
+            }
+            if let Some(texto) = estado.corrigindo.as_mut() {
+                Painel::novo().realce(Tom::Info).mostrar(ui, |ui| {
+                    ui.add(Rotulo::interface(SOBRE_A_CARTA).quebravel());
+                    ui.add_space(Espaco::E8);
+                    ui.add(Campo::novo("Correção (15 a 1000 caracteres)", texto).multilinha(4));
+                    ui.add_space(Espaco::E8);
+                    ui.horizontal(|ui| {
+                        enviar_carta = ui
+                            .add(Botao::primario("Enviar carta de correção"))
+                            .clicked();
+                        desistir_carta = ui.add(Botao::fantasma("Desistir")).clicked();
+                    });
+                });
+                ui.add_space(Espaco::E8);
+            }
             if let Some((pedido, justificativa)) = estado.pedindo.as_mut() {
                 let fora_do_prazo = prazo.is_some_and(|p| !p.dentro());
                 let tom = if *pedido == PedidoDocumento::Cancelar && fora_do_prazo {
@@ -525,6 +635,12 @@ fn detalhe(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estad
                 {
                     danfe = Some(d.resumo.id);
                 }
+                if pode_corrigir
+                    && estado.corrigindo.is_none()
+                    && ui.add(Botao::secundario("Carta de correção")).clicked()
+                {
+                    abrir_carta = true;
+                }
                 if d.resumo.modelo == mod_fiscal::ModeloFiscal::Nfce
                     && matches!(
                         d.resumo.estado,
@@ -557,6 +673,24 @@ fn detalhe(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estad
     if let Some(p) = abrir_pedido {
         estado.pedindo = Some((p, String::new()));
     }
+    if abrir_carta {
+        // A nova substitui a anterior: começa do texto da última registrada.
+        let ultima = cartas
+            .iter()
+            .find(|k| k.estado == EstadoCarta::Registrada)
+            .map(|k| k.texto.clone());
+        estado.corrigindo = Some(ultima.unwrap_or_default());
+    }
+    if desistir_carta {
+        estado.corrigindo = None;
+    }
+    if enviar_carta {
+        let texto = estado.corrigindo.clone().unwrap_or_default();
+        match corrigir(ui.ctx(), motor, sessao, estado, d.resumo.id, &texto) {
+            Ok(_) => notificar(ui.ctx(), Notificacao::sucesso("Carta de correção na fila")),
+            Err(e) => notificar(ui.ctx(), Notificacao::erro(e)),
+        }
+    }
     if desistir {
         estado.pedindo = None;
     }
@@ -587,6 +721,7 @@ fn detalhe(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estad
     if fechar {
         estado.detalhe = None;
         estado.pedindo = None;
+        estado.corrigindo = None;
     }
     if let Some(id) = danfe {
         match crate::danfe::imprimir(motor, sessao, id) {
@@ -760,6 +895,12 @@ mod testes {
                 });
             });
         }
+        // A NFC-e não tem carta de correção (o documento nem existe: o erro volta, o formulário
+        // fica aberto).
+        estado.corrigindo = Some("Corrige o bairro do destinatário para Centro".into());
+        let id = estado.detalhe.as_ref().unwrap().resumo.id;
+        assert!(corrigir(&ctx, m, s, &mut estado, id, "Corrige o bairro para Centro").is_err());
+        assert!(estado.corrigindo.is_some());
         // O documento não existe na base: o pedido volta com erro e o formulário fica aberto.
         let id = estado.detalhe.as_ref().unwrap().resumo.id;
         assert!(pedir(

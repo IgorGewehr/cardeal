@@ -735,6 +735,12 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   contingência nem substituição), `DetalheDocumento.nfe`; desktop: Emitir NF-e no pedido faturado e a série em
   Configurações › Fiscal. O DANFE A4 veio em seguida (`cardeal_pdf::danfe`, Code 128C próprio em
   `cardeal_pdf::barras`, conferido com o zxing; desktop `danfe.rs`).
+- **Carta de correção da NF-e (2026-10-27, fiscal.md §7):** `cardeal-fiscal`:
+  `PortaFiscal::carta_de_correcao` (HTTP `/nfe/carta-correcao` com a sequência, e simulado); `mod-fiscal`:
+  `correcao.rs` (`EmitirCartaDeCorrecao`, `CartasDeCorrecao`, `decidir_carta`), migração v11, a fila leva as
+  cartas depois das notas, `ResumoFiscal.cartas_pendentes` (a vigia de fundo conta), `NotasDoMes.cartas`;
+  o pacote do contador leva as cartas e dá o nome 110112 ao cancelamento por substituição; desktop: Carta
+  de correção no detalhe da NF-e.
 - **Substituição da NFC-e sem resposta (2026-10-27, fecha o fiscal.md §11 item 3):** `sefaz-api`
   43c98f0 (o `/nfe/cancelar` com `chaveSubstituta` = evento 110112); `cardeal-fiscal`
   `PortaFiscal::cancelar_por_substituicao`; `mod-fiscal`: migração v9, `pede_substituicao`,

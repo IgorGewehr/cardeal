@@ -197,6 +197,10 @@ impl NotaDoMes {
                     "serie{:03}-numero{:09}-procInutNFe.xml",
                     self.serie, self.numero
                 ),
+                // O cancelamento por substituição (110112) tem o tipo dele no nome.
+                _ if evento.contains("<tpEvento>110112</tpEvento>") => {
+                    format!("110112{nome}01-procEventoNFe.xml")
+                }
                 _ => format!("110111{nome}01-procEventoNFe.xml"),
             };
             v.push((format!("{pasta}/{arquivo}"), evento.as_str()));
@@ -243,6 +247,33 @@ pub struct NotasDoMes {
     pub sem_desfecho: Vec<DocumentoResumo>,
     /// Quantas notas de homologação (teste, sem valor fiscal) o mês teve — ficam de fora.
     pub de_homologacao: u32,
+    /// As cartas de correção registradas no mês (pelo registro, não pela emissão da nota).
+    pub cartas: Vec<CartaDoMes>,
+}
+
+/// Uma carta de correção registrada no mês.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CartaDoMes {
+    /// A chave da NF-e.
+    pub chave: String,
+    /// A sequência.
+    pub sequencia: u32,
+    /// O `procEventoNFe`.
+    pub xml: String,
+}
+
+impl CartaDoMes {
+    /// O arquivo no pacote, com o nome que a contabilidade conhece.
+    #[must_use]
+    pub fn arquivo(&self) -> (String, &str) {
+        (
+            format!(
+                "Saidas/NF-e/CartasDeCorrecao/110110{}{:02}-procEventoNFe.xml",
+                self.chave, self.sequencia
+            ),
+            self.xml.as_str(),
+        )
+    }
 }
 
 impl NotasDoMes {
@@ -356,6 +387,14 @@ impl Consulta for NotasFiscaisDoMes {
                 inicio,
                 fim,
             )?,
+            cartas: crate::correcao::sqlite::registradas_entre(c, ctx.empresa, inicio, fim)?
+                .into_iter()
+                .map(|(chave, sequencia, xml)| CartaDoMes {
+                    chave,
+                    sequencia,
+                    xml,
+                })
+                .collect(),
         })
     }
 }
