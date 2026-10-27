@@ -859,9 +859,11 @@ dependencies = [
  "open",
  "rfd",
  "serde",
+ "serde_json",
  "tempfile",
  "tracing",
  "tracing-subscriber",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

@@ -357,10 +357,7 @@ pub(super) fn dialogo_vendas_do_dia(
         }
         Some(AcaoVendas::Imprimir(documento)) => {
             match crate::danfce::imprimir(motor, sessao, documento) {
-                Ok(_) => notificar(
-                    ctx,
-                    Notificacao::sucesso("Cupom fiscal aberto para imprimir"),
-                ),
+                Ok(saida) => notificar(ctx, Notificacao::sucesso(saida.mensagem("Cupom fiscal"))),
                 Err(e) => notificar(ctx, Notificacao::erro(e)),
             }
         }
@@ -873,7 +870,10 @@ pub(super) mod testes {
         };
 
         let pdf = std::fs::read(
-            crate::comprovante::imprimir(m, s, cupom, Dinheiro::reais(5), false).unwrap(),
+            crate::comprovante::imprimir(m, s, cupom, Dinheiro::reais(5), false)
+                .unwrap()
+                .caminho()
+                .unwrap(),
         )
         .unwrap();
         let texto = String::from_utf8_lossy(&pdf).into_owned();
@@ -893,13 +893,37 @@ pub(super) mod testes {
             },
         );
         r.unwrap();
-        let pdf =
-            std::fs::read(crate::comprovante::imprimir(m, s, cupom, Dinheiro::ZERO, true).unwrap())
-                .unwrap();
+        let pdf = std::fs::read(
+            crate::comprovante::imprimir(m, s, cupom, Dinheiro::ZERO, true)
+                .unwrap()
+                .caminho()
+                .unwrap(),
+        )
+        .unwrap();
         let texto = String::from_utf8_lossy(&pdf).into_owned();
         assert!((largura(&pdf) - 164.409).abs() < 0.01, "58 mm");
         assert!(texto.contains("Trocas em"));
         assert!(!texto.contains("Troco"), "a reimpressão não sabe o troco");
+        // Com a térmica configurada, o mesmo comprovante vai em ESC/POS, na bobina de 58 mm.
+        let (endereco, recebido) = crate::impressora::testes::impressora_de_rede();
+        let saida = crate::comprovante::imprimir_em(
+            m,
+            s,
+            cupom,
+            Dinheiro::ZERO,
+            true,
+            &crate::maquina::ImpressoraDaMaquina {
+                destino: crate::maquina::Destino::Rede(endereco.clone()),
+                acentos: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(saida, crate::impressora::Saida::Impressora(endereco));
+        let bytes = recebido.join().unwrap();
+        assert!(bytes.starts_with(b"\x1b@"));
+        let texto = String::from_utf8_lossy(&bytes);
+        assert!(texto.contains("COMPROVANTE DE VENDA") && texto.contains("Trocas em"));
+        assert!(texto.contains(&"-".repeat(32)), "32 colunas na de 58 mm");
         // A tela de PDV lê a preferência.
         let mut estado = EstadoTelaPdv::default();
         estado.carregar(m, s);

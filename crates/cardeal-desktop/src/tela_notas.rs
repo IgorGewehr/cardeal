@@ -540,9 +540,9 @@ fn detalhe(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estad
     }
     if let Some(id) = imprimir {
         match crate::danfce::imprimir(motor, sessao, id) {
-            Ok(_) => notificar(
+            Ok(saida) => notificar(
                 ui.ctx(),
-                Notificacao::sucesso("Cupom fiscal aberto para imprimir"),
+                Notificacao::sucesso(saida.mensagem("Cupom fiscal")),
             ),
             Err(e) => notificar(ui.ctx(), Notificacao::erro(e)),
         }

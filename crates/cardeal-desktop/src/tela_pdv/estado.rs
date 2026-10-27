@@ -246,6 +246,9 @@ pub struct EstadoTelaPdv {
     pub(super) geracao_fiscal: u64,
     /// A impressão do PDV (bobina, comprovante automático, rodapé).
     pub(super) impressao: mod_pdv::ImpressaoPdv,
+    /// A NFC-e da última venda, esperando sair (autorizada ou em contingência) para o cupom
+    /// fiscal ser impresso sozinho.
+    pub(super) imprimir_nfce_quando_sair: Option<Id>,
 }
 
 impl Default for EstadoTelaPdv {
@@ -283,6 +286,7 @@ impl Default for EstadoTelaPdv {
             nfce_ultima: None,
             geracao_fiscal: 0,
             impressao: mod_pdv::ImpressaoPdv::default(),
+            imprimir_nfce_quando_sair: None,
         }
     }
 }
@@ -372,6 +376,27 @@ impl EstadoTelaPdv {
                 )
                 .ok()
                 .flatten();
+        }
+        self.imprimir_se_saiu();
+    }
+
+    /// O cupom fiscal da última venda sai sozinho quando a NFC-e sai — autorizada ou em
+    /// contingência. Rejeitada ou denegada, não: o aviso da venda já mostra o motivo.
+    pub(super) fn imprimir_se_saiu(&mut self) {
+        let (Some(id), Some(n)) = (self.imprimir_nfce_quando_sair, self.nfce_ultima.as_ref())
+        else {
+            return;
+        };
+        if n.id != id {
+            return;
+        }
+        match n.estado {
+            mod_fiscal::EstadoDocumento::Autorizada | mod_fiscal::EstadoDocumento::Contingencia => {
+                self.pendentes.push(Acao::ImprimirNfce(id));
+                self.imprimir_nfce_quando_sair = None;
+            }
+            mod_fiscal::EstadoDocumento::Pendente | mod_fiscal::EstadoDocumento::Incerta => {}
+            _ => self.imprimir_nfce_quando_sair = None,
         }
     }
 

@@ -36,6 +36,7 @@ mod bobina;
 mod comprovante;
 mod danfce;
 mod documento;
+mod escpos;
 mod fonte;
 mod imagem;
 mod layout;
@@ -43,6 +44,7 @@ mod layout;
 pub use bobina::Bobina;
 pub use comprovante::{gerar_comprovante, ComprovantePdf, ItemComprovante};
 pub use danfce::{chave_em_grupos, gerar_danfce, DanfcePdf, ItemDanfce};
+pub use escpos::{comprovante_escpos, danfce_escpos, teste_escpos, OpcoesEscPos};
 
 use cardeal_kernel::{Data, Dinheiro, Instante, Percentual, Preco, Quantidade};
 

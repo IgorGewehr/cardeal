@@ -11,6 +11,7 @@ use cardeal_ui::organisms::{notificar, ColunaGrade, Grade, LayoutTela, Notificac
 use cardeal_ui::tokens::{Espaco, Tema, TemaUi};
 use eframe::egui;
 
+mod impressora;
 mod tetos;
 
 const REGIMES: [&str; 4] = ["MEI", "SimplesNacional", "LucroPresumido", "LucroReal"];
@@ -52,6 +53,8 @@ pub struct EstadoTelaSettings {
     bobina: Option<mod_pdv::LarguraBobina>,
     imprimir_auto: bool,
     rodape: String,
+    /// A impressora deste computador (não da empresa).
+    impressora_local: impressora::EstadoImpressora,
 }
 
 impl EstadoTelaSettings {
@@ -381,7 +384,8 @@ fn secao_impressao(
         ui.add_space(Espaco::E8);
         ui.add(Caixa::nova(
             &mut estado.imprimir_auto,
-            "Imprimir o comprovante ao finalizar cada venda",
+            "Imprimir sozinho ao finalizar cada venda — o cupom fiscal quando a NFC-e sai; sem \
+             NFC-e, o comprovante",
         ));
         ui.add_space(Espaco::E8);
         ui.add(
@@ -410,6 +414,14 @@ fn secao_impressao(
             }
         }
     });
+    if estado.impressao.is_some() {
+        ui.add_space(Espaco::E12);
+        let pode = sessao.concede("pdv.impressao.configurar");
+        let bobina = crate::comprovante::bobina(estado.bobina.unwrap_or_default());
+        cartao(ui, |ui| {
+            impressora::secao(ui, pode, bobina, &mut estado.impressora_local);
+        });
+    }
 }
 
 fn secao_aparencia(ui: &mut egui::Ui, tema: &mut Tema) {

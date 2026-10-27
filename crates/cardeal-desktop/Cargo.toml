@@ -48,6 +48,7 @@ eframe.workspace      = true
 egui.workspace        = true
 egui_extras.workspace = true
 serde.workspace       = true
+serde_json.workspace  = true
 anyhow.workspace      = true
 tracing.workspace     = true
 tracing-subscriber.workspace = true
@@ -57,6 +58,9 @@ open.workspace        = true
 
 # Só para `--features demo` (banco temporário da captura do app inteiro).
 tempfile = { workspace = true, optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

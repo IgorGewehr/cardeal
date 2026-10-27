@@ -9,7 +9,7 @@
 use cardeal_kernel::{Dinheiro, Fuso, Instante, Preco, Quantidade};
 use qrcodegen::{QrCode, QrCodeEcc};
 
-use crate::bobina::{imprimir, Bobina, Cursor};
+use crate::bobina::{imprimir, Bobina, Escrita};
 use crate::fonte::Fonte;
 use crate::ErroPdf;
 
@@ -96,8 +96,8 @@ fn reais(d: Dinheiro) -> String {
 }
 
 /// Os itens, os totais e as formas de pagamento.
-fn itens_e_totais(c: &mut Cursor, d: &DanfcePdf) {
-    let corpo = c.b.corpo();
+fn itens_e_totais(c: &mut impl Escrita, d: &DanfcePdf) {
+    let corpo = c.bobina().corpo();
     c.par("Código  Descrição", "Valor", Fonte::Negrito);
     for (i, item) in d.itens.iter().enumerate() {
         c.esquerda(
@@ -139,11 +139,12 @@ fn itens_e_totais(c: &mut Cursor, d: &DanfcePdf) {
     c.tracejado();
 }
 
-fn compor(c: &mut Cursor, d: &DanfcePdf, qr: Option<&QrCode>) {
+pub(crate) fn compor(c: &mut impl Escrita, d: &DanfcePdf, qr: Option<&QrCode>) {
     let homologacao = "EMITIDA EM AMBIENTE DE HOMOLOGAÇÃO - SEM VALOR FISCAL";
-    let pequeno = c.b.pequeno();
+    let pequeno = c.bobina().pequeno();
 
-    c.centro(&d.razao_social, Fonte::Negrito, c.b.titulo());
+    let titulo = c.bobina().titulo();
+    c.centro(&d.razao_social, Fonte::Negrito, titulo);
     c.centro(
         &format!("CNPJ {}  IE {}", d.cnpj, d.inscricao_estadual),
         Fonte::Regular,
@@ -337,6 +338,24 @@ mod testes {
         let pdf = String::from_utf8_lossy(&gerar_danfce(&d, Bobina::Mm80).unwrap()).into_owned();
         assert!(pdf.contains("EMITIDA EM CONTING"));
         assert!(!pdf.contains("Pendente de autoriza"));
+    }
+
+    #[test]
+    fn na_termica_sai_o_mesmo_cupom_do_pdf() {
+        let bytes =
+            crate::danfce_escpos(&exemplo(), Bobina::Mm80, crate::OpcoesEscPos::default()).unwrap();
+        let texto = String::from_utf8_lossy(&bytes);
+        for trecho in [
+            "Documento Auxiliar da Nota Fiscal de Consumidor",
+            "Protocolo de autorizacao",
+            "4326 1065 6097",
+            "EMITIDA EM AMBIENTE DE HOMOLOGACAO",
+            "Valor a pagar R$",
+        ] {
+            assert!(texto.contains(trecho), "falta {trecho:?}");
+        }
+        // O QR Code foi como imagem.
+        assert!(bytes.windows(3).any(|w| w == [0x1D, b'v', b'0']));
     }
 
     #[test]

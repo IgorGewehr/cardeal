@@ -728,3 +728,54 @@ fn desconto_no_total_vai_ao_motor_e_o_cadastro_rapido_identifica_o_cliente() {
     );
     assert!(e.clientes.iter().any(|c| c.nome == "Joana Prado"));
 }
+
+#[test]
+fn o_cupom_fiscal_sai_sozinho_quando_a_nfce_sai() {
+    let nota = |id: Id, estado: mod_fiscal::EstadoDocumento| mod_fiscal::DocumentoResumo {
+        id,
+        modelo: mod_fiscal::ModeloFiscal::Nfce,
+        serie: 1,
+        numero: 1,
+        ambiente: mod_fiscal::AmbienteFiscal::Homologacao,
+        estado,
+        total: Dinheiro::reais(10),
+        chave: None,
+        protocolo: None,
+        codigo: None,
+        motivo: None,
+        origem: Id::novo(),
+        tentativas: 0,
+        criado_em: cardeal_kernel::Instante::agora(),
+        autorizado_em: None,
+        pedido: None,
+        anulada: false,
+        contingencia_em: None,
+    };
+    let imprimir = |e: &EstadoTelaPdv| {
+        e.pendentes
+            .iter()
+            .filter(|a| matches!(a, Acao::ImprimirNfce(_)))
+            .count()
+    };
+    let id = Id::novo();
+    let mut e = EstadoTelaPdv {
+        imprimir_nfce_quando_sair: Some(id),
+        nfce_ultima: Some(nota(id, mod_fiscal::EstadoDocumento::Pendente)),
+        ..EstadoTelaPdv::default()
+    };
+    // Na fila: espera.
+    e.imprimir_se_saiu();
+    assert_eq!((imprimir(&e), e.imprimir_nfce_quando_sair), (0, Some(id)));
+    // Saiu em contingência: imprime uma vez só.
+    e.nfce_ultima = Some(nota(id, mod_fiscal::EstadoDocumento::Contingencia));
+    e.imprimir_se_saiu();
+    e.imprimir_se_saiu();
+    assert_eq!((imprimir(&e), e.imprimir_nfce_quando_sair), (1, None));
+    // Rejeitada: não imprime, e para de esperar.
+    let outra = Id::novo();
+    e.pendentes.clear();
+    e.imprimir_nfce_quando_sair = Some(outra);
+    e.nfce_ultima = Some(nota(outra, mod_fiscal::EstadoDocumento::Rejeitada));
+    e.imprimir_se_saiu();
+    assert_eq!((imprimir(&e), e.imprimir_nfce_quando_sair), (0, None));
+}

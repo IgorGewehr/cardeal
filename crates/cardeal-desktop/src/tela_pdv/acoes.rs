@@ -13,10 +13,7 @@ pub(super) fn aplicar(
 ) {
     match acao {
         Acao::ImprimirNfce(documento) => match crate::danfce::imprimir(motor, sessao, documento) {
-            Ok(_) => notificar(
-                ctx,
-                Notificacao::sucesso("Cupom fiscal aberto para imprimir"),
-            ),
+            Ok(saida) => notificar(ctx, Notificacao::sucesso(saida.mensagem("Cupom fiscal"))),
             Err(e) => notificar(ctx, Notificacao::erro(e)),
         },
         Acao::Bipar => bipar(ctx, motor, sessao, estado),
@@ -665,7 +662,17 @@ pub(super) fn finalizar(
                     .id(fiscal),
             );
             if estado.impressao.imprimir_ao_finalizar {
-                imprimir_comprovante(ctx, motor, sessao, cupom, troco, false);
+                // Com NFC-e na fila, o cupom fiscal sai quando ela sair (`imprimir_se_saiu`);
+                // sem NFC-e (ou já rejeitada na montagem), o comprovante, agora.
+                let na_fila = estado
+                    .nfce_ultima
+                    .as_ref()
+                    .filter(|d| d.estado == mod_fiscal::EstadoDocumento::Pendente)
+                    .map(|d| d.id);
+                estado.imprimir_nfce_quando_sair = na_fila;
+                if na_fila.is_none() {
+                    imprimir_comprovante(ctx, motor, sessao, cupom, troco, false);
+                }
             }
         }
         Err(e) => notificar(ctx, Notificacao::erro(e.mensagem).id(fiscal)),
@@ -681,11 +688,16 @@ pub(super) fn imprimir_comprovante(
     troco: Dinheiro,
     segunda_via: bool,
 ) {
-    if let Err(e) = crate::comprovante::imprimir(motor, sessao, cupom, troco, segunda_via) {
-        notificar(
+    match crate::comprovante::imprimir(motor, sessao, cupom, troco, segunda_via) {
+        // O PDF se anuncia sozinho (abre o visualizador); a térmica, não.
+        Ok(saida @ crate::impressora::Saida::Impressora(_)) => {
+            notificar(ctx, Notificacao::sucesso(saida.mensagem("Comprovante")));
+        }
+        Ok(crate::impressora::Saida::Pdf(_)) => {}
+        Err(e) => notificar(
             ctx,
-            Notificacao::erro("Não foi possível abrir o comprovante").detalhe(e),
-        );
+            Notificacao::erro("Não foi possível imprimir o comprovante").detalhe(e),
+        ),
     }
 }
 

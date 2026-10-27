@@ -121,16 +121,35 @@ pub fn montar(d: &DetalheDocumento) -> Result<DanfcePdf, String> {
     })
 }
 
-/// Gera o DANFCE do documento, grava na pasta temporária e abre no visualizador. Devolve o
-/// caminho.
+/// Imprime o DANFCE do documento na impressora desta máquina — direto na térmica, quando
+/// configurada (Configurações › Impressão); senão grava o PDF na pasta temporária e abre no
+/// visualizador.
 ///
 /// # Errors
-/// Documento inexistente, não autorizado, ou falha ao gerar/gravar.
+/// Documento inexistente, não autorizado, ou falha ao gerar, gravar ou imprimir.
 pub fn imprimir(
     motor: &Motor,
     sessao: &Sessao,
     documento: Id,
-) -> Result<std::path::PathBuf, String> {
+) -> Result<crate::impressora::Saida, String> {
+    imprimir_em(
+        motor,
+        sessao,
+        documento,
+        &crate::maquina::atual().impressora,
+    )
+}
+
+/// [`imprimir`] na impressora dada.
+///
+/// # Errors
+/// Como [`imprimir`].
+pub fn imprimir_em(
+    motor: &Motor,
+    sessao: &Sessao,
+    documento: Id,
+    impressora: &crate::maquina::ImpressoraDaMaquina,
+) -> Result<crate::impressora::Saida, String> {
     let detalhe: DetalheDocumento = motor
         .consultar(
             sessao,
@@ -138,11 +157,16 @@ pub fn imprimir(
             &DocumentoFiscal { documento },
         )
         .map_err(|e| e.mensagem)?;
-    let pdf = cardeal_pdf::gerar_danfce(
-        &montar(&detalhe)?,
-        crate::comprovante::bobina_configurada(motor, sessao),
-    )
-    .map_err(|e| e.to_string())?;
+    let danfce = montar(&detalhe)?;
+    let bobina = crate::comprovante::bobina_configurada(motor, sessao);
+    if impressora.destino != crate::maquina::Destino::Pdf {
+        let bytes =
+            cardeal_pdf::danfce_escpos(&danfce, bobina, crate::impressora::opcoes(impressora))
+                .map_err(|e| e.to_string())?;
+        return crate::impressora::enviar(&impressora.destino, &bytes)
+            .map(crate::impressora::Saida::Impressora);
+    }
+    let pdf = cardeal_pdf::gerar_danfce(&danfce, bobina).map_err(|e| e.to_string())?;
     let pasta = std::env::temp_dir().join("Cardeal").join("cupons");
     std::fs::create_dir_all(&pasta).map_err(|e| e.to_string())?;
     let caminho = pasta.join(format!(
@@ -153,7 +177,7 @@ pub fn imprimir(
     if !cfg!(test) {
         open::that_detached(&caminho).map_err(|e| e.to_string())?;
     }
-    Ok(caminho)
+    Ok(crate::impressora::Saida::Pdf(caminho))
 }
 
 #[cfg(test)]

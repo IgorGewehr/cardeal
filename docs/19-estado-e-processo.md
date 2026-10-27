@@ -727,6 +727,13 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   - desktop (`pacote_contador.rs`): `XMLs AAAA-MM.zip`, as seções "Notas fiscais do mês" e
     "Pendências do mês" no PDF, e as abas "Notas emitidas" e "Notas de entrada" na planilha;
   - `cardeal-pdf`: o sinal de menos (U+2212) sai como traço, não como "?".
+- **Impressão direta na térmica (2026-10-27, fiscal.md §11 item 2):** `cardeal-pdf` ganhou a interface
+  `Escrita` (o layout da bobina escreve nela; `Cursor` é o PDF) e o `escpos` (`danfce_escpos`,
+  `comprovante_escpos`, `teste_escpos`, `OpcoesEscPos`; QR em `GS v 0`, PC860 opcional). Desktop:
+  `maquina` (a preferência desta máquina em `maquina.json`), `impressora` (spooler do Windows em
+  modo cru via `windows-sys`, `lp -o raw` fora dele, TCP 9100; `instaladas()`), Configurações ›
+  Impressão › Impressora deste computador, e o "imprimir sozinho" passa a imprimir o cupom fiscal
+  quando a NFC-e sai. Não conferido numa térmica de verdade.
 - **Contingência off-line da NFC-e (2026-10-27, fiscal.md §11 item 3):** `sefaz-api` 7d7faa6 (o
   `naoEnviado` — o pedido que com certeza não chegou à SEFAZ); `cardeal-fiscal`: `RetornoSefaz::nao_enviado`
   e `sefaz_fora`, `PortaFiscal::preparar_nfce_em_contingencia`/`transmitir_nfce_em_contingencia`

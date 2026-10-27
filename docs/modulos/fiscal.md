@@ -261,8 +261,17 @@ fonte e a margem encolhem e o QR Code fica com 28 mm, acima dos 25 mm do manual)
 (emitente, itens, totais, pagamentos e troco, chave em 11 grupos com o endereço de consulta, consumidor,
 número/série/emissão, protocolo e o QR Code — `qrcodegen`, MIT). Em homologação, "sem valor fiscal" no topo e
 no rodapé. Montado da nota guardada + `qrCode`/`urlChave` do XML autorizado; abre no visualizador do sistema
-(de onde vai à impressora — a impressão direta ESC/POS é passo seguinte). Conferido: o QR Code renderizado
-decodifica para a URL de consulta com a chave.
+(de onde vai à impressora). Conferido: o QR Code renderizado decodifica para a URL de consulta com a chave.
+
+**Direto na térmica** (2026-10-27): com a impressora deste computador configurada (Configurações › Impressão),
+o DANFCE vai em ESC/POS (`cardeal_pdf::danfce_escpos`), sem abrir o PDF. O layout é o **mesmo** `compor` do
+PDF, escrito contra a interface `Escrita` (o PDF e o ESC/POS a implementam): as duas saídas não divergem. Só o
+núcleo comum das térmicas (Epson TM, Elgin i9, Bematech em modo ESC/POS, Daruma, Tanca): `ESC @`, alinhamento,
+negrito, tamanho duplo no título, corte parcial; o QR Code vai como **imagem** (`GS v 0`, 32 mm na de 80, 28 mm
+na de 58), que toda ESC/POS imprime, em vez do `GS ( k`, que nem todas têm. 48 colunas na bobina de 80 mm, 32
+na de 58. Acento: o padrão é sem (o texto é transliterado — sai certo em qualquer marca); ligado, a PC860
+(`ESC t 3`). Não conferido numa impressora de verdade (não há uma nesta máquina): o teste manda os bytes a uma
+"impressora de rede" local e confere o conteúdo.
 
 ## 8. Telas
 
@@ -321,7 +330,8 @@ Cancelar e configurar continuam fora do papel.
 ## 11. Próximas fatias da onda 7
 
 1. **Primeira NFC-e autorizada no RS** (falta a IE, o endereço e o CSC de homologação da SEFAZ-RS).
-2. A impressão direta na térmica (ESC/POS) e o DANFCE em 58 mm.
+2. ~~A impressão direta na térmica (ESC/POS) e o DANFCE em 58 mm~~ — feitos (o 58 mm em 2026-10-15, o
+   ESC/POS em 2026-10-27; `docs/modulos/pdv.md`, Comprovante).
 3. ~~**Contingência offline**~~ — feita em 2026-10-27 (§7; `sefaz-api` 7d7faa6). Falta: a nota incerta
    (pode ter chegado) ir em contingência com **outro número** e a original ser cancelada por substituição
    (110112) ou inutilizada; e a conferência na SEFAZ de verdade.

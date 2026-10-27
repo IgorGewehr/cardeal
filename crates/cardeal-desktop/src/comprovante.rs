@@ -99,17 +99,40 @@ pub fn montar(
     }
 }
 
-/// Monta o comprovante da venda, grava em `%TEMP%\Cardeal\cupons` e abre para imprimir.
+/// Imprime o comprovante da venda na impressora desta máquina — direto na térmica, quando
+/// configurada; senão grava o PDF em `%TEMP%\Cardeal\cupons` e abre para imprimir.
 ///
 /// # Errors
-/// A mensagem do motor (venda não finalizada, sem permissão) ou de E/S.
+/// A mensagem do motor (venda não finalizada, sem permissão), de E/S ou da impressora.
 pub fn imprimir(
     motor: &Motor,
     sessao: &Sessao,
     cupom: Id,
     troco: Dinheiro,
     segunda_via: bool,
-) -> Result<std::path::PathBuf, String> {
+) -> Result<crate::impressora::Saida, String> {
+    imprimir_em(
+        motor,
+        sessao,
+        cupom,
+        troco,
+        segunda_via,
+        &crate::maquina::atual().impressora,
+    )
+}
+
+/// [`imprimir`] na impressora dada.
+///
+/// # Errors
+/// Como [`imprimir`].
+pub fn imprimir_em(
+    motor: &Motor,
+    sessao: &Sessao,
+    cupom: Id,
+    troco: Dinheiro,
+    segunda_via: bool,
+    impressora: &crate::maquina::ImpressoraDaMaquina,
+) -> Result<crate::impressora::Saida, String> {
     let dados: DadosDoComprovante = motor
         .consultar(
             sessao,
@@ -117,10 +140,17 @@ pub fn imprimir(
             &ComprovanteDaVenda { cupom },
         )
         .map_err(|e| e.mensagem)?;
-    let pdf = cardeal_pdf::gerar_comprovante(
-        &montar(&dados, troco, segunda_via),
-        bobina(dados.impressao.bobina),
-    );
+    let comprovante = montar(&dados, troco, segunda_via);
+    if impressora.destino != crate::maquina::Destino::Pdf {
+        let bytes = cardeal_pdf::comprovante_escpos(
+            &comprovante,
+            bobina(dados.impressao.bobina),
+            crate::impressora::opcoes(impressora),
+        );
+        return crate::impressora::enviar(&impressora.destino, &bytes)
+            .map(crate::impressora::Saida::Impressora);
+    }
+    let pdf = cardeal_pdf::gerar_comprovante(&comprovante, bobina(dados.impressao.bobina));
     let pasta = std::env::temp_dir().join("Cardeal").join("cupons");
     std::fs::create_dir_all(&pasta).map_err(|e| e.to_string())?;
     let caminho = pasta.join(format!("Comprovante-{}.pdf", dados.numero));
@@ -128,7 +158,7 @@ pub fn imprimir(
     if !cfg!(test) {
         open::that_detached(&caminho).map_err(|e| e.to_string())?;
     }
-    Ok(caminho)
+    Ok(crate::impressora::Saida::Pdf(caminho))
 }
 
 #[cfg(test)]
