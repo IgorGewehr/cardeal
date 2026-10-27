@@ -86,6 +86,18 @@ pub enum ErroVendas {
     #[error("Este vendedor não tem comissão apurada a pagar neste mês")]
     SemComissaoAPagar,
 
+    /// O estorno por devoluções passa da comissão do mês: nada a pagar agora.
+    #[error(
+        "O estorno de comissão por devoluções ({estorno}) passa da comissão apurada ({comissao}) \
+         — fica para descontar quando houver mais a pagar"
+    )]
+    EstornoMaiorQueAComissao {
+        /// A comissão apurada, formatada.
+        comissao: String,
+        /// O estorno, formatado.
+        estorno: String,
+    },
+
     /// Pagamento antes da apuração ou no futuro.
     #[error("A data do pagamento tem de ficar entre a apuração ({apurada_em}) e hoje")]
     DataDoPagamentoInvalida {
@@ -102,15 +114,16 @@ impl ErroDominio for ErroVendas {
     fn codigo(&self) -> CodigoErro {
         match self {
             Self::PrecoNaoEncontrado => CodigoErro::NAO_ENCONTRADO,
-            Self::RegraPrecoAmbigua | Self::PedidoJaFaturado | Self::QuantidadeDevolvidaExcede => {
-                CodigoErro::REGRA_VIOLADA
-            }
+            Self::RegraPrecoAmbigua
+            | Self::PedidoJaFaturado
+            | Self::QuantidadeDevolvidaExcede
+            | Self::SemComissaoAPagar
+            | Self::EstornoMaiorQueAComissao { .. } => CodigoErro::REGRA_VIOLADA,
             Self::QuantidadeInvalida
             | Self::DevolucaoVazia
             | Self::PedidoSemItens
             | Self::DataDoPagamentoInvalida { .. }
             | Self::ContaDePagamentoInvalida => CodigoErro::ENTRADA_INVALIDA,
-            Self::SemComissaoAPagar => CodigoErro::REGRA_VIOLADA,
             Self::DescontoAcimaDoLimite { .. } => CodigoErro::SEM_PERMISSAO,
             Self::OrcamentoExpirado(_)
             | Self::OrcamentoEmEstadoInvalido { .. }

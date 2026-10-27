@@ -768,6 +768,19 @@ pub(crate) mod sqlite {
             )?;
             let (blob, motivo) = blob_ou_motivo(nota)?;
             (total, blob, motivo)
+        } else if origem_modulo == crate::devolucao_venda::ORIGEM_DEVOLUCAO_VENDA {
+            let nota = crate::devolucao_venda::sqlite::montar(
+                ctx,
+                uow,
+                resumo.origem,
+                resumo.serie,
+                resumo.numero,
+            )?;
+            let total = nota
+                .as_ref()
+                .map_or(resumo.total, cardeal_fiscal::Nfe::total);
+            let (blob, motivo) = blob_ou_motivo(nota)?;
+            (total, blob, motivo)
         } else if origem_modulo == crate::devolucao_compra::ORIGEM_DEVOLUCAO_COMPRA {
             // Os dados da devolução são do compras: a nota se remonta por lá.
             return Err(Erro::novo(

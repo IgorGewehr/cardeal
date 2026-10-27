@@ -147,6 +147,10 @@ impl Mundo {
             "vendas.pedido.editar",
             "vendas.pedido.confirmar",
             "vendas.pedido.faturar",
+            "vendas.devolucao.ver",
+            "vendas.devolucao.solicitar",
+            "vendas.devolucao.aprovar",
+            "vendas.devolucao.concluir",
             "clientes.pessoa.editar",
         ] {
             papel = papel.com_permissao(p);
@@ -1806,4 +1810,141 @@ fn a_devolucao_de_compra_vira_nfe_que_se_remonta_e_transmite() {
     assert_eq!(nfe.referencias, vec!["4".repeat(44)]);
     assert_eq!(nfe.itens[0].cfop, "5411");
     assert_eq!(nfe.total(), Dinheiro::centavos(2_316));
+}
+
+#[test]
+fn a_devolucao_da_venda_em_nfe_vira_nfe_de_entrada() {
+    use cardeal_fiscal::FinalidadeNfe;
+    use mod_fiscal::devolucao_venda::{DocumentoDaDevolucaoDeVenda, EmitirNfeDaDevolucaoDeVenda};
+    use mod_vendas::{
+        AdicionarItemPedido, AprovarDevolucao, ConcluirDevolucao, ConfirmarPedido, CriarPedido,
+        Devolucao, DevolucaoFoiConcluida, FaturarPedido, ItemFoiAdicionado, PedidoCriado,
+        PedidoFoiFaturado, SolicitarDevolucao,
+    };
+    let m = Mundo::novo();
+    let cen = m.cenario();
+    m.configurar(1);
+    m.rodar(
+        "clientes.adicionar_endereco.v1",
+        &mod_clientes::AdicionarEndereco {
+            pessoa: cen.cliente,
+            tipo: mod_clientes::TipoEndereco::Residencial,
+            logradouro: "Rua Sinimbu".into(),
+            numero: "100".into(),
+            complemento: None,
+            bairro: "Centro".into(),
+            cidade: "Caxias do Sul".into(),
+            uf: "RS".into(),
+            cep: "95020000".into(),
+            principal: true,
+        },
+    )
+    .unwrap();
+    let p: PedidoCriado = m
+        .executar(
+            "vendas.criar_pedido.v1",
+            &CriarPedido {
+                cliente: cen.cliente,
+                vendedor: Id::novo(),
+                condicao_pagamento: Id::novo(),
+                tabela_preco: cen.tabela,
+                local_expedicao: cen.local,
+            },
+        )
+        .unwrap();
+    let item: ItemFoiAdicionado = m
+        .executar(
+            "vendas.adicionar_item_pedido.v1",
+            &AdicionarItemPedido {
+                pedido: p.pedido,
+                produto: cen.produto,
+                variacao: None,
+                quantidade: Quantidade::unidades(2),
+                desconto_percentual: Percentual::ZERO,
+            },
+        )
+        .unwrap();
+    m.rodar(
+        "vendas.confirmar_pedido.v1",
+        &ConfirmarPedido { pedido: p.pedido },
+    )
+    .unwrap();
+    let _: PedidoFoiFaturado = m
+        .executar(
+            "vendas.faturar_pedido.v1",
+            &FaturarPedido {
+                pedido: p.pedido,
+                a_vista: false,
+            },
+        )
+        .unwrap();
+    let venda: DocumentoResumo = m
+        .executar(
+            "fiscal.emitir_nfe_do_pedido.v1",
+            &mod_fiscal::EmitirNfeDoPedido { pedido: p.pedido },
+        )
+        .unwrap();
+    assert!(m.transmitir().contains("1 autorizada"));
+    let chave_venda = m.documento(venda.id).resumo.chave.unwrap();
+
+    // 1 de 2 volta; a NF-e de entrada só sai da devolução concluída.
+    let d: Devolucao = m
+        .executar(
+            "vendas.solicitar_devolucao.v1",
+            &SolicitarDevolucao {
+                pedido: p.pedido,
+                itens: vec![(item.item, Quantidade::unidades(1))],
+                motivo: "Produto com defeito de fábrica".into(),
+            },
+        )
+        .unwrap();
+    let cedo: Result<DocumentoResumo, _> = m.executar(
+        "fiscal.emitir_nfe_da_devolucao_de_venda.v1",
+        &EmitirNfeDaDevolucaoDeVenda { devolucao: d.id },
+    );
+    assert_eq!(cedo.unwrap_err().codigo, CodigoErro::ESTADO_INVALIDO);
+    let _: Devolucao = m
+        .executar(
+            "vendas.aprovar_devolucao.v1",
+            &AprovarDevolucao { devolucao: d.id },
+        )
+        .unwrap();
+    let feita: DevolucaoFoiConcluida = m
+        .executar(
+            "vendas.concluir_devolucao.v1",
+            &ConcluirDevolucao { devolucao: d.id },
+        )
+        .unwrap();
+    assert_eq!(
+        feita.abatido, d.valor_total,
+        "a prazo: abate a conta a receber"
+    );
+
+    let entrada: DocumentoResumo = m
+        .executar(
+            "fiscal.emitir_nfe_da_devolucao_de_venda.v1",
+            &EmitirNfeDaDevolucaoDeVenda { devolucao: d.id },
+        )
+        .unwrap();
+    assert_eq!(
+        entrada.estado,
+        EstadoDocumento::Pendente,
+        "{:?}",
+        entrada.motivo
+    );
+    assert_eq!(entrada.numero, venda.numero + 1, "a mesma série da NF-e");
+    assert!(m.transmitir().contains("1 autorizada"));
+    let doc: Option<DocumentoResumo> = m.consultar(
+        "fiscal.documento_da_devolucao_de_venda.v1",
+        &DocumentoDaDevolucaoDeVenda { devolucao: d.id },
+    );
+    assert_eq!(doc.unwrap().estado, EstadoDocumento::Autorizada);
+    let nfe = m.documento(entrada.id).nfe.unwrap();
+    assert!(!nfe.saida, "NF-e de entrada");
+    assert_eq!(nfe.finalidade, FinalidadeNfe::Devolucao);
+    assert_eq!(nfe.referencias, vec![chave_venda]);
+    assert_eq!(nfe.itens[0].cfop, "1202");
+    assert_eq!(nfe.itens[0].quantidade, Quantidade::unidades(1));
+    assert_eq!(nfe.itens[0].impostos.icms.csosn.as_deref(), Some("900"));
+    assert_eq!(nfe.total(), d.valor_total);
 }

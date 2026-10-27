@@ -1,13 +1,16 @@
-//! Abater o título de uma origem — a devolução de compra, que diminui a conta a pagar da nota
-//! (`docs/modulos/compras.md` §7: D Fornecedores / C Estoque). Não é pagamento: nenhum dinheiro
-//! anda, e não há juros nem multa, mesmo com a parcela vencida.
+//! Abater o título de uma origem — a devolução, que diminui o que se deve pela nota ou pelo
+//! pedido: a de compra abate a conta a pagar (`docs/modulos/compras.md` §7: D Fornecedores /
+//! C Estoque); a de venda, a conta a receber (D Devoluções de venda / C Clientes a receber). Não
+//! é pagamento: nenhum dinheiro anda (a baixa sai com `valor_recebido` zero — os relatórios de
+//! pago e recebido não a contam), e não há juros nem multa, mesmo com a parcela vencida.
 //!
 //! O valor abate as parcelas em aberto da que vence primeiro em diante (o "abate no próximo
-//! boleto" de sempre). O que sobra — a conta já paga, ou o que falta pagar não cobre — vira um
-//! **crédito com a contraparte**: um título a receber dela (D Clientes a receber / C Estoque),
-//! que se baixa quando ela devolve o dinheiro. Fica em Clientes a receber, não em Adiantamentos
-//! a fornecedores (1.2.04, o que a spec diz): a baixa do financeiro credita sempre Clientes a
-//! receber, e um título em 1.2.04 deixaria as duas contas erradas na baixa.
+//! boleto" de sempre). O que sobra — a conta já paga, ou o que falta não cobre — vira um
+//! **crédito com a contraparte**, um título da espécie oposta: a receber do fornecedor (D Clientes
+//! a receber / C contrapartida), a pagar ao cliente (D contrapartida / C Fornecedores). Baixa-se
+//! quando o dinheiro volta. Fica nas contas padrão da baixa, não em Adiantamentos (1.2.04/2.1.x,
+//! o que a spec diz): a baixa do financeiro usa sempre o papel padrão da espécie, e um título em
+//! outra conta deixaria as duas erradas na baixa.
 //!
 //! Sem título vivo na origem (a entrada confirmada sem gerar conta a pagar), nada acontece no
 //! financeiro — como na entrada.
@@ -73,8 +76,8 @@ pub struct DadosAbatimento<'a> {
 /// Abate o título vivo de uma origem; o que não couber vira crédito com a contraparte.
 ///
 /// # Errors
-/// [`ErroFinanceiro::ValorInvalido`] para valor não positivo; título da origem que não é a
-/// pagar; os erros do Razão e de [`super::lancar_titulo_comum`].
+/// [`ErroFinanceiro::ValorInvalido`] para valor não positivo; os erros do Razão e de
+/// [`super::lancar_titulo_comum`].
 #[cfg(feature = "sqlite")]
 pub fn abater_titulo_da_origem_comum(
     d: &DadosAbatimento<'_>,
@@ -98,18 +101,16 @@ pub fn abater_titulo_da_origem_comum(
             valor_credito: Dinheiro::ZERO,
         });
     };
-    if titulo.especie != EspecieTitulo::Pagar {
-        return Err(Erro::novo(
-            cardeal_kernel::CodigoErro::REGRA_VIOLADA,
-            "Só se abate um título a pagar",
-        ));
-    }
-    let (fornecedores, contrapartida) = {
+    // A conta da dívida que se abate: Fornecedores (a pagar) ou Clientes a receber.
+    let (da_divida, contrapartida) = {
         let repo = RepositorioRazao::novo(uow);
         let contas = Contas::nova(&repo, ctx.empresa);
         (
             contas
-                .papel(PapelConta::Fornecedores)
+                .papel(match titulo.especie {
+                    EspecieTitulo::Pagar => PapelConta::Fornecedores,
+                    EspecieTitulo::Receber => PapelConta::ClientesAReceber,
+                })
                 .map_err(|e| Erro::de_dominio(&e))?,
             contas
                 .papel(d.papel_contrapartida)
@@ -122,7 +123,6 @@ pub fn abater_titulo_da_origem_comum(
         .filter(|p| matches!(p.estado, EstadoParcela::Aberta | EstadoParcela::Parcial))
         .collect();
     parcelas.sort_by_key(|p| (p.vencimento, p.numero));
-    let hoje = ctx.hoje();
     let mut resta = d.valor;
     for mut p in parcelas {
         let saldo = p.valor - p.valor_baixado;
@@ -138,7 +138,7 @@ pub fn abater_titulo_da_origem_comum(
             x,
             saldo,
             &titulo,
-            (fornecedores, contrapartida),
+            (da_divida, contrapartida),
             &d.historico,
             ctx,
             uow,
@@ -147,29 +147,7 @@ pub fn abater_titulo_da_origem_comum(
     }
     let abatido = d.valor - resta;
     let credito = if resta.e_positivo() {
-        Some(
-            super::lancar_titulo_comum(
-                super::DadosLancamentoTitulo {
-                    especie: EspecieTitulo::Receber,
-                    contraparte: Some(d.contraparte),
-                    valor_total: resta,
-                    emissao: hoje,
-                    parcelas: 1,
-                    primeiro_vencimento: hoje,
-                    intervalo_dias: 0,
-                    cronograma: None,
-                    observacao: Some(format!("Crédito — {}", d.historico)),
-                    categoria: None,
-                    origem_modulo: d.origem_do_credito,
-                    origem_id: Some(d.id_do_credito),
-                    papel_contraparte: PapelConta::ClientesAReceber,
-                    papel_resultado: d.papel_contrapartida,
-                },
-                ctx,
-                uow,
-            )?
-            .titulo,
-        )
+        Some(lancar_credito(d, titulo.especie, resta, ctx, uow)?)
     } else {
         None
     };
@@ -181,8 +159,8 @@ pub fn abater_titulo_da_origem_comum(
     })
 }
 
-/// Abate `x` de uma parcela: o lançamento D Fornecedores / C contrapartida, a baixa sem
-/// dinheiro e o evento.
+/// Abate `x` de uma parcela: o lançamento (a pagar: D Fornecedores / C contrapartida; a
+/// receber: D contrapartida / C Clientes a receber), a baixa sem dinheiro e o evento.
 #[cfg(feature = "sqlite")]
 #[allow(clippy::too_many_arguments)]
 fn abater_parcela(
@@ -190,7 +168,7 @@ fn abater_parcela(
     x: Dinheiro,
     saldo: Dinheiro,
     titulo: &crate::titulo::Titulo,
-    (fornecedores, contrapartida): (Id, Id),
+    (da_divida, contrapartida): (Id, Id),
     historico: &str,
     ctx: &Ctx,
     uow: &mut UnidadeDeTrabalho,
@@ -208,10 +186,17 @@ fn abater_parcela(
     )
     .liquidacao(hoje)
     .criado_por(ctx.usuario, ctx.dispositivo)
-    .agora(ctx.agora)
-    .debitar(fornecedores, x)
-    .contraparte_se(titulo.contraparte)
-    .creditar(contrapartida, x)
+    .agora(ctx.agora);
+    let lanc = match titulo.especie {
+        EspecieTitulo::Pagar => lanc
+            .debitar(da_divida, x)
+            .contraparte_se(titulo.contraparte)
+            .creditar(contrapartida, x),
+        EspecieTitulo::Receber => lanc
+            .debitar(contrapartida, x)
+            .creditar(da_divida, x)
+            .contraparte_se(titulo.contraparte),
+    }
     .construir()
     .map_err(|_| Erro::de_dominio(&ErroFinanceiro::ValorInvalido))?;
     let lancamento = {
@@ -221,7 +206,7 @@ fn abater_parcela(
     // Sem dinheiro: o principal sai da dívida, sem juros, multa nem desconto.
     let plano = PlanoBaixa {
         data: hoje,
-        valor_recebido: x,
+        valor_recebido: Dinheiro::ZERO,
         principal: x,
         juros: Dinheiro::ZERO,
         multa: Dinheiro::ZERO,
@@ -234,7 +219,7 @@ fn abater_parcela(
         empresa: ctx.empresa,
         parcela: p.id,
         data: hoje,
-        valor_recebido: x,
+        valor_recebido: Dinheiro::ZERO,
         principal: x,
         juros: Dinheiro::ZERO,
         multa: Dinheiro::ZERO,
@@ -250,10 +235,50 @@ fn abater_parcela(
     uow.publicar(ParcelaBaixada {
         parcela: p.id,
         titulo: titulo.id,
-        valor_recebido: x,
+        valor_recebido: Dinheiro::ZERO,
         quitada: plano.quita,
         lancamento,
     })
     .map_err(|e| Erro::de_dominio(&e))?;
     Ok(())
+}
+
+/// O crédito com a contraparte: o que sobrou, num título da espécie oposta.
+#[cfg(feature = "sqlite")]
+fn lancar_credito(
+    d: &DadosAbatimento<'_>,
+    especie: EspecieTitulo,
+    resta: Dinheiro,
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<Id> {
+    let hoje = ctx.hoje();
+    let titulo = especie;
+    super::lancar_titulo_comum(
+        super::DadosLancamentoTitulo {
+            especie: match titulo {
+                EspecieTitulo::Pagar => EspecieTitulo::Receber,
+                EspecieTitulo::Receber => EspecieTitulo::Pagar,
+            },
+            contraparte: Some(d.contraparte),
+            valor_total: resta,
+            emissao: hoje,
+            parcelas: 1,
+            primeiro_vencimento: hoje,
+            intervalo_dias: 0,
+            cronograma: None,
+            observacao: Some(format!("Crédito — {}", d.historico)),
+            categoria: None,
+            origem_modulo: d.origem_do_credito,
+            origem_id: Some(d.id_do_credito),
+            papel_contraparte: match titulo {
+                EspecieTitulo::Pagar => PapelConta::ClientesAReceber,
+                EspecieTitulo::Receber => PapelConta::Fornecedores,
+            },
+            papel_resultado: d.papel_contrapartida,
+        },
+        ctx,
+        uow,
+    )
+    .map(|g| g.titulo)
 }

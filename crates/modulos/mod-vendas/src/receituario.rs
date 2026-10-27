@@ -105,20 +105,26 @@ pub fn faturar_pedido(
     c.construir().map_err(|_| ErroVendas::PedidoSemItens)
 }
 
-/// Monta o lançamento de estorno de uma devolução (`Realizado`):
-/// D Devoluções de venda / C Caixa|Clientes, e D Estoque / C CMV pelo custo reposto.
+/// Monta o lançamento de estorno de uma devolução (`Realizado`): com `reembolso` (a venda à
+/// vista — o dinheiro volta ao cliente), D Devoluções de venda (`contas.descontos`) / C Caixa
+/// (`contas.destino`); e D Estoque / C CMV pelo custo reposto. Na venda a prazo o reembolso é o
+/// abatimento do título a receber, lançado pelo financeiro: aqui só o custo. `None` quando não
+/// há nada a lançar (a prazo, sem custo).
 ///
 /// # Errors
 /// [`ErroVendas::DevolucaoVazia`] se não há valor a estornar.
 pub fn concluir_devolucao(
     devolucao: &Devolucao,
-    a_vista: bool,
+    reembolso: bool,
     cmv_reposto: Dinheiro,
     contas: ContasFaturamento,
     autoria: Autoria,
-) -> Result<LancamentoBalanceado, ErroVendas> {
+) -> Result<Option<LancamentoBalanceado>, ErroVendas> {
     if !devolucao.valor_total.e_positivo() {
         return Err(ErroVendas::DevolucaoVazia);
+    }
+    if !reembolso && !cmv_reposto.e_positivo() {
+        return Ok(None);
     }
     let mut c = ConstrutorLancamento::novo(
         devolucao.empresa,
@@ -132,18 +138,57 @@ pub fn concluir_devolucao(
     )
     .liquidacao(devolucao.data)
     .criado_por(autoria.usuario, autoria.dispositivo)
-    .agora(autoria.agora)
-    .debitar(contas.descontos, devolucao.valor_total)
-    .creditar(contas.destino, devolucao.valor_total);
-    if !a_vista {
-        c = c.contraparte(Contraparte::Cliente(devolucao.cliente));
+    .agora(autoria.agora);
+    if reembolso {
+        c = c
+            .debitar(contas.descontos, devolucao.valor_total)
+            .creditar(contas.destino, devolucao.valor_total);
     }
     if cmv_reposto.e_positivo() {
         c = c
             .debitar(contas.estoque, cmv_reposto)
             .creditar(contas.cmv, cmv_reposto);
     }
-    c.construir().map_err(|_| ErroVendas::DevolucaoVazia)
+    c.construir()
+        .map(Some)
+        .map_err(|_| ErroVendas::DevolucaoVazia)
+}
+
+/// O estorno da comissão da parte devolvida de um pedido já apurado (`Confirmado`): D Comissões a
+/// pagar / C Despesas comerciais — o inverso da apuração.
+///
+/// # Errors
+/// [`ErroVendas::ComissaoEmEstadoInvalido`] se o valor não é positivo.
+pub fn estornar_comissao(
+    empresa: Id,
+    devolucao: Id,
+    vendedor: Id,
+    valor: Dinheiro,
+    data: cardeal_kernel::Data,
+    contas: ContasComissao,
+    autoria: Autoria,
+) -> Result<LancamentoBalanceado, ErroVendas> {
+    if !valor.e_positivo() {
+        return Err(ErroVendas::ComissaoEmEstadoInvalido { atual: "sem valor" });
+    }
+    ConstrutorLancamento::novo(
+        empresa,
+        data,
+        "Estorno de comissão — devolução de venda".to_string(),
+    )
+    .origem(
+        Origem::modulo("vendas")
+            .tipo("comissao_devolucao")
+            .agregado(devolucao),
+    )
+    .estado(EstadoLancamento::Confirmado)
+    .criado_por(autoria.usuario, autoria.dispositivo)
+    .agora(autoria.agora)
+    .debitar(contas.comissoes_a_pagar, valor)
+    .contraparte(Contraparte::Funcionario(vendedor))
+    .creditar(contas.despesas_comerciais, valor)
+    .construir()
+    .map_err(|_| ErroVendas::ComissaoEmEstadoInvalido { atual: "sem valor" })
 }
 
 /// Lançamento da apuração de comissão: D Despesas comerciais / C Comissões a pagar,
@@ -346,8 +391,9 @@ mod testes {
         let p = pedido();
         let linhas: Vec<_> = p.itens.iter().map(|i| (i.id, i.quantidade)).collect();
         let d = Devolucao::solicitar(&p, &linhas, "avaria", hoje()).unwrap();
-        let l =
-            concluir_devolucao(&d, true, Dinheiro::reais(400), contas_fat(), autoria()).unwrap();
+        let l = concluir_devolucao(&d, true, Dinheiro::reais(400), contas_fat(), autoria())
+            .unwrap()
+            .unwrap();
         assert!(l.interno().esta_balanceado());
         assert_eq!(l.interno().estado, EstadoLancamento::Realizado);
     }

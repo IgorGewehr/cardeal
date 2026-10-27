@@ -49,6 +49,12 @@ impl Modulo for ModuloFiscal {
             .consulta::<crate::devolucao_compra::DocumentoDaDevolucao>(
                 "fiscal.documento_da_devolucao.v1",
             )
+            .comando::<crate::devolucao_venda::EmitirNfeDaDevolucaoDeVenda>(
+                "fiscal.emitir_nfe_da_devolucao_de_venda.v1",
+            )
+            .consulta::<crate::devolucao_venda::DocumentoDaDevolucaoDeVenda>(
+                "fiscal.documento_da_devolucao_de_venda.v1",
+            )
             .consulta::<ConfiguracaoDaNfe>("fiscal.configuracao_nfe.v1")
             .comando::<EmitirNfeDoPedido>("fiscal.emitir_nfe_do_pedido.v1")
             .consulta::<DocumentoDoPedido>("fiscal.documento_do_pedido.v1")

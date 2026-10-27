@@ -263,10 +263,14 @@ impl PapelDeFabrica {
                 tudo: false,
                 nega_prefixo: &["financeiro", "estoque.custo", "vendas.margem"],
                 modulos: &[],
+                // A devolução: o vendedor pede e acompanha; aprovar e concluir (o dinheiro e o
+                // estoque voltam) fica com o gerente.
                 concede_prefixo: &[
                     "vendas.orcamento",
                     "vendas.pedido",
                     "vendas.venda",
+                    "vendas.devolucao.ver",
+                    "vendas.devolucao.solicitar",
                     "clientes",
                 ],
                 concede_sufixo: &[],

@@ -286,7 +286,7 @@ impl cardeal_modkit::Consulta for DocumentoDaDevolucao {
 }
 
 #[cfg(feature = "sqlite")]
-mod sqlite {
+pub(crate) mod sqlite {
     use cardeal_kernel::{CodigoErro, Erro, Id, Resultado};
     use cardeal_modkit::Ctx;
     use cardeal_storage::UnidadeDeTrabalho;
@@ -342,12 +342,39 @@ mod sqlite {
         ctx: &Ctx,
         uow: &mut UnidadeDeTrabalho,
     ) -> Resultado<DocumentoResumo> {
-        let existente = sqld::documento_da_origem(
-            uow.conexao(),
-            ctx.empresa,
+        let total_sem_nota = dados
+            .itens
+            .iter()
+            .map(|i| i.valor_bruto - i.desconto + i.devolvido.soma())
+            .sum();
+        criar_ou_remontar(
             ORIGEM_DEVOLUCAO_COMPRA,
             devolucao,
-        )?;
+            total_sem_nota,
+            ctx,
+            uow,
+            |ctx, uow, serie, numero| montar(uow.conexao(), ctx, fornecedor, dados, serie, numero),
+        )
+    }
+
+    /// Cria a NF-e de uma origem (reservando o número da série da NF-e), ou a remonta no mesmo
+    /// número se está rejeitada; a que já existe em outro estado volta como está. `montar` diz a
+    /// nota — ou o que impede, que vira a rejeição. `total_sem_nota` é o total da rejeitada.
+    pub(crate) fn criar_ou_remontar(
+        origem_modulo: &'static str,
+        origem: Id,
+        total_sem_nota: cardeal_kernel::Dinheiro,
+        ctx: &Ctx,
+        uow: &mut UnidadeDeTrabalho,
+        montar: impl FnOnce(
+            &Ctx,
+            &mut UnidadeDeTrabalho,
+            u32,
+            u64,
+        ) -> Resultado<Result<cardeal_fiscal::Nfe, Vec<String>>>,
+    ) -> Resultado<DocumentoResumo> {
+        let existente =
+            sqld::documento_da_origem(uow.conexao(), ctx.empresa, origem_modulo, origem)?;
         if let Some(d) = &existente {
             let remontavel =
                 d.estado == EstadoDocumento::Rejeitada && !d.anulada && d.pedido.is_none();
@@ -366,15 +393,10 @@ mod sqlite {
                 sqld::reservar_numero(c, ctx.empresa, MODELO, serie, ambiente)?,
             )
         };
-        let nota = montar(uow.conexao(), ctx, fornecedor, dados, serie, numero)?;
-        let total = match &nota {
-            Ok(n) => n.total(),
-            Err(_) => dados
-                .itens
-                .iter()
-                .map(|i| i.valor_bruto - i.desconto + i.devolvido.soma())
-                .sum(),
-        };
+        let nota = montar(ctx, uow, serie, numero)?;
+        let total = nota
+            .as_ref()
+            .map_or(total_sem_nota, cardeal_fiscal::Nfe::total);
         let (estado, blob, motivo) = match nota {
             Ok(n) => (
                 EstadoDocumento::Pendente,
@@ -406,8 +428,8 @@ mod sqlite {
                     serie,
                     numero,
                     ambiente: crate::sql::ambiente(c, ctx.empresa)?,
-                    origem_modulo: ORIGEM_DEVOLUCAO_COMPRA,
-                    origem: devolucao,
+                    origem_modulo,
+                    origem,
                     estado,
                     total,
                     nota: blob,
@@ -417,7 +439,7 @@ mod sqlite {
                 },
             )?,
         }
-        sqld::documento_da_origem(c, ctx.empresa, ORIGEM_DEVOLUCAO_COMPRA, devolucao)?
+        sqld::documento_da_origem(c, ctx.empresa, origem_modulo, origem)?
             .ok_or_else(|| Erro::nao_encontrado("documento fiscal"))
     }
 }

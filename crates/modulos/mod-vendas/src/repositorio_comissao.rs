@@ -39,7 +39,12 @@ pub(crate) fn a_apurar(
 ) -> Resultado<Vec<(Comissao, Data)>> {
     let mut stmt = conn
         .prepare(
-            "SELECT p.id, p.vendedor, i.produto, p.data, i.total_item, i.comissao_percentual
+            "SELECT p.id, p.vendedor, i.produto, p.data,
+                    i.total_item - COALESCE((
+                        SELECT SUM(di.valor_estornado) FROM vendas_devolucao_item di
+                        JOIN vendas_devolucao d ON d.id = di.devolucao
+                        WHERE di.item_pedido = i.id AND d.estado = 'Concluida'), 0),
+                    i.comissao_percentual
              FROM vendas_pedido p JOIN vendas_item_pedido i ON i.pedido = p.id
              WHERE p.empresa = ?1 AND p.estado IN ('Faturado','EmEntrega','Concluido')
                AND p.data BETWEEN ?2 AND ?3
@@ -164,6 +169,163 @@ pub(crate) fn atualizar_estado(conn: &Connection, c: &Comissao) -> Resultado<()>
         params![blob(c.id), estado_txt(c.estado), c.lancamento.map(blob)],
     )
     .map_err(persist)?;
+    Ok(())
+}
+
+/// Um estorno de comissão por devolução: (id, vendedor, pedido, devolução, base, valor, data,
+/// paga).
+pub(crate) type Ajuste = (Id, Id, Id, Id, Dinheiro, Dinheiro, Data, bool);
+
+/// Estorna a comissão da parte devolvida de um pedido cuja comissão já foi apurada: um ajuste
+/// (D Comissões a pagar / C Despesas comerciais) que o próximo pagamento do vendedor desconta.
+/// Pedido ainda não apurado não precisa: a apuração já sai sem a parte devolvida. Devolve o
+/// valor estornado.
+///
+/// # Errors
+/// Os do SQLite e do Razão.
+pub(crate) fn estornar_da_devolucao(
+    d: &crate::devolucao::Devolucao,
+    pedido: &crate::pedido::Pedido,
+    ctx: &Ctx,
+    uow: &mut cardeal_storage::UnidadeDeTrabalho,
+) -> Resultado<Dinheiro> {
+    use rusqlite::OptionalExtension;
+    let apurada: Option<(Vec<u8>, i64)> = uow
+        .conexao()
+        .query_row(
+            "SELECT vendedor, percentual FROM vendas_comissao
+             WHERE pedido = ?1 AND estado <> 'Cancelada'",
+            [blob(pedido.id)],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()
+        .map_err(persist)?;
+    let Some((vendedor, efetivo)) = apurada else {
+        return Ok(Dinheiro::ZERO);
+    };
+    let vendedor = id_de(vendedor);
+    // O percentual congelado de cada item (o efetivo da comissão, se não houver).
+    let mut valor = Dinheiro::ZERO;
+    for i in &d.itens {
+        let congelado: Option<i64> = uow
+            .conexao()
+            .query_row(
+                "SELECT comissao_percentual FROM vendas_item_pedido WHERE id = ?1",
+                [blob(i.item_pedido)],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(persist)?
+            .flatten();
+        let p = Percentual::unidades(congelado.unwrap_or(efetivo));
+        valor += i
+            .valor_estornado
+            .aplicar(p, cardeal_kernel::Arredondamento::MeioAcima);
+    }
+    if !valor.e_positivo() {
+        return Ok(Dinheiro::ZERO);
+    }
+    let contas = crate::comandos::contas_de_comissao(ctx, uow)?;
+    let lanc = crate::receituario::estornar_comissao(
+        ctx.empresa,
+        d.id,
+        vendedor,
+        valor,
+        d.data,
+        contas,
+        crate::comandos::autoria_de(ctx),
+    )
+    .map_err(|e| cardeal_kernel::Erro::de_dominio(&e))?;
+    let lancamento = {
+        let mut repo = cardeal_ledger::RepositorioRazao::novo(uow);
+        cardeal_ledger::Razao::registrar(&mut repo, lanc)
+            .map_err(|e| cardeal_kernel::Erro::de_dominio(&e))?
+    };
+    uow.conexao()
+        .execute(
+            "INSERT INTO vendas_comissao_ajuste
+               (id, empresa, vendedor, pedido, devolucao, base, valor, data, estado,
+                lancamento_apuracao, criado_em)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'Apurada', ?9, ?10)",
+            params![
+                blob(Id::novo()),
+                blob(ctx.empresa),
+                blob(vendedor),
+                blob(pedido.id),
+                blob(d.id),
+                d.valor_total.em_centavos(),
+                valor.em_centavos(),
+                dias(d.data),
+                blob(lancamento),
+                ctx.agora.em_micros()
+            ],
+        )
+        .map_err(persist)?;
+    Ok(valor)
+}
+
+/// Os estornos de comissão por devolução: os do mês (pela data da devolução) e, com
+/// `pendentes_ate`, também os ainda não descontados até aquele dia.
+///
+/// # Errors
+/// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+pub(crate) fn ajustes(
+    conn: &Connection,
+    empresa: Id,
+    competencia: Competencia,
+    vendedor: Option<Id>,
+    so_pendentes: bool,
+) -> Resultado<Vec<Ajuste>> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, vendedor, pedido, devolucao, base, valor, data, estado
+             FROM vendas_comissao_ajuste
+             WHERE empresa = ?1 AND (?4 IS NULL OR vendedor = ?4)
+               AND CASE WHEN ?5 THEN estado = 'Apurada' AND data <= ?3
+                        ELSE data BETWEEN ?2 AND ?3 END
+             ORDER BY data, rowid",
+        )
+        .map_err(persist)?;
+    let v = stmt
+        .query_map(
+            params![
+                blob(empresa),
+                dias(competencia.primeiro_dia()),
+                dias(competencia.ultimo_dia()),
+                vendedor.map(blob),
+                so_pendentes
+            ],
+            |r| {
+                Ok((
+                    id_de(r.get(0)?),
+                    id_de(r.get(1)?),
+                    id_de(r.get(2)?),
+                    id_de(r.get(3)?),
+                    Dinheiro::centavos(r.get(4)?),
+                    Dinheiro::centavos(r.get(5)?),
+                    data_de(r.get(6)?),
+                    r.get::<_, String>(7)? == "Paga",
+                ))
+            },
+        )
+        .map_err(persist)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(persist);
+    v
+}
+
+/// Marca os estornos como descontados no pagamento.
+///
+/// # Errors
+/// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+pub(crate) fn descontar_ajustes(conn: &Connection, ids: &[Id], lancamento: Id) -> Resultado<()> {
+    for id in ids {
+        conn.execute(
+            "UPDATE vendas_comissao_ajuste SET estado = 'Paga', lancamento = ?2 WHERE id = ?1",
+            params![blob(*id), blob(lancamento)],
+        )
+        .map_err(persist)?;
+    }
     Ok(())
 }
 

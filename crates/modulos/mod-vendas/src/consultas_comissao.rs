@@ -34,6 +34,9 @@ pub struct LinhaComissao {
     pub valor: Dinheiro,
     /// O estado; `None` = ainda a apurar (prévia, pelo percentual congelado no faturamento).
     pub estado: Option<EstadoComissao>,
+    /// O estorno da comissão por uma devolução (a base e o valor vêm negativos; a data é a da
+    /// devolução): `Apurada` até ser descontado num pagamento.
+    pub devolucao: Option<Id>,
 }
 
 /// As comissões de um mês, apuradas e a apurar.
@@ -58,6 +61,7 @@ impl Consulta for ComissoesDoMes {
                 percentual: c.percentual,
                 valor: c.valor,
                 estado,
+                devolucao: None,
             };
         let mut linhas: Vec<LinhaComissao> =
             repositorio_comissao::do_mes(conexao, ctx.empresa, self.competencia, None)?
@@ -71,6 +75,26 @@ impl Consulta for ComissoesDoMes {
             repositorio_comissao::a_apurar(conexao, ctx, self.competencia, ctx.hoje())?
                 .into_iter()
                 .map(|(c, data)| linha(c, data, None)),
+        );
+        linhas.extend(
+            repositorio_comissao::ajustes(conexao, ctx.empresa, self.competencia, None, false)?
+                .into_iter()
+                .map(
+                    |(_, vendedor, pedido, devolucao, base, valor, data, paga)| LinhaComissao {
+                        pedido,
+                        data_pedido: data,
+                        vendedor,
+                        base: Dinheiro::ZERO - base,
+                        percentual: Percentual::ZERO,
+                        valor: Dinheiro::ZERO - valor,
+                        estado: Some(if paga {
+                            EstadoComissao::Paga
+                        } else {
+                            EstadoComissao::Apurada
+                        }),
+                        devolucao: Some(devolucao),
+                    },
+                ),
         );
         linhas.sort_by_key(|l| l.data_pedido);
         Ok(linhas)
@@ -110,7 +134,9 @@ pub fn resumo_por_vendedor(linhas: &[LinhaComissao]) -> Vec<ResumoDoVendedor> {
             a_pagar: Dinheiro::ZERO,
             pago: Dinheiro::ZERO,
         });
-        r.pedidos += 1;
+        if l.devolucao.is_none() {
+            r.pedidos += 1;
+        }
         r.base += l.base;
         match l.estado {
             None => r.a_apurar += l.valor,
@@ -135,6 +161,7 @@ mod testes {
             percentual: Percentual::pontos(5),
             valor: Dinheiro::reais(valor),
             estado,
+            devolucao: None,
         }
     }
 

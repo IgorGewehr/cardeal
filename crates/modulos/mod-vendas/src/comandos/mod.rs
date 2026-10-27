@@ -10,16 +10,25 @@ mod confirmar_pedido;
 mod criar_pedido;
 mod criar_regra_preco;
 mod criar_tabela_preco;
+pub(crate) mod devolucao;
 mod faturar_pedido;
 
 pub use adicionar_item_pedido::{AdicionarItemPedido, ItemFoiAdicionado};
 pub use aplicar_precos_sugeridos::{AplicarPrecosSugeridos, PrecosAplicados};
 pub use cancelar_pedido::CancelarPedido;
+#[cfg(feature = "sqlite")]
+pub(crate) use comissao::contas_de_comissao;
 pub use comissao::{ApurarComissoes, ComissoesApuradas, ComissoesPagas, PagarComissoes};
 pub use confirmar_pedido::ConfirmarPedido;
 pub use criar_pedido::{CriarPedido, PedidoCriado};
 pub use criar_regra_preco::{CriarRegraPreco, RegraPrecoCriada};
 pub use criar_tabela_preco::{CriarTabelaPreco, TabelaPrecoCriada};
+#[cfg(feature = "sqlite")]
+pub use devolucao::devolucao_por_id;
+pub use devolucao::{
+    AprovarDevolucao, CancelarDevolucao, ConcluirDevolucao, DevolucaoFoiConcluida,
+    DevolucoesDoPedido, DevolucoesPendentes, SolicitarDevolucao, MOTIVO_MINIMO_DEVOLUCAO_VENDA,
+};
 pub use faturar_pedido::{FaturarPedido, PedidoFoiFaturado};
 
 #[cfg(feature = "sqlite")]

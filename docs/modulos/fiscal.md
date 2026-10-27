@@ -236,6 +236,18 @@ compras (o fiscal não lê tabela de outro módulo); por isso a rejeitada se emi
 o Reenviar das Notas fiscais explica isso. Comparado com o gestao-raiz: lá a devolução é o formulário
 genérico de NF-e (finalidade 4, a chave referenciada digitada), sem os tributos da compra.
 
+**NF-e de entrada da devolução de venda** (`mod_fiscal::devolucao_venda`, 2026-10-27,
+`fiscal.emitir_nfe_da_devolucao_de_venda.v1`): a mercadoria que o cliente devolveu (`docs/modulos/vendas.md`,
+`ConcluirDevolucao`) entra numa NF-e emitida pela empresa (`tpNF` 0, finalidade 4) que referencia a NF-e de
+venda. Os itens são os da venda guardada, na quantidade que voltou (valor e desconto na proporção); CFOP
+1202/2202 — 1201/2201 da venda de produção, 1411/2411 da venda com ST (5405/6404), 1410/2410 da produção com
+ST —; CSOSN 900; PIS/COFINS 98 (outras operações de entrada); sem pagamento; o destinatário e o indFinal os
+da venda; a mesma série da NF-e. Só quando o cliente **não** é contribuinte do ICMS (o contribuinte emite ele
+mesmo a NF-e de devolução), no Simples Nacional, e da venda que saiu em NF-e autorizada — senão a nota vira
+rejeitada com o porquê. Como o fiscal tem a venda e lê a devolução pelo `mod-vendas`, o Reenviar das Notas
+fiscais remonta essa nota. A criação e a remontagem são as mesmas da devolução de compra
+(`devolucao_compra::sqlite::criar_ou_remontar`).
+
 O `sefaz-api` ganhou o `impostoDevol` e o FCP do ST (8075fde) — e, de quebra, uma correção: a validação
 exigia `vICMSST = vBCST × pICMSST`, mas o ST é esse produto **menos** o ICMS próprio; todo ST de verdade
 era recusado. Agora o ST só não pode passar do produto.
@@ -457,8 +469,8 @@ Cancelar e configurar continuam fora do papel.
    nota incerta (outro número em contingência; a original cancelada por substituição, 110112, ou inutilizada;
    `sefaz-api` 43c98f0). Falta a conferência na SEFAZ de verdade.
 4. ~~Série por terminal~~ — feita em 2026-10-27 (§7, "Série por caixa").
-5. NF-e: ~~a de venda, o DANFE A4, a carta de correção e a devolução de compra~~ (2026-10-27, §7); falta
-   a de devolução de venda (a entrada da mercadoria que o cliente devolve).
+5. NF-e: ~~a de venda, o DANFE A4, a carta de correção, a devolução de compra e a NF-e de entrada da
+   devolução de venda~~ (2026-10-27, §7). A devolução da venda do PDV (NFC-e) ainda não sai em NF-e.
 6. NFS-e da OS.
 7. SPED gerado no Cardeal.
 8. ~~DFe e manifestação~~ — feito em 2026-10-26 (sefaz-api 842576f; a busca de notas em

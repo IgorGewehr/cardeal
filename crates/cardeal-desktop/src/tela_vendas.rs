@@ -6,6 +6,7 @@
 //! produto. As comissões do mês (apurar e pagar) ficam no diálogo "Comissões".
 
 mod comissoes;
+mod devolucao;
 mod nfe;
 
 use std::collections::HashMap;
@@ -70,6 +71,8 @@ pub struct EstadoTelaVendas {
     comissoes: comissoes::EstadoComissoes,
     /// A NF-e do pedido aberto.
     nfe: nfe::NfeDoPedido,
+    /// As devoluções do pedido aberto.
+    devolucoes: devolucao::DevolucoesDoPedidoAberto,
 }
 
 impl EstadoTelaVendas {
@@ -598,6 +601,24 @@ fn acoes(
         }
         EstadoPedido::Faturado | EstadoPedido::EmEntrega | EstadoPedido::Concluido => {
             nfe::secao(ui, motor, sessao, &mut estado.nfe, p.pedido);
+            ui.add_space(Espaco::E12);
+            let itens = estado.itens_ped.clone();
+            let nomes: std::collections::HashMap<Id, String> = itens
+                .iter()
+                .map(|i| (i.produto, estado.nome_produto(i.produto)))
+                .collect();
+            let nome = |id: Id| nomes.get(&id).cloned().unwrap_or_default();
+            if devolucao::secao(
+                ui,
+                motor,
+                sessao,
+                &mut estado.devolucoes,
+                p.pedido,
+                &itens,
+                &nome,
+            ) {
+                estado.carregar(motor, sessao);
+            }
         }
         EstadoPedido::Cancelado => {
             ui.add(Rotulo::campo("Sem ações disponíveis neste estado."));
@@ -1009,5 +1030,83 @@ mod testes {
                 comissoes::dialogo(ctx, m, s, &mut estado);
             });
         }
+    }
+
+    #[test]
+    fn pedido_faturado_volta_pela_devolucao_e_desenha_a_secao() {
+        let t = motor_de_teste();
+        let (m, s) = (&t.motor, &t.sessao);
+        let (pedido, _) = pedido_com_item(m, s);
+        let (): () = m
+            .executar(s, "vendas.confirmar_pedido.v1", &ConfirmarPedido { pedido })
+            .expect("confirmar");
+        let _: mod_vendas::PedidoFoiFaturado = m
+            .executar(
+                s,
+                "vendas.faturar_pedido.v1",
+                &FaturarPedido {
+                    pedido,
+                    a_vista: true,
+                },
+            )
+            .expect("faturar");
+        let mut estado = EstadoTelaVendas::default();
+        estado.carregar(m, s);
+        estado.abrir_pedido(m, s, 0);
+        let item = estado.itens_ped[0].id;
+        let ctx = egui::Context::default();
+        cardeal_ui::tokens::instalar_fontes(&ctx);
+        cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+        let quadro = |estado: &mut EstadoTelaVendas| {
+            for _ in 0..2 {
+                let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| mostrar(ui, m, s, estado));
+                });
+            }
+        };
+        quadro(&mut estado);
+
+        // Pedida, aprovada e concluída: à vista, o dinheiro volta pelo caixa.
+        let d: mod_vendas::Devolucao = m
+            .executar(
+                s,
+                "vendas.solicitar_devolucao.v1",
+                &mod_vendas::SolicitarDevolucao {
+                    pedido,
+                    itens: vec![(item, Quantidade::unidades(1))],
+                    motivo: "Cliente desistiu da compra".into(),
+                },
+            )
+            .expect("pedir");
+        quadro(&mut estado);
+        let _: mod_vendas::Devolucao = m
+            .executar(
+                s,
+                "vendas.aprovar_devolucao.v1",
+                &mod_vendas::AprovarDevolucao { devolucao: d.id },
+            )
+            .expect("aprovar");
+        let feita: mod_vendas::DevolucaoFoiConcluida = m
+            .executar(
+                s,
+                "vendas.concluir_devolucao.v1",
+                &mod_vendas::ConcluirDevolucao { devolucao: d.id },
+            )
+            .expect("concluir");
+        assert_eq!(feita.reembolsado, Dinheiro::reais(100));
+        assert!(devolucao::resultado(&feita).contains("pelo caixa"));
+        // Sem NF-e de venda, a de entrada nasce rejeitada, com o porquê.
+        let doc: mod_fiscal::DocumentoResumo = m
+            .executar(
+                s,
+                "fiscal.emitir_nfe_da_devolucao_de_venda.v1",
+                &mod_fiscal::devolucao_venda::EmitirNfeDaDevolucaoDeVenda { devolucao: d.id },
+            )
+            .expect("cria a NF-e");
+        assert_eq!(doc.estado, mod_fiscal::EstadoDocumento::Rejeitada);
+        assert!(doc.motivo.unwrap().contains("não saiu em NF-e autorizada"));
+        estado.carregar(m, s);
+        estado.abrir_pedido(m, s, 0);
+        quadro(&mut estado);
     }
 }

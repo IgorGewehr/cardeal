@@ -58,11 +58,17 @@ mod repositorio;
 #[cfg(feature = "sqlite")]
 mod repositorio_comissao;
 
+#[cfg(feature = "sqlite")]
+pub use comandos::devolucao_por_id;
 pub use comandos::{
     AdicionarItemPedido, AplicarPrecosSugeridos, ApurarComissoes, CancelarPedido,
     ComissoesApuradas, ComissoesPagas, ConfirmarPedido, CriarPedido, CriarRegraPreco,
     CriarTabelaPreco, FaturarPedido, ItemFoiAdicionado, PagarComissoes, PedidoCriado,
     PedidoFoiFaturado, PrecosAplicados, RegraPrecoCriada, TabelaPrecoCriada,
+};
+pub use comandos::{
+    AprovarDevolucao, CancelarDevolucao, ConcluirDevolucao, DevolucaoFoiConcluida,
+    DevolucoesDoPedido, DevolucoesPendentes, SolicitarDevolucao, MOTIVO_MINIMO_DEVOLUCAO_VENDA,
 };
 pub use comissao::{Comissao, EstadoComissao};
 pub use consultas::{ItemPedido, ItensDoPedido, PedidosRecentes, RegrasDaTabela, TabelasDePreco};
@@ -70,7 +76,7 @@ pub use consultas_comissao::{
     resumo_por_vendedor, ComissoesDoMes, LinhaComissao, ResumoDoVendedor,
 };
 pub use defasados::{classificar, PrecoDefasado, PrecosDefasados, SituacaoDoPreco};
-pub use devolucao::{Devolucao, EstadoDevolucao, ItemDevolvido, TipoDevolucao};
+pub use devolucao::{Devolucao, EstadoDevolucao, ItemDevolvido, JaDevolvido, TipoDevolucao};
 pub use erros::ErroVendas;
 pub use manifesto::{manifesto, MANIFESTO};
 pub use margem::{MargemDoPedido, MargemDoPedidoCalculada};

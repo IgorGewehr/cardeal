@@ -393,6 +393,95 @@ pub fn retirar_entradas_da_origem(
     Ok(saidas)
 }
 
+/// Põe de volta no estoque **parte** do que saiu por uma origem — a devolução de parte de uma
+/// venda. Uma entrada no local da saída, na quantidade pedida e **ao custo médio dessas saídas**
+/// (o CMV que o chamador estorna no Razão), com a mesma origem: o que voltou deixa de contar
+/// para a próxima devolução. Devolve a entrada e o custo total reposto.
+///
+/// # Errors
+/// [`crate::ErroEstoque::DevolucaoMaiorQueOResto`] se a origem não tirou tanto (descontado o que
+/// já voltou); local travado por inventário em contagem.
+#[cfg(feature = "sqlite")]
+pub fn devolver_parte_da_saida(
+    origem_modulo: &'static str,
+    origem_id: Id,
+    produto: Id,
+    quantidade: Quantidade,
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<(EntradaGravada, cardeal_kernel::Dinheiro)> {
+    // (local) → (quantidade líquida que saiu, valor dessas saídas), só deste produto.
+    let mut por_local: Vec<(Id, i128, i128)> = Vec::new();
+    for m in crate::consultas::movimentos_da_origem(
+        uow.conexao(),
+        ctx.empresa,
+        origem_modulo,
+        origem_id,
+    )? {
+        if m.produto != produto {
+            continue;
+        }
+        let sinal = match m.tipo {
+            TipoMovimento::Saida => 1,
+            TipoMovimento::Entrada => -1,
+            _ => continue,
+        };
+        let q = i128::from(m.quantidade.unidades_internas());
+        let c = i128::from(m.custo_unitario.map_or(0, Preco::unidades_internas));
+        if let Some(l) = por_local.iter_mut().find(|l| l.0 == m.local) {
+            l.1 += sinal * q;
+            l.2 += sinal * q * c;
+        } else {
+            por_local.push((m.local, sinal * q, sinal * q * c));
+        }
+    }
+    let pedido = i128::from(quantidade.unidades_internas());
+    let Some(&(local, q, v)) = por_local
+        .iter()
+        .filter(|l| l.1 >= pedido)
+        .max_by_key(|l| l.1)
+    else {
+        let resta = por_local.iter().map(|l| l.1).max().unwrap_or(0).max(0);
+        return Err(Erro::de_dominio(
+            &crate::erros::ErroEstoque::DevolucaoMaiorQueOResto {
+                produto: uow
+                    .conexao()
+                    .query_row(
+                        "SELECT nome FROM estoque_produto WHERE id = ?1",
+                        [produto.em_bytes().as_slice()],
+                        |r| r.get::<_, String>(0),
+                    )
+                    .unwrap_or_default(),
+                pedido: quantidade.formatar(0),
+                resta: Quantidade::interna(i64::try_from(resta).unwrap_or(i64::MAX)).formatar(0),
+            },
+        ));
+    };
+    let custo = Preco::interna(
+        i64::try_from(if v <= 0 { 0 } else { (2 * v + q) / (2 * q) }).unwrap_or(i64::MAX),
+    );
+    let entrada = registrar_entrada_interna(
+        DadosEntrada {
+            produto,
+            local,
+            quantidade,
+            custo_unitario: custo,
+            origem_modulo,
+            origem_id: Some(origem_id),
+        },
+        None,
+        true,
+        ctx,
+        uow,
+    )?;
+    let reposto = cardeal_kernel::Dinheiro::de_total(
+        quantidade,
+        custo,
+        cardeal_kernel::Arredondamento::MeioAcima,
+    );
+    Ok((entrada, reposto))
+}
+
 /// Devolve **parte** do que uma origem pôs no estoque — a devolução ao fornecedor de parte de
 /// uma nota de compra. Uma saída do produto no local da entrada, com a mesma origem (assim o que
 /// volta deixa de ser entrada viva: a nota não se estorna depois como se tudo estivesse lá), ao

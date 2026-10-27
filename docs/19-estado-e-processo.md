@@ -750,6 +750,16 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   devolução; `mod-fiscal`: `devolucao_compra.rs` (`montar_nfe_de_devolucao`,
   `emitir_nfe_de_devolucao_comum`, `DocumentoDaDevolucao`); desktop: Compras › nota › Devolver ao
   fornecedor, a lista das devoluções com a NF-e (emitir, situação, DANFE) e o DANFE com ST/IPI devolvidos.
+- **Devolução de venda + NF-e de entrada + ajuste de comissão (2026-10-27, vendas.md §5, fiscal.md §7):**
+  `mod-vendas`: `comandos/devolucao.rs` (`SolicitarDevolucao`, `AprovarDevolucao`, `CancelarDevolucao`,
+  `ConcluirDevolucao`, `DevolucoesDoPedido`, `DevolucoesPendentes`, `devolucao_por_id`), migração v3
+  (`vendas_devolucao`, `vendas_devolucao_item`, `vendas_comissao_ajuste`), `Devolucao::solicitar_descontando`,
+  o receituário com o reembolso opcional e `estornar_comissao`, a apuração líquida de devoluções, o pagamento
+  que desconta os estornos, `LinhaComissao.devolucao`; `mod-estoque`: `devolver_parte_da_saida`;
+  `mod-financeiro`: o abatimento serve as duas espécies e sai sem dinheiro; `mod-fiscal`:
+  `devolucao_venda.rs` (`EmitirNfeDaDevolucaoDeVenda`, `DocumentoDaDevolucaoDeVenda`,
+  `cfop_da_devolucao_de_venda`), o Reenviar remonta essa nota; `cardeal-auth`: o Vendedor pede devolução;
+  desktop: Vendas › pedido faturado › Devoluções (pedir, aprovar, concluir, cancelar, NF-e de entrada, DANFE).
 - **Substituição da NFC-e sem resposta (2026-10-27, fecha o fiscal.md §11 item 3):** `sefaz-api`
   43c98f0 (o `/nfe/cancelar` com `chaveSubstituta` = evento 110112); `cardeal-fiscal`
   `PortaFiscal::cancelar_por_substituicao`; `mod-fiscal`: migração v9, `pede_substituicao`,

@@ -96,6 +96,53 @@ CREATE TABLE vendas_comissao (
 CREATE INDEX vendas_comissao_competencia ON vendas_comissao(empresa, competencia, vendedor);
 ";
 
+/// v3: a devolução de venda, item a item, e o estorno da comissão da parte devolvida de um
+/// pedido já apurado.
+const SQL_DEVOLUCAO: &str = "
+CREATE TABLE vendas_devolucao (
+    id                 BLOB PRIMARY KEY,
+    empresa            BLOB    NOT NULL,
+    pedido             BLOB    NOT NULL REFERENCES vendas_pedido(id),
+    cliente            BLOB    NOT NULL,
+    data               INTEGER NOT NULL,
+    motivo             TEXT    NOT NULL,
+    tipo               TEXT    NOT NULL CHECK (tipo IN ('Total','Parcial')),
+    valor_total        INTEGER NOT NULL,
+    estado             TEXT    NOT NULL
+                       CHECK (estado IN ('Solicitada','Aprovada','Concluida','Cancelada')),
+    estorno_lancamento BLOB,
+    versao             INTEGER NOT NULL DEFAULT 1,
+    criada_em          INTEGER NOT NULL,
+    criada_por         BLOB    NOT NULL
+) STRICT;
+CREATE INDEX vendas_devolucao_pedido ON vendas_devolucao(pedido);
+CREATE INDEX vendas_devolucao_estado ON vendas_devolucao(empresa, estado);
+CREATE TABLE vendas_devolucao_item (
+    devolucao       BLOB    NOT NULL REFERENCES vendas_devolucao(id),
+    item_pedido     BLOB    NOT NULL REFERENCES vendas_item_pedido(id),
+    produto         BLOB    NOT NULL,
+    variacao        BLOB,
+    quantidade      INTEGER NOT NULL CHECK (quantidade > 0),
+    valor_estornado INTEGER NOT NULL,
+    PRIMARY KEY (devolucao, item_pedido)
+) STRICT;
+CREATE TABLE vendas_comissao_ajuste (
+    id                  BLOB PRIMARY KEY,
+    empresa             BLOB    NOT NULL,
+    vendedor            BLOB    NOT NULL,
+    pedido              BLOB    NOT NULL REFERENCES vendas_pedido(id),
+    devolucao           BLOB    NOT NULL UNIQUE REFERENCES vendas_devolucao(id),
+    base                INTEGER NOT NULL,
+    valor               INTEGER NOT NULL CHECK (valor > 0),
+    data                INTEGER NOT NULL,
+    estado              TEXT    NOT NULL CHECK (estado IN ('Apurada','Paga')),
+    lancamento_apuracao BLOB    NOT NULL,
+    lancamento          BLOB,
+    criado_em           INTEGER NOT NULL
+) STRICT;
+CREATE INDEX vendas_comissao_ajuste_vendedor ON vendas_comissao_ajuste(empresa, vendedor, estado);
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -107,6 +154,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 2,
         nome: "vendas_comissao",
         sql: SQL_COMISSAO,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 3,
+        nome: "vendas_devolucao",
+        sql: SQL_DEVOLUCAO,
         tipo: TipoMigracao::Esquema,
     },
 ];
