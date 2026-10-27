@@ -181,10 +181,10 @@ pub fn imprimir_em(
 }
 
 #[cfg(test)]
-mod testes {
+pub(crate) mod testes {
     use super::*;
 
-    fn detalhe(estado: EstadoDocumento) -> DetalheDocumento {
+    pub(crate) fn detalhe(estado: EstadoDocumento) -> DetalheDocumento {
         use cardeal_fiscal::{
             ContribuicaoItem, Crt, Emitente, EnderecoEmitente, IcmsItem, ImpostosItem,
             ItemDocumento, Nfce, PagamentoDocumento,

@@ -103,6 +103,16 @@ pub(super) fn secao(
                 Err(e) => notificar(ui.ctx(), Notificacao::erro(e.mensagem)),
             }
         }
+        if d.estado == EstadoDocumento::Autorizada
+            && ui
+                .add(Botao::secundario("Imprimir DANFE").pequeno())
+                .clicked()
+        {
+            match crate::danfe::imprimir(motor, sessao, d.id) {
+                Ok(_) => notificar(ui.ctx(), Notificacao::sucesso("DANFE aberto para imprimir")),
+                Err(e) => notificar(ui.ctx(), Notificacao::erro(e)),
+            }
+        }
     });
     if d.estado != EstadoDocumento::Autorizada {
         if let Some(m) = &d.motivo {

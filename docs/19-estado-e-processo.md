@@ -733,7 +733,8 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   `nfe_venda.rs` (`EmitirNfeDoPedido`, `DocumentoDoPedido`, `ConfigurarNfe`, `ConfiguracaoDaNfe`), migração
   v10, `montar_nfe`/`destinatario_do_cliente`/`cfop_interestadual`, a fila pelos dois modelos (NF-e sem
   contingência nem substituição), `DetalheDocumento.nfe`; desktop: Emitir NF-e no pedido faturado e a série em
-  Configurações › Fiscal. Falta o DANFE A4.
+  Configurações › Fiscal. O DANFE A4 veio em seguida (`cardeal_pdf::danfe`, Code 128C próprio em
+  `cardeal_pdf::barras`, conferido com o zxing; desktop `danfe.rs`).
 - **Substituição da NFC-e sem resposta (2026-10-27, fecha o fiscal.md §11 item 3):** `sefaz-api`
   43c98f0 (o `/nfe/cancelar` com `chaveSubstituta` = evento 110112); `cardeal-fiscal`
   `PortaFiscal::cancelar_por_substituicao`; `mod-fiscal`: migração v9, `pede_substituicao`,

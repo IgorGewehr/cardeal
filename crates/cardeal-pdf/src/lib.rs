@@ -32,9 +32,11 @@
     clippy::return_self_not_must_use
 )]
 
+mod barras;
 mod bobina;
 mod comprovante;
 mod danfce;
+mod danfe;
 mod documento;
 mod escpos;
 mod fonte;
@@ -44,6 +46,7 @@ mod layout;
 pub use bobina::Bobina;
 pub use comprovante::{gerar_comprovante, ComprovantePdf, ItemComprovante};
 pub use danfce::{chave_em_grupos, gerar_danfce, DanfcePdf, ItemDanfce};
+pub use danfe::{gerar_danfe, DanfePdf, DestinatarioDanfe, DuplicataDanfe, ItemDanfe, TotaisDanfe};
 pub use escpos::{comprovante_escpos, danfce_escpos, teste_escpos, OpcoesEscPos};
 
 use cardeal_kernel::{Data, Dinheiro, Instante, Percentual, Preco, Quantidade};

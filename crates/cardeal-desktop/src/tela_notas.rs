@@ -404,6 +404,7 @@ fn detalhe(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estad
     }
     let mut fechar = false;
     let mut imprimir = None;
+    let mut danfe = None;
     let mut abrir_pedido = None;
     let mut confirmar = false;
     let mut desistir = false;
@@ -518,6 +519,12 @@ fn detalhe(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estad
                 ui.add_space(Espaco::E8);
             }
             ui.horizontal(|ui| {
+                if d.resumo.modelo == mod_fiscal::ModeloFiscal::Nfe
+                    && d.resumo.estado == EstadoDocumento::Autorizada
+                    && ui.add(Botao::secundario("Imprimir DANFE")).clicked()
+                {
+                    danfe = Some(d.resumo.id);
+                }
                 if d.resumo.modelo == mod_fiscal::ModeloFiscal::Nfce
                     && matches!(
                         d.resumo.estado,
@@ -580,6 +587,12 @@ fn detalhe(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estad
     if fechar {
         estado.detalhe = None;
         estado.pedindo = None;
+    }
+    if let Some(id) = danfe {
+        match crate::danfe::imprimir(motor, sessao, id) {
+            Ok(_) => notificar(ui.ctx(), Notificacao::sucesso("DANFE aberto para imprimir")),
+            Err(e) => notificar(ui.ctx(), Notificacao::erro(e)),
+        }
     }
     if let Some(id) = imprimir {
         match crate::danfce::imprimir(motor, sessao, id) {

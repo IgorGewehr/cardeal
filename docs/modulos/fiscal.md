@@ -181,7 +181,15 @@ A série e o próximo número da NF-e (`ConfigurarNfe`/`ConfiguracaoDaNfe`) são
 contingência off-line e a substituição são só da NFC-e (a contingência da NF-e é outra, a SVC). Desktop: Vendas ›
 pedido faturado › **Emitir NF-e** (com a situação e o "Reenviar"); Configurações › Fiscal › NF-e de venda; as
 Notas fiscais mostram o modelo. Lição do gestao-raiz: lá a NF-e sai também de um formulário em que se digitam o
-destinatário e os itens; aqui só do pedido faturado — o cadastro é a fonte. Falta o DANFE A4.
+destinatário e os itens; aqui só do pedido faturado — o cadastro é a fonte.
+
+**DANFE A4** (`cardeal_pdf::gerar_danfe`, 2026-10-27): o leiaute do manual — canhoto, emitente, o quadro DANFE
+(entrada/saída, número, série, folha), o **código de barras da chave em Code 128C** (`cardeal_pdf::barras`, escrito
+aqui; conferido com um leitor de verdade, o zxing, que leu a chave exata), natureza e protocolo, destinatário,
+duplicatas (ou "pagamento à vista"), cálculo do imposto, transportador, produtos (a descrição quebra em linhas;
+o que não cabe segue nas folhas seguintes, com o cabeçalho e "FOLHA n/total") e dados adicionais; em homologação,
+"SEM VALOR FISCAL". A data de emissão sai do `dhEmi` do XML autorizado. Imprimir: Notas fiscais › Detalhes e
+Vendas › pedido › Imprimir DANFE (o PDF no visualizador).
 
 **Série por caixa** (migração v8, 2026-10-27): `DefinirSerieDoTerminal` (`fiscal.definir_serie_do_terminal.v1`,
 `fiscal.configurar`) dá a um terminal a sua série (1 a 889, com nome e, se a série já foi usada em outro
@@ -397,7 +405,7 @@ Cancelar e configurar continuam fora do papel.
    nota incerta (outro número em contingência; a original cancelada por substituição, 110112, ou inutilizada;
    `sefaz-api` 43c98f0). Falta a conferência na SEFAZ de verdade.
 4. ~~Série por terminal~~ — feita em 2026-10-27 (§7, "Série por caixa").
-5. NF-e: ~~a de venda~~ (2026-10-27, §7 "NF-e de venda"); falta o DANFE A4, a devolução e a CC-e.
+5. NF-e: ~~a de venda e o DANFE A4~~ (2026-10-27, §7 "NF-e de venda"); falta a devolução e a CC-e.
 6. NFS-e da OS.
 7. SPED gerado no Cardeal.
 8. ~~DFe e manifestação~~ — feito em 2026-10-26 (sefaz-api 842576f; a busca de notas em

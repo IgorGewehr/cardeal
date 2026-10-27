@@ -10,6 +10,7 @@ mod aviso_defasados;
 mod compras_fundo;
 mod comprovante;
 mod danfce;
+mod danfe;
 #[cfg(feature = "demo")]
 mod demo_app;
 mod fiscal_fundo;
