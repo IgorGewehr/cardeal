@@ -113,6 +113,9 @@ fn sessao_completa(empresa: Id) -> Sessao {
         "financeiro.receber.baixar",
         "financeiro.receber.ver",
         "pdv.clientes.ver",
+        "estoque.produto.editar",
+        "vendas.comissao.ver",
+        "vendas.comissao.apurar",
     ] {
         papel = papel.com_permissao(p);
     }
@@ -374,6 +377,7 @@ fn abrir_cupom(
                 cliente: Some(cen.cliente),
                 tabela_preco: cen.tabela_preco,
                 local_expedicao: cen.local,
+                vendedor: None,
             }),
             s,
             amb,
@@ -1173,6 +1177,7 @@ fn cupom_com(
                 cliente,
                 tabela_preco: cen.tabela_preco,
                 local_expedicao: cen.local,
+                vendedor: None,
             }),
             s,
             amb,
@@ -1568,4 +1573,163 @@ fn a_curva_de_clientes_soma_o_balcao_e_diz_quem_cobrar() {
         c[0].acao.as_deref(),
         Some("Cobrar: R$ 25,00 vencido há 40 dias")
     );
+}
+
+#[test]
+fn venda_do_pdv_com_vendedor_entra_na_comissao_e_o_estorno_tira() {
+    use mod_vendas::{ApurarComissoes, ComissoesApuradas, ComissoesDoMes, LinhaComissao};
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[
+        &ModuloClientes,
+        &ModuloEstoque,
+        &ModuloFinanceiro,
+        &ModuloVendas,
+        &ModuloPdv,
+    ])
+    .unwrap();
+    let s = sessao_completa(empresa);
+    let amb = ambiente(empresa);
+    let cen = montar_cenario(&d, &s, &amb, &arm, empresa, 25);
+    let comando = |nome: &str, c: Vec<u8>| d.executar_comando(nome, &c, &s, &amb, arm.escritor());
+    comando(
+        "estoque.definir_comissao_do_produto.v1",
+        carga(&mod_estoque::DefinirComissaoDoProduto {
+            produto: cen.produto,
+            comissao: Some(Percentual::pontos(10)),
+        }),
+    )
+    .unwrap();
+    let ana = Id::novo();
+    // Uma venda: o vendedor na abertura (o F4 antes do primeiro item) e/ou no meio dela.
+    let vender = |vendedor: Option<Id>, no_meio: Option<Option<Id>>| -> Id {
+        let cupom: CupomAberto = postcard::from_bytes(
+            &comando(
+                "pdv.abrir_cupom.v1",
+                carga(&AbrirCupom {
+                    sessao_caixa: cen.sessao_caixa,
+                    terminal: Id::novo(),
+                    serie_fiscal: 1,
+                    cliente: None,
+                    tabela_preco: cen.tabela_preco,
+                    local_expedicao: cen.local,
+                    vendedor,
+                }),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        if let Some(vendedor) = no_meio {
+            comando(
+                "pdv.definir_vendedor_do_cupom.v1",
+                carga(&mod_pdv::DefinirVendedorDoCupom {
+                    cupom: cupom.cupom,
+                    vendedor,
+                }),
+            )
+            .unwrap();
+        }
+        comando(
+            "pdv.adicionar_item.v1",
+            carga(&AdicionarItem {
+                cupom: cupom.cupom,
+                produto: cen.produto,
+                variacao: None,
+                quantidade: Quantidade::unidades(2),
+            }),
+        )
+        .unwrap();
+        comando(
+            "pdv.finalizar_venda.v1",
+            carga(&FinalizarVenda {
+                cupom: cupom.cupom,
+                pagamentos: vec![PagamentoInformado {
+                    forma: FormaPagamentoPdv::Dinheiro,
+                    valor: Dinheiro::reais(50),
+                    prazo: None,
+                }],
+            }),
+        )
+        .unwrap();
+        cupom.cupom
+    };
+    let estornar = |cupom: Id| {
+        comando(
+            "pdv.estornar_venda.v1",
+            carga(&EstornarVenda {
+                cupom,
+                motivo: "Cliente desistiu da compra".into(),
+                autorizado_por: Id::novo(),
+            }),
+        )
+        .unwrap();
+    };
+    let comissoes = || -> Vec<LinhaComissao> {
+        postcard::from_bytes(
+            &d.executar_consulta(
+                "vendas.comissoes_do_mes.v1",
+                &carga(&ComissoesDoMes {
+                    competencia: Data::hoje(Fuso::BRASILIA).competencia(),
+                }),
+                &s,
+                &amb,
+                arm.leitor(),
+            )
+            .unwrap(),
+        )
+        .unwrap()
+    };
+
+    let com_ana = vender(None, Some(Some(ana)));
+    // Escolhido e depois tirado: sem comissão.
+    let _sem_vendedor = vender(Some(ana), Some(None));
+    // A venda estornada antes da apuração sai dela.
+    let estornada_antes = vender(Some(ana), None);
+    estornar(estornada_antes);
+    let previa = comissoes();
+    assert_eq!(previa.len(), 1, "só a venda válida com vendedor");
+    assert_eq!((previa[0].pedido, previa[0].vendedor), (com_ana, ana));
+    assert_eq!(previa[0].valor, Dinheiro::reais(5), "10% de R$ 50");
+
+    let apuradas: ComissoesApuradas = postcard::from_bytes(
+        &comando(
+            "vendas.apurar_comissoes.v1",
+            carga(&ApurarComissoes {
+                competencia: Data::hoje(Fuso::BRASILIA).competencia(),
+            }),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!((apuradas.pedidos, apuradas.valor), (1, Dinheiro::reais(5)));
+
+    // Finalizada, o vendedor não muda mais.
+    let erro = comando(
+        "pdv.definir_vendedor_do_cupom.v1",
+        carga(&mod_pdv::DefinirVendedorDoCupom {
+            cupom: com_ana,
+            vendedor: None,
+        }),
+    )
+    .unwrap_err();
+    assert_eq!(erro.codigo, CodigoErro::ESTADO_INVALIDO);
+    // A lista do F4 (aqui ninguém foi cadastrado na empresa) responde.
+    let vendedores: Vec<(Id, String)> = postcard::from_bytes(
+        &d.executar_consulta(
+            "pdv.vendedores.v1",
+            &carga(&mod_pdv::VendedoresDoPdv),
+            &s,
+            &amb,
+            arm.leitor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(vendedores.iter().all(|(_, nome)| !nome.is_empty()));
+
+    // Estornada depois de apurada: a comissão é estornada (a linha negativa do mês).
+    estornar(com_ana);
+    let linhas = comissoes();
+    let r = mod_vendas::resumo_por_vendedor(&linhas);
+    assert_eq!(r[0].a_pagar, Dinheiro::ZERO, "{linhas:?}");
+    assert!(linhas.iter().any(|l| l.devolucao == Some(com_ana)));
 }

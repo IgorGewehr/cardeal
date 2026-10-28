@@ -136,6 +136,12 @@ pub(super) enum Dlg {
         /// "Cadastrar cliente": o formulário do cadastro rápido, quando aberto.
         novo: Option<crate::pessoa::EstadoPessoa>,
     },
+    /// `F4`: o vendedor da venda (quem ganha a comissão).
+    Vendedor {
+        busca: String,
+        /// A linha destacada na lista.
+        sel: usize,
+    },
     /// `Shift+F5`: o desconto no total da venda.
     DescontoTotal {
         texto: String,
@@ -183,6 +189,10 @@ pub(super) enum Acao {
     AbrirCliente,
     /// Um cliente foi escolhido (`None` = consumidor não identificado).
     EscolherCliente(Option<(Id, String)>),
+    /// `F4`.
+    AbrirVendedor,
+    /// Um vendedor foi escolhido (`None` = venda sem vendedor, sem comissão).
+    EscolherVendedor(Option<(Id, String)>),
     /// `Enter` no diálogo de consulta de preço.
     ConsultarPreco,
     /// Imprimir o cupom fiscal (DANFCE) da NFC-e da última venda.
@@ -207,6 +217,10 @@ pub struct EstadoTelaPdv {
     pub(super) clientes: Vec<ItemPessoa>,
     /// O cliente identificado na venda atual, com o nome para mostrar.
     pub(super) cliente: Option<(Id, String)>,
+    /// Quem o `F4` oferece: os usuários ativos da empresa.
+    pub(super) vendedores: Vec<(Id, String)>,
+    /// O vendedor da venda atual (vale para uma venda só), com o nome para mostrar.
+    pub(super) vendedor: Option<(Id, String)>,
     /// Preço mínimo por produto já consultado (`None` = o estoque não sabe: sem custo ou margem).
     pub(super) minimos: std::collections::HashMap<Id, Option<Dinheiro>>,
     pub(super) caixa_sel: Option<Id>,
@@ -262,6 +276,8 @@ impl Default for EstadoTelaPdv {
             produtos: Vec::new(),
             clientes: Vec::new(),
             cliente: None,
+            vendedores: Vec::new(),
+            vendedor: None,
             minimos: std::collections::HashMap::new(),
             caixa_sel: None,
             tabela_sel: None,
@@ -327,6 +343,9 @@ impl EstadoTelaPdv {
             },
         ) {
             self.clientes = c;
+        }
+        if let Ok(v) = motor.consultar(sessao, "pdv.vendedores.v1", &mod_pdv::VendedoresDoPdv) {
+            self.vendedores = v;
         }
 
         if self.caixa_sel.is_none() {

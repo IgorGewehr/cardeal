@@ -289,6 +289,24 @@ impl Comando for FinalizarVenda {
         // A parte a prazo vira conta a receber do cliente — parcelas apontando para o
         // lançamento da venda (que já debitou Clientes a receber), sem lançar receita de novo.
         let titulo_a_receber = abrir_conta_a_prazo(&cupom, a_prazo, lancamento, ctx, uow)?;
+        // Com vendedor, a venda entra na comissão dele (o percentual de hoje, congelado).
+        if let Some(vendedor) = super::vendedor::do_cupom(uow.conexao(), cupom.id)? {
+            let itens: Vec<(Id, cardeal_kernel::Dinheiro)> = cupom
+                .itens
+                .iter()
+                .filter(|i| !i.cancelado)
+                .map(|i| (i.produto, i.total_item))
+                .collect();
+            mod_vendas::registrar_venda_comissionavel_comum(
+                "pdv",
+                cupom.id,
+                vendedor,
+                ctx.hoje(),
+                &itens,
+                ctx,
+                uow,
+            )?;
+        }
 
         // 5. Publicar.
         uow.publicar(VendaFinalizada {

@@ -12,6 +12,8 @@ mod criar_regra_preco;
 mod criar_tabela_preco;
 pub(crate) mod devolucao;
 mod faturar_pedido;
+#[cfg(feature = "sqlite")]
+mod venda_comissionavel;
 
 pub use adicionar_item_pedido::{AdicionarItemPedido, ItemFoiAdicionado};
 pub use aplicar_precos_sugeridos::{AplicarPrecosSugeridos, PrecosAplicados};
@@ -30,6 +32,10 @@ pub use devolucao::{
     DevolucoesDoPedido, DevolucoesPendentes, SolicitarDevolucao, MOTIVO_MINIMO_DEVOLUCAO_VENDA,
 };
 pub use faturar_pedido::{FaturarPedido, PedidoFoiFaturado};
+#[cfg(feature = "sqlite")]
+pub use venda_comissionavel::{
+    estornar_venda_comissionavel_comum, registrar_venda_comissionavel_comum,
+};
 
 #[cfg(feature = "sqlite")]
 use cardeal_auth::ValorLimite;

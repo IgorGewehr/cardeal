@@ -60,6 +60,8 @@ mod repositorio_comissao;
 
 #[cfg(feature = "sqlite")]
 pub use comandos::devolucao_por_id;
+#[cfg(feature = "sqlite")]
+pub use comandos::{estornar_venda_comissionavel_comum, registrar_venda_comissionavel_comum};
 pub use comandos::{
     AdicionarItemPedido, AplicarPrecosSugeridos, ApurarComissoes, CancelarPedido,
     ComissoesApuradas, ComissoesPagas, ConfirmarPedido, CriarPedido, CriarRegraPreco,

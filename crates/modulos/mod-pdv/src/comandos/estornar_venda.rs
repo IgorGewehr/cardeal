@@ -129,6 +129,8 @@ impl Comando for EstornarVenda {
 
         // 5. Devolver a mercadoria, ao custo em que saiu.
         let devolvidos = mod_estoque::devolver_saidas_da_origem("pdv", cupom.id, ctx, uow)?;
+        // A comissão do vendedor sai junto (já apurada, estornada e descontada no pagamento).
+        mod_vendas::estornar_venda_comissionavel_comum("pdv", cupom.id, ctx.hoje(), ctx, uow)?;
 
         // 6. Persistir.
         {

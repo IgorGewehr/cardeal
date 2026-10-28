@@ -25,6 +25,7 @@ pub(super) fn dialogos(
             dialogo_cliente(ctx, estado, sessao.concede("clientes.pessoa.criar"));
         }
         Dlg::DescontoTotal { .. } => super::desconto_total::dialogo(ctx, motor, sessao, estado),
+        Dlg::Vendedor { .. } => super::vendedor::dialogo(ctx, estado),
         Dlg::VendasDoDia(_) => {
             super::vendas_do_dia::dialogo_vendas_do_dia(ctx, motor, sessao, estado);
         }

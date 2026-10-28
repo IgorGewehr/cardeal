@@ -788,6 +788,7 @@ pub(super) mod testes {
                     cliente: None,
                     tabela_preco: tabela.tabela_preco,
                     local_expedicao: local.local,
+                    vendedor: None,
                 },
             )
             .unwrap();

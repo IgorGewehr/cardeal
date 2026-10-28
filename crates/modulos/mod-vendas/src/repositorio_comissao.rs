@@ -49,7 +49,13 @@ pub(crate) fn a_apurar(
              WHERE p.empresa = ?1 AND p.estado IN ('Faturado','EmEntrega','Concluido')
                AND p.data BETWEEN ?2 AND ?3
                AND NOT EXISTS (SELECT 1 FROM vendas_comissao c WHERE c.pedido = p.id)
-             ORDER BY p.data, p.rowid, i.rowid",
+             UNION ALL
+             SELECT v.origem_id, v.vendedor, vi.produto, v.data, vi.total, vi.comissao_percentual
+             FROM vendas_venda_comissionavel v
+             JOIN vendas_venda_comissionavel_item vi ON vi.venda = v.id
+             WHERE v.empresa = ?1 AND v.estado = 'Valida' AND v.data BETWEEN ?2 AND ?3
+               AND NOT EXISTS (SELECT 1 FROM vendas_comissao c WHERE c.pedido = v.origem_id)
+             ORDER BY 4, 1",
         )
         .map_err(persist)?;
     let linhas: Vec<LinhaApuracao> = stmt
@@ -139,8 +145,10 @@ pub(crate) fn inserir(
     conn.execute(
         "INSERT INTO vendas_comissao
            (id, empresa, vendedor, pedido, base_calculo, percentual, valor, competencia, estado,
-            lancamento_apuracao, lancamento, criado_em)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,NULL,?11)",
+            lancamento_apuracao, lancamento, criado_em, origem)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,NULL,?11,
+                 CASE WHEN EXISTS (SELECT 1 FROM vendas_pedido WHERE id = ?4)
+                      THEN 'pedido' ELSE 'pdv' END)",
         params![
             blob(c.id),
             blob(c.empresa),
@@ -343,11 +351,13 @@ pub(crate) fn do_mes(
     let mut stmt = conn
         .prepare(
             "SELECT c.id, c.vendedor, c.pedido, c.base_calculo, c.percentual, c.valor,
-                    c.competencia, c.estado, c.lancamento, p.data
-             FROM vendas_comissao c JOIN vendas_pedido p ON p.id = c.pedido
+                    c.competencia, c.estado, c.lancamento, COALESCE(p.data, v.data, c.competencia)
+             FROM vendas_comissao c
+             LEFT JOIN vendas_pedido p ON p.id = c.pedido
+             LEFT JOIN vendas_venda_comissionavel v ON v.origem_id = c.pedido
              WHERE c.empresa = ?1 AND c.competencia BETWEEN ?2 AND ?3
                AND (?4 IS NULL OR c.vendedor = ?4)
-             ORDER BY p.data, p.rowid",
+             ORDER BY 10, c.rowid",
         )
         .map_err(persist)?;
     let linhas = stmt

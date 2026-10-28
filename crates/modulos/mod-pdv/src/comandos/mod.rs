@@ -11,6 +11,7 @@ mod cancelar_item;
 mod estornar_venda;
 mod finalizar_venda;
 mod identificar_cliente;
+mod vendedor;
 
 pub use abrir_cupom::{AbrirCupom, CupomAberto};
 pub use adicionar_item::{AdicionarItem, ItemFoiAdicionado};
@@ -23,6 +24,7 @@ pub use estornar_venda::{
 };
 pub use finalizar_venda::{FinalizarVenda, PagamentoInformado, VendaFoiFinalizada};
 pub use identificar_cliente::IdentificarCliente;
+pub use vendedor::{DefinirVendedorDoCupom, VendedoresDoPdv};
 
 #[cfg(feature = "sqlite")]
 use cardeal_auth::ValorLimite;

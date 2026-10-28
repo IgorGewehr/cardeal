@@ -443,6 +443,7 @@ impl Mundo {
                     cliente: cliente.then_some(cen.cliente),
                     tabela_preco: cen.tabela,
                     local_expedicao: cen.local,
+                    vendedor: None,
                 },
             )
             .unwrap();

@@ -102,6 +102,17 @@ pub(super) fn aplicar(
         Acao::EscolherCliente(escolhido) => {
             identificar_cliente(ctx, motor, sessao, estado, escolhido)
         }
+        Acao::AbrirVendedor => abrir(
+            ctx,
+            estado,
+            Dlg::Vendedor {
+                busca: String::new(),
+                sel: 0,
+            },
+        ),
+        Acao::EscolherVendedor(escolhido) => {
+            super::vendedor::escolher(ctx, motor, sessao, estado, escolhido);
+        }
         Acao::AbrirSangria => abrir(
             ctx,
             estado,
@@ -369,6 +380,7 @@ pub(super) fn garantir_cupom(
             cliente: estado.cliente.as_ref().map(|c| c.0),
             tabela_preco,
             local_expedicao,
+            vendedor: estado.vendedor.as_ref().map(|v| v.0),
         },
     ) {
         Ok(CupomAberto {
@@ -533,6 +545,7 @@ pub(super) fn cancelar_cupom(
             estado.cupom = None;
             estado.cupom_numero = None;
             estado.cliente = None;
+            estado.vendedor = None;
             estado.desconto_no_total = None;
             estado.carrinho.clear();
             estado.linha_sel = None;
@@ -632,6 +645,7 @@ pub(super) fn finalizar(
             estado.cupom = None;
             estado.cupom_numero = None;
             estado.cliente = None;
+            estado.vendedor = None;
             estado.desconto_no_total = None;
             estado.carrinho.clear();
             estado.linha_sel = None;

@@ -73,6 +73,7 @@ pub use comandos::{
     IdentificarCliente, ItemFoiAdicionado, PagamentoInformado, VendaFoiEstornada,
     VendaFoiFinalizada, MOTIVO_MINIMO_DO_ESTORNO,
 };
+pub use comandos::{DefinirVendedorDoCupom, VendedoresDoPdv};
 pub use consultas::{
     EstornoDaVenda, PrecoConsultado, PrecoDoProduto, VendaDoPeriodo, VendasDoPeriodo,
 };

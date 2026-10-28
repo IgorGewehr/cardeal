@@ -28,6 +28,8 @@ impl Modulo for ModuloPdv {
     fn registrar(&self, registro: &mut Registro) -> Resultado<()> {
         registro
             .comando::<AbrirCupom>("pdv.abrir_cupom.v1")
+            .comando::<crate::DefinirVendedorDoCupom>("pdv.definir_vendedor_do_cupom.v1")
+            .consulta::<crate::VendedoresDoPdv>("pdv.vendedores.v1")
             .comando::<AdicionarItem>("pdv.adicionar_item.v1")
             .comando::<AplicarDescontoItem>("pdv.aplicar_desconto_item.v1")
             .comando::<crate::AplicarDescontoNoTotal>("pdv.aplicar_desconto_no_total.v1")
