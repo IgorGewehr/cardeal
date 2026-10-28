@@ -70,6 +70,7 @@ impl EstadoTelaFinanceiro {
             } else {
                 None
             };
+            self.obrigacoes = super::obrigacoes::carregar(motor, sessao);
         }
         if matches!(self.aba, Aba::Receber | Aba::Pagar) {
             self.carregar_parcelas_periodo(motor, sessao);

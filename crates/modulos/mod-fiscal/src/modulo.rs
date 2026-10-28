@@ -49,6 +49,7 @@ impl Modulo for ModuloFiscal {
             .consulta::<crate::devolucao_compra::DocumentoDaDevolucao>(
                 "fiscal.documento_da_devolucao.v1",
             )
+            .consulta::<crate::calendario::ObrigacoesDoMes>("fiscal.obrigacoes_do_mes.v1")
             .comando::<crate::nfse::ConfigurarNfse>("fiscal.configurar_nfse.v1")
             .consulta::<crate::nfse::ConfiguracaoDaNfse>("fiscal.configuracao_nfse.v1")
             .comando::<crate::nfse::EmitirNfseDaOs>("fiscal.emitir_nfse_da_os.v1")

@@ -21,6 +21,7 @@
 #![allow(clippy::module_name_repetitions, clippy::must_use_candidate)]
 #![allow(clippy::result_large_err)]
 
+pub mod calendario;
 mod comandos;
 mod consultas;
 pub mod correcao;

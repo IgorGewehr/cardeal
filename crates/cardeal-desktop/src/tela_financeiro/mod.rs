@@ -19,6 +19,7 @@ mod dre;
 mod fluxo;
 mod importacao;
 mod lancar;
+mod obrigacoes;
 mod orcamento;
 mod pacote_contador;
 mod pessoal;
@@ -424,6 +425,8 @@ pub struct EstadoTelaFinanceiro {
     fila_cobranca: Option<mod_financeiro::FilaDoDia>,
     /// A situação fiscal (para o aviso do certificado na Visão).
     situacao_fiscal: Option<mod_fiscal::SituacaoFiscalDaEmpresa>,
+    /// As obrigações que vencem (o cartão da Visão).
+    obrigacoes: Vec<mod_fiscal::calendario::Obrigacao>,
     /// O aviso do certificado pediu para abrir Configurações › Fiscal (o `main` atende).
     pub pedido_config_fiscal: bool,
     /// O editor da régua aberto.

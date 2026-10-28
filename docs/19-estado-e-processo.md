@@ -750,6 +750,10 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   devolução; `mod-fiscal`: `devolucao_compra.rs` (`montar_nfe_de_devolucao`,
   `emitir_nfe_de_devolucao_comum`, `DocumentoDaDevolucao`); desktop: Compras › nota › Devolver ao
   fornecedor, a lista das devoluções com a NF-e (emitir, situação, DANFE) e o DANFE com ST/IPI devolvidos.
+- **Calendário de obrigações (2026-10-28, fiscal.md §7):** `mod-fiscal`: `calendario.rs` (`pascoa`,
+  `feriados`, `prorrogar`/`antecipar`/`dia_util`/`ultimo_dia_util`, `obrigacoes_do_mes` por regime,
+  `ObrigacoesDoMes` com as do Cardeal); desktop: o cartão "Obrigações" na Visão geral
+  (`tela_financeiro/obrigacoes.rs`).
 - **NFS-e da OS (2026-10-28, fiscal.md §7):** `sefaz-api` 5726b25 (a emissão no ADN lê `chaveAcesso`/
   `nfseXmlGZipB64`; a consulta pelo DPS busca a nota pela chave); `cardeal-fiscal`: `nfse.rs` (`Nfse`,
   `TomadorNfse`, `RetornoNfse`, `CancelamentoNfse`), `PortaFiscal::emitir_nfse`/`consultar_nfse_por_dps`/

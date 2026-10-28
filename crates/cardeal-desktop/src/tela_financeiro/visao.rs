@@ -109,6 +109,7 @@ pub(super) fn painel_visao(
     super::conferencia::alerta_na_visao(ui, motor, sessao, estado);
     super::regua::aviso_na_visao(ui, motor, sessao, estado);
     aviso_do_certificado(ui, estado);
+    super::obrigacoes::cartao(ui, &estado.obrigacoes);
 
     // Faixa de KPIs — três cartões esticados pra ocupar a largura toda, em vez de flutuar
     // colados à esquerda com um vão morto do lado (pedido explícito do usuário: a Visão

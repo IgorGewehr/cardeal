@@ -276,6 +276,25 @@ gestao-raiz a NFS-e "não é suportada nesta versão". O `sefaz-api` lia a respo
 que não é o da API (saía sem número, sem XML e sem a chave, que o cancelamento exige) — corrigido em
 5726b25, que também faz a consulta pelo DPS buscar a nota pela chave. Não conferido contra o ADN de verdade.
 
+**Calendário de obrigações** (`mod_fiscal::calendario`, `fiscal.obrigacoes_do_mes.v1`, 2026-10-28): o que vence
+no mês, pelo regime da empresa (`nucleo_empresa.regime`). As datas são as da regra federal, com os dias úteis
+descontando os fins de semana e os feriados nacionais em que os bancos não abrem (com a Sexta-feira Santa e a
+segunda e a terça de Carnaval, pela Páscoa); o que **prorroga** vai para o dia útil seguinte (DAS), o que
+**antecipa** para o anterior (FGTS Digital, eSocial, DCTFWeb/EFD-Reinf, PIS/COFINS).
+- Simples: DAS e PGDAS-D (dia 20 do mês seguinte), DEFIS (31/03); com funcionários, DCTFWeb (dia 15).
+- MEI: DAS-MEI (dia 20), DASN-SIMEI (31/05).
+- Lucro presumido e real: DCTFWeb e EFD-Reinf (dia 15), PIS e COFINS (dia 25), EFD-Contribuições (10º dia
+  útil do segundo mês), IRPJ e CSLL do trimestre (último dia útil do mês seguinte ao trimestre; no real, a
+  estimativa mensal), ECD (último dia útil de junho), ECF (de julho); o ICMS e a EFD ICMS/IPI **sem data** — o
+  prazo é do estado e da atividade.
+- Com funcionários, em qualquer regime: eSocial (dia 15) e FGTS Digital (dia 20).
+- Do Cardeal: inutilizar os números sem desfecho (até o dia 10, quando há) e o pacote do contador (sugestão:
+  dia 5).
+
+Na Visão geral, o cartão "Obrigações" mostra o que ainda vence no mês (e o começo do próximo, quando o mês
+está acabando), com os dias que faltam; as de quem tem funcionários por último (o Cardeal não sabe se há).
+Feriado estadual ou municipal não entra: o cartão pede para conferir com o contador.
+
 O `sefaz-api` ganhou o `impostoDevol` e o FCP do ST (8075fde) — e, de quebra, uma correção: a validação
 exigia `vICMSST = vBCST × pICMSST`, mas o ST é esse produto **menos** o ICMS próprio; todo ST de verdade
 era recusado. Agora o ST só não pode passar do produto.
@@ -505,6 +524,7 @@ Cancelar e configurar continuam fora do papel.
 6. ~~NFS-e da OS~~ — feita em 2026-10-28 (§7; `sefaz-api` 5726b25). Falta conferir num município de
    verdade (homologação do ADN, com a inscrição municipal e o código do serviço da empresa).
 7. SPED gerado no Cardeal.
+10. ~~Calendário de obrigações~~ — feito em 2026-10-28 (§7).
 8. ~~DFe e manifestação~~ — feito em 2026-10-26 (sefaz-api 842576f; a busca de notas em
    `mod-compras`). Falta conferir contra o Ambiente Nacional de homologação, que pede o
    certificado com a senha; e as manifestações conclusivas (confirmação, desconhecimento).
