@@ -72,6 +72,10 @@ impl Modulo for ModuloFiscal {
             .consulta::<DocumentoDaVenda>("fiscal.documento_da_venda.v1")
             .consulta::<DocumentosDasVendas>("fiscal.documentos_das_vendas.v1")
             .consulta::<NotasFiscaisDoMes>("fiscal.notas_do_mes.v1")
+            .comando::<crate::efd::ConfigurarEfd>("fiscal.configurar_efd.v1")
+            .consulta::<crate::efd::ConfiguracaoDaEfd>("fiscal.configuracao_efd.v1")
+            .consulta::<crate::efd::GerarEfd>("fiscal.gerar_efd.v1")
+            .comando::<crate::efd::RegistrarApuracaoIcms>("fiscal.registrar_apuracao_icms.v1")
             .comando::<BuscarXmlsQueFaltam>("fiscal.buscar_xmls_que_faltam.v1")
             .tarefa(
                 TAREFA_TRANSMITIR,

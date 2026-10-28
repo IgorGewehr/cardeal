@@ -963,3 +963,37 @@ fn st_estimado_pela_mva_entra_no_custo_so_quando_quem_confirma_decide() {
     );
     assert_eq!(guias_vivas, 0);
 }
+
+#[test]
+fn a_nota_confirmada_entra_no_mes_da_entrada_para_o_sped() {
+    use mod_compras::escrituracao::{EntradasDoMes, EntradasParaEscriturar};
+    let b = Base::nova();
+    let (produto, local) = b.produto_e_local();
+    let r = b.importar_e_vincular(xml('5', &[]), produto);
+    let hoje = Data::hoje(cardeal_kernel::Fuso::BRASILIA);
+    let entradas = |competencia: Competencia| -> EntradasDoMes {
+        b.consultar(
+            "compras.entradas_para_escriturar.v1",
+            &EntradasParaEscriturar { competencia },
+        )
+    };
+    // Antes da confirmação, a mercadoria não entrou.
+    assert!(entradas(hoje.competencia()).entradas.is_empty());
+    b.confirmar(r.nota_entrada, local, false, None).unwrap();
+
+    let e = entradas(hoje.competencia());
+    assert_eq!(e.entradas.len(), 1);
+    assert!(e.sem_xml.is_empty());
+    let entrada = &e.entradas[0];
+    assert_eq!(entrada.data_entrada, hoje, "o dia da confirmação");
+    assert!(entrada.xml.contains("<nNF>4598</nNF>"));
+    let p = entrada.itens[0].as_ref().expect("o item casado");
+    assert_eq!(p.produto, produto);
+    assert_eq!((p.unidade.as_str(), p.ncm.as_str()), ("UN", "22021000"));
+    assert_eq!(p.descricao, "Refrigerante Cola 2L");
+    // O mês da emissão (setembro de 2026) não decide: a nota entrou hoje.
+    let setembro = Competencia::nova(2026, 9);
+    if hoje.competencia() != setembro {
+        assert!(entradas(setembro).entradas.is_empty());
+    }
+}

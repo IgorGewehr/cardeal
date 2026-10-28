@@ -446,6 +446,34 @@ na de 58. Acento: o padrão é sem (o texto é transliterado — sai certo em qu
 (`ESC t 3`). Não conferido numa impressora de verdade (não há uma nesta máquina): o teste manda os bytes a uma
 "impressora de rede" local e confere o conteúdo.
 
+**SPED — EFD ICMS/IPI** (2026-10-28, `mod_fiscal::efd`): o arquivo do mês, gerado aqui (o `sefaz-api` não
+gera SPED), para o contador validar e transmitir pelo PVA. Lê os **XMLs**: o `nfeProc` das notas emitidas
+(`fiscal.notas_do_mes.v1`: autorizadas e canceladas; a denegada e a inutilizada não se escrituram desde 2023) e o
+XML das compras que **entraram** no mês (`compras.entradas_para_escriturar.v1`, o mês da confirmação — o
+`fiscal` não enxerga as compras, então o cliente pede as entradas ao `compras` e as entrega a
+`fiscal.gerar_efd.v1`). O leitor é `cardeal_fiscal::ler_para_escriturar` (participantes com endereço e IE,
+totais, e item a item o CFOP, a unidade, o ICMS, o ST, o IPI, o PIS e a COFINS).
+- Leiaute de 2026 (`COD_VER` 020; o ano manda: 2027 = 021, com aviso). Bloco 0 (0000, 0001, 0002 na indústria,
+  0005, 0100, 0150 dos participantes, 0190 e 0200 só dos itens das entradas); C100 de cada nota — a NFC-e sem
+  participante nem ST/IPI/PIS/COFINS, a cancelada só com a chave —, C170 só nas notas de **terceiros** (a
+  própria não leva) e C190 por CST, CFOP e alíquota, cujos valores fazem os do C100; E100/E110 e o E116 quando há
+  ICMS a recolher (código de receita e dia do vencimento da configuração); B, D, G, H e K sem movimento; 1010 com
+  tudo "N"; o bloco 9 conta. Arquivo em ISO-8859-1, linhas com CRLF.
+- **Entrada pela ótica de quem compra**: o CFOP vira o de entrada (5102 → 1102, 5405 → 1403, 6xxx → 2xxx; na
+  indústria 1101/1401); o CSOSN do fornecedor do Simples vira CST 090 (500 → 060) e o crédito é o ICMS destacado
+  ou o `vCredICMSSN` do CSOSN 101; o item vai com o código (`codigo_do_produto`, o mesmo das notas da empresa), a
+  unidade e o NCM do **cadastro** (o produto casado), e o não casado vai com o código do fornecedor e um aviso.
+  O IPI de quem não é indústria vai só informado (CST 49); o PIS/COFINS fica fora do C170.
+- **Apuração** (E110): débitos = ICMS dos C190 de CFOP 5/6/7, créditos = os de 1/2/3, menos o saldo credor
+  anterior — o da apuração **registrada** do mês anterior (`fiscal.registrar_apuracao_icms.v1`), ou o digitado; sem
+  registro, zero e um aviso.
+- **Só regime normal**: o Simples (e o MEI) é dispensado — a geração diz isso antes de olhar qualquer outra coisa.
+  Impedem também: sem IE, sem o código IBGE do município, sem o contabilista (nome, CPF, CRC e município).
+- Fora, de propósito: a **EFD-Contribuições** (PIS/COFINS), que deixa de existir em janeiro de 2027 com a CBS —
+  gerar agora serviria a dois meses; o **inventário** (bloco H, na EFD de fevereiro; a geração avisa); o E200 (ST
+  como substituto), o E500 (IPI de quem é indústria), o CT-e (bloco D) e ajustes (E111). Não conferido no PVA
+  desta máquina: o contador valida.
+
 ## 8. Telas
 
 Configurações › **Fiscal**: pendências no topo; dados fiscais do emitente; certificado (titular, CNPJ,
@@ -468,6 +496,13 @@ correção** e a lista das cartas com a situação) e **Transmitir agora**. No P
 autorizada ganha **Imprimir cupom fiscal**. A nota em contingência também (o DANFCE com o aviso), tem a
 etiqueta "Em contingência" e, nas Notas fiscais, entra em "Atenção" com o prazo de transmissão; a vigia de
 fundo a transmite como as da fila.
+
+Também em Configurações › Fiscal, o cartão **SPED — EFD ICMS/IPI** (2026-10-28): o perfil, a atividade, o
+contabilista, o código de receita e o dia do vencimento do ICMS; o mês (‹ ›), o saldo credor anterior
+(vazio: o registrado), "arquivo substituto", **Gerar**, o resumo da apuração com os avisos, **Salvar o
+arquivo…** e **Registrar a apuração** (o saldo credor abre o mês seguinte). O **pacote do contador** leva a
+EFD do mês quando a empresa entrega (regime normal configurado), com os avisos num `.txt` ao lado; faltando a
+configuração, um `.txt` diz o quê; no Simples, nada.
 
 ## 9. Permissões
 
@@ -498,6 +533,8 @@ Cancelar e configurar continuam fora do papel.
 - v6: `fiscal_documento.xml_assinado` (a nota assinada da emissão incerta, apagada quando chega o
   `nfeProc`) e `xml_a_buscar` (tentativas restantes da busca de XML; 0 = nada a buscar); o índice da fila
   passa a cobrir a busca, e os cancelamentos sem o XML já entram nela.
+- v13: `fiscal_configuracao_efd` (a configuração do SPED, em postcard) e `fiscal_apuracao_icms` (por
+  empresa e mês: débitos, créditos, a recolher e o saldo credor que vai para o mês seguinte).
 - v12: `fiscal_configuracao_nfse` (o código do serviço, o percentual, a série e o próximo número do DPS por
   ambiente) e `fiscal_nfse` (a nota, a fila, o pedido de cancelamento; única por origem entre as não
   canceladas).
@@ -523,7 +560,8 @@ Cancelar e configurar continuam fora do papel.
    devolução de venda~~ (2026-10-27, §7). A devolução da venda do PDV (NFC-e) ainda não sai em NF-e.
 6. ~~NFS-e da OS~~ — feita em 2026-10-28 (§7; `sefaz-api` 5726b25). Falta conferir num município de
    verdade (homologação do ADN, com a inscrição municipal e o código do serviço da empresa).
-7. SPED gerado no Cardeal.
+7. ~~SPED gerado no Cardeal~~ — a EFD ICMS/IPI feita em 2026-10-28 (§7); a EFD-Contribuições fica fora (acaba
+   em 2027). Falta validar um arquivo no PVA de verdade (com o contador).
 10. ~~Calendário de obrigações~~ — feito em 2026-10-28 (§7).
 8. ~~DFe e manifestação~~ — feito em 2026-10-26 (sefaz-api 842576f; a busca de notas em
    `mod-compras`). Falta conferir contra o Ambiente Nacional de homologação, que pede o

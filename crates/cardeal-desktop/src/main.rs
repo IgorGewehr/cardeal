@@ -21,6 +21,7 @@ mod login;
 mod maquina;
 mod pagamento;
 mod pessoa;
+mod sped;
 mod tela_agenda;
 mod tela_clientes;
 mod tela_compras;

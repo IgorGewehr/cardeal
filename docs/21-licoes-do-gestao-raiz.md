@@ -246,7 +246,8 @@ O que eles têm e o Cardeal não, com o que aprenderam:
     De fora, por decisão:
     - o **DANFE**, porque o documento é o XML e o contador importa XML;
     - o **SPED**, porque a empresa do Simples em geral é dispensada da EFD ICMS/IPI e o contador a gera
-      dos XMLs;
+      dos XMLs (revisto em 2026-10-28: a EFD ICMS/IPI passou a ser gerada para o regime normal e vai no pacote
+      — `docs/modulos/fiscal.md` §7);
     - **baixar a nota sem XML da SEFAZ**: a consulta não devolve a nota que não se guardou assinada, e o
       emitente não baixa a própria nota pela distribuição — o pacote diz para baixar no portal.
 

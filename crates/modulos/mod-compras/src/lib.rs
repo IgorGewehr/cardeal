@@ -52,6 +52,7 @@ mod consultas;
 pub mod devolucao;
 mod dfe;
 mod erros;
+pub mod escrituracao;
 pub mod eventos;
 mod manifesto;
 #[cfg(feature = "sqlite")]

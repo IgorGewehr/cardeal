@@ -44,7 +44,8 @@ pub struct DadosDaVenda {
 
 /// O código do produto na nota: os 12 últimos dígitos hexadecimais do id (a parte aleatória do
 /// `UUIDv7` — o começo é o instante da criação, igual para produtos importados juntos).
-fn codigo_do_produto(id: Id) -> String {
+#[must_use]
+pub fn codigo_do_produto(id: Id) -> String {
     let hex: String = id
         .to_string()
         .chars()

@@ -805,6 +805,7 @@ pub fn confirmar_entrada_com_parcelas(
     };
 
     RepositorioCompras::novo(uow).atualizar_nota(&nota)?;
+    gravar_data_de_entrada(nota.id, ctx.hoje(), uow)?;
 
     uow.publicar(NotaConfirmada {
         nota_entrada: nota.id,
@@ -816,4 +817,22 @@ pub fn confirmar_entrada_com_parcelas(
     .map_err(|e| Erro::de_dominio(&e))?;
 
     Ok(ConfirmacaoEntrada { titulo, pago })
+}
+
+/// O dia em que a nota entrou: o mês em que ela se escritura (SPED).
+#[cfg(feature = "sqlite")]
+fn gravar_data_de_entrada(
+    nota: Id,
+    dia: cardeal_kernel::Data,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<()> {
+    uow.conexao()
+        .execute(
+            "UPDATE compras_nota_entrada SET data_entrada = ?2 WHERE id = ?1",
+            rusqlite::params![nota.em_bytes().as_slice(), i64::from(dia.em_dias())],
+        )
+        .map(|_| ())
+        .map_err(|e| {
+            cardeal_kernel::Erro::novo(cardeal_kernel::CodigoErro::FALHA_INTERNA, e.to_string())
+        })
 }

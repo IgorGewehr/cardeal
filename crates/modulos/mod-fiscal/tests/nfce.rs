@@ -153,6 +153,7 @@ impl Mundo {
             "vendas.devolucao.aprovar",
             "vendas.devolucao.concluir",
             "clientes.pessoa.editar",
+            "estoque.tributario.editar",
         ] {
             papel = papel.com_permissao(p);
         }
@@ -2137,4 +2138,200 @@ fn a_os_faturada_vira_nfse_pela_fila_consulta_o_dps_e_cancela() {
         .consultar::<Option<NfseResumo>>("fiscal.nfse_da_os.v1", &NfseDaOs { ordem })
         .unwrap();
     assert_eq!(cancelada.estado, EstadoNfse::Cancelada);
+}
+
+/// Uma compra de outra empresa (CST 00, 17%), com a empresa do teste como destinatária.
+const COMPRA_PARA_EFD: &str = r#"<nfeProc versao="4.00"><NFe><infNFe Id="NFe43261011444777000161550010000007771000007770" versao="4.00">
+<ide><mod>55</mod><serie>1</serie><nNF>777</nNF><dhEmi>DATAT08:00:00-03:00</dhEmi><tpNF>1</tpNF><finNFe>1</finNFe></ide>
+<emit><CNPJ>11444777000161</CNPJ><xNome>Atacado Gama</xNome><enderEmit><xLgr>Rua C</xLgr><nro>1</nro><xBairro>Norte</xBairro><cMun>4304606</cMun><UF>RS</UF></enderEmit><IE>0960099999</IE><CRT>3</CRT></emit>
+<dest><CNPJ>11222333000181</CNPJ><xNome>Empresa Teste LTDA</xNome><indIEDest>1</indIEDest></dest>
+<det nItem="1"><prod><cProd>X9</cProd><xProd>CAPINHA</xProd><NCM>39269090</NCM><CFOP>5102</CFOP><uCom>PC</uCom><qCom>10.0000</qCom><vProd>100.00</vProd></prod>
+<imposto><ICMS><ICMS00><orig>0</orig><CST>00</CST><vBC>100.00</vBC><pICMS>17.0000</pICMS><vICMS>17.00</vICMS></ICMS00></ICMS></imposto></det>
+<total><ICMSTot><vBC>100.00</vBC><vICMS>17.00</vICMS><vProd>100.00</vProd><vNF>100.00</vNF></ICMSTot></total>
+<transp><modFrete>1</modFrete></transp></infNFe></NFe></nfeProc>"#;
+
+#[test]
+fn o_mes_vira_efd_icms_ipi_com_a_apuracao_e_o_saldo_credor() {
+    use mod_fiscal::efd::{
+        ConfiguracaoEfd, ConfigurarEfd, Contabilista, EfdDoMes, EntradaEscriturada, GerarEfd,
+        ItemDoCadastro, RegistrarApuracaoIcms,
+    };
+    let m = Mundo::novo();
+    let cen = m.cenario();
+    m.configurar(1);
+    let hoje = Data::hoje(Fuso::BRASILIA);
+    let mes = hoje.competencia();
+    let gerar = |competencia, entradas: Vec<EntradaEscriturada>| -> EfdDoMes {
+        m.consultar(
+            "fiscal.gerar_efd.v1",
+            &GerarEfd {
+                competencia,
+                substituta: false,
+                entradas,
+                saldo_credor_anterior: None,
+            },
+        )
+    };
+    // No Simples, não há EFD ICMS/IPI.
+    let simples = gerar(mes, vec![]);
+    assert!(simples.arquivo.is_none());
+    assert!(simples.impedimentos[0].contains("Simples Nacional"));
+
+    // Lucro Presumido, o produto com CST 00 a 18%, notas de produção.
+    let empresa = m.empresa;
+    m.arm
+        .escritor()
+        .executar(
+            ContextoEscrita::novo(empresa, Id::novo(), Id::novo(), Id::novo()),
+            move |uow| {
+                uow.conexao()
+                    .execute(
+                        "UPDATE nucleo_empresa SET regime = 'LucroPresumido' WHERE id = ?1",
+                        [empresa.em_bytes().as_slice()],
+                    )
+                    .map(|_| ())
+                    .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+            },
+        )
+        .unwrap();
+    m.rodar(
+        "estoque.definir_campos_fiscais_do_produto.v1",
+        &mod_estoque::DefinirCamposFiscaisDoProduto {
+            produto: cen.produto,
+            campos: mod_estoque::fiscal::CamposFiscais {
+                cst_icms: Some("00".into()),
+                aliquota_icms: Some(Percentual::pontos(18)),
+                ..mod_estoque::fiscal::CamposFiscais::default()
+            },
+        },
+    )
+    .unwrap();
+    m.rodar(
+        "fiscal.definir_ambiente.v1",
+        &DefinirAmbienteFiscal {
+            ambiente: AmbienteFiscal::Producao,
+        },
+    )
+    .unwrap();
+    let a = m.emitir(m.vender(&cen, cen.produto, 2, false));
+    let b = m.emitir(m.vender(&cen, cen.produto, 1, false));
+    assert!(m.transmitir().starts_with("2 autorizada"));
+    m.rodar(
+        "fiscal.cancelar_nfce.v1",
+        &CancelarNfce {
+            documento: b.id,
+            justificativa: "Venda registrada em duplicidade no caixa".into(),
+        },
+    )
+    .unwrap();
+    assert!(m.transmitir().contains("1 cancelada"));
+
+    // Sem o contabilista, não sai.
+    let sem_config = gerar(mes, vec![]);
+    assert!(
+        sem_config.impedimentos[0].contains("contabilista"),
+        "{sem_config:?}"
+    );
+    let configuracao = ConfiguracaoEfd {
+        contabilista: Contabilista {
+            nome: "Ana Contadora".into(),
+            cpf: "52998224725".into(),
+            crc: "RS-012345/O".into(),
+            codigo_municipio: "4314902".into(),
+            ..Contabilista::default()
+        },
+        codigo_receita: "0221".into(),
+        dia_vencimento: 12,
+        ..ConfiguracaoEfd::default()
+    };
+    m.rodar(
+        "fiscal.configurar_efd.v1",
+        &ConfigurarEfd {
+            configuracao: configuracao.clone(),
+        },
+    )
+    .unwrap();
+    let lida: ConfiguracaoEfd = m.consultar(
+        "fiscal.configuracao_efd.v1",
+        &mod_fiscal::efd::ConfiguracaoDaEfd,
+    );
+    assert_eq!(lida, configuracao);
+
+    let compra = EntradaEscriturada {
+        xml: COMPRA_PARA_EFD.replace("DATA", &hoje.formatar_iso()),
+        data_entrada: hoje,
+        itens: vec![Some(ItemDoCadastro {
+            codigo: mod_fiscal::codigo_do_produto(cen.produto),
+            descricao: "Capinha de celular".into(),
+            unidade: "UN".into(),
+            ncm: "39269090".into(),
+            gtin: None,
+            cest: None,
+        })],
+    };
+    let efd = gerar(mes, vec![compra]);
+    assert!(efd.impedimentos.is_empty(), "{:?}", efd.impedimentos);
+    let arquivo = efd.arquivo.unwrap();
+    let linhas: Vec<Vec<&str>> = arquivo
+        .texto
+        .lines()
+        .map(|l| l.trim_matches('|').split('|').collect())
+        .collect();
+    let do_reg = |reg: &str| -> Vec<&Vec<&str>> { linhas.iter().filter(|l| l[0] == reg).collect() };
+    // A autorizada e a cancelada (só com a chave), e a compra.
+    let c100 = do_reg("C100");
+    assert_eq!(c100.len(), 3);
+    let numero = a.numero.to_string();
+    assert_eq!(
+        c100[0][..8],
+        ["C100", "1", "0", "", "65", "00", "1", numero.as_str(),]
+    );
+    assert_eq!(c100[0][8].len(), 44, "a chave da autorizada");
+    assert_eq!(c100[0][11], "50,00");
+    assert_eq!(c100[1][5], "02");
+    assert_eq!(c100[2][1..6], ["0", "1", "11444777000161", "55", "00"]);
+    let c190 = do_reg("C190");
+    assert_eq!(
+        c190[0][1..7],
+        ["000", "5102", "18,00", "50,00", "50,00", "9,00"]
+    );
+    assert_eq!(
+        c190[1][1..7],
+        ["000", "1102", "17,00", "100,00", "100,00", "17,00"]
+    );
+    let codigo = mod_fiscal::codigo_do_produto(cen.produto);
+    assert_eq!(do_reg("C170")[0][2], codigo);
+    assert_eq!(do_reg("0200")[0][1], codigo);
+    assert_eq!(linhas[0][1], "020");
+    assert_eq!(linhas[0][13], "A");
+    // 9 de débito, 17 de crédito: 8 de saldo credor para o mês seguinte.
+    assert_eq!(arquivo.apuracao.debitos, Dinheiro::reais(9));
+    assert_eq!(arquivo.apuracao.creditos, Dinheiro::reais(17));
+    assert_eq!(
+        arquivo.apuracao.saldo_credor_a_transportar,
+        Dinheiro::reais(8)
+    );
+    assert!(
+        arquivo.avisos[0].contains("Sem a apuração"),
+        "{:?}",
+        arquivo.avisos
+    );
+
+    // Registrada a apuração, o mês seguinte abre com o saldo.
+    m.rodar(
+        "fiscal.registrar_apuracao_icms.v1",
+        &RegistrarApuracaoIcms {
+            competencia: mes,
+            apuracao: arquivo.apuracao,
+        },
+    )
+    .unwrap();
+    let seguinte = gerar(mes.proxima(), vec![]).arquivo.unwrap();
+    assert_eq!(seguinte.apuracao.saldo_credor_anterior, Dinheiro::reais(8));
+    assert_eq!(
+        seguinte.apuracao.saldo_credor_a_transportar,
+        Dinheiro::reais(8)
+    );
+    assert!(!seguinte.avisos.iter().any(|x| x.contains("Sem a apuração")));
+    assert_eq!(seguinte.documentos, 0);
 }

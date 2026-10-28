@@ -28,6 +28,7 @@ pub mod correcao;
 pub mod devolucao_compra;
 pub mod devolucao_venda;
 mod documento;
+pub mod efd;
 mod erros;
 mod explicacao;
 mod fechamento;
@@ -71,7 +72,7 @@ pub use manifesto::{ID, MANIFESTO};
 #[cfg(feature = "sqlite")]
 pub use modulo::ModuloFiscal;
 #[cfg(feature = "sqlite")]
-pub use montagem::{marcar_homologacao, DESCRICAO_HOMOLOGACAO};
+pub use montagem::{codigo_do_produto, marcar_homologacao, DESCRICAO_HOMOLOGACAO};
 pub use nfce::{
     AnularDocumentoDaVenda, BuscarXmlsQueFaltam, CancelarNfce, ConfiguracaoDaNfce,
     ConfiguracaoNfce, ConfigurarNfce, DetalheDocumento, DocumentoDaVenda, DocumentoFiscal,

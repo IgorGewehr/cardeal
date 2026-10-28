@@ -768,6 +768,8 @@ pub(super) struct PacoteGravado {
     pub(super) buscando: u32,
     /// Quantas pendências o PDF lista.
     pub(super) pendencias: usize,
+    /// Se a EFD ICMS/IPI do mês foi junto.
+    pub(super) efd: bool,
 }
 
 /// Grava o pacote do mês escolhido em `destino/Contador <AAAA-MM>/`.
@@ -867,12 +869,55 @@ pub(super) fn gravar(
         std::fs::write(pasta.join(format!("XMLs {aaaamm}.zip")), zip)
             .map_err(|e| format!("Não consegui gravar os XMLs: {e}"))?;
     }
+    let efd = gravar_efd(motor, sessao, mes, &pasta, &aaaamm)?;
     Ok(PacoteGravado {
         pasta,
         xmls: xmls.len(),
         buscando,
         pendencias: pendencias(&emitidas, &entradas).len(),
+        efd,
     })
+}
+
+/// A EFD ICMS/IPI do mês na pasta do pacote, quando a empresa entrega (regime normal com o SPED
+/// configurado), com os avisos ao lado; faltando algo, um arquivo diz o quê. No Simples, nada.
+fn gravar_efd(
+    motor: &Motor,
+    sessao: &Sessao,
+    mes: Competencia,
+    pasta: &Path,
+    aaaamm: &str,
+) -> Result<bool, String> {
+    if !sessao.concede("fiscal.ver") {
+        return Ok(false);
+    }
+    let Ok(efd) = crate::sped::gerar(motor, sessao, mes, false, None) else {
+        return Ok(false);
+    };
+    let escrever = |nome: String, conteudo: &[u8]| {
+        std::fs::write(pasta.join(nome), conteudo)
+            .map_err(|e| format!("Não consegui gravar a EFD: {e}"))
+    };
+    match &efd.arquivo {
+        Some(a) => {
+            escrever(a.nome.clone(), &a.em_latin1())?;
+            if !a.avisos.is_empty() {
+                escrever(
+                    format!("EFD ICMS IPI {aaaamm} - avisos.txt"),
+                    a.avisos.join("\r\n").as_bytes(),
+                )?;
+            }
+            Ok(true)
+        }
+        None if crate::sped::dispensada(&efd) => Ok(false),
+        None => {
+            escrever(
+                format!("EFD ICMS IPI {aaaamm} - não gerada.txt"),
+                efd.impedimentos.join("\r\n").as_bytes(),
+            )?;
+            Ok(false)
+        }
+    }
 }
 
 /// O botão da aba Resultado: escolhe a pasta, grava e abre.
@@ -899,12 +944,15 @@ pub(super) fn botao(
             if p.buscando > 0 {
                 crate::fiscal_fundo::disparar(ui.ctx(), motor, sessao);
             }
+            let efd = if p.efd { " e a EFD ICMS/IPI" } else { "" };
             let aviso = match (p.xmls, p.pendencias) {
                 (_, 0) if p.xmls > 0 => Notificacao::sucesso(format!(
-                    "Pacote do contador gravado: PDF, planilha e {} XML(s) do mês",
+                    "Pacote do contador gravado: PDF, planilha, {} XML(s) do mês{efd}",
                     p.xmls
                 )),
-                (0, 0) => Notificacao::sucesso("Pacote do contador gravado: PDF e planilha do mês"),
+                (0, 0) => Notificacao::sucesso(format!(
+                    "Pacote do contador gravado: PDF e planilha do mês{efd}"
+                )),
                 (_, n) if p.buscando > 0 => Notificacao::aviso(format!(
                     "Pacote do contador gravado, com {n} pendência(s) — o Cardeal está buscando {} \
                      XML(s) na SEFAZ: gere o pacote de novo daqui a pouco",

@@ -158,6 +158,12 @@ CREATE INDEX compras_dfe_nota_espera ON compras_dfe_nota(empresa, ambiente, esta
 ";
 
 /// v10: o ICMS-ST estimado pela MVA que entrou no custo do item (para o estorno tirar).
+/// v11: o dia em que a nota entrou (a confirmação) — o mês da escrituração (SPED). A nota
+/// confirmada antes fica sem ele e usa o dia da emissão.
+const SQL_V11: &str = "
+ALTER TABLE compras_nota_entrada ADD COLUMN data_entrada INTEGER;
+";
+
 const SQL_V10: &str = "
 ALTER TABLE compras_item_nota_entrada ADD COLUMN st_estimado INTEGER NOT NULL DEFAULT 0;
 ";
@@ -246,6 +252,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 10,
         nome: "compras_st_estimado",
         sql: SQL_V10,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 11,
+        nome: "compras_data_da_entrada",
+        sql: SQL_V11,
         tipo: TipoMigracao::Esquema,
     },
 ];

@@ -35,7 +35,9 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   entram no custo e no título); a estimativa do ST pela MVA quando a nota não traz o valor também (2026-10-28). A **apuração e
   o pagamento da comissão do vendedor** estão feitos (2026-10-14), com o ajuste pela devolução de venda
   (2026-10-27) e a **comissão nas vendas do PDV** (2026-10-28: o cupom ganha o vendedor no `F4`, a venda vira
-  "venda comissionável" no `vendas` e o estorno do cupom a tira ou estorna a comissão).
+  "venda comissionável" no `vendas` e o estorno do cupom a tira ou estorna a comissão). O **SPED** (EFD ICMS/IPI)
+  é gerado no Cardeal desde 2026-10-28 (`mod_fiscal::efd`, dos XMLs das notas emitidas e das compras que entraram;
+  só regime normal; a EFD-Contribuições fica fora — acaba em 2027 com a CBS).
   Onda 6 (Financeiro 2) começou: **conciliação com alerta de pendências e saldo banco × sistema**,
   **lançamento pré-preenchido pelo último da pessoa**, **DFC indireto**, **cheques**, **balancete/diário** e o
   **pacote do contador** (PDF + `.xlsx`) e a **régua de cobrança** (fila do dia com envio de um clique) feitos

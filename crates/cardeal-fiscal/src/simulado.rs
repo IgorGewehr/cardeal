@@ -14,6 +14,7 @@ use crate::emissao::{
 };
 use crate::erros::ErroFiscal;
 use crate::porta::{ModeloFiscal, Nsu, PortaFiscal, StatusSefaz};
+use crate::simulado_xml::{nfe_assinada, xml_simulado, Complemento};
 
 /// A distribuição `DFe` simulada, como a SEFAZ entrega: o resumo primeiro, a nota completa
 /// depois da ciência (por um NSU novo, ou pela consulta por chave).
@@ -114,7 +115,8 @@ impl FiscalSimulado {
     }
 
     /// A emissão simulada de uma NFC-e (`"65"`) ou NF-e (`"55"`).
-    fn emitir_modelo(&self, nota: &Nfce, modelo: &str) -> Resultado<RetornoSefaz> {
+    fn emitir_modelo(&self, nota: &Nfce, complemento: &Complemento) -> Resultado<RetornoSefaz> {
+        let modelo = complemento.modelo;
         self.api_fora()?;
         if let Some(r) = self.sem_sefaz() {
             return Ok(r);
@@ -140,7 +142,7 @@ impl FiscalSimulado {
             chave: Some(chave.clone()),
             protocolo: Some(format!("143{:012}", nota.numero)),
             recebido_em: Some("2026-10-14T12:00:00-03:00".into()),
-            xml: Some(xml_simulado(&chave, nota)),
+            xml: Some(xml_simulado(&chave, nota, complemento)),
             xml_assinado: None,
             xml_cancelamento: None,
             erros: Vec::new(),
@@ -156,7 +158,7 @@ impl FiscalSimulado {
                     r.situacao,
                     SituacaoRetorno::Processando | SituacaoRetorno::Erro
                 ) {
-                    r.xml_assinado = Some(nfe_assinada(&chave, nota));
+                    r.xml_assinado = Some(nfe_assinada(&chave, nota, complemento));
                 }
                 r
             }
@@ -478,11 +480,11 @@ impl PortaFiscal for FiscalSimulado {
             numero: nota.numero,
             informacoes: nota.informacoes.clone(),
         };
-        self.emitir_modelo(&como_nfce, "55")
+        self.emitir_modelo(&como_nfce, &Complemento::da_nfe(nota))
     }
 
     fn emitir_nfce(&self, nota: &Nfce, _csc: &Csc) -> Resultado<RetornoSefaz> {
-        self.emitir_modelo(nota, "65")
+        self.emitir_modelo(nota, &Complemento::da_nfce(nota))
     }
 
     fn consultar_documento(
@@ -686,7 +688,7 @@ impl PortaFiscal for FiscalSimulado {
         );
         let chave = chave.como_str().to_string();
         // A nota assinada, com o `dhCont`/`xJust` no `ide` (como o sefaz-api monta).
-        let xml = nfe_assinada(&chave, nota).replacen(
+        let xml = nfe_assinada(&chave, nota, &Complemento::da_nfce(nota)).replacen(
             "</ide>",
             &format!(
                 "<tpEmis>9</tpEmis><dhCont>{}</dhCont><xJust>{}</xJust></ide>",
@@ -779,36 +781,6 @@ fn rejeicao(codigo: &str, motivo: &str) -> RetornoSefaz {
 
 fn travar<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
-}
-
-/// Um `nfeProc` mínimo: a nota "assinada" com o protocolo.
-fn xml_simulado(chave: &str, nota: &Nfce) -> String {
-    format!(
-        "<nfeProc versao=\"4.00\">{}<protNFe><infProt><chNFe>{chave}</chNFe><cStat>100</cStat>\
-         </infProt></protNFe></nfeProc>",
-        nfe_assinada(chave, nota)
-    )
-}
-
-/// A `NFe` mínima, com a emissão (agora, em Brasília) e o grupo do QR Code — o bastante para
-/// guardar, imprimir e mandar ao contador em teste.
-fn nfe_assinada(chave: &str, nota: &Nfce) -> String {
-    let agora = cardeal_kernel::Instante::agora();
-    let fuso = cardeal_kernel::Fuso::BRASILIA;
-    format!(
-        "<NFe><infNFe Id=\"NFe{chave}\"><ide><nNF>{}</nNF><serie>{}</serie>\
-         <dhEmi>{}T{}-03:00</dhEmi></ide><total><ICMSTot><vNF>{}</vNF></ICMSTot></total></infNFe><infNFeSupl><qrCode>\
-         https://homologacao.simulado/nfce?p={chave}|3|2</qrCode><urlChave>https://homologacao.simulado/nfce</urlChave>\
-         </infNFeSupl></NFe>",
-        nota.numero,
-        nota.serie,
-        agora.data(fuso).formatar_iso(),
-        agora.hora(fuso).formatar_com_segundos(),
-        {
-            let c = nota.total().em_centavos();
-            format!("{}.{:02}", c / 100, c % 100)
-        }
-    )
 }
 
 #[cfg(test)]

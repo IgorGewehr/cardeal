@@ -91,7 +91,7 @@ operando 30 dias, incluindo pelo menos um evento de queda de rede.
 - [ ] NF-e de saída, cancelamento, carta de correção, inutilização
 - [x] Conciliação bancária — OFX e CSV, com saldo banco × sistema e alerta de pendências *(Pix e CNAB retorno: faltam)*
 - [ ] Cobrança: boleto e Pix com baixa automática
-- [ ] SPED Fiscal e Contribuições *(o `sefaz-api` não gera: será gerado no Cardeal)*
+- [x] SPED Fiscal (EFD ICMS/IPI) *(gerado no Cardeal desde 2026-10-28; a EFD-Contribuições fica fora: acaba em janeiro de 2027 com a CBS)*
 
 ## Fase 4 — Analytics (determinístico)
 

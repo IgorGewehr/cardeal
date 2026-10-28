@@ -320,6 +320,26 @@ CREATE INDEX fiscal_carta_fila ON fiscal_carta_correcao(empresa, proxima_tentati
 
 /// v12: a NFS-e (DPS do Padrão Nacional) — a configuração (o código do serviço, a série e o
 /// próximo número por ambiente) e a nota, com a fila própria.
+/// v13: o SPED — a configuração (o contabilista, o perfil, o código de receita) e a apuração
+/// do ICMS registrada de cada mês (o saldo credor que abre o seguinte).
+const SQL_V13: &str = "
+CREATE TABLE fiscal_configuracao_efd (
+    empresa       BLOB PRIMARY KEY,
+    dados         BLOB    NOT NULL,
+    atualizado_em INTEGER NOT NULL
+) STRICT;
+CREATE TABLE fiscal_apuracao_icms (
+    empresa                  BLOB    NOT NULL,
+    competencia              INTEGER NOT NULL,
+    debitos                  INTEGER NOT NULL,
+    creditos                 INTEGER NOT NULL,
+    a_recolher               INTEGER NOT NULL,
+    saldo_credor_transportar INTEGER NOT NULL,
+    registrado_em            INTEGER NOT NULL,
+    PRIMARY KEY (empresa, competencia)
+) STRICT;
+";
+
 const SQL_V12: &str = "
 CREATE TABLE fiscal_configuracao_nfse (
     empresa                     BLOB PRIMARY KEY REFERENCES nucleo_empresa(id),
@@ -436,6 +456,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 12,
         nome: "fiscal_nfse",
         sql: SQL_V12,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 13,
+        nome: "fiscal_sped",
+        sql: SQL_V13,
         tipo: TipoMigracao::Esquema,
     },
 ];

@@ -38,11 +38,13 @@ mod der;
 mod dfe;
 mod emissao;
 mod erros;
+mod escrituracao;
 mod nfe;
 mod nfse;
 mod porta;
 mod sefaz_api;
 mod simulado;
+mod simulado_xml;
 
 pub use certificado::{
     ler_certificado_a1, preparar_certificado_a1, CertificadoPreparado, InfoCertificado,
@@ -60,6 +62,7 @@ pub use emissao::{
 };
 pub use emissao::{Destinatario, DevolucaoDoItem, IndicadorIe, Nfe};
 pub use erros::ErroFiscal;
+pub use escrituracao::{ler_para_escriturar, DocumentoXml, ItemXml, ParticipanteXml, TotaisXml};
 pub use nfe::{cfop_de_venda, descrever_cfop, ClassificacaoEntrada, FinalidadeNfe};
 pub use nfe::{interpretar, Duplicata, ItemNfe, NotaFiscalXml, TributosDaCompra};
 pub use nfse::{
