@@ -129,6 +129,10 @@ pub struct EstadoTelaCompras {
     grupos: Vec<NoArvore>,
     /// "Já foi pago" no diálogo de confirmar entrada — item 2 do briefing.
     pago_no_ato: bool,
+    /// O ICMS-ST estimado pela MVA dos itens que vieram sem ST (a nota aberta).
+    st_estimado: Vec<mod_compras::st::EstimativaSt>,
+    /// Incluir o ST estimado no custo ao confirmar (decisão de quem confere).
+    incluir_st: bool,
     /// As parcelas da conta a pagar da nota aberta.
     parcelas: parcelas::EditorParcelas,
     /// O estorno da entrada da nota aberta (confirmada).
@@ -234,6 +238,14 @@ impl EstadoTelaCompras {
         self.vinc_produto.clear();
         self.busca_produto.clear();
         self.pago_no_ato = false;
+        self.incluir_st = false;
+        self.st_estimado = motor
+            .consultar(
+                sessao,
+                "compras.estimativa_de_st.v1",
+                &mod_compras::st::EstimativaDeStDaNota { nota_entrada: nota },
+            )
+            .unwrap_or_default();
         self.parcelas = parcelas::EditorParcelas::carregar(motor, sessao, &item);
         self.estorno = estorno::EstadoEstorno::default();
         self.devolucao = devolucao::EstadoDevolucao::default();
@@ -991,6 +1003,7 @@ fn dialogo_ver(
                             );
                         }
                         ui.add_space(Espaco::E12);
+                        secao_st_estimado(ui, &estado.st_estimado, &mut estado.incluir_st);
                         if ui.add(Botao::primario("Confirmar entrada")).clicked() {
                             confirmar(ui.ctx(), motor, sessao, estado, n.nota);
                         }
@@ -1042,6 +1055,50 @@ fn dialogo_ver(
     if fechar {
         estado.dlg = Dlg::Fechado;
     }
+}
+
+/// O ST estimado pela MVA: os itens, o total e a decisão de incluir no custo (com a guia a
+/// pagar ao estado). Sem estimativa, nada.
+fn secao_st_estimado(
+    ui: &mut egui::Ui,
+    estimativas: &[mod_compras::st::EstimativaSt],
+    incluir: &mut bool,
+) {
+    if estimativas.is_empty() {
+        return;
+    }
+    let total: Dinheiro = estimativas.iter().map(|e| e.valor).sum();
+    Painel::novo().realce(Tom::Atencao).mostrar(ui, |ui| {
+        ui.add(Rotulo::interface("ICMS-ST estimado pela MVA").quebravel());
+        ui.add(
+            Rotulo::apoio(
+                "Estes itens têm MVA no cadastro e vieram sem ST na nota — a antecipação fica com \
+                 a empresa. É uma estimativa: confira com o contador.",
+            )
+            .quebravel(),
+        );
+        ui.add_space(Espaco::E4);
+        for e in estimativas {
+            ui.add(Rotulo::campo(format!(
+                "{} — base {} (MVA {}), {} − {} da origem = {}",
+                e.descricao,
+                e.base_st.formatar_com_simbolo(),
+                e.mva.formatar_com_simbolo(),
+                e.aliquota_interna.formatar_com_simbolo(),
+                e.credito.formatar_com_simbolo(),
+                e.valor.formatar_com_simbolo()
+            )));
+        }
+        ui.add_space(Espaco::E4);
+        ui.add(Caixa::nova(
+            incluir,
+            format!(
+                "Incluir os {} no custo e lançar a guia a pagar ao estado",
+                total.formatar_com_simbolo()
+            ),
+        ));
+    });
+    ui.add_space(Espaco::E8);
 }
 
 /// As opções de produto para um `SeletorBusca` — reconstruída a cada item porque
@@ -1314,6 +1371,7 @@ fn confirmar(
             gerar_titulo_a_pagar: None,
             pago_no_ato: Some(estado.pago_no_ato),
             parcelas,
+            incluir_st_estimado: estado.incluir_st,
         },
     ) {
         Ok(saida) => {

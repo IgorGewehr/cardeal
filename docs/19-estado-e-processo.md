@@ -32,7 +32,7 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   já estão feitos — a onda 4 fechou). Onda 5: **inventário com contagem cega**, **transferência entre locais**, **produto a partir da
   nota com nome padronizado por dicionário**, **validade e perdas** e **custo-hora do técnico** feitos
   (2026-10-13); do **ST/MVA no custo**, a parte determinística está feita (ICMS-ST, FCP-ST, IPI e desconto do XML
-  entram no custo e no título); resta estimar ST pela MVA quando a nota não traz o valor (tabelas + contador). A **apuração e
+  entram no custo e no título); a estimativa do ST pela MVA quando a nota não traz o valor também (2026-10-28). A **apuração e
   o pagamento da comissão do vendedor** estão feitos (2026-10-14); fora: comissão nas vendas do PDV (o cupom
   tem operador, não vendedor) e o ajuste por devolução (a devolução ainda não é persistida).
   Onda 6 (Financeiro 2) começou: **conciliação com alerta de pendências e saldo banco × sistema**,
@@ -53,8 +53,8 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   produção, e o DFe ainda não foi conferido contra o Ambiente Nacional (pede o certificado com a
   senha).
 - **Pendência de confiança:** as tabelas do Simples e as alíquotas precisam ser conferidas com o
-  contador; o ST/IPI **da nota** já entra no custo (2026-10-13), mas a estimativa de ST pela MVA (sem o valor na
-  nota) ainda não.
+  contador; o ST/IPI **da nota** entra no custo (2026-10-13) e o ST estimado pela MVA (sem o valor na nota)
+  entra quando quem confirma decide (2026-10-28) — as MVAs e alíquotas do cadastro precisam do contador.
 
 ## 1. O que existe, com precisão (tabela dos crates de 2026-09-05; as sessões seguintes, abaixo, a atualizam)
 
@@ -750,6 +750,10 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   devolução; `mod-fiscal`: `devolucao_compra.rs` (`montar_nfe_de_devolucao`,
   `emitir_nfe_de_devolucao_comum`, `DocumentoDaDevolucao`); desktop: Compras › nota › Devolver ao
   fornecedor, a lista das devoluções com a NF-e (emitir, situação, DANFE) e o DANFE com ST/IPI devolvidos.
+- **ICMS-ST estimado pela MVA (2026-10-28, compras.md §5, fecha a pendência da onda 5):** `mod-compras`:
+  `st.rs` (`mva_ajustada`, `estimar_st`, `EstimativaDeStDaNota`), migração v10 (`st_estimado`),
+  `ConfirmarEntrada.incluir_st_estimado` (o custo e a guia `compras_st`), o estorno que desfaz, a confirmação
+  automática que para; desktop: o quadro "ICMS-ST estimado pela MVA" na confirmação da entrada.
 - **Calendário de obrigações (2026-10-28, fiscal.md §7):** `mod-fiscal`: `calendario.rs` (`pascoa`,
   `feriados`, `prorrogar`/`antecipar`/`dia_util`/`ultimo_dia_util`, `obrigacoes_do_mes` por regime,
   `ObrigacoesDoMes` com as do Cardeal); desktop: o cartão "Obrigações" na Visão geral

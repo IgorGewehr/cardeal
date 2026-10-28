@@ -62,6 +62,7 @@ mod nota;
 mod preferencias;
 #[cfg(feature = "sqlite")]
 mod repositorio;
+pub mod st;
 
 pub use casamento::{casar, RegraCasamentoAprendida, ResultadoCasamento, LIMIAR_SUGESTAO_FORTE};
 #[cfg(feature = "sqlite")]

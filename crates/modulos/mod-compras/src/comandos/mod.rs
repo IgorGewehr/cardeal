@@ -385,6 +385,26 @@ fn tentar_confirmar_automaticamente(
     let Some(local) = preferencias.local_padrao else {
         return Ok(None);
     };
+    // ST a estimar pela MVA: quem decide é quem confere — a nota fica com o aviso.
+    let estimativas = crate::st::sqlite::estimativas(uow.conexao(), ctx, nota_id)?;
+    if !estimativas.is_empty() {
+        let total: Dinheiro = estimativas.iter().map(|e| e.valor).sum();
+        uow.conexao()
+            .execute(
+                "UPDATE compras_nota_entrada SET alerta = ?2 WHERE id = ?1",
+                rusqlite::params![
+                    nota_id.em_bytes().as_slice(),
+                    format!(
+                        "{} item(ns) sem ICMS-ST na nota, com MVA no cadastro: ST estimado em {} \
+                         — confira na conferência antes de confirmar",
+                        estimativas.len(),
+                        total.formatar_com_simbolo()
+                    )
+                ],
+            )
+            .map_err(|e| Erro::novo(cardeal_kernel::CodigoErro::FALHA_INTERNA, e.to_string()))?;
+        return Ok(None);
+    }
     let confirmacao = confirmar_entrada_comum(
         nota_id,
         local,
@@ -561,7 +581,16 @@ pub fn confirmar_entrada_comum(
     ctx: &Ctx,
     uow: &mut UnidadeDeTrabalho,
 ) -> Resultado<ConfirmacaoEntrada> {
-    confirmar_entrada_com_parcelas(nota_id, local, gerar_titulo, pago_no_ato, None, ctx, uow)
+    confirmar_entrada_com_parcelas(
+        nota_id,
+        local,
+        gerar_titulo,
+        pago_no_ato,
+        None,
+        false,
+        ctx,
+        uow,
+    )
 }
 
 /// As parcelas do título a pagar: as informadas (vazias = uma só, na emissão) ou, sem elas, as
@@ -592,6 +621,75 @@ fn cronograma_da_entrada(
     ))
 }
 
+/// Soma o ST estimado (`crate::st`) ao custo dos itens e grava; devolve o total.
+#[cfg(feature = "sqlite")]
+fn aplicar_st_estimado(
+    nota: Id,
+    itens: &mut [crate::nota::ItemNotaEntrada],
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<Dinheiro> {
+    let estimativas = crate::st::sqlite::estimativas(uow.conexao(), ctx, nota)?;
+    let mut total = Dinheiro::ZERO;
+    for e in estimativas {
+        let Some(item) = itens.iter_mut().find(|i| i.id == e.item) else {
+            continue;
+        };
+        item.valor_impostos += e.valor;
+        total += e.valor;
+        uow.conexao()
+            .execute(
+                "UPDATE compras_item_nota_entrada
+                 SET valor_impostos = valor_impostos + ?2, st_estimado = ?2 WHERE id = ?1",
+                rusqlite::params![item.id.em_bytes().as_slice(), e.valor.em_centavos()],
+            )
+            .map_err(|e| Erro::novo(cardeal_kernel::CodigoErro::FALHA_INTERNA, e.to_string()))?;
+    }
+    Ok(total)
+}
+
+/// A guia do ICMS-ST antecipado: um título a pagar (D Estoque / C Fornecedores — a baixa do
+/// financeiro debita sempre o papel padrão), vencendo no dia 20 do mês seguinte, o prazo mais
+/// comum; o do estado pode ser outro (o vencimento se altera no financeiro).
+#[cfg(feature = "sqlite")]
+fn lancar_guia_de_st(
+    nota: &crate::nota::NotaEntrada,
+    valor: Dinheiro,
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<()> {
+    let hoje = ctx.hoje();
+    let dia_20 = cardeal_kernel::Data::de_ymd(hoje.ano(), hoje.mes(), 20)
+        .map_err(|e| Erro::novo(cardeal_kernel::CodigoErro::FALHA_INTERNA, e.mensagem))?
+        .mais_meses(1);
+    let vencimento = mod_fiscal::calendario::prorrogar(dia_20);
+    lancar_titulo_comum(
+        DadosLancamentoTitulo {
+            especie: EspecieTitulo::Pagar,
+            contraparte: None,
+            valor_total: valor,
+            emissao: hoje,
+            parcelas: 1,
+            primeiro_vencimento: vencimento,
+            intervalo_dias: 0,
+            cronograma: None,
+            observacao: Some(format!(
+                "ICMS-ST antecipado (guia ao estado), estimado pela MVA — nota {}/{}. Confira o \
+                 valor e o vencimento do seu estado com o contador",
+                nota.numero, nota.serie
+            )),
+            categoria: None,
+            origem_modulo: "compras_st",
+            origem_id: Some(nota.id),
+            papel_contraparte: PapelConta::Fornecedores,
+            papel_resultado: PapelConta::EstoqueMercadorias,
+        },
+        ctx,
+        uow,
+    )?;
+    Ok(())
+}
+
 /// Como [`confirmar_entrada_comum`], com as parcelas do título informadas por quem confirma
 /// (`None` = as da nota).
 ///
@@ -602,17 +700,25 @@ fn cronograma_da_entrada(
 /// # Panics
 /// Nunca, na prática — ver [`confirmar_entrada_comum`].
 #[cfg(feature = "sqlite")]
+#[allow(clippy::too_many_arguments)] // as escolhas de quem confirma, uma a uma
 pub fn confirmar_entrada_com_parcelas(
     nota_id: Id,
     local: Id,
     gerar_titulo: bool,
     pago_no_ato: bool,
     parcelas: Option<Vec<ParcelaCompra>>,
+    incluir_st: bool,
     ctx: &Ctx,
     uow: &mut UnidadeDeTrabalho,
 ) -> Resultado<ConfirmacaoEntrada> {
     let mut nota = carregar_nota(uow, nota_id)?;
-    let itens = RepositorioCompras::novo(uow).itens_da_nota(nota_id)?;
+    let mut itens = RepositorioCompras::novo(uow).itens_da_nota(nota_id)?;
+    // O ST estimado pela MVA entra no custo do item (e fica gravado, para o estorno tirar).
+    let st_total = if incluir_st {
+        aplicar_st_estimado(nota_id, &mut itens, ctx, uow)?
+    } else {
+        Dinheiro::ZERO
+    };
     let nao_casados = itens
         .iter()
         .filter(|i| i.estado_casamento != EstadoCasamento::Casado)
@@ -690,6 +796,9 @@ pub fn confirmar_entrada_com_parcelas(
             false
         };
 
+        if st_total.e_positivo() {
+            lancar_guia_de_st(&nota, st_total, ctx, uow)?;
+        }
         (Some(gravado.titulo), pago)
     } else {
         (None, false)

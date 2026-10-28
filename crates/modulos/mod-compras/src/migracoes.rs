@@ -157,6 +157,11 @@ CREATE TABLE compras_dfe_nota (
 CREATE INDEX compras_dfe_nota_espera ON compras_dfe_nota(empresa, ambiente, estado, proxima_tentativa);
 ";
 
+/// v10: o ICMS-ST estimado pela MVA que entrou no custo do item (para o estorno tirar).
+const SQL_V10: &str = "
+ALTER TABLE compras_item_nota_entrada ADD COLUMN st_estimado INTEGER NOT NULL DEFAULT 0;
+";
+
 /// v9: a devolução ao fornecedor, item a item (a nota pode voltar em partes).
 const SQL_V9: &str = "
 CREATE TABLE compras_devolucao (
@@ -235,6 +240,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 9,
         nome: "compras_devolucao_ao_fornecedor",
         sql: SQL_V9,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 10,
+        nome: "compras_st_estimado",
+        sql: SQL_V10,
         tipo: TipoMigracao::Esquema,
     },
 ];

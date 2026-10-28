@@ -37,6 +37,7 @@ impl Modulo for ModuloCompras {
             .comando::<crate::DevolverAoFornecedor>("compras.devolver_ao_fornecedor.v1")
             .comando::<crate::EmitirNfeDaDevolucao>("compras.emitir_nfe_da_devolucao.v1")
             .consulta::<crate::DevolucoesDaNota>("compras.devolucoes_da_nota.v1")
+            .consulta::<crate::st::EstimativaDeStDaNota>("compras.estimativa_de_st.v1")
             .comando::<LancarNotaManual>("compras.lancar_nota_manual.v1")
             .comando::<ImportarNotaDeArquivoXml>("compras.importar_nota_de_arquivo_xml.v1")
             .consulta::<NotasRecentes>("compras.notas_recentes.v1")

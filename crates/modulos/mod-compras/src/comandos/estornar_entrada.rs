@@ -82,14 +82,16 @@ impl Comando for EstornarEntrada {
         if crate::devolucao::sqlite::tem_devolucao(uow.conexao(), nota.id)? {
             return Err(Erro::de_dominio(&ErroCompras::NotaComDevolucao));
         }
-        if let Some((_, pago)) = mod_financeiro::situacao_do_titulo_da_origem(
-            uow.conexao(),
-            ctx.empresa,
-            "compras",
-            nota.id,
-        )? {
-            if pago.e_positivo() && !self.estornar_pagamento {
-                return Err(Erro::de_dominio(&ErroCompras::EntradaComPagamento(pago)));
+        for origem in ["compras", "compras_st"] {
+            if let Some((_, pago)) = mod_financeiro::situacao_do_titulo_da_origem(
+                uow.conexao(),
+                ctx.empresa,
+                origem,
+                nota.id,
+            )? {
+                if pago.e_positivo() && !self.estornar_pagamento {
+                    return Err(Erro::de_dominio(&ErroCompras::EntradaComPagamento(pago)));
+                }
             }
         }
 
@@ -104,6 +106,22 @@ impl Comando for EstornarEntrada {
         let desfeito = mod_financeiro::desfazer_titulo_da_origem_comum(
             "compras", nota.id, &historico, ctx, uow,
         )?;
+        // A guia do ST estimado, e o ST que tinha entrado no custo dos itens.
+        mod_financeiro::desfazer_titulo_da_origem_comum(
+            "compras_st",
+            nota.id,
+            &historico,
+            ctx,
+            uow,
+        )?;
+        uow.conexao()
+            .execute(
+                "UPDATE compras_item_nota_entrada
+                 SET valor_impostos = valor_impostos - st_estimado, st_estimado = 0
+                 WHERE nota_entrada = ?1",
+                [nota.id.em_bytes().as_slice()],
+            )
+            .map_err(|e| Erro::novo(cardeal_kernel::CodigoErro::FALHA_INTERNA, e.to_string()))?;
 
         // 5. Persistir.
         RepositorioCompras::novo(uow).atualizar_nota(&nota)?;

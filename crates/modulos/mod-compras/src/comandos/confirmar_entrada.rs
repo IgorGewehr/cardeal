@@ -38,6 +38,11 @@ pub struct ConfirmarEntrada {
     /// ato ignora: uma parcela só, quitada.
     #[serde(default)]
     pub parcelas: Option<Vec<ParcelaCompra>>,
+    /// Incluir no custo o ICMS-ST estimado pela MVA dos itens que vieram sem ST
+    /// (`compras.estimativa_de_st.v1`) — e lançar a guia a pagar ao estado. Decisão de quem
+    /// confirma: é estimativa.
+    #[serde(default)]
+    pub incluir_st_estimado: bool,
 }
 
 /// O que o comando devolve.
@@ -69,6 +74,7 @@ impl Comando for ConfirmarEntrada {
             gerar_titulo,
             pago_no_ato,
             self.parcelas,
+            self.incluir_st_estimado,
             ctx,
             uow,
         )?;

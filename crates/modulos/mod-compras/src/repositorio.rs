@@ -339,21 +339,7 @@ impl<'a, 'b> RepositorioCompras<'a, 'b> {
     /// # Errors
     /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
     pub fn itens_da_nota(&self, nota_entrada: Id) -> Resultado<Vec<ItemNotaEntrada>> {
-        let mut stmt = self
-            .conn()
-            .prepare(
-                "SELECT id, nota_entrada, produto_casado, codigo_fornecedor,
-                        descricao_fornecedor, ncm, quantidade, valor_unitario, valor_rateio,
-                        estado_casamento, codigo_barras, valor_desconto, valor_impostos
-                 FROM compras_item_nota_entrada WHERE nota_entrada = ?1 ORDER BY rowid",
-            )
-            .map_err(persist)?;
-        let linhas = stmt
-            .query_map([blob(nota_entrada)], item_de_linha)
-            .map_err(persist)?;
-        linhas
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(persist)
+        itens_da_nota_por_conexao(self.conn(), nota_entrada)
     }
 
     /// Quantos itens da nota ainda não estão `Casado`.
@@ -562,4 +548,43 @@ pub(crate) fn parcelas_da_nota(c: &Connection, nota: Id) -> Resultado<Vec<Parcel
     linhas
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(persist)
+}
+
+/// Os itens de uma nota, na ordem em que foram gravados (para quem só tem a conexão).
+///
+/// # Errors
+/// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+pub(crate) fn itens_da_nota_por_conexao(
+    c: &Connection,
+    nota_entrada: Id,
+) -> Resultado<Vec<ItemNotaEntrada>> {
+    let mut stmt = c
+        .prepare(
+            "SELECT id, nota_entrada, produto_casado, codigo_fornecedor,
+                    descricao_fornecedor, ncm, quantidade, valor_unitario, valor_rateio,
+                    estado_casamento, codigo_barras, valor_desconto, valor_impostos
+             FROM compras_item_nota_entrada WHERE nota_entrada = ?1 ORDER BY rowid",
+        )
+        .map_err(persist)?;
+    let linhas = stmt
+        .query_map([blob(nota_entrada)], item_de_linha)
+        .map_err(persist)?;
+    linhas
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(persist)
+}
+
+/// O XML original da nota (para quem só tem a conexão).
+///
+/// # Errors
+/// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+pub(crate) fn xml_da_nota_por_conexao(c: &Connection, nota: Id) -> Resultado<Option<String>> {
+    c.query_row(
+        "SELECT xml FROM compras_nota_entrada WHERE id = ?1",
+        [blob(nota)],
+        |r| r.get(0),
+    )
+    .optional()
+    .map(Option::flatten)
+    .map_err(persist)
 }

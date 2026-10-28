@@ -81,6 +81,7 @@ impl Base {
             "compras.entrada.confirmar",
             "compras.entrada.estornar",
             "compras.devolucao.criar",
+            "estoque.tributario.editar",
         ] {
             papel = papel.com_permissao(p);
         }
@@ -219,6 +220,7 @@ impl Base {
                 gerar_titulo_a_pagar: Some(true),
                 pago_no_ato: Some(pago_no_ato),
                 parcelas,
+                incluir_st_estimado: false,
             },
         )
     }
@@ -853,4 +855,111 @@ fn devolver_ao_fornecedor_abate_a_conta_e_o_que_sobra_vira_credito() {
         CodigoErro::ESTADO_INVALIDO,
         "a nota devolvida não volta de novo"
     );
+}
+
+/// A nota sem ST: 10 × R$ 4,00 + R$ 10,00 de frete, ICMS 00 a 12% (R$ 6,00).
+fn xml_sem_st() -> String {
+    let chave: String = std::iter::repeat_n('8', 44).collect();
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe"><NFe>
+<infNFe Id="NFe{chave}" versao="4.00">
+  <ide><nNF>4700</nNF><serie>1</serie><dhEmi>2026-09-01T09:00:00-03:00</dhEmi></ide>
+  <emit><CNPJ>{CNPJ_FORNECEDOR}</CNPJ><xNome>Distribuidora Alfa LTDA</xNome></emit>
+  <det nItem="1"><prod><cProd>REF-1</cProd><xProd>REFRIG COLA PET 2L</xProd><NCM>22021000</NCM>
+    <qCom>10.0000</qCom><vUnCom>4.000000</vUnCom><vProd>40.00</vProd><vFrete>10.00</vFrete></prod>
+    <imposto><ICMS><ICMS00><orig>0</orig><CST>00</CST><modBC>3</modBC><vBC>50.00</vBC>
+      <pICMS>12.00</pICMS><vICMS>6.00</vICMS></ICMS00></ICMS></imposto></det>
+  <total><ICMSTot><vProd>40.00</vProd><vFrete>10.00</vFrete><vSeg>0.00</vSeg><vOutro>0.00</vOutro>
+    <vNF>50.00</vNF></ICMSTot></total>
+</infNFe></NFe></nfeProc>"#
+    )
+}
+
+#[test]
+fn st_estimado_pela_mva_entra_no_custo_so_quando_quem_confirma_decide() {
+    use mod_compras::st::{EstimativaDeStDaNota, EstimativaSt};
+    let b = Base::nova();
+    let (produto, local) = b.produto_e_local();
+    let r = b.importar_e_vincular(xml_sem_st(), produto);
+    let estimar = || -> Vec<EstimativaSt> {
+        b.consultar(
+            "compras.estimativa_de_st.v1",
+            &EstimativaDeStDaNota {
+                nota_entrada: r.nota_entrada,
+            },
+        )
+    };
+    // Sem MVA no cadastro, nada a estimar.
+    assert!(estimar().is_empty());
+    let (): () = b
+        .executar(
+            "estoque.definir_campos_fiscais_do_produto.v1",
+            &mod_estoque::DefinirCamposFiscaisDoProduto {
+                produto,
+                campos: mod_estoque::fiscal::CamposFiscais {
+                    mva_st: Some(cardeal_kernel::Percentual::pontos(40)),
+                    aliquota_icms: Some(cardeal_kernel::Percentual::pontos(17)),
+                    ..Default::default()
+                },
+            },
+        )
+        .unwrap();
+    // R$ 50 × 1,40 = 70 de base; 70 × 17% = 11,90 − 6,00 da origem = 5,90.
+    let e = estimar();
+    assert_eq!(e.len(), 1);
+    assert_eq!(e[0].base_st, Dinheiro::reais(70));
+    assert_eq!(e[0].credito, Dinheiro::reais(6));
+    assert_eq!(e[0].valor, Dinheiro::centavos(590));
+
+    // Confirmada com o ST: o custo o leva e a guia vai a pagar.
+    let _: EntradaConfirmada = b
+        .executar(
+            "compras.confirmar_entrada.v1",
+            &ConfirmarEntrada {
+                nota_entrada: r.nota_entrada,
+                local,
+                gerar_titulo_a_pagar: Some(true),
+                pago_no_ato: Some(false),
+                parcelas: None,
+                incluir_st_estimado: true,
+            },
+        )
+        .unwrap();
+    let guia: i64 = b.sql(
+        "SELECT p.valor FROM financeiro_parcela p JOIN financeiro_titulo t ON t.id = p.titulo
+         WHERE t.origem_modulo = 'compras_st' AND t.cancelado_em IS NULL",
+        vec![],
+    );
+    assert_eq!(guia, 590);
+    let custo: i64 = b.sql(
+        "SELECT valor_impostos FROM compras_item_nota_entrada WHERE nota_entrada = ?1",
+        vec![r.nota_entrada.em_bytes().to_vec()],
+    );
+    assert_eq!(custo, 590);
+    assert!(b.contas_com_saldo() > 0);
+
+    // O estorno tira o ST do custo e cancela a guia; o Razão volta a zero.
+    b.estornar(r.nota_entrada, false).unwrap();
+    let custo: i64 = b.sql(
+        "SELECT valor_impostos FROM compras_item_nota_entrada WHERE nota_entrada = ?1",
+        vec![r.nota_entrada.em_bytes().to_vec()],
+    );
+    assert_eq!(custo, 0);
+    let guias_vivas: i64 = b.sql(
+        "SELECT COUNT(*) FROM financeiro_titulo
+         WHERE origem_modulo = 'compras_st' AND cancelado_em IS NULL",
+        vec![],
+    );
+    assert_eq!(guias_vivas, 0);
+    assert_eq!(b.contas_com_saldo(), 0);
+
+    // Confirmada sem o ST, ele não entra.
+    b.confirmar(r.nota_entrada, local, false, None).unwrap();
+    let guias_vivas: i64 = b.sql(
+        "SELECT COUNT(*) FROM financeiro_titulo
+         WHERE origem_modulo = 'compras_st' AND cancelado_em IS NULL",
+        vec![],
+    );
+    assert_eq!(guias_vivas, 0);
 }

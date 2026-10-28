@@ -171,9 +171,21 @@ stateDiagram-v2
 > que vai para o estoque passa a ser **bruto − desconto + rateio de despesas + ICMS-ST + IPI** — impostos que
 > quem compra para revender não recupera. O total da nota passou a ser o que o fornecedor cobra (o `vNF`):
 > **antes era só produtos + despesas, e o título a pagar saía menor que o boleto** em toda nota com ST ou IPI.
-> Na conferência, cada item mostra de onde vem o custo. Fora: estimar ST pela MVA quando a nota não traz o
-> valor (compra interestadual com antecipação, compra sem nota) — depende das tabelas por UF/NCM e de
-> conferência com o contador.
+> Na conferência, cada item mostra de onde vem o custo.
+
+> **Nota (2026-10-28) — ICMS-ST estimado pela MVA** (`mod_compras::st`, `compras.estimativa_de_st.v1`): o item
+> casado com produto que tem MVA-ST e alíquota no perfil fiscal (o efetivo, herdado do grupo) e que chegou
+> **sem** ST — nem cobrado nesta nota, nem retido antes (CST 10/30/60/70, CSOSN 201/202/203/500) — tem a
+> antecipação estimada: base = valor da operação (produto − desconto + frete/seguro/outras + IPI) × (1 + MVA);
+> na compra de outro estado (a UF da chave não é a da empresa), a **MVA ajustada** do Convênio ICMS 52/2017
+> (`(1 + MVA) × (1 − interestadual) / (1 − interna) − 1`, com duas casas); ST = base × alíquota interna − o ICMS
+> da origem (o destacado na nota, ou o valor × a alíquota de origem); nunca negativo. A conferência mostra item
+> a item e quem confirma decide (`ConfirmarEntrada.incluir_st_estimado`): o ST entra no custo do item
+> (`compras_item_nota_entrada.st_estimado`, migração v10) e vira a **guia a pagar ao estado** (título de origem
+> `compras_st`, D Estoque / C Fornecedores — a baixa do financeiro debita o papel padrão; vencimento no dia 20
+> do mês seguinte, o prazo mais comum, que se altera no financeiro). A nota com estimativa **não se confirma
+> sozinha** (fica com o aviso). O estorno da entrada tira o ST do custo e cancela a guia. Lição do gestao-raiz:
+> ST por MVA se detecta e vai para revisão humana — aqui a conta é feita, mas a decisão é de quem confere.
 
 > **Nota (2026-10-20):** a tela só mostrava "Confirmar entrada" para nota `Conferida` — estado
 > que nenhum comando alcança. Na prática, a nota que não se confirmava sozinha não tinha como
