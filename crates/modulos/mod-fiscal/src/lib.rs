@@ -39,6 +39,7 @@ mod modulo;
 mod montagem;
 mod nfce;
 mod nfe_venda;
+pub mod nfse;
 mod provedor;
 #[cfg(feature = "sqlite")]
 mod sql;
@@ -62,7 +63,7 @@ pub use documento::{
 pub use erros::ErroModuloFiscal;
 pub use explicacao::explicar;
 pub use fechamento::{
-    dia_da_emissao, CartaDoMes, NotaDoMes, NotasDoMes, NotasFiscaisDoMes, SituacaoNoMes,
+    dia_da_emissao, CartaDoMes, NfseDoMes, NotaDoMes, NotasDoMes, NotasFiscaisDoMes, SituacaoNoMes,
     XmlQueFalta,
 };
 pub use manifesto::{ID, MANIFESTO};

@@ -175,6 +175,35 @@ pub trait PortaFiscal: Send + Sync {
     /// Como [`Self::emitir_nfce`].
     fn inutilizar(&self, pedido: &PedidoInutilizacao) -> Resultado<RetornoSefaz>;
 
+    /// Emite uma **NFS-e** (DPS do Padrão Nacional; o `sefaz-api` roteia pelo município).
+    ///
+    /// # Errors
+    /// API fora do ar ou sem credencial (a recusa do município volta como
+    /// [`crate::SituacaoNfse::Rejeitada`]).
+    fn emitir_nfse(&self, nota: &crate::Nfse) -> Resultado<crate::RetornoNfse>;
+
+    /// Consulta a NFS-e de um DPS (a série e o número do prestador) — a recuperação de uma emissão
+    /// sem resposta. Não encontrada volta `Rejeitada` com a mensagem 404.
+    ///
+    /// # Errors
+    /// Como [`Self::emitir_nfse`].
+    fn consultar_nfse_por_dps(
+        &self,
+        prestador: &crate::Emitente,
+        serie: u32,
+        numero: u64,
+    ) -> Resultado<crate::RetornoNfse>;
+
+    /// Cancela uma NFS-e autorizada (evento 101101 no Padrão Nacional).
+    ///
+    /// # Errors
+    /// Como [`Self::emitir_nfse`].
+    fn cancelar_nfse(
+        &self,
+        prestador: &crate::Emitente,
+        cancelamento: &crate::CancelamentoNfse,
+    ) -> Resultado<crate::RetornoNfse>;
+
     /// Registra uma **carta de correção** (CC-e, evento 110110) da NF-e autorizada, com a
     /// `sequencia` (1 a 20 — cada uma substitui a anterior). Registrada vem como `Autorizado`
     /// (135/136), com o `procEventoNFe`.
@@ -310,6 +339,27 @@ impl<T: PortaFiscal + ?Sized> PortaFiscal for std::sync::Arc<T> {
         uf: Uf,
     ) -> Resultado<RetornoSefaz> {
         (**self).carta_de_correcao(chave, texto, sequencia, uf)
+    }
+
+    fn emitir_nfse(&self, nota: &crate::Nfse) -> Resultado<crate::RetornoNfse> {
+        (**self).emitir_nfse(nota)
+    }
+
+    fn consultar_nfse_por_dps(
+        &self,
+        prestador: &crate::Emitente,
+        serie: u32,
+        numero: u64,
+    ) -> Resultado<crate::RetornoNfse> {
+        (**self).consultar_nfse_por_dps(prestador, serie, numero)
+    }
+
+    fn cancelar_nfse(
+        &self,
+        prestador: &crate::Emitente,
+        cancelamento: &crate::CancelamentoNfse,
+    ) -> Resultado<crate::RetornoNfse> {
+        (**self).cancelar_nfse(prestador, cancelamento)
     }
 
     fn preparar_nfce_em_contingencia(

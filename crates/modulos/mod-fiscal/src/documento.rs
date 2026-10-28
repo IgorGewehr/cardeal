@@ -397,6 +397,8 @@ pub struct ResumoFiscal {
     pub xmls_a_buscar: u32,
     /// Cartas de correção esperando a fila.
     pub cartas_pendentes: u32,
+    /// NFS-e esperando a fila (a emitir, a conferir, a cancelar).
+    pub nfse_na_fila: u32,
 }
 
 impl ResumoFiscal {

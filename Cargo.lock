@@ -3181,6 +3181,7 @@ dependencies = [
  "mod-empresa",
  "mod-estoque",
  "mod-financeiro",
+ "mod-os",
  "mod-pdv",
  "mod-vendas",
  "postcard",

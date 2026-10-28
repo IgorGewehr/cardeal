@@ -249,6 +249,51 @@ pub struct NotasDoMes {
     pub de_homologacao: u32,
     /// As cartas de correção registradas no mês (pelo registro, não pela emissão da nota).
     pub cartas: Vec<CartaDoMes>,
+    /// As NFS-e de produção autorizadas no mês (as canceladas também, marcadas).
+    pub nfse: Vec<NfseDoMes>,
+}
+
+/// Uma NFS-e de produção que fechou no mês (pela autorização).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NfseDoMes {
+    /// O número da NFS-e (do município).
+    pub numero: Option<u64>,
+    /// A chave de acesso (50 dígitos).
+    pub chave: Option<String>,
+    /// O valor dos serviços.
+    pub total: Dinheiro,
+    /// Foi cancelada.
+    pub cancelada: bool,
+    /// O XML da NFS-e.
+    pub xml: Option<String>,
+    /// O XML do cancelamento.
+    pub xml_evento: Option<String>,
+    /// Quando foi autorizada.
+    pub autorizada_em: Instante,
+}
+
+impl NfseDoMes {
+    /// Os arquivos no pacote: `Saidas/NFS-e/<chave>-nfse.xml` (e o cancelamento).
+    #[must_use]
+    pub fn arquivos(&self) -> Vec<(String, &str)> {
+        let nome = self
+            .chave
+            .clone()
+            .unwrap_or_else(|| format!("numero{}", self.numero.unwrap_or_default()));
+        let pasta = if self.cancelada {
+            "Saidas/NFS-e/Canceladas"
+        } else {
+            "Saidas/NFS-e/Autorizadas"
+        };
+        let mut v = Vec::new();
+        if let Some(x) = &self.xml {
+            v.push((format!("{pasta}/{nome}-nfse.xml"), x.as_str()));
+        }
+        if let Some(x) = &self.xml_evento {
+            v.push((format!("{pasta}/{nome}-cancelamento.xml"), x.as_str()));
+        }
+        v
+    }
 }
 
 /// Uma carta de correção registrada no mês.
@@ -387,6 +432,7 @@ impl Consulta for NotasFiscaisDoMes {
                 inicio,
                 fim,
             )?,
+            nfse: crate::nfse::sqlite::do_mes(c, ctx.empresa, inicio, fim)?,
             cartas: crate::correcao::sqlite::registradas_entre(c, ctx.empresa, inicio, fim)?
                 .into_iter()
                 .map(|(chave, sequencia, xml)| CartaDoMes {

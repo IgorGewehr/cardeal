@@ -49,6 +49,11 @@ impl Modulo for ModuloFiscal {
             .consulta::<crate::devolucao_compra::DocumentoDaDevolucao>(
                 "fiscal.documento_da_devolucao.v1",
             )
+            .comando::<crate::nfse::ConfigurarNfse>("fiscal.configurar_nfse.v1")
+            .consulta::<crate::nfse::ConfiguracaoDaNfse>("fiscal.configuracao_nfse.v1")
+            .comando::<crate::nfse::EmitirNfseDaOs>("fiscal.emitir_nfse_da_os.v1")
+            .consulta::<crate::nfse::NfseDaOs>("fiscal.nfse_da_os.v1")
+            .comando::<crate::nfse::CancelarNfse>("fiscal.cancelar_nfse.v1")
             .comando::<crate::devolucao_venda::EmitirNfeDaDevolucaoDeVenda>(
                 "fiscal.emitir_nfe_da_devolucao_de_venda.v1",
             )

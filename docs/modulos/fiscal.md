@@ -248,6 +248,34 @@ rejeitada com o porquê. Como o fiscal tem a venda e lê a devolução pelo `mod
 fiscais remonta essa nota. A criação e a remontagem são as mesmas da devolução de compra
 (`devolucao_compra::sqlite::criar_ou_remontar`).
 
+**NFS-e da ordem de serviço** (`mod_fiscal::nfse`, migração v12, 2026-10-28): a mão de obra da OS faturada
+vira uma NFS-e — o DPS do Padrão Nacional, que o `sefaz-api` roteia pelo município (Nacional/ADN, Betha,
+São Paulo). As peças são mercadoria e ficam de fora (saem em NF-e/NFC-e). A configuração
+(`ConfigurarNfse`, `fiscal.configurar_nfse.v1`; Configurações › Fiscal › NFS-e da ordem de serviço): o código
+de tributação nacional (`cTribNac`, 6 dígitos — "14.01.01" vira "140101"), o item da LC 116 ("14.01"), o
+código municipal e o NBS quando o município pede, o percentual — **no Simples, o aproximado dos tributos do
+Simples** (vai como `pTotTribSN`; o ISS é apurado no DAS e o DPS não leva alíquota); no regime normal, a
+alíquota do ISS — e a série e o próximo número do DPS, por ambiente. A empresa precisa da inscrição
+municipal nos dados fiscais.
+
+`EmitirNfseDaOs` (`fiscal.emitir_nfse_da_os.v1`, `fiscal.emitir`) monta a nota (o tomador é o cliente da OS:
+o documento, o endereço com o código do IBGE e o e-mail, cada um quando há; a discriminação é "OS n -
+aparelho: serviço (valor); …") e a põe na **fila** — tabela própria, `fiscal_nfse`, porque a NFS-e tem o
+número do município, a chave de 50 dígitos e eventos próprios. A fila:
+- pendente → emite; autorizada guarda o número, a chave, o código de verificação e o XML;
+- sem resposta (erro, processando) → **incerta**: na próxima rodada consulta pelo DPS (a série e o número
+  do prestador) antes de qualquer reenvio — achou, autorizada; o município diz que não existe (404), volta
+  a pendente e emite de novo, no mesmo número;
+- recusada → rejeitada com o porquê; emitir de novo remonta no mesmo número;
+- `CancelarNfse` (`fiscal.cancelar_nfse.v1`, `fiscal.cancelar`: o motivo do evento e a justificativa de 15
+  caracteres) é um pedido que a fila leva; recusado, a nota segue autorizada com o motivo.
+
+A vigia de fundo conta a NFS-e na fila (`ResumoFiscal.nfse_na_fila`); o pacote do contador leva os XMLs
+(`Saidas/NFS-e/Autorizadas|Canceladas/<chave>-nfse.xml`, no mês da autorização) e o relatório as conta. No
+gestao-raiz a NFS-e "não é suportada nesta versão". O `sefaz-api` lia a resposta da emissão no ADN num formato
+que não é o da API (saía sem número, sem XML e sem a chave, que o cancelamento exige) — corrigido em
+5726b25, que também faz a consulta pelo DPS buscar a nota pela chave. Não conferido contra o ADN de verdade.
+
 O `sefaz-api` ganhou o `impostoDevol` e o FCP do ST (8075fde) — e, de quebra, uma correção: a validação
 exigia `vICMSST = vBCST × pICMSST`, mas o ST é esse produto **menos** o ICMS próprio; todo ST de verdade
 era recusado. Agora o ST só não pode passar do produto.
@@ -451,6 +479,9 @@ Cancelar e configurar continuam fora do papel.
 - v6: `fiscal_documento.xml_assinado` (a nota assinada da emissão incerta, apagada quando chega o
   `nfeProc`) e `xml_a_buscar` (tentativas restantes da busca de XML; 0 = nada a buscar); o índice da fila
   passa a cobrir a busca, e os cancelamentos sem o XML já entram nela.
+- v12: `fiscal_configuracao_nfse` (o código do serviço, o percentual, a série e o próximo número do DPS por
+  ambiente) e `fiscal_nfse` (a nota, a fila, o pedido de cancelamento; única por origem entre as não
+  canceladas).
 - v11: `fiscal_carta_correcao` (a NF-e, a sequência de 1 a 20, o texto, o estado, o motivo, o protocolo,
   o XML, as tentativas e a próxima tentativa, quando foi registrada).
 - v10: `fiscal_configuracao.serie_nfe` — a série da NF-e (modelo 55), separada da da NFC-e.
@@ -471,7 +502,8 @@ Cancelar e configurar continuam fora do papel.
 4. ~~Série por terminal~~ — feita em 2026-10-27 (§7, "Série por caixa").
 5. NF-e: ~~a de venda, o DANFE A4, a carta de correção, a devolução de compra e a NF-e de entrada da
    devolução de venda~~ (2026-10-27, §7). A devolução da venda do PDV (NFC-e) ainda não sai em NF-e.
-6. NFS-e da OS.
+6. ~~NFS-e da OS~~ — feita em 2026-10-28 (§7; `sefaz-api` 5726b25). Falta conferir num município de
+   verdade (homologação do ADN, com a inscrição municipal e o código do serviço da empresa).
 7. SPED gerado no Cardeal.
 8. ~~DFe e manifestação~~ — feito em 2026-10-26 (sefaz-api 842576f; a busca de notas em
    `mod-compras`). Falta conferir contra o Ambiente Nacional de homologação, que pede o

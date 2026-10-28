@@ -1380,6 +1380,15 @@ fn pacote_do_contador_resume_as_notas_e_lista_as_pendencias() {
             sequencia: 1,
             xml: "<procEventoNFe/>".into(),
         }],
+        nfse: vec![mod_fiscal::NfseDoMes {
+            numero: Some(7),
+            chave: Some("5".repeat(50)),
+            total: Dinheiro::reais(150),
+            cancelada: false,
+            xml: Some("<NFSe/>".into()),
+            xml_evento: None,
+            autorizada_em: cardeal_kernel::Instante::agora(),
+        }],
     });
     let entradas: NotasDeEntrada = Ok(vec![mod_compras::NotaDeEntradaDoMes {
         nota: Id::novo(),
@@ -1407,7 +1416,11 @@ fn pacote_do_contador_resume_as_notas_e_lista_as_pendencias() {
     // No ZIP: as duas notas (a cancelada sem o evento) e a carta de correção; a entrada não tem
     // XML.
     let xmls = arquivos_xml(&emitidas, &entradas);
-    assert_eq!(xmls.len(), 3);
+    assert_eq!(xmls.len(), 4);
+    assert_eq!(
+        xmls[3].0,
+        format!("Saidas/NFS-e/Autorizadas/{}-nfse.xml", "5".repeat(50))
+    );
     assert_eq!(
         xmls[2].0,
         format!(
@@ -1439,10 +1452,11 @@ fn pacote_do_contador_resume_as_notas_e_lista_as_pendencias() {
         ["NFC-e canceladas".to_owned(), "1".to_owned()]
     );
     assert_eq!(linhas[2], vec!["Cartas de correção (NF-e)", "1", ""]);
-    assert_eq!(linhas[3], vec!["Notas de entrada", "1", "R$ 36,00"]);
+    assert_eq!(linhas[3], vec!["NFS-e autorizadas", "1", "R$ 150,00"]);
+    assert_eq!(linhas[4], vec!["Notas de entrada", "1", "R$ 36,00"]);
     assert_eq!(
-        linhas[4][..2],
-        ["XMLs no pacote".to_owned(), "3".to_owned()]
+        linhas[5][..2],
+        ["XMLs no pacote".to_owned(), "4".to_owned()]
     );
     assert!(notas
         .nota

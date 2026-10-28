@@ -278,6 +278,7 @@ impl Consulta for ResumoDaFilaFiscal {
         );
         let mut r = crate::sql_documento::resumo(c, ctx.empresa, inicio, ctx.agora)?;
         r.cartas_pendentes = crate::correcao::sqlite::quantas_pendentes(c, ctx.empresa)?;
+        r.nfse_na_fila = crate::nfse::sqlite::quantas_na_fila(c, ctx.empresa)?;
         Ok(r)
     }
 }
@@ -983,13 +984,15 @@ pub(crate) mod sqlite {
         let agora = Instante::agora();
         let fila = t.ler(|c| sqld::fila(c, empresa, agora, 20))?;
         let cartas = t.ler(|c| crate::correcao::sqlite::pendentes(c, empresa, agora, 10))?;
-        if fila.is_empty() && cartas.is_empty() {
+        let nfses = t.ler(|c| crate::nfse::sqlite::fila(c, empresa, agora, 10))?;
+        if fila.is_empty() && cartas.is_empty() && nfses.is_empty() {
             return Ok("nada na fila".into());
         }
         let ambientes: HashSet<AmbienteFiscal> = fila
             .iter()
             .map(|d| d.ambiente)
             .chain(cartas.iter().map(|k| k.ambiente))
+            .chain(nfses.iter().map(|n| n.ambiente))
             .collect();
         let (portas, csc, uf): (Portas, Option<Csc>, Option<Uf>) = t.ler(|c| {
             let mut portas = HashMap::new();
@@ -1026,10 +1029,91 @@ pub(crate) mod sqlite {
                 continue;
             };
             if levar_carta(t, porta.as_ref(), &carta, uf, &mut rodada)? {
-                break;
+                return Ok(resumo_da_rodada(&rodada));
+            }
+        }
+        if !nfses.is_empty() {
+            // O prestador (para consultar pelo DPS e cancelar): a empresa como está hoje.
+            let prestador = t.ler(|c| crate::nfce::sqlite::emitente(c, empresa))?.ok();
+            for nfse in nfses {
+                let Some(porta) = portas.get(&nfse.ambiente) else {
+                    continue;
+                };
+                if levar_nfse(t, porta.as_ref(), &nfse, prestador.as_ref(), &mut rodada)? {
+                    break;
+                }
             }
         }
         Ok(resumo_da_rodada(&rodada))
+    }
+
+    /// Leva uma NFS-e ao município (emitir, conferir pelo DPS ou cancelar) e grava o que veio.
+    /// Devolve se a rodada para (a API fora do ar).
+    fn levar_nfse(
+        t: &ContextoTarefa<'_>,
+        porta: &dyn PortaFiscal,
+        n: &crate::nfse::sqlite::NfseNaFila,
+        prestador: Option<&cardeal_fiscal::Emitente>,
+        rodada: &mut Rodada,
+    ) -> Resultado<bool> {
+        use crate::nfse::{decidir_nfse, DestinoNfse, EstadoNfse};
+        let resposta: Result<cardeal_fiscal::RetornoNfse, String> = match (n.estado, prestador) {
+            (EstadoNfse::Autorizada, Some(p)) if n.cancelar => match (&n.chave, n.numero_nfse) {
+                (Some(chave), Some(numero)) => porta
+                    .cancelar_nfse(
+                        p,
+                        &cardeal_fiscal::CancelamentoNfse {
+                            chave: chave.clone(),
+                            numero,
+                            motivo: n
+                                .motivo_cancelamento
+                                .unwrap_or(cardeal_fiscal::MotivoCancelamentoNfse::ErroNaEmissao),
+                            justificativa: n.justificativa.clone().unwrap_or_default(),
+                        },
+                    )
+                    .map_err(|e| e.mensagem),
+                _ => Ok(cardeal_fiscal::RetornoNfse {
+                    situacao: cardeal_fiscal::SituacaoNfse::Rejeitada,
+                    numero: None,
+                    chave: None,
+                    codigo_verificacao: None,
+                    xml: None,
+                    mensagens: vec!["a NFS-e não tem a chave de acesso guardada".into()],
+                }),
+            },
+            (EstadoNfse::Incerta, Some(p)) => porta
+                .consultar_nfse_por_dps(p, n.serie, n.numero)
+                .map_err(|e| e.mensagem),
+            (EstadoNfse::Pendente, _) => match n
+                .nota
+                .as_deref()
+                .map(postcard::from_bytes::<cardeal_fiscal::Nfse>)
+            {
+                Some(Ok(nota)) => porta.emitir_nfse(&nota).map_err(|e| e.mensagem),
+                _ => Ok(cardeal_fiscal::RetornoNfse {
+                    situacao: cardeal_fiscal::SituacaoNfse::Rejeitada,
+                    numero: None,
+                    chave: None,
+                    codigo_verificacao: None,
+                    xml: None,
+                    mensagens: vec!["a NFS-e guardada está ilegível — emita de novo".into()],
+                }),
+            },
+            _ => Err("os dados fiscais da empresa estão incompletos".into()),
+        };
+        let parar = resposta.is_err();
+        let destino = decidir_nfse(resposta, n.cancelar && n.estado == EstadoNfse::Autorizada);
+        match &destino {
+            DestinoNfse::Autorizada(_) => rodada.nfse.0 += 1,
+            DestinoNfse::Rejeitada(_) | DestinoNfse::CancelamentoRecusado(_) => rodada.nfse.1 += 1,
+            DestinoNfse::Cancelada(_) => rodada.nfse.2 += 1,
+            _ => {}
+        }
+        let (id, tentativas) = (n.id, n.tentativas);
+        t.escrever(move |uow| {
+            crate::nfse::sqlite::aplicar(uow.conexao(), id, &destino, tentativas, Instante::agora())
+        })?;
+        Ok(parar)
     }
 
     /// Leva uma carta de correção à SEFAZ e grava o que veio. Devolve se a rodada para.
@@ -1081,6 +1165,8 @@ pub(crate) mod sqlite {
         substituidas: u32,
         /// Cartas de correção registradas e recusadas.
         cartas: (u32, u32),
+        /// NFS-e autorizadas, recusadas e canceladas.
+        nfse: (u32, u32, u32),
     }
 
     /// O que vale para a rodada inteira.
@@ -1421,6 +1507,13 @@ pub(crate) mod sqlite {
             let _ = write!(
                 resumo,
                 "; {cancelados} cancelada(s), {inutilizados} inutilizada(s), {recusados} pedido(s) recusado(s)"
+            );
+        }
+        if rodada.nfse.0 + rodada.nfse.1 + rodada.nfse.2 > 0 {
+            let _ = write!(
+                resumo,
+                "; NFS-e: {} autorizada(s), {} recusada(s), {} cancelada(s)",
+                rodada.nfse.0, rodada.nfse.1, rodada.nfse.2
             );
         }
         if rodada.cartas.0 + rodada.cartas.1 > 0 {

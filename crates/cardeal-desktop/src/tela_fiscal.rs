@@ -21,6 +21,7 @@ use mod_fiscal::{
 
 mod caixa;
 mod nfe;
+mod nfse;
 
 const FUSO: Fuso = Fuso::BRASILIA;
 
@@ -95,6 +96,7 @@ pub struct EstadoFiscal {
     pub caixa: caixa::EstadoCaixa,
     /// A série e a numeração da NF-e.
     pub nfe: nfe::FormNfe,
+    pub nfse: nfse::FormNfse,
 }
 
 /// O formulário da NFC-e. O token do CSC nunca volta da base: vazio = manter o guardado.
@@ -201,6 +203,7 @@ impl EstadoFiscal {
         }
         self.caixa.carregar(motor, sessao);
         self.nfe.carregar(motor, sessao);
+        self.nfse.carregar(motor, sessao);
     }
 
     fn erro_em(&self, campo: &str) -> Option<String> {
@@ -314,6 +317,8 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
     caixa::secao(ui, motor, sessao, &mut estado.caixa, pode_configurar);
     ui.add_space(Espaco::E16);
     nfe::secao(ui, motor, sessao, &mut estado.nfe, pode_configurar);
+    ui.add_space(Espaco::E16);
+    nfse::secao(ui, motor, sessao, &mut estado.nfse, pode_configurar);
     ui.add_space(Espaco::E16);
     secao_conexao(ui, motor, sessao, estado, pode_configurar);
 }

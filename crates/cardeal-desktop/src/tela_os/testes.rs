@@ -721,3 +721,58 @@ fn custo_hora_da_equipe_grava_padrao_e_por_tecnico_so_o_que_mudou() {
         });
     }
 }
+
+#[test]
+fn os_faturada_emite_a_nfse_e_mostra_o_que_corrigir() {
+    let mut c = cenario();
+    com_mao_de_obra_de_300(&mut c);
+    let os = c.estado.detalhe.as_ref().expect("detalhe").ordem.clone();
+    c.estado.dlg = Dlg::faturar();
+    faturar_os(&c.ctx, &c.motor, &c.sessao, &mut c.estado, &os);
+    let emitir = |c: &Cenario| -> Result<mod_fiscal::nfse::NfseResumo, cardeal_kernel::Erro> {
+        c.motor.executar(
+            &c.sessao,
+            "fiscal.emitir_nfse_da_os.v1",
+            &mod_fiscal::nfse::EmitirNfseDaOs { ordem: c.os },
+        )
+    };
+    // Sem a configuração da NFS-e, o erro diz onde configurar.
+    assert!(emitir(&c)
+        .unwrap_err()
+        .mensagem
+        .contains("Configurações › Fiscal"));
+    let _: mod_fiscal::nfse::ConfiguracaoNfse = c
+        .motor
+        .executar(
+            &c.sessao,
+            "fiscal.configurar_nfse.v1",
+            &mod_fiscal::nfse::ConfigurarNfse {
+                codigo_tributacao_nacional: "14.01.01".into(),
+                item_lc116: "14.01".into(),
+                codigo_tributacao_municipal: None,
+                nbs: None,
+                aliquota: cardeal_kernel::Percentual::de_str("6").expect("percentual"),
+                serie: 900,
+                proximo_numero: None,
+            },
+        )
+        .expect("configurar");
+    // A empresa ainda sem dados fiscais nem certificado: a NFS-e nasce rejeitada, com o porquê.
+    let n = emitir(&c).expect("emitir");
+    assert_eq!(n.estado, mod_fiscal::nfse::EstadoNfse::Rejeitada);
+    assert_eq!(n.total, "300,00".parse::<Dinheiro>().expect("valor"));
+    assert!(n.motivo.expect("motivo").contains("certificado"));
+
+    // O detalhe da OS faturada desenha a seção da NFS-e.
+    c.estado.dlg = Dlg::Fechado;
+    let ctx = egui::Context::default();
+    cardeal_ui::tokens::instalar_fontes(&ctx);
+    cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+    for _ in 0..2 {
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                mostrar(ui, &c.motor, &c.sessao, &mut c.estado);
+            });
+        });
+    }
+}

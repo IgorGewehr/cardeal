@@ -126,6 +126,27 @@ impl ApiFiscalHttp {
         corpo
     }
 
+    /// Um pedido de NFS-e: a recusa do `sefaz-api` (a validação dele, 400) é a recusa do
+    /// pedido — vira `Rejeitada` com o porquê; fora do ar e sem credencial são erro.
+    fn pedir_nfse(
+        &self,
+        caminho: &str,
+        corpo: serde_json::Map<String, Value>,
+    ) -> Resultado<crate::RetornoNfse> {
+        match self.postar::<crate::nfse::RespostaNfse>(caminho, &Value::Object(corpo)) {
+            Ok(r) => Ok(r.em_retorno()),
+            Err(ErroFiscal::ApiFiscalRecusou(m)) => Ok(crate::RetornoNfse {
+                situacao: crate::SituacaoNfse::Rejeitada,
+                numero: None,
+                chave: None,
+                codigo_verificacao: None,
+                xml: None,
+                mensagens: vec![m],
+            }),
+            Err(e) => Err(Erro::de_dominio(&e)),
+        }
+    }
+
     /// Faz um `POST` e lê a resposta (o `SefazResponse` do `sefaz-api`, ou o da distribuição).
     fn postar<T: DeserializeOwned>(&self, caminho: &str, corpo: &Value) -> Result<T, ErroFiscal> {
         let url = format!("{}{caminho}", self.config.url);
@@ -863,6 +884,47 @@ impl PortaFiscal for ApiFiscalHttp {
             .map_err(|e| Erro::de_dominio(&e))
     }
 
+    fn emitir_nfse(&self, nota: &crate::Nfse) -> Resultado<crate::RetornoNfse> {
+        let mut corpo = self.corpo_base();
+        corpo.extend(crate::nfse::nfse_json(nota));
+        self.pedir_nfse("/nfse/emitir", corpo)
+    }
+
+    fn consultar_nfse_por_dps(
+        &self,
+        prestador: &crate::Emitente,
+        serie: u32,
+        numero: u64,
+    ) -> Resultado<crate::RetornoNfse> {
+        let mut corpo = self.corpo_base();
+        corpo.insert("prestador".into(), crate::nfse::prestador_json(prestador));
+        corpo.insert("serie".into(), Value::from(serie.to_string()));
+        corpo.insert("numero".into(), Value::from(numero));
+        corpo.insert(
+            "codigoMunicipio".into(),
+            Value::from(prestador.endereco.codigo_municipio.as_str()),
+        );
+        self.pedir_nfse("/nfse/consultar", corpo)
+    }
+
+    fn cancelar_nfse(
+        &self,
+        prestador: &crate::Emitente,
+        c: &crate::CancelamentoNfse,
+    ) -> Resultado<crate::RetornoNfse> {
+        let mut corpo = self.corpo_base();
+        corpo.insert("prestador".into(), crate::nfse::prestador_json(prestador));
+        corpo.insert("numero".into(), Value::from(c.numero));
+        corpo.insert("chaveNFSe".into(), Value::from(c.chave.as_str()));
+        corpo.insert(
+            "codigoMunicipio".into(),
+            Value::from(prestador.endereco.codigo_municipio.as_str()),
+        );
+        corpo.insert("codigoCancelamento".into(), Value::from(c.motivo.codigo()));
+        corpo.insert("motivo".into(), Value::from(c.justificativa.as_str()));
+        self.pedir_nfse("/nfse/cancelar", corpo)
+    }
+
     fn carta_de_correcao(
         &self,
         chave: &ChaveAcesso,
@@ -1427,6 +1489,31 @@ mod testes {
             devolucao.total(),
             base.total() + cardeal_kernel::Dinheiro::centavos(712)
         );
+    }
+
+    #[test]
+    fn a_nfse_vai_ao_emitir_e_a_recusa_da_validacao_vira_rejeicao() {
+        let (url, tarefa) = servidor(
+            200,
+            r#"{"success":true,"status":"autorizado","numeroNfse":42,"chaveAcesso":"43051082112233000181000000000004226100000000000017","codigoVerificacao":"ABC","xml":"<NFSe/>"}"#,
+        );
+        let nota = crate::nfse::testes::exemplo();
+        let r = cliente(&url).emitir_nfse(&nota).unwrap();
+        assert_eq!(r.situacao, crate::SituacaoNfse::Autorizada);
+        assert_eq!(r.numero, Some(42));
+        let recebido = tarefa.join().unwrap();
+        assert!(recebido.starts_with("POST /nfse/emitir "), "{recebido}");
+        let corpo: Value = serde_json::from_str(recebido.rsplit('\n').next().unwrap()).unwrap();
+        assert_eq!(corpo["numeroDPS"], 7);
+        assert!(corpo["certificado"]["pfxBase64"].is_string());
+
+        let (url, _t) = servidor(
+            400,
+            r#"{"error":"Campos obrigatórios: prestador.cnpj, prestador.inscricaoMunicipal"}"#,
+        );
+        let r = cliente(&url).emitir_nfse(&nota).unwrap();
+        assert_eq!(r.situacao, crate::SituacaoNfse::Rejeitada);
+        assert!(r.motivo().contains("inscricaoMunicipal"));
     }
 
     #[test]

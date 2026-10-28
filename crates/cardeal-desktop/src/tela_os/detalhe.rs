@@ -354,6 +354,8 @@ pub(super) fn corpo_detalhe(
                 ));
             }
         }
+        ui.add_space(Espaco::E16);
+        super::nfse::secao(ui, motor, sessao, &mut estado.nfse, os.id);
     }
 
     ui.add_space(Espaco::E16);

@@ -79,6 +79,11 @@ pub(super) fn arquivos_xml(
             let (caminho, xml) = k.arquivo();
             v.push((caminho, xml.as_bytes().to_vec()));
         }
+        for n in &e.nfse {
+            for (caminho, xml) in n.arquivos() {
+                v.push((caminho, xml.as_bytes().to_vec()));
+            }
+        }
     }
     if let Ok(e) = entradas {
         for n in e {
@@ -96,7 +101,9 @@ pub(super) fn arquivos_xml(
 
 fn quantos_xmls(emitidas: &NotasEmitidas, entradas: &NotasDeEntrada) -> usize {
     let saidas = emitidas.as_ref().map_or(0, |e| {
-        e.notas.iter().map(|n| n.arquivos().len()).sum::<usize>() + e.cartas.len()
+        e.notas.iter().map(|n| n.arquivos().len()).sum::<usize>()
+            + e.cartas.len()
+            + e.nfse.iter().map(|n| n.arquivos().len()).sum::<usize>()
     });
     let de_entrada = entradas
         .as_ref()
@@ -233,6 +240,30 @@ fn secao_das_notas(d: &DadosDoPacote<'_>, aaaamm: &str) -> SecaoRelatorio {
                     ],
                     false,
                     0,
+                ));
+            }
+            let (canceladas, autorizadas): (Vec<_>, Vec<_>) =
+                e.nfse.iter().partition(|n| n.cancelada);
+            if !autorizadas.is_empty() {
+                linhas.push(linha(
+                    vec![
+                        "NFS-e autorizadas".into(),
+                        autorizadas.len().to_string(),
+                        f(autorizadas.iter().map(|n| n.total).sum()),
+                    ],
+                    true,
+                    0,
+                ));
+            }
+            if !canceladas.is_empty() {
+                linhas.push(linha(
+                    vec![
+                        "NFS-e canceladas".into(),
+                        canceladas.len().to_string(),
+                        String::new(),
+                    ],
+                    false,
+                    1,
                 ));
             }
             if e.de_homologacao > 0 {

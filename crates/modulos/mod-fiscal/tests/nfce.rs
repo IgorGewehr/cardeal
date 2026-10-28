@@ -80,6 +80,7 @@ impl Mundo {
             ModuloFinanceiro.migracoes(),
             ModuloVendas.migracoes(),
             ModuloPdv.migracoes(),
+            mod_os::ModuloOs.migracoes(),
             ModuloFiscal.migracoes(),
         ])
         .unwrap();
@@ -239,6 +240,26 @@ impl Mundo {
 
     fn documento(&self, id: Id) -> DetalheDocumento {
         self.consultar("fiscal.documento.v1", &DocumentoFiscal { documento: id })
+    }
+
+    /// Libera a próxima tentativa das NFS-e já.
+    fn tentar_ja_nfse(&self) {
+        let empresa = self.empresa;
+        self.arm
+            .escritor()
+            .executar(
+                ContextoEscrita::novo(empresa, Id::novo(), Id::novo(), Id::novo()),
+                move |uow| {
+                    uow.conexao()
+                        .execute(
+                            "UPDATE fiscal_nfse SET proxima_tentativa = 0 WHERE empresa = ?1",
+                            [empresa.em_bytes().as_slice()],
+                        )
+                        .map(|_| ())
+                        .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+                },
+            )
+            .unwrap();
     }
 
     /// Libera a próxima tentativa já (o teste não espera o backoff).
@@ -1947,4 +1968,172 @@ fn a_devolucao_da_venda_em_nfe_vira_nfe_de_entrada() {
     assert_eq!(nfe.itens[0].quantidade, Quantidade::unidades(1));
     assert_eq!(nfe.itens[0].impostos.icms.csosn.as_deref(), Some("900"));
     assert_eq!(nfe.total(), d.valor_total);
+}
+
+#[test]
+fn a_os_faturada_vira_nfse_pela_fila_consulta_o_dps_e_cancela() {
+    use cardeal_fiscal::{MotivoCancelamentoNfse, RetornoNfse, SituacaoNfse};
+    use mod_fiscal::nfse::{
+        CancelarNfse, ConfiguracaoNfse, ConfigurarNfse, EmitirNfseDaOs, EstadoNfse, NfseDaOs,
+        NfseResumo,
+    };
+    let m = Mundo::novo();
+    let cen = m.cenario();
+    m.configurar(1);
+    // Uma OS faturada com duas mãos de obra (uma de cortesia) e uma peça.
+    let ordem = Id::novo();
+    let (empresa, cliente) = (m.empresa, cen.cliente);
+    m.arm
+        .escritor()
+        .executar(
+            ContextoEscrita::novo(empresa, Id::novo(), Id::novo(), Id::novo()),
+            move |uow| {
+                let c = uow.conexao();
+                let erro = |e: rusqlite::Error| ErroArmazenamento::Sqlite(e.to_string());
+                c.execute(
+                    "INSERT INTO os_ordem_servico
+                       (id, empresa, numero, cliente, equipamento, data_abertura,
+                        tecnico_responsavel, estado, valor_total)
+                     VALUES (?1, ?2, 42, ?3, 'Notebook Dell', 0, ?4, 'Faturada', 25000)",
+                    rusqlite::params![
+                        ordem.em_bytes().as_slice(),
+                        empresa.em_bytes().as_slice(),
+                        cliente.em_bytes().as_slice(),
+                        Id::novo().em_bytes().as_slice()
+                    ],
+                )
+                .map_err(erro)?;
+                for (descricao, valor) in [("Diagnóstico", 5_000), ("Troca de bateria", 10_000), ("Limpeza", 0)] {
+                    c.execute(
+                        "INSERT INTO os_item_mao_de_obra (id, ordem_servico, descricao, valor, tecnico)
+                         VALUES (?1, ?2, ?3, ?4, ?5)",
+                        rusqlite::params![
+                            Id::novo().em_bytes().as_slice(),
+                            ordem.em_bytes().as_slice(),
+                            descricao,
+                            valor,
+                            Id::novo().em_bytes().as_slice()
+                        ],
+                    )
+                    .map_err(erro)?;
+                }
+                Ok(())
+            },
+        )
+        .unwrap();
+    let emitir = || -> Result<NfseResumo, Erro> {
+        m.executar("fiscal.emitir_nfse_da_os.v1", &EmitirNfseDaOs { ordem })
+    };
+
+    // Sem a configuração, não sai; configurada, a empresa sem inscrição municipal é rejeição.
+    assert_eq!(emitir().unwrap_err().codigo, CodigoErro::REGRA_VIOLADA);
+    let cfg: ConfiguracaoNfse = m
+        .executar(
+            "fiscal.configurar_nfse.v1",
+            &ConfigurarNfse {
+                codigo_tributacao_nacional: "14.01.01".into(),
+                item_lc116: "1401".into(),
+                codigo_tributacao_municipal: None,
+                nbs: None,
+                aliquota: Percentual::de_str("6").unwrap(),
+                serie: 900,
+                proximo_numero: Some(10),
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        (
+            cfg.codigo_tributacao_nacional.as_str(),
+            cfg.item_lc116.as_str()
+        ),
+        ("140101", "14.01")
+    );
+    let rejeitada = emitir().unwrap();
+    assert_eq!(rejeitada.estado, EstadoNfse::Rejeitada);
+    assert!(rejeitada
+        .motivo
+        .as_deref()
+        .unwrap()
+        .contains("inscrição municipal"));
+    let _: DadosFiscais = m
+        .executar(
+            "empresa.definir_dados_fiscais.v1",
+            &DefinirDadosFiscaisEmpresa {
+                dados: DadosFiscais {
+                    inscricao_estadual: "0960000000".into(),
+                    inscricao_municipal: "12345".into(),
+                    endereco: EnderecoFiscal {
+                        logradouro: "Rua A".into(),
+                        numero: "1".into(),
+                        complemento: String::new(),
+                        bairro: "Centro".into(),
+                        municipio: "Porto Alegre".into(),
+                        codigo_municipio: "4314902".into(),
+                        uf: "RS".into(),
+                        cep: "90010000".into(),
+                    },
+                },
+            },
+        )
+        .unwrap();
+
+    // Emitir de novo remonta no mesmo número; a resposta se perde (o DPS chegou): a fila consulta
+    // pelo DPS e acha a NFS-e, sem emitir outra.
+    let pendente = emitir().unwrap();
+    assert_eq!(
+        (pendente.estado, pendente.numero),
+        (EstadoNfse::Pendente, 10)
+    );
+    assert_eq!(pendente.total, Dinheiro::reais(150), "só a mão de obra");
+    m.sim.registrar_nfse(900, 10);
+    m.sim.programar_nfse(RetornoNfse {
+        situacao: SituacaoNfse::Erro,
+        numero: None,
+        chave: None,
+        codigo_verificacao: None,
+        xml: None,
+        mensagens: vec!["tempo esgotado".into()],
+    });
+    m.transmitir();
+    let incerta: Option<NfseResumo> = m.consultar("fiscal.nfse_da_os.v1", &NfseDaOs { ordem });
+    assert_eq!(incerta.unwrap().estado, EstadoNfse::Incerta);
+    let resumo: ResumoFiscal = m.consultar("fiscal.resumo_da_fila.v1", &ResumoDaFilaFiscal);
+    assert_eq!(resumo.nfse_na_fila, 1);
+    m.tentar_ja_nfse();
+    assert!(m.transmitir().contains("NFS-e: 1 autorizada"));
+    let autorizada: NfseResumo = m
+        .consultar::<Option<NfseResumo>>("fiscal.nfse_da_os.v1", &NfseDaOs { ordem })
+        .unwrap();
+    assert_eq!(autorizada.estado, EstadoNfse::Autorizada);
+    assert_eq!(autorizada.numero_nfse, Some(1));
+    assert_eq!(autorizada.chave.as_deref().map(str::len), Some(50));
+    // Emitir de novo devolve a mesma.
+    assert_eq!(emitir().unwrap().id, autorizada.id);
+
+    // Cancelar: o pedido vai pela fila.
+    let curto: Result<NfseResumo, _> = m.executar(
+        "fiscal.cancelar_nfse.v1",
+        &CancelarNfse {
+            nfse: autorizada.id,
+            motivo: MotivoCancelamentoNfse::ServicoNaoPrestado,
+            justificativa: "curta".into(),
+        },
+    );
+    assert_eq!(curto.unwrap_err().campo.as_deref(), Some("justificativa"));
+    let pedido: NfseResumo = m
+        .executar(
+            "fiscal.cancelar_nfse.v1",
+            &CancelarNfse {
+                nfse: autorizada.id,
+                motivo: MotivoCancelamentoNfse::ServicoNaoPrestado,
+                justificativa: "O cliente desistiu do conserto".into(),
+            },
+        )
+        .unwrap();
+    assert!(pedido.cancelamento_pedido);
+    assert!(m.transmitir().contains("1 cancelada"));
+    let cancelada: NfseResumo = m
+        .consultar::<Option<NfseResumo>>("fiscal.nfse_da_os.v1", &NfseDaOs { ordem })
+        .unwrap();
+    assert_eq!(cancelada.estado, EstadoNfse::Cancelada);
 }

@@ -318,6 +318,53 @@ CREATE INDEX fiscal_carta_fila ON fiscal_carta_correcao(empresa, proxima_tentati
     WHERE estado = 'Pendente';
 ";
 
+/// v12: a NFS-e (DPS do Padrão Nacional) — a configuração (o código do serviço, a série e o
+/// próximo número por ambiente) e a nota, com a fila própria.
+const SQL_V12: &str = "
+CREATE TABLE fiscal_configuracao_nfse (
+    empresa                     BLOB PRIMARY KEY REFERENCES nucleo_empresa(id),
+    codigo_tributacao_nacional  TEXT    NOT NULL,
+    item_lc116                  TEXT    NOT NULL,
+    codigo_tributacao_municipal TEXT,
+    nbs                         TEXT,
+    aliquota                    INTEGER NOT NULL,
+    serie                       INTEGER NOT NULL,
+    proximo_homologacao         INTEGER NOT NULL DEFAULT 1,
+    proximo_producao            INTEGER NOT NULL DEFAULT 1
+) STRICT;
+CREATE TABLE fiscal_nfse (
+    id                  BLOB PRIMARY KEY,
+    empresa             BLOB    NOT NULL REFERENCES nucleo_empresa(id),
+    origem_modulo       TEXT    NOT NULL,
+    origem              BLOB    NOT NULL,
+    ambiente            TEXT    NOT NULL CHECK (ambiente IN ('homologacao','producao')),
+    serie               INTEGER NOT NULL,
+    numero              INTEGER NOT NULL,
+    estado              TEXT    NOT NULL
+                        CHECK (estado IN ('Pendente','Incerta','Autorizada','Rejeitada','Cancelada')),
+    cancelar            INTEGER NOT NULL DEFAULT 0,
+    motivo_cancelamento TEXT,
+    justificativa       TEXT,
+    total               INTEGER NOT NULL,
+    nota                BLOB,
+    numero_nfse         INTEGER,
+    chave               TEXT,
+    codigo_verificacao  TEXT,
+    xml                 TEXT,
+    xml_evento          TEXT,
+    motivo              TEXT,
+    tentativas          INTEGER NOT NULL DEFAULT 0,
+    proxima_tentativa   INTEGER NOT NULL DEFAULT 0,
+    criado_em           INTEGER NOT NULL,
+    autorizado_em       INTEGER,
+    cancelado_em        INTEGER,
+    UNIQUE (empresa, ambiente, serie, numero)
+) STRICT;
+CREATE UNIQUE INDEX fiscal_nfse_origem ON fiscal_nfse(empresa, origem_modulo, origem)
+    WHERE estado <> 'Cancelada';
+CREATE INDEX fiscal_nfse_fila ON fiscal_nfse(empresa, proxima_tentativa);
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -383,6 +430,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 11,
         nome: "fiscal_carta_de_correcao",
         sql: SQL_V11,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 12,
+        nome: "fiscal_nfse",
+        sql: SQL_V12,
         tipo: TipoMigracao::Esquema,
     },
 ];

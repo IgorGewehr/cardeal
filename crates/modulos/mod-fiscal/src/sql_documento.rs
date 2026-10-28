@@ -906,6 +906,7 @@ pub(crate) fn resumo(
                 em_contingencia: r.get(6)?,
                 contingencia_desde: r.get::<_, Option<i64>>(7)?.map(Instante::de_micros),
                 cartas_pendentes: 0,
+                nfse_na_fila: 0,
             })
         },
     )

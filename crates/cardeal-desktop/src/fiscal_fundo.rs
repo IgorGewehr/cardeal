@@ -50,7 +50,12 @@ pub fn vigiar(ctx: &egui::Context, motor: &Motor, sessao: &Sessao) {
                 &mod_fiscal::ResumoDaFilaFiscal,
             )
             .is_ok_and(|r| {
-                r.pendentes + r.incertas + r.em_contingencia + r.xmls_a_buscar + r.cartas_pendentes
+                r.pendentes
+                    + r.incertas
+                    + r.em_contingencia
+                    + r.xmls_a_buscar
+                    + r.cartas_pendentes
+                    + r.nfse_na_fila
                     > 0
             })
     });

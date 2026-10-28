@@ -23,6 +23,7 @@ sqlite = [
     "mod-clientes/sqlite",
     "mod-vendas/sqlite",
     "mod-financeiro/sqlite",
+    "mod-os/sqlite",
 ]
 
 [dependencies]
@@ -35,6 +36,7 @@ mod-estoque     = { path = "../mod-estoque", default-features = false }
 mod-clientes    = { path = "../mod-clientes", default-features = false }
 mod-vendas      = { path = "../mod-vendas", default-features = false }
 mod-financeiro  = { path = "../mod-financeiro", default-features = false }
+mod-os          = { path = "../mod-os", default-features = false }
 cardeal-storage = { workspace = true, optional = true }
 rusqlite        = { workspace = true, optional = true }
 postcard        = { workspace = true, optional = true }

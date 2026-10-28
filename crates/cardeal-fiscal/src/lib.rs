@@ -39,6 +39,7 @@ mod dfe;
 mod emissao;
 mod erros;
 mod nfe;
+mod nfse;
 mod porta;
 mod sefaz_api;
 mod simulado;
@@ -61,6 +62,9 @@ pub use emissao::{Destinatario, DevolucaoDoItem, IndicadorIe, Nfe};
 pub use erros::ErroFiscal;
 pub use nfe::{cfop_de_venda, descrever_cfop, ClassificacaoEntrada, FinalidadeNfe};
 pub use nfe::{interpretar, Duplicata, ItemNfe, NotaFiscalXml, TributosDaCompra};
+pub use nfse::{
+    CancelamentoNfse, MotivoCancelamentoNfse, Nfse, RetornoNfse, SituacaoNfse, TomadorNfse,
+};
 pub use porta::{AmbienteFiscal, ModeloFiscal, Nsu, PortaFiscal, StatusSefaz};
 pub use sefaz_api::{ApiFiscalHttp, CertificadoA1, ConfigApiFiscal};
 pub use simulado::FiscalSimulado;

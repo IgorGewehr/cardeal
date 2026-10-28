@@ -48,6 +48,10 @@ pub struct FiscalSimulado {
     sefaz_fora: std::sync::atomic::AtomicBool,
     /// Quantas notas foram assinadas em contingência.
     pub contingencias: std::sync::atomic::AtomicUsize,
+    /// Retornos programados para os próximos pedidos de NFS-e.
+    nfse_programadas: Mutex<std::collections::VecDeque<crate::RetornoNfse>>,
+    /// As NFS-e emitidas, por (série, número do DPS).
+    nfse: Mutex<std::collections::HashMap<(u32, u64), crate::RetornoNfse>>,
 }
 
 impl FiscalSimulado {
@@ -275,6 +279,29 @@ impl FiscalSimulado {
             erros: Vec::new(),
             nao_enviado: false,
         })
+    }
+
+    /// Programa a resposta do próximo pedido de NFS-e (emitir, consultar ou cancelar).
+    pub fn programar_nfse(&self, retorno: crate::RetornoNfse) {
+        travar(&self.nfse_programadas).push_back(retorno);
+    }
+
+    /// Registra uma NFS-e como emitida (o DPS chegou, a resposta se perdeu).
+    pub fn registrar_nfse(&self, serie: u32, numero: u64) -> crate::RetornoNfse {
+        let mut nfse = travar(&self.nfse);
+        let n = u64::try_from(nfse.len()).unwrap_or(0) + 1;
+        let r = crate::RetornoNfse {
+            situacao: crate::SituacaoNfse::Autorizada,
+            numero: Some(n),
+            chave: Some(format!("{:050}", 4_305_108_000_000 + n)),
+            codigo_verificacao: Some(format!("CV{n:04}")),
+            xml: Some(format!(
+                "<NFSe><nNFSe>{n}</nNFSe><nDPS>{numero}</nDPS></NFSe>"
+            )),
+            mensagens: Vec::new(),
+        };
+        nfse.insert((serie, numero), r.clone());
+        r
     }
 
     /// Faz a API fiscal simulada parar de responder (ou voltar).
@@ -525,6 +552,70 @@ impl PortaFiscal for FiscalSimulado {
 
     fn inutilizar(&self, p: &PedidoInutilizacao) -> Resultado<RetornoSefaz> {
         self.inutilizar_numeros(p)
+    }
+
+    fn emitir_nfse(&self, nota: &crate::Nfse) -> Resultado<crate::RetornoNfse> {
+        self.api_fora()?;
+        if let Some(r) = travar(&self.nfse_programadas).pop_front() {
+            return Ok(r);
+        }
+        if nota.prestador.inscricao_municipal.is_none() {
+            return Ok(crate::RetornoNfse {
+                situacao: crate::SituacaoNfse::Rejeitada,
+                numero: None,
+                chave: None,
+                codigo_verificacao: None,
+                xml: None,
+                mensagens: vec!["Inscrição Municipal do prestador é obrigatória".into()],
+            });
+        }
+        Ok(self.registrar_nfse(nota.serie, nota.numero))
+    }
+
+    fn consultar_nfse_por_dps(
+        &self,
+        _prestador: &crate::Emitente,
+        serie: u32,
+        numero: u64,
+    ) -> Resultado<crate::RetornoNfse> {
+        self.api_fora()?;
+        if let Some(r) = travar(&self.nfse_programadas).pop_front() {
+            return Ok(r);
+        }
+        Ok(travar(&self.nfse)
+            .get(&(serie, numero))
+            .cloned()
+            .unwrap_or_else(|| crate::RetornoNfse {
+                situacao: crate::SituacaoNfse::Rejeitada,
+                numero: None,
+                chave: None,
+                codigo_verificacao: None,
+                xml: None,
+                mensagens: vec!["404 — NFS-e não encontrada".into()],
+            }))
+    }
+
+    fn cancelar_nfse(
+        &self,
+        _prestador: &crate::Emitente,
+        c: &crate::CancelamentoNfse,
+    ) -> Resultado<crate::RetornoNfse> {
+        self.api_fora()?;
+        if let Some(r) = travar(&self.nfse_programadas).pop_front() {
+            return Ok(r);
+        }
+        Ok(crate::RetornoNfse {
+            situacao: crate::SituacaoNfse::Cancelada,
+            numero: Some(c.numero),
+            chave: Some(c.chave.clone()),
+            codigo_verificacao: None,
+            xml: Some(format!(
+                "<evento><chNFSe>{}</chNFSe><cMotivo>{}</cMotivo></evento>",
+                c.chave,
+                c.motivo.codigo()
+            )),
+            mensagens: Vec::new(),
+        })
     }
 
     fn carta_de_correcao(

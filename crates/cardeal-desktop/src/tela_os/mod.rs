@@ -13,6 +13,7 @@ mod encomenda;
 mod faturar;
 mod ficha;
 mod lista;
+mod nfse;
 mod nova;
 mod orcamento;
 mod pdf;
@@ -222,6 +223,8 @@ pub struct EstadoTelaOs {
     peca_qtd: String,
     peca_preco: String,
     aprovador: String,
+    /// A NFS-e da OS aberta (faturada).
+    nfse: nfse::NfseDaOsAberta,
 }
 
 impl EstadoTelaOs {
