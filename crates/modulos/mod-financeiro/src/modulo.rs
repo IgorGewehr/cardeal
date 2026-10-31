@@ -121,6 +121,12 @@ impl Modulo for ModuloFinanceiro {
             .consulta::<crate::DreDoPeriodo>("financeiro.dre_do_periodo.v1")
             .consulta::<crate::DreComparativa>("financeiro.dre_comparativa.v1")
             .consulta::<crate::orcamento::OrcamentoDoAno>("financeiro.orcamento_do_ano.v1")
+            .consulta::<crate::contador::DeParaDoContador>("financeiro.de_para_do_contador.v1")
+            .comando::<crate::contador::DefinirDePara>("financeiro.definir_de_para.v1")
+            .consulta::<crate::contador::Apontamentos>("financeiro.apontamentos.v1")
+            .comando::<crate::contador::RegistrarApontamento>("financeiro.registrar_apontamento.v1")
+            .comando::<crate::contador::ResponderApontamento>("financeiro.responder_apontamento.v1")
+            .comando::<crate::contador::ResolverApontamento>("financeiro.resolver_apontamento.v1")
             .consulta::<crate::pagamento::PerfisDePagamento>("financeiro.perfis_de_pagamento.v1")
             .comando::<crate::orcamento::DefinirOrcamentoDaConta>(
                 "financeiro.definir_orcamento_da_conta.v1",

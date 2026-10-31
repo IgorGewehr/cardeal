@@ -293,7 +293,8 @@ impl PapelDeFabrica {
                 tudo: false,
                 nega_prefixo: &[],
                 modulos: &[],
-                concede_prefixo: &["relatorio"],
+                // O Portal do Contador: o DE/PARA e os apontamentos são dele.
+                concede_prefixo: &["relatorio", "financeiro.contador"],
                 concede_sufixo: &[".ver", ".listar", ".consultar", ".exportar"],
             },
             Self::Auditor => PoliticaPapel {
@@ -405,6 +406,10 @@ mod testes {
     const CATALOGO: &[&str] = &[
         "financeiro.pulso.ver",
         "financeiro.receber.baixar",
+        "financeiro.contador.ver",
+        "financeiro.contador.de_para",
+        "financeiro.contador.apontar",
+        "financeiro.apontamento.responder",
         "financeiro.conta.editar",
         "financeiro.caixa.abrir",
         "razao.lancamento.ver",
@@ -518,6 +523,10 @@ mod testes {
         assert!(p.contains("relatorio.exportar"));
         assert!(!p.contains("financeiro.receber.baixar"));
         assert!(!p.contains("vendas.pedido.faturar"));
+        // O Portal do Contador: o DE/PARA e os apontamentos são dele; responder é da empresa.
+        assert!(p.contains("financeiro.contador.de_para"));
+        assert!(p.contains("financeiro.contador.apontar"));
+        assert!(!p.contains("financeiro.apontamento.responder"));
     }
 
     #[test]

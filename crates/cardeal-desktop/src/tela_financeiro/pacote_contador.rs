@@ -2,8 +2,9 @@
 //! direto e indireto, balancete, o resumo das notas fiscais e as pendências), numa planilha
 //! `.xlsx` (as mesmas tabelas, o diário completo e as notas nota a nota, com números de verdade
 //! para o contador trabalhar) e num ZIP com os XMLs do mês — emitidas, canceladas (a nota e o
-//! evento), inutilizadas e as de entrada —, gravados numa pasta que o sistema abre em seguida,
-//! pronta para anexar no e-mail ou no WhatsApp.
+//! evento), inutilizadas e as de entrada —, e num CSV com os lançamentos do mês para o sistema
+//! do contador (com o DE/PARA do Portal do Contador), gravados numa pasta que o sistema abre em
+//! seguida, pronta para anexar no e-mail ou no WhatsApp.
 
 use std::path::{Path, PathBuf};
 
@@ -15,6 +16,7 @@ use cardeal_pdf::{
 };
 use cardeal_planilha::{Aba as AbaPlanilha, Celula, Planilha};
 use mod_compras::{EstadoNotaEntrada, NotaDeEntradaDoMes, NotasDeEntradaDoMes};
+use mod_financeiro::contador::{em_latin1, lancamentos_em_csv, DeParaDoContador};
 use mod_financeiro::dfc::{BlocoDfc, Dfc, DfcIndireto};
 use mod_financeiro::dre::TipoLinhaDre;
 use mod_financeiro::{ComparativoDre, DiarioDoPeriodo};
@@ -35,6 +37,37 @@ pub(super) struct DadosDoPacote<'a> {
     pub(super) diario: &'a [LancamentoDoDiario],
     pub(super) emitidas: &'a NotasEmitidas,
     pub(super) entradas: &'a NotasDeEntrada,
+    /// As contas do CSV que saíram sem o código do contador ("código — nome"), quando o DE/PARA
+    /// já está em uso (sem nenhum código, o contador ainda não começou a usar: não é pendência).
+    pub(super) sem_de_para: &'a [String],
+}
+
+/// Quantas contas sem DE/PARA a pendência nomeia (o resto vira "e mais N").
+const CONTAS_NOMEADAS: usize = 6;
+
+/// A pendência das contas sem o código do contador.
+pub(super) fn pendencia_do_de_para(sem: &[String]) -> Option<(String, String)> {
+    if sem.is_empty() {
+        return None;
+    }
+    let mut nomes = sem
+        .iter()
+        .take(CONTAS_NOMEADAS)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join("; ");
+    if sem.len() > CONTAS_NOMEADAS {
+        nomes.push_str(&format!("; e mais {}", sem.len() - CONTAS_NOMEADAS));
+    }
+    Some((
+        format!(
+            "{} conta(s) sem o código do contador nos lançamentos: {nomes}",
+            sem.len()
+        ),
+        "Preencha em Financeiro › Contador › DE/PARA e gere o pacote de novo — no CSV elas \
+         saíram com o código do Cardeal."
+            .to_owned(),
+    ))
 }
 
 const fn nome_do_modelo(m: ModeloFiscal) -> &'static str {
@@ -585,7 +618,8 @@ pub(super) fn relatorio(d: &DadosDoPacote<'_>) -> RelatorioPdf {
     });
     let aaaamm = format!("{}-{:02}", d.mes.ano(), d.mes.mes());
     secoes.push(secao_das_notas(d, &aaaamm));
-    let pendentes = pendencias(d.emitidas, d.entradas);
+    let mut pendentes = pendencias(d.emitidas, d.entradas);
+    pendentes.extend(pendencia_do_de_para(d.sem_de_para));
     if !pendentes.is_empty() {
         secoes.push(SecaoRelatorio {
             titulo: "Pendências do mês".to_owned(),
@@ -827,6 +861,21 @@ pub(super) fn gravar(
     } else {
         Err("o seu usuário não vê as compras".to_owned())
     };
+    // O DE/PARA do contador: sem a permissão de vê-lo, o CSV sai com os códigos do Cardeal.
+    let de_para: HashMap<String, String> = motor
+        .consultar(
+            sessao,
+            "financeiro.de_para_do_contador.v1",
+            &DeParaDoContador,
+        )
+        .map(|v| {
+            v.into_iter()
+                .filter_map(|l| Some((l.codigo, l.externo?)))
+                .collect()
+        })
+        .unwrap_or_default();
+    let (csv, sem) = lancamentos_em_csv(&diario, &de_para);
+    let sem_de_para = if de_para.is_empty() { Vec::new() } else { sem };
     let dados = DadosDoPacote {
         mes,
         dre: estado.dre.as_ref().ok_or_else(falta)?,
@@ -836,6 +885,7 @@ pub(super) fn gravar(
         diario: &diario,
         emitidas: &emitidas,
         entradas: &entradas,
+        sem_de_para: &sem_de_para,
     };
     let ident = motor.identidade_visual().unwrap_or_default();
     let empresa = IdentidadeEmpresa {
@@ -862,6 +912,11 @@ pub(super) fn gravar(
         .map_err(|e| format!("Não consegui gravar o PDF: {e}"))?;
     std::fs::write(pasta.join(format!("Contabilidade {aaaamm}.xlsx")), xlsx)
         .map_err(|e| format!("Não consegui gravar a planilha: {e}"))?;
+    std::fs::write(
+        pasta.join(format!("Lançamentos {aaaamm}.csv")),
+        em_latin1(&csv),
+    )
+    .map_err(|e| format!("Não consegui gravar os lançamentos: {e}"))?;
     let xmls = arquivos_xml(&emitidas, &entradas);
     if !xmls.is_empty() {
         let zip = cardeal_planilha::zip::empacotar_comprimido(&xmls)
@@ -874,7 +929,8 @@ pub(super) fn gravar(
         pasta,
         xmls: xmls.len(),
         buscando,
-        pendencias: pendencias(&emitidas, &entradas).len(),
+        pendencias: pendencias(&emitidas, &entradas).len()
+            + usize::from(pendencia_do_de_para(&sem_de_para).is_some()),
         efd,
     })
 }
@@ -951,7 +1007,7 @@ pub(super) fn botao(
                     p.xmls
                 )),
                 (0, 0) => Notificacao::sucesso(format!(
-                    "Pacote do contador gravado: PDF e planilha do mês{efd}"
+                    "Pacote do contador gravado: PDF, planilha e lançamentos do mês{efd}"
                 )),
                 (_, n) if p.buscando > 0 => Notificacao::aviso(format!(
                     "Pacote do contador gravado, com {n} pendência(s) — o Cardeal está buscando {} \

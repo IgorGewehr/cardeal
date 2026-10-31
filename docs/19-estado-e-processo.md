@@ -52,7 +52,11 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   Os **primeiros passos** (`cardeal-desktop/src/primeiros_passos.rs`) abrem depois do login para quem
   administra enquanto falta algum dos 7 (empresa, fiscal, produtos, bancos, clientes, equipe, primeira
   venda), cada um conferido pelos dados — não por "marquei como feito" — e com o botão para a tela;
-  "Não mostrar mais" vale para o computador e a paleta (`Ctrl+K`) reabre.
+  "Não mostrar mais" vale para o computador e a paleta (`Ctrl+K`) reabre. O **Portal do Contador**
+  (`mod_financeiro::contador`, migração v15, doc `modulos/financeiro.md` §6.8): Financeiro › Contador
+  com os apontamentos (o contador pede, a empresa responde, a Visão geral avisa) e o DE/PARA do
+  plano, que o pacote do mês usa no `Lançamentos AAAA-MM.csv` (ISO-8859-1) para o sistema do
+  escritório.
   Onda 6 (Financeiro 2) começou: **conciliação com alerta de pendências e saldo banco × sistema**,
   **lançamento pré-preenchido pelo último da pessoa**, **DFC indireto**, **cheques**, **balancete/diário** e o
   **pacote do contador** (PDF + `.xlsx`) e a **régua de cobrança** (fila do dia com envio de um clique) feitos
@@ -598,7 +602,7 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   Resultado (pasta `Contador AAAA-MM` com PDF de DRE/DFC/balancete e planilha com essas tabelas + diário).
   Validação: testes do ZIP (lido de volta, CRC conferido), da planilha e do PDF; a amostra abriu no Excel
   (abas, formato, negrito, painel congelado); o pacote real passou no `System.IO.Packaging` do .NET. Envio
-  automático (SMTP) fica para quando houver configuração de e-mail; Portal do Contador é da onda 8.
+  automático (SMTP) fica para quando houver configuração de e-mail; o Portal do Contador veio na onda 8 (§6.8 do financeiro).
 - **Régua de cobrança (2026-10-14, onda 6):** `mod_financeiro::regua` (régua padrão −3/0/1/7/15/30, etapa devida
   por parcela uma vez só, fila agrupada por cliente na etapa mais grave, mensagem redigida), migração `financeiro`
   v12, `ReguaDeCobranca`/`FilaDeCobranca`/`DefinirReguaDeCobranca`/`RegistrarCobranca` e duas permissões novas

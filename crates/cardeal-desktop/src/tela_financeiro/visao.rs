@@ -108,6 +108,7 @@ pub(super) fn painel_visao(
     }
     super::conferencia::alerta_na_visao(ui, motor, sessao, estado);
     super::regua::aviso_na_visao(ui, motor, sessao, estado);
+    super::contador::aviso_na_visao(ui, motor, sessao, estado);
     aviso_do_certificado(ui, estado);
     super::obrigacoes::cartao(ui, &estado.obrigacoes);
 

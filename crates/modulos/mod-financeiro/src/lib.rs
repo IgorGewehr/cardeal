@@ -74,6 +74,7 @@ mod comandos;
 mod conciliacao;
 mod conferencia;
 mod consultas;
+pub mod contador;
 pub mod dfc;
 pub mod dre;
 mod dre_consulta;

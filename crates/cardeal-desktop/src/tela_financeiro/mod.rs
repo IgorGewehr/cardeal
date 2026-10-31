@@ -13,6 +13,7 @@ mod cheques;
 mod cobranca;
 mod conciliacao_banco;
 mod conferencia;
+mod contador;
 mod contas;
 mod custos;
 mod dre;
@@ -94,6 +95,8 @@ enum Aba {
     Bancos,
     /// Os CNPJs do grupo lado a lado (só com mais de um).
     Grupo,
+    /// O Portal do Contador: apontamentos e DE/PARA.
+    Contador,
 }
 
 /// A chave do topo: as contas da empresa ou as finanças pessoais do usuário.
@@ -400,6 +403,8 @@ pub struct EstadoTelaFinanceiro {
     aba: Aba,
     /// O painel do grupo (os CNPJs em que a pessoa entra).
     grupo: grupo::EstadoGrupo,
+    /// O Portal do Contador.
+    contador: contador::EstadoContador,
     /// As parcelas da aba ativa (Receber/Pagar) com vencimento em `periodo` — **qualquer
     /// estado**, não só em aberto (pedido explícito do usuário: a aba deve mostrar também o
     /// que já foi pago/recebido, igual ao histórico do fluxo de caixa).
@@ -576,6 +581,7 @@ pub fn mostrar(
                 Aba::Conciliacao => painel_conciliacao(ui, motor, sessao, estado),
                 Aba::Cheques => cheques::painel_cheques(ui, motor, sessao, estado),
                 Aba::Grupo => grupo::painel(ui, motor, sessao, &mut estado.grupo),
+                Aba::Contador => contador::painel(ui, motor, sessao, &mut estado.contador),
                 _ => lista(ui, motor, sessao, estado),
             }
         },
@@ -703,6 +709,9 @@ fn abas(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTe
     ];
     if estado.grupo.ha_grupo() {
         lista.push((Aba::Grupo, "Grupo"));
+    }
+    if sessao.concede("financeiro.contador.ver") {
+        lista.push((Aba::Contador, "Contador"));
     }
     let nova = Abas::nova(&lista).selecionada(estado.aba).mostrar(ui);
     if let Some(nova) = nova {

@@ -1217,10 +1217,11 @@ fn pacote_do_contador_grava_pdf_e_planilha_do_mes() {
         .map(|e| e.unwrap().path())
         .collect();
     arquivos.sort();
-    assert_eq!(arquivos.len(), 2, "{arquivos:?}");
+    assert_eq!(arquivos.len(), 3, "{arquivos:?}");
     let xlsx = std::fs::read(&arquivos[0]).unwrap();
-    let pdf = std::fs::read(&arquivos[1]).unwrap();
+    let pdf = std::fs::read(&arquivos[2]).unwrap();
     assert!(arquivos[0].to_string_lossy().ends_with(".xlsx"));
+    assert!(arquivos[1].to_string_lossy().ends_with(".csv"));
     assert!(pdf.starts_with(b"%PDF-1."));
     // O `.xlsx` guarda os XMLs sem compressão: dá para conferir o conteúdo nos bytes.
     let texto = String::from_utf8_lossy(&xlsx);
@@ -1438,6 +1439,7 @@ fn pacote_do_contador_resume_as_notas_e_lista_as_pendencias() {
         diario: &[],
         emitidas: &emitidas,
         entradas: &entradas,
+        sem_de_para: &[],
     };
     let r = relatorio(&dados);
     let notas = r
@@ -1773,4 +1775,149 @@ fn conta_nova_com_saldo_e_transferencia_aparecem_na_aba_de_bancos() {
             }
         });
     }
+}
+
+/// O CSV de lançamentos do pacote, lido de volta (ISO-8859-1 → texto).
+fn csv_do_pacote(pasta: &std::path::Path) -> String {
+    let mes = Data::hoje(Fuso::BRASILIA).competencia();
+    let nome = format!("Lançamentos {}-{:02}.csv", mes.ano(), mes.mes());
+    std::fs::read(pasta.join(nome))
+        .expect("o CSV dos lançamentos")
+        .into_iter()
+        .map(char::from)
+        .collect()
+}
+
+#[test]
+fn portal_do_contador_o_de_para_vai_no_csv_do_pacote_e_o_apontamento_avisa_a_visao() {
+    use mod_financeiro::contador::{
+        Apontamentos, DeParaDoContador, DefinirDePara, LinhaDePara, RegistrarApontamento,
+        ResponderApontamento,
+    };
+    let t = motor_de_teste();
+    lancar_a_receber(&t.motor, &t.sessao, 250);
+    let mut estado = EstadoTelaFinanceiro {
+        aba: Aba::Resultado,
+        ..Default::default()
+    };
+    estado.carregar(&t.motor, &t.sessao);
+
+    // Sem DE/PARA nenhum: o CSV sai com os códigos do Cardeal e não é pendência.
+    let dir = tempfile::tempdir().unwrap();
+    let antes = super::pacote_contador::gravar(&t.motor, &t.sessao, &estado, dir.path()).unwrap();
+    assert_eq!(antes.pendencias, 0);
+    let csv = csv_do_pacote(&antes.pasta);
+    let linhas: Vec<&str> = csv.split("\r\n").filter(|l| !l.is_empty()).collect();
+    assert_eq!(linhas[0], "data;lancamento;conta;dc;valor;historico");
+    assert!(
+        linhas.len() >= 3,
+        "o título lançado, partida a partida: {csv}"
+    );
+    assert!(linhas.iter().any(|l| l.contains(";250,00;")), "{csv}");
+    let primeira = linhas[1].split(';').nth(2).unwrap().to_owned();
+
+    // O contador põe o código dele numa conta: o CSV troca, e as outras viram pendência.
+    let de_para: Vec<LinhaDePara> = t
+        .motor
+        .consultar(
+            &t.sessao,
+            "financeiro.de_para_do_contador.v1",
+            &DeParaDoContador,
+        )
+        .unwrap();
+    let conta = de_para
+        .iter()
+        .find(|l| l.codigo == primeira)
+        .expect("conta analítica");
+    let n: usize = t
+        .motor
+        .executar(
+            &t.sessao,
+            "financeiro.definir_de_para.v1",
+            &DefinirDePara {
+                codigos: vec![(conta.conta, Some(" 1105 ".into()))],
+            },
+        )
+        .unwrap();
+    assert_eq!(n, 1);
+    let errado = t.motor.executar(
+        &t.sessao,
+        "financeiro.definir_de_para.v1",
+        &DefinirDePara {
+            codigos: vec![(conta.conta, Some("11;05".into()))],
+        },
+    );
+    assert!(errado.is_err(), "o separador do CSV não entra no código");
+    let dir = tempfile::tempdir().unwrap();
+    let depois = super::pacote_contador::gravar(&t.motor, &t.sessao, &estado, dir.path()).unwrap();
+    assert_eq!(depois.pendencias, 1, "as contas que ficaram sem código");
+    let csv = csv_do_pacote(&depois.pasta);
+    assert!(csv.contains(";1105;"), "{csv}");
+    assert!(!csv.contains(&format!(";{primeira};")), "{csv}");
+
+    // O apontamento: avisa a Visão geral até a empresa responder.
+    let id: Id = t
+        .motor
+        .executar(
+            &t.sessao,
+            "financeiro.registrar_apontamento.v1",
+            &RegistrarApontamento {
+                competencia: Data::hoje(Fuso::BRASILIA).competencia(),
+                texto: "falta a nota da compra de 12/10".into(),
+            },
+        )
+        .unwrap();
+    let curto = t.motor.executar(
+        &t.sessao,
+        "financeiro.responder_apontamento.v1",
+        &ResponderApontamento {
+            apontamento: id,
+            resposta: "ok".into(),
+        },
+    );
+    assert!(curto.is_err(), "resposta curta demais");
+    estado.aba = Aba::Visao;
+    estado.carregar(&t.motor, &t.sessao);
+    assert_eq!(estado.contador.aguardando(), 1);
+    t.motor
+        .executar(
+            &t.sessao,
+            "financeiro.responder_apontamento.v1",
+            &ResponderApontamento {
+                apontamento: id,
+                resposta: "anexei no e-mail de hoje".into(),
+            },
+        )
+        .unwrap();
+    estado.carregar(&t.motor, &t.sessao);
+    assert_eq!(estado.contador.aguardando(), 0);
+    let pendentes: Vec<mod_financeiro::contador::Apontamento> = t
+        .motor
+        .consultar(
+            &t.sessao,
+            "financeiro.apontamentos.v1",
+            &Apontamentos { so_pendentes: true },
+        )
+        .unwrap();
+    assert_eq!(
+        pendentes.len(),
+        1,
+        "respondido ainda espera o contador conferir"
+    );
+    assert_eq!(
+        pendentes[0].resposta.as_deref(),
+        Some("anexei no e-mail de hoje")
+    );
+
+    // A aba desenha (com a lista e o DE/PARA carregados).
+    estado.aba = Aba::Contador;
+    estado.carregar(&t.motor, &t.sessao);
+    let ctx = egui::Context::default();
+    cardeal_ui::tokens::instalar_fontes(&ctx);
+    cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            super::contador::painel(ui, &t.motor, &t.sessao, &mut estado.contador);
+        });
+    });
 }

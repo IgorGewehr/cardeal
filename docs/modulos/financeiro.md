@@ -435,6 +435,32 @@ stateDiagram-v2
 | `TotalPorCategoriaNoPeriodo` ✅ | `financeiro.categoria.ver` | Gráfico de custo/receita por categoria e mês (churn, MRR por projeto) | agregação em memória sobre `financeiro_baixa` join `financeiro_titulo`, filtrando por `data` |
 | `TituloDaOrigem` ✅ (novo, 2026-09-11) | `financeiro.receber.ver` | Detalhe de OS (`os`)/vendas/compras faturada: "qual título isto gerou" | `financeiro_titulo(empresa, origem_modulo, origem_id)` — o par de correlação que `Titulo` já carregava desde a origem; usado por outro módulo pela consulta pública, nunca por SQL direto em `financeiro_titulo` (`docs/contratos-internos.md` §7 regra 2) |
 
+## 6.8 Portal do Contador (2026-10-31, onda 8)
+
+O que liga a empresa ao escritório de contabilidade, além do pacote do mês (`contador.rs`, migração
+v15). Financeiro › **Contador**:
+
+- **DE/PARA do plano** (`financeiro.de_para_do_contador.v1` / `financeiro.definir_de_para.v1`): o
+  código de cada conta analítica no sistema do contador. Quem preenche é o próprio contador — o papel
+  de fábrica Contador (somente leitura e exportação) ganhou `financeiro.contador.*`.
+- **Lançamentos para o sistema do contador**: o pacote do mês leva `Lançamentos AAAA-MM.csv` — o
+  diário partida a partida (`data;lancamento;conta;dc;valor;historico`, `;`, CRLF, valor sem
+  separador de milhar, D/C pelo sinal, histórico sem `;` nem quebra de linha), em **ISO-8859-1**
+  como os sistemas contábeis importam (`contador::em_latin1`: travessão e aspas tipográficas viram
+  os simples; o resto que não cabe, `?`). Cada conta sai com o código do contador; a que não tem,
+  com o do Cardeal — e, quando o DE/PARA já está em uso (ao menos um código), as que faltam viram
+  uma pendência no fim do PDF. Sem nenhum código, o CSV vai com os do Cardeal e não é pendência:
+  o contador ainda não começou a usar. Quem gera o pacote sem `financeiro.contador.ver` também
+  leva os códigos do Cardeal.
+- **Apontamentos** (`financeiro.apontamentos.v1`, `…registrar_apontamento.v1`,
+  `…responder_apontamento.v1`, `…resolver_apontamento.v1`): o contador pede, a empresa responde
+  (`financeiro.apontamento.responder`, que o papel Contador **não** tem), o contador resolve ou
+  reabre (o respondido continua pendente até ele conferir). A Visão geral avisa os que esperam a
+  empresa, com "Responder" levando à aba. Texto e resposta com ao menos 5 caracteres; o resolvido
+  não aceita resposta.
+- **Código do contador**: até 40 caracteres, sem `;` (quebraria o CSV); vazio apaga. `DefinirDePara`
+  é auditado (Médio).
+
 ## 6.7 Orçamento por conta (2026-10-26, item 13 do doc 21)
 
 O orçado de cada conta do resultado, mês a mês (`orcamento.rs`, migração v14
@@ -489,7 +515,8 @@ cabeçalho da empresa — `cardeal_pdf::gerar_relatorio`, relatório tabular gen
 separados). O `.xlsx` vem do crate novo `cardeal-planilha`: Office Open XML escrito à mão (ZIP armazenado +
 XML), sem dependência externa — dinheiro como número `#.##0,00`, datas como data, negrito, larguras e cabeçalho
 congelado; conferido no Excel (amostra) e pelo leitor de pacotes Open XML do .NET (o pacote real). "Envio" é
-manual: o usuário anexa a pasta no e-mail/WhatsApp — SMTP e o Portal do Contador (onda 8) ficam para depois.
+manual: o usuário anexa a pasta no e-mail/WhatsApp — SMTP fica para depois; o Portal do Contador (§6.8)
+acrescenta o CSV dos lançamentos com o DE/PARA.
 
 **Com as notas do mês (2026-10-20, item 11 do doc 21).** O pacote ganha um terceiro arquivo,
 `XMLs AAAA-MM.zip`, comprimido (`cardeal_planilha::zip::empacotar_comprimido`; o deflate é do

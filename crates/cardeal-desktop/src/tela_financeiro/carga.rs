@@ -71,6 +71,10 @@ impl EstadoTelaFinanceiro {
                 None
             };
             self.obrigacoes = super::obrigacoes::carregar(motor, sessao);
+            self.contador.conhecer(motor, sessao);
+        }
+        if self.aba == Aba::Contador {
+            self.contador.carregar(motor, sessao);
         }
         if matches!(self.aba, Aba::Receber | Aba::Pagar) {
             self.carregar_parcelas_periodo(motor, sessao);
