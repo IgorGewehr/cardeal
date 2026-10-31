@@ -49,6 +49,7 @@ mod sql;
 mod sql_documento;
 mod terminal;
 mod tipos;
+pub mod transferencia;
 mod tributacao;
 
 pub use cardeal_fiscal::{AmbienteFiscal, ModeloFiscal, StatusSefaz};

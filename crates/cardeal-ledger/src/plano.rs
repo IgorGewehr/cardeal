@@ -90,6 +90,7 @@ pub fn plano_padrao() -> Vec<ContaSemente> {
         linha("1.2.03", "Cheques a receber", Ativo, A).papel(P::ChequesAReceber),
         linha("1.2.04", "Adiantamentos a fornecedores", Ativo, A).papel(P::AdiantamentoFornecedor),
         linha("1.2.05", "Impostos a recuperar", Ativo, A).papel(P::ImpostosARecuperar),
+        linha("1.2.06", "Conta corrente com empresas do grupo", Ativo, A).papel(P::ContaCorrenteGrupo),
         linha("1.3", "Estoques", Ativo, S),
         linha("1.3.01", "Mercadorias para revenda", Ativo, A).papel(P::EstoqueMercadorias),
         linha("1.3.02", "Matéria-prima", Ativo, A).papel(P::EstoqueMateriaPrima),

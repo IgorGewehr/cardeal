@@ -782,6 +782,12 @@ pub(crate) mod sqlite {
                 .map_or(resumo.total, cardeal_fiscal::Nfe::total);
             let (blob, motivo) = blob_ou_motivo(nota)?;
             (total, blob, motivo)
+        } else if origem_modulo == crate::transferencia::ORIGEM_TRANSFERENCIA {
+            // Os dados da transferência são do compras: a nota se remonta por lá.
+            return Err(Erro::novo(
+                CodigoErro::ESTADO_INVALIDO,
+                "A NF-e de transferência se reenvia pela transferência, em Estoque ›                  Transferências (Emitir NF-e de novo, depois de corrigir)",
+            ));
         } else if origem_modulo == crate::devolucao_compra::ORIGEM_DEVOLUCAO_COMPRA {
             // Os dados da devolução são do compras: a nota se remonta por lá.
             return Err(Erro::novo(

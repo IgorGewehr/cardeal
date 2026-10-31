@@ -56,7 +56,10 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   (`mod_financeiro::contador`, migração v15, doc `modulos/financeiro.md` §6.8): Financeiro › Contador
   com os apontamentos (o contador pede, a empresa responde, a Visão geral avisa) e o DE/PARA do
   plano, que o pacote do mês usa no `Lançamentos AAAA-MM.csv` (ISO-8859-1) para o sistema do
-  escritório.
+  escritório. A **transferência entre filiais** (`mod_compras::transferencia`, compras v13, doc
+  `modulos/compras.md` §14): Estoque › Entre filiais envia com a NF-e de transferência (5152/6152, CSOSN
+  400, `mod_fiscal::transferencia`), a filial recebe só com ela autorizada, o Razão espelha pela conta
+  corrente com empresas do grupo (papel novo `ContaCorrenteGrupo`); só mesma raiz de CNPJ e Simples.
   Onda 6 (Financeiro 2) começou: **conciliação com alerta de pendências e saldo banco × sistema**,
   **lançamento pré-preenchido pelo último da pessoa**, **DFC indireto**, **cheques**, **balancete/diário** e o
   **pacote do contador** (PDF + `.xlsx`) e a **régua de cobrança** (fila do dia com envio de um clique) feitos

@@ -118,6 +118,24 @@ const PERMISSOES: &[Permissao] = &[
         Some("cotacao"),
     ),
     perm(
+        "compras.transferencia.ver",
+        "Ver as transferências de mercadoria entre as filiais do grupo",
+        Risco::Baixo,
+        None,
+    ),
+    perm(
+        "compras.transferencia.enviar",
+        "Enviar mercadoria a outra filial (NF-e de transferência) e cancelar o envio",
+        Risco::Medio,
+        None,
+    ),
+    perm(
+        "compras.transferencia.receber",
+        "Receber a mercadoria transferida por outra filial",
+        Risco::Medio,
+        None,
+    ),
+    perm(
         "compras.pedido.ver",
         "Consultar pedidos de compra",
         Risco::Baixo,

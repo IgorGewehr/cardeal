@@ -288,7 +288,7 @@ stateDiagram-v2
 | `ReservarEstoque` | (consulta síncrona de `vendas`, sem permissão de usuário direta) | Baixo | Ainda não implementado | `SaldoInsuficiente` |
 | `LiberarReserva` | idem | Baixo | Ainda não implementado | `ReservaInexistente` |
 | `TransferirEntreLocais` ✅ (2026-10-13, `estoque.transferir_entre_locais.v1`) | `estoque.transferencia.criar` | Médio | Vários produtos de um local para outro do mesmo CNPJ, numa transação: por item, saída na origem e entrada no destino ao custo médio da origem (o destino recalcula; sem custo conhecido só a quantidade muda), movimentos `TransferenciaSaida`/`TransferenciaEntrada` com origem `transferencia` e o documento em `estoque_transferencia*`. Produto repetido soma | `LocalIgual`, `TransferenciaSemItens`, `SaldoInsuficienteNaOrigem` (`ESTOQUE_INSUFICIENTE`, tudo ou nada), `TransferenciaComLote`, `LocalCongelado` (local em inventário) |
-| `ConfirmarRecebimentoTransferencia` | `estoque.transferencia.confirmar` | Baixo | **Adiado de propósito (2026-10-13):** entre locais do mesmo CNPJ a mercadoria muda de lugar na hora; a etapa `EmTransito` com confirmação vem com a transferência entre filiais (CNPJs), que exige NF-e de transferência (onda fiscal) | `TransferenciaJaConfirmada` |
+| `ConfirmarRecebimentoTransferencia` | `estoque.transferencia.confirmar` | Baixo | **Entre locais do mesmo CNPJ, não existe (2026-10-13):** a mercadoria muda de lugar na hora. Entre filiais (CNPJs) a etapa a caminho veio em 2026-10-31 no `mod-compras` (`ReceberTransferencia`, `docs/modulos/compras.md` §14), sem local técnico `EmTransito`: o que está a caminho é a transferência `Enviada`, e o valor fica na conta corrente com empresas do grupo | `TransferenciaJaConfirmada` |
 | `AjustarSaldo` ✅ | `estoque.movimento.ajustar` | Alto | Corrige o disponível de um produto/local para `nova_quantidade` (erro de digitação de contagem/entrada), fora do fluxo formal de inventário; **é o único comando de movimento desta fatia que posta no razão** (`receituario::ajuste_manual`, mesma contabilização de `ajuste_de_inventario` — D Estoque/C Outras receitas na sobra, D Perdas/C Estoque na falta), porque não há nenhum outro módulo gerando a contrapartida de uma correção manual. Corrige quantidade, não custo — reabrir/corrigir só o `custo_medio` sem mexer na quantidade fica para quando existir `EditarProduto` | `MotivoObrigatorio` (motivo com menos de 10 caracteres), `QuantidadeInvalida` (`nova_quantidade` igual à atual — nada a corrigir) |
 | `RegistrarPerda` ✅ (2026-10-13, `estoque.registrar_perda.v1`) | `estoque.movimento.perda` | Médio | Baixa de perda (motivo vencimento, quebra/avaria, furto/extravio, outro + observação): sai do saldo do local e, se informado, do lote (que vira `Esgotado` quando zera); movimento `Perda`; lança D Perdas / C Estoque **ao custo médio** (como toda saída — o custo do lote é informativo) com o motivo no histórico. Não deixa saldo negativo | `LoteInexistente`, `LoteDeOutroProduto`, `LoteSaldoInsuficiente`, `PerdaAcimaDoSaldo`, `LocalCongelado` |
 | `CriarInventario` ✅ (2026-10-13, `estoque.criar_inventario.v1`) | `estoque.inventario.criar` | Baixo | Planeja a contagem de um local (CNPJ da sessão): o local inteiro ou um grupo da estrutura com a subárvore | `LocalJaEmInventario` (um inventário aberto por local), local/grupo inexistente |
@@ -438,6 +438,14 @@ recusado** (o lote guarda o local; a transferência por lote fica para depois); 
 filtram `Saida`/`Entrada` e por isso não enxergam a transferência como consumo nem como compra. Tela: aba
 **Transferências** no Estoque — de/para, produto com o disponível na origem e no destino, lista com remover,
 observação, e o histórico com os itens da selecionada.
+
+**Entre filiais (2026-10-31).** A transferência para outro CNPJ do grupo é do `mod-compras`
+(`docs/modulos/compras.md` §14), mas os movimentos são daqui, com três funções públicas:
+`registrar_saida_por_transferencia_comum` (só de local da empresa, sem lote ativo nele),
+`registrar_entrada_por_transferencia_comum` (no local da filial que recebe, ao custo da que enviou) e
+`devolver_transferencia_da_origem` (o cancelamento). Os movimentos são `TransferenciaSaida`/
+`TransferenciaEntrada`, nunca `Saida`/`Entrada`: transferência não é consumo nem compra, e o ABC, o giro,
+a rentabilidade e o histórico de compras (que leem só `Saida`/`Entrada`) continuam sem enxergá-la.
 
 ### Inventário com contagem cega (2026-10-13)
 

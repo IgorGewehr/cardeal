@@ -1321,3 +1321,190 @@ fn validade_na_tela_entrada_alerta_e_baixa() {
     assert!(estado.val.lotes.is_empty());
     assert_eq!(estado.lotes_em_alerta, 0);
 }
+
+#[test]
+fn entre_filiais_a_aba_aparece_com_o_grupo_envia_e_a_filial_ve_a_caminho() {
+    use mod_compras::{CancelarTransferencia, SituacaoDaNota};
+    use mod_empresa::{DadosFiscais, DefinirDadosFiscaisEmpresa, EnderecoFiscal};
+    let mut t = motor_de_teste();
+    let matriz = t.motor.empresa_da_sessao(&t.sessao).expect("empresa");
+    let mut estado = EstadoTelaEstoque::default();
+    estado.carregar(&t.motor, &t.sessao);
+    assert!(!estado.filiais.ha_grupo(), "um CNPJ só: sem a aba");
+
+    let filial = t
+        .motor
+        .adicionar_empresa(&t.sessao, "Assistência Teste Filial", "11.222.333/0002-62")
+        .expect("filial");
+    let fiscais = DefinirDadosFiscaisEmpresa {
+        dados: DadosFiscais {
+            inscricao_estadual: "0960000000".into(),
+            inscricao_municipal: String::new(),
+            endereco: EnderecoFiscal {
+                logradouro: "Rua A".into(),
+                numero: "1".into(),
+                complemento: String::new(),
+                bairro: "Centro".into(),
+                municipio: "Porto Alegre".into(),
+                codigo_municipio: "4314902".into(),
+                uf: "RS".into(),
+                cep: "90010000".into(),
+            },
+        },
+    };
+    let s_filial = t.motor.trocar_empresa(&t.sessao, filial).expect("troca");
+    let _: DadosFiscais = t
+        .motor
+        .executar(&s_filial, "empresa.definir_dados_fiscais.v1", &fiscais)
+        .expect("dados fiscais da filial");
+    let deposito_filial: LocalCriado = t
+        .motor
+        .executar(
+            &s_filial,
+            "estoque.criar_local.v1",
+            &CriarLocal {
+                nome: "Depósito da filial".into(),
+                tipo: TipoLocal::Deposito,
+            },
+        )
+        .expect("local da filial");
+    let s = t.motor.trocar_empresa(&s_filial, matriz).expect("volta");
+    let _: DadosFiscais = t
+        .motor
+        .executar(&s, "empresa.definir_dados_fiscais.v1", &fiscais)
+        .expect("dados fiscais da matriz");
+    let g = grupo(&t.motor, &s, "Acessórios", None);
+    let un: UnidadeCriada = t
+        .motor
+        .executar(
+            &s,
+            "estoque.criar_unidade.v1",
+            &CriarUnidade {
+                sigla: "UN".into(),
+                nome: "Unidade".into(),
+                fracionavel: false,
+            },
+        )
+        .expect("unidade");
+    let p: ProdutoCriado = t
+        .motor
+        .executar(
+            &s,
+            "estoque.criar_produto.v1",
+            &CriarProduto {
+                grupo_produto: g,
+                nome: "Película de vidro".into(),
+                ncm: "70071900".into(),
+                unidade_padrao: un.unidade,
+                codigo_barras: None,
+                detalhes_tecnicos: None,
+            },
+        )
+        .expect("produto");
+    let loja: LocalCriado = t
+        .motor
+        .executar(
+            &s,
+            "estoque.criar_local.v1",
+            &CriarLocal {
+                nome: "Loja".into(),
+                tipo: TipoLocal::Loja,
+            },
+        )
+        .expect("local");
+    let _: EntradaRegistrada = t
+        .motor
+        .executar(
+            &s,
+            "estoque.registrar_entrada.v1",
+            &RegistrarEntrada {
+                produto: p.produto,
+                local: loja.local,
+                quantidade: Quantidade::unidades(10),
+                custo_unitario: Preco::reais(4),
+            },
+        )
+        .expect("entrada");
+
+    // Com a filial, a aba aparece; o envio pela tela sai (a NF-e, sem o certificado, rejeitada
+    // com o porquê) e a lista mostra a caminho.
+    let mut estado = EstadoTelaEstoque::default();
+    estado.carregar(&t.motor, &s);
+    assert!(estado.filiais.ha_grupo());
+    estado.filiais.destino = Some(filial);
+    estado.filiais.local = Some(loja.local);
+    estado
+        .filiais
+        .itens
+        .push(super::transferencia::ItemNaLista {
+            produto: p.produto,
+            nome: "Película de vidro".into(),
+            quantidade: Quantidade::unidades(3),
+        });
+    let r = super::filiais::enviar(&t.motor, &s, &mut estado).expect("enviou");
+    assert_eq!(r.valor, cardeal_kernel::Dinheiro::reais(12));
+    assert!(
+        matches!(&r.nota, SituacaoDaNota::Rejeitada(p) if p.contains("certificado")),
+        "{:?}",
+        r.nota
+    );
+    assert!(estado.filiais.itens.is_empty());
+    assert_eq!(estado.filiais.lista().len(), 1);
+    let ctx = egui::Context::default();
+    cardeal_ui::tokens::instalar_fontes(&ctx);
+    cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+    let desenhar = |motor: &Motor, estado: &mut EstadoTelaEstoque, sessao: &Sessao| {
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                super::filiais::aba(ui, motor, sessao, estado);
+            });
+        });
+    };
+    desenhar(&t.motor, &mut estado, &s);
+
+    // A filial vê a caminho (e não recebe sem a nota autorizada).
+    let s_filial = t.motor.trocar_empresa(&s, filial).expect("troca");
+    let mut na_filial = EstadoTelaEstoque::default();
+    na_filial.carregar(&t.motor, &s_filial);
+    na_filial.filiais.carregar(&t.motor, &s_filial);
+    let id = {
+        let l = na_filial.filiais.lista();
+        assert_eq!(l.len(), 1);
+        assert!(!l[0].enviada_por_esta);
+        l[0].id
+    };
+    na_filial.filiais.selecionar(&t.motor, &s_filial, id);
+    desenhar(&t.motor, &mut na_filial, &s_filial);
+    let erro = t
+        .motor
+        .executar::<mod_compras::ReceberTransferencia>(
+            &s_filial,
+            "compras.receber_transferencia.v1",
+            &mod_compras::ReceberTransferencia {
+                transferencia: id,
+                local: deposito_filial.local,
+            },
+        )
+        .unwrap_err();
+    assert!(erro.mensagem.contains("autorizada"), "{}", erro.mensagem);
+
+    // A matriz cancela o envio (sem nota autorizada): a mercadoria volta.
+    let s = t.motor.trocar_empresa(&s_filial, matriz).expect("volta");
+    t.motor
+        .executar::<CancelarTransferencia>(
+            &s,
+            "compras.cancelar_transferencia.v1",
+            &CancelarTransferencia {
+                transferencia: id,
+                motivo: "a filial ainda tem estoque".into(),
+            },
+        )
+        .expect("cancelou");
+    estado.carregar(&t.motor, &s);
+    let saldo = estado
+        .produtos
+        .iter()
+        .find(|x| x.produto == p.produto)
+        .map(|x| x.disponivel);
+    assert_eq!(saldo, Some(Quantidade::unidades(10)));
+}

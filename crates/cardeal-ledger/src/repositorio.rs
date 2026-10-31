@@ -263,6 +263,47 @@ impl<'a, 'b> RepositorioRazao<'a, 'b> {
             .map(|opt| opt.map(CodigoConta::novo))
     }
 
+    /// A conta do `papel`; sem ela no plano (a base é de antes de o papel existir no plano
+    /// padrão), abre-a como analítica filha de `codigo_pai`, no próximo código livre, e a
+    /// devolve. Para o papel que o plano padrão novo já traz.
+    ///
+    /// # Errors
+    /// [`ErroRazao::CodigoNaoEncontrado`] sem a conta pai; os de [`Conta::abrir_filha`];
+    /// [`ErroRazao::FalhaDePersistencia`] em erro do SQLite.
+    pub fn garantir_conta_do_papel(
+        &mut self,
+        empresa: Id,
+        papel: PapelConta,
+        codigo_pai: &str,
+        nome: &str,
+        natureza: Natureza,
+        modulo_origem: &str,
+    ) -> Resultado<Id> {
+        if let Some(id) = self.conta_por_papel(empresa, papel)? {
+            return Ok(id);
+        }
+        let pai_id = self
+            .conta_por_codigo(empresa, codigo_pai)?
+            .ok_or_else(|| ErroRazao::CodigoNaoEncontrado(codigo_pai.to_owned()))?;
+        let pai = self
+            .info_conta(pai_id)?
+            .ok_or_else(|| ErroRazao::CodigoNaoEncontrado(codigo_pai.to_owned()))?;
+        let ultimo = self.ultimo_codigo_filho(empresa, pai_id)?;
+        let codigo = CodigoConta::novo(pai.codigo.clone()).proximo_filho(ultimo.as_ref());
+        let conta = Conta::abrir_filha(
+            pai_id,
+            &pai,
+            codigo,
+            nome.to_owned(),
+            natureza,
+            None,
+            Some(papel),
+            modulo_origem,
+        )?;
+        self.inserir_conta(&conta)?;
+        Ok(conta.id)
+    }
+
     /// Grava uma conta analítica nova, aberta em runtime por um módulo
     /// (`Conta::abrir_filha`).
     ///

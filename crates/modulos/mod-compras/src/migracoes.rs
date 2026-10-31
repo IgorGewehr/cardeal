@@ -362,7 +362,48 @@ const MIGRACOES: &[Migracao] = &[
         sql: SQL_V12,
         tipo: TipoMigracao::Esquema,
     },
+    Migracao {
+        versao: 13,
+        nome: "compras_transferencia_entre_filiais",
+        sql: SQL_V13,
+        tipo: TipoMigracao::Esquema,
+    },
 ];
+
+/// v13: a transferência de mercadoria entre filiais do grupo (`transferencia.rs`). `empresa` é a
+/// que envia; `destino`, a que recebe (as duas na mesma base: a organização).
+const SQL_V13: &str = "
+CREATE TABLE compras_transferencia (
+    id                     BLOB PRIMARY KEY,
+    empresa                BLOB    NOT NULL REFERENCES nucleo_empresa(id),
+    destino                BLOB    NOT NULL REFERENCES nucleo_empresa(id),
+    local_origem           BLOB    NOT NULL,
+    local_destino          BLOB,
+    estado                 TEXT    NOT NULL CHECK (estado IN ('Enviada','Recebida','Cancelada')),
+    observacao             TEXT,
+    valor_total            INTEGER NOT NULL,
+    enviada_em             INTEGER NOT NULL,
+    enviada_por            BLOB    NOT NULL,
+    lancamento_envio       BLOB,
+    recebida_em            INTEGER,
+    recebida_por           BLOB,
+    lancamento_recebimento BLOB,
+    cancelada_em           INTEGER,
+    motivo_cancelamento    TEXT,
+    CHECK (destino <> empresa)
+) STRICT;
+CREATE INDEX compras_transferencia_origem ON compras_transferencia(empresa, estado, enviada_em);
+CREATE INDEX compras_transferencia_destino ON compras_transferencia(destino, estado, enviada_em);
+CREATE TABLE compras_transferencia_item (
+    transferencia  BLOB    NOT NULL REFERENCES compras_transferencia(id),
+    ordem          INTEGER NOT NULL,
+    produto        BLOB    NOT NULL,
+    quantidade     INTEGER NOT NULL CHECK (quantidade > 0),
+    custo_unitario INTEGER NOT NULL,
+    valor          INTEGER NOT NULL,
+    PRIMARY KEY (transferencia, ordem)
+) STRICT, WITHOUT ROWID;
+";
 
 /// O conjunto de migrações do módulo de compras.
 #[must_use]

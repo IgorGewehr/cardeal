@@ -10,6 +10,7 @@ mod analise;
 mod dicionario;
 mod estrutura;
 mod estrutura_importacao;
+mod filiais;
 mod fiscal;
 mod inventario;
 mod lote;
@@ -57,6 +58,8 @@ enum AbaEstoque {
     Rentabilidade,
     Inventario,
     Transferencias,
+    /// Entre os CNPJs do grupo (só com mais de um).
+    Filiais,
     Validade,
     Radar,
 }
@@ -99,6 +102,7 @@ pub struct EstadoTelaEstoque {
     rent: rentabilidade::EstadoRentabilidade,
     inv: inventario::EstadoInventarioUi,
     transf: transferencia::EstadoTransferenciaUi,
+    filiais: filiais::EstadoFiliais,
     dic: dicionario::EstadoDicionario,
     val: validade::EstadoValidade,
     /// Perfil fiscal do produto aberto em "Editar": o que ele define e o vigente.
@@ -180,6 +184,9 @@ impl EstadoTelaEstoque {
         }
         if let Ok(l) = motor.consultar(sessao, "estoque.locais.v1", &Locais) {
             self.locais = l;
+        }
+        if sessao.concede("compras.transferencia.ver") {
+            self.filiais.conhecer(motor, sessao);
         }
         if let Ok(r) = motor.consultar(
             sessao,
@@ -292,7 +299,7 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
             }
         },
         |ui, estado| {
-            if let Some(nova) = Abas::nova(&[
+            let mut abas = vec![
                 (AbaEstoque::Produtos, "Produtos"),
                 (AbaEstoque::Estrutura, "Estrutura"),
                 (AbaEstoque::Precos, "Preços"),
@@ -301,12 +308,13 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
                 (AbaEstoque::Rentabilidade, "Rentabilidade"),
                 (AbaEstoque::Inventario, "Inventário"),
                 (AbaEstoque::Transferencias, "Transferências"),
-                (AbaEstoque::Validade, "Validade"),
-                (AbaEstoque::Radar, "Radar de reposição"),
-            ])
-            .selecionada(estado.aba)
-            .mostrar(ui)
-            {
+            ];
+            if estado.filiais.ha_grupo() {
+                abas.push((AbaEstoque::Filiais, "Entre filiais"));
+            }
+            abas.push((AbaEstoque::Validade, "Validade"));
+            abas.push((AbaEstoque::Radar, "Radar de reposição"));
+            if let Some(nova) = Abas::nova(&abas).selecionada(estado.aba).mostrar(ui) {
                 estado.aba = nova;
                 if nova == AbaEstoque::Precos {
                     estado.prc.carregar(motor, sessao);
@@ -325,6 +333,9 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
                 }
                 if nova == AbaEstoque::Transferencias {
                     estado.transf.carregar(motor, sessao);
+                }
+                if nova == AbaEstoque::Filiais {
+                    estado.filiais.carregar(motor, sessao);
                 }
                 if nova == AbaEstoque::Validade {
                     estado.val.carregar(motor, sessao);
@@ -350,6 +361,7 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
                 AbaEstoque::Rentabilidade => rentabilidade::aba(ui, motor, sessao, estado),
                 AbaEstoque::Inventario => inventario::aba(ui, motor, sessao, estado),
                 AbaEstoque::Transferencias => transferencia::aba(ui, motor, sessao, estado),
+                AbaEstoque::Filiais => filiais::aba(ui, motor, sessao, estado),
                 AbaEstoque::Validade => validade::aba(ui, motor, sessao, estado),
                 AbaEstoque::Radar => radar(ui, estado),
             }

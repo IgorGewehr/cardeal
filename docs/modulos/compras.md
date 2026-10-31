@@ -499,3 +499,57 @@ CREATE TABLE compras_devolucao_item (
     PRIMARY KEY (devolucao, item)
 ) STRICT, WITHOUT ROWID;
 ```
+
+## 14. Transferência entre filiais (2026-10-31, onda 8)
+
+A mercadoria de um CNPJ do grupo para outro **da mesma raiz** (matriz e filiais), com a NF-e de
+transferência e a etapa a caminho (`transferencia.rs`, migração v13; a NF-e em
+`mod_fiscal::transferencia`). O catálogo de produtos é do grupo: o produto é o mesmo nas duas.
+
+| Comando | Permissão | Onde | O que faz |
+|---|---|---|---|
+| `EnviarTransferencia` (`compras.enviar_transferencia.v1`) | `compras.transferencia.enviar` (Médio, auditado) | filial que envia | Numa transação: confere a filial (outra empresa da base, mesma raiz, Simples, dados fiscais das duas); a mercadoria sai do local ao **custo médio** (`TransferenciaSaida`, só o que o local tem, sem lote ativo, sem custo zero); D Conta corrente com empresas do grupo / C Estoque; a NF-e vai para a fila (ou fica rejeitada já, com o porquê) |
+| `EmitirNfeDaTransferencia` | `compras.transferencia.enviar` | filial que envia | Remonta a rejeitada no mesmo número (como a devolução de compra; o fiscal não reenvia sozinho) |
+| `ReceberTransferencia` | `compras.transferencia.receber` (Médio, auditado) | filial que recebe | Só com a NF-e **autorizada** ("a mercadoria só circula com ela"): entrada no local escolhido ao mesmo custo (`TransferenciaEntrada`), D Estoque / C Conta corrente |
+| `CancelarTransferencia` | `compras.transferencia.enviar` | filial que envia | Antes de receber e **sem NF-e autorizada nem na fila** (rejeitada ou sem nota): a mercadoria volta ao local ao mesmo custo e o lançamento se estorna. Autorizada, cancela-se a NF-e em Notas fiscais antes; o número rejeitado é um buraco na série, que as pendências fiscais mandam inutilizar |
+
+Consultas: `TransferenciasEntreFiliais` (as enviadas e as que vêm, com a situação da NF-e da filial que
+enviou) e `ItensDaTransferencia`, com `compras.transferencia.ver`.
+
+**A NF-e** (`mod_fiscal::transferencia::montar_nfe_de_transferencia`, função pura): CFOP 5152 (6152 para
+outra UF), finalidade normal, sem pagamento, ao custo, destinatário = a filial (pelo emitente que ela
+seria), CSOSN 400 e PIS/COFINS 49, informações complementares com a raiz do CNPJ e a não incidência.
+
+Decisões que fogem do que se esperaria:
+- **Só a mesma raiz.** CNPJs de raízes diferentes no mesmo grupo são empresas diferentes: a mercadoria vai
+  por **venda** (NF-e de venda), não por transferência. A recusa diz isso.
+- **Só no Simples Nacional.** Desde o STF (ADC 49) e a LC 204/2023 não há ICMS na transferência entre
+  estabelecimentos do mesmo titular, mas no regime normal a lei manda (ou deixa) transferir o crédito
+  destacando-o na nota; essa regra não está no cálculo e precisa do contador. Mesmo recorte da devolução de
+  compra.
+- **Ao custo médio**, não "o valor da entrada mais recente" (LC 87/1996 art. 13 §4º I): no Simples, sem
+  ICMS destacado, a base não muda imposto, e o custo médio é o que sai do estoque e entra na outra filial.
+- **Duas transações, não uma** (a ADR-0017 previa uma): a filial que recebe confere e dá entrada na sessão
+  dela, com o local dela, depois da autorização.
+- **Fora desta fatia:** a entrada na filial não vira nota de entrada de compras (não entra em "notas de
+  entrada do mês" nem no ZIP de XMLs do pacote do contador da filial); o relatório de eliminação do
+  intercompany; transferência por lote; o regime normal.
+
+Tela: Estoque › **Entre filiais** (só com outro CNPJ no grupo) — o envio à esquerda (filial, local,
+produtos, observação, "Enviar com NF-e") e, à direita, o que está a caminho e o que chegou: na que recebe,
+o local e "Receber" (só com a NF-e autorizada); na que enviou, "Emitir NF-e de novo" e "Cancelar envio".
+
+```sql
+CREATE TABLE compras_transferencia (
+    id BLOB PRIMARY KEY, empresa BLOB NOT NULL, destino BLOB NOT NULL, local_origem BLOB NOT NULL,
+    local_destino BLOB, estado TEXT NOT NULL CHECK (estado IN ('Enviada','Recebida','Cancelada')),
+    observacao TEXT, valor_total INTEGER NOT NULL, enviada_em INTEGER NOT NULL, enviada_por BLOB NOT NULL,
+    lancamento_envio BLOB, recebida_em INTEGER, recebida_por BLOB, lancamento_recebimento BLOB,
+    cancelada_em INTEGER, motivo_cancelamento TEXT, CHECK (destino <> empresa)
+) STRICT;
+CREATE TABLE compras_transferencia_item (
+    transferencia BLOB NOT NULL, ordem INTEGER NOT NULL, produto BLOB NOT NULL,
+    quantidade INTEGER NOT NULL CHECK (quantidade > 0), custo_unitario INTEGER NOT NULL,
+    valor INTEGER NOT NULL, PRIMARY KEY (transferencia, ordem)
+) STRICT, WITHOUT ROWID;
+```

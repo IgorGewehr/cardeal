@@ -68,6 +68,7 @@ mod preferencias;
 #[cfg(feature = "sqlite")]
 mod repositorio;
 pub mod st;
+pub mod transferencia;
 
 pub use casamento::{casar, RegraCasamentoAprendida, ResultadoCasamento, LIMIAR_SUGESTAO_FORTE};
 #[cfg(feature = "sqlite")]
@@ -114,3 +115,8 @@ pub use pedido::{
 pub use preferencias::{PreferenciasCompras, RateioPor};
 #[cfg(feature = "sqlite")]
 pub use repositorio::RepositorioCompras;
+pub use transferencia::{
+    CancelarTransferencia, EmitirNfeDaTransferencia, EnviarTransferencia, EstadoTransferencia,
+    ItemATransferir, ItemDaTransferencia, ItensDaTransferencia, ReceberTransferencia,
+    SituacaoDaNota, TransferenciaEntreFiliais, TransferenciaEnviada, TransferenciasEntreFiliais,
+};

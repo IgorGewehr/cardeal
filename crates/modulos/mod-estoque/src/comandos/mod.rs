@@ -185,6 +185,7 @@ fn registrar_entrada_interna(
     dados: DadosEntrada,
     dados_lote: Option<DadosNovoLote>,
     devolucao: bool,
+    tipo: TipoMovimento,
     ctx: &Ctx,
     uow: &mut UnidadeDeTrabalho,
 ) -> Resultado<EntradaGravada> {
@@ -243,7 +244,7 @@ fn registrar_entrada_interna(
         produto: dados.produto,
         variacao: None,
         local: dados.local,
-        tipo: TipoMovimento::Entrada,
+        tipo,
         quantidade: dados.quantidade,
         custo_unitario: Some(dados.custo_unitario),
         lote: lote.as_ref().map(|l| l.id),
@@ -273,7 +274,7 @@ pub fn registrar_entrada_comum(
     ctx: &Ctx,
     uow: &mut UnidadeDeTrabalho,
 ) -> Resultado<EntradaGravada> {
-    registrar_entrada_interna(dados, None, false, ctx, uow)
+    registrar_entrada_interna(dados, None, false, TipoMovimento::Entrada, ctx, uow)
 }
 
 /// Devolve ao estoque tudo o que saiu por uma origem — o estorno de uma venda. Para cada
@@ -320,6 +321,7 @@ pub fn devolver_saidas_da_origem(
                 },
                 None,
                 true,
+                TipoMovimento::Entrada,
                 ctx,
                 uow,
             )
@@ -471,6 +473,7 @@ pub fn devolver_parte_da_saida(
         },
         None,
         true,
+        TipoMovimento::Entrada,
         ctx,
         uow,
     )?;
@@ -587,7 +590,7 @@ pub fn registrar_entrada_com_lote_comum(
     ctx: &Ctx,
     uow: &mut UnidadeDeTrabalho,
 ) -> Resultado<EntradaGravada> {
-    registrar_entrada_interna(dados, Some(lote), false, ctx, uow)
+    registrar_entrada_interna(dados, Some(lote), false, TipoMovimento::Entrada, ctx, uow)
 }
 
 /// Os dados que `RegistrarSaida` e chamadas diretas de outros módulos passam ao corpo
@@ -628,6 +631,7 @@ pub struct SaidaGravada {
 fn registrar_saida_interna(
     dados: DadosSaida,
     lote: Option<Id>,
+    tipo: TipoMovimento,
     ctx: &Ctx,
     uow: &mut UnidadeDeTrabalho,
 ) -> Resultado<SaidaGravada> {
@@ -685,7 +689,7 @@ fn registrar_saida_interna(
         produto: dados.produto,
         variacao: None,
         local: dados.local,
-        tipo: TipoMovimento::Saida,
+        tipo,
         quantidade: dados.quantidade,
         custo_unitario: Some(aplicada.custo_unitario),
         lote,
@@ -741,7 +745,118 @@ pub fn registrar_saida_comum(
     ctx: &Ctx,
     uow: &mut UnidadeDeTrabalho,
 ) -> Resultado<SaidaGravada> {
-    registrar_saida_interna(dados, None, ctx, uow)
+    registrar_saida_interna(dados, None, TipoMovimento::Saida, ctx, uow)
+}
+
+/// A saída de uma **transferência para outra filial** do grupo (`mod-compras`): como
+/// [`registrar_saida_comum`], mas o movimento é `TransferenciaSaida` — não é consumo (o ABC, o
+/// giro e a rentabilidade não o contam) — e só de um local da empresa, sem lote ativo nele (o
+/// lote guarda o local). Quem chama confere o saldo antes (a transferência não deixa negativo).
+///
+/// # Errors
+/// [`crate::ErroEstoque::QuantidadeInvalida`]; `NAO_ENCONTRADO` para o local de outra empresa
+/// ou o produto de fora do grupo; [`crate::ErroEstoque::TransferenciaComLote`].
+#[cfg(feature = "sqlite")]
+pub fn registrar_saida_por_transferencia_comum(
+    dados: DadosSaida,
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<SaidaGravada> {
+    if !dados.quantidade.e_positiva() {
+        return Err(Erro::de_dominio(
+            &crate::erros::ErroEstoque::QuantidadeInvalida,
+        ));
+    }
+    if !crate::repositorio_inventario::local_da_empresa(uow.conexao(), ctx.empresa, dados.local)? {
+        return Err(Erro::nao_encontrado("local"));
+    }
+    let produto = RepositorioEstoque::novo(uow)
+        .buscar_produto(dados.produto)?
+        .filter(|p| p.empresa == ctx.organizacao)
+        .ok_or_else(|| Erro::nao_encontrado("produto"))?;
+    if crate::repositorio_transferencia::tem_lote_ativo(uow.conexao(), produto.id, dados.local)? {
+        return Err(Erro::de_dominio(
+            &crate::erros::ErroEstoque::TransferenciaComLote {
+                produto: produto.nome,
+            },
+        ));
+    }
+    registrar_saida_interna(dados, None, TipoMovimento::TransferenciaSaida, ctx, uow)
+}
+
+/// A entrada da **transferência que outra filial mandou**: `TransferenciaEntrada` ao custo da
+/// filial que enviou — não é compra (o histórico de compras e a "última compra" não a leem).
+///
+/// # Errors
+/// `NAO_ENCONTRADO` para o local de outra empresa; os de [`registrar_entrada_comum`].
+#[cfg(feature = "sqlite")]
+pub fn registrar_entrada_por_transferencia_comum(
+    dados: DadosEntrada,
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<EntradaGravada> {
+    if !crate::repositorio_inventario::local_da_empresa(uow.conexao(), ctx.empresa, dados.local)? {
+        return Err(Erro::nao_encontrado("local"));
+    }
+    registrar_entrada_interna(
+        dados,
+        None,
+        false,
+        TipoMovimento::TransferenciaEntrada,
+        ctx,
+        uow,
+    )
+}
+
+/// Desfaz a saída de uma transferência entre filiais cancelada: devolve ao local, ao mesmo
+/// custo, o que saiu por `(origem_modulo, origem_id)` como `TransferenciaSaida`. Uma origem que
+/// já voltou é recusada, para nunca devolver em dobro.
+///
+/// # Errors
+/// `ESTADO_INVALIDO` se a origem já voltou; os de [`registrar_entrada_comum`].
+#[cfg(feature = "sqlite")]
+pub fn devolver_transferencia_da_origem(
+    origem_modulo: &'static str,
+    origem_id: Id,
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<Vec<EntradaGravada>> {
+    let movimentos = crate::consultas::movimentos_da_origem(
+        uow.conexao(),
+        ctx.empresa,
+        origem_modulo,
+        origem_id,
+    )?;
+    if movimentos
+        .iter()
+        .any(|m| m.tipo == TipoMovimento::TransferenciaEntrada)
+    {
+        return Err(Erro::novo(
+            cardeal_kernel::CodigoErro::ESTADO_INVALIDO,
+            "O que saiu por esta transferência já voltou ao estoque",
+        ));
+    }
+    movimentos
+        .into_iter()
+        .filter(|m| m.tipo == TipoMovimento::TransferenciaSaida)
+        .map(|m| {
+            registrar_entrada_interna(
+                DadosEntrada {
+                    produto: m.produto,
+                    local: m.local,
+                    quantidade: m.quantidade,
+                    custo_unitario: m.custo_unitario.unwrap_or(Preco::ZERO),
+                    origem_modulo,
+                    origem_id: Some(origem_id),
+                },
+                None,
+                true,
+                TipoMovimento::TransferenciaEntrada,
+                ctx,
+                uow,
+            )
+        })
+        .collect()
 }
 
 /// Como [`registrar_saida_comum`], mas consome de um lote/peça rastreável específico — o
@@ -761,5 +876,5 @@ pub fn registrar_saida_de_lote_comum(
     ctx: &Ctx,
     uow: &mut UnidadeDeTrabalho,
 ) -> Resultado<SaidaGravada> {
-    registrar_saida_interna(dados, Some(lote), ctx, uow)
+    registrar_saida_interna(dados, Some(lote), TipoMovimento::Saida, ctx, uow)
 }
