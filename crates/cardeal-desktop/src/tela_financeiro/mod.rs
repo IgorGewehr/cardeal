@@ -825,3 +825,11 @@ impl EstadoTelaFinanceiro {
         }
     }
 }
+
+impl EstadoTelaFinanceiro {
+    /// Abre direto em "Contas bancárias" (os primeiros passos levam para cá).
+    pub fn abrir_bancos(&mut self, motor: &Motor, sessao: &Sessao) {
+        self.aba = Aba::Bancos;
+        self.carregar(motor, sessao);
+    }
+}

@@ -117,6 +117,18 @@ impl EstadoTelaSettings {
         self.cnpjs = grupo::EstadoCnpjs::carregar(motor, sessao);
     }
 
+    /// Abre direto na aba Empresa (os primeiros passos levam para cá).
+    pub fn abrir_empresa(&mut self, motor: &Motor, sessao: &Sessao) {
+        self.aba = Aba::Empresa;
+        self.carregar(motor, sessao);
+    }
+
+    /// Abre direto na aba Acesso (usuários e papéis).
+    pub fn abrir_acesso(&mut self, motor: &Motor, sessao: &Sessao) {
+        self.aba = Aba::Acesso;
+        self.carregar(motor, sessao);
+    }
+
     /// Abre direto na aba Fiscal (o aviso do certificado na Visão geral leva para cá).
     pub fn abrir_fiscal(&mut self, motor: &Motor, sessao: &Sessao) {
         self.aba = Aba::Fiscal;

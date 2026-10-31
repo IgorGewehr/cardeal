@@ -21,6 +21,7 @@ mod login;
 mod maquina;
 mod pagamento;
 mod pessoa;
+mod primeiros_passos;
 mod sped;
 mod tela_agenda;
 mod tela_clientes;
@@ -301,6 +302,11 @@ const ITENS_PALETA: &[ItemComando] = &[
         grupo: "Ir para",
     },
     ItemComando {
+        id: "primeiros-passos",
+        rotulo: "Primeiros passos — o que falta para operar",
+        grupo: "Ação",
+    },
+    ItemComando {
         id: "tema",
         rotulo: "Alternar tema (claro/escuro)",
         grupo: "Ação",
@@ -492,6 +498,10 @@ enum Acao {
     TrocarEmpresa(Id),
     /// Cadastrar um CNPJ no grupo (razão social, CNPJ).
     NovoCnpj(String, String),
+    /// Abrir os primeiros passos.
+    PrimeirosPassos,
+    /// Ir à tela de um dos primeiros passos.
+    IrPara(primeiros_passos::Destino),
     TentarNovamente,
     VerificarAtualizacoes,
     InstalarAtualizacao,
@@ -574,6 +584,8 @@ struct App {
     verificando_atualizacao: bool,
     /// A escolha de CNPJ do grupo está aberta.
     escolhendo_empresa: bool,
+    /// Os primeiros passos, quando abertos.
+    passos: Option<Vec<primeiros_passos::Passo>>,
 }
 
 /// Onde a preferência de tema fica gravada (ao lado da base).
@@ -614,6 +626,7 @@ impl App {
             atualizacao_disponivel: None,
             verificando_atualizacao: true,
             escolhendo_empresa: false,
+            passos: None,
             #[cfg(feature = "demo")]
             demo: demo_app::Captura::do_ambiente(),
         }
@@ -674,6 +687,21 @@ impl App {
                 tracing::error!("falha ao abrir a base: {e}");
                 self.tela = Tela::FalhaAoAbrir(e.to_string());
             }
+        }
+    }
+
+    /// Depois do login: os primeiros passos, para quem administra, enquanto falta algum (e a
+    /// pessoa não pediu para não mostrar mais).
+    fn abrir_primeiros_passos(&mut self) {
+        let (Tela::Autenticado(estado), Some(motor)) = (&self.tela, &self.motor) else {
+            return;
+        };
+        if !estado.sessao.concede("empresa.usuarios.gerenciar") || primeiros_passos::ocultos() {
+            return;
+        }
+        let passos = primeiros_passos::avaliar(motor, &estado.sessao);
+        if passos.iter().any(|p| !p.feito) {
+            self.passos = Some(passos);
         }
     }
 
@@ -803,6 +831,7 @@ impl eframe::App for App {
             ) {
                 acao = match id {
                     "tema" => Acao::AlternarTema,
+                    "primeiros-passos" => Acao::PrimeirosPassos,
                     "verificar-atualizacoes" => Acao::VerificarAtualizacoes,
                     "instalar-atualizacao" => Acao::InstalarAtualizacao,
                     _ => Acao::MudarArea(Area::de_id(id)),
@@ -1084,6 +1113,17 @@ impl eframe::App for App {
                 }
             });
 
+        // Os primeiros passos.
+        if let Some(passos) = &self.passos {
+            let mut aberto = true;
+            if let Some(d) = primeiros_passos::dialogo(ctx, passos, &mut aberto) {
+                acao = Acao::IrPara(d);
+            }
+            if !aberto {
+                self.passos = None;
+            }
+        }
+
         // A escolha do CNPJ do grupo.
         if self.escolhendo_empresa {
             if let (Tela::Autenticado(estado), Some(motor)) = (&self.tela, &self.motor) {
@@ -1133,6 +1173,43 @@ impl eframe::App for App {
         match acao {
             Acao::Nenhuma => {}
             Acao::EscolherEmpresa => self.escolhendo_empresa = true,
+            Acao::PrimeirosPassos => {
+                if let (Tela::Autenticado(estado), Some(motor)) = (&self.tela, &self.motor) {
+                    self.passos = Some(primeiros_passos::avaliar(motor, &estado.sessao));
+                }
+            }
+            Acao::IrPara(destino) => {
+                if let (Tela::Autenticado(estado), Some(motor)) = (&mut self.tela, &self.motor) {
+                    use primeiros_passos::Destino;
+                    let s = &estado.sessao;
+                    match destino {
+                        Destino::Empresa => {
+                            estado.area = Area::Configuracoes;
+                            estado.settings.abrir_empresa(motor, s);
+                        }
+                        Destino::Fiscal => {
+                            estado.area = Area::Configuracoes;
+                            estado.settings.abrir_fiscal(motor, s);
+                        }
+                        Destino::Acesso => {
+                            estado.area = Area::Configuracoes;
+                            estado.settings.abrir_acesso(motor, s);
+                        }
+                        Destino::Bancos => {
+                            estado.area = Area::Financeiro;
+                            estado.financeiro.abrir_bancos(motor, s);
+                        }
+                        Destino::Estoque | Destino::Clientes | Destino::Pdv => {
+                            estado.area = match destino {
+                                Destino::Estoque => Area::Estoque,
+                                Destino::Clientes => Area::Clientes,
+                                _ => Area::Pdv,
+                            };
+                            estado.recarregar_area(motor);
+                        }
+                    }
+                }
+            }
             Acao::TrocarEmpresa(empresa) => {
                 let r = match (&self.tela, &mut self.motor) {
                     (Tela::Autenticado(estado), Some(motor)) => {
@@ -1215,11 +1292,15 @@ impl eframe::App for App {
                 self.tela = Tela::Login(Box::new(login::EstadoLogin::com_login(login)));
             }
             Acao::LoginOk(entrada) => match *entrada {
-                login::Entrada::Local(sessao) => self.entrar(sessao),
+                login::Entrada::Local(sessao) => {
+                    self.entrar(sessao);
+                    self.abrir_primeiros_passos();
+                }
                 login::Entrada::Remota(motor, sessao) => {
                     // A partir daqui todas as telas falam com o servidor.
                     self.motor = Some(*motor);
                     self.entrar(sessao);
+                    self.abrir_primeiros_passos();
                 }
             },
             Acao::MudarArea(area) => {

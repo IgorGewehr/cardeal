@@ -49,6 +49,10 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   (trocar de CNPJ sem novo login, cadastrar outro, Financeiro › Grupo consolidado) e a **gestão de
   usuários do banco local** (cadastrar com senha inicial trocada no primeiro acesso, papel, senha
   provisória, desativar/reativar, sem escalada de privilégio — doc 08 §2.1.2) também (2026-10-31).
+  Os **primeiros passos** (`cardeal-desktop/src/primeiros_passos.rs`) abrem depois do login para quem
+  administra enquanto falta algum dos 7 (empresa, fiscal, produtos, bancos, clientes, equipe, primeira
+  venda), cada um conferido pelos dados — não por "marquei como feito" — e com o botão para a tela;
+  "Não mostrar mais" vale para o computador e a paleta (`Ctrl+K`) reabre.
   Onda 6 (Financeiro 2) começou: **conciliação com alerta de pendências e saldo banco × sistema**,
   **lançamento pré-preenchido pelo último da pessoa**, **DFC indireto**, **cheques**, **balancete/diário** e o
   **pacote do contador** (PDF + `.xlsx`) e a **régua de cobrança** (fila do dia com envio de um clique) feitos
