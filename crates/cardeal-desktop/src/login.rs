@@ -34,6 +34,10 @@ pub struct EstadoLogin {
     /// A senha conferiu e a conta tem verificação em duas etapas: falta o código.
     pede_codigo: bool,
     codigo: String,
+    /// Entrou com a senha que outra pessoa definiu: escolhe a própria antes de trabalhar.
+    trocando: Option<Sessao>,
+    nova: String,
+    confirmar: String,
     /// Login no servidor aceito, conta com mais de uma empresa: falta escolher.
     escolhendo: Option<Remoto>,
 }
@@ -99,6 +103,10 @@ pub fn mostrar(
         });
         ui.add_space(Espaco::E16);
 
+        if e.trocando.is_some() {
+            entrada = trocar_senha(ui, motor_local, e);
+            return;
+        }
         if let Some(remoto) = &e.escolhendo {
             if let Some(empresa) = escolher_empresa(ui, remoto, e.erro.as_deref()) {
                 if let Some(mut remoto) = e.escolhendo.take() {
@@ -177,7 +185,16 @@ pub fn mostrar(
         match e.onde {
             Onde::Local => {
                 match motor_local.map(|m| m.entrar(&e.login, &e.senha, codigo.as_deref())) {
-                    Some(Ok(sessao)) => entrada = Some(Entrada::Local(sessao)),
+                    Some(Ok(sessao)) => {
+                        if motor_local
+                            .is_some_and(|m| m.precisa_trocar_senha(&sessao).unwrap_or(false))
+                        {
+                            e.erro = None;
+                            e.trocando = Some(sessao);
+                        } else {
+                            entrada = Some(Entrada::Local(sessao));
+                        }
+                    }
                     Some(Err(erro)) => recusado(e, &erro),
                     None => e.erro = Some("o banco local não está aberto".into()),
                 }
@@ -209,6 +226,43 @@ pub fn mostrar(
         }
     });
     entrada
+}
+
+/// O primeiro acesso de quem recebeu a senha de outra pessoa: escolher a própria.
+fn trocar_senha(ui: &mut egui::Ui, motor: Option<&Motor>, e: &mut EstadoLogin) -> Option<Entrada> {
+    ui.add(Rotulo::apoio(
+        "Esta senha foi definida por outra pessoa. Escolha a sua antes de começar.",
+    ));
+    ui.add_space(Espaco::E12);
+    ui.add(Campo::novo("Senha nova", &mut e.nova).senha(true));
+    ui.add_space(Espaco::E12);
+    ui.add(
+        Campo::novo("Repita a senha nova", &mut e.confirmar)
+            .senha(true)
+            .erro(e.erro.clone()),
+    );
+    if !botao_entrar(ui) {
+        return None;
+    }
+    if e.nova != e.confirmar {
+        e.erro = Some("as duas senhas não batem".into());
+        return None;
+    }
+    let (Some(motor), Some(sessao)) = (motor, e.trocando.as_ref()) else {
+        return None;
+    };
+    match motor.trocar_senha(sessao, &e.senha, &e.nova) {
+        Ok(()) => {
+            e.senha.clear();
+            e.nova.clear();
+            e.confirmar.clear();
+            e.trocando.take().map(Entrada::Local)
+        }
+        Err(erro) => {
+            e.erro = Some(erro.mensagem);
+            None
+        }
+    }
 }
 
 /// O login recusado: a senha conferiu e falta o código (a tela passa a pedi-lo), ou o erro.

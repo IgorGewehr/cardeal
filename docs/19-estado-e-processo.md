@@ -45,7 +45,10 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   o radar de reposição mostra o que está a caminho; o pedido vai ao fornecedor em PDF ou pelo WhatsApp.
   **Onda 8 começou** com a **verificação em duas etapas** (2026-10-31, `cardeal_auth::totp`, doc 08 §2.1.1):
   TOTP com códigos de recuperação no login local e no da conta do servidor (desktop e navegador), o
-  segredo selado pelo cofre, o bloqueio progressivo valendo também para o código.
+  segredo selado pelo cofre, o bloqueio progressivo valendo também para o código. O **grupo de CNPJs**
+  (trocar de CNPJ sem novo login, cadastrar outro, Financeiro › Grupo consolidado) e a **gestão de
+  usuários do banco local** (cadastrar com senha inicial trocada no primeiro acesso, papel, senha
+  provisória, desativar/reativar, sem escalada de privilégio — doc 08 §2.1.2) também (2026-10-31).
   Onda 6 (Financeiro 2) começou: **conciliação com alerta de pendências e saldo banco × sistema**,
   **lançamento pré-preenchido pelo último da pessoa**, **DFC indireto**, **cheques**, **balancete/diário** e o
   **pacote do contador** (PDF + `.xlsx`) e a **régua de cobrança** (fila do dia com envio de um clique) feitos

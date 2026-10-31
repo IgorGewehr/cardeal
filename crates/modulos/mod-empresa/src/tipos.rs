@@ -56,6 +56,8 @@ pub struct UsuarioResumo {
     pub ativo: bool,
     /// Tem verificação em duas etapas.
     pub segundo_fator: bool,
+    /// O papel nesta empresa (o primeiro, se tiver mais de um).
+    pub papel: Option<String>,
 }
 
 /// Um papel, resumido para a lista de Configurações.

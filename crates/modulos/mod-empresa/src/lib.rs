@@ -24,6 +24,7 @@ mod modulo;
 #[cfg(feature = "sqlite")]
 pub mod sql;
 mod tipos;
+pub mod usuarios;
 
 pub use cardeal_auth::PapelDeFabrica;
 pub use comandos::{AtualizarDadosEmpresa, DefinirContatoEmpresa, DefinirLogoEmpresa};
@@ -37,4 +38,7 @@ pub use membros::{AdicionarUsuario, DefinirTetoDeDesconto, DesativarUsuario};
 pub use modulo::ModuloEmpresa;
 pub use tipos::{
     EmpresaResumo, IdentidadeVisual, PapelResumo, TetoDeDesconto, UsuarioResumo, TETO_LOGO_BYTES,
+};
+pub use usuarios::{
+    CadastrarUsuario, DefinirPapelDoUsuario, ReativarUsuario, RedefinirSenhaDoUsuario,
 };

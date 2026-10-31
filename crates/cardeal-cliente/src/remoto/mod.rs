@@ -235,6 +235,29 @@ impl Remoto {
         ))
     }
 
+    /// Põe alguém na empresa escolhida (uma conta que já existe ganha o vínculo; um e-mail novo
+    /// vira conta com a senha inicial).
+    ///
+    /// # Errors
+    /// Sem permissão; sem conexão.
+    pub fn adicionar_membro(
+        &self,
+        novo: &cardeal_protocol::PedidoNovoMembro,
+    ) -> Resultado<cardeal_protocol::MembroAdicionado> {
+        let empresa = self.empresa.ok_or_else(sem_empresa)?;
+        self.pedir(&protocolo::adicionar_membro(empresa, novo)?)
+    }
+
+    /// Tira alguém da empresa escolhida (a conta continua; perde o vínculo e os papéis).
+    ///
+    /// # Errors
+    /// Sem permissão; sem conexão.
+    pub fn remover_membro(&self, usuario: Id) -> Resultado<()> {
+        let empresa = self.empresa.ok_or_else(sem_empresa)?;
+        let resposta = self.com_retentativa(&protocolo::remover_membro(empresa, usuario))?;
+        protocolo::interpretar_vazio(&resposta)
+    }
+
     /// Executa uma consulta numa empresa **dada** (outro CNPJ em que a conta entra), sem
     /// trocar a escolhida — o painel do grupo consulta cada uma. O servidor confere o vínculo e
     /// o papel da conta naquela empresa.

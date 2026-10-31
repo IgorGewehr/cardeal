@@ -66,6 +66,22 @@ Opcional por pessoa, nos dois logins: o do banco local (desktop) e o da conta do
 - A **liberação por supervisor** no PDV (`Motor::autenticar`) continua só com a senha: é uma
   autorização dentro de uma sessão já aberta, não a porta de entrada (`Motor::entrar`).
 
+### 2.1.2 Usuários do banco local — feito em 2026-10-31
+
+Configurações › Acesso (`mod_empresa::usuarios`): cadastrar (nome, login, papel de fábrica e a
+senha inicial), trocar o papel, dar uma senha provisória, desativar e reativar; e "Minha senha".
+
+- **A senha nunca vai no comando:** o motor confere a política e manda só o hash Argon2id
+  (`empresa.cadastrar_usuario.v1`, `…redefinir_senha_do_usuario.v1`, auditados) — a auditoria
+  e a idempotência guardam o comando, e senha em texto não mora em lugar nenhum.
+- **A senha que outra pessoa definiu se troca no primeiro acesso:** o login pede a nova antes de
+  abrir as telas (`exige_troca_senha`, que existia na base mas não era cobrado).
+- **Sem escalada:** o Gerente gerencia usuários, mas dar ou tirar o papel de Administrador e
+  redefinir a senha de um administrador é coisa de administrador; ninguém troca o próprio papel
+  nem desativa a si mesmo; a empresa nunca fica sem administrador ativo.
+- No servidor, "cadastrar" põe a conta do e-mail na empresa (`/membros`) e "desativar" tira o
+  vínculo; a senha de cada conta é dela.
+
 ### 2.2 PIN de operador (o caso do PDV)
 
 Trocar de operador no caixa 40 vezes por dia com senha de 12 caracteres não acontece na prática —

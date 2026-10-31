@@ -15,6 +15,7 @@ mod grupo;
 mod impressora;
 mod segundo_fator;
 mod tetos;
+mod usuarios;
 
 const REGIMES: [&str; 4] = ["MEI", "SimplesNacional", "LucroPresumido", "LucroReal"];
 const REGIME_ROTULO: [&str; 4] = ["MEI", "Simples Nacional", "Lucro Presumido", "Lucro Real"];
@@ -59,8 +60,8 @@ pub struct EstadoTelaSettings {
     impressora_local: impressora::EstadoImpressora,
     /// A verificação em duas etapas da pessoa da sessão.
     segundo_fator: segundo_fator::EstadoSegundoFator,
-    /// O usuário cuja verificação em duas etapas o administrador pediu para desligar.
-    desligar_2fa: Option<(cardeal_kernel::Id, String)>,
+    /// Cadastrar, editar e a própria senha.
+    equipe: usuarios::EstadoUsuarios,
     /// Os CNPJs do grupo.
     cnpjs: grupo::EstadoCnpjs,
     /// O cadastro de um CNPJ pedido no cartão (razão social, CNPJ) — quem é dono do motor o
@@ -494,87 +495,16 @@ fn secao_acesso(
         segundo_fator::secao(ui, motor, sessao, &mut estado.segundo_fator);
     });
     ui.add_space(Espaco::E16);
-    // O administrador desliga a verificação de quem perdeu o celular (no banco local; no
-    // servidor, cada conta cuida da sua).
-    let gerencia = sessao.concede("empresa.usuarios.gerenciar") && matches!(motor, Motor::Local(_));
-    if let Some((usuario, nome)) = estado.desligar_2fa.clone() {
-        let r = cardeal_ui::organisms::dialogo_confirmacao(
-            ui.ctx(),
-            "Desligar a verificação em duas etapas",
-            &format!(
-                "{nome} vai entrar só com a senha até ativar de novo. Faça isso só para quem perdeu \
-                 o celular e os códigos de recuperação."
-            ),
-            "Desligar",
-        );
-        if r.confirmado {
-            estado.desligar_2fa = None;
-            match motor.desligar_segundo_fator_de(sessao, usuario) {
-                Ok(()) => {
-                    notificar(
-                        ui.ctx(),
-                        Notificacao::aviso(format!(
-                            "Verificação em duas etapas de {nome} desligada"
-                        )),
-                    );
-                    estado.usuarios = motor.usuarios().unwrap_or_default();
-                }
-                Err(e) => notificar(ui.ctx(), Notificacao::erro(e.mensagem)),
-            }
-        } else if r.fechar {
-            estado.desligar_2fa = None;
-        }
-    }
+    let mut recarregar = false;
     cartao(ui, |ui| {
-        ui.add(Rotulo::titulo_secao("Usuários"));
-        ui.add_space(Espaco::E8);
-        if estado.usuarios.is_empty() {
-            ui.add(Rotulo::campo("Nenhum usuário."));
-        } else {
-            let colunas = vec![
-                ColunaGrade::nova("Nome"),
-                ColunaGrade::nova("Login").largura(160.0),
-                ColunaGrade::nova("Situação").largura(90.0),
-                ColunaGrade::nova("Duas etapas").largura(150.0),
-            ];
-            let eu = sessao.usuario();
-            let mut desligar = None;
-            Grade::nova(colunas).mostrar(ui, estado.usuarios.len(), |i, row| {
-                let u = &estado.usuarios[i];
-                row.col(|ui| {
-                    ui.add(Rotulo::interface(u.nome.clone()));
-                });
-                row.col(|ui| {
-                    ui.add(Rotulo::campo(u.login.clone()));
-                });
-                row.col(|ui| {
-                    let (t, c) = if u.ativo {
-                        ("ativo", ui.cores().positivo)
-                    } else {
-                        ("inativo", ui.cores().texto_fraco)
-                    };
-                    ui.add(Rotulo::interface(t).cor(c));
-                });
-                row.col(|ui| {
-                    ui.horizontal(|ui| {
-                        if u.segundo_fator {
-                            ui.add(cardeal_ui::atoms::Etiqueta::positiva("ativa"));
-                            if gerencia
-                                && u.id != eu
-                                && ui.add(Botao::fantasma("Desligar").pequeno()).clicked()
-                            {
-                                desligar = Some((u.id, u.nome.clone()));
-                            }
-                        } else {
-                            ui.add(Rotulo::campo("—"));
-                        }
-                    });
-                });
-            });
-            if desligar.is_some() {
-                estado.desligar_2fa = desligar;
-            }
-        }
+        recarregar = usuarios::secao(ui, motor, sessao, &mut estado.equipe, &estado.usuarios);
+    });
+    if recarregar {
+        estado.usuarios = motor.usuarios().unwrap_or_default();
+    }
+    ui.add_space(Espaco::E16);
+    cartao(ui, |ui| {
+        usuarios::secao_minha_senha(ui, motor, sessao, &mut estado.equipe);
     });
     ui.add_space(Espaco::E16);
     cartao(ui, |ui| {
@@ -613,7 +543,7 @@ fn secao_acesso(
     }
     ui.add_space(Espaco::E12);
     ui.add(Rotulo::apoio(
-        "Criar e editar usuários e papéis chega numa próxima versão — hoje o assistente de primeiro acesso cria o administrador.",
+        "Os papéis são os de fábrica, ajustados ao que esta empresa usa; o teto de desconto de cada um se ajusta acima.",
     ));
 }
 

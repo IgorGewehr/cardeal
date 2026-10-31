@@ -270,6 +270,89 @@ impl MotorLocal {
         Ok(SessaoLocal { sessao })
     }
 
+    /// Cadastra um usuário do banco local com a senha inicial (marcada para troca no primeiro
+    /// acesso) e um papel. A senha é conferida pela política e vira hash **aqui** — o comando
+    /// (`empresa.cadastrar_usuario.v1`, auditado) só leva o hash.
+    ///
+    /// # Errors
+    /// Senha fora da política; sem permissão; login repetido; os do comando.
+    pub fn cadastrar_usuario(
+        &self,
+        sessao: &SessaoLocal,
+        login: &str,
+        nome: &str,
+        papel: cardeal_auth::PapelDeFabrica,
+        senha_inicial: &str,
+    ) -> Resultado<Id> {
+        let hash = hash_conferido(senha_inicial)?;
+        self.executar(
+            sessao,
+            "empresa.cadastrar_usuario.v1",
+            &mod_empresa::CadastrarUsuario {
+                login: login.to_owned(),
+                nome: nome.to_owned(),
+                papel,
+                hash_senha: hash,
+            },
+        )
+    }
+
+    /// O administrador redefine a senha de quem esqueceu (a provisória fica marcada para troca).
+    ///
+    /// # Errors
+    /// Senha fora da política; sem permissão; os do comando.
+    pub fn redefinir_senha_de(
+        &self,
+        sessao: &SessaoLocal,
+        usuario: Id,
+        nova: &str,
+    ) -> Resultado<()> {
+        let hash = hash_conferido(nova)?;
+        self.executar(
+            sessao,
+            "empresa.redefinir_senha_do_usuario.v1",
+            &mod_empresa::RedefinirSenhaDoUsuario {
+                usuario,
+                hash_senha: hash,
+            },
+        )
+    }
+
+    /// A pessoa da sessão troca a própria senha, provando a atual. Tira a marca de "trocar no
+    /// primeiro acesso".
+    ///
+    /// # Errors
+    /// Senha atual errada; nova fora da política; erro de escrita.
+    pub fn trocar_senha(&self, sessao: &SessaoLocal, atual: &str, nova: &str) -> Resultado<()> {
+        let mut u = self.usuario_da_sessao(sessao)?;
+        u.trocar_senha(
+            atual,
+            nova,
+            cardeal_auth::PoliticaSenha::PADRAO,
+            Instante::agora(),
+        )
+        .map_err(|e| Erro::de_dominio(&e).no_campo("senha"))?;
+        let ctx = ContextoEscrita::novo(sessao.empresa(), u.id, self.dispositivo, Id::novo());
+        self.arm
+            .escritor()
+            .executar(ctx, move |uow| {
+                RepositorioAuth::novo(uow)
+                    .atualizar_credenciais(&u)
+                    .map_err(|e| como_erro_armazenamento(&e))
+            })
+            .map(|_| ())
+            .map_err(erro_armazenamento)
+    }
+
+    /// A pessoa da sessão ainda está com a senha que outra pessoa definiu (a inicial ou uma
+    /// redefinida) e precisa trocar antes de trabalhar?
+    ///
+    /// # Errors
+    /// Erro de leitura.
+    pub fn precisa_trocar_senha(&self, sessao: &SessaoLocal) -> Resultado<bool> {
+        Ok(self.usuario_da_sessao(sessao)?.exige_troca_senha)
+    }
+
     /// O CNPJ em que a tela está (a matriz, até trocar).
     #[must_use]
     pub fn empresa_ativa(&self) -> Id {
@@ -635,4 +718,13 @@ fn gravar_impressao(arm: &Armazenamento, empresa: Id, impressao: [u8; 32]) -> Re
         })
         .map(|_| ())
         .map_err(erro_armazenamento)
+}
+
+/// A senha conferida pela política e transformada em hash Argon2id (formato PHC).
+fn hash_conferido(senha: &str) -> Resultado<String> {
+    cardeal_auth::PoliticaSenha::PADRAO
+        .validar(senha)
+        .and_then(|()| cardeal_auth::hash_senha(senha))
+        .map(|h| h.como_phc().to_owned())
+        .map_err(|e| Erro::de_dominio(&e).no_campo("senha"))
 }

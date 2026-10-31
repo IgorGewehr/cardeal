@@ -235,7 +235,7 @@ pub(crate) fn papel_existente(
 /// O id do papel desta empresa para um papel de fábrica — criando-o, contra o catálogo atual,
 /// na primeira vez.
 #[cfg(feature = "sqlite")]
-fn papel_da_empresa(
+pub(crate) fn papel_da_empresa(
     ctx: &Ctx,
     uow: &mut UnidadeDeTrabalho,
     fabrica: PapelDeFabrica,

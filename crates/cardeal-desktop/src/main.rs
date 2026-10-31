@@ -474,7 +474,7 @@ enum Tela {
         admin_senha: String,
         erro: Option<String>,
     },
-    Login(login::EstadoLogin),
+    Login(Box<login::EstadoLogin>),
     Autenticado(Box<EstadoAutenticado>),
 }
 
@@ -633,11 +633,11 @@ impl App {
             let cena = demo.cena.clone();
             if cena.starts_with("login") {
                 self.motor = Some(motor);
-                self.tela = Tela::Login(if cena == "login-servidor" {
+                self.tela = Tela::Login(Box::new(if cena == "login-servidor" {
                     login::EstadoLogin::no_servidor("app.cardeal.com.br", "dono@loja.com.br")
                 } else {
                     login::EstadoLogin::default()
-                });
+                }));
                 return;
             }
             self.motor = Some(motor);
@@ -667,7 +667,7 @@ impl App {
                         erro: None,
                     }
                 } else {
-                    Tela::Login(login::EstadoLogin::lembrado())
+                    Tela::Login(Box::new(login::EstadoLogin::lembrado()))
                 };
             }
             Err(e) => {
@@ -1212,7 +1212,7 @@ impl eframe::App for App {
                 ),
             },
             Acao::AdminCriado(login) => {
-                self.tela = Tela::Login(login::EstadoLogin::com_login(login));
+                self.tela = Tela::Login(Box::new(login::EstadoLogin::com_login(login)));
             }
             Acao::LoginOk(entrada) => match *entrada {
                 login::Entrada::Local(sessao) => self.entrar(sessao),
