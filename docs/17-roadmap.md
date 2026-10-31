@@ -78,7 +78,7 @@ Primeiro cliente real: um MEI ou prestador de serviços.
 - [x] `mod-vendas` — orçamento, pedido, tabela de preço, condição de pagamento
 - [x] `mod-pdv` — frente de caixa, sessão, sangria, suprimento, atalhos, impressão
 - [ ] **Modo autônomo** — posto avançado, faixas de numeração, reconciliação
-- [ ] `cardeal-fiscal` + NFC-e via API, contingência offline *(onda 7: provedor = `sefaz-api`; certificado A1 no cofre, dados fiscais, ambiente, status da SEFAZ, a NFC-e do PDV como documento assíncrono com fila e transmissão em segundo plano, o DANFCE com QR Code, o cancelamento e a inutilização feitos — falta a contingência offline)*
+- [x] `cardeal-fiscal` + NFC-e via API, contingência offline *(onda 7: provedor = `sefaz-api`; certificado A1 no cofre, NFC-e do PDV pela fila, DANFCE, cancelamento, inutilização, substituição e a contingência offline — feitos; falta a 1ª autorizada no RS, que espera a IE e o CSC)*
 - [ ] Multiterminal com mTLS e pareamento por mDNS
 
 **Critério de saída:** cenário end-to-end "mercado de bairro" verde; um comércio real com 2 PDVs
@@ -86,9 +86,9 @@ operando 30 dias, incluindo pelo menos um evento de queda de rede.
 
 ## Fase 3 — Compras + Fiscal completo + Conciliação
 
-- [x] `mod-compras` — entrada por XML, rateio de frete, aprendizado de casamento *(cotação e pedido de compra: faltam)*
-- [ ] Distribuição DFe e manifestação do destinatário *(depende de rotas novas no `sefaz-api`)*
-- [ ] NF-e de saída, cancelamento, carta de correção, inutilização
+- [x] `mod-compras` — entrada por XML, rateio de frete, aprendizado de casamento, devolução ao fornecedor e, desde 2026-10-31, **cotação** (comparativo com a escolha sugerida, decisão item a item) e **pedido de compra** (aprovação, recebimento parcial pelas notas, ligação pelo `xPed`, conferência nota × pedido, encerrar o saldo)
+- [x] Distribuição DFe e manifestação do destinatário *(rotas no `sefaz-api`; ciência automática; não conferido contra o Ambiente Nacional)*
+- [x] NF-e de saída, cancelamento, carta de correção, inutilização *(e o DANFE A4, a NF-e de devolução e a NFS-e da OS)*
 - [x] Conciliação bancária — OFX e CSV, com saldo banco × sistema e alerta de pendências *(Pix e CNAB retorno: faltam)*
 - [ ] Cobrança: boleto e Pix com baixa automática
 - [x] SPED Fiscal (EFD ICMS/IPI) *(gerado no Cardeal desde 2026-10-28; a EFD-Contribuições fica fora: acaba em janeiro de 2027 com a CBS)*
@@ -100,7 +100,7 @@ Números que o usuário consegue conferir, sem modelo estatístico por trás.
 - [ ] `cardeal-analytics` — projetor, Parquet, DuckDB, esquema estrela *(hoje: consultas diretas sobre o Razão)*
 - [x] Curva ABC, giro, cobertura, ruptura e encalhe (aba Análise do estoque)
 - [x] Margem prevista e real (pedido, OS), DRE, DFC (direto e indireto), aging, score de saúde
-- [x] Rentabilidade por nível da estrutura mercadológica, comissão por estrutura e a apuração/pagamento mensal da comissão do vendedor *(fora: comissão no PDV e ajuste por devolução)*
+- [x] Rentabilidade por nível da estrutura mercadológica, comissão por estrutura e a apuração/pagamento mensal da comissão do vendedor *(com a comissão no PDV e o ajuste pela devolução, 2026-10-27/28)*
 - [ ] Preços defasados (custo mudou, margem caiu) e reajuste em lote
 - [ ] Cartões fixáveis no Pulso e exportações: Excel, Power BI, Parquet
 

@@ -3,8 +3,9 @@
 
 use cardeal_kernel::{Data, Dinheiro, Instante, Percentual, Preco, Quantidade};
 use cardeal_pdf::{
-    gerar_comprovante_os, gerar_orcamento, gerar_relatorio, ColunaRelatorio, ComprovanteOsPdf,
-    IdentidadeEmpresa, ItemPdf, LinhaRelatorio, OrcamentoPdf, RelatorioPdf, SecaoRelatorio,
+    gerar_comprovante_os, gerar_orcamento, gerar_pedido_compra, gerar_relatorio, ColunaRelatorio,
+    ComprovanteOsPdf, IdentidadeEmpresa, ItemPdf, LinhaRelatorio, OrcamentoPdf, PedidoCompraPdf,
+    RelatorioPdf, SecaoRelatorio,
 };
 
 fn empresa(com_logo: bool) -> IdentidadeEmpresa {
@@ -291,4 +292,31 @@ fn relatorio_tabular_quebra_pagina_e_corta_texto_longo() {
         texto.matches("/Type /Page ").count() >= 3,
         "120 linhas não cabem em 2 páginas"
     );
+}
+
+#[test]
+fn gera_pdf_do_pedido_de_compra_com_frete_e_o_numero_para_a_nota() {
+    let orc = orcamento(30);
+    let pedido = PedidoCompraPdf {
+        numero: 12,
+        fornecedor_nome: "Distribuidora Alfa LTDA".to_owned(),
+        fornecedor_documento: "CNPJ 45.543.915/0001-81".to_owned(),
+        fornecedor_contato: "(31) 3333-0000".to_owned(),
+        data: Data::de_dias(20_000),
+        previsao_entrega: Some(Data::de_dias(20_005)),
+        condicao_pagamento: "28/56 dias no boleto".to_owned(),
+        observacoes: "Entregar pela manhã.".to_owned(),
+        subtotal: orc.subtotal,
+        frete: Dinheiro::reais(45),
+        total: orc.subtotal + Dinheiro::reais(45),
+        itens: orc.itens,
+        responsavel: "Comprador".to_owned(),
+    };
+    let bytes = gerar_pedido_compra(&empresa(true), &pedido, Instante::EPOCA).unwrap();
+    assert!(bytes.starts_with(b"%PDF-1."));
+    let texto = String::from_utf8_lossy(&bytes);
+    assert!(texto.contains("Pedido de compra N"), "título ausente");
+    assert!(texto.contains("xPed"), "o pedido do número na nota");
+    assert!(texto.contains("Frete"));
+    assert!(texto.matches("/Type /Page ").count() >= 2);
 }

@@ -34,12 +34,14 @@
 //! `pago_no_ato_padrao` também mandar). Caso contrário, a nota fica `AConferir` para um
 //! humano revisar com `VincularProdutoManual` + `ConfirmarEntrada`.
 //!
+//! A **cotação** ([`cotacao`]) e o **pedido de compra** ([`pedido`], 2026-10-31): a nota que
+//! chega se liga ao pedido (pelo `xPed` do XML ou pelo único pedido em aberto do fornecedor), é
+//! conferida contra ele e, confirmada, o recebe.
+//!
 //! ## O que falta (ver `docs/17-roadmap.md`, Fase 3)
 //!
-//! Cotação e pedido de compra (o doc original tem o spec; esta versão vai direto da nota ao
-//! estoque, como o `gestao-raiz` faz — mas sem copiar a ausência de pedido formal dele, só
-//! adiando); devolução ao fornecedor; e as manifestações conclusivas do destinatário
-//! (confirmação, desconhecimento) — hoje só a ciência, automática.
+//! As manifestações conclusivas do destinatário (confirmação, desconhecimento) — hoje só a
+//! ciência, automática.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs, clippy::pedantic)]
@@ -49,6 +51,7 @@
 mod casamento;
 mod comandos;
 mod consultas;
+pub mod cotacao;
 pub mod devolucao;
 mod dfe;
 mod erros;
@@ -60,6 +63,7 @@ pub mod migracoes;
 #[cfg(feature = "sqlite")]
 mod modulo;
 mod nota;
+pub mod pedido;
 mod preferencias;
 #[cfg(feature = "sqlite")]
 mod repositorio;
@@ -80,6 +84,10 @@ pub use consultas::{
     ItemDoEstorno, ItemNota, ItensDaNota, NotaDeEntradaDoMes, NotasDeEntradaDoMes, NotasRecentes,
     ParcelasDaNota, PreviaDoEstornoDaEntrada, PreviaEstornoEntrada,
 };
+pub use cotacao::{
+    CancelarCotacao, ComparativoDaCotacao, Cotacao, CotacaoCompleta, Cotacoes, DecidirCotacao,
+    EscolhaDaCotacao, EstadoCotacao, ItemDaCotacao, RegistrarPropostaFornecedor, SalvarCotacao,
+};
 #[cfg(feature = "sqlite")]
 pub use devolucao::EmitirNfeDaDevolucao;
 pub use devolucao::{
@@ -97,6 +105,11 @@ pub use modulo::ModuloCompras;
 pub use nota::{
     conferir_parcelas, EstadoCasamento, EstadoNotaEntrada, ItemNotaEntrada, NotaEntrada,
     ParcelaCompra,
+};
+pub use pedido::{
+    ACaminho, AprovarPedidoCompra, CancelarPedidoCompra, ConferenciaComPedido,
+    EncerrarPedidoCompra, EstadoPedido, ItemDoPedido, PedidoCompra, PedidoDeCompra, PedidoSalvo,
+    PedidosDeCompra, SalvarPedidoCompra, UltimosPrecosPagos, VincularNotaAoPedido,
 };
 pub use preferencias::{PreferenciasCompras, RateioPor};
 #[cfg(feature = "sqlite")]

@@ -164,6 +164,102 @@ const SQL_V11: &str = "
 ALTER TABLE compras_nota_entrada ADD COLUMN data_entrada INTEGER;
 ";
 
+/// v12: a cotação (itens, fornecedores convidados, preços) e o pedido de compra (itens e o
+/// recebimento de cada nota); a nota de entrada aponta para o pedido que atende.
+const SQL_V12: &str = "
+CREATE TABLE compras_cotacao (
+    id             BLOB PRIMARY KEY,
+    empresa        BLOB    NOT NULL REFERENCES nucleo_empresa(id),
+    numero         INTEGER NOT NULL CHECK (numero > 0),
+    descricao      TEXT    NOT NULL,
+    data           INTEGER NOT NULL,
+    prazo_resposta INTEGER,
+    estado         TEXT    NOT NULL CHECK (estado IN ('Aberta','Decidida','Cancelada')),
+    motivo         TEXT,
+    criada_em      INTEGER NOT NULL,
+    criada_por     BLOB    NOT NULL,
+    decidida_em    INTEGER,
+    UNIQUE (empresa, numero)
+) STRICT;
+CREATE INDEX compras_cotacao_estado ON compras_cotacao(empresa, estado);
+CREATE TABLE compras_cotacao_item (
+    id         BLOB PRIMARY KEY,
+    cotacao    BLOB    NOT NULL REFERENCES compras_cotacao(id),
+    ordem      INTEGER NOT NULL,
+    produto    BLOB    NOT NULL,
+    descricao  TEXT    NOT NULL,
+    unidade    TEXT    NOT NULL,
+    quantidade INTEGER NOT NULL CHECK (quantidade > 0),
+    escolhido  BLOB
+) STRICT;
+CREATE INDEX compras_cotacao_item_cotacao ON compras_cotacao_item(cotacao, ordem);
+CREATE TABLE compras_cotacao_fornecedor (
+    cotacao            BLOB    NOT NULL REFERENCES compras_cotacao(id),
+    fornecedor         BLOB    NOT NULL,
+    ordem              INTEGER NOT NULL,
+    respondeu          INTEGER NOT NULL DEFAULT 0,
+    prazo_entrega_dias INTEGER,
+    condicao_pagamento TEXT    NOT NULL DEFAULT '',
+    frete              INTEGER NOT NULL DEFAULT 0 CHECK (frete >= 0),
+    observacao         TEXT    NOT NULL DEFAULT '',
+    respondida_em      INTEGER,
+    PRIMARY KEY (cotacao, fornecedor)
+) STRICT, WITHOUT ROWID;
+CREATE TABLE compras_cotacao_preco (
+    item           BLOB    NOT NULL REFERENCES compras_cotacao_item(id),
+    fornecedor     BLOB    NOT NULL,
+    preco_unitario INTEGER NOT NULL CHECK (preco_unitario > 0),
+    PRIMARY KEY (item, fornecedor)
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE compras_pedido (
+    id                 BLOB PRIMARY KEY,
+    empresa            BLOB    NOT NULL REFERENCES nucleo_empresa(id),
+    numero             INTEGER NOT NULL CHECK (numero > 0),
+    fornecedor         BLOB    NOT NULL,
+    cotacao            BLOB REFERENCES compras_cotacao(id),
+    data               INTEGER NOT NULL,
+    previsao_entrega   INTEGER,
+    condicao_pagamento TEXT    NOT NULL DEFAULT '',
+    frete              INTEGER NOT NULL DEFAULT 0 CHECK (frete >= 0),
+    observacao         TEXT    NOT NULL DEFAULT '',
+    estado             TEXT    NOT NULL CHECK (estado IN
+                         ('Rascunho','Enviado','ParcialmenteRecebido','Recebido','Encerrado',
+                          'Cancelado')),
+    motivo             TEXT,
+    criado_em          INTEGER NOT NULL,
+    criado_por         BLOB    NOT NULL,
+    aprovado_em        INTEGER,
+    aprovado_por       BLOB,
+    UNIQUE (empresa, numero)
+) STRICT;
+CREATE INDEX compras_pedido_estado ON compras_pedido(empresa, estado);
+CREATE INDEX compras_pedido_fornecedor ON compras_pedido(empresa, fornecedor, estado);
+CREATE INDEX compras_pedido_cotacao ON compras_pedido(cotacao);
+CREATE TABLE compras_pedido_item (
+    id             BLOB PRIMARY KEY,
+    pedido         BLOB    NOT NULL REFERENCES compras_pedido(id),
+    ordem          INTEGER NOT NULL,
+    produto        BLOB    NOT NULL,
+    descricao      TEXT    NOT NULL,
+    unidade        TEXT    NOT NULL,
+    quantidade     INTEGER NOT NULL CHECK (quantidade > 0),
+    preco_unitario INTEGER NOT NULL CHECK (preco_unitario >= 0)
+) STRICT;
+CREATE INDEX compras_pedido_item_pedido ON compras_pedido_item(pedido, ordem);
+CREATE TABLE compras_pedido_recebimento (
+    item_pedido BLOB    NOT NULL REFERENCES compras_pedido_item(id),
+    nota        BLOB    NOT NULL REFERENCES compras_nota_entrada(id),
+    quantidade  INTEGER NOT NULL CHECK (quantidade > 0),
+    PRIMARY KEY (item_pedido, nota)
+) STRICT, WITHOUT ROWID;
+CREATE INDEX compras_pedido_recebimento_nota ON compras_pedido_recebimento(nota);
+
+ALTER TABLE compras_nota_entrada ADD COLUMN pedido BLOB REFERENCES compras_pedido(id);
+ALTER TABLE compras_nota_entrada ADD COLUMN pedido_ligacao TEXT;
+CREATE INDEX compras_nota_pedido ON compras_nota_entrada(pedido);
+";
+
 const SQL_V10: &str = "
 ALTER TABLE compras_item_nota_entrada ADD COLUMN st_estimado INTEGER NOT NULL DEFAULT 0;
 ";
@@ -258,6 +354,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 11,
         nome: "compras_data_da_entrada",
         sql: SQL_V11,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 12,
+        nome: "compras_cotacao_e_pedido",
+        sql: SQL_V12,
         tipo: TipoMigracao::Esquema,
     },
 ];

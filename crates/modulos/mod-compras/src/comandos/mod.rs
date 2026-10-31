@@ -289,18 +289,7 @@ pub(crate) fn importar_nota_interpretada(
     }
     let despesas = nota_xml.valor_frete + nota_xml.valor_seguro + nota_xml.valor_outras_despesas;
 
-    let pesos: Vec<i64> = match preferencias.rateio_por {
-        RateioPor::Valor => nota_xml
-            .itens
-            .iter()
-            .map(|i| i.valor_total.em_centavos())
-            .collect(),
-        RateioPor::Peso => nota_xml
-            .itens
-            .iter()
-            .map(|i| i.quantidade.unidades_internas())
-            .collect(),
-    };
+    let pesos = pesos_do_rateio(preferencias.rateio_por, nota_xml);
     let mut itens = montar_itens(
         nota.id,
         fornecedor,
@@ -334,6 +323,7 @@ pub(crate) fn importar_nota_interpretada(
         }
         repo.substituir_parcelas(nota.id, &parcelas)?;
     }
+    crate::pedido::sqlite::ligar_pelo_xml(nota.id, fornecedor, nota_xml, &itens, ctx, uow)?;
 
     let itens_nao_casados = itens
         .iter()
@@ -365,6 +355,24 @@ pub(crate) fn importar_nota_interpretada(
     })
 }
 
+/// Os pesos do rateio das despesas acessórias entre os itens do XML: o valor de cada um ou a
+/// quantidade (o "peso" da preferência).
+#[cfg(feature = "sqlite")]
+fn pesos_do_rateio(rateio: RateioPor, nota_xml: &cardeal_fiscal::NotaFiscalXml) -> Vec<i64> {
+    match rateio {
+        RateioPor::Valor => nota_xml
+            .itens
+            .iter()
+            .map(|i| i.valor_total.em_centavos())
+            .collect(),
+        RateioPor::Peso => nota_xml
+            .itens
+            .iter()
+            .map(|i| i.quantidade.unidades_internas())
+            .collect(),
+    }
+}
+
 /// Confirma a entrada sozinha quando a preferência `confirma_automaticamente_quando_tudo_casa`
 /// permite (todo item já `Casado`, nunca por `SugestaoForte`) e há um `local_padrao`
 /// configurado — compartilhado entre [`importar_nota_interpretada`] e
@@ -385,6 +393,10 @@ fn tentar_confirmar_automaticamente(
     let Some(local) = preferencias.local_padrao else {
         return Ok(None);
     };
+    // A nota que diverge do pedido (a mais, preço acima, item fora) passa por quem confere.
+    if crate::pedido::sqlite::diverge_do_pedido(uow.conexao(), ctx.empresa, nota_id)? {
+        return Ok(None);
+    }
     // ST a estimar pela MVA: quem decide é quem confere — a nota fica com o aviso.
     let estimativas = crate::st::sqlite::estimativas(uow.conexao(), ctx, nota_id)?;
     if !estimativas.is_empty() {
@@ -806,6 +818,7 @@ pub fn confirmar_entrada_com_parcelas(
 
     RepositorioCompras::novo(uow).atualizar_nota(&nota)?;
     gravar_data_de_entrada(nota.id, ctx.hoje(), uow)?;
+    crate::pedido::sqlite::receber(nota.id, ctx, uow)?;
 
     uow.publicar(NotaConfirmada {
         nota_entrada: nota.id,

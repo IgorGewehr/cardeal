@@ -53,7 +53,7 @@ fn estado_nota_txt(e: EstadoNotaEntrada) -> &'static str {
     e.rotulo()
 }
 
-fn estado_nota_de(s: &str) -> EstadoNotaEntrada {
+pub(crate) fn estado_nota_de(s: &str) -> EstadoNotaEntrada {
     match s {
         "Conferida" => EstadoNotaEntrada::Conferida,
         "Confirmada" => EstadoNotaEntrada::Confirmada,

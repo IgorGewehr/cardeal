@@ -130,6 +130,12 @@ const PERMISSOES: &[Permissao] = &[
         None,
     ),
     perm(
+        "compras.pedido.aprovar",
+        "Aprovar, cancelar e encerrar pedido de compra",
+        Risco::Medio,
+        None,
+    ),
+    perm(
         "compras.entrada.ver",
         "Consultar notas de entrada",
         Risco::Baixo,

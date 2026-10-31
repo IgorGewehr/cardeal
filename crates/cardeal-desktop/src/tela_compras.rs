@@ -12,6 +12,11 @@
 //! seção "Notas que chegaram pela SEFAZ" mostra a última busca e as que pedem atenção (à espera
 //! da SEFAZ liberar a nota completa, as que não importaram, as ignoradas e por quê).
 //!
+//! Três abas (2026-10-31): **Notas de entrada**, **Pedidos** (`pedidos`: o pedido de compra,
+//! aprovado, mandado ao fornecedor e recebido pelas notas) e **Cotações** (`cotacoes`: as
+//! propostas de vários fornecedores lado a lado, decididas item a item). A nota ligada a um
+//! pedido mostra na conferência o que veio contra o que se pediu (`conferencia_pedido`).
+//!
 //! Revisão de 2026-09-13 (mesma rodada de modernização de estoque/clientes/OS/financeiro):
 //! busca + ordenação por coluna na lista, `Etiqueta` colorida por estado (nota e casamento de
 //! item), diálogo de conferência decoupled do índice da lista (guarda a nota aberta por valor,
@@ -25,8 +30,8 @@ use cardeal_kernel::{Dinheiro, Fuso, Id};
 use cardeal_modkit::Icone;
 use cardeal_ui::atoms::{Botao, Caixa, Divisor, Etiqueta, Rotulo, Tom, ValorDinheiro, ATALHO_NOVO};
 use cardeal_ui::molecules::{
-    dado, BarraFiltros, Campo, EstadoVazio, Mascara, OpcaoBusca, SecaoExpansivel, SeletorBusca,
-    SeletorOpcao,
+    dado, Abas, BarraFiltros, Campo, EstadoVazio, Mascara, OpcaoBusca, SecaoExpansivel,
+    SeletorBusca, SeletorOpcao,
 };
 use cardeal_ui::organisms::{
     notificar, ColunaGrade, Dialogo, Direcao, EstadoSeletorArvore, Grade, LayoutTela, NoArvore,
@@ -34,7 +39,7 @@ use cardeal_ui::organisms::{
 };
 use cardeal_ui::tokens::{Espaco, TemaUi};
 use eframe::egui;
-use mod_clientes::{Papel, PessoasPorPapel};
+use mod_clientes::{ItemPessoa, Papel, PessoasPorPapel};
 use mod_compras::{
     ConfirmarEntrada, CriarProdutoDoItem, EstadoCasamento, EstadoNaSefaz, EstadoNotaEntrada,
     ImportarDeNovoDaSefaz, ImportarNotaDeArquivoXml, ItemNota, ItemNotaEntrada, ItemNotaManual,
@@ -46,9 +51,21 @@ use mod_estoque::{
     SugerirNomeDoProduto,
 };
 
+mod conferencia_pedido;
+mod cotacoes;
 mod devolucao;
 mod estorno;
 mod parcelas;
+mod pedidos;
+
+/// As abas da tela.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum AbaCompras {
+    #[default]
+    Notas,
+    Pedidos,
+    Cotacoes,
+}
 
 /// O fuso das datas e horas da tela.
 const FUSO: Fuso = Fuso::BRASILIA;
@@ -109,8 +126,15 @@ fn form_nova_padrao() -> FormNova {
 /// Estado local da tela.
 #[derive(Default)]
 pub struct EstadoTelaCompras {
+    aba: AbaCompras,
     notas: Vec<ItemNota>,
     fornecedores: HashMap<Id, String>,
+    /// Os fornecedores com documento e telefone (o pedido vai ao fornecedor por eles).
+    lista_fornecedores: Vec<ItemPessoa>,
+    pedidos: pedidos::EstadoPedidos,
+    cotacoes: cotacoes::EstadoCotacoes,
+    /// O pedido de compra da nota aberta.
+    conf_pedido: conferencia_pedido::EstadoConferenciaPedido,
     produtos: Vec<ItemProdutoComSaldo>,
     locais: Vec<ItemLocal>,
     itens_nota: Vec<ItemNotaEntrada>,
@@ -179,7 +203,16 @@ impl EstadoTelaCompras {
                 busca: None,
             },
         ) {
-            self.fornecedores = f.into_iter().map(|p| (p.pessoa, p.nome)).collect();
+            self.fornecedores = f.iter().map(|p| (p.pessoa, p.nome.clone())).collect();
+            self.lista_fornecedores = f;
+        }
+        if sessao.concede("compras.pedido.ver") {
+            self.pedidos
+                .carregar(motor, sessao, self.lista_fornecedores.clone());
+        }
+        if sessao.concede("compras.cotacao.ver") {
+            self.cotacoes
+                .carregar(motor, sessao, self.lista_fornecedores.clone());
         }
         if let Ok(p) = motor.consultar(sessao, "estoque.produtos_com_saldo.v1", &ProdutosComSaldo) {
             self.produtos = p;
@@ -249,6 +282,12 @@ impl EstadoTelaCompras {
         self.parcelas = parcelas::EditorParcelas::carregar(motor, sessao, &item);
         self.estorno = estorno::EstadoEstorno::default();
         self.devolucao = devolucao::EstadoDevolucao::default();
+        self.conf_pedido = conferencia_pedido::EstadoConferenciaPedido::carregar(
+            motor,
+            sessao,
+            nota,
+            item.fornecedor,
+        );
         self.nota_aberta = Some(item);
         self.dlg = Dlg::Ver;
     }
@@ -282,56 +321,132 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
             }
         }
     }
+    // A cotação decidida pediu para abrir um dos pedidos gerados.
+    if let Some(p) = estado.cotacoes.abrir_pedido.take() {
+        estado.aba = AbaCompras::Pedidos;
+        estado
+            .pedidos
+            .carregar(motor, sessao, estado.lista_fornecedores.clone());
+        pedidos::abrir_pedido(&mut estado.pedidos, motor, sessao, p);
+    }
     LayoutTela::nova("Compras").mostrar(
         ui,
         estado,
-        |ui, estado| {
-            if ui
-                .add(Botao::primario("+ Nota manual").tecla(ATALHO_NOVO))
-                .clicked()
-            {
-                estado.nova = form_nova_padrao();
-                estado.dlg = Dlg::Nova;
-            }
-            if ui.add(Botao::secundario("Importar XML")).clicked() {
-                importar_xml(ui.ctx(), motor, sessao, estado);
-            }
-            if ui.add(Botao::secundario("Importar pasta")).clicked() {
-                importar_pasta_xml(ui.ctx(), motor, sessao, estado);
-            }
-            if sessao.concede("compras.entrada.importar") {
-                let rodando = crate::compras_fundo::rodando();
-                if ui
-                    .add(
-                        Botao::secundario("Buscar na SEFAZ")
-                            .carregando(rodando)
-                            .habilitado(!rodando),
-                    )
-                    .clicked()
-                    && crate::compras_fundo::disparar(ui.ctx(), motor, sessao)
+        |ui, estado| match estado.aba {
+            AbaCompras::Pedidos => {
+                if sessao.concede("compras.pedido.criar")
+                    && ui
+                        .add(Botao::primario("+ Novo pedido").tecla(ATALHO_NOVO))
+                        .clicked()
                 {
-                    estado.busca_pedida = true;
+                    pedidos::abrir_novo(&mut estado.pedidos);
+                }
+            }
+            AbaCompras::Cotacoes => {
+                if sessao.concede("compras.cotacao.criar")
+                    && ui
+                        .add(Botao::primario("+ Nova cotação").tecla(ATALHO_NOVO))
+                        .clicked()
+                {
+                    cotacoes::abrir_nova(&mut estado.cotacoes);
+                }
+            }
+            AbaCompras::Notas => cabecalho_notas(ui, motor, sessao, estado),
+        },
+        |ui, estado| {
+            let mut abas = vec![(AbaCompras::Notas, "Notas de entrada")];
+            if sessao.concede("compras.pedido.ver") {
+                abas.push((AbaCompras::Pedidos, "Pedidos"));
+            }
+            if sessao.concede("compras.cotacao.ver") {
+                abas.push((AbaCompras::Cotacoes, "Cotações"));
+            }
+            if abas.len() > 1 {
+                if let Some(nova) = Abas::nova(&abas).selecionada(estado.aba).mostrar(ui) {
+                    estado.aba = nova;
+                    estado.carregar(motor, sessao);
+                }
+                ui.add_space(Espaco::E16);
+            }
+            match estado.aba {
+                AbaCompras::Pedidos => pedidos::corpo(ui, motor, sessao, &mut estado.pedidos),
+                AbaCompras::Cotacoes => cotacoes::corpo(ui, motor, sessao, &mut estado.cotacoes),
+                AbaCompras::Notas => {
+                    if let Some(erro) = &estado.erro {
+                        ui.add(
+                            Rotulo::interface(erro.clone())
+                                .quebravel()
+                                .cor(ui.cores().negativo),
+                        );
+                        ui.add_space(Espaco::E12);
+                    }
+                    notas_na_sefaz(ui, motor, sessao, estado);
+                    lista(ui, motor, sessao, estado);
                 }
             }
         },
-        |ui, estado| {
-            if let Some(erro) = &estado.erro {
-                ui.add(
-                    Rotulo::interface(erro.clone())
-                        .quebravel()
-                        .cor(ui.cores().negativo),
-                );
-                ui.add_space(Espaco::E12);
-            }
-            notas_na_sefaz(ui, motor, sessao, estado);
-            lista(ui, motor, sessao, estado);
-        },
     );
 
-    match estado.dlg {
-        Dlg::Fechado => {}
-        Dlg::Ver => dialogo_ver(ui.ctx(), motor, sessao, estado),
-        Dlg::Nova => dialogo_nova(ui.ctx(), motor, sessao, estado),
+    match estado.aba {
+        AbaCompras::Pedidos => {
+            pedidos::dialogos(
+                ui.ctx(),
+                motor,
+                sessao,
+                &estado.produtos,
+                &mut estado.pedidos,
+            );
+        }
+        AbaCompras::Cotacoes => {
+            cotacoes::dialogos(
+                ui.ctx(),
+                motor,
+                sessao,
+                &estado.produtos,
+                &mut estado.cotacoes,
+            );
+        }
+        AbaCompras::Notas => match estado.dlg {
+            Dlg::Fechado => {}
+            Dlg::Ver => dialogo_ver(ui.ctx(), motor, sessao, estado),
+            Dlg::Nova => dialogo_nova(ui.ctx(), motor, sessao, estado),
+        },
+    }
+}
+
+/// O cabeçalho da aba das notas: lançar, importar e buscar na SEFAZ.
+fn cabecalho_notas(
+    ui: &mut egui::Ui,
+    motor: &Motor,
+    sessao: &Sessao,
+    estado: &mut EstadoTelaCompras,
+) {
+    if ui
+        .add(Botao::primario("+ Nota manual").tecla(ATALHO_NOVO))
+        .clicked()
+    {
+        estado.nova = form_nova_padrao();
+        estado.dlg = Dlg::Nova;
+    }
+    if ui.add(Botao::secundario("Importar XML")).clicked() {
+        importar_xml(ui.ctx(), motor, sessao, estado);
+    }
+    if ui.add(Botao::secundario("Importar pasta")).clicked() {
+        importar_pasta_xml(ui.ctx(), motor, sessao, estado);
+    }
+    if sessao.concede("compras.entrada.importar") {
+        let rodando = crate::compras_fundo::rodando();
+        if ui
+            .add(
+                Botao::secundario("Buscar na SEFAZ")
+                    .carregando(rodando)
+                    .habilitado(!rodando),
+            )
+            .clicked()
+            && crate::compras_fundo::disparar(ui.ctx(), motor, sessao)
+        {
+            estado.busca_pedida = true;
+        }
     }
 }
 
@@ -938,6 +1053,7 @@ fn dialogo_ver(
                     }
                     ui.add_space(Espaco::E8);
                 }
+                let produto_mudou = acao.is_some();
                 match acao {
                     Some((item_nota, AcaoItem::Vincular(produto))) => {
                         vincular_item(ui.ctx(), motor, sessao, estado, n.nota, item_nota, produto);
@@ -946,6 +1062,26 @@ fn dialogo_ver(
                         criar_produto_do_item(ui.ctx(), motor, sessao, estado, n.nota, item_nota);
                     }
                     None => {}
+                }
+                let editavel = matches!(
+                    n.estado,
+                    EstadoNotaEntrada::AConferir | EstadoNotaEntrada::Conferida
+                );
+                if conferencia_pedido::secao(
+                    ui,
+                    motor,
+                    sessao,
+                    &mut estado.conf_pedido,
+                    n.nota,
+                    editavel,
+                ) || produto_mudou
+                {
+                    estado.conf_pedido = conferencia_pedido::EstadoConferenciaPedido::carregar(
+                        motor,
+                        sessao,
+                        n.nota,
+                        n.fornecedor,
+                    );
                 }
 
                 // A nota em conferência se confirma quando todo item tem produto (`Conferida`
@@ -1004,6 +1140,12 @@ fn dialogo_ver(
                         }
                         ui.add_space(Espaco::E12);
                         secao_st_estimado(ui, &estado.st_estimado, &mut estado.incluir_st);
+                        if estado.conf_pedido.diverge() {
+                            ui.add(
+                                Rotulo::campo("A nota diverge do pedido de compra — confira acima antes de confirmar.")
+                                    .cor(ui.cores().atencao),
+                            );
+                        }
                         if ui.add(Botao::primario("Confirmar entrada")).clicked() {
                             confirmar(ui.ctx(), motor, sessao, estado, n.nota);
                         }
@@ -1103,6 +1245,12 @@ fn secao_st_estimado(
 
 /// As opções de produto para um `SeletorBusca` — reconstruída a cada item porque
 /// `OpcaoBusca` não é `Clone` (o vetor é consumido por `.opcoes()`).
+/// A etiqueta do estado da nota (a lista de notas e as notas do pedido).
+pub(crate) fn etiqueta_da_nota(e: EstadoNotaEntrada) -> Etiqueta {
+    let (rotulo, tom) = estado_nota_etiqueta(e);
+    Etiqueta::nova(rotulo, tom)
+}
+
 fn opcoes_busca_produtos(produtos: &[ItemProdutoComSaldo]) -> Vec<OpcaoBusca<Id>> {
     produtos
         .iter()
@@ -1390,6 +1538,124 @@ fn confirmar(
             }
         }
         Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
+    }
+}
+
+/// O que os testes das abas de compras precisam: um fornecedor (com celular) e um produto,
+/// cadastrados pelo motor, e os catálogos que a tela carrega.
+#[cfg(test)]
+pub(crate) mod apoio_testes {
+    use cardeal_cliente::{Motor, Sessao};
+    use cardeal_kernel::Id;
+    use eframe::egui;
+    use mod_clientes::{
+        ContatoInicial, CriarPessoa, ItemPessoa, Papel, PessoaCadastrada, PessoasPorPapel,
+        TipoContato, TipoPessoa,
+    };
+    use mod_estoque::{
+        CriarGrupoProduto, CriarProduto, CriarUnidade, GrupoProdutoCriado, ItemProdutoComSaldo,
+        ProdutoCriado, ProdutosComSaldo, UnidadeCriada,
+    };
+
+    /// O fornecedor e o produto criados, e os catálogos.
+    pub struct Base {
+        pub fornecedor: Id,
+        pub outro_fornecedor: Id,
+        pub produto: Id,
+        pub produtos: Vec<ItemProdutoComSaldo>,
+        pub fornecedores: Vec<ItemPessoa>,
+    }
+
+    fn pessoa(motor: &Motor, sessao: &Sessao, nome: &str) -> Id {
+        let p: PessoaCadastrada = motor
+            .executar(
+                sessao,
+                "clientes.criar_pessoa.v1",
+                &CriarPessoa {
+                    tipo: TipoPessoa::Juridica,
+                    nome: nome.to_owned(),
+                    nome_fantasia: None,
+                    papel_inicial: Papel::Fornecedor,
+                    documento_tipo: None,
+                    documento_numero: None,
+                    data_nascimento: None,
+                    endereco: None,
+                    contato: Some(ContatoInicial {
+                        tipo: TipoContato::Celular,
+                        valor: "31999998888".to_owned(),
+                    }),
+                },
+            )
+            .expect("fornecedor");
+        p.pessoa
+    }
+
+    /// Cadastra e carrega.
+    pub fn base(motor: &Motor, sessao: &Sessao) -> Base {
+        let fornecedor = pessoa(motor, sessao, "Distribuidora Alfa");
+        let outro_fornecedor = pessoa(motor, sessao, "Atacado Beta");
+        let grupo: GrupoProdutoCriado = motor
+            .executar(
+                sessao,
+                "estoque.criar_grupo_produto.v1",
+                &CriarGrupoProduto {
+                    codigo: "BEB".to_owned(),
+                    nome: "Bebidas".to_owned(),
+                    pai: None,
+                },
+            )
+            .expect("grupo");
+        let unidade: UnidadeCriada = motor
+            .executar(
+                sessao,
+                "estoque.criar_unidade.v1",
+                &CriarUnidade {
+                    sigla: "GF".to_owned(),
+                    nome: "Garrafa".to_owned(),
+                    fracionavel: false,
+                },
+            )
+            .expect("unidade");
+        let produto: ProdutoCriado = motor
+            .executar(
+                sessao,
+                "estoque.criar_produto.v1",
+                &CriarProduto {
+                    grupo_produto: grupo.grupo_produto,
+                    nome: "Refrigerante Cola 2L".to_owned(),
+                    ncm: "22021000".to_owned(),
+                    unidade_padrao: unidade.unidade,
+                    codigo_barras: None,
+                    detalhes_tecnicos: None,
+                },
+            )
+            .expect("produto");
+        Base {
+            fornecedor,
+            outro_fornecedor,
+            produto: produto.produto,
+            produtos: motor
+                .consultar(sessao, "estoque.produtos_com_saldo.v1", &ProdutosComSaldo)
+                .expect("produtos"),
+            fornecedores: motor
+                .consultar(
+                    sessao,
+                    "clientes.pessoas_por_papel.v1",
+                    &PessoasPorPapel {
+                        papel: Papel::Fornecedor,
+                        busca: None,
+                    },
+                )
+                .expect("fornecedores"),
+        }
+    }
+
+    /// Um contexto egui com as fontes e o estilo do app.
+    pub fn contexto() -> egui::Context {
+        let ctx = egui::Context::default();
+        cardeal_ui::tokens::instalar_fontes(&ctx);
+        cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+        ctx
     }
 }
 

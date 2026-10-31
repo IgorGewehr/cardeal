@@ -37,7 +37,12 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   (2026-10-27) e a **comissão nas vendas do PDV** (2026-10-28: o cupom ganha o vendedor no `F4`, a venda vira
   "venda comissionável" no `vendas` e o estorno do cupom a tira ou estorna a comissão). O **SPED** (EFD ICMS/IPI)
   é gerado no Cardeal desde 2026-10-28 (`mod_fiscal::efd`, dos XMLs das notas emitidas e das compras que entraram;
-  só regime normal; a EFD-Contribuições fica fora — acaba em 2027 com a CBS).
+  só regime normal; a EFD-Contribuições fica fora — acaba em 2027 com a CBS). A **cotação e o pedido de
+  compra** (2026-10-31, a última pendência de compras das ondas passadas): a cotação compara as propostas
+  item a item (com os fretes somados) e gera um pedido por fornecedor; o pedido aprovado se liga às notas
+  (pelo `xPed` do XML ou pelo único em aberto do fornecedor), a conferência aponta o que diverge (a nota
+  que diverge não entra sozinha), a confirmação recebe e o estorno desfaz; o saldo que não vem se encerra;
+  o radar de reposição mostra o que está a caminho; o pedido vai ao fornecedor em PDF ou pelo WhatsApp.
   Onda 6 (Financeiro 2) começou: **conciliação com alerta de pendências e saldo banco × sistema**,
   **lançamento pré-preenchido pelo último da pessoa**, **DFC indireto**, **cheques**, **balancete/diário** e o
   **pacote do contador** (PDF + `.xlsx`) e a **régua de cobrança** (fila do dia com envio de um clique) feitos

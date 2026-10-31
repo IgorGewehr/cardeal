@@ -85,16 +85,71 @@ pub enum ErroCompras {
          outra devolução)"
     )]
     NotaComDevolucao,
+
+    /// Pedido (ou edição) sem nenhum item com quantidade.
+    #[error("O pedido precisa de ao menos um item com quantidade")]
+    PedidoVazio,
+
+    /// A ação não cabe no estado do pedido.
+    #[error("Não dá para {acao} um pedido \"{atual}\"")]
+    EstadoDoPedidoInvalido {
+        /// O estado atual, para a tela.
+        atual: &'static str,
+        /// O que se tentou.
+        acao: &'static str,
+    },
+
+    /// O pedido já recebeu mercadoria: não se cancela, encerra-se o saldo.
+    #[error("Este pedido já recebeu mercadoria — encerre o saldo em vez de cancelar")]
+    PedidoComRecebimento,
+
+    /// O motivo de cancelar ou encerrar vai ao histórico.
+    #[error("Explique o motivo (ao menos 10 caracteres)")]
+    MotivoDoPedidoCurto,
+
+    /// A nota é de um fornecedor, o pedido de outro.
+    #[error("O pedido é de outro fornecedor")]
+    PedidoDeOutroFornecedor,
+
+    /// O mesmo produto duas vezes no pedido ou na cotação.
+    #[error("{0} aparece duas vezes — junte as quantidades numa linha só")]
+    ProdutoRepetido(String),
+
+    /// Cotação sem item.
+    #[error("A cotação precisa de ao menos um item com quantidade")]
+    CotacaoSemItens,
+
+    /// Cotação sem fornecedor.
+    #[error("Convide ao menos um fornecedor para a cotação")]
+    CotacaoSemFornecedores,
+
+    /// A cotação já foi decidida ou cancelada.
+    #[error("Esta cotação já foi decidida ou cancelada")]
+    CotacaoFechada,
+
+    /// Decidir sem escolher nada.
+    #[error("Escolha de quem comprar ao menos um item")]
+    DecisaoVazia,
+
+    /// O fornecedor escolhido não cotou o item.
+    #[error("{0}: o fornecedor escolhido não cotou este item")]
+    EscolhaSemPreco(String),
 }
 
 impl ErroDominio for ErroCompras {
     fn codigo(&self) -> CodigoErro {
         match self {
             Self::ChaveJaImportada => CodigoErro::DUPLICADO,
-            Self::ItemNaoCasado(_) | Self::NotaJaConfirmada | Self::ReferenciaInvalida => {
-                CodigoErro::REGRA_VIOLADA
-            }
-            Self::EstadoDeNotaInvalido { .. } => CodigoErro::ESTADO_INVALIDO,
+            Self::ItemNaoCasado(_)
+            | Self::NotaJaConfirmada
+            | Self::ReferenciaInvalida
+            | Self::EntradaComPagamento(_)
+            | Self::NotaComDevolucao
+            | Self::PedidoComRecebimento
+            | Self::PedidoDeOutroFornecedor => CodigoErro::REGRA_VIOLADA,
+            Self::EstadoDeNotaInvalido { .. }
+            | Self::EstadoDoPedidoInvalido { .. }
+            | Self::CotacaoFechada => CodigoErro::ESTADO_INVALIDO,
             Self::ItemNaoPertenceANota
             | Self::NaoECompra(_)
             | Self::ParcelasNaoFecham { .. }
@@ -102,8 +157,14 @@ impl ErroDominio for ErroCompras {
             | Self::MotivoDoEstornoCurto
             | Self::MotivoDaDevolucaoCurto
             | Self::DevolucaoVazia
-            | Self::DevolveMaisQueEntrou { .. } => CodigoErro::ENTRADA_INVALIDA,
-            Self::EntradaComPagamento(_) | Self::NotaComDevolucao => CodigoErro::REGRA_VIOLADA,
+            | Self::DevolveMaisQueEntrou { .. }
+            | Self::PedidoVazio
+            | Self::MotivoDoPedidoCurto
+            | Self::ProdutoRepetido(_)
+            | Self::CotacaoSemItens
+            | Self::CotacaoSemFornecedores
+            | Self::DecisaoVazia
+            | Self::EscolhaSemPreco(_) => CodigoErro::ENTRADA_INVALIDA,
         }
     }
 

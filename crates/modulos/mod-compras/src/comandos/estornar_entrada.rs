@@ -123,8 +123,9 @@ impl Comando for EstornarEntrada {
             )
             .map_err(|e| Erro::novo(cardeal_kernel::CodigoErro::FALHA_INTERNA, e.to_string()))?;
 
-        // 5. Persistir.
+        // 5. Persistir; o que a nota deu ao pedido sai.
         RepositorioCompras::novo(uow).atualizar_nota(&nota)?;
+        crate::pedido::sqlite::desfazer_recebimento(nota.id, ctx, uow)?;
 
         // 6. Publicar.
         let titulo = desfeito.map(|d| d.titulo);

@@ -47,6 +47,9 @@ pub struct ItemNfe {
     /// O ICMS, o ST e o FCP do ST destacados no item, campo a campo — o que a devolução
     /// devolve na proporção.
     pub tributos: TributosDaCompra,
+    /// O pedido de compra do destinatário a que o item atende (`det/prod/xPed`), como o
+    /// fornecedor escreveu.
+    pub pedido: Option<String>,
 }
 
 /// Os tributos destacados num item da nota de compra (`det/imposto/ICMS/*` e o IPI).
@@ -123,6 +126,8 @@ pub struct NotaFiscalXml {
     /// As duplicatas (`cobr/dup`): como o fornecedor vai cobrar — vencimento e valor de cada
     /// parcela. Vazio quando a nota não traz cobrança (paga à vista, ou boleto à parte).
     pub duplicatas: Vec<Duplicata>,
+    /// O pedido de compra do destinatário (`compra/xPed`), como o fornecedor escreveu.
+    pub pedido: Option<String>,
 }
 
 /// Uma duplicata da nota (`cobr/dup`).
@@ -427,6 +432,7 @@ pub fn interpretar(xml: &str) -> Result<NotaFiscalXml, ErroFiscal> {
         finalidade: ide.finalidade,
         destinatario: ide.destinatario,
         duplicatas: cobranca.duplicatas,
+        pedido: ide.pedido,
     })
 }
 
@@ -503,6 +509,7 @@ struct Identificacao {
     entrada_do_emitente: bool,
     finalidade: FinalidadeNfe,
     destinatario: Option<String>,
+    pedido: Option<String>,
 }
 
 #[derive(Default)]
@@ -519,6 +526,7 @@ struct ItemParcial {
     valor_ipi: Dinheiro,
     cfop: Option<String>,
     tributos: TributosDaCompra,
+    pedido: Option<String>,
 }
 
 /// O literal que a NF-e usa em `cEAN`/`cEANTrib` para "este produto não tem código de
@@ -550,6 +558,7 @@ impl ItemParcial {
             valor_ipi: self.valor_ipi,
             cfop: self.cfop,
             tributos: self.tributos,
+            pedido: self.pedido,
         })
     }
 }
@@ -577,6 +586,8 @@ fn processar_texto(
             ide.destinatario = Some(texto.chars().filter(char::is_ascii_digit).collect());
         }
         [.., "prod", "CFOP"] => set_item(item_atual, |i| i.cfop = Some(texto.trim().to_string())),
+        [.., "prod", "xPed"] => set_item(item_atual, |i| i.pedido = Some(texto.trim().to_string())),
+        [.., "compra", "xPed"] => ide.pedido = Some(texto.trim().to_string()),
         [.., "ide", "nNF"] => *numero = Some(texto.to_string()),
         [.., "ide", "serie"] => *serie = Some(texto.to_string()),
         [.., "ide", "dhEmi"] => *emissao = Some(data_de_dh_emi(texto)?),
@@ -793,6 +804,27 @@ mod testes {
         // Itens somados batem com o vNF.
         let soma: Dinheiro = n.itens.iter().map(ItemNfe::valor_na_nota).sum();
         assert_eq!(soma, n.valor_total);
+        assert_eq!(n.pedido, None, "sem o grupo compra");
+        assert_eq!(a.pedido, None);
+    }
+
+    #[test]
+    fn le_o_pedido_de_compra_da_nota_e_do_item() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe"><NFe>
+<infNFe Id="NFe35240912345678000181550010000012341123456789" versao="4.00">
+  <ide><nNF>9</nNF><serie>1</serie><dhEmi>2024-09-12T10:00:00-03:00</dhEmi></ide>
+  <emit><CNPJ>11222333000181</CNPJ><xNome>Fornecedor</xNome></emit>
+  <det nItem="1">
+    <prod><cProd>A</cProd><xProd>CERVEJA</xProd><NCM>22030000</NCM><qCom>12</qCom>
+      <vUnCom>5.00</vUnCom><vProd>60.00</vProd><xPed> PC-0042 </xPed><nItemPed>1</nItemPed></prod>
+  </det>
+  <total><ICMSTot><vProd>60.00</vProd><vNF>60.00</vNF></ICMSTot></total>
+  <compra><xPed>42</xPed></compra>
+</infNFe></NFe></nfeProc>"#;
+        let n = interpretar(xml).unwrap();
+        assert_eq!(n.pedido.as_deref(), Some("42"));
+        assert_eq!(n.itens[0].pedido.as_deref(), Some("PC-0042"));
     }
 
     const XML_EXEMPLO: &str = r#"<?xml version="1.0" encoding="UTF-8"?>

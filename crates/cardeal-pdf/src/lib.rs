@@ -149,6 +149,50 @@ pub fn gerar_orcamento(
     layout::gerar(empresa, orcamento, gerado_em)
 }
 
+/// Os dados de um **pedido de compra** a mandar ao fornecedor: o que se encomenda, a que
+/// preço, o frete, a entrega e o pagamento combinados.
+#[derive(Debug, Clone)]
+pub struct PedidoCompraPdf {
+    /// O número do pedido (o fornecedor o repete na nota, no `xPed`).
+    pub numero: u64,
+    /// O fornecedor.
+    pub fornecedor_nome: String,
+    /// O CNPJ/CPF do fornecedor, formatado (vazio se não houver).
+    pub fornecedor_documento: String,
+    /// Telefone ou e-mail do fornecedor (vazio se não houver).
+    pub fornecedor_contato: String,
+    /// O dia do pedido.
+    pub data: Data,
+    /// A entrega combinada.
+    pub previsao_entrega: Option<Data>,
+    /// A condição de pagamento.
+    pub condicao_pagamento: String,
+    /// Observações para o fornecedor.
+    pub observacoes: String,
+    /// Os itens.
+    pub itens: Vec<ItemPdf>,
+    /// A soma dos itens.
+    pub subtotal: Dinheiro,
+    /// O frete.
+    pub frete: Dinheiro,
+    /// Itens + frete.
+    pub total: Dinheiro,
+    /// Quem fez o pedido.
+    pub responsavel: String,
+}
+
+/// Gera os bytes do PDF de um pedido de compra.
+///
+/// # Errors
+/// [`ErroPdf::Logo`] se `empresa.logo_png` não decodificar.
+pub fn gerar_pedido_compra(
+    empresa: &IdentidadeEmpresa,
+    pedido: &PedidoCompraPdf,
+    gerado_em: Instante,
+) -> Result<Vec<u8>, ErroPdf> {
+    layout::gerar_pedido(empresa, pedido, gerado_em)
+}
+
 /// Os dados de um comprovante/laudo de Ordem de Serviço a imprimir — o registro que fica com
 /// a assistência técnica e a via que o cliente leva na entrega do equipamento: o que era, o
 /// diagnóstico, o que foi aplicado (peças + mão de obra), quanto custou e a garantia.
