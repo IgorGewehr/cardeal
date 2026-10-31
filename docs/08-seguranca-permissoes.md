@@ -39,6 +39,33 @@ Um comando só é aceito se **os três** forem válidos. Um token roubado é in�
   mais comuns embutida.
 - Bloqueio progressivo: 5 tentativas → 1 min, 10 → 15 min, com desbloqueio pelo admin.
 
+### 2.1.1 Verificação em duas etapas (TOTP) — feita em 2026-10-31
+
+Opcional por pessoa, nos dois logins: o do banco local (desktop) e o da conta do servidor
+(desktop "No servidor" e navegador). `cardeal_auth::totp`:
+
+- **TOTP do RFC 6238** (HMAC-SHA1, 6 dígitos, janela de 30 s) — o que Google Authenticator,
+  Microsoft Authenticator, Authy e afins leem; conferido contra os vetores do apêndice B do RFC.
+  Aceita o passo anterior e o seguinte (relógio do celular meio minuto fora) e **nunca o mesmo
+  passo duas vezes** (o último aceito fica guardado).
+- **Ativar:** o segredo novo (160 bits) vai ao aplicativo pelo QR Code (`otpauth://`, o átomo
+  `CodigoQr`) ou pela chave em Base32; o primeiro código confirma; saem **8 códigos de
+  recuperação** (10 caracteres sem 0/o/1/l/i), mostrados **uma vez** — cada um entra uma vez no
+  lugar do código. **Desativar:** a senha e um código. O administrador desliga a de quem perdeu o
+  celular (local, `empresa.usuarios.gerenciar`); no servidor, cada conta cuida da sua.
+- **Guardado selado:** o estado inteiro (segredo, resumos BLAKE3 dos códigos de recuperação com a
+  pessoa no contexto, último passo) vai cifrado pelo **cofre** (AES-256-GCM, chave fora da base),
+  amarrado à pessoa — `nucleo_usuario.mfa_segredo` no local, `conta.segundo_fator` no diretório do
+  servidor (v3). Quem copia o `.db` não leva o segredo nem os resumos.
+- **Login em dois passos:** a senha certa de quem tem o segundo fator responde
+  `SEGUNDO_FATOR_NECESSARIO` (3007, HTTP 401) e a tela pede o código; no servidor o segundo envio
+  vai a `POST /v1/sessao/codigo` (o cliente antigo continua entrando nas contas sem o segundo
+  fator). **A senha certa não zera as tentativas antes de o código conferir, e o código errado
+  conta como tentativa** — o bloqueio progressivo vale para os dois, senão daria para chutar
+  códigos à vontade.
+- A **liberação por supervisor** no PDV (`Motor::autenticar`) continua só com a senha: é uma
+  autorização dentro de uma sessão já aberta, não a porta de entrada (`Motor::entrar`).
+
 ### 2.2 PIN de operador (o caso do PDV)
 
 Trocar de operador no caixa 40 vezes por dia com senha de 12 caracteres não acontece na prática —

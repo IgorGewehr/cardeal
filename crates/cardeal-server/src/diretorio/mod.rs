@@ -157,6 +157,39 @@ impl Diretorio {
             .map_err(|e| falha(&e))
     }
 
+    /// O segundo fator selado da conta (`None`: sem verificação em duas etapas).
+    ///
+    /// # Errors
+    /// Falha do SQLite.
+    pub fn segundo_fator(&self, conta: Id) -> Resultado<Option<String>> {
+        self.conn
+            .lock()
+            .query_row(
+                "SELECT segundo_fator FROM conta WHERE id = ?1",
+                [conta.em_bytes().as_slice()],
+                |r| r.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .map(Option::flatten)
+            .map_err(|e| falha(&e))
+    }
+
+    /// Grava (ou apaga, `None`) o segundo fator selado da conta.
+    ///
+    /// # Errors
+    /// Falha do SQLite.
+    pub fn gravar_segundo_fator(&self, conta: Id, selado: Option<&str>) -> Resultado<()> {
+        self.conn
+            .lock()
+            .execute(
+                "UPDATE conta SET segundo_fator = ?2 WHERE id = ?1",
+                params![conta.em_bytes().as_slice(), selado],
+            )
+            .map_err(|e| falha(&e))?;
+        self.replicar();
+        Ok(())
+    }
+
     /// O nome de exibição de uma conta.
     ///
     /// # Errors

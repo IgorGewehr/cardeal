@@ -97,6 +97,22 @@ pub mod consultas {
             .map_err(super::persist)
     }
 
+    /// O segundo fator do usuário, como foi gravado (o selado do cofre, em hexadecimal).
+    /// `Ok(None)` = sem verificação em duas etapas.
+    ///
+    /// # Errors
+    /// [`crate::ErroAuth::FalhaDePersistencia`] em erro do SQLite.
+    pub fn segundo_fator_selado(c: &Connection, usuario: Id) -> Resultado<Option<String>> {
+        c.query_row(
+            "SELECT mfa_segredo FROM nucleo_usuario WHERE id = ?1",
+            [usuario.em_bytes().as_slice()],
+            |r| r.get::<_, Option<String>>(0),
+        )
+        .optional()
+        .map(Option::flatten)
+        .map_err(super::persist)
+    }
+
     /// Carrega um papel pelo `id`, com suas permissões e limites. `Ok(None)` = não existe.
     ///
     /// # Errors
@@ -302,6 +318,21 @@ impl<'a, 'b> RepositorioAuth<'a, 'b> {
                     i64::from(u.bloqueio.tentativas),
                     i64::try_from(u.versao.numero()).unwrap_or(i64::MAX),
                 ],
+            )
+            .map_err(persist)?;
+        Ok(())
+    }
+
+    /// Grava o segundo fator do usuário (o selado do cofre, em hexadecimal), ou o desliga
+    /// (`None`).
+    ///
+    /// # Errors
+    /// [`crate::ErroAuth::FalhaDePersistencia`] em erro do SQLite.
+    pub fn gravar_segundo_fator(&mut self, usuario: Id, selado: Option<&str>) -> Resultado<()> {
+        self.conn()
+            .execute(
+                "UPDATE nucleo_usuario SET mfa_segredo = ?2 WHERE id = ?1",
+                rusqlite::params![blob(usuario), selado],
             )
             .map_err(persist)?;
         Ok(())

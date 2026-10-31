@@ -78,6 +78,9 @@ desktop nativo ────────┼─ HTTPS ─ Cloudflare ─ VPS: card
 |---|---|
 | `POST /v1/sessao` | login (e-mail + senha) → cookie de sessão + empresas acessíveis |
 | `DELETE /v1/sessao` | logout |
+| `POST /v1/sessao/codigo` | login com o código da verificação em duas etapas (2026-10-31, doc 08 §2.1.1) |
+| `GET`/`POST /v1/sessao/segundo-fator` | se a conta tem a verificação; ativar (segredo + 1º código → códigos de recuperação) |
+| `POST /v1/sessao/segundo-fator/proposta` · `/desligar` | um segredo novo para o aplicativo; desligar (senha + código) |
 | `POST /v1/e/{empresa}/cmd/{nome}` | comando; corpo = carga `postcard`; `Idempotency-Key` obrigatório |
 | `POST /v1/e/{empresa}/qry/{nome}` | consulta; corpo = carga `postcard` |
 | `POST /v1/e/{empresa}/empresas` | outro CNPJ na mesma organização (ADR-0017) |

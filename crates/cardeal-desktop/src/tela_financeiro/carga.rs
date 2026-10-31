@@ -84,6 +84,11 @@ impl EstadoTelaFinanceiro {
         if self.aba == Aba::Cheques {
             self.cheques.carregar(motor, sessao);
         }
+        if self.aba == Aba::Grupo {
+            self.grupo.carregar(motor, sessao);
+        } else {
+            self.grupo.conhecer(motor, sessao);
+        }
         if self.aba == Aba::Plano {
             self.plano.carregar(motor, sessao);
         }

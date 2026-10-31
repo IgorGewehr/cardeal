@@ -17,6 +17,7 @@ mod contas;
 mod custos;
 mod dre;
 mod fluxo;
+mod grupo;
 mod importacao;
 mod lancar;
 mod obrigacoes;
@@ -91,6 +92,8 @@ enum Aba {
     Cheques,
     Fluxo,
     Bancos,
+    /// Os CNPJs do grupo lado a lado (só com mais de um).
+    Grupo,
 }
 
 /// A chave do topo: as contas da empresa ou as finanças pessoais do usuário.
@@ -395,6 +398,8 @@ impl Default for FormLancar {
 #[derive(Default)]
 pub struct EstadoTelaFinanceiro {
     aba: Aba,
+    /// O painel do grupo (os CNPJs em que a pessoa entra).
+    grupo: grupo::EstadoGrupo,
     /// As parcelas da aba ativa (Receber/Pagar) com vencimento em `periodo` — **qualquer
     /// estado**, não só em aberto (pedido explícito do usuário: a aba deve mostrar também o
     /// que já foi pago/recebido, igual ao histórico do fluxo de caixa).
@@ -570,6 +575,7 @@ pub fn mostrar(
                 Aba::Plano => painel_plano(ui, motor, sessao, estado),
                 Aba::Conciliacao => painel_conciliacao(ui, motor, sessao, estado),
                 Aba::Cheques => cheques::painel_cheques(ui, motor, sessao, estado),
+                Aba::Grupo => grupo::painel(ui, motor, sessao, &mut estado.grupo),
                 _ => lista(ui, motor, sessao, estado),
             }
         },
@@ -682,7 +688,7 @@ fn acoes_empresa(
 }
 
 fn abas(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTelaFinanceiro) {
-    let nova = Abas::nova(&[
+    let mut lista = vec![
         (Aba::Visao, "Visão geral"),
         (Aba::Receber, "A receber"),
         (Aba::Pagar, "A pagar"),
@@ -694,9 +700,11 @@ fn abas(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTe
         (Aba::Cheques, "Cheques"),
         (Aba::Fluxo, "Fluxo de caixa"),
         (Aba::Bancos, "Contas bancárias"),
-    ])
-    .selecionada(estado.aba)
-    .mostrar(ui);
+    ];
+    if estado.grupo.ha_grupo() {
+        lista.push((Aba::Grupo, "Grupo"));
+    }
+    let nova = Abas::nova(&lista).selecionada(estado.aba).mostrar(ui);
     if let Some(nova) = nova {
         estado.aba = nova;
         estado.carregar(motor, sessao);

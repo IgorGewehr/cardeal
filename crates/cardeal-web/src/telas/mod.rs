@@ -6,3 +6,4 @@ pub mod empresas;
 pub mod equipe;
 pub mod login;
 pub mod principal;
+pub mod segundo_fator;

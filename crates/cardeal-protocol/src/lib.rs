@@ -27,12 +27,17 @@ mod sessao;
 pub use rotas::{
     modulos_alterados, rota_comando, rota_consulta, rota_empresas, rota_eventos, rota_membro,
     rota_membros, rota_sessao_empresa, EVENTO_MUDOU, EVENTO_RECARREGAR, EVENTO_SESSAO_ENCERRADA,
-    ROTA_SAUDE, ROTA_SENHA, ROTA_SESSAO,
+    ROTA_SAUDE, ROTA_SEGUNDO_FATOR, ROTA_SEGUNDO_FATOR_DESLIGAR, ROTA_SEGUNDO_FATOR_PROPOSTA,
+    ROTA_SENHA, ROTA_SESSAO, ROTA_SESSAO_CODIGO,
 };
 pub use sessao::{
-    EmpresaAcessivel, InfoSessao, MembroAdicionado, PedidoLogin, PedidoNovaEmpresa,
+    EmpresaAcessivel, InfoSessao, MembroAdicionado, PedidoAtivarSegundoFator,
+    PedidoDesativarSegundoFator, PedidoLogin, PedidoLoginComCodigo, PedidoNovaEmpresa,
     PedidoNovoMembro, PedidoTrocaSenha, RespostaLogin, TipoCliente,
 };
+
+/// O segredo novo da verificação em duas etapas (`ROTA_SEGUNDO_FATOR_PROPOSTA`).
+pub use cardeal_auth::totp::SegundoFatorProposto;
 
 use cardeal_kernel::CodigoErro;
 
@@ -73,7 +78,7 @@ pub const fn status_http(codigo: CodigoErro) -> u16 {
         2002 => 404,
         4003 => 429,
         3001 | 3003 | 3004 => 403,
-        3002 | 3005 | 3006 => 401,
+        3002 | 3005 | 3006 | 3007 => 401,
         1000..=1999 => 422,
         2000..=2999 | 4000..=4999 => 409,
         5003 => 504,

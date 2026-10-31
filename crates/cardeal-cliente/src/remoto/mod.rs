@@ -128,8 +128,32 @@ impl Remoto {
             senha: senha.to_owned(),
             cliente: TipoCliente::Nativo,
         })?;
+        Self::abrir(transporte, &pedido)
+    }
+
+    /// Faz login com e-mail, senha e o código da verificação em duas etapas (a conta que
+    /// respondeu `SEGUNDO_FATOR_NECESSARIO` a [`Self::entrar`]).
+    ///
+    /// # Errors
+    /// Credencial ou código inválido, conta bloqueada, sem conexão.
+    pub fn entrar_com_codigo(
+        transporte: Box<dyn Transporte>,
+        email: &str,
+        senha: &str,
+        codigo: &str,
+    ) -> Resultado<Self> {
+        let pedido = protocolo::login_com_codigo(&cardeal_protocol::PedidoLoginComCodigo {
+            email: email.to_owned(),
+            senha: senha.to_owned(),
+            cliente: TipoCliente::Nativo,
+            codigo: codigo.to_owned(),
+        })?;
+        Self::abrir(transporte, &pedido)
+    }
+
+    fn abrir(transporte: Box<dyn Transporte>, pedido: &Pedido) -> Resultado<Self> {
         // Login não é reenviado: uma senha errada repetida conta como três tentativas.
-        let resposta = transporte.enviar(&pedido, None).map_err(sem_conexao)?;
+        let resposta = transporte.enviar(pedido, None).map_err(sem_conexao)?;
         let login: RespostaLogin = protocolo::interpretar(&resposta)?;
         let token = login.token.ok_or_else(|| {
             Erro::novo(
@@ -211,6 +235,24 @@ impl Remoto {
         ))
     }
 
+    /// Executa uma consulta numa empresa **dada** (outro CNPJ em que a conta entra), sem
+    /// trocar a escolhida — o painel do grupo consulta cada uma. O servidor confere o vínculo e
+    /// o papel da conta naquela empresa.
+    ///
+    /// # Errors
+    /// Sem acesso à empresa; o erro de domínio; sem conexão.
+    pub fn consultar_em<Q>(&self, empresa: Id, nome: &str, consulta: &Q) -> Resultado<Q::Saida>
+    where
+        Q: Consulta + Serialize,
+        Q::Saida: DeserializeOwned,
+    {
+        self.pedir(&protocolo::consulta(
+            empresa,
+            nome,
+            protocolo::carga(consulta)?,
+        ))
+    }
+
     /// Cadastra outro CNPJ na organização da empresa escolhida (ADR-0017); quem pede vira
     /// administrador dele, e ele já entra na lista de [`Self::empresas`].
     ///
@@ -235,6 +277,43 @@ impl Remoto {
     /// Senha atual errada, nova fora da política, sem conexão.
     pub fn trocar_senha(&self, atual: &str, nova: &str) -> Resultado<()> {
         let pedido = protocolo::trocar_senha(atual, nova)?;
+        let resposta = self
+            .transporte
+            .enviar(&pedido, Some(&self.token))
+            .map_err(sem_conexao)?;
+        protocolo::interpretar_vazio(&resposta)
+    }
+
+    /// A conta tem verificação em duas etapas?
+    ///
+    /// # Errors
+    /// Sem conexão.
+    pub fn segundo_fator_ativo(&self) -> Resultado<bool> {
+        self.pedir(&protocolo::segundo_fator_ativo())
+    }
+
+    /// Um segredo novo para o aplicativo autenticador.
+    ///
+    /// # Errors
+    /// Sem conexão.
+    pub fn propor_segundo_fator(&self) -> Resultado<cardeal_protocol::SegundoFatorProposto> {
+        self.pedir(&protocolo::propor_segundo_fator())
+    }
+
+    /// Ativa a verificação em duas etapas; devolve os códigos de recuperação.
+    ///
+    /// # Errors
+    /// Código que não confere; já ativa; sem conexão.
+    pub fn ativar_segundo_fator(&self, segredo: &str, codigo: &str) -> Resultado<Vec<String>> {
+        self.pedir(&protocolo::ativar_segundo_fator(segredo, codigo)?)
+    }
+
+    /// Desliga a verificação em duas etapas (a senha e um código).
+    ///
+    /// # Errors
+    /// Senha ou código que não confere; sem conexão.
+    pub fn desativar_segundo_fator(&self, senha: &str, codigo: &str) -> Resultado<()> {
+        let pedido = protocolo::desativar_segundo_fator(senha, codigo)?;
         let resposta = self
             .transporte
             .enviar(&pedido, Some(&self.token))

@@ -43,6 +43,9 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   (pelo `xPed` do XML ou pelo único em aberto do fornecedor), a conferência aponta o que diverge (a nota
   que diverge não entra sozinha), a confirmação recebe e o estorno desfaz; o saldo que não vem se encerra;
   o radar de reposição mostra o que está a caminho; o pedido vai ao fornecedor em PDF ou pelo WhatsApp.
+  **Onda 8 começou** com a **verificação em duas etapas** (2026-10-31, `cardeal_auth::totp`, doc 08 §2.1.1):
+  TOTP com códigos de recuperação no login local e no da conta do servidor (desktop e navegador), o
+  segredo selado pelo cofre, o bloqueio progressivo valendo também para o código.
   Onda 6 (Financeiro 2) começou: **conciliação com alerta de pendências e saldo banco × sistema**,
   **lançamento pré-preenchido pelo último da pessoa**, **DFC indireto**, **cheques**, **balancete/diário** e o
   **pacote do contador** (PDF + `.xlsx`) e a **régua de cobrança** (fila do dia com envio de um clique) feitos

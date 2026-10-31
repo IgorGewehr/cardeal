@@ -192,6 +192,82 @@ pub(crate) fn autenticar_usuario(
     )))
 }
 
+/// O **login**: a senha e, se a pessoa tem verificação em duas etapas, o código do aplicativo
+/// (ou um de recuperação). Sem o código, `SEGUNDO_FATOR_NECESSARIO` — a tela pede e chama de
+/// novo. A senha certa **não zera** as tentativas antes de o código conferir: senão daria para
+/// chutar códigos sem nunca cair no bloqueio progressivo. O código errado conta como tentativa.
+pub(crate) fn entrar_usuario(
+    arm: &Armazenamento,
+    recursos: &cardeal_modkit::Recursos,
+    empresa: Id,
+    login: &str,
+    senha: &str,
+    codigo: Option<&str>,
+) -> Resultado<Sessao> {
+    let login_normal = login.to_string();
+    let mut usuario = arm
+        .leitor()
+        .consultar(|c| {
+            cardeal_auth::consultas::usuario_por_login(c, &login_normal)
+                .map_err(|e| como_erro_armazenamento(&e))
+        })
+        .map_err(erro_armazenamento)?
+        .ok_or_else(|| Erro::novo(CodigoErro::NAO_ENCONTRADO, "login ou senha inválidos"))?;
+    if !usuario.mfa_habilitado {
+        return autenticar_usuario(arm, empresa, login, senha);
+    }
+    let agora = Instante::agora();
+    let antes = usuario.bloqueio;
+    let resultado = usuario.autenticar(senha, agora);
+    let mut erro_do_codigo = None;
+    if resultado.is_ok() {
+        usuario.bloqueio = antes;
+        match crate::segundo_fator::conferir_no_login(arm, recursos, empresa, usuario.id, codigo) {
+            Ok(Some(true) | None) => usuario.bloqueio.registrar_sucesso(),
+            Ok(Some(false)) => {
+                usuario.bloqueio.registrar_falha(agora);
+                erro_do_codigo = Some(
+                    match usuario.bloqueio.bloqueado_ate.filter(|ate| agora < *ate) {
+                        Some(ate) => {
+                            Erro::de_dominio(&cardeal_auth::ErroAuth::ContaBloqueada { ate })
+                        }
+                        None => Erro::novo(CodigoErro::CREDENCIAL_INVALIDA, "Código inválido")
+                            .no_campo("codigo"),
+                    },
+                );
+            }
+            Err(e) => erro_do_codigo = Some(e),
+        }
+    }
+    let usuario_final = usuario.clone();
+    let ctx = ContextoEscrita::novo(empresa, usuario.id, Id::novo(), Id::novo());
+    arm.escritor()
+        .executar(ctx, move |uow| {
+            RepositorioAuth::novo(uow)
+                .atualizar_credenciais(&usuario_final)
+                .map_err(|e| como_erro_armazenamento(&e))
+        })
+        .map_err(erro_armazenamento)?;
+    resultado.map_err(|e| Erro::de_dominio(&e))?;
+    if let Some(e) = erro_do_codigo {
+        return Err(e);
+    }
+    let papeis = arm
+        .leitor()
+        .consultar(|c| {
+            cardeal_auth::consultas::papeis_do_usuario(c, usuario.id, empresa)
+                .map_err(|e| como_erro_armazenamento(&e))
+        })
+        .map_err(erro_armazenamento)?;
+    Ok(Sessao::abrir(EmissaoSessao::padrao(
+        usuario.id,
+        Id::novo(),
+        Escopo::empresa_inteira(empresa),
+        AutorizacoesEfetivas::consolidar(&papeis),
+        agora,
+    )))
+}
+
 /// A sessão de um usuário ativo, sem conferir senha — quem chama já provou a identidade (a
 /// conta do servidor). Mesmo cruzamento papéis × empresa de [`autenticar_usuario`].
 pub(crate) fn sessao_de_usuario_ativo(

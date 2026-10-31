@@ -31,6 +31,9 @@ pub struct EstadoLogin {
     servidor: String,
     email: String,
     erro: Option<String>,
+    /// A senha conferiu e a conta tem verificação em duas etapas: falta o código.
+    pede_codigo: bool,
+    codigo: String,
     /// Login no servidor aceito, conta com mais de uma empresa: falta escolher.
     escolhendo: Option<Remoto>,
 }
@@ -40,7 +43,7 @@ pub enum Entrada {
     /// Sessão no motor local.
     Local(Sessao),
     /// Motor remoto + sessão numa empresa.
-    Remota(Motor, Sessao),
+    Remota(Box<Motor>, Sessao),
 }
 
 impl EstadoLogin {
@@ -102,7 +105,7 @@ pub fn mostrar(
                     match remoto.escolher_empresa(empresa) {
                         Ok(sessao) => {
                             entrada = Some(Entrada::Remota(
-                                Motor::Remoto(remoto),
+                                Box::new(Motor::Remoto(remoto)),
                                 Sessao::Remota(sessao),
                             ));
                         }
@@ -130,18 +133,23 @@ pub fn mostrar(
         if let Some(onde) = onde {
             e.onde = onde;
             e.erro = None;
+            e.pede_codigo = false;
+            e.codigo.clear();
         }
         ui.add_space(Espaco::E16);
 
         let pediu = match e.onde {
             Onde::Local => {
-                ui.add(Campo::novo("Login", &mut e.login));
+                if ui.add(Campo::novo("Login", &mut e.login)).changed() {
+                    e.pede_codigo = false;
+                }
                 ui.add_space(Espaco::E12);
                 ui.add(
                     Campo::novo("Senha", &mut e.senha)
                         .senha(true)
-                        .erro(e.erro.clone()),
+                        .erro(e.erro.clone().filter(|_| !e.pede_codigo)),
                 );
+                campo_codigo(ui, e);
                 botao_entrar(ui)
             }
             Onde::Servidor => {
@@ -149,50 +157,80 @@ pub fn mostrar(
                     Campo::novo("Servidor", &mut e.servidor).marcador("https://app.cardeal.com.br"),
                 );
                 ui.add_space(Espaco::E12);
-                ui.add(Campo::novo("E-mail", &mut e.email));
+                if ui.add(Campo::novo("E-mail", &mut e.email)).changed() {
+                    e.pede_codigo = false;
+                }
                 ui.add_space(Espaco::E12);
                 ui.add(
                     Campo::novo("Senha", &mut e.senha)
                         .senha(true)
-                        .erro(e.erro.clone()),
+                        .erro(e.erro.clone().filter(|_| !e.pede_codigo)),
                 );
+                campo_codigo(ui, e);
                 botao_entrar(ui)
             }
         };
         if !pediu {
             return;
         }
+        let codigo = e.pede_codigo.then(|| e.codigo.clone());
         match e.onde {
-            Onde::Local => match motor_local.map(|m| m.autenticar(&e.login, &e.senha)) {
-                Some(Ok(sessao)) => entrada = Some(Entrada::Local(sessao)),
-                Some(Err(erro)) => e.erro = Some(erro.mensagem),
-                None => e.erro = Some("o banco local não está aberto".into()),
-            },
-            Onde::Servidor => match entrar_no_servidor(&e.servidor, &e.email, &e.senha) {
-                Ok(mut remoto) => {
-                    let _ = std::fs::write(
-                        caminho_lembrete(),
-                        format!("{}\n{}\n", e.servidor.trim(), e.email.trim()),
-                    );
-                    e.senha.clear();
-                    match remoto.empresa() {
-                        Some(empresa) => match remoto.escolher_empresa(empresa) {
-                            Ok(sessao) => {
-                                entrada = Some(Entrada::Remota(
-                                    Motor::Remoto(remoto),
-                                    Sessao::Remota(sessao),
-                                ));
-                            }
-                            Err(erro) => e.erro = Some(erro.mensagem),
-                        },
-                        None => e.escolhendo = Some(remoto),
-                    }
+            Onde::Local => {
+                match motor_local.map(|m| m.entrar(&e.login, &e.senha, codigo.as_deref())) {
+                    Some(Ok(sessao)) => entrada = Some(Entrada::Local(sessao)),
+                    Some(Err(erro)) => recusado(e, &erro),
+                    None => e.erro = Some("o banco local não está aberto".into()),
                 }
-                Err(erro) => e.erro = Some(erro),
-            },
+            }
+            Onde::Servidor => {
+                match entrar_no_servidor(&e.servidor, &e.email, &e.senha, codigo.as_deref()) {
+                    Ok(mut remoto) => {
+                        let _ = std::fs::write(
+                            caminho_lembrete(),
+                            format!("{}\n{}\n", e.servidor.trim(), e.email.trim()),
+                        );
+                        e.senha.clear();
+                        match remoto.empresa() {
+                            Some(empresa) => match remoto.escolher_empresa(empresa) {
+                                Ok(sessao) => {
+                                    entrada = Some(Entrada::Remota(
+                                        Box::new(Motor::Remoto(remoto)),
+                                        Sessao::Remota(sessao),
+                                    ));
+                                }
+                                Err(erro) => e.erro = Some(erro.mensagem),
+                            },
+                            None => e.escolhendo = Some(remoto),
+                        }
+                    }
+                    Err(erro) => recusado(e, &erro),
+                }
+            }
         }
     });
     entrada
+}
+
+/// O login recusado: a senha conferiu e falta o código (a tela passa a pedi-lo), ou o erro.
+fn recusado(e: &mut EstadoLogin, erro: &cardeal_kernel::Erro) {
+    if erro.codigo == cardeal_kernel::CodigoErro::SEGUNDO_FATOR_NECESSARIO {
+        e.pede_codigo = true;
+        e.codigo.clear();
+    }
+    e.erro = Some(erro.mensagem.clone());
+}
+
+/// O campo do código, quando a conta tem verificação em duas etapas.
+fn campo_codigo(ui: &mut egui::Ui, e: &mut EstadoLogin) {
+    if !e.pede_codigo {
+        return;
+    }
+    ui.add_space(Espaco::E12);
+    ui.add(
+        Campo::novo("Código do aplicativo autenticador", &mut e.codigo)
+            .marcador("000000 — ou um código de recuperação")
+            .erro(e.erro.clone()),
+    );
 }
 
 fn botao_entrar(ui: &mut egui::Ui) -> bool {
@@ -204,18 +242,31 @@ fn botao_entrar(ui: &mut egui::Ui) -> bool {
     clicou || enter
 }
 
-fn entrar_no_servidor(servidor: &str, email: &str, senha: &str) -> Result<Remoto, String> {
+fn entrar_no_servidor(
+    servidor: &str,
+    email: &str,
+    senha: &str,
+    codigo: Option<&str>,
+) -> Result<Remoto, cardeal_kernel::Erro> {
+    use cardeal_kernel::{CodigoErro, Erro};
     let base = servidor.trim();
     if base.is_empty() {
-        return Err("informe o endereço do servidor".into());
+        return Err(Erro::novo(
+            CodigoErro::ENTRADA_INVALIDA,
+            "informe o endereço do servidor",
+        ));
     }
     let base = if base.starts_with("http://") || base.starts_with("https://") {
         base.to_owned()
     } else {
         format!("https://{base}")
     };
-    let transporte = TransporteHttp::novo(&base)?;
-    Remoto::entrar(Box::new(transporte), email.trim(), senha).map_err(|e| e.mensagem)
+    let transporte =
+        TransporteHttp::novo(&base).map_err(|e| Erro::novo(CodigoErro::ENTRADA_INVALIDA, e))?;
+    match codigo {
+        Some(c) => Remoto::entrar_com_codigo(Box::new(transporte), email.trim(), senha, c),
+        None => Remoto::entrar(Box::new(transporte), email.trim(), senha),
+    }
 }
 
 fn escolher_empresa(ui: &mut egui::Ui, remoto: &Remoto, erro: Option<&str>) -> Option<Id> {

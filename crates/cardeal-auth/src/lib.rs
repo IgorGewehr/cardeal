@@ -35,8 +35,12 @@
 //! A persistência de `Sessao`/`Dispositivo` (dependem da camada de token/transporte e da CA
 //! interna, §4), a montagem de [`AutorizacoesEfetivas`] a partir do `ConjuntoEfetivo` de
 //! `cardeal-modkit` (feita na camada que tem ambos), o handshake desafio-resposta (§2.3), o
-//! PIN de operador (§2.2) e a CA interna (§4.1). O `mfa_segredo` (TOTP) é lido mas ainda não
-//! é escrito — [`Usuario::mfa_habilitado`] reflete só a presença da coluna.
+//! PIN de operador (§2.2) e a CA interna (§4.1).
+//!
+//! A **verificação em duas etapas** ([`totp`], 2026-10-31): o código TOTP de um aplicativo
+//! autenticador e os códigos de recuperação. O estado ([`totp::SegundoFator`]) vai selado pelo
+//! cofre na coluna `mfa_segredo` ([`RepositorioAuth::gravar_segundo_fator`]);
+//! [`Usuario::mfa_habilitado`] é a presença dele.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs, clippy::pedantic)]
@@ -52,6 +56,7 @@ mod papel;
 mod repositorio;
 mod senha;
 mod sessao;
+pub mod totp;
 mod usuario;
 
 pub use bloqueio::Bloqueio;

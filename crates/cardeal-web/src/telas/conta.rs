@@ -1,4 +1,4 @@
-//! Minha conta: trocar a senha. As outras sessões da conta caem (se a senha vazou, quem
+//! Minha conta: a verificação em duas etapas (`super::segundo_fator`) e trocar a senha. As outras sessões da conta caem (se a senha vazou, quem
 //! entrou com ela sai); esta continua.
 
 use cardeal_cliente::remoto::protocolo;
@@ -17,6 +17,7 @@ pub struct Estado {
     confirmar: String,
     erro: Option<(Option<String>, String)>,
     enviando: Option<Pendente<()>>,
+    segundo_fator: super::segundo_fator::Estado,
 }
 
 fn erro_em(e: &Estado, campo: &str) -> Option<String> {
@@ -38,12 +39,19 @@ pub fn mostrar(ui: &mut egui::Ui, e: &mut Estado) {
                         "Senha trocada. As outras sessões desta conta foram encerradas.",
                     ),
                 );
-                *e = Estado::default();
+                *e = Estado {
+                    segundo_fator: std::mem::take(&mut e.segundo_fator),
+                    ..Estado::default()
+                };
             }
             Err(erro) => e.erro = Some((erro.campo, erro.mensagem)),
         }
     }
     CabecalhoTela::novo("Minha conta").mostrar(ui, |_| {});
+    ui.add_space(Espaco::E16);
+    Cartao::novo().largura(420.0).mostrar(ui, |ui| {
+        super::segundo_fator::mostrar(ui, &mut e.segundo_fator);
+    });
     ui.add_space(Espaco::E16);
     Cartao::novo().largura(420.0).mostrar(ui, |ui| {
         ui.add(Rotulo::titulo_secao("Trocar a senha"));

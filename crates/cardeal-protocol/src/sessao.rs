@@ -25,6 +25,39 @@ pub struct PedidoLogin {
     pub cliente: TipoCliente,
 }
 
+/// `POST /v1/sessao/codigo`: o login da conta com verificação em duas etapas — o mesmo do
+/// [`PedidoLogin`], com o código do aplicativo autenticador (ou um de recuperação).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PedidoLoginComCodigo {
+    /// E-mail da conta.
+    pub email: String,
+    /// Senha.
+    pub senha: String,
+    /// Navegador ou nativo.
+    pub cliente: TipoCliente,
+    /// O código de 6 dígitos (ou de recuperação).
+    pub codigo: String,
+}
+
+/// `POST /v1/sessao/segundo-fator`: ativa a verificação em duas etapas com o segredo proposto e
+/// o primeiro código do aplicativo.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PedidoAtivarSegundoFator {
+    /// O segredo proposto (Base32).
+    pub segredo: String,
+    /// O código que o aplicativo mostra agora.
+    pub codigo: String,
+}
+
+/// `POST /v1/sessao/segundo-fator/desligar`: a senha e um código.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PedidoDesativarSegundoFator {
+    /// A senha da conta.
+    pub senha: String,
+    /// Um código do aplicativo (ou de recuperação).
+    pub codigo: String,
+}
+
 /// Uma empresa em que a conta pode entrar.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EmpresaAcessivel {

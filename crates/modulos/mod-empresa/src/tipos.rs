@@ -54,6 +54,8 @@ pub struct UsuarioResumo {
     pub nome: String,
     /// Se está ativo.
     pub ativo: bool,
+    /// Tem verificação em duas etapas.
+    pub segundo_fator: bool,
 }
 
 /// Um papel, resumido para a lista de Configurações.

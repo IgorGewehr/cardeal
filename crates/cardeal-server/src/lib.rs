@@ -51,6 +51,8 @@ pub struct Servidor {
     diretorio: Diretorio,
     frota: Frota,
     sessoes: Sessoes,
+    /// O cofre do servidor: o segundo fator das contas vai selado por ele.
+    cofre: Arc<cardeal_storage::Cofre>,
     logins: tokio::sync::Semaphore,
     limitador: limitador::LimitadorLogin,
     metricas: metricas::Metricas,
@@ -71,6 +73,12 @@ impl Servidor {
             &cardeal_distribuicao::pedido_ativacao(),
         )?;
         let recursos = cardeal_distribuicao::recursos(&config.dados)?;
+        let cofre = recursos.obter::<cardeal_storage::Cofre>().ok_or_else(|| {
+            cardeal_kernel::Erro::novo(
+                cardeal_kernel::CodigoErro::FALHA_INTERNA,
+                "a distribuição não trouxe o cofre de segredos",
+            )
+        })?;
         let frota = Frota::nova(Arc::clone(&plano), config.clone(), recursos);
         Ok(Arc::new(Self {
             logins: tokio::sync::Semaphore::new(config.logins_simultaneos.max(1)),
@@ -86,6 +94,7 @@ impl Servidor {
             diretorio,
             frota,
             sessoes: Sessoes::default(),
+            cofre,
         }))
     }
 

@@ -43,6 +43,22 @@ pub fn roteador(servidor: Arc<Servidor>) -> Router {
             post(sessao::entrar).get(sessao::atual).delete(sessao::sair),
         )
         .route(ROTA_SENHA, post(sessao::trocar_senha))
+        .route(
+            cardeal_protocol::ROTA_SESSAO_CODIGO,
+            post(sessao::entrar_com_codigo),
+        )
+        .route(
+            cardeal_protocol::ROTA_SEGUNDO_FATOR,
+            get(sessao::segundo_fator_ativo).post(sessao::ativar_segundo_fator),
+        )
+        .route(
+            cardeal_protocol::ROTA_SEGUNDO_FATOR_PROPOSTA,
+            post(sessao::propor_segundo_fator),
+        )
+        .route(
+            cardeal_protocol::ROTA_SEGUNDO_FATOR_DESLIGAR,
+            post(sessao::desativar_segundo_fator),
+        )
         .route("/v1/e/:empresa/cmd/:nome", post(despacho::comando))
         .route("/v1/e/:empresa/qry/:nome", post(despacho::consulta))
         .route("/v1/e/:empresa/sessao", get(despacho::sessao))

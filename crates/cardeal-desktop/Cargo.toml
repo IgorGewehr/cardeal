@@ -64,3 +64,4 @@ windows-sys.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+cardeal-auth.workspace = true

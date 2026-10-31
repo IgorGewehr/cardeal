@@ -249,3 +249,40 @@ fn desktop_acompanha_em_tempo_real_o_que_outra_sessao_faz() {
     // O logout derruba o fluxo no próximo batimento; aqui basta soltar a assinatura.
     drop(assinatura);
 }
+
+#[test]
+fn a_conta_com_verificacao_em_duas_etapas_so_entra_com_o_codigo() {
+    let (_p, base) = servidor();
+    let novo = || Box::new(TransporteHttp::novo(&base).unwrap());
+    let r = Remoto::entrar(novo(), "ana@x.com", SENHA).unwrap();
+    assert!(!r.segundo_fator_ativo().unwrap());
+    let p = r.propor_segundo_fator().unwrap();
+    assert!(p.uri.starts_with("otpauth://totp/Cardeal:ana%40x.com?"));
+    let segredo = cardeal_auth::totp::SegredoTotp::de_base32(&p.segredo).unwrap();
+    // O código errado não ativa.
+    assert!(r.ativar_segundo_fator(&p.segredo, "000000").is_err());
+    let agora = cardeal_kernel::Instante::agora();
+    let codigos = r
+        .ativar_segundo_fator(&p.segredo, &segredo.codigo_em(agora))
+        .unwrap();
+    assert_eq!(codigos.len(), 8);
+    assert!(r.segundo_fator_ativo().unwrap());
+
+    // Sem o código, o servidor diz que falta; com o de recuperação, entra.
+    let erro = Remoto::entrar(novo(), "ana@x.com", SENHA).err().unwrap();
+    assert_eq!(erro.codigo, CodigoErro::SEGUNDO_FATOR_NECESSARIO);
+    assert!(Remoto::entrar_com_codigo(novo(), "ana@x.com", SENHA, "000000").is_err());
+    let r2 = Remoto::entrar_com_codigo(novo(), "ana@x.com", SENHA, &codigos[0]).unwrap();
+    assert_eq!(r2.nome(), "Ana");
+    assert!(
+        Remoto::entrar_com_codigo(novo(), "ana@x.com", SENHA, &codigos[0]).is_err(),
+        "o código de recuperação vale uma vez"
+    );
+    // Senha errada com código certo: não.
+    assert!(Remoto::entrar_com_codigo(novo(), "ana@x.com", "senha-errada-1", &codigos[1]).is_err());
+
+    // Desligar pede a senha e um código.
+    assert!(r2.desativar_segundo_fator(SENHA, "000000").is_err());
+    r2.desativar_segundo_fator(SENHA, &codigos[1]).unwrap();
+    assert!(Remoto::entrar(novo(), "ana@x.com", SENHA).is_ok());
+}

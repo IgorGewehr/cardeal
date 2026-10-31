@@ -794,12 +794,16 @@ name = "cardeal-auth"
 version = "0.2.0"
 dependencies = [
  "argon2",
+ "blake3",
  "cardeal-kernel",
  "cardeal-storage",
  "getrandom 0.2.17",
+ "hmac",
+ "postcard",
  "rand 0.8.8",
  "rusqlite",
  "serde",
+ "sha1",
  "tempfile",
  "thiserror 2.0.20",
  "tracing",
@@ -810,6 +814,7 @@ name = "cardeal-cliente"
 version = "0.2.0"
 dependencies = [
  "axum",
+ "cardeal-auth",
  "cardeal-kernel",
  "cardeal-modkit",
  "cardeal-motor",
@@ -832,6 +837,7 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "cardeal-analytics",
+ "cardeal-auth",
  "cardeal-cliente",
  "cardeal-distribuicao",
  "cardeal-fiscal",
@@ -979,6 +985,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "tempfile",
+ "tracing",
 ]
 
 [[package]]
@@ -1089,6 +1096,7 @@ dependencies = [
  "egui",
  "egui_extras",
  "image",
+ "qrcodegen",
  "serde",
  "tracing",
 ]

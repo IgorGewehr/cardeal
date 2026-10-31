@@ -29,7 +29,7 @@ impl MotorLocal {
         &self,
         f: impl FnOnce(&Connection, Id) -> Resultado<()> + Send + 'static,
     ) -> Resultado<()> {
-        let empresa = self.empresa;
+        let empresa = self.empresa_ativa();
         let ctx = ContextoEscrita::novo(empresa, Id::novo(), self.dispositivo, Id::novo());
         self.arm
             .escritor()
@@ -45,7 +45,7 @@ impl MotorLocal {
     /// # Errors
     /// Erro de leitura do armazenamento.
     pub fn empresa_resumo(&self) -> Resultado<EmpresaResumo> {
-        let empresa = self.empresa;
+        let empresa = self.empresa_ativa();
         self.ler(move |c| sql::dados(c, empresa))
     }
 
@@ -72,7 +72,7 @@ impl MotorLocal {
     /// # Errors
     /// Erro de leitura do armazenamento.
     pub fn identidade_visual(&self) -> Resultado<IdentidadeVisual> {
-        let empresa = self.empresa;
+        let empresa = self.empresa_ativa();
         self.ler(move |c| sql::identidade(c, empresa))
     }
 
@@ -125,7 +125,7 @@ impl MotorLocal {
     /// # Errors
     /// Erro de leitura do armazenamento.
     pub fn usuarios(&self) -> Resultado<Vec<UsuarioResumo>> {
-        let empresa = self.empresa;
+        let empresa = self.empresa_ativa();
         self.ler(move |c| sql::usuarios(c, empresa))
     }
 
@@ -134,7 +134,7 @@ impl MotorLocal {
     /// # Errors
     /// Erro de leitura do armazenamento.
     pub fn papeis(&self) -> Resultado<Vec<PapelResumo>> {
-        let empresa = self.empresa;
+        let empresa = self.empresa_ativa();
         self.ler(move |c| sql::papeis(c, empresa))
     }
 }

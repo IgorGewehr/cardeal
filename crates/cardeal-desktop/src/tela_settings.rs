@@ -11,7 +11,9 @@ use cardeal_ui::organisms::{notificar, ColunaGrade, Grade, LayoutTela, Notificac
 use cardeal_ui::tokens::{Espaco, Tema, TemaUi};
 use eframe::egui;
 
+mod grupo;
 mod impressora;
+mod segundo_fator;
 mod tetos;
 
 const REGIMES: [&str; 4] = ["MEI", "SimplesNacional", "LucroPresumido", "LucroReal"];
@@ -55,6 +57,15 @@ pub struct EstadoTelaSettings {
     rodape: String,
     /// A impressora deste computador (não da empresa).
     impressora_local: impressora::EstadoImpressora,
+    /// A verificação em duas etapas da pessoa da sessão.
+    segundo_fator: segundo_fator::EstadoSegundoFator,
+    /// O usuário cuja verificação em duas etapas o administrador pediu para desligar.
+    desligar_2fa: Option<(cardeal_kernel::Id, String)>,
+    /// Os CNPJs do grupo.
+    cnpjs: grupo::EstadoCnpjs,
+    /// O cadastro de um CNPJ pedido no cartão (razão social, CNPJ) — quem é dono do motor o
+    /// executa e chama [`EstadoTelaSettings::cnpj_adicionado`].
+    pub pedido_cnpj: Option<(String, String)>,
 }
 
 impl EstadoTelaSettings {
@@ -72,6 +83,8 @@ impl EstadoTelaSettings {
         }
         self.usuarios = motor.usuarios().unwrap_or_default();
         self.papeis = motor.papeis().unwrap_or_default();
+        self.segundo_fator = segundo_fator::EstadoSegundoFator::carregar(motor, sessao);
+        self.cnpjs = grupo::EstadoCnpjs::carregar(motor, sessao);
         self.tetos = tetos::carregar(motor, sessao);
 
         match motor.identidade_visual() {
@@ -96,6 +109,11 @@ impl EstadoTelaSettings {
             self.imprimir_auto = i.imprimir_ao_finalizar;
             self.rodape = i.rodape.clone().unwrap_or_default();
         }
+    }
+
+    /// O CNPJ pedido entrou no grupo: a lista se atualiza e o formulário fecha.
+    pub fn cnpj_adicionado(&mut self, motor: &Motor, sessao: &Sessao) {
+        self.cnpjs = grupo::EstadoCnpjs::carregar(motor, sessao);
     }
 
     /// Abre direto na aba Fiscal (o aviso do certificado na Visão geral leva para cá).
@@ -166,6 +184,14 @@ fn secao_empresa(
         .as_ref()
         .map_or_else(String::new, |e| e.cnpj.clone());
 
+    let mut pedido = None;
+    cartao(ui, |ui| {
+        pedido = grupo::secao(ui, sessao, &mut estado.cnpjs);
+    });
+    if pedido.is_some() {
+        estado.pedido_cnpj = pedido;
+    }
+    ui.add_space(Espaco::E16);
     cartao(ui, |ui| {
         ui.add(Rotulo::titulo_secao("Dados da empresa"));
         ui.add_space(Espaco::E12);
@@ -465,6 +491,41 @@ fn secao_acesso(
     estado: &mut EstadoTelaSettings,
 ) {
     cartao(ui, |ui| {
+        segundo_fator::secao(ui, motor, sessao, &mut estado.segundo_fator);
+    });
+    ui.add_space(Espaco::E16);
+    // O administrador desliga a verificação de quem perdeu o celular (no banco local; no
+    // servidor, cada conta cuida da sua).
+    let gerencia = sessao.concede("empresa.usuarios.gerenciar") && matches!(motor, Motor::Local(_));
+    if let Some((usuario, nome)) = estado.desligar_2fa.clone() {
+        let r = cardeal_ui::organisms::dialogo_confirmacao(
+            ui.ctx(),
+            "Desligar a verificação em duas etapas",
+            &format!(
+                "{nome} vai entrar só com a senha até ativar de novo. Faça isso só para quem perdeu \
+                 o celular e os códigos de recuperação."
+            ),
+            "Desligar",
+        );
+        if r.confirmado {
+            estado.desligar_2fa = None;
+            match motor.desligar_segundo_fator_de(sessao, usuario) {
+                Ok(()) => {
+                    notificar(
+                        ui.ctx(),
+                        Notificacao::aviso(format!(
+                            "Verificação em duas etapas de {nome} desligada"
+                        )),
+                    );
+                    estado.usuarios = motor.usuarios().unwrap_or_default();
+                }
+                Err(e) => notificar(ui.ctx(), Notificacao::erro(e.mensagem)),
+            }
+        } else if r.fechar {
+            estado.desligar_2fa = None;
+        }
+    }
+    cartao(ui, |ui| {
         ui.add(Rotulo::titulo_secao("Usuários"));
         ui.add_space(Espaco::E8);
         if estado.usuarios.is_empty() {
@@ -472,9 +533,12 @@ fn secao_acesso(
         } else {
             let colunas = vec![
                 ColunaGrade::nova("Nome"),
-                ColunaGrade::nova("Login").largura(180.0),
-                ColunaGrade::nova("Situação").largura(110.0),
+                ColunaGrade::nova("Login").largura(160.0),
+                ColunaGrade::nova("Situação").largura(90.0),
+                ColunaGrade::nova("Duas etapas").largura(150.0),
             ];
+            let eu = sessao.usuario();
+            let mut desligar = None;
             Grade::nova(colunas).mostrar(ui, estado.usuarios.len(), |i, row| {
                 let u = &estado.usuarios[i];
                 row.col(|ui| {
@@ -491,7 +555,25 @@ fn secao_acesso(
                     };
                     ui.add(Rotulo::interface(t).cor(c));
                 });
+                row.col(|ui| {
+                    ui.horizontal(|ui| {
+                        if u.segundo_fator {
+                            ui.add(cardeal_ui::atoms::Etiqueta::positiva("ativa"));
+                            if gerencia
+                                && u.id != eu
+                                && ui.add(Botao::fantasma("Desligar").pequeno()).clicked()
+                            {
+                                desligar = Some((u.id, u.nome.clone()));
+                            }
+                        } else {
+                            ui.add(Rotulo::campo("—"));
+                        }
+                    });
+                });
             });
+            if desligar.is_some() {
+                estado.desligar_2fa = desligar;
+            }
         }
     });
     ui.add_space(Espaco::E16);

@@ -7,7 +7,7 @@ use cardeal_kernel::Dinheiro;
 use cardeal_modkit::Icone;
 use cardeal_ui::atoms::{
     desenhar_icone, superficie_clicavel, Botao, BotaoChevron, BotaoJanela, Caixa, CampoTexto,
-    Divisor, Etiqueta, Rotulo, Spinner, Tecla, TipoBotaoJanela, Tom, ValorDinheiro,
+    CodigoQr, Divisor, Etiqueta, Rotulo, Spinner, Tecla, TipoBotaoJanela, Tom, ValorDinheiro,
 };
 use cardeal_ui::molecules::{
     Abas, AcaoRegistro, AcoesRegistro, BarraFiltros, CabecalhoTela, Campo, CampoBusca, CartaoKpi,
@@ -423,6 +423,10 @@ impl eframe::App for Galeria {
                     ui.add(Botao::primario("Emitindo…").carregando(true));
                     ui.add(Botao::secundario("Salvando…").carregando(true));
                 });
+
+                ui.add_space(Espaco::E24);
+                ui.add(Rotulo::titulo_secao("QR Code (sempre escuro sobre claro)"));
+                ui.add(CodigoQr::novo("otpauth://totp/Cardeal:demo?secret=GEZDGNBVGY3TQOJQ").lado(140.0));
 
                 ui.add_space(Espaco::E24);
                 ui.add(Rotulo::titulo_secao("Notificações (toast)"));

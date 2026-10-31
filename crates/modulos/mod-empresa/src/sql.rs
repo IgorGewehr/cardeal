@@ -220,14 +220,14 @@ pub fn gravar_logo(c: &Connection, empresa: Id, png: Option<&[u8]>) -> Resultado
 }
 
 /// Os usuários da empresa — quem tem papel nela (o usuário é da organização; ADR-0017) —
-/// (id, login, nome, ativo), por nome.
+/// (id, login, nome, ativo, se tem verificação em duas etapas), por nome.
 ///
 /// # Errors
 /// Falha do SQLite.
 pub fn usuarios(c: &Connection, empresa: Id) -> Resultado<Vec<UsuarioResumo>> {
     let mut stmt = c
         .prepare_cached(
-            "SELECT u.id, u.login, u.nome, u.ativo FROM nucleo_usuario u
+            "SELECT u.id, u.login, u.nome, u.ativo, u.mfa_segredo IS NOT NULL FROM nucleo_usuario u
              WHERE EXISTS (SELECT 1 FROM nucleo_usuario_papel up
                            WHERE up.usuario = u.id AND (up.empresa = ?1 OR up.empresa IS NULL))
              ORDER BY u.nome",
@@ -241,6 +241,7 @@ pub fn usuarios(c: &Connection, empresa: Id) -> Resultado<Vec<UsuarioResumo>> {
                 login: r.get(1)?,
                 nome: r.get(2)?,
                 ativo: r.get::<_, i64>(3)? != 0,
+                segundo_fator: r.get::<_, i64>(4)? != 0,
             })
         })
         .map_err(falha)?

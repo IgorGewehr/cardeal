@@ -29,6 +29,7 @@ reqwest = { workspace = true, features = ["blocking"] }
 
 [dev-dependencies]
 cardeal-server.workspace = true
+cardeal-auth.workspace   = true
 mod-clientes.workspace   = true
 mod-empresa.workspace    = true
 tempfile.workspace       = true
