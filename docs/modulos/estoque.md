@@ -240,11 +240,11 @@ decomposto é o resto (absorve o arredondamento dos demais termos).
 **Carga tributária** (`precificacao::carga_sobre_venda`): MEI não tem percentual sobre a venda
 (o DAS fixo é despesa e entra no custo operacional); Simples usa a alíquota efetiva
 `(RBT12 × alíquota nominal − parcela a deduzir) ÷ RBT12` das tabelas da LC 123/2006 (RBT12 = receita
-bruta dos últimos 12 meses lida do Razão); no Anexo I, ICMS-ST e monofásico tiram a parcela
+bruta dos 12 meses anteriores ao mês, lida do Razão, mais a de antes do Cardeal quando informada, e
+anualizada no primeiro ano — `simples::rbt12`, o mesmo do resumo do Simples); no Anexo I, ICMS-ST e monofásico tiram a parcela
 respectiva da repartição da faixa. Presumido/Real usa o percentual informado, ou, se o produto (herdando do grupo) tem alíquota de ICMS/PIS/COFINS, `ICMS × (100% − redução de base) + PIS + COFINS` (`carga_do_produto`; ST/MVA ainda não entram). **Limites
 conhecidos:** acima de R$ 3,6 mi (6ª faixa) o ICMS/ISS sai do DAS e a efetiva subestima a carga —
-usar `Manual`; a dedução de ST/monofásico só existe para o Anexo I; empresa com menos de 12 meses
-usa o que existe (a regra de anualização proporcional não foi implementada). **As tabelas devem ser
+usar `Manual`; a dedução de ST/monofásico só existe para o Anexo I. **As tabelas devem ser
 conferidas com o contador** e revisadas com a reforma tributária (IBS/CBS).
 
 ## 4. Máquinas de estado
@@ -288,7 +288,7 @@ stateDiagram-v2
 | `ReservarEstoque` | (consulta síncrona de `vendas`, sem permissão de usuário direta) | Baixo | Ainda não implementado | `SaldoInsuficiente` |
 | `LiberarReserva` | idem | Baixo | Ainda não implementado | `ReservaInexistente` |
 | `TransferirEntreLocais` ✅ (2026-10-13, `estoque.transferir_entre_locais.v1`) | `estoque.transferencia.criar` | Médio | Vários produtos de um local para outro do mesmo CNPJ, numa transação: por item, saída na origem e entrada no destino ao custo médio da origem (o destino recalcula; sem custo conhecido só a quantidade muda), movimentos `TransferenciaSaida`/`TransferenciaEntrada` com origem `transferencia` e o documento em `estoque_transferencia*`. Produto repetido soma | `LocalIgual`, `TransferenciaSemItens`, `SaldoInsuficienteNaOrigem` (`ESTOQUE_INSUFICIENTE`, tudo ou nada), `TransferenciaComLote`, `LocalCongelado` (local em inventário) |
-| `ConfirmarRecebimentoTransferencia` | `estoque.transferencia.confirmar` | Baixo | **Adiado de propósito (2026-10-13):** entre locais do mesmo CNPJ a mercadoria muda de lugar na hora; a etapa `EmTransito` com confirmação vem com a transferência entre filiais (CNPJs), que exige NF-e de transferência (onda fiscal) | `TransferenciaJaConfirmada` |
+| `ConfirmarRecebimentoTransferencia` | `estoque.transferencia.confirmar` | Baixo | **Entre locais do mesmo CNPJ, não existe (2026-10-13):** a mercadoria muda de lugar na hora. Entre filiais (CNPJs) a etapa a caminho veio em 2026-10-31 no `mod-compras` (`ReceberTransferencia`, `docs/modulos/compras.md` §14), sem local técnico `EmTransito`: o que está a caminho é a transferência `Enviada`, e o valor fica na conta corrente com empresas do grupo | `TransferenciaJaConfirmada` |
 | `AjustarSaldo` ✅ | `estoque.movimento.ajustar` | Alto | Corrige o disponível de um produto/local para `nova_quantidade` (erro de digitação de contagem/entrada), fora do fluxo formal de inventário; **é o único comando de movimento desta fatia que posta no razão** (`receituario::ajuste_manual`, mesma contabilização de `ajuste_de_inventario` — D Estoque/C Outras receitas na sobra, D Perdas/C Estoque na falta), porque não há nenhum outro módulo gerando a contrapartida de uma correção manual. Corrige quantidade, não custo — reabrir/corrigir só o `custo_medio` sem mexer na quantidade fica para quando existir `EditarProduto` | `MotivoObrigatorio` (motivo com menos de 10 caracteres), `QuantidadeInvalida` (`nova_quantidade` igual à atual — nada a corrigir) |
 | `RegistrarPerda` ✅ (2026-10-13, `estoque.registrar_perda.v1`) | `estoque.movimento.perda` | Médio | Baixa de perda (motivo vencimento, quebra/avaria, furto/extravio, outro + observação): sai do saldo do local e, se informado, do lote (que vira `Esgotado` quando zera); movimento `Perda`; lança D Perdas / C Estoque **ao custo médio** (como toda saída — o custo do lote é informativo) com o motivo no histórico. Não deixa saldo negativo | `LoteInexistente`, `LoteDeOutroProduto`, `LoteSaldoInsuficiente`, `PerdaAcimaDoSaldo`, `LocalCongelado` |
 | `CriarInventario` ✅ (2026-10-13, `estoque.criar_inventario.v1`) | `estoque.inventario.criar` | Baixo | Planeja a contagem de um local (CNPJ da sessão): o local inteiro ou um grupo da estrutura com a subárvore | `LocalJaEmInventario` (um inventário aberto por local), local/grupo inexistente |
@@ -334,6 +334,13 @@ stateDiagram-v2
 > orçada/não aplicada com o saldo real via esta porta pública, sem nunca ler
 > `estoque_saldo_local` direto.
 
+> **Nota (2026-10-20):** `retirar_entradas_da_origem` desfaz o que uma origem pôs no estoque (o
+> estorno da entrada de uma nota de compra): sai **ao custo da entrada**, não ao médio
+> (`SaldoLocal::estorno_de_entrada` — o médio volta a `(saldo·médio − q·custo) / (saldo − q)`), e
+> é recusado se a mercadoria já não está toda no local (`EntradaJaConsumida`). Só o que está vivo
+> sai: entradas da origem menos as saídas dela (`entradas_vivas_da_origem`), então a nota
+> estornada, corrigida e confirmada de novo se estorna de novo.
+
 ## 6. Consultas
 
 | Consulta | Permissão | Uso na UI | Índice que a sustenta |
@@ -346,6 +353,8 @@ stateDiagram-v2
 | `ProdutosAbaixoPontoPedido` ✅ (novo, 2026-09-12; nome Rust `ProdutosAbaixoDoPontoPedido`) | `estoque.compra_sugerida.ver` | "Radar" do Pulso, sugestão de pedido de compra | `estoque_saldo_local` agregado por produto, comparado a `estoque_produto.ponto_pedido` |
 | `ArvoreGruposProduto` ✅ (2026-10-09) | `estoque.produto.ver` | Aba Estrutura: a árvore em pré-ordem com nível, contagem de produtos (diretos e na subárvore), margem e perfil fiscal próprios | `estoque_grupo_produto(empresa)` + contagem agrupada |
 | `ParametrosDePreco` ✅ (2026-10-09) | `estoque.produto.ver` | Parâmetros de preço do CNPJ | `estoque_parametros_preco(empresa)` |
+| `ResumoDoSimplesDoMes` ✅ (2026-10-26, `estoque.resumo_do_simples.v1`) | `estoque.preco.simples.ver` | Financeiro › Resultado › "Simples Nacional": faturamento do mês e dos 12 meses anteriores (RBT12 da lei, com a origem: 12 meses, 1º mês × 12, média do início de atividade, histórico curto), alíquota efetiva, DAS estimado, faixa e a próxima, os 12 meses e os avisos (80% e acima do sublimite de R$ 3,6 mi e do limite de R$ 4,8 mi; MEI pelo limite do ano; histórico curto). Lição do gestao-raiz: lá é a alíquota **nominal** sobre o acumulado **do ano** e pelo **recebido**, e o MEI paga 5% | Razão por mês (24 meses) + `estoque_simples_*` |
+| `HistoricoDoSimplesDaEmpresa` ✅ (2026-10-26, `estoque.historico_do_simples.v1`) | `estoque.preco.simples.ver` | O mês de abertura e o faturamento de antes do Cardeal, para editar | `estoque_simples_historico`, `estoque_simples_receita_anterior` |
 | `PrecoSugeridoDoProduto` ✅ (2026-10-09) | `estoque.produto.ver` | Preço sugerido e de empate com a decomposição e a origem de cada percentual; `custo` opcional recalcula (cotação de compra) | produto + grupos + `razao_*` (RBT12 e custo operacional) |
 | `PrecosSugeridosDoGrupo` ✅ (2026-10-09) | `estoque.produto.ver` | Aba Preços: a mesma conta para a subárvore de um grupo (ou o catálogo todo com `grupo: None`), carregando a base (parâmetros, árvore, Razão) uma vez só | idem |
 | `AnaliseDeEstoque` ✅ (2026-10-09; substitui `CurvaAbc`) | `estoque.abc.ver` | Aba Análise: curva ABC (A até 80% do valor acumulado, B até 95%, C o resto; sem saída = sem giro) pelo **valor que saiu ao custo** na janela (30/60/90/180 dias), cobertura em dias (saldo ÷ ritmo de saída; abaixo de 7 dias = risco de ruptura) e giro | `estoque_movimento(produto, criado_em)` tipo `Saida` + `estoque_saldo_local` |
@@ -406,7 +415,8 @@ para o fim (`35G` → `35gr`, `2000ML` → `2Lt`, `1500ML` → `1,5Lt`, `1000G` 
 dá para explicar — a palavra escolhida **começa** com a da nota (abreviação expandida, `FERM` → `Fermento`)
 ou é a mesma sem caixa/acento (`PO` → `Pó`) e difere do que o sistema sugeriria; palavra inserida, juntada
 (`COCA COLA` → `Coca-Cola`) ou trocada por outra não ensina nada. Migração `estoque` v13
-(`estoque_dicionario_nome`, da organização); comandos `estoque.definir_termo_do_dicionario.v1`/
+(`estoque_dicionario_nome`, da organização); v14 (2026-10-26) cria `estoque_simples_historico` (mês de
+abertura) e `estoque_simples_receita_anterior` (faturamento de antes do Cardeal, por mês); comandos `estoque.definir_termo_do_dicionario.v1`/
 `estoque.remover_termo_do_dicionario.v1` (`estoque.produto.editar`), consultas
 `estoque.dicionario_de_nomes.v1`/`estoque.sugerir_nome_do_produto.v1` (`estoque.produto.ver`) e o corpo
 comum `criar_produto_de_compra_comum` (usado por `compras.CriarProdutoDoItem`). Tela: "Dicionário de
@@ -428,6 +438,14 @@ recusado** (o lote guarda o local; a transferência por lote fica para depois); 
 filtram `Saida`/`Entrada` e por isso não enxergam a transferência como consumo nem como compra. Tela: aba
 **Transferências** no Estoque — de/para, produto com o disponível na origem e no destino, lista com remover,
 observação, e o histórico com os itens da selecionada.
+
+**Entre filiais (2026-10-31).** A transferência para outro CNPJ do grupo é do `mod-compras`
+(`docs/modulos/compras.md` §14), mas os movimentos são daqui, com três funções públicas:
+`registrar_saida_por_transferencia_comum` (só de local da empresa, sem lote ativo nele),
+`registrar_entrada_por_transferencia_comum` (no local da filial que recebe, ao custo da que enviou) e
+`devolver_transferencia_da_origem` (o cancelamento). Os movimentos são `TransferenciaSaida`/
+`TransferenciaEntrada`, nunca `Saida`/`Entrada`: transferência não é consumo nem compra, e o ABC, o giro,
+a rentabilidade e o histórico de compras (que leem só `Saida`/`Entrada`) continuam sem enxergá-la.
 
 ### Inventário com contagem cega (2026-10-13)
 
@@ -577,7 +595,8 @@ e a sequência completa em [doc 01 §3](../01-arquitetura-geral.md#3-o-caminho-d
 | `estoque.lote.ver` | Ver lotes e validade | Baixo |
 | `estoque.abc.ver` | Ver curva ABC | Baixo |
 | `estoque.compra_sugerida.ver` | Ver produtos abaixo do ponto de pedido | Baixo |
-| `estoque.tributario.editar` | Editar perfil tributário | Alto |
+| `estoque.tributario.editar` | Editar perfil tributário (e o histórico do Simples: `estoque.definir_historico_do_simples.v1`) | Alto |
+| `estoque.preco.simples.ver` | Ver o resumo do Simples — o faturamento da empresa; o caixa, o vendedor e o estoquista não têm (2026-10-26) | Baixo |
 
 As permissões de leitura `estoque.transferencia.ver`, `estoque.inventario.ver` e
 `estoque.compra_sugerida.ver` foram acrescentadas junto do manifesto (`mod-estoque`): a §6

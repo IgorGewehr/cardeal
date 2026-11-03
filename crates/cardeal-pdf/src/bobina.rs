@@ -2,6 +2,9 @@
 //! cursor que escreve nela, de cima para baixo. A página tem a largura da bobina e a altura do
 //! conteúdo: a primeira passada mede, a segunda desenha. Usado pelo DANFCE e pelo comprovante
 //! de venda.
+//!
+//! O layout é escrito contra [`Escrita`] — a mesma composição sai em PDF ([`Cursor`]) ou nos bytes
+//! ESC/POS da impressora térmica (`crate::escpos`).
 
 use qrcodegen::QrCode;
 
@@ -42,7 +45,7 @@ impl Bobina {
     }
 
     /// O corpo do texto (pt).
-    pub(crate) const fn corpo(self) -> f32 {
+    pub const fn corpo(self) -> f32 {
         match self {
             Self::Mm80 => 7.0,
             Self::Mm58 => 6.0,
@@ -50,7 +53,7 @@ impl Bobina {
     }
 
     /// O texto miúdo (pt).
-    pub(crate) const fn pequeno(self) -> f32 {
+    pub const fn pequeno(self) -> f32 {
         match self {
             Self::Mm80 => 6.0,
             Self::Mm58 => 5.2,
@@ -58,7 +61,7 @@ impl Bobina {
     }
 
     /// O nome no topo (pt).
-    pub(crate) const fn titulo(self) -> f32 {
+    pub const fn titulo(self) -> f32 {
         match self {
             Self::Mm80 => 8.0,
             Self::Mm58 => 7.0,
@@ -110,6 +113,25 @@ pub(crate) fn quebrar(texto: &str, fonte: Fonte, tam: f32, largura_mm: f32) -> V
     linhas
 }
 
+/// Onde o layout da bobina escreve, de cima para baixo: o PDF ([`Cursor`]) ou a impressora
+/// térmica (`crate::escpos::EscPos`).
+pub(crate) trait Escrita {
+    /// A bobina.
+    fn bobina(&self) -> Bobina;
+    /// Texto centralizado, quebrado na largura.
+    fn centro(&mut self, texto: &str, fonte: Fonte, tam: f32);
+    /// Texto à esquerda, quebrado na largura.
+    fn esquerda(&mut self, texto: &str, fonte: Fonte, tam: f32);
+    /// Rótulo à esquerda, valor à direita, na mesma linha, no corpo do texto.
+    fn par(&mut self, rotulo: &str, valor: &str, fonte: Fonte);
+    /// Um espaço em branco.
+    fn espaco(&mut self, mm: f32);
+    /// Uma linha tracejada.
+    fn tracejado(&mut self);
+    /// O QR Code, centralizado.
+    fn qr(&mut self, qr: &QrCode);
+}
+
 /// O cursor de composição: escreve no canvas e desce.
 pub(crate) struct Cursor {
     pub(crate) canvas: Canvas,
@@ -125,8 +147,14 @@ impl Cursor {
             b,
         }
     }
+}
 
-    pub(crate) fn centro(&mut self, texto: &str, fonte: Fonte, tam: f32) {
+impl Escrita for Cursor {
+    fn bobina(&self) -> Bobina {
+        self.b
+    }
+
+    fn centro(&mut self, texto: &str, fonte: Fonte, tam: f32) {
         for linha in quebrar(texto, fonte, tam, self.b.util()) {
             let largura = largura_texto(&linha, fonte, tam) / MM;
             self.y += tam * 0.42;
@@ -141,7 +169,7 @@ impl Cursor {
         }
     }
 
-    pub(crate) fn esquerda(&mut self, texto: &str, fonte: Fonte, tam: f32) {
+    fn esquerda(&mut self, texto: &str, fonte: Fonte, tam: f32) {
         for linha in quebrar(texto, fonte, tam, self.b.util()) {
             self.y += tam * 0.42;
             self.canvas
@@ -149,8 +177,7 @@ impl Cursor {
         }
     }
 
-    /// Rótulo à esquerda, valor à direita, na mesma linha, no corpo do texto.
-    pub(crate) fn par(&mut self, rotulo: &str, valor: &str, fonte: Fonte) {
+    fn par(&mut self, rotulo: &str, valor: &str, fonte: Fonte) {
         let tam = self.b.corpo();
         self.y += tam * 0.42;
         self.canvas
@@ -166,11 +193,11 @@ impl Cursor {
         );
     }
 
-    pub(crate) fn espaco(&mut self, mm: f32) {
+    fn espaco(&mut self, mm: f32) {
         self.y += mm;
     }
 
-    pub(crate) fn tracejado(&mut self) {
+    fn tracejado(&mut self) {
         let (inicio, fim) = (self.b.margem(), self.b.largura() - self.b.margem());
         self.y += 1.2;
         let mut x = inicio;
@@ -182,7 +209,7 @@ impl Cursor {
         self.y += 0.8;
     }
 
-    pub(crate) fn qr(&mut self, qr: &QrCode) {
+    fn qr(&mut self, qr: &QrCode) {
         let lado = self.b.qr_mm();
         let n = qr.size();
         let modulo = lado / f32::from(u16::try_from(n).unwrap_or(1));

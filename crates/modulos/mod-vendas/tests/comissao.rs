@@ -21,10 +21,11 @@ use mod_estoque::{
     UnidadeCriada,
 };
 use mod_vendas::{
-    resumo_por_vendedor, AdicionarItemPedido, ApurarComissoes, ComissoesApuradas, ComissoesDoMes,
-    ComissoesPagas, ConfirmarPedido, CriarPedido, CriarRegraPreco, CriarTabelaPreco,
-    EstadoComissao, FaturarPedido, LinhaComissao, ModuloVendas, PagarComissoes, PedidoCriado,
-    TabelaPrecoCriada, TipoTabela,
+    resumo_por_vendedor, AdicionarItemPedido, AprovarDevolucao, ApurarComissoes, CancelarDevolucao,
+    ComissoesApuradas, ComissoesDoMes, ComissoesPagas, ConcluirDevolucao, ConfirmarPedido,
+    CriarPedido, CriarRegraPreco, CriarTabelaPreco, Devolucao, DevolucaoFoiConcluida,
+    EstadoComissao, EstadoDevolucao, FaturarPedido, LinhaComissao, ModuloVendas, PagarComissoes,
+    PedidoCriado, SolicitarDevolucao, TabelaPrecoCriada, TipoDevolucao, TipoTabela,
 };
 use serde::de::DeserializeOwned;
 use tempfile::TempDir;
@@ -93,6 +94,10 @@ fn sessao(empresa: Id) -> Sessao {
         "vendas.comissao.ver",
         "vendas.comissao.apurar",
         "vendas.comissao.pagar",
+        "vendas.devolucao.ver",
+        "vendas.devolucao.solicitar",
+        "vendas.devolucao.aprovar",
+        "vendas.devolucao.concluir",
         "financeiro.plano.editar",
     ] {
         papel = papel.com_permissao(p);
@@ -310,6 +315,11 @@ fn cenario(l: &Loja) -> Cenario {
 
 /// Cria, confirma e fatura (à vista) um pedido de `unidades` do produto, a R$ 100.
 fn vender(l: &Loja, c: &Cenario, vendedor: Id, unidades: i64) -> Id {
+    vender_com(l, c, vendedor, unidades, true)
+}
+
+/// Como [`vender`], à vista ou a prazo.
+fn vender_com(l: &Loja, c: &Cenario, vendedor: Id, unidades: i64, a_vista: bool) -> Id {
     let pedido: PedidoCriado = l.ok(
         "vendas.criar_pedido.v1",
         &CriarPedido {
@@ -340,7 +350,7 @@ fn vender(l: &Loja, c: &Cenario, vendedor: Id, unidades: i64) -> Id {
         "vendas.faturar_pedido.v1",
         &FaturarPedido {
             pedido: pedido.pedido,
-            a_vista: true,
+            a_vista,
         },
     );
     pedido.pedido
@@ -476,4 +486,163 @@ fn sem_comissao_definida_nada_a_apurar_e_conta_do_modelo_comercio_e_usada() {
     assert_eq!(apuradas.valor, Dinheiro::reais(20)); // 500 × 4%
     assert_eq!(l.saldo("5.42"), 2_000);
     assert_eq!(l.saldo("5.5"), 0);
+}
+
+impl Loja {
+    /// O item (único) de um pedido.
+    fn item_do_pedido(&self, pedido: Id) -> Id {
+        let pedido = pedido.em_bytes().to_vec();
+        self.arm
+            .leitor()
+            .consultar(move |c| {
+                c.query_row(
+                    "SELECT id FROM vendas_item_pedido WHERE pedido = ?1",
+                    [&pedido],
+                    |r| r.get::<_, Vec<u8>>(0),
+                )
+                .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+            })
+            .map(|b| Id::de_bytes(b.as_slice().try_into().unwrap()))
+            .unwrap()
+    }
+
+    fn devolver(&self, pedido: Id, unidades: i64) -> Result<Devolucao, cardeal_kernel::Erro> {
+        self.comando(
+            "vendas.solicitar_devolucao.v1",
+            &SolicitarDevolucao {
+                pedido,
+                itens: vec![(self.item_do_pedido(pedido), Quantidade::unidades(unidades))],
+                motivo: "Cliente desistiu da compra".into(),
+            },
+        )
+    }
+
+    fn aprovar_e_concluir(&self, d: &Devolucao) -> DevolucaoFoiConcluida {
+        let aprovada: Devolucao = self.ok(
+            "vendas.aprovar_devolucao.v1",
+            &AprovarDevolucao { devolucao: d.id },
+        );
+        assert_eq!(aprovada.estado, EstadoDevolucao::Aprovada);
+        self.ok(
+            "vendas.concluir_devolucao.v1",
+            &ConcluirDevolucao { devolucao: d.id },
+        )
+    }
+
+    fn estoque(&self, c: &Cenario) -> i64 {
+        let (produto, local) = (c.produto.em_bytes().to_vec(), c.local.em_bytes().to_vec());
+        self.arm
+            .leitor()
+            .consultar(move |conn| {
+                conn.query_row(
+                    "SELECT quantidade_disponivel FROM estoque_saldo_local
+                     WHERE produto = ?1 AND local = ?2",
+                    [&produto, &local],
+                    |r| r.get::<_, i64>(0),
+                )
+                .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+            })
+            .unwrap()
+            / 10_000
+    }
+}
+
+#[test]
+fn devolucao_de_venda_repoe_estoque_devolve_o_dinheiro_e_estorna_a_comissao() {
+    let l = Loja::nova();
+    let c = cenario(&l);
+    let (ana, beto) = (Id::novo(), Id::novo());
+    comissao_do_produto(&l, &c, 10);
+
+    // Ana vende 3 à vista (R$ 300, comissão R$ 30, apurada).
+    let pedido_ana = vender(&l, &c, ana, 3);
+    let _: ComissoesApuradas = l.ok(
+        "vendas.apurar_comissoes.v1",
+        &ApurarComissoes {
+            competencia: hoje().competencia(),
+        },
+    );
+    assert_eq!(l.estoque(&c), 47);
+
+    // 1 volta: o dinheiro sai do caixa, o estoque e o CMV voltam, a comissão é estornada.
+    let d = l.devolver(pedido_ana, 1).unwrap();
+    assert_eq!(
+        (d.estado, d.tipo),
+        (EstadoDevolucao::Solicitada, TipoDevolucao::Parcial)
+    );
+    assert_eq!(d.valor_total, Dinheiro::reais(100));
+    let feita = l.aprovar_e_concluir(&d);
+    assert_eq!(feita.reembolsado, Dinheiro::reais(100));
+    assert_eq!(feita.comissao_estornada, Dinheiro::reais(10));
+    assert_eq!(l.estoque(&c), 48);
+    assert_eq!(l.saldo("4.5"), 10_000, "devoluções de venda");
+    assert_eq!(l.saldo("1.1.01"), 20_000, "o caixa devolveu R$ 100");
+    assert_eq!(l.saldo("5.1"), 6_000, "o CMV de 2 a R$ 30");
+    assert_eq!(l.saldo("2.1.03"), -2_000, "comissão a pagar: 30 − 10");
+    // Concluir de novo não pode.
+    assert_eq!(
+        l.comando::<DevolucaoFoiConcluida>(
+            "vendas.concluir_devolucao.v1",
+            &ConcluirDevolucao { devolucao: d.id },
+        )
+        .unwrap_err()
+        .codigo,
+        CodigoErro::ESTADO_INVALIDO
+    );
+
+    // O mês mostra o estorno, e o pagamento o desconta.
+    let linhas = l.comissoes();
+    let r = resumo_por_vendedor(&linhas);
+    let da_ana = r.iter().find(|x| x.vendedor == ana).unwrap();
+    assert_eq!((da_ana.pedidos, da_ana.a_pagar), (1, Dinheiro::reais(20)));
+    let pago: ComissoesPagas = l.ok(
+        "vendas.pagar_comissoes.v1",
+        &PagarComissoes {
+            vendedor: ana,
+            competencia: hoje().competencia(),
+            conta: l.conta("1.1.01"),
+            data: hoje(),
+        },
+    );
+    assert_eq!(pago.valor, Dinheiro::reais(20));
+    assert_eq!(l.saldo("2.1.03"), 0);
+
+    // Beto vende 2 a prazo; 1 volta antes da apuração: abate a conta a receber e a
+    // apuração já sai sem a parte devolvida.
+    let pedido_beto = vender_com(&l, &c, beto, 2, false);
+    // Pedida e cancelada não conta.
+    let cancelada = l.devolver(pedido_beto, 2).unwrap();
+    let _: Devolucao = l.ok(
+        "vendas.cancelar_devolucao.v1",
+        &CancelarDevolucao {
+            devolucao: cancelada.id,
+        },
+    );
+    let d = l.devolver(pedido_beto, 1).unwrap();
+    let feita = l.aprovar_e_concluir(&d);
+    assert_eq!(feita.reembolsado, Dinheiro::ZERO);
+    assert_eq!(feita.abatido, Dinheiro::reais(100));
+    assert_eq!(
+        (feita.credito, feita.comissao_estornada),
+        (None, Dinheiro::ZERO)
+    );
+    assert_eq!(l.saldo("1.2.01"), 10_000, "o cliente deve R$ 100");
+    let apuradas: ComissoesApuradas = l.ok(
+        "vendas.apurar_comissoes.v1",
+        &ApurarComissoes {
+            competencia: hoje().competencia(),
+        },
+    );
+    assert_eq!(
+        apuradas.valor,
+        Dinheiro::reais(10),
+        "10% dos R$ 100 que ficaram"
+    );
+    // Só 1 ainda pode voltar; e a última leva o resto do item.
+    assert_eq!(
+        l.devolver(pedido_beto, 2).unwrap_err().codigo,
+        CodigoErro::REGRA_VIOLADA
+    );
+    let ultima = l.devolver(pedido_beto, 1).unwrap();
+    assert_eq!(ultima.tipo, TipoDevolucao::Total);
 }

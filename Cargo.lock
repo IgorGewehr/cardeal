@@ -794,12 +794,16 @@ name = "cardeal-auth"
 version = "0.2.0"
 dependencies = [
  "argon2",
+ "blake3",
  "cardeal-kernel",
  "cardeal-storage",
  "getrandom 0.2.17",
+ "hmac",
+ "postcard",
  "rand 0.8.8",
  "rusqlite",
  "serde",
+ "sha1",
  "tempfile",
  "thiserror 2.0.20",
  "tracing",
@@ -810,6 +814,7 @@ name = "cardeal-cliente"
 version = "0.2.0"
 dependencies = [
  "axum",
+ "cardeal-auth",
  "cardeal-kernel",
  "cardeal-modkit",
  "cardeal-motor",
@@ -832,6 +837,7 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "cardeal-analytics",
+ "cardeal-auth",
  "cardeal-cliente",
  "cardeal-distribuicao",
  "cardeal-fiscal",
@@ -859,9 +865,11 @@ dependencies = [
  "open",
  "rfd",
  "serde",
+ "serde_json",
  "tempfile",
  "tracing",
  "tracing-subscriber",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -977,6 +985,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "tempfile",
+ "tracing",
 ]
 
 [[package]]
@@ -995,6 +1004,7 @@ name = "cardeal-planilha"
 version = "0.2.0"
 dependencies = [
  "cardeal-kernel",
+ "miniz_oxide 0.8.9",
 ]
 
 [[package]]
@@ -1086,6 +1096,7 @@ dependencies = [
  "egui",
  "egui_extras",
  "image",
+ "qrcodegen",
  "serde",
  "tracing",
 ]
@@ -3053,8 +3064,10 @@ dependencies = [
  "cardeal-ui",
  "egui",
  "mod-clientes",
+ "mod-empresa",
  "mod-estoque",
  "mod-financeiro",
+ "mod-fiscal",
  "postcard",
  "proptest",
  "rusqlite",
@@ -3176,6 +3189,7 @@ dependencies = [
  "mod-empresa",
  "mod-estoque",
  "mod-financeiro",
+ "mod-os",
  "mod-pdv",
  "mod-vendas",
  "postcard",

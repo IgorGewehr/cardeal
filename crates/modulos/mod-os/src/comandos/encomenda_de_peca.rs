@@ -234,6 +234,7 @@ fn lancar_conta_da_peca(
             parcelas: 1,
             primeiro_vencimento: vencimento,
             intervalo_dias: 0,
+            cronograma: None,
             observacao: Some(observacao),
             categoria: None,
             origem_modulo: "os_peca",

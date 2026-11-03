@@ -62,8 +62,11 @@ sustenta a decisão na tela.
   reforma tributária (IBS/CBS). Conferir com o contador antes de uso real.
 - A 6ª faixa do Simples (acima de R$ 3,6 mi) tira ICMS/ISS do DAS: a efetiva subestima a carga e a
   recomendação é o modo `Manual`. A dedução de ST/monofásico só existe para o Anexo I.
-- Empresa com menos de 12 meses usa o faturamento que existe; a anualização proporcional da LC 123
-  não foi implementada.
+- ~~Empresa com menos de 12 meses usa o faturamento que existe~~ — desde 2026-10-26 o RBT12 é o da
+  lei (os 12 meses **anteriores** ao mês, não a janela até hoje), com a anualização do art. 18 §§2º
+  e 3º quando o mês de abertura é informado e a receita de antes do Cardeal somada quando
+  informada (`mod_estoque::simples`); o resumo do Simples e o preço usam o mesmo cálculo. Sem
+  nenhum dos dois, soma o que há e o resumo avisa.
 - Acoplamento: `mod-estoque` lê o Razão por `cardeal_ledger::resultado_por_conta` (o núcleo, não
   as tabelas de outro módulo), mantendo a regra de `docs/contratos-internos.md` §7.
 

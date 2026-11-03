@@ -1,14 +1,11 @@
 //! Os comandos de compras (`docs/modulos/compras.md` §5). Um arquivo, um comando — mais a
-//! parte que não é comando: a varredura da distribuição `DFe` é uma tarefa agendada no spec
-//! (§5, sequência), não uma ação de usuário, então vive aqui como função `pub` comum
-//! ([`verificar_notas_na_sefaz`]/[`importar_nota_da_sefaz`]), chamável direto por quem tiver
-//! um `PortaFiscal` em mãos (hoje, só teste de integração com `FiscalSimulado`; quando
-//! `cardeal-modkit::Ctx::porta()` existir, um agendador de verdade chama a mesma função —
-//! ver `docs/19-estado-e-processo.md` §1.2/§4).
+//! importação de um XML que chegou da SEFAZ ([`importar_nota_da_sefaz`]), que a busca de notas
+//! (a tarefa de `crate::dfe`, fora de transação) chama nota a nota.
 
 mod confirmar_entrada;
 mod criar_produto_do_item;
 mod definir_preferencias_compras;
+mod estornar_entrada;
 mod importar_nota_de_arquivo_xml;
 mod lancar_nota_manual;
 mod vincular_produto_manual;
@@ -16,12 +13,11 @@ mod vincular_produto_manual;
 pub use confirmar_entrada::{ConfirmarEntrada, EntradaConfirmada};
 pub use criar_produto_do_item::{CriarProdutoDoItem, ProdutoDoItemCriado};
 pub use definir_preferencias_compras::DefinirPreferenciasCompras;
+pub use estornar_entrada::{EntradaFoiEstornada, EstornarEntrada, MOTIVO_MINIMO_ESTORNO};
 pub use importar_nota_de_arquivo_xml::ImportarNotaDeArquivoXml;
 pub use lancar_nota_manual::{ItemNotaManual, LancarNotaManual};
 pub use vincular_produto_manual::VincularProdutoManual;
 
-#[cfg(feature = "sqlite")]
-use cardeal_fiscal::{Nsu, PortaFiscal};
 use cardeal_kernel::Id;
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::{Cnpj, Dinheiro, Erro, Resultado, Versao};
@@ -54,14 +50,16 @@ use crate::erros::ErroCompras;
 use crate::eventos::{EntradaAConferir, NotaConfirmada};
 use crate::nota::EstadoNotaEntrada;
 #[cfg(feature = "sqlite")]
-use crate::nota::{EstadoCasamento, ItemNotaEntrada, NotaEntrada};
+use crate::nota::ParcelaCompra;
+#[cfg(feature = "sqlite")]
+use crate::nota::{conferir_parcelas, EstadoCasamento, ItemNotaEntrada, NotaEntrada};
 #[cfg(feature = "sqlite")]
 use crate::preferencias::{PreferenciasCompras, RateioPor};
 #[cfg(feature = "sqlite")]
 use crate::repositorio::RepositorioCompras;
 
 #[cfg(feature = "sqlite")]
-fn carregar_nota(uow: &mut UnidadeDeTrabalho, id: Id) -> Resultado<NotaEntrada> {
+pub(crate) fn carregar_nota(uow: &mut UnidadeDeTrabalho, id: Id) -> Resultado<NotaEntrada> {
     RepositorioCompras::novo(uow)
         .buscar_nota(id)?
         .ok_or_else(|| Erro::nao_encontrado("nota de entrada"))
@@ -124,9 +122,8 @@ pub struct RelatorioImportacao {
     pub titulo_pago: bool,
 }
 
-/// Interpreta um XML já baixado (via `PortaFiscal`/`DFe`) e importa a nota — só um envelope
-/// fino sobre [`importar_nota_interpretada`], mantido para a assinatura que
-/// [`verificar_notas_na_sefaz`] já usava.
+/// Interpreta um XML já baixado da SEFAZ (a busca de notas, `crate::dfe`) e importa a nota —
+/// um envelope fino sobre [`importar_nota_interpretada`].
 ///
 /// # Errors
 /// Erro de domínio (`ErroFiscal::XmlInvalido` já vem tratado pelo chamador — este recebe o
@@ -134,10 +131,11 @@ pub struct RelatorioImportacao {
 #[cfg(feature = "sqlite")]
 pub fn importar_nota_da_sefaz(
     nota_xml: &cardeal_fiscal::NotaFiscalXml,
+    xml_bruto: &str,
     ctx: &Ctx,
     uow: &mut UnidadeDeTrabalho,
 ) -> Resultado<RelatorioImportacao> {
-    importar_nota_interpretada(nota_xml, ctx, uow)
+    importar_nota_interpretada(nota_xml, xml_bruto, ctx, uow)
 }
 
 /// O cabeçalho da nota a partir do XML. O total é o que o fornecedor cobra (o `vNF`): produtos −
@@ -167,6 +165,32 @@ fn nota_do_xml(nota_xml: &cardeal_fiscal::NotaFiscalXml, fornecedor: Id, ctx: &C
         alerta: alerta_de_cfop(nota_xml),
         versao: Versao::INICIAL,
     }
+}
+
+/// As duplicatas do XML como parcelas da nota.
+#[cfg(feature = "sqlite")]
+fn parcelas_do_xml(nota_xml: &cardeal_fiscal::NotaFiscalXml) -> Vec<ParcelaCompra> {
+    nota_xml
+        .duplicatas
+        .iter()
+        .map(|d| ParcelaCompra {
+            numero: d.numero.clone(),
+            vencimento: d.vencimento,
+            valor: d.valor,
+        })
+        .collect()
+}
+
+/// O aviso quando as duplicatas não servem como estão (não fecham com o total, vencem antes
+/// da emissão): a nota não se confirma sozinha, e quem confere acerta as parcelas.
+#[cfg(feature = "sqlite")]
+fn alerta_de_parcelas(parcelas: &[ParcelaCompra], nota: &NotaEntrada) -> Option<String> {
+    if parcelas.is_empty() {
+        return None;
+    }
+    conferir_parcelas(parcelas, nota.valor_total, nota.data_emissao)
+        .err()
+        .map(|e| format!("Confira as parcelas antes de dar entrada — duplicatas do XML: {e}."))
 }
 
 /// O aviso para quem confere quando algum item tem CFOP que não é venda de mercadoria: a
@@ -223,6 +247,7 @@ fn exigir_compra(
 #[cfg(feature = "sqlite")]
 pub(crate) fn importar_nota_interpretada(
     nota_xml: &cardeal_fiscal::NotaFiscalXml,
+    xml_bruto: &str,
     ctx: &Ctx,
     uow: &mut UnidadeDeTrabalho,
 ) -> Resultado<RelatorioImportacao> {
@@ -230,6 +255,8 @@ pub(crate) fn importar_nota_interpretada(
     if let Some(existente) =
         RepositorioCompras::novo(uow).buscar_nota_por_chave(ctx.empresa, chave)?
     {
+        // A nota importada antes de o XML ser guardado ganha o XML agora.
+        RepositorioCompras::novo(uow).guardar_xml(existente, xml_bruto)?;
         let nota = carregar_nota(uow, existente)?;
         let pendentes = RepositorioCompras::novo(uow).contar_itens_nao_casados(nota.id)?;
         return Ok(RelatorioImportacao {
@@ -252,21 +279,17 @@ pub(crate) fn importar_nota_interpretada(
     )?;
     let preferencias = RepositorioCompras::novo(uow).preferencias(ctx.empresa)?;
 
-    let nota = nota_do_xml(nota_xml, fornecedor, ctx);
+    let mut nota = nota_do_xml(nota_xml, fornecedor, ctx);
+    let parcelas = parcelas_do_xml(nota_xml);
+    if let Some(aviso) = alerta_de_parcelas(&parcelas, &nota) {
+        nota.alerta = Some(match nota.alerta.take() {
+            Some(cfop) => format!("{cfop} {aviso}"),
+            None => aviso,
+        });
+    }
     let despesas = nota_xml.valor_frete + nota_xml.valor_seguro + nota_xml.valor_outras_despesas;
 
-    let pesos: Vec<i64> = match preferencias.rateio_por {
-        RateioPor::Valor => nota_xml
-            .itens
-            .iter()
-            .map(|i| i.valor_total.em_centavos())
-            .collect(),
-        RateioPor::Peso => nota_xml
-            .itens
-            .iter()
-            .map(|i| i.quantidade.unidades_internas())
-            .collect(),
-    };
+    let pesos = pesos_do_rateio(preferencias.rateio_por, nota_xml);
     let mut itens = montar_itens(
         nota.id,
         fornecedor,
@@ -294,10 +317,13 @@ pub(crate) fn importar_nota_interpretada(
     {
         let mut repo = RepositorioCompras::novo(uow);
         repo.inserir_nota(&nota)?;
+        repo.guardar_xml(nota.id, xml_bruto)?;
         for item in &itens {
             repo.inserir_item(item)?;
         }
+        repo.substituir_parcelas(nota.id, &parcelas)?;
     }
+    crate::pedido::sqlite::ligar_pelo_xml(nota.id, fornecedor, nota_xml, &itens, ctx, uow)?;
 
     let itens_nao_casados = itens
         .iter()
@@ -329,6 +355,24 @@ pub(crate) fn importar_nota_interpretada(
     })
 }
 
+/// Os pesos do rateio das despesas acessórias entre os itens do XML: o valor de cada um ou a
+/// quantidade (o "peso" da preferência).
+#[cfg(feature = "sqlite")]
+fn pesos_do_rateio(rateio: RateioPor, nota_xml: &cardeal_fiscal::NotaFiscalXml) -> Vec<i64> {
+    match rateio {
+        RateioPor::Valor => nota_xml
+            .itens
+            .iter()
+            .map(|i| i.valor_total.em_centavos())
+            .collect(),
+        RateioPor::Peso => nota_xml
+            .itens
+            .iter()
+            .map(|i| i.quantidade.unidades_internas())
+            .collect(),
+    }
+}
+
 /// Confirma a entrada sozinha quando a preferência `confirma_automaticamente_quando_tudo_casa`
 /// permite (todo item já `Casado`, nunca por `SugestaoForte`) e há um `local_padrao`
 /// configurado — compartilhado entre [`importar_nota_interpretada`] e
@@ -349,6 +393,30 @@ fn tentar_confirmar_automaticamente(
     let Some(local) = preferencias.local_padrao else {
         return Ok(None);
     };
+    // A nota que diverge do pedido (a mais, preço acima, item fora) passa por quem confere.
+    if crate::pedido::sqlite::diverge_do_pedido(uow.conexao(), ctx.empresa, nota_id)? {
+        return Ok(None);
+    }
+    // ST a estimar pela MVA: quem decide é quem confere — a nota fica com o aviso.
+    let estimativas = crate::st::sqlite::estimativas(uow.conexao(), ctx, nota_id)?;
+    if !estimativas.is_empty() {
+        let total: Dinheiro = estimativas.iter().map(|e| e.valor).sum();
+        uow.conexao()
+            .execute(
+                "UPDATE compras_nota_entrada SET alerta = ?2 WHERE id = ?1",
+                rusqlite::params![
+                    nota_id.em_bytes().as_slice(),
+                    format!(
+                        "{} item(ns) sem ICMS-ST na nota, com MVA no cadastro: ST estimado em {} \
+                         — confira na conferência antes de confirmar",
+                        estimativas.len(),
+                        total.formatar_com_simbolo()
+                    )
+                ],
+            )
+            .map_err(|e| Erro::novo(cardeal_kernel::CodigoErro::FALHA_INTERNA, e.to_string()))?;
+        return Ok(None);
+    }
     let confirmacao = confirmar_entrada_comum(
         nota_id,
         local,
@@ -480,50 +548,6 @@ fn montar_item_casado(
     Ok(item)
 }
 
-/// Varre a distribuição `DFe` desde o último NSU visto, baixa e importa cada nota nova.
-/// Idempotente: reimportar a mesma chave nunca duplica (`importar_nota_da_sefaz`).
-///
-/// # Errors
-/// Erro de domínio ou de infraestrutura — de qualquer nota individual (interrompe a
-/// varredura na primeira falha; o NSU só avança para as notas processadas com sucesso).
-#[cfg(feature = "sqlite")]
-pub fn verificar_notas_na_sefaz(
-    porta: &dyn PortaFiscal,
-    ctx: &Ctx,
-    uow: &mut UnidadeDeTrabalho,
-) -> Resultado<Vec<RelatorioImportacao>> {
-    let cnpj_empresa = RepositorioCompras::novo(uow).cnpj_da_empresa(ctx.empresa)?;
-    let ultimo_nsu = RepositorioCompras::novo(uow).ultimo_nsu(ctx.empresa)?;
-
-    let resumos = porta.distribuicao_dfe(&cnpj_empresa, Nsu(ultimo_nsu))?;
-    let mut relatorios = Vec::with_capacity(resumos.len());
-    let mut maior_nsu = ultimo_nsu;
-
-    for resumo in resumos {
-        maior_nsu = maior_nsu.max(resumo.nsu.0);
-        if RepositorioCompras::novo(uow)
-            .buscar_nota_por_chave(ctx.empresa, resumo.chave_acesso.como_str())?
-            .is_some()
-        {
-            continue;
-        }
-        let xml_bruto = porta.baixar_xml(&resumo.chave_acesso)?;
-        let nota_xml =
-            cardeal_fiscal::interpretar(&xml_bruto.0).map_err(|e| Erro::de_dominio(&e))?;
-        // A distribuição também traz notas em que a empresa aparece sem ser compradora
-        // (transportadora, autorizada a baixar o XML, devolução de cliente): essas ficam de
-        // fora, sem travar a varredura.
-        if nota_xml.classificar_para(&cnpj_empresa) != cardeal_fiscal::ClassificacaoEntrada::Compra
-        {
-            continue;
-        }
-        relatorios.push(importar_nota_da_sefaz(&nota_xml, ctx, uow)?);
-    }
-
-    RepositorioCompras::novo(uow).atualizar_ultimo_nsu(ctx.empresa, maior_nsu)?;
-    Ok(relatorios)
-}
-
 /// O que [`confirmar_entrada_comum`] devolve: o título gerado (se algum) e se ele já nasceu
 /// pago.
 #[derive(Debug, Clone, Copy)]
@@ -540,9 +564,9 @@ pub struct ConfirmacaoEntrada {
 /// opcionalmente, gera o título a pagar no financeiro com
 /// `mod_financeiro::lancar_titulo_comum` — D Estoque / C Fornecedores por parcela
 /// (`docs/modulos/compras.md` §7), o mesmo receituário simples que o helper já produz para
-/// a espécie `Pagar` quando `papel_resultado = EstoqueMercadorias`. Sem parcelamento por
-/// duplicata ainda (assume um único vencimento na emissão) — o XML de condições de
-/// pagamento (`cobr/dup`) não é lido nesta versão.
+/// a espécie `Pagar` quando `papel_resultado = EstoqueMercadorias`. As parcelas do título são
+/// as da nota (as duplicatas do XML, `cobr/dup`); sem elas, uma parcela vencendo na emissão.
+/// Para informar outras, [`confirmar_entrada_com_parcelas`].
 ///
 /// Quando `gerar_titulo` e `pago_no_ato` são ambos verdadeiros — a compra já foi paga à
 /// vista, na hora —, a mesma transação também dá baixa completa no título recém-criado, na
@@ -569,8 +593,144 @@ pub fn confirmar_entrada_comum(
     ctx: &Ctx,
     uow: &mut UnidadeDeTrabalho,
 ) -> Resultado<ConfirmacaoEntrada> {
+    confirmar_entrada_com_parcelas(
+        nota_id,
+        local,
+        gerar_titulo,
+        pago_no_ato,
+        None,
+        false,
+        ctx,
+        uow,
+    )
+}
+
+/// As parcelas do título a pagar: as informadas (vazias = uma só, na emissão) ou, sem elas, as
+/// da nota; conferidas contra o total e gravadas na nota como as usadas. A compra paga no ato
+/// tem uma parcela só, quitada na hora — as duplicatas ficam de lado.
+#[cfg(feature = "sqlite")]
+fn cronograma_da_entrada(
+    nota: &NotaEntrada,
+    informadas: Option<Vec<ParcelaCompra>>,
+    pago_no_ato: bool,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<Option<Vec<(cardeal_kernel::Data, Dinheiro)>>> {
+    if pago_no_ato {
+        return Ok(None);
+    }
+    let parcelas = match informadas {
+        Some(p) => p,
+        None => RepositorioCompras::novo(uow).parcelas_da_nota(nota.id)?,
+    };
+    if parcelas.is_empty() {
+        return Ok(None);
+    }
+    conferir_parcelas(&parcelas, nota.valor_total, nota.data_emissao)
+        .map_err(|e| Erro::de_dominio(&e))?;
+    RepositorioCompras::novo(uow).substituir_parcelas(nota.id, &parcelas)?;
+    Ok(Some(
+        parcelas.iter().map(|p| (p.vencimento, p.valor)).collect(),
+    ))
+}
+
+/// Soma o ST estimado (`crate::st`) ao custo dos itens e grava; devolve o total.
+#[cfg(feature = "sqlite")]
+fn aplicar_st_estimado(
+    nota: Id,
+    itens: &mut [crate::nota::ItemNotaEntrada],
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<Dinheiro> {
+    let estimativas = crate::st::sqlite::estimativas(uow.conexao(), ctx, nota)?;
+    let mut total = Dinheiro::ZERO;
+    for e in estimativas {
+        let Some(item) = itens.iter_mut().find(|i| i.id == e.item) else {
+            continue;
+        };
+        item.valor_impostos += e.valor;
+        total += e.valor;
+        uow.conexao()
+            .execute(
+                "UPDATE compras_item_nota_entrada
+                 SET valor_impostos = valor_impostos + ?2, st_estimado = ?2 WHERE id = ?1",
+                rusqlite::params![item.id.em_bytes().as_slice(), e.valor.em_centavos()],
+            )
+            .map_err(|e| Erro::novo(cardeal_kernel::CodigoErro::FALHA_INTERNA, e.to_string()))?;
+    }
+    Ok(total)
+}
+
+/// A guia do ICMS-ST antecipado: um título a pagar (D Estoque / C Fornecedores — a baixa do
+/// financeiro debita sempre o papel padrão), vencendo no dia 20 do mês seguinte, o prazo mais
+/// comum; o do estado pode ser outro (o vencimento se altera no financeiro).
+#[cfg(feature = "sqlite")]
+fn lancar_guia_de_st(
+    nota: &crate::nota::NotaEntrada,
+    valor: Dinheiro,
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<()> {
+    let hoje = ctx.hoje();
+    let dia_20 = cardeal_kernel::Data::de_ymd(hoje.ano(), hoje.mes(), 20)
+        .map_err(|e| Erro::novo(cardeal_kernel::CodigoErro::FALHA_INTERNA, e.mensagem))?
+        .mais_meses(1);
+    let vencimento = mod_fiscal::calendario::prorrogar(dia_20);
+    lancar_titulo_comum(
+        DadosLancamentoTitulo {
+            especie: EspecieTitulo::Pagar,
+            contraparte: None,
+            valor_total: valor,
+            emissao: hoje,
+            parcelas: 1,
+            primeiro_vencimento: vencimento,
+            intervalo_dias: 0,
+            cronograma: None,
+            observacao: Some(format!(
+                "ICMS-ST antecipado (guia ao estado), estimado pela MVA — nota {}/{}. Confira o \
+                 valor e o vencimento do seu estado com o contador",
+                nota.numero, nota.serie
+            )),
+            categoria: None,
+            origem_modulo: "compras_st",
+            origem_id: Some(nota.id),
+            papel_contraparte: PapelConta::Fornecedores,
+            papel_resultado: PapelConta::EstoqueMercadorias,
+        },
+        ctx,
+        uow,
+    )?;
+    Ok(())
+}
+
+/// Como [`confirmar_entrada_comum`], com as parcelas do título informadas por quem confirma
+/// (`None` = as da nota).
+///
+/// # Errors
+/// Os de [`confirmar_entrada_comum`]; [`ErroCompras::ParcelasNaoFecham`] e
+/// [`ErroCompras::ParcelaInvalida`].
+///
+/// # Panics
+/// Nunca, na prática — ver [`confirmar_entrada_comum`].
+#[cfg(feature = "sqlite")]
+#[allow(clippy::too_many_arguments)] // as escolhas de quem confirma, uma a uma
+pub fn confirmar_entrada_com_parcelas(
+    nota_id: Id,
+    local: Id,
+    gerar_titulo: bool,
+    pago_no_ato: bool,
+    parcelas: Option<Vec<ParcelaCompra>>,
+    incluir_st: bool,
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<ConfirmacaoEntrada> {
     let mut nota = carregar_nota(uow, nota_id)?;
-    let itens = RepositorioCompras::novo(uow).itens_da_nota(nota_id)?;
+    let mut itens = RepositorioCompras::novo(uow).itens_da_nota(nota_id)?;
+    // O ST estimado pela MVA entra no custo do item (e fica gravado, para o estorno tirar).
+    let st_total = if incluir_st {
+        aplicar_st_estimado(nota_id, &mut itens, ctx, uow)?
+    } else {
+        Dinheiro::ZERO
+    };
     let nao_casados = itens
         .iter()
         .filter(|i| i.estado_casamento != EstadoCasamento::Casado)
@@ -602,6 +762,7 @@ pub fn confirmar_entrada_comum(
     }
 
     let (titulo, pago) = if gerar_titulo {
+        let cronograma = cronograma_da_entrada(&nota, parcelas, pago_no_ato, uow)?;
         let gravado = lancar_titulo_comum(
             DadosLancamentoTitulo {
                 especie: EspecieTitulo::Pagar,
@@ -611,6 +772,7 @@ pub fn confirmar_entrada_comum(
                 parcelas: 1,
                 primeiro_vencimento: nota.data_emissao,
                 intervalo_dias: 0,
+                cronograma,
                 observacao: Some(format!("Nota de entrada {}/{}", nota.numero, nota.serie)),
                 categoria: None,
                 origem_modulo: "compras",
@@ -646,12 +808,17 @@ pub fn confirmar_entrada_comum(
             false
         };
 
+        if st_total.e_positivo() {
+            lancar_guia_de_st(&nota, st_total, ctx, uow)?;
+        }
         (Some(gravado.titulo), pago)
     } else {
         (None, false)
     };
 
     RepositorioCompras::novo(uow).atualizar_nota(&nota)?;
+    gravar_data_de_entrada(nota.id, ctx.hoje(), uow)?;
+    crate::pedido::sqlite::receber(nota.id, ctx, uow)?;
 
     uow.publicar(NotaConfirmada {
         nota_entrada: nota.id,
@@ -663,4 +830,22 @@ pub fn confirmar_entrada_comum(
     .map_err(|e| Erro::de_dominio(&e))?;
 
     Ok(ConfirmacaoEntrada { titulo, pago })
+}
+
+/// O dia em que a nota entrou: o mês em que ela se escritura (SPED).
+#[cfg(feature = "sqlite")]
+fn gravar_data_de_entrada(
+    nota: Id,
+    dia: cardeal_kernel::Data,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<()> {
+    uow.conexao()
+        .execute(
+            "UPDATE compras_nota_entrada SET data_entrada = ?2 WHERE id = ?1",
+            rusqlite::params![nota.em_bytes().as_slice(), i64::from(dia.em_dias())],
+        )
+        .map(|_| ())
+        .map_err(|e| {
+            cardeal_kernel::Erro::novo(cardeal_kernel::CodigoErro::FALHA_INTERNA, e.to_string())
+        })
 }

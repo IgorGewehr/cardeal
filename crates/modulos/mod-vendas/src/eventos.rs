@@ -23,6 +23,26 @@ impl EventoDominio for PedidoConfirmado {
     }
 }
 
+/// Uma devolução de venda foi concluída: estoque reposto, dinheiro e comissão acertados.
+#[derive(Debug, Serialize)]
+pub struct DevolucaoConcluida {
+    /// A devolução.
+    pub devolucao: Id,
+    /// O pedido.
+    pub pedido_origem: Id,
+    /// O valor devolvido.
+    pub valor_total: Dinheiro,
+}
+
+#[cfg(feature = "sqlite")]
+impl EventoDominio for DevolucaoConcluida {
+    const TIPO: &'static str = "vendas.devolucao_concluida.v1";
+
+    fn agregado(&self) -> Option<Id> {
+        Some(self.pedido_origem)
+    }
+}
+
 /// Um pedido foi faturado.
 #[derive(Debug, Serialize)]
 pub struct PedidoFaturado {

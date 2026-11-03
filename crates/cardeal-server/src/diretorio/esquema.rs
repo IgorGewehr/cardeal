@@ -41,4 +41,7 @@ pub(super) const MIGRACOES: &[&str] = &[
     // a própria empresa (a matriz, que dá nome ao arquivo) — as empresas de antes ficam como
     // estão.
     "ALTER TABLE empresa ADD COLUMN base BLOB;",
+    // v3 — a verificação em duas etapas da conta: o estado selado pelo cofre do servidor
+    // (`cardeal_auth::totp::selar`), em hexadecimal. `NULL` = sem segundo fator.
+    "ALTER TABLE conta ADD COLUMN segundo_fator TEXT;",
 ];

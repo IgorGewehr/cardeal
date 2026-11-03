@@ -3,6 +3,8 @@
 //! `docs/modulos/vendas.md` §4 e §11.5: a devolução parcial **rateia proporcionalmente** e
 //! a soma dos itens devolvidos bate exatamente com `valor_total`. Domínio puro.
 
+use std::collections::HashMap;
+
 use cardeal_kernel::{Arredondamento, Data, Dinheiro, Id, Quantidade, Versao};
 use serde::{Deserialize, Serialize};
 
@@ -88,9 +90,17 @@ pub struct Devolucao {
     pub versao: Versao,
 }
 
-fn valor_estornado_do_item(item: &ItemVenda, quantidade: Quantidade) -> Dinheiro {
-    if quantidade >= item.quantidade {
-        item.total_item
+/// O que já voltou de cada item do pedido (devoluções não canceladas): quantidade e valor.
+pub type JaDevolvido = HashMap<Id, (Quantidade, Dinheiro)>;
+
+fn valor_estornado_do_item(
+    item: &ItemVenda,
+    quantidade: Quantidade,
+    ja: (Quantidade, Dinheiro),
+) -> Dinheiro {
+    if ja.0 + quantidade >= item.quantidade {
+        // A última devolução do item leva o resto: a soma fecha com o total do item.
+        item.total_item - ja.1
     } else {
         item.total_item.fracao(
             quantidade.unidades_internas(),
@@ -114,7 +124,24 @@ impl Devolucao {
         motivo: impl Into<String>,
         data: Data,
     ) -> Result<Self, ErroVendas> {
+        Self::solicitar_descontando(pedido, linhas, &JaDevolvido::new(), motivo, data)
+    }
+
+    /// Como [`Self::solicitar`], descontando o que já voltou em devoluções anteriores do mesmo
+    /// pedido: a quantidade não passa do que resta, e a última devolução de um item leva o
+    /// resto do valor dele.
+    ///
+    /// # Errors
+    /// Os de [`Self::solicitar`].
+    pub fn solicitar_descontando(
+        pedido: &Pedido,
+        linhas: &[(Id, Quantidade)],
+        ja: &JaDevolvido,
+        motivo: impl Into<String>,
+        data: Data,
+    ) -> Result<Self, ErroVendas> {
         use crate::pedido::EstadoPedido;
+        let nada = (Quantidade::ZERO, Dinheiro::ZERO);
         if !matches!(
             pedido.estado,
             EstadoPedido::Faturado | EstadoPedido::EmEntrega | EstadoPedido::Concluido
@@ -138,7 +165,8 @@ impl Devolucao {
                 .iter()
                 .find(|i| i.id == *item_id)
                 .ok_or(ErroVendas::QuantidadeInvalida)?;
-            if *quantidade > item.quantidade {
+            let antes = ja.get(&item.id).copied().unwrap_or(nada);
+            if antes.0 + *quantidade > item.quantidade {
                 return Err(ErroVendas::QuantidadeDevolvidaExcede);
             }
             itens.push(ItemDevolvido {
@@ -146,16 +174,18 @@ impl Devolucao {
                 produto: item.produto,
                 variacao: item.variacao,
                 quantidade: *quantidade,
-                valor_estornado: valor_estornado_do_item(item, *quantidade),
+                valor_estornado: valor_estornado_do_item(item, *quantidade, antes),
             });
         }
 
         let valor_total = itens.iter().map(|i| i.valor_estornado).sum();
         let cobre_tudo = pedido.itens.iter().all(|orig| {
-            itens
+            let antes = ja.get(&orig.id).copied().unwrap_or(nada).0;
+            let agora = itens
                 .iter()
                 .find(|d| d.item_pedido == orig.id)
-                .is_some_and(|d| d.quantidade >= orig.quantidade)
+                .map_or(Quantidade::ZERO, |d| d.quantidade);
+            antes + agora >= orig.quantidade
         });
         let tipo = if cobre_tudo {
             TipoDevolucao::Total
@@ -191,14 +221,15 @@ impl Devolucao {
     }
 
     /// `Aprovada → Concluida` — o comando faz o estorno no razão e repõe o estoque; aqui só
-    /// a transição e o vínculo com o lançamento.
+    /// a transição e o vínculo com o lançamento (nenhum, na venda a prazo sem custo: o
+    /// abatimento do título é o lançamento).
     ///
     /// # Errors
     /// [`ErroVendas::DevolucaoEmEstadoInvalido`].
-    pub fn concluir(&mut self, estorno_lancamento: Id) -> Result<(), ErroVendas> {
+    pub fn concluir(&mut self, estorno_lancamento: Option<Id>) -> Result<(), ErroVendas> {
         self.exigir(EstadoDevolucao::Aprovada)?;
         self.estado = EstadoDevolucao::Concluida;
-        self.estorno_lancamento = Some(estorno_lancamento);
+        self.estorno_lancamento = estorno_lancamento;
         self.versao = self.versao.proxima();
         Ok(())
     }
@@ -340,9 +371,9 @@ mod testes {
         let p = pedido_faturado(vec![(1, 10)]);
         let linhas: Vec<_> = p.itens.iter().map(|i| (i.id, i.quantidade)).collect();
         let mut d = Devolucao::solicitar(&p, &linhas, "x", hoje()).unwrap();
-        assert!(d.concluir(Id::novo()).is_err()); // precisa aprovar antes
+        assert!(d.concluir(Some(Id::novo())).is_err()); // precisa aprovar antes
         d.aprovar().unwrap();
-        d.concluir(Id::novo()).unwrap();
+        d.concluir(Some(Id::novo())).unwrap();
         assert_eq!(d.estado, EstadoDevolucao::Concluida);
         assert!(d.estorno_lancamento.is_some());
     }

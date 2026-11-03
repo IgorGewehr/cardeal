@@ -55,6 +55,59 @@ fn natureza_de(s: &str) -> Natureza {
 }
 
 #[cfg(feature = "sqlite")]
+/// As contas analíticas e ativas de receita e despesa (com o papel herdado), valor zero — para
+/// quem precisa de todas, mesmo sem movimento (o orçamento). Ordenado por código.
+///
+/// # Errors
+/// [`ErroRazao::FalhaDePersistencia`] em erro do SQLite.
+pub fn contas_de_resultado(
+    conexao: &Connection,
+    empresa: Id,
+) -> Result<Vec<LinhaResultado>, ErroRazao> {
+    let empresa_b = empresa.em_bytes().to_vec();
+    let mut stmt = conexao
+        .prepare(
+            "SELECT id, codigo, nome, natureza, papel_padrao, tipo, ativa FROM razao_conta
+             WHERE empresa = ?1 AND natureza IN ('Receita','Despesa')",
+        )
+        .map_err(persist)?;
+    let contas: Vec<(ContaDeResultado, String, bool)> = stmt
+        .query_map([&empresa_b], |r| {
+            Ok((
+                (r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?),
+                r.get(5)?,
+                r.get::<_, i64>(6)? != 0,
+            ))
+        })
+        .map_err(persist)?
+        .collect::<rusqlite::Result<_>>()
+        .map_err(persist)?;
+    let papel_do_codigo = |codigo: &str| -> Option<String> {
+        let mut atual = codigo;
+        loop {
+            if let Some(((_, _, _, _, Some(p)), _, _)) = contas.iter().find(|c| c.0 .1 == atual) {
+                return Some(p.clone());
+            }
+            atual = &atual[..atual.rfind('.')?];
+        }
+    };
+    let mut saida: Vec<LinhaResultado> = contas
+        .iter()
+        .filter(|(_, tipo, ativa)| tipo == "Analitica" && *ativa)
+        .map(|((id, codigo, nome, nat, _), _, _)| LinhaResultado {
+            conta: <[u8; 16]>::try_from(id.as_slice()).map_or(Id::NULO, Id::de_bytes),
+            codigo: codigo.clone(),
+            nome: nome.clone(),
+            natureza: natureza_de(nat),
+            papel: papel_do_codigo(codigo),
+            valor: Dinheiro::ZERO,
+        })
+        .collect();
+    saida.sort_by(|a, b| a.codigo.cmp(&b.codigo));
+    Ok(saida)
+}
+
+#[cfg(feature = "sqlite")]
 /// Soma o resultado de cada conta de receita/despesa com movimento na competência do
 /// período. Contas sem movimento não aparecem. Ordenado por código.
 ///

@@ -185,6 +185,7 @@ fn registrar_entrada_interna(
     dados: DadosEntrada,
     dados_lote: Option<DadosNovoLote>,
     devolucao: bool,
+    tipo: TipoMovimento,
     ctx: &Ctx,
     uow: &mut UnidadeDeTrabalho,
 ) -> Resultado<EntradaGravada> {
@@ -243,7 +244,7 @@ fn registrar_entrada_interna(
         produto: dados.produto,
         variacao: None,
         local: dados.local,
-        tipo: TipoMovimento::Entrada,
+        tipo,
         quantidade: dados.quantidade,
         custo_unitario: Some(dados.custo_unitario),
         lote: lote.as_ref().map(|l| l.id),
@@ -273,7 +274,7 @@ pub fn registrar_entrada_comum(
     ctx: &Ctx,
     uow: &mut UnidadeDeTrabalho,
 ) -> Resultado<EntradaGravada> {
-    registrar_entrada_interna(dados, None, false, ctx, uow)
+    registrar_entrada_interna(dados, None, false, TipoMovimento::Entrada, ctx, uow)
 }
 
 /// Devolve ao estoque tudo o que saiu por uma origem — o estorno de uma venda. Para cada
@@ -320,11 +321,257 @@ pub fn devolver_saidas_da_origem(
                 },
                 None,
                 true,
+                TipoMovimento::Entrada,
                 ctx,
                 uow,
             )
         })
         .collect()
+}
+
+/// Desfaz o que uma origem pôs no estoque — o estorno da entrada de uma nota de compra. Para
+/// cada [`crate::EntradaViva`] da origem, uma saída no mesmo local, na mesma quantidade e **ao
+/// custo da entrada** (não ao médio): é exatamente o valor que o chamador estorna no Razão, e
+/// o custo médio volta ao que seria sem a entrada. Recusa se a mercadoria já não está toda no
+/// local (vendida, movida): desfazer então deixaria o estoque negativo e o custo errado.
+///
+/// # Errors
+/// [`crate::ErroEstoque::EntradaJaConsumida`]; local travado por inventário em contagem.
+#[cfg(feature = "sqlite")]
+pub fn retirar_entradas_da_origem(
+    origem_modulo: &'static str,
+    origem_id: Id,
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<Vec<SaidaGravada>> {
+    let vivas = crate::consultas::entradas_vivas_da_origem(
+        uow.conexao(),
+        ctx.empresa,
+        origem_modulo,
+        origem_id,
+    )?;
+    if let Some(v) = vivas.iter().find(|v| !v.inteira_no_local()) {
+        return Err(Erro::de_dominio(
+            &crate::erros::ErroEstoque::EntradaJaConsumida {
+                produto: v.nome.clone(),
+                entrou: v.quantidade.formatar(0),
+                resta: v.disponivel.max(Quantidade::ZERO).formatar(0),
+            },
+        ));
+    }
+    let mut saidas = Vec::with_capacity(vivas.len());
+    for v in vivas {
+        crate::repositorio_inventario::exigir_local_livre(uow.conexao(), v.local)?;
+        let mut repo = RepositorioEstoque::novo(uow);
+        let mut saldo = repo
+            .buscar_saldo(v.produto, v.local)?
+            .ok_or_else(|| Erro::nao_encontrado("saldo do produto no local"))?;
+        let aplicada = saldo
+            .estorno_de_entrada(v.quantidade, v.custo_unitario, ctx.agora)
+            .map_err(|e| Erro::de_dominio(&e))?;
+        repo.atualizar_saldo(&saldo)?;
+        let movimento = Movimento {
+            id: Id::novo(),
+            empresa: ctx.empresa,
+            produto: v.produto,
+            variacao: None,
+            local: v.local,
+            tipo: TipoMovimento::Saida,
+            quantidade: v.quantidade,
+            custo_unitario: Some(v.custo_unitario),
+            lote: None,
+            origem_modulo: origem_modulo.to_string(),
+            origem_id: Some(origem_id),
+            lancamento: None,
+            criado_em: ctx.agora,
+            criado_por: ctx.usuario,
+        };
+        repo.inserir_movimento(&movimento)?;
+        saidas.push(SaidaGravada {
+            movimento: movimento.id,
+            aplicada,
+        });
+    }
+    Ok(saidas)
+}
+
+/// Põe de volta no estoque **parte** do que saiu por uma origem — a devolução de parte de uma
+/// venda. Uma entrada no local da saída, na quantidade pedida e **ao custo médio dessas saídas**
+/// (o CMV que o chamador estorna no Razão), com a mesma origem: o que voltou deixa de contar
+/// para a próxima devolução. Devolve a entrada e o custo total reposto.
+///
+/// # Errors
+/// [`crate::ErroEstoque::DevolucaoMaiorQueOResto`] se a origem não tirou tanto (descontado o que
+/// já voltou); local travado por inventário em contagem.
+#[cfg(feature = "sqlite")]
+pub fn devolver_parte_da_saida(
+    origem_modulo: &'static str,
+    origem_id: Id,
+    produto: Id,
+    quantidade: Quantidade,
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<(EntradaGravada, cardeal_kernel::Dinheiro)> {
+    // (local) → (quantidade líquida que saiu, valor dessas saídas), só deste produto.
+    let mut por_local: Vec<(Id, i128, i128)> = Vec::new();
+    for m in crate::consultas::movimentos_da_origem(
+        uow.conexao(),
+        ctx.empresa,
+        origem_modulo,
+        origem_id,
+    )? {
+        if m.produto != produto {
+            continue;
+        }
+        let sinal = match m.tipo {
+            TipoMovimento::Saida => 1,
+            TipoMovimento::Entrada => -1,
+            _ => continue,
+        };
+        let q = i128::from(m.quantidade.unidades_internas());
+        let c = i128::from(m.custo_unitario.map_or(0, Preco::unidades_internas));
+        if let Some(l) = por_local.iter_mut().find(|l| l.0 == m.local) {
+            l.1 += sinal * q;
+            l.2 += sinal * q * c;
+        } else {
+            por_local.push((m.local, sinal * q, sinal * q * c));
+        }
+    }
+    let pedido = i128::from(quantidade.unidades_internas());
+    let Some(&(local, q, v)) = por_local
+        .iter()
+        .filter(|l| l.1 >= pedido)
+        .max_by_key(|l| l.1)
+    else {
+        let resta = por_local.iter().map(|l| l.1).max().unwrap_or(0).max(0);
+        return Err(Erro::de_dominio(
+            &crate::erros::ErroEstoque::DevolucaoMaiorQueOResto {
+                produto: uow
+                    .conexao()
+                    .query_row(
+                        "SELECT nome FROM estoque_produto WHERE id = ?1",
+                        [produto.em_bytes().as_slice()],
+                        |r| r.get::<_, String>(0),
+                    )
+                    .unwrap_or_default(),
+                pedido: quantidade.formatar(0),
+                resta: Quantidade::interna(i64::try_from(resta).unwrap_or(i64::MAX)).formatar(0),
+            },
+        ));
+    };
+    let custo = Preco::interna(
+        i64::try_from(if v <= 0 { 0 } else { (2 * v + q) / (2 * q) }).unwrap_or(i64::MAX),
+    );
+    let entrada = registrar_entrada_interna(
+        DadosEntrada {
+            produto,
+            local,
+            quantidade,
+            custo_unitario: custo,
+            origem_modulo,
+            origem_id: Some(origem_id),
+        },
+        None,
+        true,
+        TipoMovimento::Entrada,
+        ctx,
+        uow,
+    )?;
+    let reposto = cardeal_kernel::Dinheiro::de_total(
+        quantidade,
+        custo,
+        cardeal_kernel::Arredondamento::MeioAcima,
+    );
+    Ok((entrada, reposto))
+}
+
+/// Devolve **parte** do que uma origem pôs no estoque — a devolução ao fornecedor de parte de
+/// uma nota de compra. Uma saída do produto no local da entrada, com a mesma origem (assim o que
+/// volta deixa de ser entrada viva: a nota não se estorna depois como se tudo estivesse lá), ao
+/// custo `valor / quantidade` — o valor que o chamador credita no Razão, para estoque e
+/// contabilidade andarem juntos.
+///
+/// # Errors
+/// [`crate::ErroEstoque::DevolucaoMaiorQueOResto`] se o local não tem a quantidade (ou a origem
+/// não pôs o produto no estoque); local travado por inventário em contagem.
+#[cfg(feature = "sqlite")]
+pub fn devolver_parte_da_entrada(
+    origem_modulo: &'static str,
+    origem_id: Id,
+    produto: Id,
+    quantidade: Quantidade,
+    valor: cardeal_kernel::Dinheiro,
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<SaidaGravada> {
+    let viva = crate::consultas::entradas_vivas_da_origem(
+        uow.conexao(),
+        ctx.empresa,
+        origem_modulo,
+        origem_id,
+    )?
+    .into_iter()
+    .filter(|v| v.produto == produto)
+    .max_by_key(|v| v.quantidade.min(v.disponivel));
+    let resta = viva
+        .as_ref()
+        .map_or(Quantidade::ZERO, |v| v.quantidade.min(v.disponivel));
+    let Some(viva) = viva.filter(|_| resta >= quantidade) else {
+        return Err(Erro::de_dominio(
+            &crate::erros::ErroEstoque::DevolucaoMaiorQueOResto {
+                produto: uow
+                    .conexao()
+                    .query_row(
+                        "SELECT nome FROM estoque_produto WHERE id = ?1",
+                        [produto.em_bytes().as_slice()],
+                        |r| r.get::<_, String>(0),
+                    )
+                    .unwrap_or_default(),
+                pedido: quantidade.formatar(0),
+                resta: resta.max(Quantidade::ZERO).formatar(0),
+            },
+        ));
+    };
+    crate::repositorio_inventario::exigir_local_livre(uow.conexao(), viva.local)?;
+    let custo = preco_por_unidade_do_valor(valor, quantidade);
+    let mut repo = RepositorioEstoque::novo(uow);
+    let mut saldo = repo
+        .buscar_saldo(produto, viva.local)?
+        .ok_or_else(|| Erro::nao_encontrado("saldo do produto no local"))?;
+    let aplicada = saldo
+        .estorno_de_entrada(quantidade, custo, ctx.agora)
+        .map_err(|e| Erro::de_dominio(&e))?;
+    repo.atualizar_saldo(&saldo)?;
+    let movimento = Movimento {
+        id: Id::novo(),
+        empresa: ctx.empresa,
+        produto,
+        variacao: None,
+        local: viva.local,
+        tipo: TipoMovimento::Saida,
+        quantidade,
+        custo_unitario: Some(custo),
+        lote: None,
+        origem_modulo: origem_modulo.to_string(),
+        origem_id: Some(origem_id),
+        lancamento: None,
+        criado_em: ctx.agora,
+        criado_por: ctx.usuario,
+    };
+    repo.inserir_movimento(&movimento)?;
+    Ok(SaidaGravada {
+        movimento: movimento.id,
+        aplicada,
+    })
+}
+
+/// O preço unitário de um valor total (`valor / quantidade`, na precisão do [`Preco`]).
+#[cfg(feature = "sqlite")]
+fn preco_por_unidade_do_valor(valor: cardeal_kernel::Dinheiro, quantidade: Quantidade) -> Preco {
+    // Como o custo da nota em `compras` (`preco_por_unidade`): centavos × 1e8 / q interna.
+    let q = i128::from(quantidade.unidades_internas()).max(1);
+    let v = i128::from(valor.em_centavos()) * 100_000_000;
+    Preco::interna(i64::try_from((2 * v + q) / (2 * q)).unwrap_or(i64::MAX))
 }
 
 /// Como [`registrar_entrada_comum`], mas cria também um [`Lote`] rastreável (o código do
@@ -343,7 +590,7 @@ pub fn registrar_entrada_com_lote_comum(
     ctx: &Ctx,
     uow: &mut UnidadeDeTrabalho,
 ) -> Resultado<EntradaGravada> {
-    registrar_entrada_interna(dados, Some(lote), false, ctx, uow)
+    registrar_entrada_interna(dados, Some(lote), false, TipoMovimento::Entrada, ctx, uow)
 }
 
 /// Os dados que `RegistrarSaida` e chamadas diretas de outros módulos passam ao corpo
@@ -384,6 +631,7 @@ pub struct SaidaGravada {
 fn registrar_saida_interna(
     dados: DadosSaida,
     lote: Option<Id>,
+    tipo: TipoMovimento,
     ctx: &Ctx,
     uow: &mut UnidadeDeTrabalho,
 ) -> Resultado<SaidaGravada> {
@@ -441,7 +689,7 @@ fn registrar_saida_interna(
         produto: dados.produto,
         variacao: None,
         local: dados.local,
-        tipo: TipoMovimento::Saida,
+        tipo,
         quantidade: dados.quantidade,
         custo_unitario: Some(aplicada.custo_unitario),
         lote,
@@ -497,7 +745,118 @@ pub fn registrar_saida_comum(
     ctx: &Ctx,
     uow: &mut UnidadeDeTrabalho,
 ) -> Resultado<SaidaGravada> {
-    registrar_saida_interna(dados, None, ctx, uow)
+    registrar_saida_interna(dados, None, TipoMovimento::Saida, ctx, uow)
+}
+
+/// A saída de uma **transferência para outra filial** do grupo (`mod-compras`): como
+/// [`registrar_saida_comum`], mas o movimento é `TransferenciaSaida` — não é consumo (o ABC, o
+/// giro e a rentabilidade não o contam) — e só de um local da empresa, sem lote ativo nele (o
+/// lote guarda o local). Quem chama confere o saldo antes (a transferência não deixa negativo).
+///
+/// # Errors
+/// [`crate::ErroEstoque::QuantidadeInvalida`]; `NAO_ENCONTRADO` para o local de outra empresa
+/// ou o produto de fora do grupo; [`crate::ErroEstoque::TransferenciaComLote`].
+#[cfg(feature = "sqlite")]
+pub fn registrar_saida_por_transferencia_comum(
+    dados: DadosSaida,
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<SaidaGravada> {
+    if !dados.quantidade.e_positiva() {
+        return Err(Erro::de_dominio(
+            &crate::erros::ErroEstoque::QuantidadeInvalida,
+        ));
+    }
+    if !crate::repositorio_inventario::local_da_empresa(uow.conexao(), ctx.empresa, dados.local)? {
+        return Err(Erro::nao_encontrado("local"));
+    }
+    let produto = RepositorioEstoque::novo(uow)
+        .buscar_produto(dados.produto)?
+        .filter(|p| p.empresa == ctx.organizacao)
+        .ok_or_else(|| Erro::nao_encontrado("produto"))?;
+    if crate::repositorio_transferencia::tem_lote_ativo(uow.conexao(), produto.id, dados.local)? {
+        return Err(Erro::de_dominio(
+            &crate::erros::ErroEstoque::TransferenciaComLote {
+                produto: produto.nome,
+            },
+        ));
+    }
+    registrar_saida_interna(dados, None, TipoMovimento::TransferenciaSaida, ctx, uow)
+}
+
+/// A entrada da **transferência que outra filial mandou**: `TransferenciaEntrada` ao custo da
+/// filial que enviou — não é compra (o histórico de compras e a "última compra" não a leem).
+///
+/// # Errors
+/// `NAO_ENCONTRADO` para o local de outra empresa; os de [`registrar_entrada_comum`].
+#[cfg(feature = "sqlite")]
+pub fn registrar_entrada_por_transferencia_comum(
+    dados: DadosEntrada,
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<EntradaGravada> {
+    if !crate::repositorio_inventario::local_da_empresa(uow.conexao(), ctx.empresa, dados.local)? {
+        return Err(Erro::nao_encontrado("local"));
+    }
+    registrar_entrada_interna(
+        dados,
+        None,
+        false,
+        TipoMovimento::TransferenciaEntrada,
+        ctx,
+        uow,
+    )
+}
+
+/// Desfaz a saída de uma transferência entre filiais cancelada: devolve ao local, ao mesmo
+/// custo, o que saiu por `(origem_modulo, origem_id)` como `TransferenciaSaida`. Uma origem que
+/// já voltou é recusada, para nunca devolver em dobro.
+///
+/// # Errors
+/// `ESTADO_INVALIDO` se a origem já voltou; os de [`registrar_entrada_comum`].
+#[cfg(feature = "sqlite")]
+pub fn devolver_transferencia_da_origem(
+    origem_modulo: &'static str,
+    origem_id: Id,
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<Vec<EntradaGravada>> {
+    let movimentos = crate::consultas::movimentos_da_origem(
+        uow.conexao(),
+        ctx.empresa,
+        origem_modulo,
+        origem_id,
+    )?;
+    if movimentos
+        .iter()
+        .any(|m| m.tipo == TipoMovimento::TransferenciaEntrada)
+    {
+        return Err(Erro::novo(
+            cardeal_kernel::CodigoErro::ESTADO_INVALIDO,
+            "O que saiu por esta transferência já voltou ao estoque",
+        ));
+    }
+    movimentos
+        .into_iter()
+        .filter(|m| m.tipo == TipoMovimento::TransferenciaSaida)
+        .map(|m| {
+            registrar_entrada_interna(
+                DadosEntrada {
+                    produto: m.produto,
+                    local: m.local,
+                    quantidade: m.quantidade,
+                    custo_unitario: m.custo_unitario.unwrap_or(Preco::ZERO),
+                    origem_modulo,
+                    origem_id: Some(origem_id),
+                },
+                None,
+                true,
+                TipoMovimento::TransferenciaEntrada,
+                ctx,
+                uow,
+            )
+        })
+        .collect()
 }
 
 /// Como [`registrar_saida_comum`], mas consome de um lote/peça rastreável específico — o
@@ -517,5 +876,5 @@ pub fn registrar_saida_de_lote_comum(
     ctx: &Ctx,
     uow: &mut UnidadeDeTrabalho,
 ) -> Resultado<SaidaGravada> {
-    registrar_saida_interna(dados, Some(lote), ctx, uow)
+    registrar_saida_interna(dados, Some(lote), TipoMovimento::Saida, ctx, uow)
 }

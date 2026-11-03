@@ -35,6 +35,8 @@ impl Modulo for ModuloFinanceiro {
         migracoes::conjunto()
     }
 
+    // A lista de registro cresce com o módulo: uma linha por comando, consulta ou tarefa.
+    #[allow(clippy::too_many_lines)]
     fn registrar(&self, registro: &mut Registro) -> Resultado<()> {
         registro
             .comando::<LancarTituloAReceber>("financeiro.lancar_titulo_a_receber.v1")
@@ -118,6 +120,20 @@ impl Modulo for ModuloFinanceiro {
             .consulta::<crate::DiarioDoPeriodo>("financeiro.diario_do_periodo.v1")
             .consulta::<crate::DreDoPeriodo>("financeiro.dre_do_periodo.v1")
             .consulta::<crate::DreComparativa>("financeiro.dre_comparativa.v1")
+            .consulta::<crate::orcamento::OrcamentoDoAno>("financeiro.orcamento_do_ano.v1")
+            .consulta::<crate::contador::DeParaDoContador>("financeiro.de_para_do_contador.v1")
+            .comando::<crate::contador::DefinirDePara>("financeiro.definir_de_para.v1")
+            .consulta::<crate::contador::Apontamentos>("financeiro.apontamentos.v1")
+            .comando::<crate::contador::RegistrarApontamento>("financeiro.registrar_apontamento.v1")
+            .comando::<crate::contador::ResponderApontamento>("financeiro.responder_apontamento.v1")
+            .comando::<crate::contador::ResolverApontamento>("financeiro.resolver_apontamento.v1")
+            .consulta::<crate::pagamento::PerfisDePagamento>("financeiro.perfis_de_pagamento.v1")
+            .comando::<crate::orcamento::DefinirOrcamentoDaConta>(
+                "financeiro.definir_orcamento_da_conta.v1",
+            )
+            .comando::<crate::orcamento::CopiarOrcamentoDoAno>(
+                "financeiro.copiar_orcamento_do_ano.v1",
+            )
             .consulta::<crate::projecao::ProjecaoPorCategoria>(
                 "financeiro.projecao_por_categoria.v1",
             )

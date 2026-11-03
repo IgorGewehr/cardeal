@@ -54,7 +54,10 @@ pub struct ComissoesApuradas {
 
 /// As contas da comissão, resolvidas na empresa.
 #[cfg(feature = "sqlite")]
-fn contas_de_comissao(ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<ContasComissao> {
+pub(crate) fn contas_de_comissao(
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<ContasComissao> {
     let repo = RepositorioRazao::novo(uow);
     let contas = Contas::nova(&repo, ctx.empresa);
     let despesas_comerciais = match contas.por_codigo("5.42") {
@@ -184,9 +187,25 @@ impl Comando for PagarComissoes {
         }
         exigir_conta_disponivel(uow, ctx.empresa, self.conta)?;
 
-        let valor = apuradas
+        let bruto = apuradas
             .iter()
             .fold(Dinheiro::ZERO, |total, c| total + c.valor);
+        // Os estornos por devolução ainda não descontados (deste mês ou de antes) saem daqui.
+        let ajustes = repositorio_comissao::ajustes(
+            uow.conexao(),
+            ctx.empresa,
+            self.competencia,
+            Some(self.vendedor),
+            true,
+        )?;
+        let estornado: Dinheiro = ajustes.iter().map(|a| a.5).sum();
+        let valor = bruto - estornado;
+        if !valor.e_positivo() {
+            return Err(Erro::de_dominio(&ErroVendas::EstornoMaiorQueAComissao {
+                comissao: bruto.formatar_com_simbolo(),
+                estorno: estornado.formatar_com_simbolo(),
+            }));
+        }
         let contas = contas_de_comissao(ctx, uow)?;
         let lancamento = pagar_comissoes(
             ctx.empresa,
@@ -209,6 +228,8 @@ impl Comando for PagarComissoes {
                 .map_err(|e| Erro::de_dominio(&e))?;
             repositorio_comissao::atualizar_estado(uow.conexao(), comissao)?;
         }
+        let descontados: Vec<Id> = ajustes.iter().map(|a| a.0).collect();
+        repositorio_comissao::descontar_ajustes(uow.conexao(), &descontados, lancamento)?;
         Ok(ComissoesPagas {
             lancamento,
             pedidos: u32::try_from(apuradas.len()).unwrap_or(u32::MAX),

@@ -53,6 +53,7 @@
 mod comandos;
 mod consultas;
 mod cupom;
+mod curva_clientes;
 mod erros;
 pub mod eventos;
 mod impressao;
@@ -72,12 +73,17 @@ pub use comandos::{
     IdentificarCliente, ItemFoiAdicionado, PagamentoInformado, VendaFoiEstornada,
     VendaFoiFinalizada, MOTIVO_MINIMO_DO_ESTORNO,
 };
+pub use comandos::{DefinirVendedorDoCupom, VendedoresDoPdv};
 pub use consultas::{
     EstornoDaVenda, PrecoConsultado, PrecoDoProduto, VendaDoPeriodo, VendasDoPeriodo,
 };
 pub use cupom::{
     validar_pagamentos, CondicaoPrazo, Cupom, DescontoNoTotal, EstadoCupom, FormaPagamentoPdv,
     ItemCupom, PagamentoCupom,
+};
+pub use curva_clientes::{
+    montar_curva, ClasseDoCliente, ClienteNaCurva, CompraDoCliente, CurvaDeClientes,
+    SituacaoDoCliente,
 };
 pub use erros::ErroPdv;
 pub use impressao::{

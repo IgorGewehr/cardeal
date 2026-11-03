@@ -45,6 +45,8 @@ pub struct ComparativoDre {
     pub mes_anterior: Dre,
     /// O mesmo mês, um ano antes.
     pub mesmo_mes_ano_anterior: Dre,
+    /// A DRE do orçamento do mês (`None` sem orçamento): a coluna "Orçado".
+    pub orcado: Option<Dre>,
 }
 
 /// A DRE do mês, comparada com o mês anterior e com o mesmo mês do ano anterior.
@@ -66,10 +68,52 @@ impl Consulta for DreComparativa {
     #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         let ano_antes = Competencia::nova(self.mes.ano() - 1, self.mes.mes());
+        let periodo = periodo_do_mes(self.mes);
+        // O orçamento do mês: a DRE do orçado, e as contas orçadas aparecem no realizado mesmo
+        // sem movimento.
+        let orcado = crate::orcamento::sqlite::orcado_do_mes(conexao, ctx.empresa, self.mes)?;
+        let (atual, dre_orcada) = if orcado.is_empty() {
+            (apurar(conexao, ctx, periodo)?, None)
+        } else {
+            let contas =
+                cardeal_ledger::contas_de_resultado(conexao, ctx.empresa).map_err(|e| {
+                    Erro::novo(CodigoErro::FALHA_INTERNA, format!("financeiro/DRE: {e}"))
+                })?;
+            let linhas_orcadas: Vec<cardeal_ledger::LinhaResultado> = orcado
+                .iter()
+                .filter_map(|(conta, valor)| {
+                    contas
+                        .iter()
+                        .find(|c| c.conta == *conta)
+                        .map(|c| crate::dre::linha_orcada(c, *valor))
+                })
+                .collect();
+            let sempre: Vec<cardeal_kernel::Id> = orcado.iter().map(|(c, _)| *c).collect();
+            let mut realizado = cardeal_ledger::resultado_por_conta(conexao, ctx.empresa, periodo)
+                .map_err(|e| {
+                    Erro::novo(CodigoErro::FALHA_INTERNA, format!("financeiro/DRE: {e}"))
+                })?;
+            for l in &linhas_orcadas {
+                if !realizado.iter().any(|r| r.conta == l.conta) {
+                    let mut zerada = l.clone();
+                    zerada.valor = cardeal_kernel::Dinheiro::ZERO;
+                    realizado.push(zerada);
+                }
+            }
+            (
+                crate::dre::montar_mantendo(periodo, &realizado, &sempre),
+                Some(crate::dre::montar_mantendo(
+                    periodo,
+                    &linhas_orcadas,
+                    &sempre,
+                )),
+            )
+        };
         Ok(ComparativoDre {
-            atual: apurar(conexao, ctx, periodo_do_mes(self.mes))?,
+            atual,
             mes_anterior: apurar(conexao, ctx, periodo_do_mes(self.mes.anterior()))?,
             mesmo_mes_ano_anterior: apurar(conexao, ctx, periodo_do_mes(ano_antes))?,
+            orcado: dre_orcada,
         })
     }
 }

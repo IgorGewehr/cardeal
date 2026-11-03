@@ -106,6 +106,29 @@ impl MotorLocal {
         sem_acesso_se_vazia(SessaoLocal { sessao })
     }
 
+    /// Como [`Self::entrar`], numa empresa específica da organização.
+    ///
+    /// # Errors
+    /// Empresa de outra organização; os do login; usuário sem papel na empresa.
+    pub fn entrar_em(
+        &self,
+        empresa: Id,
+        login: &str,
+        senha: &str,
+        codigo: Option<&str>,
+    ) -> Resultado<SessaoLocal> {
+        self.exigir_empresa(empresa)?;
+        let sessao = crate::acesso::entrar_usuario(
+            &self.arm,
+            &self.recursos,
+            empresa,
+            login,
+            senha,
+            codigo,
+        )?;
+        sem_acesso_se_vazia(SessaoLocal { sessao })
+    }
+
     /// Como [`Self::sessao_do_usuario`], numa empresa específica da organização.
     ///
     /// # Errors
@@ -147,6 +170,8 @@ impl MotorLocal {
                 "informe a razão social e o CNPJ",
             ));
         }
+        // O CNPJ de verdade (dígitos verificadores) — o que vai às notas fiscais dele.
+        cardeal_kernel::Cnpj::novo(&cnpj)?;
         let so_digitos = |s: &str| s.chars().filter(char::is_ascii_digit).collect::<String>();
         if self
             .empresas()?

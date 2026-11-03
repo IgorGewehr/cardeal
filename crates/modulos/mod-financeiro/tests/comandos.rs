@@ -2534,6 +2534,7 @@ fn titulo_de_compra(arm: &Armazenamento, empresa: Id) -> (Id, Id) {
                     parcelas: 1,
                     primeiro_vencimento: hoje().mais_dias(30),
                     intervalo_dias: 30,
+                    cronograma: None,
                     observacao: None,
                     categoria: None,
                     origem_modulo: "compras",

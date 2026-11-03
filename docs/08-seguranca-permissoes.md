@@ -39,6 +39,49 @@ Um comando só é aceito se **os três** forem válidos. Um token roubado é in�
   mais comuns embutida.
 - Bloqueio progressivo: 5 tentativas → 1 min, 10 → 15 min, com desbloqueio pelo admin.
 
+### 2.1.1 Verificação em duas etapas (TOTP) — feita em 2026-10-31
+
+Opcional por pessoa, nos dois logins: o do banco local (desktop) e o da conta do servidor
+(desktop "No servidor" e navegador). `cardeal_auth::totp`:
+
+- **TOTP do RFC 6238** (HMAC-SHA1, 6 dígitos, janela de 30 s) — o que Google Authenticator,
+  Microsoft Authenticator, Authy e afins leem; conferido contra os vetores do apêndice B do RFC.
+  Aceita o passo anterior e o seguinte (relógio do celular meio minuto fora) e **nunca o mesmo
+  passo duas vezes** (o último aceito fica guardado).
+- **Ativar:** o segredo novo (160 bits) vai ao aplicativo pelo QR Code (`otpauth://`, o átomo
+  `CodigoQr`) ou pela chave em Base32; o primeiro código confirma; saem **8 códigos de
+  recuperação** (10 caracteres sem 0/o/1/l/i), mostrados **uma vez** — cada um entra uma vez no
+  lugar do código. **Desativar:** a senha e um código. O administrador desliga a de quem perdeu o
+  celular (local, `empresa.usuarios.gerenciar`); no servidor, cada conta cuida da sua.
+- **Guardado selado:** o estado inteiro (segredo, resumos BLAKE3 dos códigos de recuperação com a
+  pessoa no contexto, último passo) vai cifrado pelo **cofre** (AES-256-GCM, chave fora da base),
+  amarrado à pessoa — `nucleo_usuario.mfa_segredo` no local, `conta.segundo_fator` no diretório do
+  servidor (v3). Quem copia o `.db` não leva o segredo nem os resumos.
+- **Login em dois passos:** a senha certa de quem tem o segundo fator responde
+  `SEGUNDO_FATOR_NECESSARIO` (3007, HTTP 401) e a tela pede o código; no servidor o segundo envio
+  vai a `POST /v1/sessao/codigo` (o cliente antigo continua entrando nas contas sem o segundo
+  fator). **A senha certa não zera as tentativas antes de o código conferir, e o código errado
+  conta como tentativa** — o bloqueio progressivo vale para os dois, senão daria para chutar
+  códigos à vontade.
+- A **liberação por supervisor** no PDV (`Motor::autenticar`) continua só com a senha: é uma
+  autorização dentro de uma sessão já aberta, não a porta de entrada (`Motor::entrar`).
+
+### 2.1.2 Usuários do banco local — feito em 2026-10-31
+
+Configurações › Acesso (`mod_empresa::usuarios`): cadastrar (nome, login, papel de fábrica e a
+senha inicial), trocar o papel, dar uma senha provisória, desativar e reativar; e "Minha senha".
+
+- **A senha nunca vai no comando:** o motor confere a política e manda só o hash Argon2id
+  (`empresa.cadastrar_usuario.v1`, `…redefinir_senha_do_usuario.v1`, auditados) — a auditoria
+  e a idempotência guardam o comando, e senha em texto não mora em lugar nenhum.
+- **A senha que outra pessoa definiu se troca no primeiro acesso:** o login pede a nova antes de
+  abrir as telas (`exige_troca_senha`, que existia na base mas não era cobrado).
+- **Sem escalada:** o Gerente gerencia usuários, mas dar ou tirar o papel de Administrador e
+  redefinir a senha de um administrador é coisa de administrador; ninguém troca o próprio papel
+  nem desativa a si mesmo; a empresa nunca fica sem administrador ativo.
+- No servidor, "cadastrar" põe a conta do e-mail na empresa (`/membros`) e "desativar" tira o
+  vínculo; a senha de cada conta é dela.
+
 ### 2.2 PIN de operador (o caso do PDV)
 
 Trocar de operador no caixa 40 vezes por dia com senha de 12 caracteres não acontece na prática —
@@ -98,7 +141,8 @@ português — o admin nunca vê `fin.rec.bx`.
 | Contador | Escritório contábil | Somente leitura + exportações |
 | Auditor | Auditoria | Somente leitura, inclusive auditoria e razão |
 
-Papéis de fábrica são imutáveis (`sistema = 1`); o admin cria cópias para ajustar.
+Papéis de fábrica são imutáveis (`sistema = 1`); o admin cria cópias para ajustar. **Exceção: os
+limites** (§3.4) — o que o papel pode fazer é da fábrica; o tamanho do poder é da empresa.
 
 ### 3.3 Escopo (a parte ABAC)
 
@@ -139,6 +183,13 @@ sem ele o teto é zero e nem o dono conseguia dar desconto. E, por serem imutáv
 a cada mudança de política o motor os completa ao abrir a base (`sincronizar_papeis_de_fabrica`):
 acrescenta o que a política passou a conceder e o limite que ainda não têm — só acrescenta, como já
 fazia com o Administrador.
+
+O teto de desconto de cada papel que vende é ajustável pelo dono em Configurações › Usuários e
+acesso (`empresa.definir_teto_desconto.v1`, permissão `empresa.usuarios.gerenciar`, auditado;
+`empresa.tetos_desconto.v1` lista): de 0% (não dá desconto) a 100%, ou sem teto. O papel de
+fábrica ainda não usado nasce ali, já com o ajuste. Como a sincronização só preenche limite
+ausente, a próxima atualização não desfaz o ajuste. Vale a partir do próximo login de quem tem o
+papel — a sessão carrega os limites no login.
 
 Exceder o limite não é erro: dispara **autorização de supervisor** na hora, que é registrada
 vinculando as duas identidades (quem pediu, quem autorizou).

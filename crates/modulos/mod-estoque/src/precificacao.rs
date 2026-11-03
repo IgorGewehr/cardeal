@@ -450,6 +450,13 @@ fn indice_da_faixa(a: AnexoSimples, rbt12: Dinheiro) -> usize {
         .unwrap_or(5)
 }
 
+/// A faixa do Simples (índice 0 a 5) para o faturamento dos 12 meses, e o teto dela.
+#[must_use]
+pub fn faixa_do_simples(anexo: AnexoSimples, rbt12: Dinheiro) -> (usize, Dinheiro) {
+    let i = indice_da_faixa(anexo, rbt12);
+    (i, Dinheiro::reais(tabela(anexo)[i].0))
+}
+
 /// A alíquota efetiva do Simples para o faturamento dos últimos 12 meses.
 ///
 /// Sem histórico (`rbt12` zero, empresa nova) vale a alíquota nominal da primeira faixa.

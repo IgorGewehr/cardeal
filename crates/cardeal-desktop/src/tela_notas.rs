@@ -3,7 +3,7 @@
 //! nota rejeitada depois de corrigir e se manda transmitir na hora.
 
 use cardeal_cliente::{Motor, Sessao};
-use cardeal_kernel::{Fuso, Id};
+use cardeal_kernel::{Fuso, Id, Instante};
 use cardeal_modkit::Icone;
 use cardeal_ui::atoms::{Botao, Etiqueta, Rotulo, Tom, ValorDinheiro};
 use cardeal_ui::molecules::{dado, Abas, Campo, CartaoKpi, EstadoVazio};
@@ -12,6 +12,7 @@ use cardeal_ui::organisms::{
 };
 use cardeal_ui::tokens::{Espaco, TemaUi};
 use eframe::egui;
+use mod_fiscal::correcao::{CartaDeCorrecao, CartasDeCorrecao, EmitirCartaDeCorrecao, EstadoCarta};
 use mod_fiscal::{
     AmbienteFiscal, CancelarNfce, DetalheDocumento, DocumentoFiscal, DocumentoResumo,
     DocumentosFiscais, EstadoDocumento, InutilizarNumero, PedidoDocumento, ReenviarDocumento,
@@ -46,7 +47,45 @@ pub struct EstadoNotas {
     pub geracao_vista: u64,
     /// O cancelamento/inutilização sendo pedido no detalhe: o pedido e a justificativa.
     pub pedindo: Option<(PedidoDocumento, String)>,
+    /// As cartas de correção da NF-e aberta no detalhe: a nota e as cartas.
+    pub cartas: Option<(Id, Vec<CartaDeCorrecao>)>,
+    /// A carta de correção sendo escrita no detalhe.
+    pub corrigindo: Option<String>,
 }
+
+/// Pede a carta de correção da NF-e e dispara a transmissão.
+///
+/// # Errors
+/// O erro do comando (texto curto, nota não autorizada, carta já na fila, as 20 usadas).
+pub fn corrigir(
+    ctx: &egui::Context,
+    motor: &Motor,
+    sessao: &Sessao,
+    estado: &mut EstadoNotas,
+    documento: Id,
+    texto: &str,
+) -> Result<CartaDeCorrecao, String> {
+    let carta: CartaDeCorrecao = motor
+        .executar(
+            sessao,
+            "fiscal.emitir_carta_de_correcao.v1",
+            &EmitirCartaDeCorrecao {
+                documento,
+                texto: texto.to_owned(),
+            },
+        )
+        .map_err(|e| e.mensagem)?;
+    estado.corrigindo = None;
+    fiscal_fundo::disparar(ctx, motor, sessao);
+    estado.carregar(motor, sessao);
+    Ok(carta)
+}
+
+/// O que a carta de correção pode e não pode corrigir (Ajuste SINIEF 01/07).
+const SOBRE_A_CARTA: &str = "A carta de correção corrige dados cadastrais, endereço, descrição \
+    e informações complementares. Não corrige valores, quantidades, impostos, o CNPJ/CPF de quem \
+    emite ou recebe nem as datas — para isso, cancele a nota e emita outra. Cada carta substitui a \
+    anterior: escreva todas as correções.";
 
 /// Pede o cancelamento (autorizada) ou a inutilização (rejeitada) do documento e dispara a
 /// transmissão.
@@ -80,6 +119,9 @@ pub fn pedir(
                 justificativa,
             },
         ),
+        PedidoDocumento::CancelarPorSubstituicao => {
+            return Err("O cancelamento por substituição a fila pede sozinha".to_owned());
+        }
     };
     let d = r.map_err(|e| e.mensagem)?;
     estado.pedindo = None;
@@ -109,6 +151,7 @@ impl EstadoNotas {
         self.resumo = motor
             .consultar(sessao, "fiscal.resumo_da_fila.v1", &ResumoDaFilaFiscal)
             .ok();
+        self.cartas = None;
         if let Some(d) = &self.detalhe {
             let id = d.resumo.id;
             self.detalhe = motor
@@ -129,6 +172,7 @@ impl EstadoNotas {
                     d.estado,
                     EstadoDocumento::Pendente
                         | EstadoDocumento::Incerta
+                        | EstadoDocumento::Contingencia
                         | EstadoDocumento::Rejeitada
                 ),
                 Filtro::Autorizadas => d.estado == EstadoDocumento::Autorizada,
@@ -163,13 +207,45 @@ pub fn reenviar(
     Ok(d)
 }
 
-fn etiqueta(d: &DocumentoResumo) -> Etiqueta {
+/// "NFC-e" ou "NF-e".
+const fn nome_do_modelo(m: mod_fiscal::ModeloFiscal) -> &'static str {
+    match m {
+        mod_fiscal::ModeloFiscal::Nfce => "NFC-e",
+        mod_fiscal::ModeloFiscal::Nfe => "NF-e",
+    }
+}
+
+/// A etiqueta da situação do documento.
+pub(crate) fn etiqueta(d: &DocumentoResumo) -> Etiqueta {
     let rotulo = d.estado.rotulo();
     match d.estado {
         EstadoDocumento::Autorizada => Etiqueta::positiva(rotulo),
         EstadoDocumento::Pendente | EstadoDocumento::Incerta => Etiqueta::info(rotulo),
+        EstadoDocumento::Contingencia => Etiqueta::atencao(rotulo),
         EstadoDocumento::Rejeitada | EstadoDocumento::Denegada => Etiqueta::negativa(rotulo),
         EstadoDocumento::Cancelada | EstadoDocumento::Inutilizada => Etiqueta::neutra(rotulo),
+    }
+}
+
+/// O que a linha da nota diz: a chave da autorizada; o prazo da que está em contingência; o
+/// motivo das outras.
+fn texto_da_linha(d: &DocumentoResumo) -> String {
+    let fechada = matches!(
+        d.estado,
+        EstadoDocumento::Cancelada | EstadoDocumento::Inutilizada
+    );
+    if d.substituida_por.is_some() && !fechada {
+        return "Ficou sem resposta da SEFAZ e foi substituída por outra NFC-e, em contingência — \
+                esta vai ser cancelada por substituição ou inutilizada sozinha."
+            .to_owned();
+    }
+    match (d.estado, d.prazo_da_contingencia()) {
+        (EstadoDocumento::Autorizada, _) => d.chave.clone().unwrap_or_default(),
+        (EstadoDocumento::Contingencia, Some(prazo)) => format!(
+            "Cupom fiscal emitido em contingência — a SEFAZ estava fora. Transmitir até {}.",
+            prazo.formatar(cardeal_kernel::Fuso::BRASILIA)
+        ),
+        _ => d.motivo.clone().unwrap_or_default(),
     }
 }
 
@@ -197,13 +273,29 @@ fn corpo(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoN
     }
     let r = estado.resumo.clone().unwrap_or_default();
     let tom_se = |n: u32, tom: Tom| if n == 0 { Tom::Neutro } else { tom };
-    FaixaKpi::nova(vec![
+    let mut cartoes = vec![
         CartaoKpi::contagem("Na fila", r.pendentes).tom(tom_se(r.pendentes, Tom::Atencao)),
         CartaoKpi::contagem("Conferindo", r.incertas).tom(tom_se(r.incertas, Tom::Atencao)),
         CartaoKpi::contagem("Rejeitadas", r.rejeitadas).tom(tom_se(r.rejeitadas, Tom::Negativo)),
         CartaoKpi::contagem("Autorizadas hoje", r.autorizadas_hoje).tom(Tom::Positivo),
-    ])
-    .mostrar(ui);
+    ];
+    // A contingência só aparece quando há: a SEFAZ esteve fora e o prazo de 24 h corre.
+    if r.em_contingencia > 0 {
+        let prazo = r.contingencia_desde.map_or_else(String::new, |d| {
+            format!(
+                "transmitir até {}",
+                d.mais_segundos(mod_fiscal::PRAZO_DA_CONTINGENCIA_SEGUNDOS)
+                    .formatar(cardeal_kernel::Fuso::BRASILIA)
+            )
+        });
+        cartoes.insert(
+            2,
+            CartaoKpi::contagem("Em contingência", r.em_contingencia)
+                .variacao(prazo)
+                .tom(Tom::Atencao),
+        );
+    }
+    FaixaKpi::nova(cartoes).mostrar(ui);
     ui.add_space(Espaco::E12);
     ui.horizontal(|ui| {
         if let Some(f) = Abas::nova(&[
@@ -258,7 +350,12 @@ fn grade(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoN
     .mostrar(ui, linhas.len(), |i, row| {
         let d = &linhas[i];
         row.col(|ui| {
-            ui.add(Rotulo::interface(format!("{}-{}", d.serie, d.numero)));
+            ui.add(Rotulo::interface(format!(
+                "{} {}-{}",
+                nome_do_modelo(d.modelo),
+                d.serie,
+                d.numero
+            )));
         });
         row.col(|ui| {
             ui.add(Rotulo::campo(d.criado_em.data(FUSO).formatar()));
@@ -283,11 +380,7 @@ fn grade(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoN
             });
         });
         row.col(|ui| {
-            let texto = match d.estado {
-                EstadoDocumento::Autorizada => d.chave.clone().unwrap_or_default(),
-                _ => d.motivo.clone().unwrap_or_default(),
-            };
-            ui.add(Rotulo::campo(texto).quebravel());
+            ui.add(Rotulo::campo(texto_da_linha(d)).quebravel());
         });
         row.col(|ui| {
             ui.horizontal(|ui| {
@@ -326,19 +419,74 @@ fn grade(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoN
     }
 }
 
+/// O que o pedido de cancelamento diz, com o prazo (30 minutos para a NFC-e).
+fn texto_do_cancelamento(prazo: Option<mod_fiscal::PrazoDeCancelamento>) -> String {
+    let inicio = prazo.map_or_else(
+        || "Cancelar esta NFC-e na SEFAZ.".to_owned(),
+        mod_fiscal::PrazoDeCancelamento::aviso,
+    );
+    format!("{inicio} A venda em si não é desfeita aqui.")
+}
+
 fn detalhe(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoNotas) {
     let Some(d) = estado.detalhe.clone() else {
         return;
     };
     let pode_cancelar = sessao.concede("fiscal.cancelar") && d.resumo.pedido.is_none();
+    // O prazo de cancelamento corre: avisa, não bloqueia (algumas UFs aceitam fora dele).
+    let prazo = d
+        .resumo
+        .prazo_de_cancelamento(Instante::agora())
+        .filter(|_| d.resumo.pedido.is_none() && !d.resumo.anulada);
+    if prazo.is_some_and(|p| p.dentro()) {
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_secs(30));
+    }
+    let nfe = d.resumo.modelo == mod_fiscal::ModeloFiscal::Nfe;
+    if nfe && estado.cartas.as_ref().map(|c| c.0) != Some(d.resumo.id) {
+        let cartas = motor
+            .consultar(
+                sessao,
+                "fiscal.cartas_de_correcao.v1",
+                &CartasDeCorrecao {
+                    documento: d.resumo.id,
+                },
+            )
+            .unwrap_or_default();
+        estado.cartas = Some((d.resumo.id, cartas));
+    }
+    let cartas = estado
+        .cartas
+        .as_ref()
+        .filter(|c| nfe && c.0 == d.resumo.id)
+        .map(|c| c.1.clone())
+        .unwrap_or_default();
+    let pode_corrigir = nfe
+        && d.resumo.estado == EstadoDocumento::Autorizada
+        && sessao.concede("fiscal.emitir")
+        && !cartas.iter().any(|k| k.estado == EstadoCarta::Pendente)
+        && cartas
+            .iter()
+            .filter(|k| k.estado == EstadoCarta::Registrada)
+            .count()
+            < mod_fiscal::correcao::MAXIMO_DE_CARTAS as usize;
     let mut fechar = false;
+    let mut abrir_carta = false;
+    let mut enviar_carta = false;
+    let mut desistir_carta = false;
     let mut imprimir = None;
+    let mut danfe = None;
     let mut abrir_pedido = None;
     let mut confirmar = false;
     let mut desistir = false;
     ui.add_space(Espaco::E12);
     Painel::novo()
-        .titulo(format!("NFC-e {}-{}", d.resumo.serie, d.resumo.numero))
+        .titulo(format!(
+            "{} {}-{}",
+            nome_do_modelo(d.resumo.modelo),
+            d.resumo.serie,
+            d.resumo.numero
+        ))
         .mostrar(ui, |ui| {
             ui.columns(3, |c| {
                 dado(&mut c[0], "Situação", d.resumo.estado.rotulo());
@@ -359,6 +507,17 @@ fn detalhe(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estad
             }
             if let Some(p) = &d.resumo.protocolo {
                 dado(ui, "Protocolo", p);
+                ui.add_space(Espaco::E8);
+            }
+            if let Some(p) = prazo {
+                ui.add(Rotulo::sobrelinha("Prazo de cancelamento"));
+                ui.add(
+                    Rotulo::interface(p.curto()).cor(if p.dentro() {
+                        ui.cores().texto
+                    } else {
+                        ui.cores().atencao
+                    }),
+                );
                 ui.add_space(Espaco::E8);
             }
             if let Some(m) = &d.resumo.motivo {
@@ -395,14 +554,59 @@ fn detalhe(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estad
                 ui.add(Etiqueta::atencao(p.rotulo()).com_ponto());
                 ui.add_space(Espaco::E8);
             }
+            if !cartas.is_empty() {
+                ui.add(Rotulo::sobrelinha("Cartas de correção"));
+                for k in &cartas {
+                    ui.horizontal(|ui| {
+                        ui.add(
+                            match k.estado {
+                                EstadoCarta::Pendente => Etiqueta::atencao(k.estado.rotulo()),
+                                EstadoCarta::Registrada => Etiqueta::positiva(k.estado.rotulo()),
+                                EstadoCarta::Recusada => Etiqueta::negativa(k.estado.rotulo()),
+                            }
+                            .com_ponto(),
+                        );
+                        ui.add(
+                            Rotulo::campo(format!("{}ª — {}", k.sequencia, k.texto)).quebravel(),
+                        );
+                    });
+                    if k.estado != EstadoCarta::Registrada {
+                        if let Some(m) = &k.motivo {
+                            ui.add(Rotulo::apoio(m.clone()).quebravel());
+                        }
+                    }
+                }
+                ui.add_space(Espaco::E8);
+            }
+            if let Some(texto) = estado.corrigindo.as_mut() {
+                Painel::novo().realce(Tom::Info).mostrar(ui, |ui| {
+                    ui.add(Rotulo::interface(SOBRE_A_CARTA).quebravel());
+                    ui.add_space(Espaco::E8);
+                    ui.add(Campo::novo("Correção (15 a 1000 caracteres)", texto).multilinha(4));
+                    ui.add_space(Espaco::E8);
+                    ui.horizontal(|ui| {
+                        enviar_carta = ui
+                            .add(Botao::primario("Enviar carta de correção"))
+                            .clicked();
+                        desistir_carta = ui.add(Botao::fantasma("Desistir")).clicked();
+                    });
+                });
+                ui.add_space(Espaco::E8);
+            }
             if let Some((pedido, justificativa)) = estado.pedindo.as_mut() {
-                Painel::novo().realce(Tom::Atencao).mostrar(ui, |ui| {
+                let fora_do_prazo = prazo.is_some_and(|p| !p.dentro());
+                let tom = if *pedido == PedidoDocumento::Cancelar && fora_do_prazo {
+                    Tom::Negativo
+                } else {
+                    Tom::Atencao
+                };
+                Painel::novo().realce(tom).mostrar(ui, |ui| {
                     ui.add(Rotulo::interface(match pedido {
-                        PedidoDocumento::Cancelar => {
-                            "Cancelar esta NFC-e na SEFAZ (em geral até 30 minutos depois de autorizada). A venda em si não é desfeita aqui."
+                        PedidoDocumento::Cancelar | PedidoDocumento::CancelarPorSubstituicao => {
+                            texto_do_cancelamento(prazo)
                         }
                         PedidoDocumento::Inutilizar => {
-                            "Inutilizar o número desta nota, que não vai mais ser enviada — sem isso ele fica como um buraco na série."
+                            "Inutilizar o número desta nota, que não vai mais ser enviada — sem isso ele fica como um buraco na série.".to_owned()
                         }
                     }).quebravel());
                     ui.add_space(Espaco::E8);
@@ -414,7 +618,8 @@ fn detalhe(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estad
                     ui.horizontal(|ui| {
                         confirmar = ui
                             .add(Botao::destrutivo(match pedido {
-                                PedidoDocumento::Cancelar => "Confirmar cancelamento",
+                                PedidoDocumento::Cancelar
+                                | PedidoDocumento::CancelarPorSubstituicao => "Confirmar cancelamento",
                                 PedidoDocumento::Inutilizar => "Confirmar inutilização",
                             }))
                             .clicked();
@@ -424,14 +629,35 @@ fn detalhe(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estad
                 ui.add_space(Espaco::E8);
             }
             ui.horizontal(|ui| {
-                if d.resumo.estado == EstadoDocumento::Autorizada
+                if d.resumo.modelo == mod_fiscal::ModeloFiscal::Nfe
+                    && d.resumo.estado == EstadoDocumento::Autorizada
+                    && ui.add(Botao::secundario("Imprimir DANFE")).clicked()
+                {
+                    danfe = Some(d.resumo.id);
+                }
+                if pode_corrigir
+                    && estado.corrigindo.is_none()
+                    && ui.add(Botao::secundario("Carta de correção")).clicked()
+                {
+                    abrir_carta = true;
+                }
+                if d.resumo.modelo == mod_fiscal::ModeloFiscal::Nfce
+                    && matches!(
+                        d.resumo.estado,
+                        EstadoDocumento::Autorizada | EstadoDocumento::Contingencia
+                    )
                     && ui.add(Botao::secundario("Imprimir cupom fiscal")).clicked()
                 {
                     imprimir = Some(d.resumo.id);
                 }
                 if pode_cancelar && estado.pedindo.is_none() {
                     if d.resumo.estado == EstadoDocumento::Autorizada
-                        && ui.add(Botao::fantasma("Cancelar NFC-e")).clicked()
+                        && ui
+                            .add(Botao::fantasma(match d.resumo.modelo {
+                                mod_fiscal::ModeloFiscal::Nfe => "Cancelar NF-e",
+                                mod_fiscal::ModeloFiscal::Nfce => "Cancelar NFC-e",
+                            }))
+                            .clicked()
                     {
                         abrir_pedido = Some(PedidoDocumento::Cancelar);
                     }
@@ -446,6 +672,24 @@ fn detalhe(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estad
         });
     if let Some(p) = abrir_pedido {
         estado.pedindo = Some((p, String::new()));
+    }
+    if abrir_carta {
+        // A nova substitui a anterior: começa do texto da última registrada.
+        let ultima = cartas
+            .iter()
+            .find(|k| k.estado == EstadoCarta::Registrada)
+            .map(|k| k.texto.clone());
+        estado.corrigindo = Some(ultima.unwrap_or_default());
+    }
+    if desistir_carta {
+        estado.corrigindo = None;
+    }
+    if enviar_carta {
+        let texto = estado.corrigindo.clone().unwrap_or_default();
+        match corrigir(ui.ctx(), motor, sessao, estado, d.resumo.id, &texto) {
+            Ok(_) => notificar(ui.ctx(), Notificacao::sucesso("Carta de correção na fila")),
+            Err(e) => notificar(ui.ctx(), Notificacao::erro(e)),
+        }
     }
     if desistir {
         estado.pedindo = None;
@@ -464,7 +708,9 @@ fn detalhe(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estad
                 Ok(_) => notificar(
                     ui.ctx(),
                     Notificacao::sucesso(match pedido {
-                        PedidoDocumento::Cancelar => "Cancelamento na fila",
+                        PedidoDocumento::Cancelar | PedidoDocumento::CancelarPorSubstituicao => {
+                            "Cancelamento na fila"
+                        }
                         PedidoDocumento::Inutilizar => "Inutilização na fila",
                     }),
                 ),
@@ -475,12 +721,19 @@ fn detalhe(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estad
     if fechar {
         estado.detalhe = None;
         estado.pedindo = None;
+        estado.corrigindo = None;
+    }
+    if let Some(id) = danfe {
+        match crate::danfe::imprimir(motor, sessao, id) {
+            Ok(_) => notificar(ui.ctx(), Notificacao::sucesso("DANFE aberto para imprimir")),
+            Err(e) => notificar(ui.ctx(), Notificacao::erro(e)),
+        }
     }
     if let Some(id) = imprimir {
         match crate::danfce::imprimir(motor, sessao, id) {
-            Ok(_) => notificar(
+            Ok(saida) => notificar(
                 ui.ctx(),
-                Notificacao::sucesso("Cupom fiscal aberto para imprimir"),
+                Notificacao::sucesso(saida.mensagem("Cupom fiscal")),
             ),
             Err(e) => notificar(ui.ctx(), Notificacao::erro(e)),
         }
@@ -511,6 +764,9 @@ mod testes {
             autorizado_em: None,
             pedido: None,
             anulada: false,
+            contingencia_em: None,
+            substitui: None,
+            substituida_por: None,
         }
     }
 
@@ -525,6 +781,35 @@ mod testes {
                 });
             });
         }
+    }
+
+    #[test]
+    fn a_contingencia_pede_atencao_mostra_o_prazo_e_o_indicador() {
+        let t = motor_de_teste();
+        let (m, s) = (&t.motor, &t.sessao);
+        let mut estado = EstadoNotas::default();
+        estado.carregar(m, s);
+        let desde = cardeal_kernel::Instante::de_micros(1_793_030_400_000_000);
+        let mut d = documento(EstadoDocumento::Contingencia, 4);
+        d.contingencia_em = Some(desde);
+        assert_eq!(
+            texto_da_linha(&d),
+            "Cupom fiscal emitido em contingência — a SEFAZ estava fora. Transmitir até \
+             27/10/2026 13:00."
+        );
+        let mut substituida = documento(EstadoDocumento::Incerta, 3);
+        substituida.substituida_por = Some(Id::novo());
+        assert!(texto_da_linha(&substituida).contains("foi substituída por outra NFC-e"));
+        estado.documentos = vec![d, documento(EstadoDocumento::Autorizada, 5)];
+        assert_eq!(estado.visiveis().len(), 1, "a contingência pede atenção");
+        estado.resumo = Some(ResumoFiscal {
+            em_contingencia: 1,
+            contingencia_desde: Some(desde),
+            ..ResumoFiscal::default()
+        });
+        estado.geracao_vista = fiscal_fundo::geracao();
+        desenhar(m, s, &mut estado);
+        assert_eq!(estado.resumo.map(|r| r.em_contingencia), Some(1));
     }
 
     #[test]
@@ -553,7 +838,9 @@ mod testes {
         estado.detalhe = Some(DetalheDocumento {
             resumo: rejeitada,
             nota: None,
+            nfe: None,
             xml: None,
+            xml_assinado: None,
         });
         let ctx = egui::Context::default();
         cardeal_ui::tokens::instalar_fontes(&ctx);
@@ -575,10 +862,24 @@ mod testes {
         let (m, s) = (&t.motor, &t.sessao);
         let mut estado = EstadoNotas::default();
         estado.carregar(m, s);
+        // Autorizada há 45 minutos: passou o prazo da NFC-e — o pedido avisa, não bloqueia.
+        let mut resumo = documento(EstadoDocumento::Autorizada, 9);
+        resumo.autorizado_em = Some(Instante::agora().mais_segundos(-45 * 60));
+        let prazo = resumo.prazo_de_cancelamento(Instante::agora());
+        assert!(prazo.is_some_and(|p| !p.dentro()));
+        let texto = texto_do_cancelamento(prazo);
+        assert!(texto.contains("passou o prazo de 30 min"), "{texto}");
+        assert!(texto.ends_with("A venda em si não é desfeita aqui."));
+        assert_eq!(
+            texto_do_cancelamento(None),
+            "Cancelar esta NFC-e na SEFAZ. A venda em si não é desfeita aqui."
+        );
         estado.detalhe = Some(DetalheDocumento {
-            resumo: documento(EstadoDocumento::Autorizada, 9),
+            resumo,
             nota: None,
+            nfe: None,
             xml: None,
+            xml_assinado: None,
         });
         estado.pedindo = Some((
             PedidoDocumento::Cancelar,
@@ -594,6 +895,12 @@ mod testes {
                 });
             });
         }
+        // A NFC-e não tem carta de correção (o documento nem existe: o erro volta, o formulário
+        // fica aberto).
+        estado.corrigindo = Some("Corrige o bairro do destinatário para Centro".into());
+        let id = estado.detalhe.as_ref().unwrap().resumo.id;
+        assert!(corrigir(&ctx, m, s, &mut estado, id, "Corrige o bairro para Centro").is_err());
+        assert!(estado.corrigindo.is_some());
         // O documento não existe na base: o pedido volta com erro e o formulário fica aberto.
         let id = estado.detalhe.as_ref().unwrap().resumo.id;
         assert!(pedir(

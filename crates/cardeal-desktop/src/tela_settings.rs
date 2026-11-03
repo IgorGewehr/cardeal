@@ -11,6 +11,12 @@ use cardeal_ui::organisms::{notificar, ColunaGrade, Grade, LayoutTela, Notificac
 use cardeal_ui::tokens::{Espaco, Tema, TemaUi};
 use eframe::egui;
 
+mod grupo;
+mod impressora;
+mod segundo_fator;
+mod tetos;
+mod usuarios;
+
 const REGIMES: [&str; 4] = ["MEI", "SimplesNacional", "LucroPresumido", "LucroReal"];
 const REGIME_ROTULO: [&str; 4] = ["MEI", "Simples Nacional", "Lucro Presumido", "Lucro Real"];
 
@@ -31,6 +37,8 @@ pub struct EstadoTelaSettings {
     empresa: Option<EmpresaResumo>,
     usuarios: Vec<UsuarioResumo>,
     papeis: Vec<PapelResumo>,
+    /// O teto de desconto de cada papel que vende.
+    tetos: Vec<tetos::LinhaTeto>,
     razao: String,
     fantasia: String,
     regime: usize,
@@ -48,6 +56,17 @@ pub struct EstadoTelaSettings {
     bobina: Option<mod_pdv::LarguraBobina>,
     imprimir_auto: bool,
     rodape: String,
+    /// A impressora deste computador (não da empresa).
+    impressora_local: impressora::EstadoImpressora,
+    /// A verificação em duas etapas da pessoa da sessão.
+    segundo_fator: segundo_fator::EstadoSegundoFator,
+    /// Cadastrar, editar e a própria senha.
+    equipe: usuarios::EstadoUsuarios,
+    /// Os CNPJs do grupo.
+    cnpjs: grupo::EstadoCnpjs,
+    /// O cadastro de um CNPJ pedido no cartão (razão social, CNPJ) — quem é dono do motor o
+    /// executa e chama [`EstadoTelaSettings::cnpj_adicionado`].
+    pub pedido_cnpj: Option<(String, String)>,
 }
 
 impl EstadoTelaSettings {
@@ -65,6 +84,9 @@ impl EstadoTelaSettings {
         }
         self.usuarios = motor.usuarios().unwrap_or_default();
         self.papeis = motor.papeis().unwrap_or_default();
+        self.segundo_fator = segundo_fator::EstadoSegundoFator::carregar(motor, sessao);
+        self.cnpjs = grupo::EstadoCnpjs::carregar(motor, sessao);
+        self.tetos = tetos::carregar(motor, sessao);
 
         match motor.identidade_visual() {
             Ok(id) => {
@@ -88,6 +110,23 @@ impl EstadoTelaSettings {
             self.imprimir_auto = i.imprimir_ao_finalizar;
             self.rodape = i.rodape.clone().unwrap_or_default();
         }
+    }
+
+    /// O CNPJ pedido entrou no grupo: a lista se atualiza e o formulário fecha.
+    pub fn cnpj_adicionado(&mut self, motor: &Motor, sessao: &Sessao) {
+        self.cnpjs = grupo::EstadoCnpjs::carregar(motor, sessao);
+    }
+
+    /// Abre direto na aba Empresa (os primeiros passos levam para cá).
+    pub fn abrir_empresa(&mut self, motor: &Motor, sessao: &Sessao) {
+        self.aba = Aba::Empresa;
+        self.carregar(motor, sessao);
+    }
+
+    /// Abre direto na aba Acesso (usuários e papéis).
+    pub fn abrir_acesso(&mut self, motor: &Motor, sessao: &Sessao) {
+        self.aba = Aba::Acesso;
+        self.carregar(motor, sessao);
     }
 
     /// Abre direto na aba Fiscal (o aviso do certificado na Visão geral leva para cá).
@@ -126,7 +165,7 @@ pub fn mostrar(
                 Aba::Fiscal => crate::tela_fiscal::mostrar(ui, motor, sessao, &mut estado.fiscal),
                 Aba::Impressao => secao_impressao(ui, motor, sessao, estado),
                 Aba::Aparencia => secao_aparencia(ui, tema),
-                Aba::Acesso => secao_acesso(ui, estado),
+                Aba::Acesso => secao_acesso(ui, motor, sessao, estado),
             }
         },
     );
@@ -158,6 +197,14 @@ fn secao_empresa(
         .as_ref()
         .map_or_else(String::new, |e| e.cnpj.clone());
 
+    let mut pedido = None;
+    cartao(ui, |ui| {
+        pedido = grupo::secao(ui, sessao, &mut estado.cnpjs);
+    });
+    if pedido.is_some() {
+        estado.pedido_cnpj = pedido;
+    }
+    ui.add_space(Espaco::E16);
     cartao(ui, |ui| {
         ui.add(Rotulo::titulo_secao("Dados da empresa"));
         ui.add_space(Espaco::E12);
@@ -376,7 +423,8 @@ fn secao_impressao(
         ui.add_space(Espaco::E8);
         ui.add(Caixa::nova(
             &mut estado.imprimir_auto,
-            "Imprimir o comprovante ao finalizar cada venda",
+            "Imprimir sozinho ao finalizar cada venda — o cupom fiscal quando a NFC-e sai; sem \
+             NFC-e, o comprovante",
         ));
         ui.add_space(Espaco::E8);
         ui.add(
@@ -405,6 +453,14 @@ fn secao_impressao(
             }
         }
     });
+    if estado.impressao.is_some() {
+        ui.add_space(Espaco::E12);
+        let pode = sessao.concede("pdv.impressao.configurar");
+        let bobina = crate::comprovante::bobina(estado.bobina.unwrap_or_default());
+        cartao(ui, |ui| {
+            impressora::secao(ui, pode, bobina, &mut estado.impressora_local);
+        });
+    }
 }
 
 fn secao_aparencia(ui: &mut egui::Ui, tema: &mut Tema) {
@@ -441,36 +497,26 @@ fn secao_aparencia(ui: &mut egui::Ui, tema: &mut Tema) {
     });
 }
 
-fn secao_acesso(ui: &mut egui::Ui, estado: &mut EstadoTelaSettings) {
+fn secao_acesso(
+    ui: &mut egui::Ui,
+    motor: &Motor,
+    sessao: &Sessao,
+    estado: &mut EstadoTelaSettings,
+) {
     cartao(ui, |ui| {
-        ui.add(Rotulo::titulo_secao("Usuários"));
-        ui.add_space(Espaco::E8);
-        if estado.usuarios.is_empty() {
-            ui.add(Rotulo::campo("Nenhum usuário."));
-        } else {
-            let colunas = vec![
-                ColunaGrade::nova("Nome"),
-                ColunaGrade::nova("Login").largura(180.0),
-                ColunaGrade::nova("Situação").largura(110.0),
-            ];
-            Grade::nova(colunas).mostrar(ui, estado.usuarios.len(), |i, row| {
-                let u = &estado.usuarios[i];
-                row.col(|ui| {
-                    ui.add(Rotulo::interface(u.nome.clone()));
-                });
-                row.col(|ui| {
-                    ui.add(Rotulo::campo(u.login.clone()));
-                });
-                row.col(|ui| {
-                    let (t, c) = if u.ativo {
-                        ("ativo", ui.cores().positivo)
-                    } else {
-                        ("inativo", ui.cores().texto_fraco)
-                    };
-                    ui.add(Rotulo::interface(t).cor(c));
-                });
-            });
-        }
+        segundo_fator::secao(ui, motor, sessao, &mut estado.segundo_fator);
+    });
+    ui.add_space(Espaco::E16);
+    let mut recarregar = false;
+    cartao(ui, |ui| {
+        recarregar = usuarios::secao(ui, motor, sessao, &mut estado.equipe, &estado.usuarios);
+    });
+    if recarregar {
+        estado.usuarios = motor.usuarios().unwrap_or_default();
+    }
+    ui.add_space(Espaco::E16);
+    cartao(ui, |ui| {
+        usuarios::secao_minha_senha(ui, motor, sessao, &mut estado.equipe);
     });
     ui.add_space(Espaco::E16);
     cartao(ui, |ui| {
@@ -499,9 +545,17 @@ fn secao_acesso(ui: &mut egui::Ui, estado: &mut EstadoTelaSettings) {
             });
         });
     });
+    ui.add_space(Espaco::E16);
+    let mut gravou = false;
+    cartao(ui, |ui| {
+        gravou = tetos::secao(ui, motor, sessao, &mut estado.tetos)
+    });
+    if gravou {
+        estado.tetos = tetos::carregar(motor, sessao);
+    }
     ui.add_space(Espaco::E12);
     ui.add(Rotulo::apoio(
-        "Criar e editar usuários e papéis chega numa próxima versão — hoje o assistente de primeiro acesso cria o administrador.",
+        "Os papéis são os de fábrica, ajustados ao que esta empresa usa; o teto de desconto de cada um se ajusta acima.",
     ));
 }
 

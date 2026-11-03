@@ -81,6 +81,7 @@ impl Comando for LancarTituloAReceber {
                 parcelas: self.parcelas,
                 primeiro_vencimento: self.primeiro_vencimento,
                 intervalo_dias: self.intervalo_dias,
+                cronograma: None,
                 observacao: self.observacao,
                 categoria: self.categoria,
                 origem_modulo: "avulso",

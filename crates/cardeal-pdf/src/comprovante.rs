@@ -5,7 +5,7 @@
 
 use cardeal_kernel::{Dinheiro, Fuso, Instante, Preco, Quantidade};
 
-use crate::bobina::{imprimir, Bobina, Cursor};
+use crate::bobina::{imprimir, Bobina, Escrita};
 use crate::fonte::Fonte;
 
 /// Uma linha do comprovante.
@@ -66,9 +66,10 @@ pub struct ComprovantePdf {
     pub fuso: Fuso,
 }
 
-fn compor(c: &mut Cursor, d: &ComprovantePdf) {
-    let (corpo, pequeno) = (c.b.corpo(), c.b.pequeno());
-    c.centro(&d.nome, Fonte::Negrito, c.b.titulo());
+pub(crate) fn compor(c: &mut impl Escrita, d: &ComprovantePdf) {
+    let b = c.bobina();
+    let (corpo, pequeno) = (b.corpo(), b.pequeno());
+    c.centro(&d.nome, Fonte::Negrito, b.titulo());
     if let Some(r) = &d.razao_social {
         c.centro(r, Fonte::Regular, pequeno);
     }

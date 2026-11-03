@@ -4,6 +4,7 @@
 
 use cardeal_kernel::{CodigoErro, Erro, Id, Resultado};
 use cardeal_modkit::{Comando, Consulta};
+use cardeal_protocol::SegundoFatorProposto;
 use mod_empresa::{
     AtualizarDadosEmpresa, DadosDaEmpresa, DefinirContatoEmpresa, DefinirLogoEmpresa,
     EmpresaResumo, IdentidadeDaEmpresa, IdentidadeVisual, PapeisDaEmpresa, PapelResumo,
@@ -77,6 +78,19 @@ impl From<SessaoLocal> for Sessao {
 }
 
 #[cfg(feature = "local")]
+/// Um CNPJ do grupo em que a pessoa entra.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EmpresaDoGrupo {
+    /// O id da empresa.
+    pub id: Id,
+    /// O nome (razão social no local; o nome do vínculo no servidor).
+    pub nome: String,
+    /// O CNPJ (só no local).
+    pub cnpj: Option<String>,
+    /// A matriz.
+    pub matriz: bool,
+}
+
 fn sessao_de_outro_motor() -> Erro {
     Erro::novo(
         CodigoErro::SESSAO_INVALIDA,
@@ -232,6 +246,394 @@ impl Motor {
             (Self::Local(m), Sessao::Local(s)) => m.consultar(s, nome, consulta),
             #[cfg(not(target_arch = "wasm32"))]
             (Self::Remoto(r), _) => r.consultar(nome, consulta),
+            #[cfg(feature = "local")]
+            #[allow(unreachable_patterns)]
+            _ => Err(sessao_de_outro_motor()),
+        }
+    }
+
+    /// Cadastra quem vai trabalhar na empresa, com um papel de fábrica e a senha inicial. No
+    /// banco local, o login e a senha (trocada no primeiro acesso); no servidor, o e-mail da
+    /// conta (a que já existe só ganha o vínculo).
+    ///
+    /// # Errors
+    /// Senha fora da política; login repetido; sem permissão; sem conexão.
+    pub fn cadastrar_usuario(
+        &self,
+        sessao: &Sessao,
+        login: &str,
+        nome: &str,
+        papel: mod_empresa::PapelDeFabrica,
+        senha_inicial: &str,
+    ) -> Resultado<Id> {
+        match (self, sessao) {
+            #[cfg(feature = "local")]
+            (Self::Local(m), Sessao::Local(s)) => {
+                m.cadastrar_usuario(s, login, nome, papel, senha_inicial)
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            (Self::Remoto(r), _) => r
+                .adicionar_membro(&cardeal_protocol::PedidoNovoMembro {
+                    email: login.to_owned(),
+                    nome: nome.to_owned(),
+                    papel,
+                    senha_inicial: Some(senha_inicial.to_owned()),
+                })
+                .map(|m| m.usuario),
+            #[cfg(feature = "local")]
+            #[allow(unreachable_patterns)]
+            _ => Err(sessao_de_outro_motor()),
+        }
+    }
+
+    /// Troca o papel de um usuário nesta empresa.
+    ///
+    /// # Errors
+    /// O próprio papel; tirar o último administrador; sem permissão; sem conexão.
+    pub fn definir_papel_de(
+        &self,
+        sessao: &Sessao,
+        usuario: Id,
+        papel: mod_empresa::PapelDeFabrica,
+    ) -> Resultado<()> {
+        self.executar(
+            sessao,
+            "empresa.definir_papel_do_usuario.v1",
+            &mod_empresa::DefinirPapelDoUsuario { usuario, papel },
+        )
+    }
+
+    /// Tira alguém da empresa: no banco local, desativa (o histórico fica); no servidor, tira o
+    /// vínculo da conta.
+    ///
+    /// # Errors
+    /// O próprio usuário; sem permissão; sem conexão.
+    pub fn desativar_usuario(&self, sessao: &Sessao, usuario: Id) -> Resultado<()> {
+        match (self, sessao) {
+            #[cfg(feature = "local")]
+            (Self::Local(m), Sessao::Local(s)) => m.executar(
+                s,
+                "empresa.desativar_usuario.v1",
+                &mod_empresa::DesativarUsuario { usuario },
+            ),
+            #[cfg(not(target_arch = "wasm32"))]
+            (Self::Remoto(r), _) => r.remover_membro(usuario),
+            #[cfg(feature = "local")]
+            #[allow(unreachable_patterns)]
+            _ => Err(sessao_de_outro_motor()),
+        }
+    }
+
+    /// Reativa o usuário desativado (banco local).
+    ///
+    /// # Errors
+    /// Sem permissão; no servidor, ponha a pessoa de novo pelo e-mail.
+    pub fn reativar_usuario(&self, sessao: &Sessao, usuario: Id) -> Resultado<()> {
+        match (self, sessao) {
+            #[cfg(feature = "local")]
+            (Self::Local(m), Sessao::Local(s)) => m.executar(
+                s,
+                "empresa.reativar_usuario.v1",
+                &mod_empresa::ReativarUsuario { usuario },
+            ),
+            #[cfg(not(target_arch = "wasm32"))]
+            (Self::Remoto(_), _) => {
+                let _ = usuario;
+                Err(so_no_local("Reativar usuário"))
+            }
+            #[cfg(feature = "local")]
+            #[allow(unreachable_patterns)]
+            _ => Err(sessao_de_outro_motor()),
+        }
+    }
+
+    /// O administrador redefine a senha de quem esqueceu (banco local; no servidor, cada conta
+    /// cuida da sua).
+    ///
+    /// # Errors
+    /// Senha fora da política; sem permissão.
+    pub fn redefinir_senha_de(&self, sessao: &Sessao, usuario: Id, nova: &str) -> Resultado<()> {
+        match (self, sessao) {
+            #[cfg(feature = "local")]
+            (Self::Local(m), Sessao::Local(s)) => m.redefinir_senha_de(s, usuario, nova),
+            #[cfg(not(target_arch = "wasm32"))]
+            (Self::Remoto(_), _) => {
+                let _ = (usuario, nova);
+                Err(so_no_local("Redefinir a senha de outra pessoa"))
+            }
+            #[cfg(feature = "local")]
+            #[allow(unreachable_patterns)]
+            _ => Err(sessao_de_outro_motor()),
+        }
+    }
+
+    /// A pessoa da sessão troca a própria senha, provando a atual.
+    ///
+    /// # Errors
+    /// Senha atual errada; nova fora da política; sem conexão.
+    pub fn trocar_senha(&self, sessao: &Sessao, atual: &str, nova: &str) -> Resultado<()> {
+        match (self, sessao) {
+            #[cfg(feature = "local")]
+            (Self::Local(m), Sessao::Local(s)) => m.trocar_senha(s, atual, nova),
+            #[cfg(not(target_arch = "wasm32"))]
+            (Self::Remoto(r), _) => r.trocar_senha(atual, nova),
+            #[cfg(feature = "local")]
+            #[allow(unreachable_patterns)]
+            _ => Err(sessao_de_outro_motor()),
+        }
+    }
+
+    /// A pessoa da sessão precisa trocar a senha antes de trabalhar (a inicial, ou uma
+    /// redefinida pelo administrador)? No servidor, não.
+    ///
+    /// # Errors
+    /// Erro de leitura.
+    pub fn precisa_trocar_senha(&self, sessao: &Sessao) -> Resultado<bool> {
+        match (self, sessao) {
+            #[cfg(feature = "local")]
+            (Self::Local(m), Sessao::Local(s)) => m.precisa_trocar_senha(s),
+            #[cfg(not(target_arch = "wasm32"))]
+            (Self::Remoto(_), _) => Ok(false),
+            #[cfg(feature = "local")]
+            #[allow(unreachable_patterns)]
+            _ => Err(sessao_de_outro_motor()),
+        }
+    }
+
+    /// Os CNPJs do grupo em que a pessoa da sessão entra (no banco local, os da organização em
+    /// que ela tem papel; no servidor, os vínculos da conta), matriz primeiro.
+    ///
+    /// # Errors
+    /// Erro de leitura.
+    pub fn empresas_do_grupo(&self, sessao: &Sessao) -> Resultado<Vec<EmpresaDoGrupo>> {
+        match (self, sessao) {
+            #[cfg(feature = "local")]
+            (Self::Local(m), Sessao::Local(s)) => Ok(m
+                .empresas()?
+                .into_iter()
+                .filter(|e| {
+                    e.id == s.empresa()
+                        || m.sessao_do_usuario_em(e.id, s.usuario(), Id::novo())
+                            .is_ok()
+                })
+                .map(|e| EmpresaDoGrupo {
+                    id: e.id,
+                    nome: e.razao_social,
+                    cnpj: Some(e.cnpj),
+                    matriz: e.matriz,
+                })
+                .collect()),
+            #[cfg(not(target_arch = "wasm32"))]
+            (Self::Remoto(r), _) => Ok(r
+                .empresas()
+                .iter()
+                .map(|e| EmpresaDoGrupo {
+                    id: e.id,
+                    nome: e.nome.clone(),
+                    cnpj: None,
+                    matriz: false,
+                })
+                .collect()),
+            #[cfg(feature = "local")]
+            #[allow(unreachable_patterns)]
+            _ => Err(sessao_de_outro_motor()),
+        }
+    }
+
+    /// A empresa (CNPJ) em que a sessão age.
+    #[must_use]
+    pub fn empresa_da_sessao(&self, sessao: &Sessao) -> Option<Id> {
+        match (self, sessao) {
+            #[cfg(feature = "local")]
+            (Self::Local(_), Sessao::Local(s)) => Some(s.empresa()),
+            #[cfg(not(target_arch = "wasm32"))]
+            (Self::Remoto(r), _) => r.empresa(),
+            #[cfg(feature = "local")]
+            #[allow(unreachable_patterns)]
+            _ => None,
+        }
+    }
+
+    /// A sessão da mesma pessoa em outro CNPJ do grupo — trocar de empresa sem novo login.
+    ///
+    /// # Errors
+    /// Sem papel na empresa; empresa de fora do grupo; sem conexão.
+    pub fn trocar_empresa(&mut self, sessao: &Sessao, empresa: Id) -> Resultado<Sessao> {
+        match (self, sessao) {
+            #[cfg(feature = "local")]
+            (Self::Local(m), Sessao::Local(s)) => {
+                let nova = m.sessao_do_usuario_em(empresa, s.usuario(), Id::novo())?;
+                m.ativar_empresa(empresa);
+                Ok(Sessao::Local(nova))
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            (Self::Remoto(r), _) => r.escolher_empresa(empresa).map(Sessao::Remota),
+            #[cfg(feature = "local")]
+            #[allow(unreachable_patterns)]
+            _ => Err(sessao_de_outro_motor()),
+        }
+    }
+
+    /// Cadastra outro CNPJ no grupo (plano de contas próprio; quem pede vira o administrador
+    /// dele). Exige `empresa.organizacao.gerenciar`. Devolve o id.
+    ///
+    /// # Errors
+    /// Sem permissão; CNPJ já cadastrado; sem conexão.
+    pub fn adicionar_empresa(
+        &mut self,
+        sessao: &Sessao,
+        razao_social: &str,
+        cnpj: &str,
+    ) -> Resultado<Id> {
+        match (self, sessao) {
+            #[cfg(feature = "local")]
+            (Self::Local(m), Sessao::Local(s)) => m.adicionar_empresa(s, razao_social, cnpj),
+            #[cfg(not(target_arch = "wasm32"))]
+            (Self::Remoto(r), _) => r.adicionar_empresa(razao_social, cnpj).map(|e| e.id),
+            #[cfg(feature = "local")]
+            #[allow(unreachable_patterns)]
+            _ => Err(sessao_de_outro_motor()),
+        }
+    }
+
+    /// Uma consulta em **outro** CNPJ do grupo, com as permissões que a pessoa tem lá — o que o
+    /// painel consolidado usa, empresa por empresa.
+    ///
+    /// # Errors
+    /// Sem papel ou sem permissão naquela empresa; o erro da consulta; sem conexão.
+    pub fn consultar_em<Q>(
+        &self,
+        sessao: &Sessao,
+        empresa: Id,
+        nome: &str,
+        consulta: &Q,
+    ) -> Resultado<Q::Saida>
+    where
+        Q: Consulta + Serialize,
+        Q::Saida: DeserializeOwned,
+    {
+        match (self, sessao) {
+            #[cfg(feature = "local")]
+            (Self::Local(m), Sessao::Local(s)) => {
+                let la = m.sessao_do_usuario_em(empresa, s.usuario(), Id::novo())?;
+                m.consultar(&la, nome, consulta)
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            (Self::Remoto(r), _) => r.consultar_em(empresa, nome, consulta),
+            #[cfg(feature = "local")]
+            #[allow(unreachable_patterns)]
+            _ => Err(sessao_de_outro_motor()),
+        }
+    }
+
+    /// O **login** no banco local: a senha e, para quem tem verificação em duas etapas, o
+    /// código do aplicativo (ou de recuperação). No servidor o login é o da conta
+    /// (`remoto::Remoto::entrar`).
+    ///
+    /// # Errors
+    /// `SEGUNDO_FATOR_NECESSARIO` (falta o código); credencial inválida; conta bloqueada.
+    pub fn entrar(&self, login: &str, senha: &str, codigo: Option<&str>) -> Resultado<Sessao> {
+        match self {
+            #[cfg(feature = "local")]
+            Self::Local(m) => m.entrar(login, senha, codigo).map(Sessao::Local),
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::Remoto(_) => {
+                let _ = (login, senha, codigo);
+                Err(so_no_local("O login local"))
+            }
+        }
+    }
+
+    /// A pessoa da sessão tem verificação em duas etapas?
+    ///
+    /// # Errors
+    /// Erro de leitura; sem conexão.
+    pub fn segundo_fator_ativo(&self, sessao: &Sessao) -> Resultado<bool> {
+        match (self, sessao) {
+            #[cfg(feature = "local")]
+            (Self::Local(m), Sessao::Local(s)) => m.segundo_fator_ativo(s),
+            #[cfg(not(target_arch = "wasm32"))]
+            (Self::Remoto(r), _) => r.segundo_fator_ativo(),
+            #[cfg(feature = "local")]
+            #[allow(unreachable_patterns)]
+            _ => Err(sessao_de_outro_motor()),
+        }
+    }
+
+    /// Um segredo novo para a pessoa da sessão levar ao aplicativo autenticador.
+    ///
+    /// # Errors
+    /// Erro de leitura; sem conexão.
+    pub fn propor_segundo_fator(&self, sessao: &Sessao) -> Resultado<SegundoFatorProposto> {
+        match (self, sessao) {
+            #[cfg(feature = "local")]
+            (Self::Local(m), Sessao::Local(s)) => m.propor_segundo_fator(s),
+            #[cfg(not(target_arch = "wasm32"))]
+            (Self::Remoto(r), _) => r.propor_segundo_fator(),
+            #[cfg(feature = "local")]
+            #[allow(unreachable_patterns)]
+            _ => Err(sessao_de_outro_motor()),
+        }
+    }
+
+    /// Ativa a verificação em duas etapas da pessoa da sessão (o primeiro código confirma o
+    /// segredo). Devolve os códigos de recuperação, para mostrar uma vez.
+    ///
+    /// # Errors
+    /// Código que não confere; já ativa; sem conexão.
+    pub fn ativar_segundo_fator(
+        &self,
+        sessao: &Sessao,
+        segredo: &str,
+        codigo: &str,
+    ) -> Resultado<Vec<String>> {
+        match (self, sessao) {
+            #[cfg(feature = "local")]
+            (Self::Local(m), Sessao::Local(s)) => m.ativar_segundo_fator(s, segredo, codigo),
+            #[cfg(not(target_arch = "wasm32"))]
+            (Self::Remoto(r), _) => r.ativar_segundo_fator(segredo, codigo),
+            #[cfg(feature = "local")]
+            #[allow(unreachable_patterns)]
+            _ => Err(sessao_de_outro_motor()),
+        }
+    }
+
+    /// Desativa a da pessoa da sessão: a senha e um código.
+    ///
+    /// # Errors
+    /// Senha ou código que não confere; sem conexão.
+    pub fn desativar_segundo_fator(
+        &self,
+        sessao: &Sessao,
+        senha: &str,
+        codigo: &str,
+    ) -> Resultado<()> {
+        match (self, sessao) {
+            #[cfg(feature = "local")]
+            (Self::Local(m), Sessao::Local(s)) => m.desativar_segundo_fator(s, senha, codigo),
+            #[cfg(not(target_arch = "wasm32"))]
+            (Self::Remoto(r), _) => r.desativar_segundo_fator(senha, codigo),
+            #[cfg(feature = "local")]
+            #[allow(unreachable_patterns)]
+            _ => Err(sessao_de_outro_motor()),
+        }
+    }
+
+    /// O administrador desliga a verificação em duas etapas de outro usuário desta base.
+    ///
+    /// # Errors
+    /// Sem permissão; no servidor, as contas cuidam da própria.
+    pub fn desligar_segundo_fator_de(&self, sessao: &Sessao, usuario: Id) -> Resultado<()> {
+        match (self, sessao) {
+            #[cfg(feature = "local")]
+            (Self::Local(m), Sessao::Local(s)) => m.desligar_segundo_fator_de(s, usuario),
+            #[cfg(not(target_arch = "wasm32"))]
+            (Self::Remoto(_), _) => {
+                let _ = usuario;
+                Err(so_no_local(
+                    "Desligar a verificação em duas etapas de outra pessoa",
+                ))
+            }
             #[cfg(feature = "local")]
             #[allow(unreachable_patterns)]
             _ => Err(sessao_de_outro_motor()),

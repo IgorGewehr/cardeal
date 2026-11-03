@@ -157,6 +157,10 @@ impl Comando for LancarNotaManual {
                 repo.inserir_item(item)?;
             }
         }
+        // Sem XML não há número de pedido: liga só ao único pedido em aberto do fornecedor.
+        let produtos: Vec<cardeal_kernel::Id> =
+            itens.iter().filter_map(|i| i.produto_casado).collect();
+        crate::pedido::sqlite::ligar_na_importacao(nota.id, fornecedor, &[], &produtos, ctx, uow)?;
 
         let itens_nao_casados = itens
             .iter()

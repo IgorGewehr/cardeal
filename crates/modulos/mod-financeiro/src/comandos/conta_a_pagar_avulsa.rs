@@ -92,6 +92,7 @@ pub fn lancar_conta_a_pagar_avulsa(
             parcelas: 1,
             primeiro_vencimento: vencimento,
             intervalo_dias: 0,
+            cronograma: None,
             observacao: Some(dados.observacao),
             categoria: None,
             origem_modulo: dados.origem_modulo,

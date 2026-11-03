@@ -136,6 +136,12 @@ pub(super) enum Dlg {
         /// "Cadastrar cliente": o formulário do cadastro rápido, quando aberto.
         novo: Option<crate::pessoa::EstadoPessoa>,
     },
+    /// `F4`: o vendedor da venda (quem ganha a comissão).
+    Vendedor {
+        busca: String,
+        /// A linha destacada na lista.
+        sel: usize,
+    },
     /// `Shift+F5`: o desconto no total da venda.
     DescontoTotal {
         texto: String,
@@ -183,6 +189,10 @@ pub(super) enum Acao {
     AbrirCliente,
     /// Um cliente foi escolhido (`None` = consumidor não identificado).
     EscolherCliente(Option<(Id, String)>),
+    /// `F4`.
+    AbrirVendedor,
+    /// Um vendedor foi escolhido (`None` = venda sem vendedor, sem comissão).
+    EscolherVendedor(Option<(Id, String)>),
     /// `Enter` no diálogo de consulta de preço.
     ConsultarPreco,
     /// Imprimir o cupom fiscal (DANFCE) da NFC-e da última venda.
@@ -207,6 +217,10 @@ pub struct EstadoTelaPdv {
     pub(super) clientes: Vec<ItemPessoa>,
     /// O cliente identificado na venda atual, com o nome para mostrar.
     pub(super) cliente: Option<(Id, String)>,
+    /// Quem o `F4` oferece: os usuários ativos da empresa.
+    pub(super) vendedores: Vec<(Id, String)>,
+    /// O vendedor da venda atual (vale para uma venda só), com o nome para mostrar.
+    pub(super) vendedor: Option<(Id, String)>,
     /// Preço mínimo por produto já consultado (`None` = o estoque não sabe: sem custo ou margem).
     pub(super) minimos: std::collections::HashMap<Id, Option<Dinheiro>>,
     pub(super) caixa_sel: Option<Id>,
@@ -246,12 +260,15 @@ pub struct EstadoTelaPdv {
     pub(super) geracao_fiscal: u64,
     /// A impressão do PDV (bobina, comprovante automático, rodapé).
     pub(super) impressao: mod_pdv::ImpressaoPdv,
+    /// A NFC-e da última venda, esperando sair (autorizada ou em contingência) para o cupom
+    /// fiscal ser impresso sozinho.
+    pub(super) imprimir_nfce_quando_sair: Option<Id>,
 }
 
 impl Default for EstadoTelaPdv {
     fn default() -> Self {
         Self {
-            terminal: Id::novo(),
+            terminal: crate::maquina::terminal(),
             caixas: Vec::new(),
             contas_caixa: Vec::new(),
             tabelas: Vec::new(),
@@ -259,6 +276,8 @@ impl Default for EstadoTelaPdv {
             produtos: Vec::new(),
             clientes: Vec::new(),
             cliente: None,
+            vendedores: Vec::new(),
+            vendedor: None,
             minimos: std::collections::HashMap::new(),
             caixa_sel: None,
             tabela_sel: None,
@@ -283,6 +302,7 @@ impl Default for EstadoTelaPdv {
             nfce_ultima: None,
             geracao_fiscal: 0,
             impressao: mod_pdv::ImpressaoPdv::default(),
+            imprimir_nfce_quando_sair: None,
         }
     }
 }
@@ -323,6 +343,9 @@ impl EstadoTelaPdv {
             },
         ) {
             self.clientes = c;
+        }
+        if let Ok(v) = motor.consultar(sessao, "pdv.vendedores.v1", &mod_pdv::VendedoresDoPdv) {
+            self.vendedores = v;
         }
 
         if self.caixa_sel.is_none() {
@@ -372,6 +395,27 @@ impl EstadoTelaPdv {
                 )
                 .ok()
                 .flatten();
+        }
+        self.imprimir_se_saiu();
+    }
+
+    /// O cupom fiscal da última venda sai sozinho quando a NFC-e sai — autorizada ou em
+    /// contingência. Rejeitada ou denegada, não: o aviso da venda já mostra o motivo.
+    pub(super) fn imprimir_se_saiu(&mut self) {
+        let (Some(id), Some(n)) = (self.imprimir_nfce_quando_sair, self.nfce_ultima.as_ref())
+        else {
+            return;
+        };
+        if n.id != id {
+            return;
+        }
+        match n.estado {
+            mod_fiscal::EstadoDocumento::Autorizada | mod_fiscal::EstadoDocumento::Contingencia => {
+                self.pendentes.push(Acao::ImprimirNfce(id));
+                self.imprimir_nfce_quando_sair = None;
+            }
+            mod_fiscal::EstadoDocumento::Pendente | mod_fiscal::EstadoDocumento::Incerta => {}
+            _ => self.imprimir_nfce_quando_sair = None,
         }
     }
 

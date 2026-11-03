@@ -46,6 +46,8 @@ pub mod dinheiro;
 pub mod documento;
 pub mod erro;
 pub mod id;
+pub mod municipio;
+mod municipios_dados;
 pub mod percentual;
 pub mod planilha;
 pub mod quantidade;

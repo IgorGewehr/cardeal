@@ -32,9 +32,34 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   já estão feitos — a onda 4 fechou). Onda 5: **inventário com contagem cega**, **transferência entre locais**, **produto a partir da
   nota com nome padronizado por dicionário**, **validade e perdas** e **custo-hora do técnico** feitos
   (2026-10-13); do **ST/MVA no custo**, a parte determinística está feita (ICMS-ST, FCP-ST, IPI e desconto do XML
-  entram no custo e no título); resta estimar ST pela MVA quando a nota não traz o valor (tabelas + contador). A **apuração e
-  o pagamento da comissão do vendedor** estão feitos (2026-10-14); fora: comissão nas vendas do PDV (o cupom
-  tem operador, não vendedor) e o ajuste por devolução (a devolução ainda não é persistida).
+  entram no custo e no título); a estimativa do ST pela MVA quando a nota não traz o valor também (2026-10-28). A **apuração e
+  o pagamento da comissão do vendedor** estão feitos (2026-10-14), com o ajuste pela devolução de venda
+  (2026-10-27) e a **comissão nas vendas do PDV** (2026-10-28: o cupom ganha o vendedor no `F4`, a venda vira
+  "venda comissionável" no `vendas` e o estorno do cupom a tira ou estorna a comissão). O **SPED** (EFD ICMS/IPI)
+  é gerado no Cardeal desde 2026-10-28 (`mod_fiscal::efd`, dos XMLs das notas emitidas e das compras que entraram;
+  só regime normal; a EFD-Contribuições fica fora — acaba em 2027 com a CBS). A **cotação e o pedido de
+  compra** (2026-10-31, a última pendência de compras das ondas passadas): a cotação compara as propostas
+  item a item (com os fretes somados) e gera um pedido por fornecedor; o pedido aprovado se liga às notas
+  (pelo `xPed` do XML ou pelo único em aberto do fornecedor), a conferência aponta o que diverge (a nota
+  que diverge não entra sozinha), a confirmação recebe e o estorno desfaz; o saldo que não vem se encerra;
+  o radar de reposição mostra o que está a caminho; o pedido vai ao fornecedor em PDF ou pelo WhatsApp.
+  **Onda 8 começou** com a **verificação em duas etapas** (2026-10-31, `cardeal_auth::totp`, doc 08 §2.1.1):
+  TOTP com códigos de recuperação no login local e no da conta do servidor (desktop e navegador), o
+  segredo selado pelo cofre, o bloqueio progressivo valendo também para o código. O **grupo de CNPJs**
+  (trocar de CNPJ sem novo login, cadastrar outro, Financeiro › Grupo consolidado) e a **gestão de
+  usuários do banco local** (cadastrar com senha inicial trocada no primeiro acesso, papel, senha
+  provisória, desativar/reativar, sem escalada de privilégio — doc 08 §2.1.2) também (2026-10-31).
+  Os **primeiros passos** (`cardeal-desktop/src/primeiros_passos.rs`) abrem depois do login para quem
+  administra enquanto falta algum dos 7 (empresa, fiscal, produtos, bancos, clientes, equipe, primeira
+  venda), cada um conferido pelos dados — não por "marquei como feito" — e com o botão para a tela;
+  "Não mostrar mais" vale para o computador e a paleta (`Ctrl+K`) reabre. O **Portal do Contador**
+  (`mod_financeiro::contador`, migração v15, doc `modulos/financeiro.md` §6.8): Financeiro › Contador
+  com os apontamentos (o contador pede, a empresa responde, a Visão geral avisa) e o DE/PARA do
+  plano, que o pacote do mês usa no `Lançamentos AAAA-MM.csv` (ISO-8859-1) para o sistema do
+  escritório. A **transferência entre filiais** (`mod_compras::transferencia`, compras v13, doc
+  `modulos/compras.md` §14): Estoque › Entre filiais envia com a NF-e de transferência (5152/6152, CSOSN
+  400, `mod_fiscal::transferencia`), a filial recebe só com ela autorizada, o Razão espelha pela conta
+  corrente com empresas do grupo (papel novo `ContaCorrenteGrupo`); só mesma raiz de CNPJ e Simples.
   Onda 6 (Financeiro 2) começou: **conciliação com alerta de pendências e saldo banco × sistema**,
   **lançamento pré-preenchido pelo último da pessoa**, **DFC indireto**, **cheques**, **balancete/diário** e o
   **pacote do contador** (PDF + `.xlsx`) e a **régua de cobrança** (fila do dia com envio de um clique) feitos
@@ -45,12 +70,16 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   documento criado na venda sem rede, fila, transmissão em segundo plano (tarefa no despacho), conferência
   pela chave antes de reemitir, área Notas fiscais — e o **DANFCE** (80 mm, QR Code), o **cancelamento** e a
   **inutilização** como pedidos na fila, e o **estorno da venda** no PDV com a NFC-e anulada pela fila.
-  O MVP do backlog do `docs/21-licoes-do-gestao-raiz.md` §5 (itens 1–8) está feito. Próximo: o
-  resto do §5 (DFe com OK do usuário, parcelas e estorno da entrada de compra, pacote do contador
-  com XMLs…); a 1ª autorizada no RS espera os dados do usuário.
+  O MVP do backlog do `docs/21-licoes-do-gestao-raiz.md` §5 (itens 1–8) e os itens 10 (parcelas e
+  estorno da entrada de compra), 11 (XMLs no pacote do contador) e 12 (prazo de cancelamento visível)
+  estão feitos, o `sefaz-api` devolve o XML do evento (2026-10-26, com a busca do que falta) e as notas
+  de compra chegam pela SEFAZ (DFe, item 9, 2026-10-26); o 13 (Simples, orçamento, score) também.
+  A contingência offline da NFC-e também (2026-10-27). A 1ª autorizada no RS espera os dados do usuário. O `sefaz-api` publicado precisa ser atualizado para as mudanças valerem em
+  produção, e o DFe ainda não foi conferido contra o Ambiente Nacional (pede o certificado com a
+  senha).
 - **Pendência de confiança:** as tabelas do Simples e as alíquotas precisam ser conferidas com o
-  contador; o ST/IPI **da nota** já entra no custo (2026-10-13), mas a estimativa de ST pela MVA (sem o valor na
-  nota) ainda não.
+  contador; o ST/IPI **da nota** entra no custo (2026-10-13) e o ST estimado pela MVA (sem o valor na nota)
+  entra quando quem confirma decide (2026-10-28) — as MVAs e alíquotas do cadastro precisam do contador.
 
 ## 1. O que existe, com precisão (tabela dos crates de 2026-09-05; as sessões seguintes, abaixo, a atualizam)
 
@@ -576,7 +605,7 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   Resultado (pasta `Contador AAAA-MM` com PDF de DRE/DFC/balancete e planilha com essas tabelas + diário).
   Validação: testes do ZIP (lido de volta, CRC conferido), da planilha e do PDF; a amostra abriu no Excel
   (abas, formato, negrito, painel congelado); o pacote real passou no `System.IO.Packaging` do .NET. Envio
-  automático (SMTP) fica para quando houver configuração de e-mail; Portal do Contador é da onda 8.
+  automático (SMTP) fica para quando houver configuração de e-mail; o Portal do Contador veio na onda 8 (§6.8 do financeiro).
 - **Régua de cobrança (2026-10-14, onda 6):** `mod_financeiro::regua` (régua padrão −3/0/1/7/15/30, etapa devida
   por parcela uma vez só, fila agrupada por cliente na etapa mais grave, mensagem redigida), migração `financeiro`
   v12, `ReguaDeCobranca`/`FilaDeCobranca`/`DefinirReguaDeCobranca`/`RegistrarCobranca` e duas permissões novas
@@ -688,6 +717,164 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
     `PapelDeFabrica::limites_padrao` (teto de desconto: Admin/Gerente ∞, Caixa/Vendedor 10%);
   - `cardeal-motor`: `sincronizar_papeis_de_fabrica` completa os papéis de fábrica gravados
     (permissões e limites, só acrescentando), e a impressão do plano inclui a política deles.
+- **Teto de desconto configurável (2026-10-20):** o padrão de fábrica fica (Admin/Gerente sem teto,
+  Caixa/Vendedor 10%) e o dono ajusta por papel em Configurações › Usuários e acesso:
+  - `mod_empresa`: `DefinirTetoDeDesconto` (`empresa.definir_teto_desconto.v1`) e
+    `TetosDeDesconto` (`empresa.tetos_desconto.v1`, com quantos usuários têm o papel);
+  - `RepositorioAuth::definir_limite` grava o limite inclusive em papel de fábrica (as permissões
+    seguem imutáveis); a sincronização só preenche limite ausente, então o ajuste fica;
+  - desktop: `tela_settings/tetos.rs`.
+- **Compras: parcelas da nota e estorno da entrada (2026-10-20, item 10 do doc 21):**
+  - `cardeal-fiscal`: `NotaFiscalXml.duplicatas` (`cobr/dup`: número, vencimento, valor);
+  - `mod_compras`: migração v6 `compras_nota_parcela`; `ParcelaCompra` e `conferir_parcelas`;
+    `ConfirmarEntrada.parcelas` (`confirmar_entrada_com_parcelas`); `EstornarEntrada`
+    (`compras.estornar_entrada.v1`, `compras.entrada.estornar`); consultas `ParcelasDaNota` e
+    `PreviaDoEstornoDaEntrada`; evento `compras.entrada_estornada.v1`;
+  - `mod_financeiro`: `DadosLancamentoTitulo.cronograma`, `desfazer_titulo_da_origem_comum`,
+    `situacao_do_titulo_da_origem`; `titulo_da_origem` prefere o título vivo;
+  - `mod_estoque`: `retirar_entradas_da_origem`, `entradas_vivas_da_origem`,
+    `SaldoLocal::estorno_de_entrada`;
+  - desktop: `tela_compras/parcelas.rs` e `tela_compras/estorno.rs`; "Confirmar entrada" aparece
+    na nota em conferência com tudo vinculado (esperava o estado `Conferida`, que nada alcança).
+- **Prazo de cancelamento visível (2026-10-20, item 12 do doc 21):** `ModeloFiscal::prazo_de_cancelamento_segundos`
+  e `DocumentoResumo::prazo_de_cancelamento` → `mod_fiscal::PrazoDeCancelamento`; o detalhe em Notas
+  fiscais e o `F11` do PDV mostram o tempo e avisam fora do prazo, sem bloquear.
+- **XMLs no pacote do contador (2026-10-20, item 11 do doc 21):**
+  - `cardeal-planilha`: o `zip` vira público, com `empacotar_comprimido` (deflate do `miniz_oxide`, que
+    já estava no grafo; erro em vez de pânico acima de 65.535 arquivos ou 4 GiB);
+  - `cardeal-fiscal`: o `RetornoSefaz.xml` do cancelamento e da inutilização é o XML do evento; o
+    simulado o devolve, e o `nfeProc` dele tem `dhEmi`;
+  - `mod_fiscal`: migração v5 (`xml_evento`), `Mudanca.xml_evento`, `NotasFiscaisDoMes`
+    (`fiscal.notas_do_mes.v1`), `NotaDoMes`, `SituacaoNoMes`, `XmlQueFalta`, `dia_da_emissao`;
+  - `mod_compras`: migração v7 (`xml`), a importação guarda o XML original (e o reimportar preenche o
+    que faltava), `importar_nota_da_sefaz` recebe o XML bruto, `NotasDeEntradaDoMes`
+    (`compras.notas_do_mes.v1`);
+  - desktop (`pacote_contador.rs`): `XMLs AAAA-MM.zip`, as seções "Notas fiscais do mês" e
+    "Pendências do mês" no PDF, e as abas "Notas emitidas" e "Notas de entrada" na planilha;
+  - `cardeal-pdf`: o sinal de menos (U+2212) sai como traço, não como "?".
+- **NF-e de venda (2026-10-27, fiscal.md §11 item 5, primeira parte):** `cardeal_kernel::municipio` (a
+  tabela do IBGE embutida — o código do município pelo nome, sem rede); `cardeal-fiscal`: `Nfe`,
+  `Destinatario`, `IndicadorIe`, `PortaFiscal::emitir_nfe` (HTTP `/nfe/emitir` e simulado); `mod-fiscal`:
+  `nfe_venda.rs` (`EmitirNfeDoPedido`, `DocumentoDoPedido`, `ConfigurarNfe`, `ConfiguracaoDaNfe`), migração
+  v10, `montar_nfe`/`destinatario_do_cliente`/`cfop_interestadual`, a fila pelos dois modelos (NF-e sem
+  contingência nem substituição), `DetalheDocumento.nfe`; desktop: Emitir NF-e no pedido faturado e a série em
+  Configurações › Fiscal. O DANFE A4 veio em seguida (`cardeal_pdf::danfe`, Code 128C próprio em
+  `cardeal_pdf::barras`, conferido com o zxing; desktop `danfe.rs`).
+- **Carta de correção da NF-e (2026-10-27, fiscal.md §7):** `cardeal-fiscal`:
+  `PortaFiscal::carta_de_correcao` (HTTP `/nfe/carta-correcao` com a sequência, e simulado); `mod-fiscal`:
+  `correcao.rs` (`EmitirCartaDeCorrecao`, `CartasDeCorrecao`, `decidir_carta`), migração v11, a fila leva as
+  cartas depois das notas, `ResumoFiscal.cartas_pendentes` (a vigia de fundo conta), `NotasDoMes.cartas`;
+  o pacote do contador leva as cartas e dá o nome 110112 ao cancelamento por substituição; desktop: Carta
+  de correção no detalhe da NF-e.
+- **Devolução ao fornecedor + NF-e de devolução (2026-10-27, compras.md §5, fiscal.md §7):** `sefaz-api`
+  8075fde (`impostoDevol`, FCP do ST, o vNF com os dois; a validação do ST pelo teto); `cardeal-fiscal`:
+  `TributosDaCompra` (o leitor do XML guarda ICMS/ST/FCP-ST campo a campo), `DevolucaoDoItem` e
+  `Nfe.devolvidos`; `mod-estoque`: `devolver_parte_da_entrada`; `mod-financeiro`:
+  `abater_titulo_da_origem_comum`; `mod-compras`: `devolucao.rs` (`DevolverAoFornecedor`,
+  `EmitirNfeDaDevolucao`, `DevolucoesDaNota`, `dados_da_nfe`), migração v9, o estorno recusa nota com
+  devolução; `mod-fiscal`: `devolucao_compra.rs` (`montar_nfe_de_devolucao`,
+  `emitir_nfe_de_devolucao_comum`, `DocumentoDaDevolucao`); desktop: Compras › nota › Devolver ao
+  fornecedor, a lista das devoluções com a NF-e (emitir, situação, DANFE) e o DANFE com ST/IPI devolvidos.
+- **ICMS-ST estimado pela MVA (2026-10-28, compras.md §5, fecha a pendência da onda 5):** `mod-compras`:
+  `st.rs` (`mva_ajustada`, `estimar_st`, `EstimativaDeStDaNota`), migração v10 (`st_estimado`),
+  `ConfirmarEntrada.incluir_st_estimado` (o custo e a guia `compras_st`), o estorno que desfaz, a confirmação
+  automática que para; desktop: o quadro "ICMS-ST estimado pela MVA" na confirmação da entrada.
+- **Calendário de obrigações (2026-10-28, fiscal.md §7):** `mod-fiscal`: `calendario.rs` (`pascoa`,
+  `feriados`, `prorrogar`/`antecipar`/`dia_util`/`ultimo_dia_util`, `obrigacoes_do_mes` por regime,
+  `ObrigacoesDoMes` com as do Cardeal); desktop: o cartão "Obrigações" na Visão geral
+  (`tela_financeiro/obrigacoes.rs`).
+- **NFS-e da OS (2026-10-28, fiscal.md §7):** `sefaz-api` 5726b25 (a emissão no ADN lê `chaveAcesso`/
+  `nfseXmlGZipB64`; a consulta pelo DPS busca a nota pela chave); `cardeal-fiscal`: `nfse.rs` (`Nfse`,
+  `TomadorNfse`, `RetornoNfse`, `CancelamentoNfse`), `PortaFiscal::emitir_nfse`/`consultar_nfse_por_dps`/
+  `cancelar_nfse` (HTTP e simulado); `mod-fiscal`: `nfse.rs` + `nfse/sqlite.rs` (`ConfigurarNfse`,
+  `ConfiguracaoDaNfse`, `EmitirNfseDaOs`, `NfseDaOs`, `CancelarNfse`, `montar_nfse_da_os`, `decidir_nfse`), migração
+  v12, a fila leva as NFS-e depois das cartas, `NotasDoMes.nfse`; `mod-fiscal` passa a depender do `mod-os`;
+  desktop: Configurações › Fiscal › NFS-e e OS faturada › NFS-e (emitir, situação, cancelar), a vigia e o
+  pacote do contador.
+- **Devolução de venda + NF-e de entrada + ajuste de comissão (2026-10-27, vendas.md §5, fiscal.md §7):**
+  `mod-vendas`: `comandos/devolucao.rs` (`SolicitarDevolucao`, `AprovarDevolucao`, `CancelarDevolucao`,
+  `ConcluirDevolucao`, `DevolucoesDoPedido`, `DevolucoesPendentes`, `devolucao_por_id`), migração v3
+  (`vendas_devolucao`, `vendas_devolucao_item`, `vendas_comissao_ajuste`), `Devolucao::solicitar_descontando`,
+  o receituário com o reembolso opcional e `estornar_comissao`, a apuração líquida de devoluções, o pagamento
+  que desconta os estornos, `LinhaComissao.devolucao`; `mod-estoque`: `devolver_parte_da_saida`;
+  `mod-financeiro`: o abatimento serve as duas espécies e sai sem dinheiro; `mod-fiscal`:
+  `devolucao_venda.rs` (`EmitirNfeDaDevolucaoDeVenda`, `DocumentoDaDevolucaoDeVenda`,
+  `cfop_da_devolucao_de_venda`), o Reenviar remonta essa nota; `cardeal-auth`: o Vendedor pede devolução;
+  desktop: Vendas › pedido faturado › Devoluções (pedir, aprovar, concluir, cancelar, NF-e de entrada, DANFE).
+- **Substituição da NFC-e sem resposta (2026-10-27, fecha o fiscal.md §11 item 3):** `sefaz-api`
+  43c98f0 (o `/nfe/cancelar` com `chaveSubstituta` = evento 110112); `cardeal-fiscal`
+  `PortaFiscal::cancelar_por_substituicao`; `mod-fiscal`: migração v9, `pede_substituicao`,
+  `nao_reemitir`, `pedido_da_substituida`, o pedido `CancelarPorSubstituicao`, a fila em funções
+  menores (`processar`, `decidir_documento`, `criar_substituta`). A substituta sai sempre em
+  contingência; a original é cancelada por substituição ou inutilizada, nunca emitida de novo.
+- **Série da NFC-e por caixa (2026-10-27, fiscal.md §11 item 4):** `mod-fiscal` `terminal.rs`
+  (`DefinirSerieDoTerminal`, `SeriesDosTerminais`, migração v8), a emissão pela série do terminal do
+  cupom, `ConfigurarNfce` recusando a série de um caixa; desktop: `maquina::terminal()` (a
+  identidade persistente da máquina) no PDV e Configurações › Fiscal › Série da NFC-e por caixa.
+  Achado: o terminal do PDV era um `Id::novo()` a cada abertura do app — o número da venda
+  recomeçava do 1 toda vez.
+- **Impressão direta na térmica (2026-10-27, fiscal.md §11 item 2):** `cardeal-pdf` ganhou a interface
+  `Escrita` (o layout da bobina escreve nela; `Cursor` é o PDF) e o `escpos` (`danfce_escpos`,
+  `comprovante_escpos`, `teste_escpos`, `OpcoesEscPos`; QR em `GS v 0`, PC860 opcional). Desktop:
+  `maquina` (a preferência desta máquina em `maquina.json`), `impressora` (spooler do Windows em
+  modo cru via `windows-sys`, `lp -o raw` fora dele, TCP 9100; `instaladas()`), Configurações ›
+  Impressão › Impressora deste computador, e o "imprimir sozinho" passa a imprimir o cupom fiscal
+  quando a NFC-e sai. Não conferido numa térmica de verdade.
+- **Contingência off-line da NFC-e (2026-10-27, fiscal.md §11 item 3):** `sefaz-api` 7d7faa6 (o
+  `naoEnviado` — o pedido que com certeza não chegou à SEFAZ); `cardeal-fiscal`: `RetornoSefaz::nao_enviado`
+  e `sefaz_fora`, `PortaFiscal::preparar_nfce_em_contingencia`/`transmitir_nfce_em_contingencia`
+  (HTTP e simulado, `simular_sefaz_fora`); `mod-fiscal`: estado `Contingencia` (migração v7),
+  `pede_contingencia`/`em_contingencia`, transmissão do mesmo XML, resumo e faixa com o prazo de 24 h;
+  `cardeal-pdf`: o aviso no DANFCE; desktop: imprimir o cupom da contingência no PDV, nas vendas do dia e
+  nas Notas fiscais. Achado: a vigia de fundo só olhava pendentes e incertas. Pendente: a nota incerta em
+  contingência com outro número (cancelamento por substituição, 110112).
+- **Score e curva de clientes (2026-10-26, fecha o item 13 do doc 21):** `mod_financeiro::pagamento`
+  (`avaliar`, `PerfisDePagamento`, `perfis_de_pagamento` — só a prazo, tolerância de 3 dias, nota
+  0–1000, selos), `mod_vendas::vendas_por_cliente`, `mod_pdv::CurvaDeClientes` (`montar_curva`:
+  ABC relativa, ritmo, Sumido/Novo/Ativo/Esporádico, ação), permissão nova `pdv.clientes.ver`
+  (negada ao Operador de Caixa); desktop: Clientes › "Curva de clientes" e o selo de pagamento na
+  ficha. Desvio do `clientes.md`: o score é calculado na hora no financeiro, não gravado por evento.
+- **Orçamento por conta (2026-10-26, item 13 do doc 21, segunda parte):** `mod_financeiro::orcamento`
+  (`OrcamentoDoAno`, `DefinirOrcamentoDaConta`, `CopiarOrcamentoDoAno`, `desvio` no sentido do
+  resultado), migração `financeiro` v14 (`financeiro_orcamento`), permissão
+  `financeiro.orcamento.editar`; `ComparativoDre.orcado`; `dre::montar_mantendo`/`linha_orcada`;
+  `cardeal_ledger::contas_de_resultado`; desktop: colunas "Orçado"/"Real × orçado" na DRE e a visão
+  Resultado › Orçamento.
+- **Resumo do Simples (2026-10-26, item 13 do doc 21, primeira parte):** `mod_estoque::simples`
+  (puro: `rbt12` pela lei — 12 meses anteriores, anualização do primeiro ano, histórico curto —,
+  `resumir`, avisos de sublimite/limite/MEI), migração `estoque` v14 (`estoque_simples_historico`,
+  `estoque_simples_receita_anterior`), `ResumoDoSimplesDoMes`, `HistoricoDoSimplesDaEmpresa`,
+  `DefinirHistoricoDoSimples`, permissão nova `estoque.preco.simples.ver`; o preço sugerido passa a
+  usar o mesmo RBT12; desktop: Financeiro › Resultado › "Simples Nacional".
+- **Notas de compra pela SEFAZ — DFe (2026-10-26, item 9 do doc 21):**
+  - `sefaz-api` (842576f): `/nfe/dfe/distribuicao`, `/nfe/dfe/consulta-chave`, `/nfe/manifestacao`;
+  - `cardeal-fiscal`: `PortaFiscal::distribuicao_dfe(cnpj, uf, desde) -> PaginaDfe`,
+    `consultar_dfe_por_chave`, `manifestar`; `ler_resumo_nfe`/`ler_evento`; saem `ResumoDfe`,
+    `XmlNota` e `baixar_xml`; o simulado entrega como a SEFAZ (resumo, ciência, NSU novo, 656);
+  - `mod-fiscal`: `ambiente_da_empresa`;
+  - `mod-compras`: migração v8 (`compras_dfe_estado` por ambiente, `compras_dfe_nota`), a tarefa
+    `compras.buscar_notas_na_sefaz`, `NotasNaSefaz`, `HoraDeBuscarNaSefaz`, `ImportarDeNovoDaSefaz`;
+    sai `verificar_notas_na_sefaz` (rodava a rede dentro de uma transação); passa a depender de
+    `mod-fiscal` e `mod-empresa` (só com o SQLite);
+  - desktop: `fundo::TarefaDeFundo` (a transmissão fiscal passou a usar), `compras_fundo` (a vigia de
+    minuto em minuto), e em Compras o botão "Buscar na SEFAZ" e a seção "Notas que chegaram pela
+    SEFAZ".
+- **XML do evento e busca do que falta (2026-10-26, fecha o item 11 do doc 21):**
+  - `sefaz-api` (bc58e77, outro repositório): `procEventoNFe` no cancelamento e na CC-e,
+    `procInutNFe` na inutilização, `xmlAssinado` no desfecho incerto, o `nfeProc` da denegada, e na
+    consulta `xml` (com o `xmlAssinado`, conferido pela chave e pelo digest) e `xmlCancelamento`; a
+    consulta da cancelada volta `cancelado` com o 101. Testes com a assinatura conferida dentro do
+    envelope;
+  - `cardeal-fiscal`: `RetornoSefaz.xml_assinado`/`xml_cancelamento`; `consultar_documento` leva a
+    nota assinada; o simulado imita tudo isso;
+  - `mod_fiscal`: migração v6 (`xml_assinado`, `xml_a_buscar`); `Mudanca.xml_assinado`/`buscar_xml`;
+    `decidir_busca` e `Busca` (puras); a fila busca os XMLs de documentos fechados sem mudar o estado;
+    `BuscarXmlsQueFaltam` (`fiscal.buscar_xmls_que_faltam.v1`); `ResumoFiscal::xmls_a_buscar`;
+    `XmlQueFalta::NotaABuscar`;
+  - desktop: o pacote do contador pede a busca e dispara a fila; a vigia dispara quando há busca na
+    hora;
+  - achado: um texto das pendências saía com o recuo do código no meio (faltava a continuação de
+    linha) — corrigido, com teste.
 - **Inventário com contagem cega (2026-10-13):** migração `estoque` v11 (`estoque_inventario`,
   `estoque_contagem_item`), comandos `criar_inventario`/`iniciar_contagem`/`registrar_contagem`/
   `encerrar_inventario`/`cancelar_inventario` (`.v1`) e consultas `inventarios`/`posicao_do_inventario`.
@@ -729,8 +916,8 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   entrada vira bruto − desconto + rateio + ST + IPI e o total da nota passa a ser o `vNF`. **Corrige um erro real:**
   o título a pagar saía menor que o boleto em toda nota com ST ou IPI. A conferência mostra a composição do
   custo. Testes: 1 do leitor + 1 de integração (custo médio e título com o `vNF`).
-- **Dívidas conhecidas:** tabelas do Simples a conferir com o contador; a 6ª faixa e a anualização de
-  RBT12 (ver ADR-0018); o PDV só avisa preço abaixo do mínimo de empate (etiqueta "abaixo do mínimo" na linha do
+- **Dívidas conhecidas:** tabelas do Simples a conferir com o contador; a 6ª faixa (ver ADR-0018; a
+  anualização do RBT12 foi feita em 2026-10-26); o PDV só avisa preço abaixo do mínimo de empate (etiqueta "abaixo do mínimo" na linha do
   cupom, depois do desconto); não bloqueia a venda e não é o painel de margem completo.
 
 ## 2. Decisão estratégica registrada: por que Rust, não C#/.NET

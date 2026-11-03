@@ -235,7 +235,14 @@ impl PapelDeFabrica {
             },
             Self::OperadorCaixa => PoliticaPapel {
                 tudo: false,
-                nega_prefixo: &["estoque.custo", "vendas.margem", "pdv.margem", "relatorio"],
+                // `pdv.clientes`: a curva de clientes mostra quanto cada um compra e como paga.
+                nega_prefixo: &[
+                    "estoque.custo",
+                    "vendas.margem",
+                    "pdv.margem",
+                    "pdv.clientes",
+                    "relatorio",
+                ],
                 modulos: &["pdv"],
                 // `fiscal.ver`/`fiscal.emitir`: sem eles a venda do caixa sai sem NFC-e, em
                 // silêncio (o PDV só emite com as duas). Cancelar e configurar, não.
@@ -256,10 +263,14 @@ impl PapelDeFabrica {
                 tudo: false,
                 nega_prefixo: &["financeiro", "estoque.custo", "vendas.margem"],
                 modulos: &[],
+                // A devolução: o vendedor pede e acompanha; aprovar e concluir (o dinheiro e o
+                // estoque voltam) fica com o gerente.
                 concede_prefixo: &[
                     "vendas.orcamento",
                     "vendas.pedido",
                     "vendas.venda",
+                    "vendas.devolucao.ver",
+                    "vendas.devolucao.solicitar",
                     "clientes",
                 ],
                 concede_sufixo: &[],
@@ -282,7 +293,8 @@ impl PapelDeFabrica {
                 tudo: false,
                 nega_prefixo: &[],
                 modulos: &[],
-                concede_prefixo: &["relatorio"],
+                // O Portal do Contador: o DE/PARA e os apontamentos são dele.
+                concede_prefixo: &["relatorio", "financeiro.contador"],
                 concede_sufixo: &[".ver", ".listar", ".consultar", ".exportar"],
             },
             Self::Auditor => PoliticaPapel {
@@ -394,6 +406,10 @@ mod testes {
     const CATALOGO: &[&str] = &[
         "financeiro.pulso.ver",
         "financeiro.receber.baixar",
+        "financeiro.contador.ver",
+        "financeiro.contador.de_para",
+        "financeiro.contador.apontar",
+        "financeiro.apontamento.responder",
         "financeiro.conta.editar",
         "financeiro.caixa.abrir",
         "razao.lancamento.ver",
@@ -507,6 +523,10 @@ mod testes {
         assert!(p.contains("relatorio.exportar"));
         assert!(!p.contains("financeiro.receber.baixar"));
         assert!(!p.contains("vendas.pedido.faturar"));
+        // O Portal do Contador: o DE/PARA e os apontamentos são dele; responder é da empresa.
+        assert!(p.contains("financeiro.contador.de_para"));
+        assert!(p.contains("financeiro.contador.apontar"));
+        assert!(!p.contains("financeiro.apontamento.responder"));
     }
 
     #[test]

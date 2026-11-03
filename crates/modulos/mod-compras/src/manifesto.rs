@@ -118,6 +118,24 @@ const PERMISSOES: &[Permissao] = &[
         Some("cotacao"),
     ),
     perm(
+        "compras.transferencia.ver",
+        "Ver as transferências de mercadoria entre as filiais do grupo",
+        Risco::Baixo,
+        None,
+    ),
+    perm(
+        "compras.transferencia.enviar",
+        "Enviar mercadoria a outra filial (NF-e de transferência) e cancelar o envio",
+        Risco::Medio,
+        None,
+    ),
+    perm(
+        "compras.transferencia.receber",
+        "Receber a mercadoria transferida por outra filial",
+        Risco::Medio,
+        None,
+    ),
+    perm(
         "compras.pedido.ver",
         "Consultar pedidos de compra",
         Risco::Baixo,
@@ -127,6 +145,12 @@ const PERMISSOES: &[Permissao] = &[
         "compras.pedido.criar",
         "Criar pedido de compra",
         Risco::Baixo,
+        None,
+    ),
+    perm(
+        "compras.pedido.aprovar",
+        "Aprovar, cancelar e encerrar pedido de compra",
+        Risco::Medio,
         None,
     ),
     perm(
@@ -150,6 +174,12 @@ const PERMISSOES: &[Permissao] = &[
     perm(
         "compras.entrada.confirmar",
         "Confirmar entrada (gera estoque e título)",
+        Risco::Alto,
+        None,
+    ),
+    perm(
+        "compras.entrada.estornar",
+        "Estornar a entrada de uma nota (tira do estoque e cancela a conta a pagar)",
         Risco::Alto,
         None,
     ),
@@ -200,6 +230,7 @@ const CONTAS_REQUERIDAS: &[ContaPadrao] = &[
 const EVENTOS_PUBLICADOS: &[&str] = &[
     "compras.nota_confirmada.v1",
     "compras.entrada_a_conferir.v1",
+    "compras.entrada_estornada.v1",
     "compras.devolucao_concluida.v1",
 ];
 

@@ -14,6 +14,7 @@ cardeal-kernel.workspace  = true
 cardeal-modkit = { path = "../cardeal-modkit", default-features = false }
 egui.workspace         = true
 egui_extras.workspace  = true
+qrcodegen.workspace    = true
 serde.workspace        = true
 tracing.workspace      = true
 

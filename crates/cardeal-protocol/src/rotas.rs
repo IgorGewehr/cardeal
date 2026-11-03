@@ -8,6 +8,20 @@ pub const ROTA_SESSAO: &str = "/v1/sessao";
 /// Troca de senha da conta (`POST`).
 pub const ROTA_SENHA: &str = "/v1/sessao/senha";
 
+/// O login com o código da verificação em duas etapas (`POST`, [`crate::PedidoLoginComCodigo`]).
+/// Rota própria para o cliente antigo continuar entrando nas contas sem o segundo fator.
+pub const ROTA_SESSAO_CODIGO: &str = "/v1/sessao/codigo";
+
+/// A verificação em duas etapas da conta: `GET` diz se está ativa; `POST` ativa
+/// ([`crate::PedidoAtivarSegundoFator`]) e devolve os códigos de recuperação.
+pub const ROTA_SEGUNDO_FATOR: &str = "/v1/sessao/segundo-fator";
+
+/// Um segredo novo para o aplicativo autenticador (`POST`, nada é gravado).
+pub const ROTA_SEGUNDO_FATOR_PROPOSTA: &str = "/v1/sessao/segundo-fator/proposta";
+
+/// Desliga a verificação em duas etapas da conta (`POST`, [`crate::PedidoDesativarSegundoFator`]).
+pub const ROTA_SEGUNDO_FATOR_DESLIGAR: &str = "/v1/sessao/segundo-fator/desligar";
+
 /// Prontidão do servidor (`GET`), para o balanceador e o Cloudflare.
 pub const ROTA_SAUDE: &str = "/saude";
 

@@ -142,9 +142,25 @@ fn cp1252(c: char) -> u8 {
         '‘' | '’' => 0x27,
         '“' | '”' => 0x22,
         '•' => 0x95,
-        '–' => 0x96,
+        // O sinal de menos (U+2212, o "(−) Deduções" da DRE) não existe no WinAnsi: vai o
+        // traço meio, que tem o mesmo desenho e a mesma largura.
+        '–' | '−' => 0x96,
         '—' => 0x97,
         '™' => 0x99,
         _ => b'?',
+    }
+}
+
+#[cfg(test)]
+mod testes {
+    use super::*;
+
+    #[test]
+    fn o_sinal_de_menos_sai_como_traco_e_nao_como_interrogacao() {
+        assert_eq!(
+            literal_pdf("(−) Deduções"),
+            b"(\\(\x96\\) Dedu\xe7\xf5es)".to_vec()
+        );
+        assert_eq!(literal_pdf("☃"), b"(?)".to_vec());
     }
 }

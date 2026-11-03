@@ -7,15 +7,22 @@
 //! Ordens de Serviço e Estoque; as demais mostram `tela_em_construcao` (backend já responde).
 
 mod aviso_defasados;
+mod compras_fundo;
 mod comprovante;
 mod danfce;
+mod danfe;
 #[cfg(feature = "demo")]
 mod demo_app;
 mod fiscal_fundo;
+mod fundo;
 mod importacao_planilha;
+mod impressora;
 mod login;
+mod maquina;
 mod pagamento;
 mod pessoa;
+mod primeiros_passos;
+mod sped;
 mod tela_agenda;
 mod tela_clientes;
 mod tela_compras;
@@ -36,12 +43,13 @@ use std::path::PathBuf;
 
 use cardeal_cliente::atualizador::{self, ResultadoAplicacao, VersaoDisponivel};
 use cardeal_cliente::{Motor, Sessao};
+use cardeal_kernel::Id;
 use cardeal_modkit::Icone;
 use cardeal_ui::atoms::{Botao, BotaoChevron, Divisor, Rotulo};
 use cardeal_ui::molecules::Campo;
 use cardeal_ui::organisms::{
-    notificar, Cartao, ItemComando, ItemSidebar, Janela, Notificacao, Notificacoes, PaletaComandos,
-    Sidebar,
+    notificar, Cartao, Dialogo, ItemComando, ItemSidebar, Janela, Notificacao, Notificacoes,
+    PaletaComandos, Sidebar,
 };
 use cardeal_ui::tokens::{instalar_estilo, instalar_fontes, Espaco, Tema, TemaUi};
 use eframe::egui;
@@ -294,6 +302,11 @@ const ITENS_PALETA: &[ItemComando] = &[
         grupo: "Ir para",
     },
     ItemComando {
+        id: "primeiros-passos",
+        rotulo: "Primeiros passos — o que falta para operar",
+        grupo: "Ação",
+    },
+    ItemComando {
         id: "tema",
         rotulo: "Alternar tema (claro/escuro)",
         grupo: "Ação",
@@ -401,9 +414,20 @@ struct EstadoAutenticado {
     compras: tela_compras::EstadoTelaCompras,
     agenda: tela_agenda::EstadoTelaAgenda,
     notas: tela_notas::EstadoNotas,
+    /// Os CNPJs do grupo em que a pessoa entra (com mais de um, a barra lateral troca).
+    empresas: Vec<cardeal_cliente::EmpresaDoGrupo>,
 }
 
 impl EstadoAutenticado {
+    /// O nome do CNPJ da sessão.
+    fn nome_da_empresa(&self, motor: &Motor) -> Option<String> {
+        let atual = motor.empresa_da_sessao(&self.sessao)?;
+        self.empresas
+            .iter()
+            .find(|e| e.id == atual)
+            .map(|e| e.nome.clone())
+    }
+
     /// Leva o app à cena pedida pela demo (`demo_app`).
     #[cfg(feature = "demo")]
     fn preparar_demo(&mut self, motor: &Motor, cena: &str) {
@@ -456,7 +480,7 @@ enum Tela {
         admin_senha: String,
         erro: Option<String>,
     },
-    Login(login::EstadoLogin),
+    Login(Box<login::EstadoLogin>),
     Autenticado(Box<EstadoAutenticado>),
 }
 
@@ -468,6 +492,16 @@ enum Acao {
     LoginOk(Box<login::Entrada>),
     MudarArea(Area),
     AlternarSidebar,
+    /// Abrir a escolha de CNPJ do grupo.
+    EscolherEmpresa,
+    /// Entrar noutro CNPJ do grupo (sem novo login).
+    TrocarEmpresa(Id),
+    /// Cadastrar um CNPJ no grupo (razão social, CNPJ).
+    NovoCnpj(String, String),
+    /// Abrir os primeiros passos.
+    PrimeirosPassos,
+    /// Ir à tela de um dos primeiros passos.
+    IrPara(primeiros_passos::Destino),
     TentarNovamente,
     VerificarAtualizacoes,
     InstalarAtualizacao,
@@ -548,6 +582,10 @@ struct App {
     #[cfg(feature = "demo")]
     demo: Option<demo_app::Captura>,
     verificando_atualizacao: bool,
+    /// A escolha de CNPJ do grupo está aberta.
+    escolhendo_empresa: bool,
+    /// Os primeiros passos, quando abertos.
+    passos: Option<Vec<primeiros_passos::Passo>>,
 }
 
 /// Onde a preferência de tema fica gravada (ao lado da base).
@@ -587,6 +625,8 @@ impl App {
             canal_atualizacao: canal,
             atualizacao_disponivel: None,
             verificando_atualizacao: true,
+            escolhendo_empresa: false,
+            passos: None,
             #[cfg(feature = "demo")]
             demo: demo_app::Captura::do_ambiente(),
         }
@@ -606,11 +646,11 @@ impl App {
             let cena = demo.cena.clone();
             if cena.starts_with("login") {
                 self.motor = Some(motor);
-                self.tela = Tela::Login(if cena == "login-servidor" {
+                self.tela = Tela::Login(Box::new(if cena == "login-servidor" {
                     login::EstadoLogin::no_servidor("app.cardeal.com.br", "dono@loja.com.br")
                 } else {
                     login::EstadoLogin::default()
-                });
+                }));
                 return;
             }
             self.motor = Some(motor);
@@ -640,13 +680,28 @@ impl App {
                         erro: None,
                     }
                 } else {
-                    Tela::Login(login::EstadoLogin::lembrado())
+                    Tela::Login(Box::new(login::EstadoLogin::lembrado()))
                 };
             }
             Err(e) => {
                 tracing::error!("falha ao abrir a base: {e}");
                 self.tela = Tela::FalhaAoAbrir(e.to_string());
             }
+        }
+    }
+
+    /// Depois do login: os primeiros passos, para quem administra, enquanto falta algum (e a
+    /// pessoa não pediu para não mostrar mais).
+    fn abrir_primeiros_passos(&mut self) {
+        let (Tela::Autenticado(estado), Some(motor)) = (&self.tela, &self.motor) else {
+            return;
+        };
+        if !estado.sessao.concede("empresa.usuarios.gerenciar") || primeiros_passos::ocultos() {
+            return;
+        }
+        let passos = primeiros_passos::avaliar(motor, &estado.sessao);
+        if passos.iter().any(|p| !p.feito) {
+            self.passos = Some(passos);
         }
     }
 
@@ -663,7 +718,9 @@ impl App {
             tracing::warn!("recorrências não geradas no login: {e}");
         }
         let (estoque, clientes, vendas, compras, agenda, pdv, settings) = Default::default();
+        let empresas = motor.empresas_do_grupo(&sessao).unwrap_or_default();
         self.tela = Tela::Autenticado(Box::new(EstadoAutenticado {
+            empresas,
             sessao,
             area: Area::Os,
             pdv,
@@ -774,6 +831,7 @@ impl eframe::App for App {
             ) {
                 acao = match id {
                     "tema" => Acao::AlternarTema,
+                    "primeiros-passos" => Acao::PrimeirosPassos,
                     "verificar-atualizacoes" => Acao::VerificarAtualizacoes,
                     "instalar-atualizacao" => Acao::InstalarAtualizacao,
                     _ => Acao::MudarArea(Area::de_id(id)),
@@ -833,6 +891,32 @@ impl eframe::App for App {
                     // da navegação por uma linha fina.
                     ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
                         ui.add_space(Espaco::E8);
+                        if estado.empresas.len() > 1 {
+                            let nome = self
+                                .motor
+                                .as_ref()
+                                .and_then(|m| estado.nome_da_empresa(m))
+                                .unwrap_or_default();
+                            let cor = self.tema.cores().texto_medio;
+                            let clic = cardeal_ui::atoms::superficie_clicavel(
+                                ui,
+                                false,
+                                cardeal_ui::atoms::altura_navegacao(),
+                                |ui| {
+                                    cardeal_ui::atoms::desenhar_icone(ui, Icone::Banco, 18.0, cor);
+                                    if mostra_rotulos {
+                                        ui.add_space(Espaco::E12);
+                                        ui.add(Rotulo::interface(nome.clone()).cor(cor));
+                                    }
+                                },
+                            );
+                            if clic
+                                .on_hover_text(format!("{nome} — trocar de empresa"))
+                                .clicked()
+                            {
+                                acao = Acao::EscolherEmpresa;
+                            }
+                        }
                         let sel = matches!(estado.area, Area::Configuracoes);
                         let cor = if sel {
                             self.tema.cores().rubro
@@ -960,6 +1044,7 @@ impl eframe::App for App {
                     let Some(motor) = &self.motor else { return };
                     // As NFC-e que ficaram na fila saem sozinhas, em segundo plano.
                     fiscal_fundo::vigiar(ui.ctx(), motor, &estado.sessao);
+                    compras_fundo::vigiar(ui.ctx(), motor, &estado.sessao);
                     match estado.area {
                         Area::Fiscal => {
                             tela_notas::mostrar(ui, motor, &estado.sessao, &mut estado.notas);
@@ -975,6 +1060,10 @@ impl eframe::App for App {
                                 &mut estado.settings,
                                 &mut self.tema,
                             );
+                            // O cadastro de um CNPJ do grupo precisa do motor por inteiro.
+                            if let Some((razao, cnpj)) = estado.settings.pedido_cnpj.take() {
+                                acao = Acao::NovoCnpj(razao, cnpj);
+                            }
                         }
                         Area::Os => {
                             tela_os::mostrar(ui, motor, &estado.sessao, &mut estado.os);
@@ -1024,8 +1113,151 @@ impl eframe::App for App {
                 }
             });
 
+        // Os primeiros passos.
+        if let Some(passos) = &self.passos {
+            let mut aberto = true;
+            if let Some(d) = primeiros_passos::dialogo(ctx, passos, &mut aberto) {
+                acao = Acao::IrPara(d);
+            }
+            if !aberto {
+                self.passos = None;
+            }
+        }
+
+        // A escolha do CNPJ do grupo.
+        if self.escolhendo_empresa {
+            if let (Tela::Autenticado(estado), Some(motor)) = (&self.tela, &self.motor) {
+                let atual = motor.empresa_da_sessao(&estado.sessao);
+                let mut escolhida = None;
+                let fechar = Dialogo::nova("Trocar de empresa").largura(420.0).mostrar(
+                    ctx,
+                    &mut escolhida,
+                    |ui, escolhida| {
+                        ui.add(Rotulo::apoio(
+                            "Os dados de cada CNPJ (estoque, financeiro, fiscal) são dele; clientes, \
+                             fornecedores e o catálogo de produtos são do grupo.",
+                        ).quebravel());
+                        ui.add_space(Espaco::E12);
+                        for e in &estado.empresas {
+                            let rotulo = match (&e.cnpj, e.matriz) {
+                                (Some(c), true) => format!("{} · {c} · matriz", e.nome),
+                                (Some(c), false) => format!("{} · {c}", e.nome),
+                                (None, _) => e.nome.clone(),
+                            };
+                            let b = if Some(e.id) == atual {
+                                Botao::primario(rotulo).habilitado(false)
+                            } else {
+                                Botao::secundario(rotulo)
+                            };
+                            if ui.add(b.preenche_largura()).clicked() {
+                                *escolhida = Some(e.id);
+                            }
+                            ui.add_space(Espaco::E8);
+                        }
+                    },
+                    |ui, _| {
+                        let _ = ui;
+                    },
+                );
+                if let Some(id) = escolhida {
+                    acao = Acao::TrocarEmpresa(id);
+                    self.escolhendo_empresa = false;
+                } else if fechar {
+                    self.escolhendo_empresa = false;
+                }
+            } else {
+                self.escolhendo_empresa = false;
+            }
+        }
+
         match acao {
             Acao::Nenhuma => {}
+            Acao::EscolherEmpresa => self.escolhendo_empresa = true,
+            Acao::PrimeirosPassos => {
+                if let (Tela::Autenticado(estado), Some(motor)) = (&self.tela, &self.motor) {
+                    self.passos = Some(primeiros_passos::avaliar(motor, &estado.sessao));
+                }
+            }
+            Acao::IrPara(destino) => {
+                if let (Tela::Autenticado(estado), Some(motor)) = (&mut self.tela, &self.motor) {
+                    use primeiros_passos::Destino;
+                    let s = &estado.sessao;
+                    match destino {
+                        Destino::Empresa => {
+                            estado.area = Area::Configuracoes;
+                            estado.settings.abrir_empresa(motor, s);
+                        }
+                        Destino::Fiscal => {
+                            estado.area = Area::Configuracoes;
+                            estado.settings.abrir_fiscal(motor, s);
+                        }
+                        Destino::Acesso => {
+                            estado.area = Area::Configuracoes;
+                            estado.settings.abrir_acesso(motor, s);
+                        }
+                        Destino::Bancos => {
+                            estado.area = Area::Financeiro;
+                            estado.financeiro.abrir_bancos(motor, s);
+                        }
+                        Destino::Estoque | Destino::Clientes | Destino::Pdv => {
+                            estado.area = match destino {
+                                Destino::Estoque => Area::Estoque,
+                                Destino::Clientes => Area::Clientes,
+                                _ => Area::Pdv,
+                            };
+                            estado.recarregar_area(motor);
+                        }
+                    }
+                }
+            }
+            Acao::TrocarEmpresa(empresa) => {
+                let r = match (&self.tela, &mut self.motor) {
+                    (Tela::Autenticado(estado), Some(motor)) => {
+                        Some(motor.trocar_empresa(&estado.sessao, empresa))
+                    }
+                    _ => None,
+                };
+                match r {
+                    Some(Ok(sessao)) => {
+                        self.entrar(sessao);
+                        if let (Tela::Autenticado(estado), Some(motor)) = (&self.tela, &self.motor)
+                        {
+                            if let Some(nome) = estado.nome_da_empresa(motor) {
+                                notificar(ctx, Notificacao::sucesso(format!("Agora em {nome}")));
+                            }
+                        }
+                    }
+                    Some(Err(e)) => notificar(ctx, Notificacao::erro(e.mensagem)),
+                    None => {}
+                }
+            }
+            Acao::NovoCnpj(razao, cnpj) => {
+                let r = match (&self.tela, &mut self.motor) {
+                    (Tela::Autenticado(estado), Some(motor)) => {
+                        Some(motor.adicionar_empresa(&estado.sessao, &razao, &cnpj))
+                    }
+                    _ => None,
+                };
+                match r {
+                    Some(Ok(_)) => {
+                        notificar(
+                            ctx,
+                            Notificacao::sucesso(format!("{razao} entrou no grupo")).detalhe(
+                                "Troque de empresa pelo nome dela, no rodapé da barra lateral.",
+                            ),
+                        );
+                        if let (Tela::Autenticado(estado), Some(motor)) =
+                            (&mut self.tela, &self.motor)
+                        {
+                            estado.empresas =
+                                motor.empresas_do_grupo(&estado.sessao).unwrap_or_default();
+                            estado.settings.cnpj_adicionado(motor, &estado.sessao);
+                        }
+                    }
+                    Some(Err(e)) => notificar(ctx, Notificacao::erro(e.mensagem)),
+                    None => {}
+                }
+            }
             Acao::AlternarTema => self.tema = self.tema.alternado(),
             Acao::AlternarSidebar => self.sidebar_expandida = !self.sidebar_expandida,
             Acao::TentarNovamente => self.tela = Tela::Carregando,
@@ -1057,14 +1289,18 @@ impl eframe::App for App {
                 ),
             },
             Acao::AdminCriado(login) => {
-                self.tela = Tela::Login(login::EstadoLogin::com_login(login));
+                self.tela = Tela::Login(Box::new(login::EstadoLogin::com_login(login)));
             }
             Acao::LoginOk(entrada) => match *entrada {
-                login::Entrada::Local(sessao) => self.entrar(sessao),
+                login::Entrada::Local(sessao) => {
+                    self.entrar(sessao);
+                    self.abrir_primeiros_passos();
+                }
                 login::Entrada::Remota(motor, sessao) => {
                     // A partir daqui todas as telas falam com o servidor.
-                    self.motor = Some(motor);
+                    self.motor = Some(*motor);
                     self.entrar(sessao);
+                    self.abrir_primeiros_passos();
                 }
             },
             Acao::MudarArea(area) => {

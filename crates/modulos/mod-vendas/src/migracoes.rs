@@ -96,6 +96,122 @@ CREATE TABLE vendas_comissao (
 CREATE INDEX vendas_comissao_competencia ON vendas_comissao(empresa, competencia, vendedor);
 ";
 
+/// v3: a devolução de venda, item a item, e o estorno da comissão da parte devolvida de um
+/// pedido já apurado.
+const SQL_DEVOLUCAO: &str = "
+CREATE TABLE vendas_devolucao (
+    id                 BLOB PRIMARY KEY,
+    empresa            BLOB    NOT NULL,
+    pedido             BLOB    NOT NULL REFERENCES vendas_pedido(id),
+    cliente            BLOB    NOT NULL,
+    data               INTEGER NOT NULL,
+    motivo             TEXT    NOT NULL,
+    tipo               TEXT    NOT NULL CHECK (tipo IN ('Total','Parcial')),
+    valor_total        INTEGER NOT NULL,
+    estado             TEXT    NOT NULL
+                       CHECK (estado IN ('Solicitada','Aprovada','Concluida','Cancelada')),
+    estorno_lancamento BLOB,
+    versao             INTEGER NOT NULL DEFAULT 1,
+    criada_em          INTEGER NOT NULL,
+    criada_por         BLOB    NOT NULL
+) STRICT;
+CREATE INDEX vendas_devolucao_pedido ON vendas_devolucao(pedido);
+CREATE INDEX vendas_devolucao_estado ON vendas_devolucao(empresa, estado);
+CREATE TABLE vendas_devolucao_item (
+    devolucao       BLOB    NOT NULL REFERENCES vendas_devolucao(id),
+    item_pedido     BLOB    NOT NULL REFERENCES vendas_item_pedido(id),
+    produto         BLOB    NOT NULL,
+    variacao        BLOB,
+    quantidade      INTEGER NOT NULL CHECK (quantidade > 0),
+    valor_estornado INTEGER NOT NULL,
+    PRIMARY KEY (devolucao, item_pedido)
+) STRICT;
+CREATE TABLE vendas_comissao_ajuste (
+    id                  BLOB PRIMARY KEY,
+    empresa             BLOB    NOT NULL,
+    vendedor            BLOB    NOT NULL,
+    pedido              BLOB    NOT NULL REFERENCES vendas_pedido(id),
+    devolucao           BLOB    NOT NULL UNIQUE REFERENCES vendas_devolucao(id),
+    base                INTEGER NOT NULL,
+    valor               INTEGER NOT NULL CHECK (valor > 0),
+    data                INTEGER NOT NULL,
+    estado              TEXT    NOT NULL CHECK (estado IN ('Apurada','Paga')),
+    lancamento_apuracao BLOB    NOT NULL,
+    lancamento          BLOB,
+    criado_em           INTEGER NOT NULL
+) STRICT;
+CREATE INDEX vendas_comissao_ajuste_vendedor ON vendas_comissao_ajuste(empresa, vendedor, estado);
+";
+
+/// v4: a venda comissionável de outro módulo (a do PDV) — a comissão e o estorno dela deixam de
+/// apontar só para `vendas_pedido` (as tabelas são recriadas sem essa chave estrangeira, com a
+/// origem).
+const SQL_COMISSAO_PDV: &str = "
+CREATE TABLE vendas_comissao_nova (
+    id                    BLOB PRIMARY KEY,
+    empresa               BLOB    NOT NULL,
+    vendedor              BLOB    NOT NULL,
+    pedido                BLOB    NOT NULL UNIQUE,
+    origem                TEXT    NOT NULL DEFAULT 'pedido' CHECK (origem IN ('pedido','pdv')),
+    base_calculo          INTEGER NOT NULL,
+    percentual            INTEGER NOT NULL,
+    valor                 INTEGER NOT NULL,
+    competencia           INTEGER NOT NULL,
+    estado                TEXT    NOT NULL CHECK (estado IN ('Apurada','Paga','Cancelada')),
+    lancamento_apuracao   BLOB    NOT NULL,
+    lancamento            BLOB,
+    criado_em             INTEGER NOT NULL
+) STRICT;
+INSERT INTO vendas_comissao_nova
+    (id, empresa, vendedor, pedido, base_calculo, percentual, valor, competencia, estado,
+     lancamento_apuracao, lancamento, criado_em)
+  SELECT id, empresa, vendedor, pedido, base_calculo, percentual, valor, competencia, estado,
+         lancamento_apuracao, lancamento, criado_em
+  FROM vendas_comissao;
+DROP TABLE vendas_comissao;
+ALTER TABLE vendas_comissao_nova RENAME TO vendas_comissao;
+CREATE INDEX vendas_comissao_competencia ON vendas_comissao(empresa, competencia, vendedor);
+
+CREATE TABLE vendas_comissao_ajuste_nova (
+    id                  BLOB PRIMARY KEY,
+    empresa             BLOB    NOT NULL,
+    vendedor            BLOB    NOT NULL,
+    pedido              BLOB    NOT NULL,
+    devolucao           BLOB    NOT NULL UNIQUE,
+    base                INTEGER NOT NULL,
+    valor               INTEGER NOT NULL CHECK (valor > 0),
+    data                INTEGER NOT NULL,
+    estado              TEXT    NOT NULL CHECK (estado IN ('Apurada','Paga')),
+    lancamento_apuracao BLOB    NOT NULL,
+    lancamento          BLOB,
+    criado_em           INTEGER NOT NULL
+) STRICT;
+INSERT INTO vendas_comissao_ajuste_nova SELECT * FROM vendas_comissao_ajuste;
+DROP TABLE vendas_comissao_ajuste;
+ALTER TABLE vendas_comissao_ajuste_nova RENAME TO vendas_comissao_ajuste;
+CREATE INDEX vendas_comissao_ajuste_vendedor ON vendas_comissao_ajuste(empresa, vendedor, estado);
+
+CREATE TABLE vendas_venda_comissionavel (
+    id         BLOB PRIMARY KEY,
+    empresa    BLOB    NOT NULL,
+    origem     TEXT    NOT NULL,
+    origem_id  BLOB    NOT NULL,
+    vendedor   BLOB    NOT NULL,
+    data       INTEGER NOT NULL,
+    estado     TEXT    NOT NULL CHECK (estado IN ('Valida','Estornada')),
+    criado_em  INTEGER NOT NULL,
+    UNIQUE (origem, origem_id)
+) STRICT;
+CREATE INDEX vendas_venda_comissionavel_data ON vendas_venda_comissionavel(empresa, data);
+CREATE TABLE vendas_venda_comissionavel_item (
+    venda               BLOB    NOT NULL REFERENCES vendas_venda_comissionavel(id),
+    produto             BLOB    NOT NULL,
+    total               INTEGER NOT NULL,
+    comissao_percentual INTEGER
+) STRICT;
+CREATE INDEX vendas_venda_comissionavel_item_venda ON vendas_venda_comissionavel_item(venda);
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -107,6 +223,18 @@ const MIGRACOES: &[Migracao] = &[
         versao: 2,
         nome: "vendas_comissao",
         sql: SQL_COMISSAO,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 3,
+        nome: "vendas_devolucao",
+        sql: SQL_DEVOLUCAO,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 4,
+        nome: "vendas_comissao_do_pdv",
+        sql: SQL_COMISSAO_PDV,
         tipo: TipoMigracao::Esquema,
     },
 ];

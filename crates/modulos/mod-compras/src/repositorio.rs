@@ -2,7 +2,7 @@
 //! strings SQL, sempre colunas explícitas, sempre parâmetros posicionais.
 //!
 //! [`RepositorioCompras`] grava e lê `compras_nota_entrada`/`compras_item_nota_entrada`/
-//! `compras_regra_casamento`/`compras_preferencias`/`compras_estado_dfe` sobre a
+//! `compras_regra_casamento`/`compras_preferencias` sobre a
 //! [`UnidadeDeTrabalho`](cardeal_storage::UnidadeDeTrabalho) do escritor único — mesmo
 //! padrão do `RepositorioFinanceiro`.
 
@@ -11,7 +11,9 @@ use cardeal_storage::UnidadeDeTrabalho;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::casamento::RegraCasamentoAprendida;
-use crate::nota::{EstadoCasamento, EstadoNotaEntrada, ItemNotaEntrada, NotaEntrada};
+use crate::nota::{
+    EstadoCasamento, EstadoNotaEntrada, ItemNotaEntrada, NotaEntrada, ParcelaCompra,
+};
 use crate::preferencias::{PreferenciasCompras, RateioPor};
 
 #[allow(clippy::needless_pass_by_value)] // usado como `.map_err(persist)`
@@ -51,7 +53,7 @@ fn estado_nota_txt(e: EstadoNotaEntrada) -> &'static str {
     e.rotulo()
 }
 
-fn estado_nota_de(s: &str) -> EstadoNotaEntrada {
+pub(crate) fn estado_nota_de(s: &str) -> EstadoNotaEntrada {
     match s {
         "Conferida" => EstadoNotaEntrada::Conferida,
         "Confirmada" => EstadoNotaEntrada::Confirmada,
@@ -192,6 +194,75 @@ impl<'a, 'b> RepositorioCompras<'a, 'b> {
             .map(|opt| opt.map(id_de))
     }
 
+    /// Guarda o XML original da nota, se ela ainda não tem — o da importação, ou o da
+    /// reimportação do mesmo arquivo para a nota importada antes de o XML ser guardado.
+    ///
+    /// # Errors
+    /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+    pub fn guardar_xml(&mut self, nota: Id, xml: &str) -> Resultado<()> {
+        self.conn()
+            .execute(
+                "UPDATE compras_nota_entrada SET xml = ?2 WHERE id = ?1 AND xml IS NULL",
+                params![blob(nota), xml],
+            )
+            .map(|_| ())
+            .map_err(persist)
+    }
+
+    /// O XML original da nota, se guardado.
+    ///
+    /// # Errors
+    /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+    pub fn xml_da_nota(&self, nota: Id) -> Resultado<Option<String>> {
+        self.conn()
+            .query_row(
+                "SELECT xml FROM compras_nota_entrada WHERE id = ?1",
+                [blob(nota)],
+                |r| r.get(0),
+            )
+            .optional()
+            .map(Option::flatten)
+            .map_err(persist)
+    }
+
+    /// Troca as parcelas da nota pelas informadas (as do XML na importação; as usadas na
+    /// confirmação).
+    ///
+    /// # Errors
+    /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+    pub fn substituir_parcelas(&mut self, nota: Id, parcelas: &[ParcelaCompra]) -> Resultado<()> {
+        self.conn()
+            .execute(
+                "DELETE FROM compras_nota_parcela WHERE nota = ?1",
+                [blob(nota)],
+            )
+            .map_err(persist)?;
+        for (ordem, p) in parcelas.iter().enumerate() {
+            self.conn()
+                .execute(
+                    "INSERT INTO compras_nota_parcela (nota, ordem, numero, vencimento, valor)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![
+                        blob(nota),
+                        i64::try_from(ordem).unwrap_or(i64::MAX),
+                        p.numero,
+                        dias(p.vencimento),
+                        p.valor.em_centavos(),
+                    ],
+                )
+                .map_err(persist)?;
+        }
+        Ok(())
+    }
+
+    /// As parcelas da nota, em ordem (vazio se a nota não traz cobrança).
+    ///
+    /// # Errors
+    /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+    pub fn parcelas_da_nota(&self, nota: Id) -> Resultado<Vec<ParcelaCompra>> {
+        parcelas_da_nota(self.conn(), nota)
+    }
+
     /// Grava um item de nota de entrada.
     ///
     /// # Errors
@@ -268,21 +339,7 @@ impl<'a, 'b> RepositorioCompras<'a, 'b> {
     /// # Errors
     /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
     pub fn itens_da_nota(&self, nota_entrada: Id) -> Resultado<Vec<ItemNotaEntrada>> {
-        let mut stmt = self
-            .conn()
-            .prepare(
-                "SELECT id, nota_entrada, produto_casado, codigo_fornecedor,
-                        descricao_fornecedor, ncm, quantidade, valor_unitario, valor_rateio,
-                        estado_casamento, codigo_barras, valor_desconto, valor_impostos
-                 FROM compras_item_nota_entrada WHERE nota_entrada = ?1 ORDER BY rowid",
-            )
-            .map_err(persist)?;
-        let linhas = stmt
-            .query_map([blob(nota_entrada)], item_de_linha)
-            .map_err(persist)?;
-        linhas
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(persist)
+        itens_da_nota_por_conexao(self.conn(), nota_entrada)
     }
 
     /// Quantos itens da nota ainda não estão `Casado`.
@@ -428,37 +485,6 @@ impl<'a, 'b> RepositorioCompras<'a, 'b> {
             )
         })
     }
-
-    /// O último NSU visto na distribuição `DFe` para a empresa (`0` se nunca varrida).
-    ///
-    /// # Errors
-    /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
-    pub fn ultimo_nsu(&self, empresa: Id) -> Resultado<u64> {
-        self.conn()
-            .query_row(
-                "SELECT ultimo_nsu FROM compras_estado_dfe WHERE empresa = ?1",
-                [blob(empresa)],
-                |r| r.get::<_, i64>(0),
-            )
-            .optional()
-            .map_err(persist)
-            .map(|opt| opt.and_then(|n| u64::try_from(n).ok()).unwrap_or(0))
-    }
-
-    /// Grava o novo cursor de NSU depois de uma varredura.
-    ///
-    /// # Errors
-    /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
-    pub fn atualizar_ultimo_nsu(&mut self, empresa: Id, nsu: u64) -> Resultado<()> {
-        self.conn()
-            .execute(
-                "INSERT INTO compras_estado_dfe (empresa, ultimo_nsu) VALUES (?1,?2)
-                 ON CONFLICT (empresa) DO UPDATE SET ultimo_nsu = excluded.ultimo_nsu",
-                params![blob(empresa), i64::try_from(nsu).unwrap_or(i64::MAX)],
-            )
-            .map_err(persist)?;
-        Ok(())
-    }
 }
 
 fn nota_de_linha(r: &rusqlite::Row<'_>) -> rusqlite::Result<NotaEntrada> {
@@ -497,4 +523,68 @@ fn item_de_linha(r: &rusqlite::Row<'_>) -> rusqlite::Result<ItemNotaEntrada> {
         valor_desconto: Dinheiro::centavos(r.get::<_, i64>(11)?),
         valor_impostos: Dinheiro::centavos(r.get::<_, i64>(12)?),
     })
+}
+
+/// As parcelas de uma nota, em ordem — também para as consultas.
+///
+/// # Errors
+/// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+pub(crate) fn parcelas_da_nota(c: &Connection, nota: Id) -> Resultado<Vec<ParcelaCompra>> {
+    let mut stmt = c
+        .prepare(
+            "SELECT numero, vencimento, valor FROM compras_nota_parcela
+             WHERE nota = ?1 ORDER BY ordem",
+        )
+        .map_err(persist)?;
+    let linhas = stmt
+        .query_map([blob(nota)], |r| {
+            Ok(ParcelaCompra {
+                numero: r.get(0)?,
+                vencimento: data_de(r.get(1)?),
+                valor: Dinheiro::centavos(r.get(2)?),
+            })
+        })
+        .map_err(persist)?;
+    linhas
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(persist)
+}
+
+/// Os itens de uma nota, na ordem em que foram gravados (para quem só tem a conexão).
+///
+/// # Errors
+/// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+pub(crate) fn itens_da_nota_por_conexao(
+    c: &Connection,
+    nota_entrada: Id,
+) -> Resultado<Vec<ItemNotaEntrada>> {
+    let mut stmt = c
+        .prepare(
+            "SELECT id, nota_entrada, produto_casado, codigo_fornecedor,
+                    descricao_fornecedor, ncm, quantidade, valor_unitario, valor_rateio,
+                    estado_casamento, codigo_barras, valor_desconto, valor_impostos
+             FROM compras_item_nota_entrada WHERE nota_entrada = ?1 ORDER BY rowid",
+        )
+        .map_err(persist)?;
+    let linhas = stmt
+        .query_map([blob(nota_entrada)], item_de_linha)
+        .map_err(persist)?;
+    linhas
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(persist)
+}
+
+/// O XML original da nota (para quem só tem a conexão).
+///
+/// # Errors
+/// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+pub(crate) fn xml_da_nota_por_conexao(c: &Connection, nota: Id) -> Resultado<Option<String>> {
+    c.query_row(
+        "SELECT xml FROM compras_nota_entrada WHERE id = ?1",
+        [blob(nota)],
+        |r| r.get(0),
+    )
+    .optional()
+    .map(Option::flatten)
+    .map_err(persist)
 }

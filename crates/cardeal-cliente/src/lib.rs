@@ -24,6 +24,7 @@ pub mod remoto;
 
 #[cfg(feature = "local")]
 pub use cardeal_motor::{MotorLocal, SessaoLocal};
+pub use cardeal_protocol::SegundoFatorProposto;
 pub use mod_empresa::{EmpresaResumo, IdentidadeVisual, PapelResumo, UsuarioResumo};
 #[cfg(any(feature = "local", not(target_arch = "wasm32")))]
-pub use motor::{Motor, Sessao};
+pub use motor::{EmpresaDoGrupo, Motor, Sessao};

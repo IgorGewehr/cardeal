@@ -730,3 +730,146 @@ fn balancete_fecha_e_traz_o_resultado_de_anos_anteriores_no_pl() {
             .e_zero()));
     assert_eq!(d[1].historico, "Aluguel");
 }
+
+#[test]
+fn o_orcamento_vai_para_a_dre_e_o_ano_com_o_desvio_no_sentido_do_resultado() {
+    use mod_financeiro::orcamento::{
+        desvio, CopiarOrcamentoDoAno, DefinirOrcamentoDaConta, OrcamentoAnual, OrcamentoDoAno,
+    };
+    let c = cena();
+    let s = c.sessao(
+        Id::novo(),
+        &[
+            "financeiro.receber.criar",
+            "financeiro.pagar.criar",
+            "financeiro.dre.ver",
+            "financeiro.orcamento.editar",
+        ],
+    );
+    let h = hoje();
+    let mes = h.competencia();
+    let indice = mes.mes() as usize - 1;
+    lancar_receita(&c, &s, Dinheiro::reais(1_000), h);
+    lancar_despesa(&c, &s, Dinheiro::reais(400), h);
+
+    // As contas do ano: todas as de resultado, com o realizado do mês nas que tiveram movimento.
+    let ano: OrcamentoAnual = c.consulta(
+        &s,
+        "financeiro.orcamento_do_ano.v1",
+        &OrcamentoDoAno { ano: mes.ano() },
+    );
+    let receita = ano
+        .linhas
+        .iter()
+        .find(|l| l.realizado[indice] == Dinheiro::reais(1_000))
+        .expect("a conta da receita")
+        .clone();
+    let despesa = ano
+        .linhas
+        .iter()
+        .find(|l| l.realizado[indice] == Dinheiro::reais(400))
+        .expect("a conta da despesa")
+        .clone();
+    assert!(receita.soma_no_resultado && !despesa.soma_no_resultado);
+    let parada = ano
+        .linhas
+        .iter()
+        .find(|l| !l.soma_no_resultado && l.conta != despesa.conta)
+        .expect("outra despesa, sem movimento")
+        .clone();
+
+    let orcar = |conta, valor: i64| {
+        let mut meses = [Dinheiro::ZERO; 12];
+        meses[indice] = Dinheiro::reais(valor);
+        let _: () = c.cmd(
+            &s,
+            "financeiro.definir_orcamento_da_conta.v1",
+            &DefinirOrcamentoDaConta {
+                conta,
+                ano: mes.ano(),
+                meses,
+            },
+        );
+    };
+    orcar(receita.conta, 1_200);
+    orcar(despesa.conta, 300);
+    orcar(parada.conta, 100);
+
+    let cmp: ComparativoDre =
+        c.consulta(&s, "financeiro.dre_comparativa.v1", &DreComparativa { mes });
+    let orcado = cmp.orcado.expect("o mês tem orçamento");
+    assert_eq!(orcado.lucro_liquido, Dinheiro::reais(800));
+    assert_eq!(cmp.atual.lucro_liquido, Dinheiro::reais(600));
+    // A conta orçada sem movimento aparece no realizado (zerada) e no orçado.
+    assert!(cmp
+        .atual
+        .linhas
+        .iter()
+        .any(|l| l.codigo.as_deref() == Some(parada.codigo.as_str()) && l.valor.e_zero()));
+    assert!(orcado
+        .linhas
+        .iter()
+        .any(|l| l.codigo.as_deref() == Some(parada.codigo.as_str())
+            && l.valor == Dinheiro::reais(-100)));
+    // O desvio: receita abaixo do orçado é pior; a despesa acima do orçado também.
+    assert_eq!(
+        desvio(Dinheiro::reais(1_000), Dinheiro::reais(1_200), true).map(|p| p.formatar(1)),
+        Some("-16,6".to_owned())
+    );
+    assert_eq!(
+        desvio(Dinheiro::reais(400), Dinheiro::reais(300), false).map(|p| p.formatar(1)),
+        Some("-33,3".to_owned())
+    );
+
+    // Copiar para o ano seguinte com 10% de reajuste: as três contas; de novo, nenhuma.
+    let copia = CopiarOrcamentoDoAno {
+        de: mes.ano(),
+        para: mes.ano() + 1,
+        reajuste: cardeal_kernel::Percentual::pontos(10),
+    };
+    let copiadas: u32 = c.cmd(&s, "financeiro.copiar_orcamento_do_ano.v1", &copia);
+    assert_eq!(copiadas, 3);
+    let copiadas: u32 = c.cmd(&s, "financeiro.copiar_orcamento_do_ano.v1", &copia);
+    assert_eq!(copiadas, 0);
+    let seguinte: OrcamentoAnual = c.consulta(
+        &s,
+        "financeiro.orcamento_do_ano.v1",
+        &OrcamentoDoAno { ano: mes.ano() + 1 },
+    );
+    let r = seguinte
+        .linhas
+        .iter()
+        .find(|l| l.conta == receita.conta)
+        .unwrap();
+    assert_eq!(r.orcado[indice], Dinheiro::reais(1_320));
+    assert_eq!(seguinte.resultado_orcado(), Dinheiro::reais(880));
+
+    // Sem a permissão de orçar, é recusado; e conta de balanço não se orça.
+    let so_ver = c.sessao(Id::novo(), &["financeiro.dre.ver"]);
+    let recusa = c.d.executar_comando(
+        "financeiro.definir_orcamento_da_conta.v1",
+        &postcard::to_stdvec(&DefinirOrcamentoDaConta {
+            conta: receita.conta,
+            ano: mes.ano(),
+            meses: [Dinheiro::ZERO; 12],
+        })
+        .unwrap(),
+        &so_ver,
+        &c.ambiente(),
+        c.arm.escritor(),
+    );
+    assert!(recusa.is_err());
+    let balanco = c.d.executar_comando(
+        "financeiro.definir_orcamento_da_conta.v1",
+        &postcard::to_stdvec(&DefinirOrcamentoDaConta {
+            conta: Id::novo(),
+            ano: mes.ano(),
+            meses: [Dinheiro::reais(1); 12],
+        })
+        .unwrap(),
+        &s,
+        &c.ambiente(),
+        c.arm.escritor(),
+    );
+    assert!(balanco.is_err());
+}

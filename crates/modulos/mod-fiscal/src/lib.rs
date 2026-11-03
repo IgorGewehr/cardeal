@@ -21,11 +21,17 @@
 #![allow(clippy::module_name_repetitions, clippy::must_use_candidate)]
 #![allow(clippy::result_large_err)]
 
+pub mod calendario;
 mod comandos;
 mod consultas;
+pub mod correcao;
+pub mod devolucao_compra;
+pub mod devolucao_venda;
 mod documento;
+pub mod efd;
 mod erros;
 mod explicacao;
+mod fechamento;
 mod manifesto;
 #[cfg(feature = "sqlite")]
 mod migracoes;
@@ -34,36 +40,54 @@ mod modulo;
 #[cfg(feature = "sqlite")]
 mod montagem;
 mod nfce;
+mod nfe_venda;
+pub mod nfse;
 mod provedor;
 #[cfg(feature = "sqlite")]
 mod sql;
 #[cfg(feature = "sqlite")]
 mod sql_documento;
+mod terminal;
 mod tipos;
+pub mod transferencia;
 mod tributacao;
 
 pub use cardeal_fiscal::{AmbienteFiscal, ModeloFiscal, StatusSefaz};
 pub use comandos::{DefinirAmbienteFiscal, InstalarCertificado, RemoverCertificado};
 pub use consultas::{SituacaoFiscal, StatusDaSefaz};
 pub use documento::{
-    decidir, decidir_evento, espera, pedido_da_anulacao, Desfecho, DocumentoResumo,
-    EstadoDocumento, Mudanca, PedidoDocumento, ResumoFiscal,
+    decidir, decidir_busca, decidir_evento, em_contingencia, espera, esperar,
+    justificativa_da_contingencia, nao_reemitir, pede_contingencia, pede_substituicao,
+    pedido_da_anulacao, pedido_da_substituida, protocolo_no_evento, Busca, Desfecho,
+    DocumentoResumo, EstadoDocumento, Mudanca, PedidoDocumento, PrazoDeCancelamento, ResumoFiscal,
+    JANELA_DA_SUBSTITUICAO_SEGUNDOS, JUSTIFICATIVA_DA_SUBSTITUICAO, PRAZO_DA_CONTINGENCIA_SEGUNDOS,
+    TENTATIVAS_DA_BUSCA,
 };
 pub use erros::ErroModuloFiscal;
 pub use explicacao::explicar;
+pub use fechamento::{
+    dia_da_emissao, CartaDoMes, NfseDoMes, NotaDoMes, NotasDoMes, NotasFiscaisDoMes, SituacaoNoMes,
+    XmlQueFalta,
+};
 pub use manifesto::{ID, MANIFESTO};
 #[cfg(feature = "sqlite")]
 pub use modulo::ModuloFiscal;
 #[cfg(feature = "sqlite")]
-pub use montagem::{marcar_homologacao, DESCRICAO_HOMOLOGACAO};
+pub use montagem::{codigo_do_produto, marcar_homologacao, DESCRICAO_HOMOLOGACAO};
 pub use nfce::{
-    AnularDocumentoDaVenda, CancelarNfce, ConfiguracaoDaNfce, ConfiguracaoNfce, ConfigurarNfce,
-    DetalheDocumento, DocumentoDaVenda, DocumentoFiscal, DocumentosDasVendas, DocumentosFiscais,
-    EmitirNfceDoCupom, InutilizarNumero, ReenviarDocumento, ResumoDaFilaFiscal, TAREFA_TRANSMITIR,
+    AnularDocumentoDaVenda, BuscarXmlsQueFaltam, CancelarNfce, ConfiguracaoDaNfce,
+    ConfiguracaoNfce, ConfigurarNfce, DetalheDocumento, DocumentoDaVenda, DocumentoFiscal,
+    DocumentosDasVendas, DocumentosFiscais, EmitirNfceDoCupom, InutilizarNumero, ReenviarDocumento,
+    ResumoDaFilaFiscal, TAREFA_TRANSMITIR,
+};
+pub use nfe_venda::{
+    ConfiguracaoDaNfe, ConfiguracaoNfe, ConfigurarNfe, DocumentoDoPedido, EmitirNfeDoPedido,
+    ORIGEM_VENDAS,
 };
 pub use provedor::ProvedorFiscal;
 #[cfg(feature = "sqlite")]
-pub use provedor::{porta_da_empresa, porta_da_empresa_no_ambiente};
+pub use provedor::{ambiente_da_empresa, porta_da_empresa, porta_da_empresa_no_ambiente};
+pub use terminal::{DefinirSerieDoTerminal, SerieDoTerminal, SeriesDosTerminais};
 pub use tipos::{
     CertificadoResumo, PendenciaFiscal, SituacaoFiscalDaEmpresa, ALERTA_VENCIMENTO_DIAS,
 };

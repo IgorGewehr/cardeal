@@ -122,6 +122,9 @@ ALTER TABLE pdv_pagamento_cupom_v4 RENAME TO pdv_pagamento_cupom;
 CREATE INDEX pdv_pagamento_cupom_cupom ON pdv_pagamento_cupom(cupom);
 ";
 
+/// v6: o vendedor da venda (quem ganha a comissão; o operador é quem passa a venda).
+const SQL_VENDEDOR: &str = "ALTER TABLE pdv_cupom ADD COLUMN vendedor BLOB;";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -151,6 +154,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 5,
         nome: "pdv_desconto_no_total",
         sql: SQL_DESCONTO_NO_TOTAL,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 6,
+        nome: "pdv_vendedor_da_venda",
+        sql: SQL_VENDEDOR,
         tipo: TipoMigracao::Esquema,
     },
 ];

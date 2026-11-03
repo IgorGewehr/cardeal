@@ -411,7 +411,58 @@ const MIGRACOES: &[Migracao] = &[
         sql: SQL_TRANSFERENCIA,
         tipo: TipoMigracao::Esquema,
     },
+    Migracao {
+        versao: 14,
+        nome: "financeiro_orcamento",
+        sql: SQL_ORCAMENTO,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 15,
+        nome: "financeiro_portal_do_contador",
+        sql: SQL_CONTADOR,
+        tipo: TipoMigracao::Esquema,
+    },
 ];
+
+/// v15: o Portal do Contador (`contador.rs`) — o código de cada conta no sistema do contador
+/// (DE/PARA) e os apontamentos entre o contador e a empresa (competência em AAAAMM).
+const SQL_CONTADOR: &str = "
+CREATE TABLE financeiro_de_para (
+    empresa BLOB NOT NULL REFERENCES nucleo_empresa(id),
+    conta   BLOB NOT NULL REFERENCES razao_conta(id),
+    externo TEXT NOT NULL,
+    PRIMARY KEY (empresa, conta)
+) STRICT, WITHOUT ROWID;
+CREATE TABLE financeiro_apontamento (
+    id             BLOB PRIMARY KEY,
+    empresa        BLOB    NOT NULL REFERENCES nucleo_empresa(id),
+    competencia    INTEGER NOT NULL,
+    texto          TEXT    NOT NULL,
+    autor          BLOB    NOT NULL,
+    criado_em      INTEGER NOT NULL,
+    estado         TEXT    NOT NULL CHECK (estado IN ('Aberto','Respondido','Resolvido')),
+    resposta       TEXT,
+    respondido_por BLOB,
+    respondido_em  INTEGER,
+    resolvido_em   INTEGER
+) STRICT;
+CREATE INDEX financeiro_apontamento_empresa ON financeiro_apontamento(empresa, estado, criado_em);
+";
+
+/// v14: o orçamento por conta do resultado e mês (`orcamento.rs`). O valor é positivo, no
+/// sentido em que a conta se comporta (a receita vendida, a despesa gasta); mês sem orçamento
+/// não tem linha.
+const SQL_ORCAMENTO: &str = "
+CREATE TABLE financeiro_orcamento (
+    empresa     BLOB    NOT NULL,
+    conta       BLOB    NOT NULL,
+    competencia INTEGER NOT NULL,
+    valor       INTEGER NOT NULL CHECK (valor > 0),
+    PRIMARY KEY (empresa, conta, competencia)
+) STRICT, WITHOUT ROWID;
+CREATE INDEX financeiro_orcamento_mes ON financeiro_orcamento(empresa, competencia);
+";
 
 /// O conjunto de migrações do módulo financeiro.
 #[must_use]

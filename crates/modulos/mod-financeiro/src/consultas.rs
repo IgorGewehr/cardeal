@@ -348,7 +348,8 @@ pub fn em_aberto_a_receber_do_cliente(
 }
 
 /// O título mais recente originado por um agregado de outro módulo (`origem_modulo` +
-/// `origem_id`) — o mesmo par de correlação que `Titulo` já carrega desde a origem
+/// `origem_id`) — o vivo antes do cancelado: desfeita e refeita no mesmo dia, a origem tem dois
+/// com a mesma emissão — o mesmo par de correlação que `Titulo` já carrega desde a origem
 /// (`docs/19-estado-e-processo.md` §1.1). Usado por telas de outro módulo (ex.: o detalhe de
 /// uma OS faturada) para mostrar "qual título isto gerou no financeiro", sem o outro módulo
 /// nunca ler `financeiro_titulo` direto (`docs/contratos-internos.md` §7 regra 2).
@@ -369,7 +370,7 @@ pub fn titulo_da_origem(
                     categoria, observacao, cancelado_em, versao
              FROM financeiro_titulo
              WHERE empresa = ?1 AND origem_modulo = ?2 AND origem_id = ?3
-             ORDER BY emissao DESC LIMIT 1",
+             ORDER BY cancelado_em IS NULL DESC, emissao DESC LIMIT 1",
             params![blob(empresa), origem_modulo, blob(origem_id)],
             titulo_de_linha,
         )
@@ -951,4 +952,32 @@ impl Consulta for ExtratoDisponivel {
             .collect::<rusqlite::Result<Vec<_>>>()
             .map_err(persist)
     }
+}
+
+/// Quanto o título vivo de uma origem vale e quanto dele já foi pago/recebido — para a tela
+/// de outro módulo avisar antes de desfazer a origem. `None` se a origem não tem título vivo.
+///
+/// # Errors
+/// [`cardeal_kernel::CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+#[cfg(feature = "sqlite")]
+pub fn situacao_do_titulo_da_origem(
+    conexao: &Connection,
+    empresa: Id,
+    origem_modulo: &str,
+    origem_id: Id,
+) -> Resultado<Option<(Dinheiro, Dinheiro)>> {
+    let Some(titulo) = titulo_da_origem(conexao, empresa, origem_modulo, origem_id)?
+        .filter(|t| !t.esta_cancelado())
+    else {
+        return Ok(None);
+    };
+    let pago: i64 = conexao
+        .query_row(
+            "SELECT COALESCE(SUM(valor_baixado), 0) FROM financeiro_parcela
+             WHERE titulo = ?1 AND estado <> 'Cancelada'",
+            params![blob(titulo.id)],
+            |r| r.get(0),
+        )
+        .map_err(persist)?;
+    Ok(Some((titulo.valor_original, Dinheiro::centavos(pago))))
 }

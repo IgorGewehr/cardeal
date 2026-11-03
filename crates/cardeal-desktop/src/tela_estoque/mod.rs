@@ -10,6 +10,7 @@ mod analise;
 mod dicionario;
 mod estrutura;
 mod estrutura_importacao;
+mod filiais;
 mod fiscal;
 mod inventario;
 mod lote;
@@ -57,6 +58,8 @@ enum AbaEstoque {
     Rentabilidade,
     Inventario,
     Transferencias,
+    /// Entre os CNPJs do grupo (só com mais de um).
+    Filiais,
     Validade,
     Radar,
 }
@@ -99,6 +102,7 @@ pub struct EstadoTelaEstoque {
     rent: rentabilidade::EstadoRentabilidade,
     inv: inventario::EstadoInventarioUi,
     transf: transferencia::EstadoTransferenciaUi,
+    filiais: filiais::EstadoFiliais,
     dic: dicionario::EstadoDicionario,
     val: validade::EstadoValidade,
     /// Perfil fiscal do produto aberto em "Editar": o que ele define e o vigente.
@@ -107,6 +111,8 @@ pub struct EstadoTelaEstoque {
     unidades: Vec<ItemUnidade>,
     locais: Vec<ItemLocal>,
     radar: Vec<ItemAbaixoDoPontoPedido>,
+    /// O que já vem a caminho (pedidos de compra aprovados), por produto — o radar desconta.
+    a_caminho: std::collections::HashMap<Id, Quantidade>,
     /// Lotes vencidos ou que vencem em até 7 dias — o alerta da aba Produtos.
     lotes_em_alerta: usize,
     /// Movimentações recentes do produto aberto no dialog "Ver" — a rastreabilidade
@@ -179,6 +185,9 @@ impl EstadoTelaEstoque {
         if let Ok(l) = motor.consultar(sessao, "estoque.locais.v1", &Locais) {
             self.locais = l;
         }
+        if sessao.concede("compras.transferencia.ver") {
+            self.filiais.conhecer(motor, sessao);
+        }
         if let Ok(r) = motor.consultar(
             sessao,
             "estoque.produtos_abaixo_do_ponto_pedido.v1",
@@ -186,6 +195,14 @@ impl EstadoTelaEstoque {
         ) {
             self.radar = r;
         }
+        self.a_caminho = if sessao.concede("compras.pedido.ver") {
+            motor
+                .consultar(sessao, "compras.a_caminho.v1", &mod_compras::ACaminho)
+                .map(|v| v.into_iter().collect())
+                .unwrap_or_default()
+        } else {
+            std::collections::HashMap::new()
+        };
     }
 
     fn limpar_novo(&mut self) {
@@ -282,7 +299,7 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
             }
         },
         |ui, estado| {
-            if let Some(nova) = Abas::nova(&[
+            let mut abas = vec![
                 (AbaEstoque::Produtos, "Produtos"),
                 (AbaEstoque::Estrutura, "Estrutura"),
                 (AbaEstoque::Precos, "Preços"),
@@ -291,12 +308,13 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
                 (AbaEstoque::Rentabilidade, "Rentabilidade"),
                 (AbaEstoque::Inventario, "Inventário"),
                 (AbaEstoque::Transferencias, "Transferências"),
-                (AbaEstoque::Validade, "Validade"),
-                (AbaEstoque::Radar, "Radar de reposição"),
-            ])
-            .selecionada(estado.aba)
-            .mostrar(ui)
-            {
+            ];
+            if estado.filiais.ha_grupo() {
+                abas.push((AbaEstoque::Filiais, "Entre filiais"));
+            }
+            abas.push((AbaEstoque::Validade, "Validade"));
+            abas.push((AbaEstoque::Radar, "Radar de reposição"));
+            if let Some(nova) = Abas::nova(&abas).selecionada(estado.aba).mostrar(ui) {
                 estado.aba = nova;
                 if nova == AbaEstoque::Precos {
                     estado.prc.carregar(motor, sessao);
@@ -315,6 +333,9 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
                 }
                 if nova == AbaEstoque::Transferencias {
                     estado.transf.carregar(motor, sessao);
+                }
+                if nova == AbaEstoque::Filiais {
+                    estado.filiais.carregar(motor, sessao);
                 }
                 if nova == AbaEstoque::Validade {
                     estado.val.carregar(motor, sessao);
@@ -340,6 +361,7 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
                 AbaEstoque::Rentabilidade => rentabilidade::aba(ui, motor, sessao, estado),
                 AbaEstoque::Inventario => inventario::aba(ui, motor, sessao, estado),
                 AbaEstoque::Transferencias => transferencia::aba(ui, motor, sessao, estado),
+                AbaEstoque::Filiais => filiais::aba(ui, motor, sessao, estado),
                 AbaEstoque::Validade => validade::aba(ui, motor, sessao, estado),
                 AbaEstoque::Radar => radar(ui, estado),
             }
@@ -562,7 +584,8 @@ fn radar(ui: &mut egui::Ui, estado: &mut EstadoTelaEstoque) {
         ColunaGrade::nova("Disponível").largura(110.0).numero(),
         ColunaGrade::nova("Ponto de pedido").largura(130.0).numero(),
         ColunaGrade::nova("Estoque mínimo").largura(130.0).numero(),
-        ColunaGrade::nova("Situação").largura(140.0),
+        ColunaGrade::nova("A caminho").largura(100.0).numero(),
+        ColunaGrade::nova("Situação").largura(160.0),
     ];
     let resposta =
         Grade::nova(colunas)
@@ -584,8 +607,22 @@ fn radar(ui: &mut egui::Ui, estado: &mut EstadoTelaEstoque) {
                             .map_or_else(|| "—".to_owned(), |m| m.to_string()),
                     ));
                 });
+                let vem = estado
+                    .a_caminho
+                    .get(&item.produto)
+                    .copied()
+                    .unwrap_or(Quantidade::ZERO);
                 row.col(|ui| {
-                    if item.disponivel.e_zero() {
+                    ui.add(Rotulo::interface(if vem.e_positiva() {
+                        vem.to_string()
+                    } else {
+                        "—".to_owned()
+                    }));
+                });
+                row.col(|ui| {
+                    if vem.e_positiva() && item.disponivel + vem >= item.ponto_pedido {
+                        ui.add(Etiqueta::info("Pedido a caminho"));
+                    } else if item.disponivel.e_zero() {
                         ui.add(Etiqueta::negativa("Sem estoque"));
                     } else {
                         ui.add(Etiqueta::atencao("Abaixo do ponto"));

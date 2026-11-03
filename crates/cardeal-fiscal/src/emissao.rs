@@ -5,7 +5,7 @@
 //! quem converte para o JSON da API é o adaptador ([`crate::ApiFiscalHttp`]). A nota é
 //! guardada (sem segredo nenhum) junto do documento fiscal, como foi emitida.
 
-use cardeal_kernel::{Cnpj, Cpf, Dinheiro, Percentual, Preco, Quantidade, Uf};
+use cardeal_kernel::{Cnpj, Cpf, Dinheiro, Fuso, Instante, Percentual, Preco, Quantidade, Uf};
 use cardeal_storage::Segredo;
 use serde::{Deserialize, Serialize};
 
@@ -229,6 +229,143 @@ pub struct Consumidor {
     pub nome: Option<String>,
 }
 
+/// Se o destinatário da NF-e é contribuinte do ICMS (`indIEDest`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum IndicadorIe {
+    /// 1 — contribuinte, com a inscrição estadual.
+    Contribuinte,
+    /// 2 — contribuinte isento de inscrição.
+    Isento,
+    /// 9 — não contribuinte (o consumidor; quem não tem IE).
+    NaoContribuinte,
+}
+
+impl IndicadorIe {
+    /// O código `indIEDest`.
+    #[must_use]
+    pub const fn codigo(self) -> &'static str {
+        match self {
+            Self::Contribuinte => "1",
+            Self::Isento => "2",
+            Self::NaoContribuinte => "9",
+        }
+    }
+}
+
+/// O destinatário da NF-e.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Destinatario {
+    /// CPF ou CNPJ.
+    pub documento: DocumentoConsumidor,
+    /// O nome (ou a razão social).
+    pub nome: String,
+    /// Se é contribuinte do ICMS.
+    pub indicador_ie: IndicadorIe,
+    /// A inscrição estadual (do contribuinte).
+    pub inscricao_estadual: Option<String>,
+    /// O endereço, com o código IBGE do município.
+    pub endereco: EnderecoEmitente,
+    /// O e-mail (a SEFAZ manda o XML para ele).
+    pub email: Option<String>,
+}
+
+/// Uma NF-e (modelo 55) pronta para emitir — sem certificado.
+// Os quatro `bool` são os indicadores da nota (`tpNF`, `indFinal`, `indPres`, `indPag`).
+#[allow(clippy::struct_excessive_bools)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Nfe {
+    /// O emitente.
+    pub emitente: Emitente,
+    /// O destinatário.
+    pub destinatario: Destinatario,
+    /// Os itens.
+    pub itens: Vec<ItemDocumento>,
+    /// A natureza da operação ("Venda de mercadoria").
+    pub natureza: String,
+    /// Saída (`tpNF = 1`) ou entrada (`0`, a devolução que a empresa recebe).
+    pub saida: bool,
+    /// A finalidade.
+    pub finalidade: crate::nfe::FinalidadeNfe,
+    /// As chaves das notas referenciadas (obrigatórias na devolução).
+    pub referencias: Vec<String>,
+    /// Operação com consumidor final (`indFinal`).
+    pub consumidor_final: bool,
+    /// Presencial (`indPres = 1`) ou não (`9`).
+    pub presencial: bool,
+    /// Os pagamentos.
+    pub pagamentos: Vec<PagamentoDocumento>,
+    /// A prazo (`indPag = 1`): com as duplicatas.
+    pub a_prazo: bool,
+    /// As duplicatas (`cobr/dup`).
+    pub duplicatas: Vec<crate::nfe::Duplicata>,
+    /// A série.
+    pub serie: u32,
+    /// O número.
+    pub numero: u64,
+    /// Informações complementares.
+    pub informacoes: Option<String>,
+    /// Na devolução, o que cada item devolve além do ICMS próprio (alinhado com `itens`;
+    /// vazio na venda).
+    pub devolvidos: Vec<DevolucaoDoItem>,
+}
+
+impl Nfe {
+    /// O total da nota (`vNF`): os líquidos dos itens, mais o ST, o FCP do ST e o IPI
+    /// devolvidos.
+    #[must_use]
+    pub fn total(&self) -> Dinheiro {
+        let itens: Dinheiro = self.itens.iter().map(ItemDocumento::valor_liquido).sum();
+        itens + self.devolvidos.iter().map(DevolucaoDoItem::soma).sum()
+    }
+}
+
+/// O que um item da NF-e de devolução devolve além do ICMS próprio: o ST e o FCP do ST que a
+/// compra destacou e o IPI que o comércio pagou (`impostoDevol`, NT 2016.002) — na proporção do
+/// que volta.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DevolucaoDoItem {
+    /// A modalidade da base do ST (`modBCST`), quando há ST.
+    pub modalidade_st: Option<String>,
+    /// A margem do ST (`pMVAST`).
+    pub mva_st: Option<Percentual>,
+    /// A base do ST.
+    pub base_st: Dinheiro,
+    /// A alíquota do ST.
+    pub aliquota_st: Option<Percentual>,
+    /// O ST.
+    pub valor_st: Dinheiro,
+    /// A base do FCP do ST.
+    pub base_fcp_st: Dinheiro,
+    /// A alíquota do FCP do ST.
+    pub aliquota_fcp_st: Option<Percentual>,
+    /// O FCP do ST.
+    pub valor_fcp_st: Dinheiro,
+    /// Quanto da mercadoria da compra volta (`pDevol`).
+    pub percentual_devolvido: Percentual,
+    /// O IPI devolvido (`vIPIDevol`).
+    pub ipi_devolvido: Dinheiro,
+    /// O frete da compra que volta com o item (`vFrete`).
+    pub frete: Dinheiro,
+    /// O seguro (`vSeg`).
+    pub seguro: Dinheiro,
+    /// As outras despesas (`vOutro`).
+    pub outras: Dinheiro,
+}
+
+impl DevolucaoDoItem {
+    /// O que soma no total da nota além do líquido do item: ST, FCP do ST, IPI devolvido,
+    /// frete, seguro e outras despesas.
+    #[must_use]
+    pub fn soma(&self) -> Dinheiro {
+        self.valor_st
+            + self.valor_fcp_st
+            + self.ipi_devolvido
+            + self.frete
+            + self.seguro
+            + self.outras
+    }
+}
+
 /// Uma NFC-e (modelo 65) pronta para emitir — sem certificado nem CSC.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Nfce {
@@ -320,10 +457,63 @@ pub struct RetornoSefaz {
     pub protocolo: Option<String>,
     /// Quando a SEFAZ recebeu.
     pub recebido_em: Option<String>,
-    /// O XML autorizado (`nfeProc`), quando autorizado.
+    /// O XML da nota com o protocolo (`nfeProc`), quando autorizada ou denegada. No
+    /// cancelamento e na inutilização, o XML do evento (`procEventoNFe`, `procInutNFe`) — a
+    /// guarda dele é obrigatória por 5 anos. Na consulta, o `nfeProc` quando ela recebeu o XML
+    /// assinado.
     pub xml: Option<String>,
+    /// A nota assinada que foi à SEFAZ, quando o desfecho ficou incerto (processando, falha de
+    /// comunicação): guardada, vai de volta na consulta, que então devolve o `nfeProc` — sem
+    /// ela, a nota confirmada pela consulta fica sem o XML.
+    pub xml_assinado: Option<String>,
+    /// Na consulta de nota cancelada, o XML do cancelamento (`procEventoNFe`).
+    pub xml_cancelamento: Option<String>,
     /// Os erros de validação do provedor.
     pub erros: Vec<String>,
+    /// O pedido **com certeza** não chegou à SEFAZ (sem conexão, serviço fora, 503): o
+    /// documento não existe lá e o número continua livre — vem sem chave, não há o que
+    /// consultar.
+    #[serde(default)]
+    pub nao_enviado: bool,
+}
+
+impl RetornoSefaz {
+    /// A SEFAZ está fora e a nota não chegou a ela: paralisada (108, 109) ou inalcançável (o
+    /// provedor diz que não enviou). O número continua livre — é quando a NFC-e pode ir em
+    /// contingência com ele.
+    #[must_use]
+    pub fn sefaz_fora(&self) -> bool {
+        self.nao_enviado || matches!(self.codigo.as_str(), "108" | "109")
+    }
+}
+
+/// A entrada em contingência off-line da NFC-e (`tpEmis = 9`): quando e por quê — vão na nota
+/// (`dhCont`, `xJust`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EntradaEmContingencia {
+    /// Quando a contingência começou (`dhCont`).
+    pub inicio: Instante,
+    /// O motivo, de 15 a 256 caracteres (`xJust`).
+    pub justificativa: String,
+    /// O fuso da empresa (o `dhCont` vai com o deslocamento).
+    pub fuso: Fuso,
+}
+
+/// A NFC-e assinada em contingência: a chave (com `tpEmis = 9`) e o XML com o QR Code — o que
+/// vai impresso no DANFCE e é transmitido depois, sem mudar nada.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NotaEmContingencia {
+    /// A chave de acesso.
+    pub chave: String,
+    /// A nota assinada, com o `infNFeSupl` (QR Code).
+    pub xml: String,
+}
+
+/// O tipo de emissão na chave de acesso (a 35ª posição): `9` é a contingência off-line da
+/// NFC-e.
+#[must_use]
+pub fn chave_de_contingencia(chave: &str) -> bool {
+    chave.len() == 44 && chave.as_bytes()[34] == b'9'
 }
 
 /// Uma NFC-e de exemplo para os testes do crate: dois itens (um com desconto), Simples

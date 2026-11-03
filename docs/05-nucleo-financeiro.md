@@ -454,6 +454,13 @@ Operações entre empresas do grupo (transferência de mercadoria entre filiais)
 espelhados nas duas, com `Origem` apontando para a mesma transferência — e um relatório de
 eliminação de intercompany para a consolidação.
 
+**Feito para a transferência de mercadoria (2026-10-31, `docs/modulos/compras.md` §14):** o papel
+`ContaCorrenteGrupo` ("1.2.06 Conta corrente com empresas do grupo", no plano padrão; nas bases de antes,
+`RepositorioRazao::garantir_conta_do_papel` a abre na primeira transferência). A filial que envia lança
+D Conta corrente / C Estoque; a que recebe, D Estoque / C Conta corrente, as duas com
+`Origem { modulo: "compras", tipo: "transferencia", agregado }` da mesma transferência. Somada no grupo, a
+conta zera; o que sobra é a mercadoria a caminho. O relatório de eliminação ainda não existe.
+
 ## 9. Desempenho
 
 | Operação | Alvo | Como |

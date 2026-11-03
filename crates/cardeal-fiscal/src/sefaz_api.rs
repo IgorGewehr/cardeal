@@ -15,15 +15,18 @@ use std::time::Duration;
 use base64::Engine as _;
 use cardeal_kernel::{Cnpj, Erro, Resultado, Uf};
 use cardeal_storage::Segredo;
+use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::chave::ChaveAcesso;
-use crate::emissao::{Csc, ItemDocumento, Nfce, PedidoInutilizacao, RetornoSefaz, SituacaoRetorno};
-use crate::erros::ErroFiscal;
-use crate::porta::{
-    AmbienteFiscal, ModeloFiscal, Nsu, PortaFiscal, ResumoDfe, StatusSefaz, XmlNota,
+use crate::dfe::{DocumentoDfe, Manifestacao, PaginaDfe, TipoDfe};
+use crate::emissao::{
+    Csc, EntradaEmContingencia, ItemDocumento, Nfce, Nfe, NotaEmContingencia, PedidoInutilizacao,
+    RetornoSefaz, SituacaoRetorno,
 };
+use crate::erros::ErroFiscal;
+use crate::porta::{AmbienteFiscal, ModeloFiscal, Nsu, PortaFiscal, StatusSefaz};
 
 /// Onde está o `sefaz-api` e com que chave falar com ele.
 #[derive(Debug, Clone)]
@@ -123,8 +126,29 @@ impl ApiFiscalHttp {
         corpo
     }
 
-    /// Faz um `POST` e devolve a resposta no formato `SefazResponse` do `sefaz-api`.
-    fn postar(&self, caminho: &str, corpo: &Value) -> Result<RespostaSefazApi, ErroFiscal> {
+    /// Um pedido de NFS-e: a recusa do `sefaz-api` (a validação dele, 400) é a recusa do
+    /// pedido — vira `Rejeitada` com o porquê; fora do ar e sem credencial são erro.
+    fn pedir_nfse(
+        &self,
+        caminho: &str,
+        corpo: serde_json::Map<String, Value>,
+    ) -> Resultado<crate::RetornoNfse> {
+        match self.postar::<crate::nfse::RespostaNfse>(caminho, &Value::Object(corpo)) {
+            Ok(r) => Ok(r.em_retorno()),
+            Err(ErroFiscal::ApiFiscalRecusou(m)) => Ok(crate::RetornoNfse {
+                situacao: crate::SituacaoNfse::Rejeitada,
+                numero: None,
+                chave: None,
+                codigo_verificacao: None,
+                xml: None,
+                mensagens: vec![m],
+            }),
+            Err(e) => Err(Erro::de_dominio(&e)),
+        }
+    }
+
+    /// Faz um `POST` e lê a resposta (o `SefazResponse` do `sefaz-api`, ou o da distribuição).
+    fn postar<T: DeserializeOwned>(&self, caminho: &str, corpo: &Value) -> Result<T, ErroFiscal> {
         let url = format!("{}{caminho}", self.config.url);
         let config = &self.config;
         let enviar = || -> Result<(u16, String), ErroFiscal> {
@@ -176,10 +200,31 @@ pub(crate) struct RespostaSefazApi {
     pub protocolo: Option<String>,
     pub data_recebimento: Option<String>,
     pub xml: Option<String>,
+    pub xml_assinado: Option<String>,
+    pub xml_cancelamento: Option<String>,
     pub erros: Option<Vec<String>>,
+    pub nao_enviado: bool,
 }
 
 impl RespostaSefazApi {
+    /// A nota assinada em contingência (`status: "contingencia"`, com a chave e o XML) — ou
+    /// o motivo de não ter vindo.
+    fn em_contingencia(self) -> Result<NotaEmContingencia, ErroFiscal> {
+        match (self.status.as_str(), self.chave_acesso, self.xml) {
+            ("contingencia", Some(chave), Some(xml)) if chave.len() == 44 && !xml.is_empty() => {
+                Ok(NotaEmContingencia { chave, xml })
+            }
+            _ => Err(ErroFiscal::ApiFiscalRecusou(format!(
+                "a API fiscal não assinou a nota em contingência: {}",
+                if self.motivo_status.is_empty() {
+                    "resposta sem a chave ou o XML"
+                } else {
+                    &self.motivo_status
+                }
+            ))),
+        }
+    }
+
     /// Em [`RetornoSefaz`]. A validação do provedor ("erro" com código 400) é uma rejeição: o
     /// número não foi usado e a nota precisa de correção. O `sefaz-api` também chama de "erro"
     /// as rejeições com código abaixo de 200 (algumas UFs usam, ex.: SP 178) — pelo motivo
@@ -204,10 +249,27 @@ impl RespostaSefazApi {
             chave: self.chave_acesso.filter(|c| !c.is_empty()),
             protocolo: self.protocolo.filter(|p| !p.is_empty()),
             recebido_em: self.data_recebimento.filter(|d| !d.is_empty()),
-            xml: self.xml,
+            xml: self.xml.filter(|x| !x.is_empty()),
+            xml_assinado: self.xml_assinado.filter(|x| !x.is_empty()),
+            xml_cancelamento: self.xml_cancelamento.filter(|x| !x.is_empty()),
             erros: self.erros.unwrap_or_default(),
+            nao_enviado: self.nao_enviado,
         }
     }
+}
+
+/// Data e hora como a SEFAZ quer: `AAAA-MM-DDThh:mm:ss-03:00`, no fuso da empresa.
+fn data_hora_sefaz(instante: cardeal_kernel::Instante, fuso: cardeal_kernel::Fuso) -> String {
+    let minutos = fuso.em_minutos();
+    let sinal = if minutos < 0 { '-' } else { '+' };
+    let minutos = minutos.unsigned_abs();
+    format!(
+        "{}T{}{sinal}{:02}:{:02}",
+        instante.data(fuso).formatar_iso(),
+        instante.hora(fuso).formatar_com_segundos(),
+        minutos / 60,
+        minutos % 60
+    )
 }
 
 /// Dinheiro, quantidade, preço e percentual como número JSON (o `sefaz-api` formata as
@@ -301,10 +363,44 @@ fn item_json(numero: usize, item: &ItemDocumento) -> Value {
     })
 }
 
+/// O ST, o FCP do ST e o IPI devolvidos no item da devolução.
+fn devolvido_json(item: &mut Value, d: &crate::emissao::DevolucaoDoItem) {
+    for (campo, v) in [
+        ("valorFrete", d.frete),
+        ("valorSeguro", d.seguro),
+        ("valorOutro", d.outras),
+    ] {
+        if !v.e_zero() {
+            item["produto"][campo] = Value::from(reais(v));
+        }
+    }
+    let icms = &mut item["imposto"]["icms"];
+    if !d.valor_st.e_zero() {
+        icms["modBCST"] = Value::from(d.modalidade_st.clone().unwrap_or_else(|| "4".into()));
+        if let Some(m) = d.mva_st {
+            icms["mvaST"] = Value::from(numero_percentual(m));
+        }
+        icms["valorBCST"] = Value::from(reais(d.base_st));
+        icms["aliquotaST"] = Value::from(numero_percentual(d.aliquota_st.unwrap_or_default()));
+        icms["valorST"] = Value::from(reais(d.valor_st));
+    }
+    if !d.valor_fcp_st.e_zero() {
+        icms["valorBCFCPST"] = Value::from(reais(d.base_fcp_st));
+        icms["aliquotaFCPST"] =
+            Value::from(numero_percentual(d.aliquota_fcp_st.unwrap_or_default()));
+        icms["valorFCPST"] = Value::from(reais(d.valor_fcp_st));
+    }
+    if !d.ipi_devolvido.e_zero() {
+        item["impostoDevol"] = json!({
+            "percentualDevolvido": numero_percentual(d.percentual_devolvido),
+            "valorIPIDevolvido": reais(d.ipi_devolvido),
+        });
+    }
+}
+
 /// O corpo do `POST /nfe/nfce/emitir` (sem certificado e ambiente, que o adaptador põe).
-pub(crate) fn nfce_json(nota: &Nfce, csc: &Csc) -> serde_json::Map<String, Value> {
-    let e = &nota.emitente;
-    let en = &e.endereco;
+/// O endereço no formato do `sefaz-api` (emitente e destinatário).
+fn endereco_json(en: &crate::emissao::EnderecoEmitente) -> Value {
     let mut endereco = json!({
         "logradouro": en.logradouro,
         "numero": en.numero,
@@ -320,17 +416,165 @@ pub(crate) fn nfce_json(nota: &Nfce, csc: &Csc) -> serde_json::Map<String, Value
     if let Some(t) = &en.telefone {
         endereco["telefone"] = Value::from(t.as_str());
     }
+    endereco
+}
+
+/// O emitente no formato do `sefaz-api`.
+fn emitente_json(e: &crate::emissao::Emitente) -> Value {
     let mut emitente = json!({
         "cnpj": e.cnpj.sem_mascara(),
         "nome": e.razao_social,
         "nomeFantasia": e.nome_fantasia,
         "inscricaoEstadual": e.inscricao_estadual,
         "crt": e.crt.codigo(),
-        "endereco": endereco,
+        "endereco": endereco_json(&e.endereco),
     });
     if let Some(im) = &e.inscricao_municipal {
         emitente["inscricaoMunicipal"] = Value::from(im.as_str());
     }
+    emitente
+}
+
+/// O destinatário no formato do `sefaz-api`.
+fn destinatario_json(d: &crate::emissao::Destinatario) -> Value {
+    let mut destinatario = match &d.documento {
+        crate::emissao::DocumentoConsumidor::Cpf(cpf) => json!({ "cpf": cpf.sem_mascara() }),
+        crate::emissao::DocumentoConsumidor::Cnpj(cnpj) => json!({ "cnpj": cnpj.sem_mascara() }),
+    };
+    destinatario["nome"] = Value::from(d.nome.as_str());
+    destinatario["indicadorIE"] = Value::from(d.indicador_ie.codigo());
+    if let Some(ie) = &d.inscricao_estadual {
+        destinatario["inscricaoEstadual"] = Value::from(ie.as_str());
+    }
+    if let Some(email) = &d.email {
+        destinatario["email"] = Value::from(email.as_str());
+    }
+    destinatario["endereco"] = endereco_json(&d.endereco);
+    destinatario
+}
+
+/// A cobrança (fatura e duplicatas) no formato do `sefaz-api`.
+fn cobranca_json(nota: &Nfe) -> Value {
+    let total: cardeal_kernel::Dinheiro = nota.duplicatas.iter().map(|d| d.valor).sum();
+    json!({
+        "fatura": {
+            "numero": nota.numero.to_string(),
+            "valorOriginal": reais(total),
+            "valorLiquido": reais(total),
+        },
+        "duplicatas": nota.duplicatas.iter().map(|d| json!({
+            "numero": d.numero,
+            "vencimento": d.vencimento.formatar_iso(),
+            "valor": reais(d.valor),
+        })).collect::<Vec<_>>(),
+    })
+}
+
+/// O corpo da NF-e (`NFeRequest` do `sefaz-api`), sem o certificado.
+pub(crate) fn nfe_json(nota: &Nfe) -> serde_json::Map<String, Value> {
+    let devolucao = nota.finalidade == crate::nfe::FinalidadeNfe::Devolucao;
+    // Sem o meio de verdade (o pedido não diz como vai ser pago), "outros" com a descrição. A
+    // devolução não tem pagamento: tPag 90 com zero (rejeição 871 com qualquer outro).
+    let mut formas: Vec<Value> = nota
+        .pagamentos
+        .iter()
+        .map(|p| {
+            let mut f = json!({ "tipo": p.meio.codigo(), "valor": reais(p.valor) });
+            if p.meio.exige_grupo_cartao() {
+                f["cartao"] = json!({ "tipoIntegracao": "2" });
+            }
+            if p.meio == crate::emissao::MeioPagamento::Outros {
+                f["descricao"] = Value::from(if nota.a_prazo { "A prazo" } else { "A vista" });
+            }
+            f
+        })
+        .collect();
+    if devolucao || formas.is_empty() {
+        formas = vec![json!({ "tipo": "90", "valor": 0 })];
+    }
+    let mut corpo = serde_json::Map::new();
+    corpo.insert("emitente".into(), emitente_json(&nota.emitente));
+    corpo.insert("destinatario".into(), destinatario_json(&nota.destinatario));
+    corpo.insert(
+        "itens".into(),
+        Value::Array(
+            nota.itens
+                .iter()
+                .enumerate()
+                .map(|(i, it)| {
+                    let mut v = item_json(i + 1, it);
+                    if let Some(d) = nota.devolvidos.get(i) {
+                        devolvido_json(&mut v, d);
+                    }
+                    v
+                })
+                .collect(),
+        ),
+    );
+    corpo.insert(
+        "naturezaOperacao".into(),
+        Value::from(nota.natureza.as_str()),
+    );
+    corpo.insert(
+        "tipoOperacao".into(),
+        Value::from(if nota.saida { "1" } else { "0" }),
+    );
+    corpo.insert("finalidade".into(), Value::from(nota.finalidade.codigo()));
+    if !nota.referencias.is_empty() {
+        corpo.insert(
+            "referencias".into(),
+            Value::Array(
+                nota.referencias
+                    .iter()
+                    .map(|r| json!({ "refNFe": r }))
+                    .collect(),
+            ),
+        );
+    }
+    corpo.insert(
+        "consumidorFinal".into(),
+        Value::from(if nota.consumidor_final { "1" } else { "0" }),
+    );
+    corpo.insert(
+        "presencaComprador".into(),
+        // A devolução não é presencial nem não presencial: "não se aplica" (0).
+        Value::from(if devolucao {
+            "0"
+        } else if nota.presencial {
+            "1"
+        } else {
+            "9"
+        }),
+    );
+    corpo.insert("transporte".into(), json!({ "modFrete": "9" }));
+    corpo.insert(
+        "pagamento".into(),
+        json!({
+            "indicadorPagamento": if nota.a_prazo { "1" } else { "0" },
+            "formas": formas,
+        }),
+    );
+    if !nota.duplicatas.is_empty() {
+        corpo.insert("cobranca".into(), cobranca_json(nota));
+    }
+    if let Some(info) = &nota.informacoes {
+        corpo.insert(
+            "informacoesAdicionais".into(),
+            json!({ "contribuinte": info }),
+        );
+    }
+    corpo.insert("serie".into(), Value::from(nota.serie.to_string()));
+    corpo.insert("numero".into(), Value::from(nota.numero));
+    corpo.insert(
+        "ufEmitente".into(),
+        Value::from(nota.emitente.endereco.uf.sigla()),
+    );
+    corpo
+}
+
+pub(crate) fn nfce_json(nota: &Nfce, csc: &Csc) -> serde_json::Map<String, Value> {
+    let e = &nota.emitente;
+    let en = &e.endereco;
     let formas: Vec<Value> = nota
         .pagamentos
         .iter()
@@ -350,7 +594,7 @@ pub(crate) fn nfce_json(nota: &Nfce, csc: &Csc) -> serde_json::Map<String, Value
         pagamento["troco"] = Value::from(reais(nota.troco));
     }
     let mut corpo = serde_json::Map::new();
-    corpo.insert("emitente".into(), emitente);
+    corpo.insert("emitente".into(), emitente_json(e));
     corpo.insert(
         "itens".into(),
         Value::Array(
@@ -396,8 +640,80 @@ struct RespostaDeErro {
     error: String,
 }
 
+/// A resposta da distribuição `DFe` do `sefaz-api` (`DfeResponse`).
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct RespostaDfe {
+    status: String,
+    #[serde(rename = "codigoStatus")]
+    codigo_status: String,
+    #[serde(rename = "motivoStatus")]
+    motivo_status: String,
+    #[serde(rename = "ultNSU")]
+    ult_nsu: String,
+    #[serde(rename = "maxNSU")]
+    max_nsu: String,
+    documentos: Vec<DocumentoDaApi>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+struct DocumentoDaApi {
+    nsu: String,
+    tipo: String,
+    chave_acesso: String,
+    xml: String,
+}
+
+impl RespostaDfe {
+    /// Em [`PaginaDfe`]. A resposta que não serve (sem NSU, falha da API) é
+    /// `ServicoIndisponivel` — nunca uma página que faça o NSU andar (ou voltar).
+    fn em_pagina(self, exige_nsu: bool) -> Result<PaginaDfe, ErroFiscal> {
+        let nsu = |s: &str| s.parse::<u64>().ok().map(Nsu);
+        match self.status.as_str() {
+            "ok" => {
+                let ultimo = nsu(&self.ult_nsu);
+                if exige_nsu && ultimo.is_none() {
+                    return Err(ErroFiscal::ServicoIndisponivel);
+                }
+                let ultimo = ultimo.unwrap_or_default();
+                Ok(PaginaDfe {
+                    consumo_indevido: false,
+                    ultimo_nsu: ultimo,
+                    maior_nsu: nsu(&self.max_nsu).unwrap_or(ultimo),
+                    documentos: self
+                        .documentos
+                        .into_iter()
+                        .map(|d| DocumentoDfe {
+                            nsu: nsu(&d.nsu).unwrap_or_default(),
+                            tipo: match d.tipo.as_str() {
+                                "resNFe" => TipoDfe::ResumoDaNota,
+                                "procNFe" => TipoDfe::Nota,
+                                "resEvento" => TipoDfe::ResumoDeEvento,
+                                "procEventoNFe" => TipoDfe::Evento,
+                                _ => TipoDfe::Outro,
+                            },
+                            chave: ChaveAcesso::nova(&d.chave_acesso).ok(),
+                            xml: d.xml,
+                        })
+                        .collect(),
+                })
+            }
+            "consumo_indevido" => Ok(PaginaDfe {
+                consumo_indevido: true,
+                ..PaginaDfe::default()
+            }),
+            "rejeitado" => Err(ErroFiscal::ApiFiscalRecusou(format!(
+                "a SEFAZ recusou a consulta das notas recebidas ({}): {}",
+                self.codigo_status, self.motivo_status
+            ))),
+            _ => Err(ErroFiscal::ServicoIndisponivel),
+        }
+    }
+}
+
 /// Traduz o status HTTP e o corpo numa resposta ou num [`ErroFiscal`].
-fn interpretar_resposta(status: u16, texto: &str) -> Result<RespostaSefazApi, ErroFiscal> {
+fn interpretar_resposta<T: DeserializeOwned>(status: u16, texto: &str) -> Result<T, ErroFiscal> {
     let mensagem = || {
         serde_json::from_str::<RespostaDeErro>(texto)
             .map_or_else(|_| texto.chars().take(200).collect(), |e| e.error)
@@ -422,16 +738,56 @@ fn interpretar_resposta(status: u16, texto: &str) -> Result<RespostaSefazApi, Er
 }
 
 impl PortaFiscal for ApiFiscalHttp {
-    fn distribuicao_dfe(&self, _cnpj: &Cnpj, _desde: Nsu) -> Resultado<Vec<ResumoDfe>> {
-        Err(Erro::de_dominio(&ErroFiscal::NaoSuportadoPeloProvedor(
-            "a distribuição de notas de entrada (DFe)".into(),
-        )))
+    fn distribuicao_dfe(&self, cnpj: &Cnpj, uf: Uf, desde: Nsu) -> Resultado<PaginaDfe> {
+        let mut corpo = self.corpo_base();
+        corpo.insert("cnpj".into(), Value::from(cnpj.sem_mascara()));
+        corpo.insert("ufAutor".into(), Value::from(uf.sigla()));
+        corpo.insert("ultNSU".into(), Value::from(desde.0.to_string()));
+        self.postar::<RespostaDfe>("/nfe/dfe/distribuicao", &Value::Object(corpo))
+            .and_then(|r| r.em_pagina(true))
+            .map_err(|e| Erro::de_dominio(&e))
     }
 
-    fn baixar_xml(&self, _chave: &ChaveAcesso) -> Resultado<XmlNota> {
-        Err(Erro::de_dominio(&ErroFiscal::NaoSuportadoPeloProvedor(
-            "o download de notas de entrada (DFe)".into(),
-        )))
+    fn consultar_dfe_por_chave(
+        &self,
+        cnpj: &Cnpj,
+        uf: Uf,
+        chave: &ChaveAcesso,
+    ) -> Resultado<PaginaDfe> {
+        let mut corpo = self.corpo_base();
+        corpo.insert("cnpj".into(), Value::from(cnpj.sem_mascara()));
+        corpo.insert("ufAutor".into(), Value::from(uf.sigla()));
+        corpo.insert("chaveAcesso".into(), Value::from(chave.como_str()));
+        self.postar::<RespostaDfe>("/nfe/dfe/consulta-chave", &Value::Object(corpo))
+            .and_then(|r| r.em_pagina(false))
+            .map_err(|e| Erro::de_dominio(&e))
+    }
+
+    fn manifestar(
+        &self,
+        cnpj: &Cnpj,
+        chave: &ChaveAcesso,
+        tipo: Manifestacao,
+        justificativa: Option<&str>,
+    ) -> Resultado<RetornoSefaz> {
+        let mut corpo = self.corpo_base();
+        corpo.insert("cnpj".into(), Value::from(cnpj.sem_mascara()));
+        corpo.insert("chaveAcesso".into(), Value::from(chave.como_str()));
+        corpo.insert("tipo".into(), Value::from(tipo.na_api()));
+        if let Some(j) = justificativa {
+            corpo.insert("justificativa".into(), Value::from(j));
+        }
+        self.postar("/nfe/manifestacao", &Value::Object(corpo))
+            .map(RespostaSefazApi::em_retorno)
+            .map_err(|e| Erro::de_dominio(&e))
+    }
+
+    fn emitir_nfe(&self, nota: &Nfe) -> Resultado<RetornoSefaz> {
+        let mut corpo = self.corpo_base();
+        corpo.extend(nfe_json(nota));
+        self.postar("/nfe/emitir", &Value::Object(corpo))
+            .map(RespostaSefazApi::em_retorno)
+            .map_err(|e| Erro::de_dominio(&e))
     }
 
     fn emitir_nfce(&self, nota: &Nfce, csc: &Csc) -> Resultado<RetornoSefaz> {
@@ -442,10 +798,51 @@ impl PortaFiscal for ApiFiscalHttp {
             .map_err(|e| Erro::de_dominio(&e))
     }
 
-    fn consultar_documento(&self, chave: &ChaveAcesso, uf: Uf) -> Resultado<RetornoSefaz> {
+    fn preparar_nfce_em_contingencia(
+        &self,
+        nota: &Nfce,
+        csc: &Csc,
+        entrada: &EntradaEmContingencia,
+    ) -> Resultado<NotaEmContingencia> {
+        let mut corpo = self.corpo_base();
+        corpo.extend(nfce_json(nota, csc));
+        corpo.insert(
+            "contingencia".into(),
+            json!({
+                "dhCont": data_hora_sefaz(entrada.inicio, entrada.fuso),
+                "xJust": entrada.justificativa,
+            }),
+        );
+        self.postar::<RespostaSefazApi>("/nfe/nfce/contingencia/prepare", &Value::Object(corpo))
+            .and_then(RespostaSefazApi::em_contingencia)
+            .map_err(|e| Erro::de_dominio(&e))
+    }
+
+    fn transmitir_nfce_em_contingencia(
+        &self,
+        xml_assinado: &str,
+        uf: Uf,
+    ) -> Resultado<RetornoSefaz> {
+        let mut corpo = self.corpo_base();
+        corpo.insert("signedXml".into(), Value::from(xml_assinado));
+        corpo.insert("ufEmitente".into(), Value::from(uf.sigla()));
+        self.postar("/nfe/nfce/contingencia/transmit", &Value::Object(corpo))
+            .map(RespostaSefazApi::em_retorno)
+            .map_err(|e| Erro::de_dominio(&e))
+    }
+
+    fn consultar_documento(
+        &self,
+        chave: &ChaveAcesso,
+        uf: Uf,
+        xml_assinado: Option<&str>,
+    ) -> Resultado<RetornoSefaz> {
         let mut corpo = self.corpo_base();
         corpo.insert("chaveAcesso".into(), Value::from(chave.como_str()));
         corpo.insert("ufEmitente".into(), Value::from(uf.sigla()));
+        if let Some(xml) = xml_assinado {
+            corpo.insert("xmlAssinado".into(), Value::from(xml));
+        }
         self.postar("/nfe/consultar", &Value::Object(corpo))
             .map(RespostaSefazApi::em_retorno)
             .map_err(|e| Erro::de_dominio(&e))
@@ -464,6 +861,83 @@ impl PortaFiscal for ApiFiscalHttp {
         corpo.insert("justificativa".into(), Value::from(justificativa));
         corpo.insert("ufEmitente".into(), Value::from(uf.sigla()));
         self.postar("/nfe/cancelar", &Value::Object(corpo))
+            .map(RespostaSefazApi::em_retorno)
+            .map_err(|e| Erro::de_dominio(&e))
+    }
+
+    fn cancelar_por_substituicao(
+        &self,
+        chave: &ChaveAcesso,
+        protocolo: &str,
+        justificativa: &str,
+        uf: Uf,
+        substituta: &ChaveAcesso,
+    ) -> Resultado<RetornoSefaz> {
+        let mut corpo = self.corpo_base();
+        corpo.insert("chaveAcesso".into(), Value::from(chave.como_str()));
+        corpo.insert("protocolo".into(), Value::from(protocolo));
+        corpo.insert("justificativa".into(), Value::from(justificativa));
+        corpo.insert("ufEmitente".into(), Value::from(uf.sigla()));
+        corpo.insert("chaveSubstituta".into(), Value::from(substituta.como_str()));
+        self.postar("/nfe/cancelar", &Value::Object(corpo))
+            .map(RespostaSefazApi::em_retorno)
+            .map_err(|e| Erro::de_dominio(&e))
+    }
+
+    fn emitir_nfse(&self, nota: &crate::Nfse) -> Resultado<crate::RetornoNfse> {
+        let mut corpo = self.corpo_base();
+        corpo.extend(crate::nfse::nfse_json(nota));
+        self.pedir_nfse("/nfse/emitir", corpo)
+    }
+
+    fn consultar_nfse_por_dps(
+        &self,
+        prestador: &crate::Emitente,
+        serie: u32,
+        numero: u64,
+    ) -> Resultado<crate::RetornoNfse> {
+        let mut corpo = self.corpo_base();
+        corpo.insert("prestador".into(), crate::nfse::prestador_json(prestador));
+        corpo.insert("serie".into(), Value::from(serie.to_string()));
+        corpo.insert("numero".into(), Value::from(numero));
+        corpo.insert(
+            "codigoMunicipio".into(),
+            Value::from(prestador.endereco.codigo_municipio.as_str()),
+        );
+        self.pedir_nfse("/nfse/consultar", corpo)
+    }
+
+    fn cancelar_nfse(
+        &self,
+        prestador: &crate::Emitente,
+        c: &crate::CancelamentoNfse,
+    ) -> Resultado<crate::RetornoNfse> {
+        let mut corpo = self.corpo_base();
+        corpo.insert("prestador".into(), crate::nfse::prestador_json(prestador));
+        corpo.insert("numero".into(), Value::from(c.numero));
+        corpo.insert("chaveNFSe".into(), Value::from(c.chave.as_str()));
+        corpo.insert(
+            "codigoMunicipio".into(),
+            Value::from(prestador.endereco.codigo_municipio.as_str()),
+        );
+        corpo.insert("codigoCancelamento".into(), Value::from(c.motivo.codigo()));
+        corpo.insert("motivo".into(), Value::from(c.justificativa.as_str()));
+        self.pedir_nfse("/nfse/cancelar", corpo)
+    }
+
+    fn carta_de_correcao(
+        &self,
+        chave: &ChaveAcesso,
+        texto: &str,
+        sequencia: u32,
+        uf: Uf,
+    ) -> Resultado<RetornoSefaz> {
+        let mut corpo = self.corpo_base();
+        corpo.insert("chaveAcesso".into(), Value::from(chave.como_str()));
+        corpo.insert("correcao".into(), Value::from(texto));
+        corpo.insert("sequencia".into(), Value::from(sequencia));
+        corpo.insert("ufEmitente".into(), Value::from(uf.sigla()));
+        self.postar("/nfe/carta-correcao", &Value::Object(corpo))
             .map(RespostaSefazApi::em_retorno)
             .map_err(|e| Erro::de_dominio(&e))
     }
@@ -490,7 +964,7 @@ impl PortaFiscal for ApiFiscalHttp {
         let mut corpo = self.corpo_base();
         corpo.insert("ufEmitente".into(), Value::from(uf.sigla()));
         corpo.insert("modelo".into(), Value::from(modelo.codigo()));
-        let r = self
+        let r: RespostaSefazApi = self
             .postar("/nfe/status", &Value::Object(corpo))
             .map_err(|e| Erro::de_dominio(&e))?;
         Ok(StatusSefaz {
@@ -657,16 +1131,158 @@ mod testes {
         let retorno = completo.em_retorno();
         assert_eq!(retorno.protocolo.as_deref(), Some("143260000000001"));
         assert_eq!(retorno.xml.as_deref(), Some("<nfeProc/>"));
+        assert_eq!(retorno.xml_assinado, None);
+        // A emissão incerta devolve a nota assinada; a consulta da cancelada, o cancelamento.
+        let incerta: RespostaSefazApi = serde_json::from_str(
+            r#"{"success":false,"status":"erro","codigoStatus":"ERR","motivoStatus":"socket hang up","chaveAcesso":"43261011222333000181650010000000421100000001","xmlAssinado":"<NFe/>"}"#,
+        )
+        .unwrap();
+        let incerta = incerta.em_retorno();
+        assert_eq!(incerta.situacao, SituacaoRetorno::Erro);
+        assert_eq!(incerta.xml_assinado.as_deref(), Some("<NFe/>"));
+        let cancelada: RespostaSefazApi = serde_json::from_str(
+            r#"{"success":false,"status":"cancelado","codigoStatus":"101","motivoStatus":"Cancelamento de NF-e homologado","protocolo":"143260000000001","xml":"","xmlCancelamento":"<procEventoNFe/>"}"#,
+        )
+        .unwrap();
+        let cancelada = cancelada.em_retorno();
+        assert_eq!(cancelada.situacao, SituacaoRetorno::Cancelado);
+        assert_eq!(cancelada.xml, None, "XML vazio não é XML");
+        assert_eq!(
+            cancelada.xml_cancelamento.as_deref(),
+            Some("<procEventoNFe/>")
+        );
+    }
+
+    #[test]
+    fn a_distribuicao_manda_o_nsu_e_le_a_pagina() {
+        let (url, tarefa) = servidor(
+            200,
+            r#"{"success":true,"status":"ok","codigoStatus":"138","motivoStatus":"Documento(s) localizado(s)","ultNSU":"000000000000012","maxNSU":"000000000000020","documentos":[{"nsu":"000000000000011","schema":"resNFe_v1.01.xsd","tipo":"resNFe","chaveAcesso":"43261011222333000181550010000001231000000010","xml":"<resNFe/>"},{"nsu":"000000000000012","schema":"x","tipo":"procNFe","chaveAcesso":"","xml":"<nfeProc/>"}]}"#,
+        );
+        let cnpj = Cnpj::novo("11222333000181").unwrap();
+        let p = cliente(&url)
+            .distribuicao_dfe(&cnpj, Uf::Rs, Nsu(10))
+            .unwrap();
+        assert!(!p.consumo_indevido);
+        assert_eq!((p.ultimo_nsu, p.maior_nsu), (Nsu(12), Nsu(20)));
+        assert_eq!(p.documentos.len(), 2);
+        assert_eq!(p.documentos[0].tipo, TipoDfe::ResumoDaNota);
+        assert_eq!(p.documentos[0].nsu, Nsu(11));
+        assert!(p.documentos[0].chave.is_some());
+        assert_eq!(p.documentos[1].tipo, TipoDfe::Nota);
+        assert_eq!(p.documentos[1].chave, None);
+        let recebido = tarefa.join().unwrap();
+        assert!(
+            recebido.starts_with("POST /nfe/dfe/distribuicao "),
+            "{recebido}"
+        );
+        let corpo: Value = serde_json::from_str(recebido.rsplit('\n').next().unwrap()).unwrap();
+        assert_eq!(corpo["cnpj"], "11222333000181");
+        assert_eq!(corpo["ufAutor"], "RS");
+        assert_eq!(corpo["ultNSU"], "10");
+    }
+
+    #[test]
+    fn resposta_da_distribuicao_que_nao_serve_nao_anda_o_nsu() {
+        let pagina = |json: &str| {
+            serde_json::from_str::<RespostaDfe>(json)
+                .unwrap()
+                .em_pagina(true)
+        };
+        // Sem NSU, ou a API sem resposta da SEFAZ: indisponível (tenta depois).
+        assert_eq!(
+            pagina(r#"{"status":"ok","codigoStatus":"138","ultNSU":""}"#).unwrap_err(),
+            ErroFiscal::ServicoIndisponivel
+        );
+        assert_eq!(
+            pagina(r#"{"status":"erro","codigoStatus":"ERR"}"#).unwrap_err(),
+            ErroFiscal::ServicoIndisponivel
+        );
+        // 656: a página diz "espere".
+        assert!(
+            pagina(r#"{"status":"consumo_indevido","codigoStatus":"656"}"#)
+                .unwrap()
+                .consumo_indevido
+        );
+        // Recusa da SEFAZ: o motivo vai para a tela.
+        let ErroFiscal::ApiFiscalRecusou(m) = pagina(
+            r#"{"status":"rejeitado","codigoStatus":"593","motivoStatus":"CNPJ-Base difere"}"#,
+        )
+        .unwrap_err() else {
+            panic!("esperava recusa")
+        };
+        assert!(m.contains("593") && m.contains("CNPJ-Base difere"));
+        // A consulta por chave não exige NSU.
+        let chave = serde_json::from_str::<RespostaDfe>(r#"{"status":"ok","codigoStatus":"138"}"#)
+            .unwrap()
+            .em_pagina(false)
+            .unwrap();
+        assert_eq!(chave.ultimo_nsu, Nsu(0));
+    }
+
+    #[test]
+    fn a_manifestacao_manda_o_tipo() {
+        let (url, tarefa) = servidor(
+            200,
+            r#"{"success":true,"status":"autorizado","codigoStatus":"135","motivoStatus":"Evento registrado","protocolo":"891260000000001","xml":"<procEventoNFe/>"}"#,
+        );
+        let chave = ChaveAcesso::nova("43261011222333000181550010000001231000000010").unwrap();
+        let r = cliente(&url)
+            .manifestar(
+                &Cnpj::novo("11222333000181").unwrap(),
+                &chave,
+                Manifestacao::Ciencia,
+                None,
+            )
+            .unwrap();
+        assert_eq!(r.situacao, SituacaoRetorno::Autorizado);
+        assert_eq!(r.xml.as_deref(), Some("<procEventoNFe/>"));
+        let recebido = tarefa.join().unwrap();
+        assert!(
+            recebido.starts_with("POST /nfe/manifestacao "),
+            "{recebido}"
+        );
+        let corpo: Value = serde_json::from_str(recebido.rsplit('\n').next().unwrap()).unwrap();
+        assert_eq!(corpo["tipo"], "ciencia");
+        assert!(corpo.get("justificativa").is_none());
+    }
+
+    #[test]
+    fn a_consulta_leva_o_xml_assinado_quando_ha() {
+        let (url, tarefa) = servidor(
+            200,
+            r#"{"success":true,"status":"autorizado","codigoStatus":"100","motivoStatus":"Autorizado o uso da NF-e","xml":"<nfeProc/>"}"#,
+        );
+        let chave = ChaveAcesso::nova("43261011222333000181650010000000421100000001").unwrap();
+        let r = cliente(&url)
+            .consultar_documento(&chave, Uf::Rs, Some("<NFe>assinada</NFe>"))
+            .unwrap();
+        assert_eq!(r.xml.as_deref(), Some("<nfeProc/>"));
+        let recebido = tarefa.join().unwrap();
+        assert!(recebido.starts_with("POST /nfe/consultar "), "{recebido}");
+        let corpo: Value = serde_json::from_str(recebido.rsplit('\n').next().unwrap()).unwrap();
+        assert_eq!(corpo["chaveAcesso"], chave.como_str());
+        assert_eq!(corpo["xmlAssinado"], "<NFe>assinada</NFe>");
+
+        // Sem o XML, o campo nem vai.
+        let (url, tarefa) = servidor(200, r#"{"success":true,"status":"autorizado"}"#);
+        cliente(&url)
+            .consultar_documento(&chave, Uf::Rs, None)
+            .unwrap();
+        let recebido = tarefa.join().unwrap();
+        let corpo: Value = serde_json::from_str(recebido.rsplit('\n').next().unwrap()).unwrap();
+        assert!(corpo.get("xmlAssinado").is_none());
     }
 
     #[test]
     fn erros_da_api_viram_erros_que_a_tela_explica() {
         assert_eq!(
-            interpretar_resposta(403, r#"{"error":"API key inválida"}"#).unwrap_err(),
+            interpretar_resposta::<RespostaSefazApi>(403, r#"{"error":"API key inválida"}"#)
+                .unwrap_err(),
             ErroFiscal::CredencialDaApiFiscal
         );
         assert_eq!(
-            interpretar_resposta(
+            interpretar_resposta::<RespostaSefazApi>(
                 403,
                 r#"{"error":"CNPJ do certificado não corresponde ao CNPJ do emitente"}"#
             )
@@ -676,14 +1292,14 @@ mod testes {
             )
         );
         assert_eq!(
-            interpretar_resposta(502, "Bad gateway").unwrap_err(),
+            interpretar_resposta::<RespostaSefazApi>(502, "Bad gateway").unwrap_err(),
             ErroFiscal::ServicoIndisponivel
         );
         assert_eq!(
-            interpretar_resposta(429, "{}").unwrap_err(),
+            interpretar_resposta::<RespostaSefazApi>(429, "{}").unwrap_err(),
             ErroFiscal::ServicoIndisponivel
         );
-        let rejeitado = interpretar_resposta(
+        let rejeitado = interpretar_resposta::<RespostaSefazApi>(
             422,
             r#"{"success":false,"status":"rejeitado","codigoStatus":"539","motivoStatus":"Duplicidade"}"#,
         )
@@ -703,6 +1319,271 @@ mod testes {
             .status_servico(Uf::Sc, ModeloFiscal::Nfe)
             .unwrap_err();
         assert_eq!(erro.codigo, cardeal_kernel::CodigoErro::FISCAL_INDISPONIVEL);
+    }
+
+    fn csc() -> Csc {
+        Csc {
+            id: "000001".into(),
+            token: Segredo::novo("TOKEN".into()),
+        }
+    }
+
+    #[test]
+    fn contingencia_manda_o_dh_cont_e_a_justificativa_e_le_a_nota_assinada() {
+        let (url, tarefa) = servidor(
+            200,
+            r#"{"success":true,"status":"contingencia","chaveAcesso":"43261011222333000181650010000000429100000001","numero":42,"xml":"<NFe><infNFeSupl><qrCode>q</qrCode></infNFeSupl></NFe>"}"#,
+        );
+        let entrada = EntradaEmContingencia {
+            inicio: cardeal_kernel::Instante::de_micros(1_793_030_400_000_000),
+            justificativa: "SEFAZ indisponível: sem conexão com o webservice".into(),
+            fuso: cardeal_kernel::Fuso::BRASILIA,
+        };
+        let nota = cliente(&url)
+            .preparar_nfce_em_contingencia(&crate::emissao::exemplo(), &csc(), &entrada)
+            .unwrap();
+        assert_eq!(nota.chave, "43261011222333000181650010000000429100000001");
+        assert!(nota.xml.contains("<qrCode>"));
+        let recebido = tarefa.join().unwrap();
+        assert!(
+            recebido.starts_with("POST /nfe/nfce/contingencia/prepare "),
+            "{recebido}"
+        );
+        let corpo: Value = serde_json::from_str(recebido.rsplit('\n').next().unwrap()).unwrap();
+        assert_eq!(corpo["contingencia"]["dhCont"], "2026-10-26T13:00:00-03:00");
+        assert_eq!(
+            corpo["contingencia"]["xJust"],
+            "SEFAZ indisponível: sem conexão com o webservice"
+        );
+        assert_eq!(corpo["numero"], 42);
+
+        // Sem a chave ou o XML: recusa, com o motivo.
+        let (url, _t) = servidor(
+            422,
+            r#"{"success":false,"status":"erro","motivoStatus":"xJust deve ter 15-256 caracteres"}"#,
+        );
+        let erro = cliente(&url)
+            .preparar_nfce_em_contingencia(&crate::emissao::exemplo(), &csc(), &entrada)
+            .unwrap_err();
+        assert!(
+            erro.mensagem.contains("xJust deve ter"),
+            "{}",
+            erro.mensagem
+        );
+    }
+
+    /// A NF-e de venda a prazo do teste.
+    fn nfe_a_prazo() -> Nfe {
+        use crate::emissao::{Destinatario, DocumentoConsumidor, IndicadorIe, MeioPagamento};
+        let base = crate::emissao::exemplo();
+        let mut endereco = base.emitente.endereco.clone();
+        endereco.municipio = "Caxias do Sul".into();
+        endereco.codigo_municipio = "4305108".into();
+        Nfe {
+            emitente: base.emitente.clone(),
+            destinatario: Destinatario {
+                documento: DocumentoConsumidor::Cnpj(
+                    cardeal_kernel::Cnpj::novo("11222333000181").unwrap(),
+                ),
+                nome: "CLIENTE LTDA".into(),
+                indicador_ie: IndicadorIe::Contribuinte,
+                inscricao_estadual: Some("0290000000".into()),
+                endereco,
+                email: Some("compras@cliente.com.br".into()),
+            },
+            itens: base.itens.clone(),
+            natureza: "Venda de mercadoria".into(),
+            saida: true,
+            finalidade: crate::nfe::FinalidadeNfe::Normal,
+            referencias: Vec::new(),
+            consumidor_final: false,
+            presencial: false,
+            pagamentos: vec![crate::emissao::PagamentoDocumento {
+                meio: MeioPagamento::Outros,
+                valor: base.total(),
+            }],
+            a_prazo: true,
+            duplicatas: vec![crate::nfe::Duplicata {
+                numero: "001".into(),
+                vencimento: cardeal_kernel::Data::de_ymd(2026, 11, 26).unwrap(),
+                valor: base.total(),
+            }],
+            serie: 1,
+            numero: 12,
+            informacoes: None,
+            devolvidos: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_nfe_de_venda_a_prazo_leva_destinatario_e_duplicatas() {
+        let nota = nfe_a_prazo();
+        let corpo = Value::Object(nfe_json(&nota));
+        let d = &corpo["destinatario"];
+        assert_eq!(d["cnpj"], "11222333000181");
+        assert_eq!(d["indicadorIE"], "1");
+        assert_eq!(d["inscricaoEstadual"], "0290000000");
+        assert_eq!(d["endereco"]["codigoMunicipio"], "4305108");
+        assert_eq!(corpo["naturezaOperacao"], "Venda de mercadoria");
+        assert_eq!(corpo["tipoOperacao"], "1");
+        assert_eq!(corpo["finalidade"], "1");
+        assert_eq!(corpo["consumidorFinal"], "0");
+        assert_eq!(corpo["presencaComprador"], "9");
+        assert_eq!(corpo["pagamento"]["indicadorPagamento"], "1");
+        assert_eq!(corpo["pagamento"]["formas"][0]["tipo"], "99");
+        assert_eq!(corpo["pagamento"]["formas"][0]["descricao"], "A prazo");
+        assert_eq!(
+            corpo["cobranca"]["duplicatas"][0]["vencimento"],
+            "2026-11-26"
+        );
+        assert_eq!(corpo["numero"], 12);
+        assert!(corpo.get("csc").is_none() && corpo.get("referencias").is_none());
+    }
+
+    #[test]
+    fn a_devolucao_leva_a_referencia_o_st_o_ipi_e_o_frete_sem_pagamento() {
+        let nota = nfe_a_prazo();
+        let base = crate::emissao::exemplo();
+        // A devolução referencia a nota de origem.
+        let mut devolucao = nota;
+        devolucao.finalidade = crate::nfe::FinalidadeNfe::Devolucao;
+        devolucao.referencias = vec!["4".repeat(44)];
+        devolucao.duplicatas.clear();
+        devolucao.devolvidos = vec![crate::emissao::DevolucaoDoItem {
+            modalidade_st: Some("4".into()),
+            mva_st: Some(cardeal_kernel::Percentual::de_str("40").unwrap()),
+            base_st: cardeal_kernel::Dinheiro::centavos(2_520),
+            aliquota_st: Some(cardeal_kernel::Percentual::de_str("17").unwrap()),
+            valor_st: cardeal_kernel::Dinheiro::centavos(212),
+            base_fcp_st: cardeal_kernel::Dinheiro::centavos(2_520),
+            aliquota_fcp_st: Some(cardeal_kernel::Percentual::de_str("2").unwrap()),
+            valor_fcp_st: cardeal_kernel::Dinheiro::centavos(50),
+            percentual_devolvido: cardeal_kernel::Percentual::de_str("50").unwrap(),
+            ipi_devolvido: cardeal_kernel::Dinheiro::centavos(150),
+            frete: cardeal_kernel::Dinheiro::centavos(300),
+            seguro: cardeal_kernel::Dinheiro::ZERO,
+            outras: cardeal_kernel::Dinheiro::ZERO,
+        }];
+        let corpo = Value::Object(nfe_json(&devolucao));
+        assert_eq!(corpo["finalidade"], "4");
+        assert_eq!(corpo["referencias"][0]["refNFe"], "4".repeat(44));
+        assert!(corpo.get("cobranca").is_none());
+        assert_eq!(corpo["presencaComprador"], "0");
+        assert_eq!(
+            corpo["pagamento"]["formas"],
+            json!([{ "tipo": "90", "valor": 0 }])
+        );
+        let icms = &corpo["itens"][0]["imposto"]["icms"];
+        assert_eq!(icms["modBCST"], "4");
+        assert_eq!(icms["mvaST"], 40.0);
+        assert_eq!(icms["valorBCST"], 25.2);
+        assert_eq!(icms["valorST"], 2.12);
+        assert_eq!(icms["valorFCPST"], 0.5);
+        assert_eq!(
+            corpo["itens"][0]["impostoDevol"],
+            json!({ "percentualDevolvido": 50.0, "valorIPIDevolvido": 1.5 })
+        );
+        assert_eq!(corpo["itens"][0]["produto"]["valorFrete"], 3.0);
+        assert!(corpo["itens"][0]["produto"].get("valorSeguro").is_none());
+        assert_eq!(
+            devolucao.total(),
+            base.total() + cardeal_kernel::Dinheiro::centavos(712)
+        );
+    }
+
+    #[test]
+    fn a_nfse_vai_ao_emitir_e_a_recusa_da_validacao_vira_rejeicao() {
+        let (url, tarefa) = servidor(
+            200,
+            r#"{"success":true,"status":"autorizado","numeroNfse":42,"chaveAcesso":"43051082112233000181000000000004226100000000000017","codigoVerificacao":"ABC","xml":"<NFSe/>"}"#,
+        );
+        let nota = crate::nfse::testes::exemplo();
+        let r = cliente(&url).emitir_nfse(&nota).unwrap();
+        assert_eq!(r.situacao, crate::SituacaoNfse::Autorizada);
+        assert_eq!(r.numero, Some(42));
+        let recebido = tarefa.join().unwrap();
+        assert!(recebido.starts_with("POST /nfse/emitir "), "{recebido}");
+        let corpo: Value = serde_json::from_str(recebido.rsplit('\n').next().unwrap()).unwrap();
+        assert_eq!(corpo["numeroDPS"], 7);
+        assert!(corpo["certificado"]["pfxBase64"].is_string());
+
+        let (url, _t) = servidor(
+            400,
+            r#"{"error":"Campos obrigatórios: prestador.cnpj, prestador.inscricaoMunicipal"}"#,
+        );
+        let r = cliente(&url).emitir_nfse(&nota).unwrap();
+        assert_eq!(r.situacao, crate::SituacaoNfse::Rejeitada);
+        assert!(r.motivo().contains("inscricaoMunicipal"));
+    }
+
+    #[test]
+    fn a_carta_de_correcao_manda_o_texto_e_a_sequencia() {
+        let (url, tarefa) = servidor(
+            200,
+            r#"{"success":true,"status":"autorizado","codigoStatus":"135","motivoStatus":"Evento registrado","protocolo":"135260000000003","xml":"<procEventoNFe/>"}"#,
+        );
+        let chave = ChaveAcesso::nova("43261011222333000181650010000000421100000001").unwrap();
+        let r = cliente(&url)
+            .carta_de_correcao(&chave, "Corrige o bairro para Centro", 2, Uf::Rs)
+            .unwrap();
+        assert_eq!(r.situacao, SituacaoRetorno::Autorizado);
+        assert_eq!(r.xml.as_deref(), Some("<procEventoNFe/>"));
+        let recebido = tarefa.join().unwrap();
+        assert!(
+            recebido.starts_with("POST /nfe/carta-correcao "),
+            "{recebido}"
+        );
+        let corpo: Value = serde_json::from_str(recebido.rsplit('\n').next().unwrap()).unwrap();
+        assert_eq!(corpo["correcao"], "Corrige o bairro para Centro");
+        assert_eq!(corpo["sequencia"], 2);
+        assert_eq!(corpo["ufEmitente"], "RS");
+    }
+
+    #[test]
+    fn cancelar_por_substituicao_manda_a_chave_da_substituta() {
+        let (url, tarefa) = servidor(
+            200,
+            r#"{"success":true,"status":"autorizado","codigoStatus":"135","motivoStatus":"Evento registrado","protocolo":"135260000000002","xml":"<procEventoNFe/>"}"#,
+        );
+        let chave = ChaveAcesso::nova("43261011222333000181650010000000421100000001").unwrap();
+        let substituta = ChaveAcesso::nova("43261011222333000181650010000000439100000006").unwrap();
+        let r = cliente(&url)
+            .cancelar_por_substituicao(
+                &chave,
+                "143260000000001",
+                "NFC-e sem resposta, substituida em contingencia",
+                Uf::Rs,
+                &substituta,
+            )
+            .unwrap();
+        assert_eq!(r.situacao, SituacaoRetorno::Autorizado);
+        let recebido = tarefa.join().unwrap();
+        assert!(recebido.starts_with("POST /nfe/cancelar "), "{recebido}");
+        let corpo: Value = serde_json::from_str(recebido.rsplit('\n').next().unwrap()).unwrap();
+        assert_eq!(corpo["chaveSubstituta"], substituta.como_str());
+        assert_eq!(corpo["protocolo"], "143260000000001");
+    }
+
+    #[test]
+    fn transmitir_a_contingencia_manda_o_xml_e_le_o_nao_enviado() {
+        let (url, tarefa) = servidor(
+            422,
+            r#"{"success":false,"status":"erro","codigoStatus":"ERR","motivoStatus":"Erro de conexão com SEFAZ: connect ETIMEDOUT","chaveAcesso":"43261011222333000181650010000000429100000001","naoEnviado":true}"#,
+        );
+        let r = cliente(&url)
+            .transmitir_nfce_em_contingencia("<NFe>assinada</NFe>", Uf::Rs)
+            .unwrap();
+        assert_eq!(r.situacao, SituacaoRetorno::Erro);
+        assert!(r.nao_enviado && r.sefaz_fora());
+        let recebido = tarefa.join().unwrap();
+        assert!(
+            recebido.starts_with("POST /nfe/nfce/contingencia/transmit "),
+            "{recebido}"
+        );
+        let corpo: Value = serde_json::from_str(recebido.rsplit('\n').next().unwrap()).unwrap();
+        assert_eq!(corpo["signedXml"], "<NFe>assinada</NFe>");
+        assert_eq!(corpo["ufEmitente"], "RS");
+        assert_eq!(corpo["ambiente"], "homologacao");
     }
 
     /// A conferência de verdade, em homologação, contra o `sefaz-api` publicado. Precisa de
@@ -799,7 +1680,7 @@ mod testes {
         );
         if let Some(chave) = &r.chave {
             let consulta = api
-                .consultar_documento(&ChaveAcesso::nova(chave).unwrap(), uf)
+                .consultar_documento(&ChaveAcesso::nova(chave).unwrap(), uf, None)
                 .unwrap();
             eprintln!(
                 "consulta: {:?} {} {}",

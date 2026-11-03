@@ -32,10 +32,12 @@ use mod_financeiro::{
     AbrirCaixa, CadastrarCaixa, CaixaCadastrado, CaixaFoiAberto, ModuloFinanceiro,
 };
 use mod_fiscal::{
-    AnularDocumentoDaVenda, CancelarNfce, ConfigurarNfce, DetalheDocumento, DocumentoFiscal,
-    DocumentoResumo, EmitirNfceDoCupom, EstadoDocumento, InstalarCertificado, InutilizarNumero,
-    ModuloFiscal, PedidoDocumento, ProvedorFiscal, ReenviarDocumento, ResumoDaFilaFiscal,
-    ResumoFiscal, SituacaoFiscal, SituacaoFiscalDaEmpresa, TAREFA_TRANSMITIR,
+    AmbienteFiscal, AnularDocumentoDaVenda, BuscarXmlsQueFaltam, CancelarNfce, ConfigurarNfce,
+    DefinirAmbienteFiscal, DetalheDocumento, DocumentoFiscal, DocumentoResumo, EmitirNfceDoCupom,
+    EstadoDocumento, InstalarCertificado, InutilizarNumero, ModuloFiscal, NotasDoMes,
+    NotasFiscaisDoMes, PedidoDocumento, ProvedorFiscal, ReenviarDocumento, ResumoDaFilaFiscal,
+    ResumoFiscal, SerieDoTerminal, SituacaoFiscal, SituacaoFiscalDaEmpresa, SituacaoNoMes,
+    XmlQueFalta, TAREFA_TRANSMITIR,
 };
 use mod_pdv::{
     AbrirCupom, AdicionarItem, CupomAberto, EstornarVenda, FinalizarVenda, ModuloPdv,
@@ -78,6 +80,7 @@ impl Mundo {
             ModuloFinanceiro.migracoes(),
             ModuloVendas.migracoes(),
             ModuloPdv.migracoes(),
+            mod_os::ModuloOs.migracoes(),
             ModuloFiscal.migracoes(),
         ])
         .unwrap();
@@ -141,6 +144,16 @@ impl Mundo {
             "fiscal.emitir",
             "fiscal.cancelar",
             "fiscal.configurar",
+            "vendas.pedido.criar",
+            "vendas.pedido.editar",
+            "vendas.pedido.confirmar",
+            "vendas.pedido.faturar",
+            "vendas.devolucao.ver",
+            "vendas.devolucao.solicitar",
+            "vendas.devolucao.aprovar",
+            "vendas.devolucao.concluir",
+            "clientes.pessoa.editar",
+            "estoque.tributario.editar",
         ] {
             papel = papel.com_permissao(p);
         }
@@ -228,6 +241,26 @@ impl Mundo {
 
     fn documento(&self, id: Id) -> DetalheDocumento {
         self.consultar("fiscal.documento.v1", &DocumentoFiscal { documento: id })
+    }
+
+    /// Libera a próxima tentativa das NFS-e já.
+    fn tentar_ja_nfse(&self) {
+        let empresa = self.empresa;
+        self.arm
+            .escritor()
+            .executar(
+                ContextoEscrita::novo(empresa, Id::novo(), Id::novo(), Id::novo()),
+                move |uow| {
+                    uow.conexao()
+                        .execute(
+                            "UPDATE fiscal_nfse SET proxima_tentativa = 0 WHERE empresa = ?1",
+                            [empresa.em_bytes().as_slice()],
+                        )
+                        .map(|_| ())
+                        .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+                },
+            )
+            .unwrap();
     }
 
     /// Libera a próxima tentativa já (o teste não espera o backoff).
@@ -396,16 +429,22 @@ impl Mundo {
 
     /// Uma venda finalizada de `qtd` × R$ 25 do produto, em dinheiro; devolve o cupom.
     fn vender(&self, cen: &Cenario, produto: Id, qtd: i64, cliente: bool) -> Id {
+        self.vender_no(Id::novo(), cen, produto, qtd, cliente)
+    }
+
+    /// Uma venda no terminal dado.
+    fn vender_no(&self, terminal: Id, cen: &Cenario, produto: Id, qtd: i64, cliente: bool) -> Id {
         let cupom: CupomAberto = self
             .executar(
                 "pdv.abrir_cupom.v1",
                 &AbrirCupom {
                     sessao_caixa: cen.caixa,
-                    terminal: Id::novo(),
+                    terminal,
                     serie_fiscal: 1,
                     cliente: cliente.then_some(cen.cliente),
                     tabela_preco: cen.tabela,
                     local_expedicao: cen.local,
+                    vendedor: None,
                 },
             )
             .unwrap();
@@ -501,7 +540,10 @@ fn retorno(situacao: SituacaoRetorno, codigo: &str) -> RetornoSefaz {
         protocolo: None,
         recebido_em: None,
         xml: None,
+        xml_assinado: None,
+        xml_cancelamento: None,
         erros: vec![],
+        nao_enviado: false,
     }
 }
 
@@ -671,6 +713,209 @@ fn rejeicao_resposta_perdida_e_api_fora_do_ar() {
         .map(|id| m.documento(*id).resumo.numero)
         .collect();
     assert_eq!(numeros, vec![1, 2, 3]);
+}
+
+#[test]
+fn notas_do_mes_vao_ao_contador_com_os_xmls() {
+    let m = Mundo::novo();
+    let cen = m.cenario();
+    m.configurar(1);
+    // Uma nota de teste em homologação, antes de ir para produção: não vai ao contador.
+    m.emitir(m.vender(&cen, cen.produto, 1, false));
+    assert!(m.transmitir().starts_with("1 autorizada"));
+    m.rodar(
+        "fiscal.definir_ambiente.v1",
+        &DefinirAmbienteFiscal {
+            ambiente: AmbienteFiscal::Producao,
+        },
+    )
+    .unwrap();
+
+    // Autorizada e cancelada: o cancelamento guarda o XML do evento.
+    let a = m.emitir(m.vender(&cen, cen.produto, 1, false));
+    let b = m.emitir(m.vender(&cen, cen.produto, 2, false));
+    assert!(m.transmitir().starts_with("2 autorizada"));
+    m.rodar(
+        "fiscal.cancelar_nfce.v1",
+        &CancelarNfce {
+            documento: b.id,
+            justificativa: "Venda registrada em duplicidade no caixa".into(),
+        },
+    )
+    .unwrap();
+    assert!(m.transmitir().contains("1 cancelada"));
+    // A rejeitada que não vai sair: inutilizada, com o XML da inutilização.
+    let c = m.emitir(m.vender(&cen, cen.sem_ncm, 1, false));
+    m.rodar(
+        "fiscal.inutilizar_numero.v1",
+        &InutilizarNumero {
+            documento: c.id,
+            justificativa: "Produto sem NCM, venda refeita em outra nota".into(),
+        },
+    )
+    .unwrap();
+    assert!(m.transmitir().contains("1 inutilizada"));
+    // A resposta se perdeu: a nota assinada fica guardada, e a consulta com ela devolve o
+    // nfeProc.
+    let d = m.emitir(m.vender(&cen, cen.produto, 1, false));
+    m.sim
+        .programar(retorno(SituacaoRetorno::Processando, "TIMEOUT"));
+    m.transmitir();
+    m.tentar_ja();
+    assert!(m.transmitir().starts_with("1 autorizada"));
+    // E uma rejeitada sem desfecho: o número é um buraco até alguém resolver.
+    let e = m.emitir(m.vender(&cen, cen.sem_ncm, 1, false));
+    assert_eq!(e.estado, EstadoDocumento::Rejeitada);
+
+    let mes = Data::hoje(Fuso::BRASILIA).competencia();
+    let n: NotasDoMes = m.consultar("fiscal.notas_do_mes.v1", &NotasFiscaisDoMes { mes });
+    assert_eq!(n.de_homologacao, 1);
+    let situacoes: Vec<(u64, SituacaoNoMes)> =
+        n.notas.iter().map(|x| (x.numero, x.situacao)).collect();
+    assert_eq!(
+        situacoes,
+        vec![
+            (a.numero, SituacaoNoMes::Autorizada),
+            (b.numero, SituacaoNoMes::Cancelada),
+            (c.numero, SituacaoNoMes::Inutilizada),
+            (d.numero, SituacaoNoMes::Autorizada),
+        ]
+    );
+    let cancelada = &n.notas[1];
+    assert!(cancelada.xml.as_deref().unwrap().starts_with("<nfeProc"));
+    assert!(cancelada
+        .xml_evento
+        .as_deref()
+        .unwrap()
+        .starts_with("<procEventoNFe"));
+    assert_eq!(
+        cancelada.protocolo_evento.as_deref(),
+        Some("135260000000001")
+    );
+    assert_eq!(cancelada.arquivos().len(), 2);
+    assert!(n.notas[2]
+        .xml_evento
+        .as_deref()
+        .unwrap()
+        .starts_with("<procInutNFe"));
+    assert_eq!(n.notas[0].data, Data::hoje(Fuso::BRASILIA));
+    // Nenhum XML falta: até a nota confirmada pela consulta tem o seu.
+    let confirmada = n.notas[3].xml.as_deref().unwrap();
+    assert!(confirmada.starts_with("<nfeProc") && confirmada.contains("<dhEmi>"));
+    assert_eq!(n.faltas(), vec![]);
+    assert_eq!(n.total_autorizado(), a.total + d.total);
+    let sem_desfecho: Vec<Id> = n.sem_desfecho.iter().map(|x| x.id).collect();
+    assert_eq!(sem_desfecho, vec![e.id]);
+
+    // O mês anterior não tem nada disso (nem a pendência, criada depois dele).
+    let antes: NotasDoMes = m.consultar(
+        "fiscal.notas_do_mes.v1",
+        &NotasFiscaisDoMes {
+            mes: mes.anterior(),
+        },
+    );
+    assert_eq!(antes, NotasDoMes::default());
+}
+
+#[test]
+fn o_xml_do_cancelamento_que_nao_veio_e_buscado_na_consulta() {
+    let m = Mundo::novo();
+    let cen = m.cenario();
+    m.configurar(1);
+    m.rodar(
+        "fiscal.definir_ambiente.v1",
+        &DefinirAmbienteFiscal {
+            ambiente: AmbienteFiscal::Producao,
+        },
+    )
+    .unwrap();
+    let a = m.emitir(m.vender(&cen, cen.produto, 1, false));
+    let b = m.emitir(m.vender(&cen, cen.produto, 2, false));
+    assert!(m.transmitir().starts_with("2 autorizada"));
+    for doc in [a.id, b.id] {
+        m.rodar(
+            "fiscal.cancelar_nfce.v1",
+            &CancelarNfce {
+                documento: doc,
+                justificativa: "Venda registrada em duplicidade no caixa".into(),
+            },
+        )
+        .unwrap();
+    }
+    // a: o provedor (antigo) aceitou o cancelamento sem devolver o XML; b: o cancelamento já
+    // estava registrado — a resposta do primeiro pedido se perdeu.
+    m.sim.programar(retorno(SituacaoRetorno::Autorizado, "135"));
+    m.sim.programar(retorno(SituacaoRetorno::Rejeitado, "573"));
+    assert!(m.transmitir().contains("2 cancelada"));
+    let resumo: ResumoFiscal = m.consultar("fiscal.resumo_da_fila.v1", &ResumoDaFilaFiscal);
+    assert_eq!(resumo.xmls_a_buscar, 2);
+
+    // A consulta das duas: canceladas; a de `a` já traz o XML do cancelamento, a de `b` ainda
+    // não (a SEFAZ não tinha) — a busca encerra assim mesmo.
+    let chave = |id| m.documento(id).resumo.chave.unwrap();
+    let (ca, cb) = (chave(a.id), chave(b.id));
+    let evento = |c: &str, protocolo: &str| {
+        format!(
+            "<procEventoNFe><evento/><retEvento><infEvento><chNFe>{c}</chNFe>\
+             <cStat>135</cStat><nProt>{protocolo}</nProt></infEvento></retEvento></procEventoNFe>"
+        )
+    };
+    let cancelada = |c: &str, xml: Option<String>| RetornoSefaz {
+        situacao: SituacaoRetorno::Cancelado,
+        codigo: "101".into(),
+        motivo: "Cancelamento de NF-e homologado".into(),
+        chave: Some(c.into()),
+        protocolo: Some("143".into()),
+        recebido_em: None,
+        xml: None,
+        xml_assinado: None,
+        xml_cancelamento: xml,
+        erros: vec![],
+        nao_enviado: false,
+    };
+    m.sim
+        .definir_consulta(&ca, cancelada(&ca, Some(evento(&ca, "135260000000011"))));
+    m.sim.definir_consulta(&cb, cancelada(&cb, None));
+    let r = m.transmitir();
+    assert!(r.contains("1 XML(s) recuperado(s) na SEFAZ"), "{r}");
+    let mes = Data::hoje(Fuso::BRASILIA).competencia();
+    let n: NotasDoMes = m.consultar("fiscal.notas_do_mes.v1", &NotasFiscaisDoMes { mes });
+    assert_eq!(
+        n.notas[0].xml_evento.as_deref(),
+        Some(evento(&ca, "135260000000011").as_str())
+    );
+    assert_eq!(
+        n.notas[0].protocolo_evento.as_deref(),
+        Some("135260000000011")
+    );
+    assert_eq!(n.faltas(), vec![(XmlQueFalta::EventoDeCancelamento, 1)]);
+    // A busca encerrou: nada mais na fila (e a vigia não dispara por ela).
+    assert_eq!(m.transmitir(), "nada na fila");
+    let resumo: ResumoFiscal = m.consultar("fiscal.resumo_da_fila.v1", &ResumoDaFilaFiscal);
+    assert_eq!(resumo.xmls_a_buscar, 0);
+
+    // O pacote do contador pede de novo, e agora a SEFAZ tem o de `b`. A mesma chave só é
+    // consultada de novo depois de uma hora (a SEFAZ barra consulta repetida).
+    m.sim
+        .definir_consulta(&cb, cancelada(&cb, Some(evento(&cb, "135260000000012"))));
+    let buscando: u32 = m
+        .executar("fiscal.buscar_xmls_que_faltam.v1", &BuscarXmlsQueFaltam)
+        .unwrap();
+    assert_eq!(buscando, 1);
+    assert_eq!(m.transmitir(), "nada na fila");
+    m.tentar_ja();
+    assert!(m.transmitir().contains("1 XML(s) recuperado(s)"));
+    let n: NotasDoMes = m.consultar("fiscal.notas_do_mes.v1", &NotasFiscaisDoMes { mes });
+    assert_eq!(n.faltas(), vec![]);
+    assert_eq!(
+        n.notas[1].protocolo_evento.as_deref(),
+        Some("135260000000012")
+    );
+    // Nada mais a buscar.
+    let buscando: u32 = m
+        .executar("fiscal.buscar_xmls_que_faltam.v1", &BuscarXmlsQueFaltam)
+        .unwrap();
+    assert_eq!(buscando, 0);
 }
 
 #[test]
@@ -900,4 +1145,1193 @@ fn venda_estornada_anula_a_nfce_conforme_o_estado() {
         "nada na fila",
         "não insiste num cancelamento recusado"
     );
+}
+
+#[test]
+fn sefaz_fora_a_nota_sai_em_contingencia_e_e_transmitida_quando_ela_volta() {
+    let m = Mundo::novo();
+    let cen = m.cenario();
+    m.configurar(1);
+    m.sim.simular_sefaz_fora(true);
+
+    // A SEFAZ fora e a API no ar: a nota não chegou, então sai assinada em contingência.
+    let venda = m.vender(&cen, cen.produto, 1, false);
+    let doc = m.emitir(venda);
+    assert!(m.transmitir().contains("1 em contingência"));
+    let d = m.documento(doc.id);
+    assert_eq!(d.resumo.estado, EstadoDocumento::Contingencia);
+    let chave = d.resumo.chave.clone().unwrap();
+    assert_eq!(&chave[34..35], "9", "tpEmis 9 na chave");
+    assert!(d.resumo.contingencia_em.is_some());
+    assert!(d.resumo.prazo_da_contingencia().is_some());
+    let xml = d
+        .xml_assinado
+        .clone()
+        .expect("a nota assinada, para o DANFCE");
+    assert!(xml.contains("<tpEmis>9</tpEmis>") && xml.contains("<qrCode>"));
+    assert!(xml.contains("<xJust>SEFAZ indisponível para autorização"));
+    assert_eq!(d.resumo.numero, doc.numero, "o mesmo número");
+    let resumo: ResumoFiscal = m.consultar("fiscal.resumo_da_fila.v1", &ResumoDaFilaFiscal);
+    assert_eq!(resumo.em_contingencia, 1);
+    assert!(resumo.frase().starts_with("1 nota(s) em contingência"));
+
+    // A venda é desfeita enquanto isso: a nota já está com o consumidor — transmite e cancela.
+    let _: mod_pdv::VendaFoiEstornada = m
+        .executar(
+            "pdv.estornar_venda.v1",
+            &mod_pdv::EstornarVenda {
+                cupom: venda,
+                motivo: "Cliente desistiu da compra".into(),
+                autorizado_por: Id::novo(),
+            },
+        )
+        .unwrap();
+    let anulada: Option<DocumentoResumo> = m
+        .executar(
+            "fiscal.anular_documento_da_venda.v1",
+            &AnularDocumentoDaVenda {
+                cupom: venda,
+                justificativa: "Venda estornada no PDV a pedido do cliente".into(),
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        anulada.unwrap().pedido,
+        None,
+        "espera a contingência se resolver"
+    );
+
+    // Outra venda, ainda com a SEFAZ fora; a primeira continua esperando.
+    let outra = m.emitir(m.vender(&cen, cen.produto, 2, false));
+    m.tentar_ja();
+    m.transmitir();
+    assert_eq!(
+        m.documento(outra.id).resumo.estado,
+        EstadoDocumento::Contingencia
+    );
+    assert_eq!(
+        m.documento(doc.id).resumo.estado,
+        EstadoDocumento::Contingencia
+    );
+    assert_eq!(
+        m.sim
+            .contingencias
+            .load(std::sync::atomic::Ordering::SeqCst),
+        2
+    );
+
+    // A SEFAZ volta: o mesmo XML é transmitido e autorizado, com a mesma chave; a anulada vai
+    // ao cancelamento.
+    m.sim.simular_sefaz_fora(false);
+    m.tentar_ja();
+    assert!(m.transmitir().starts_with("2 autorizada"));
+    let d = m.documento(doc.id);
+    assert_eq!(d.resumo.chave.as_deref(), Some(chave.as_str()));
+    assert!(d.xml.unwrap().starts_with("<nfeProc"));
+    assert!(
+        d.xml_assinado.is_none(),
+        "o nfeProc substitui a nota assinada"
+    );
+    assert_eq!(d.resumo.pedido, Some(PedidoDocumento::Cancelar));
+    m.tentar_ja();
+    assert!(m.transmitir().contains("1 cancelada"));
+    assert_eq!(
+        m.documento(outra.id).resumo.estado,
+        EstadoDocumento::Autorizada
+    );
+
+    // A API fora do ar (não só a SEFAZ): sem quem assine, a nota espera na fila.
+    m.sim.simular_fora_do_ar(true);
+    let sem_api = m.emitir(m.vender(&cen, cen.produto, 1, false));
+    m.transmitir();
+    assert_eq!(
+        m.documento(sem_api.id).resumo.estado,
+        EstadoDocumento::Pendente
+    );
+}
+
+#[test]
+fn cada_caixa_numera_na_sua_serie() {
+    use mod_fiscal::{DefinirSerieDoTerminal, SeriesDosTerminais};
+    let m = Mundo::novo();
+    let cen = m.cenario();
+    m.configurar(1);
+    let (caixa1, caixa2) = (Id::novo(), Id::novo());
+    let definir = |terminal: Id, nome: &str, serie: Option<u32>, proximo: Option<u64>| {
+        m.executar::<Vec<SerieDoTerminal>>(
+            "fiscal.definir_serie_do_terminal.v1",
+            &DefinirSerieDoTerminal {
+                terminal,
+                nome: nome.into(),
+                serie,
+                proximo_numero: proximo,
+            },
+        )
+    };
+    // A série da empresa (1) é a dos caixas sem série própria: não vira de um terminal.
+    let erro = definir(caixa2, "Caixa 2", Some(1), None).unwrap_err();
+    assert_eq!(erro.campo.as_deref(), Some("serie"));
+    assert!(
+        erro.mensagem.contains("é a da empresa"),
+        "{}",
+        erro.mensagem
+    );
+    // O caixa 2 na série 2, começando do 100 (a série já tinha sido usada em outro sistema).
+    let series = definir(caixa2, " Caixa 2 ", Some(2), Some(100)).unwrap();
+    assert_eq!(
+        series,
+        vec![SerieDoTerminal {
+            terminal: caixa2,
+            nome: "Caixa 2".into(),
+            serie: 2,
+            proximo_numero: 100,
+        }]
+    );
+    // A série é de um terminal só; e a da empresa não pode virar a de um terminal.
+    let erro = definir(Id::novo(), "Caixa 3", Some(2), None).unwrap_err();
+    assert!(
+        erro.mensagem.contains("já é do Caixa 2"),
+        "{}",
+        erro.mensagem
+    );
+    let erro = m
+        .executar::<mod_fiscal::ConfiguracaoNfce>(
+            "fiscal.configurar_nfce.v1",
+            &ConfigurarNfce {
+                emitir_nas_vendas: true,
+                serie: 2,
+                proximo_numero: 1,
+                csc_id: "000001".into(),
+                csc_token: None,
+            },
+        )
+        .unwrap_err();
+    assert!(
+        erro.mensagem.contains("é a do Caixa 2"),
+        "{}",
+        erro.mensagem
+    );
+
+    // As vendas: o caixa 2 na série 2 (100, 101); o caixa 1, sem série própria, na da empresa.
+    let nota = |terminal| m.emitir(m.vender_no(terminal, &cen, cen.produto, 1, false));
+    let a = nota(caixa2);
+    let b = nota(caixa1);
+    let c = nota(caixa2);
+    assert_eq!((a.serie, a.numero), (2, 100));
+    assert_eq!((b.serie, b.numero), (1, 1));
+    assert_eq!((c.serie, c.numero), (2, 101));
+    assert!(m.transmitir().starts_with("3 autorizada"));
+    let series: Vec<SerieDoTerminal> =
+        m.consultar("fiscal.series_dos_terminais.v1", &SeriesDosTerminais);
+    assert_eq!(series[0].proximo_numero, 102);
+
+    // Sem série própria de novo: volta à da empresa.
+    assert!(definir(caixa2, "", None, None).unwrap().is_empty());
+    let d = nota(caixa2);
+    assert_eq!((d.serie, d.numero), (1, 2));
+}
+
+#[test]
+fn a_nota_sem_resposta_ganha_substituta_em_contingencia() {
+    use EstadoDocumento::{Autorizada, Cancelada, Contingencia, Incerta, Inutilizada};
+    let m = Mundo::novo();
+    let cen = m.cenario();
+    m.configurar(1);
+    let rodadas = |n: usize| {
+        for _ in 0..n {
+            m.tentar_ja();
+            m.transmitir();
+        }
+    };
+    let da_venda = |cupom: Id| -> Option<DocumentoResumo> {
+        m.consultar(
+            "fiscal.documento_da_venda.v1",
+            &mod_fiscal::DocumentoDaVenda { cupom },
+        )
+    };
+
+    // A resposta da emissão se perde (o simulador lembra da nota como autorizada).
+    let venda = m.vender(&cen, cen.produto, 1, false);
+    let a = m.emitir(venda);
+    m.sim.programar(retorno(SituacaoRetorno::Erro, "TIMEOUT"));
+    m.transmitir();
+    assert_eq!(m.documento(a.id).resumo.estado, Incerta);
+    // A SEFAZ cai: a consulta não responde, e o cliente ainda está no balcão — a substituta.
+    m.sim.simular_sefaz_fora(true);
+    m.tentar_ja();
+    assert!(
+        m.transmitir().contains("1 sem resposta substituída"),
+        "a consulta sem resultado pede a substituta"
+    );
+    let b_id = m
+        .documento(a.id)
+        .resumo
+        .substituida_por
+        .expect("a substituta");
+    assert_eq!(
+        da_venda(venda).unwrap().id,
+        b_id,
+        "a nota da venda agora é a substituta"
+    );
+    rodadas(1);
+    let b = m.documento(b_id).resumo;
+    assert_eq!((b.estado, b.substitui), (Contingencia, Some(a.id)));
+    assert_eq!((b.numero, b.total), (a.numero + 1, a.total));
+    assert_eq!(&b.chave.unwrap()[34..35], "9");
+    // Uma substituta só, por mais que a consulta siga sem resposta.
+    rodadas(2);
+    assert_eq!(
+        m.sim
+            .contingencias
+            .load(std::sync::atomic::Ordering::SeqCst),
+        1
+    );
+
+    // A SEFAZ volta: a substituta é autorizada; a original, achada autorizada, é cancelada por
+    // substituição — depois de a substituta estar autorizada.
+    m.sim.simular_sefaz_fora(false);
+    rodadas(3);
+    assert_eq!(m.documento(b_id).resumo.estado, Autorizada);
+    let a_fim = m.documento(a.id).resumo;
+    assert_eq!(a_fim.estado, Cancelada, "{:?}", a_fim.motivo);
+    assert_eq!(a_fim.pedido, None);
+
+    // Outra: a original não chegou à SEFAZ (217). Não é emitida de novo; o número é inutilizado.
+    let venda = m.vender(&cen, cen.produto, 1, false);
+    let c = m.emitir(venda);
+    m.sim.programar(retorno(SituacaoRetorno::Erro, "TIMEOUT"));
+    m.transmitir();
+    let chave_c = m.documento(c.id).resumo.chave.unwrap();
+    m.sim.simular_sefaz_fora(true);
+    rodadas(2);
+    let d_id = m
+        .documento(c.id)
+        .resumo
+        .substituida_por
+        .expect("a substituta");
+    let mut nao_consta = retorno(SituacaoRetorno::Rejeitado, "217");
+    nao_consta.chave = Some(chave_c.clone());
+    m.sim.definir_consulta(&chave_c, nao_consta);
+    let emissoes = m.sim.emissoes.load(std::sync::atomic::Ordering::SeqCst);
+    m.sim.simular_sefaz_fora(false);
+    rodadas(3);
+    assert_eq!(m.documento(d_id).resumo.estado, Autorizada);
+    let c_fim = m.documento(c.id).resumo;
+    assert_eq!(c_fim.estado, Inutilizada, "{:?}", c_fim.motivo);
+    assert_eq!(
+        m.sim.emissoes.load(std::sync::atomic::Ordering::SeqCst),
+        emissoes,
+        "a original não foi emitida de novo"
+    );
+}
+
+#[test]
+fn o_pedido_faturado_vira_nfe_com_destinatario_e_duplicatas() {
+    use mod_fiscal::{ConfiguracaoNfe, ConfigurarNfe, DocumentoDoPedido, EmitirNfeDoPedido};
+    use mod_vendas::{
+        AdicionarItemPedido, ConfirmarPedido, CriarPedido, FaturarPedido, ItemFoiAdicionado,
+        PedidoCriado, PedidoFoiFaturado,
+    };
+    let m = Mundo::novo();
+    let cen = m.cenario();
+    m.configurar(1);
+    // A NF-e numera na sua série, separada da NFC-e.
+    let cfg: ConfiguracaoNfe = m
+        .executar(
+            "fiscal.configurar_nfe.v1",
+            &ConfigurarNfe {
+                serie: 2,
+                proximo_numero: 50,
+            },
+        )
+        .unwrap();
+    assert_eq!((cfg.serie, cfg.proximo_numero), (2, 50));
+    let pedido_faturado = |a_vista: bool| -> Id {
+        let p: PedidoCriado = m
+            .executar(
+                "vendas.criar_pedido.v1",
+                &CriarPedido {
+                    cliente: cen.cliente,
+                    vendedor: Id::novo(),
+                    condicao_pagamento: Id::novo(),
+                    tabela_preco: cen.tabela,
+                    local_expedicao: cen.local,
+                },
+            )
+            .unwrap();
+        let _: ItemFoiAdicionado = m
+            .executar(
+                "vendas.adicionar_item_pedido.v1",
+                &AdicionarItemPedido {
+                    pedido: p.pedido,
+                    produto: cen.produto,
+                    variacao: None,
+                    quantidade: Quantidade::unidades(2),
+                    desconto_percentual: Percentual::ZERO,
+                },
+            )
+            .unwrap();
+        m.rodar(
+            "vendas.confirmar_pedido.v1",
+            &ConfirmarPedido { pedido: p.pedido },
+        )
+        .unwrap();
+        let _: PedidoFoiFaturado = m
+            .executar(
+                "vendas.faturar_pedido.v1",
+                &FaturarPedido {
+                    pedido: p.pedido,
+                    a_vista,
+                },
+            )
+            .unwrap();
+        p.pedido
+    };
+    let emitir = |pedido: Id| -> DocumentoResumo {
+        m.executar(
+            "fiscal.emitir_nfe_do_pedido.v1",
+            &EmitirNfeDoPedido { pedido },
+        )
+        .unwrap()
+    };
+
+    // O cliente sem endereço: a nota nasce rejeitada, com o que corrigir.
+    let sem_endereco = pedido_faturado(false);
+    let d = emitir(sem_endereco);
+    assert_eq!(d.estado, EstadoDocumento::Rejeitada);
+    assert!(d.motivo.unwrap().contains("sem endereço"));
+
+    // Com o endereço (em Caxias do Sul — o código IBGE sai pelo nome), a prazo.
+    m.rodar(
+        "clientes.adicionar_endereco.v1",
+        &mod_clientes::AdicionarEndereco {
+            pessoa: cen.cliente,
+            tipo: mod_clientes::TipoEndereco::Residencial,
+            logradouro: "Rua Sinimbu".into(),
+            numero: "100".into(),
+            complemento: None,
+            bairro: "Centro".into(),
+            cidade: "caxias do sul".into(),
+            uf: "RS".into(),
+            cep: "95020000".into(),
+            principal: true,
+        },
+    )
+    .unwrap();
+    let a_prazo = pedido_faturado(false);
+    let doc = emitir(a_prazo);
+    assert_eq!(doc.estado, EstadoDocumento::Pendente, "{:?}", doc.motivo);
+    assert_eq!(
+        (doc.modelo, doc.serie, doc.numero),
+        (mod_fiscal::ModeloFiscal::Nfe, 2, 51)
+    );
+    let nfe = m.documento(doc.id).nfe.expect("a NF-e guardada");
+    assert_eq!(nfe.destinatario.endereco.codigo_municipio, "4305108");
+    assert_eq!(nfe.destinatario.endereco.municipio, "Caxias do Sul");
+    assert_eq!(
+        nfe.destinatario.indicador_ie,
+        cardeal_fiscal::IndicadorIe::NaoContribuinte
+    );
+    assert!(nfe.consumidor_final && nfe.a_prazo);
+    assert_eq!(nfe.duplicatas.len(), 1);
+    assert_eq!(nfe.duplicatas[0].valor, nfe.total());
+    assert_eq!(nfe.itens[0].cfop, "5102", "dentro do RS");
+    // Repetir devolve o mesmo documento; a fila autoriza, com a chave do modelo 55.
+    assert_eq!(emitir(a_prazo).id, doc.id);
+    assert!(m.transmitir().contains("autorizada"));
+    let autorizada = m.documento(doc.id).resumo;
+    assert_eq!(autorizada.estado, EstadoDocumento::Autorizada);
+    assert_eq!(&autorizada.chave.unwrap()[20..22], "55");
+    let do_pedido: Option<DocumentoResumo> = m.consultar(
+        "fiscal.documento_do_pedido.v1",
+        &DocumentoDoPedido { pedido: a_prazo },
+    );
+    assert_eq!(do_pedido.unwrap().id, doc.id);
+
+    // À vista: sem duplicatas. E a NFC-e segue na série dela.
+    let a_vista = emitir(pedido_faturado(true));
+    let nfe = m.documento(a_vista.id).nfe.unwrap();
+    assert!(!nfe.a_prazo && nfe.duplicatas.is_empty());
+    assert_eq!(a_vista.numero, 52);
+    let nfce = m.emitir(m.vender(&cen, cen.produto, 1, false));
+    assert_eq!(
+        (nfce.modelo, nfce.numero),
+        (mod_fiscal::ModeloFiscal::Nfce, 1)
+    );
+
+    // A rejeitada se reenvia depois de corrigir o cadastro: mesmo número, agora pendente.
+    let de_novo: DocumentoResumo = m
+        .executar(
+            "fiscal.reenviar_documento.v1",
+            &ReenviarDocumento { documento: d.id },
+        )
+        .unwrap();
+    assert_eq!(de_novo.estado, EstadoDocumento::Pendente);
+}
+
+#[test]
+fn a_nfe_autorizada_recebe_cartas_de_correcao_pela_fila() {
+    use mod_fiscal::correcao::{
+        CartaDeCorrecao, CartasDeCorrecao, EmitirCartaDeCorrecao, EstadoCarta,
+    };
+    use mod_vendas::{
+        AdicionarItemPedido, ConfirmarPedido, CriarPedido, FaturarPedido, ItemFoiAdicionado,
+        PedidoCriado, PedidoFoiFaturado,
+    };
+    let m = Mundo::novo();
+    let cen = m.cenario();
+    m.configurar(1);
+    m.rodar(
+        "fiscal.definir_ambiente.v1",
+        &DefinirAmbienteFiscal {
+            ambiente: AmbienteFiscal::Producao,
+        },
+    )
+    .unwrap();
+    m.rodar(
+        "clientes.adicionar_endereco.v1",
+        &mod_clientes::AdicionarEndereco {
+            pessoa: cen.cliente,
+            tipo: mod_clientes::TipoEndereco::Residencial,
+            logradouro: "Rua Sinimbu".into(),
+            numero: "100".into(),
+            complemento: None,
+            bairro: "Centro".into(),
+            cidade: "Caxias do Sul".into(),
+            uf: "RS".into(),
+            cep: "95020000".into(),
+            principal: true,
+        },
+    )
+    .unwrap();
+    let p: PedidoCriado = m
+        .executar(
+            "vendas.criar_pedido.v1",
+            &CriarPedido {
+                cliente: cen.cliente,
+                vendedor: Id::novo(),
+                condicao_pagamento: Id::novo(),
+                tabela_preco: cen.tabela,
+                local_expedicao: cen.local,
+            },
+        )
+        .unwrap();
+    let _: ItemFoiAdicionado = m
+        .executar(
+            "vendas.adicionar_item_pedido.v1",
+            &AdicionarItemPedido {
+                pedido: p.pedido,
+                produto: cen.produto,
+                variacao: None,
+                quantidade: Quantidade::unidades(1),
+                desconto_percentual: Percentual::ZERO,
+            },
+        )
+        .unwrap();
+    m.rodar(
+        "vendas.confirmar_pedido.v1",
+        &ConfirmarPedido { pedido: p.pedido },
+    )
+    .unwrap();
+    let _: PedidoFoiFaturado = m
+        .executar(
+            "vendas.faturar_pedido.v1",
+            &FaturarPedido {
+                pedido: p.pedido,
+                a_vista: true,
+            },
+        )
+        .unwrap();
+    let nfe: DocumentoResumo = m
+        .executar(
+            "fiscal.emitir_nfe_do_pedido.v1",
+            &mod_fiscal::EmitirNfeDoPedido { pedido: p.pedido },
+        )
+        .unwrap();
+    assert!(m.transmitir().contains("1 autorizada"));
+    let carta = |documento: Id, texto: &str| {
+        m.executar::<CartaDeCorrecao>(
+            "fiscal.emitir_carta_de_correcao.v1",
+            &EmitirCartaDeCorrecao {
+                documento,
+                texto: texto.into(),
+            },
+        )
+    };
+    let cartas = || -> Vec<CartaDeCorrecao> {
+        m.consultar(
+            "fiscal.cartas_de_correcao.v1",
+            &CartasDeCorrecao { documento: nfe.id },
+        )
+    };
+    // O texto curto e a NFC-e: recusados na hora.
+    assert_eq!(
+        carta(nfe.id, "curto").unwrap_err().campo.as_deref(),
+        Some("texto")
+    );
+    let nfce = m.emitir(m.vender(&cen, cen.produto, 1, false));
+    assert!(carta(nfce.id, "Corrige o nome do consumidor")
+        .unwrap_err()
+        .mensagem
+        .contains("NFC-e não tem carta"));
+
+    // A primeira: na fila, uma por vez.
+    let primeira = carta(nfe.id, "Corrige o bairro do destinatário para Centro").unwrap();
+    assert_eq!(
+        (primeira.sequencia, primeira.estado),
+        (1, EstadoCarta::Pendente)
+    );
+    assert!(carta(nfe.id, "Outra correção qualquer aqui")
+        .unwrap_err()
+        .mensagem
+        .contains("esperando a SEFAZ"));
+    let resumo: ResumoFiscal = m.consultar("fiscal.resumo_da_fila.v1", &ResumoDaFilaFiscal);
+    assert_eq!(resumo.cartas_pendentes, 1);
+    assert!(m
+        .transmitir()
+        .contains("1 carta(s) de correção registrada(s)"));
+    let registrada = &cartas()[0];
+    assert_eq!(registrada.estado, EstadoCarta::Registrada);
+    assert!(registrada.protocolo.is_some() && registrada.registrada_em.is_some());
+
+    // A segunda recusada não gasta a sequência: a terceira volta a ser a 2.
+    m.sim.programar(retorno(SituacaoRetorno::Rejeitado, "501"));
+    assert_eq!(
+        carta(nfe.id, "Corrige o complemento do endereço")
+            .unwrap()
+            .sequencia,
+        2
+    );
+    assert!(m.transmitir().contains("1 recusada(s)"));
+    assert_eq!(cartas()[0].estado, EstadoCarta::Recusada);
+    assert!(cartas()[0].motivo.is_some());
+    assert_eq!(
+        carta(nfe.id, "Corrige o complemento do endereço, de novo")
+            .unwrap()
+            .sequencia,
+        2
+    );
+    m.transmitir();
+
+    // No pacote do contador do mês: as duas registradas, pelo mês do registro.
+    let mes = Data::hoje(Fuso::BRASILIA).competencia();
+    let notas: NotasDoMes = m.consultar("fiscal.notas_do_mes.v1", &NotasFiscaisDoMes { mes });
+    assert_eq!(notas.cartas.len(), 2);
+    let (arquivo, xml) = notas.cartas[0].arquivo();
+    assert!(
+        arquivo.starts_with("Saidas/NF-e/CartasDeCorrecao/110110"),
+        "{arquivo}"
+    );
+    assert!(arquivo.ends_with("01-procEventoNFe.xml"), "{arquivo}");
+    assert!(xml.contains("<tpEvento>110110</tpEvento>"));
+}
+
+#[test]
+fn a_devolucao_de_compra_vira_nfe_que_se_remonta_e_transmite() {
+    use cardeal_fiscal::{DevolucaoDoItem, FinalidadeNfe};
+    use mod_fiscal::devolucao_compra::{
+        emitir_nfe_de_devolucao_comum, DadosDaDevolucao, DocumentoDaDevolucao, ItemDevolvidoNaNota,
+    };
+    let m = Mundo::novo();
+    let cen = m.cenario();
+    m.configurar(1);
+    m.rodar(
+        "clientes.adicionar_endereco.v1",
+        &mod_clientes::AdicionarEndereco {
+            pessoa: cen.cliente,
+            tipo: mod_clientes::TipoEndereco::Comercial,
+            logradouro: "Rua Sinimbu".into(),
+            numero: "100".into(),
+            complemento: None,
+            bairro: "Centro".into(),
+            cidade: "Caxias do Sul".into(),
+            uf: "RS".into(),
+            cep: "95020000".into(),
+            principal: true,
+        },
+    )
+    .unwrap();
+    let devolucao = Id::novo();
+    let fornecedor = cen.cliente;
+    let mut dados = DadosDaDevolucao {
+        chave_da_compra: None,
+        numero_da_compra: "4600".into(),
+        serie_da_compra: "1".into(),
+        emissao_da_compra: Data::de_ymd(2026, 9, 1).unwrap(),
+        motivo: "Produto com a embalagem avariada".into(),
+        itens: vec![ItemDevolvidoNaNota {
+            produto: cen.produto,
+            ncm: String::new(),
+            quantidade: Quantidade::unidades(4),
+            valor_unitario: Preco::de_str("4").unwrap(),
+            valor_bruto: Dinheiro::reais(16),
+            desconto: Dinheiro::ZERO,
+            origem: 0,
+            icms: Some((Dinheiro::reais(20), Percentual::de_str("12").unwrap())),
+            com_st: true,
+            devolvido: DevolucaoDoItem {
+                modalidade_st: Some("4".into()),
+                base_st: Dinheiro::reais(28),
+                aliquota_st: Some(Percentual::de_str("17").unwrap()),
+                valor_st: Dinheiro::centavos(236),
+                percentual_devolvido: Percentual::de_str("40").unwrap(),
+                ipi_devolvido: Dinheiro::centavos(80),
+                frete: Dinheiro::reais(4),
+                ..DevolucaoDoItem::default()
+            },
+        }],
+    };
+    let emitir = |d: &DadosDaDevolucao| -> DocumentoResumo {
+        let ctx = cardeal_modkit::Ctx::de_sessao(&m.sessao, &m.amb);
+        let d = d.clone();
+        m.arm
+            .escritor()
+            .executar(
+                ContextoEscrita::novo(m.empresa, Id::novo(), Id::novo(), Id::novo()),
+                move |uow| {
+                    emitir_nfe_de_devolucao_comum(devolucao, fornecedor, &d, &ctx, uow)
+                        .map_err(ErroArmazenamento::Dominio)
+                },
+            )
+            .unwrap()
+            .valor
+    };
+
+    // A nota de compra lançada à mão (sem chave): rejeitada já, com o porquê.
+    let rejeitada = emitir(&dados);
+    assert_eq!(rejeitada.estado, EstadoDocumento::Rejeitada);
+    assert!(rejeitada
+        .motivo
+        .as_deref()
+        .is_some_and(|m| m.contains("4600/1 não tem chave de acesso")));
+    // Pelas Notas fiscais não se reenvia: é pela devolução.
+    let reenvio: Result<DocumentoResumo, _> = m.executar(
+        "fiscal.reenviar_documento.v1",
+        &ReenviarDocumento {
+            documento: rejeitada.id,
+        },
+    );
+    assert!(reenvio.unwrap_err().mensagem.contains("em Compras"));
+
+    // Com a chave, remonta no mesmo número e vai para a fila; de novo, é a mesma nota.
+    dados.chave_da_compra = Some("4".repeat(44));
+    let pendente = emitir(&dados);
+    assert_eq!(
+        (pendente.id, pendente.numero),
+        (rejeitada.id, rejeitada.numero)
+    );
+    assert_eq!(pendente.estado, EstadoDocumento::Pendente);
+    assert_eq!(emitir(&dados).id, pendente.id);
+    assert!(m.transmitir().contains("1 autorizada"));
+    let doc: Option<DocumentoResumo> = m.consultar(
+        "fiscal.documento_da_devolucao.v1",
+        &DocumentoDaDevolucao { devolucao },
+    );
+    assert_eq!(doc.unwrap().estado, EstadoDocumento::Autorizada);
+    let nfe = m.documento(pendente.id).nfe.unwrap();
+    assert_eq!(nfe.finalidade, FinalidadeNfe::Devolucao);
+    assert_eq!(nfe.referencias, vec!["4".repeat(44)]);
+    assert_eq!(nfe.itens[0].cfop, "5411");
+    assert_eq!(nfe.total(), Dinheiro::centavos(2_316));
+}
+
+#[test]
+fn a_devolucao_da_venda_em_nfe_vira_nfe_de_entrada() {
+    use cardeal_fiscal::FinalidadeNfe;
+    use mod_fiscal::devolucao_venda::{DocumentoDaDevolucaoDeVenda, EmitirNfeDaDevolucaoDeVenda};
+    use mod_vendas::{
+        AdicionarItemPedido, AprovarDevolucao, ConcluirDevolucao, ConfirmarPedido, CriarPedido,
+        Devolucao, DevolucaoFoiConcluida, FaturarPedido, ItemFoiAdicionado, PedidoCriado,
+        PedidoFoiFaturado, SolicitarDevolucao,
+    };
+    let m = Mundo::novo();
+    let cen = m.cenario();
+    m.configurar(1);
+    m.rodar(
+        "clientes.adicionar_endereco.v1",
+        &mod_clientes::AdicionarEndereco {
+            pessoa: cen.cliente,
+            tipo: mod_clientes::TipoEndereco::Residencial,
+            logradouro: "Rua Sinimbu".into(),
+            numero: "100".into(),
+            complemento: None,
+            bairro: "Centro".into(),
+            cidade: "Caxias do Sul".into(),
+            uf: "RS".into(),
+            cep: "95020000".into(),
+            principal: true,
+        },
+    )
+    .unwrap();
+    let p: PedidoCriado = m
+        .executar(
+            "vendas.criar_pedido.v1",
+            &CriarPedido {
+                cliente: cen.cliente,
+                vendedor: Id::novo(),
+                condicao_pagamento: Id::novo(),
+                tabela_preco: cen.tabela,
+                local_expedicao: cen.local,
+            },
+        )
+        .unwrap();
+    let item: ItemFoiAdicionado = m
+        .executar(
+            "vendas.adicionar_item_pedido.v1",
+            &AdicionarItemPedido {
+                pedido: p.pedido,
+                produto: cen.produto,
+                variacao: None,
+                quantidade: Quantidade::unidades(2),
+                desconto_percentual: Percentual::ZERO,
+            },
+        )
+        .unwrap();
+    m.rodar(
+        "vendas.confirmar_pedido.v1",
+        &ConfirmarPedido { pedido: p.pedido },
+    )
+    .unwrap();
+    let _: PedidoFoiFaturado = m
+        .executar(
+            "vendas.faturar_pedido.v1",
+            &FaturarPedido {
+                pedido: p.pedido,
+                a_vista: false,
+            },
+        )
+        .unwrap();
+    let venda: DocumentoResumo = m
+        .executar(
+            "fiscal.emitir_nfe_do_pedido.v1",
+            &mod_fiscal::EmitirNfeDoPedido { pedido: p.pedido },
+        )
+        .unwrap();
+    assert!(m.transmitir().contains("1 autorizada"));
+    let chave_venda = m.documento(venda.id).resumo.chave.unwrap();
+
+    // 1 de 2 volta; a NF-e de entrada só sai da devolução concluída.
+    let d: Devolucao = m
+        .executar(
+            "vendas.solicitar_devolucao.v1",
+            &SolicitarDevolucao {
+                pedido: p.pedido,
+                itens: vec![(item.item, Quantidade::unidades(1))],
+                motivo: "Produto com defeito de fábrica".into(),
+            },
+        )
+        .unwrap();
+    let cedo: Result<DocumentoResumo, _> = m.executar(
+        "fiscal.emitir_nfe_da_devolucao_de_venda.v1",
+        &EmitirNfeDaDevolucaoDeVenda { devolucao: d.id },
+    );
+    assert_eq!(cedo.unwrap_err().codigo, CodigoErro::ESTADO_INVALIDO);
+    let _: Devolucao = m
+        .executar(
+            "vendas.aprovar_devolucao.v1",
+            &AprovarDevolucao { devolucao: d.id },
+        )
+        .unwrap();
+    let feita: DevolucaoFoiConcluida = m
+        .executar(
+            "vendas.concluir_devolucao.v1",
+            &ConcluirDevolucao { devolucao: d.id },
+        )
+        .unwrap();
+    assert_eq!(
+        feita.abatido, d.valor_total,
+        "a prazo: abate a conta a receber"
+    );
+
+    let entrada: DocumentoResumo = m
+        .executar(
+            "fiscal.emitir_nfe_da_devolucao_de_venda.v1",
+            &EmitirNfeDaDevolucaoDeVenda { devolucao: d.id },
+        )
+        .unwrap();
+    assert_eq!(
+        entrada.estado,
+        EstadoDocumento::Pendente,
+        "{:?}",
+        entrada.motivo
+    );
+    assert_eq!(entrada.numero, venda.numero + 1, "a mesma série da NF-e");
+    assert!(m.transmitir().contains("1 autorizada"));
+    let doc: Option<DocumentoResumo> = m.consultar(
+        "fiscal.documento_da_devolucao_de_venda.v1",
+        &DocumentoDaDevolucaoDeVenda { devolucao: d.id },
+    );
+    assert_eq!(doc.unwrap().estado, EstadoDocumento::Autorizada);
+    let nfe = m.documento(entrada.id).nfe.unwrap();
+    assert!(!nfe.saida, "NF-e de entrada");
+    assert_eq!(nfe.finalidade, FinalidadeNfe::Devolucao);
+    assert_eq!(nfe.referencias, vec![chave_venda]);
+    assert_eq!(nfe.itens[0].cfop, "1202");
+    assert_eq!(nfe.itens[0].quantidade, Quantidade::unidades(1));
+    assert_eq!(nfe.itens[0].impostos.icms.csosn.as_deref(), Some("900"));
+    assert_eq!(nfe.total(), d.valor_total);
+}
+
+#[test]
+fn a_os_faturada_vira_nfse_pela_fila_consulta_o_dps_e_cancela() {
+    use cardeal_fiscal::{MotivoCancelamentoNfse, RetornoNfse, SituacaoNfse};
+    use mod_fiscal::nfse::{
+        CancelarNfse, ConfiguracaoNfse, ConfigurarNfse, EmitirNfseDaOs, EstadoNfse, NfseDaOs,
+        NfseResumo,
+    };
+    let m = Mundo::novo();
+    let cen = m.cenario();
+    m.configurar(1);
+    // Uma OS faturada com duas mãos de obra (uma de cortesia) e uma peça.
+    let ordem = Id::novo();
+    let (empresa, cliente) = (m.empresa, cen.cliente);
+    m.arm
+        .escritor()
+        .executar(
+            ContextoEscrita::novo(empresa, Id::novo(), Id::novo(), Id::novo()),
+            move |uow| {
+                let c = uow.conexao();
+                let erro = |e: rusqlite::Error| ErroArmazenamento::Sqlite(e.to_string());
+                c.execute(
+                    "INSERT INTO os_ordem_servico
+                       (id, empresa, numero, cliente, equipamento, data_abertura,
+                        tecnico_responsavel, estado, valor_total)
+                     VALUES (?1, ?2, 42, ?3, 'Notebook Dell', 0, ?4, 'Faturada', 25000)",
+                    rusqlite::params![
+                        ordem.em_bytes().as_slice(),
+                        empresa.em_bytes().as_slice(),
+                        cliente.em_bytes().as_slice(),
+                        Id::novo().em_bytes().as_slice()
+                    ],
+                )
+                .map_err(erro)?;
+                for (descricao, valor) in [("Diagnóstico", 5_000), ("Troca de bateria", 10_000), ("Limpeza", 0)] {
+                    c.execute(
+                        "INSERT INTO os_item_mao_de_obra (id, ordem_servico, descricao, valor, tecnico)
+                         VALUES (?1, ?2, ?3, ?4, ?5)",
+                        rusqlite::params![
+                            Id::novo().em_bytes().as_slice(),
+                            ordem.em_bytes().as_slice(),
+                            descricao,
+                            valor,
+                            Id::novo().em_bytes().as_slice()
+                        ],
+                    )
+                    .map_err(erro)?;
+                }
+                Ok(())
+            },
+        )
+        .unwrap();
+    let emitir = || -> Result<NfseResumo, Erro> {
+        m.executar("fiscal.emitir_nfse_da_os.v1", &EmitirNfseDaOs { ordem })
+    };
+
+    // Sem a configuração, não sai; configurada, a empresa sem inscrição municipal é rejeição.
+    assert_eq!(emitir().unwrap_err().codigo, CodigoErro::REGRA_VIOLADA);
+    let cfg: ConfiguracaoNfse = m
+        .executar(
+            "fiscal.configurar_nfse.v1",
+            &ConfigurarNfse {
+                codigo_tributacao_nacional: "14.01.01".into(),
+                item_lc116: "1401".into(),
+                codigo_tributacao_municipal: None,
+                nbs: None,
+                aliquota: Percentual::de_str("6").unwrap(),
+                serie: 900,
+                proximo_numero: Some(10),
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        (
+            cfg.codigo_tributacao_nacional.as_str(),
+            cfg.item_lc116.as_str()
+        ),
+        ("140101", "14.01")
+    );
+    let rejeitada = emitir().unwrap();
+    assert_eq!(rejeitada.estado, EstadoNfse::Rejeitada);
+    assert!(rejeitada
+        .motivo
+        .as_deref()
+        .unwrap()
+        .contains("inscrição municipal"));
+    let _: DadosFiscais = m
+        .executar(
+            "empresa.definir_dados_fiscais.v1",
+            &DefinirDadosFiscaisEmpresa {
+                dados: DadosFiscais {
+                    inscricao_estadual: "0960000000".into(),
+                    inscricao_municipal: "12345".into(),
+                    endereco: EnderecoFiscal {
+                        logradouro: "Rua A".into(),
+                        numero: "1".into(),
+                        complemento: String::new(),
+                        bairro: "Centro".into(),
+                        municipio: "Porto Alegre".into(),
+                        codigo_municipio: "4314902".into(),
+                        uf: "RS".into(),
+                        cep: "90010000".into(),
+                    },
+                },
+            },
+        )
+        .unwrap();
+
+    // Emitir de novo remonta no mesmo número; a resposta se perde (o DPS chegou): a fila consulta
+    // pelo DPS e acha a NFS-e, sem emitir outra.
+    let pendente = emitir().unwrap();
+    assert_eq!(
+        (pendente.estado, pendente.numero),
+        (EstadoNfse::Pendente, 10)
+    );
+    assert_eq!(pendente.total, Dinheiro::reais(150), "só a mão de obra");
+    m.sim.registrar_nfse(900, 10);
+    m.sim.programar_nfse(RetornoNfse {
+        situacao: SituacaoNfse::Erro,
+        numero: None,
+        chave: None,
+        codigo_verificacao: None,
+        xml: None,
+        mensagens: vec!["tempo esgotado".into()],
+    });
+    m.transmitir();
+    let incerta: Option<NfseResumo> = m.consultar("fiscal.nfse_da_os.v1", &NfseDaOs { ordem });
+    assert_eq!(incerta.unwrap().estado, EstadoNfse::Incerta);
+    let resumo: ResumoFiscal = m.consultar("fiscal.resumo_da_fila.v1", &ResumoDaFilaFiscal);
+    assert_eq!(resumo.nfse_na_fila, 1);
+    m.tentar_ja_nfse();
+    assert!(m.transmitir().contains("NFS-e: 1 autorizada"));
+    let autorizada: NfseResumo = m
+        .consultar::<Option<NfseResumo>>("fiscal.nfse_da_os.v1", &NfseDaOs { ordem })
+        .unwrap();
+    assert_eq!(autorizada.estado, EstadoNfse::Autorizada);
+    assert_eq!(autorizada.numero_nfse, Some(1));
+    assert_eq!(autorizada.chave.as_deref().map(str::len), Some(50));
+    // Emitir de novo devolve a mesma.
+    assert_eq!(emitir().unwrap().id, autorizada.id);
+
+    // Cancelar: o pedido vai pela fila.
+    let curto: Result<NfseResumo, _> = m.executar(
+        "fiscal.cancelar_nfse.v1",
+        &CancelarNfse {
+            nfse: autorizada.id,
+            motivo: MotivoCancelamentoNfse::ServicoNaoPrestado,
+            justificativa: "curta".into(),
+        },
+    );
+    assert_eq!(curto.unwrap_err().campo.as_deref(), Some("justificativa"));
+    let pedido: NfseResumo = m
+        .executar(
+            "fiscal.cancelar_nfse.v1",
+            &CancelarNfse {
+                nfse: autorizada.id,
+                motivo: MotivoCancelamentoNfse::ServicoNaoPrestado,
+                justificativa: "O cliente desistiu do conserto".into(),
+            },
+        )
+        .unwrap();
+    assert!(pedido.cancelamento_pedido);
+    assert!(m.transmitir().contains("1 cancelada"));
+    let cancelada: NfseResumo = m
+        .consultar::<Option<NfseResumo>>("fiscal.nfse_da_os.v1", &NfseDaOs { ordem })
+        .unwrap();
+    assert_eq!(cancelada.estado, EstadoNfse::Cancelada);
+}
+
+/// Uma compra de outra empresa (CST 00, 17%), com a empresa do teste como destinatária.
+const COMPRA_PARA_EFD: &str = r#"<nfeProc versao="4.00"><NFe><infNFe Id="NFe43261011444777000161550010000007771000007770" versao="4.00">
+<ide><mod>55</mod><serie>1</serie><nNF>777</nNF><dhEmi>DATAT08:00:00-03:00</dhEmi><tpNF>1</tpNF><finNFe>1</finNFe></ide>
+<emit><CNPJ>11444777000161</CNPJ><xNome>Atacado Gama</xNome><enderEmit><xLgr>Rua C</xLgr><nro>1</nro><xBairro>Norte</xBairro><cMun>4304606</cMun><UF>RS</UF></enderEmit><IE>0960099999</IE><CRT>3</CRT></emit>
+<dest><CNPJ>11222333000181</CNPJ><xNome>Empresa Teste LTDA</xNome><indIEDest>1</indIEDest></dest>
+<det nItem="1"><prod><cProd>X9</cProd><xProd>CAPINHA</xProd><NCM>39269090</NCM><CFOP>5102</CFOP><uCom>PC</uCom><qCom>10.0000</qCom><vProd>100.00</vProd></prod>
+<imposto><ICMS><ICMS00><orig>0</orig><CST>00</CST><vBC>100.00</vBC><pICMS>17.0000</pICMS><vICMS>17.00</vICMS></ICMS00></ICMS></imposto></det>
+<total><ICMSTot><vBC>100.00</vBC><vICMS>17.00</vICMS><vProd>100.00</vProd><vNF>100.00</vNF></ICMSTot></total>
+<transp><modFrete>1</modFrete></transp></infNFe></NFe></nfeProc>"#;
+
+#[test]
+fn o_mes_vira_efd_icms_ipi_com_a_apuracao_e_o_saldo_credor() {
+    use mod_fiscal::efd::{
+        ConfiguracaoEfd, ConfigurarEfd, Contabilista, EfdDoMes, EntradaEscriturada, GerarEfd,
+        ItemDoCadastro, RegistrarApuracaoIcms,
+    };
+    let m = Mundo::novo();
+    let cen = m.cenario();
+    m.configurar(1);
+    let hoje = Data::hoje(Fuso::BRASILIA);
+    let mes = hoje.competencia();
+    let gerar = |competencia, entradas: Vec<EntradaEscriturada>| -> EfdDoMes {
+        m.consultar(
+            "fiscal.gerar_efd.v1",
+            &GerarEfd {
+                competencia,
+                substituta: false,
+                entradas,
+                saldo_credor_anterior: None,
+            },
+        )
+    };
+    // No Simples, não há EFD ICMS/IPI.
+    let simples = gerar(mes, vec![]);
+    assert!(simples.arquivo.is_none());
+    assert!(simples.impedimentos[0].contains("Simples Nacional"));
+
+    // Lucro Presumido, o produto com CST 00 a 18%, notas de produção.
+    let empresa = m.empresa;
+    m.arm
+        .escritor()
+        .executar(
+            ContextoEscrita::novo(empresa, Id::novo(), Id::novo(), Id::novo()),
+            move |uow| {
+                uow.conexao()
+                    .execute(
+                        "UPDATE nucleo_empresa SET regime = 'LucroPresumido' WHERE id = ?1",
+                        [empresa.em_bytes().as_slice()],
+                    )
+                    .map(|_| ())
+                    .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+            },
+        )
+        .unwrap();
+    m.rodar(
+        "estoque.definir_campos_fiscais_do_produto.v1",
+        &mod_estoque::DefinirCamposFiscaisDoProduto {
+            produto: cen.produto,
+            campos: mod_estoque::fiscal::CamposFiscais {
+                cst_icms: Some("00".into()),
+                aliquota_icms: Some(Percentual::pontos(18)),
+                ..mod_estoque::fiscal::CamposFiscais::default()
+            },
+        },
+    )
+    .unwrap();
+    m.rodar(
+        "fiscal.definir_ambiente.v1",
+        &DefinirAmbienteFiscal {
+            ambiente: AmbienteFiscal::Producao,
+        },
+    )
+    .unwrap();
+    let a = m.emitir(m.vender(&cen, cen.produto, 2, false));
+    let b = m.emitir(m.vender(&cen, cen.produto, 1, false));
+    assert!(m.transmitir().starts_with("2 autorizada"));
+    m.rodar(
+        "fiscal.cancelar_nfce.v1",
+        &CancelarNfce {
+            documento: b.id,
+            justificativa: "Venda registrada em duplicidade no caixa".into(),
+        },
+    )
+    .unwrap();
+    assert!(m.transmitir().contains("1 cancelada"));
+
+    // Sem o contabilista, não sai.
+    let sem_config = gerar(mes, vec![]);
+    assert!(
+        sem_config.impedimentos[0].contains("contabilista"),
+        "{sem_config:?}"
+    );
+    let configuracao = ConfiguracaoEfd {
+        contabilista: Contabilista {
+            nome: "Ana Contadora".into(),
+            cpf: "52998224725".into(),
+            crc: "RS-012345/O".into(),
+            codigo_municipio: "4314902".into(),
+            ..Contabilista::default()
+        },
+        codigo_receita: "0221".into(),
+        dia_vencimento: 12,
+        ..ConfiguracaoEfd::default()
+    };
+    m.rodar(
+        "fiscal.configurar_efd.v1",
+        &ConfigurarEfd {
+            configuracao: configuracao.clone(),
+        },
+    )
+    .unwrap();
+    let lida: ConfiguracaoEfd = m.consultar(
+        "fiscal.configuracao_efd.v1",
+        &mod_fiscal::efd::ConfiguracaoDaEfd,
+    );
+    assert_eq!(lida, configuracao);
+
+    let compra = EntradaEscriturada {
+        xml: COMPRA_PARA_EFD.replace("DATA", &hoje.formatar_iso()),
+        data_entrada: hoje,
+        itens: vec![Some(ItemDoCadastro {
+            codigo: mod_fiscal::codigo_do_produto(cen.produto),
+            descricao: "Capinha de celular".into(),
+            unidade: "UN".into(),
+            ncm: "39269090".into(),
+            gtin: None,
+            cest: None,
+        })],
+    };
+    let efd = gerar(mes, vec![compra]);
+    assert!(efd.impedimentos.is_empty(), "{:?}", efd.impedimentos);
+    let arquivo = efd.arquivo.unwrap();
+    let linhas: Vec<Vec<&str>> = arquivo
+        .texto
+        .lines()
+        .map(|l| l.trim_matches('|').split('|').collect())
+        .collect();
+    let do_reg = |reg: &str| -> Vec<&Vec<&str>> { linhas.iter().filter(|l| l[0] == reg).collect() };
+    // A autorizada e a cancelada (só com a chave), e a compra.
+    let c100 = do_reg("C100");
+    assert_eq!(c100.len(), 3);
+    let numero = a.numero.to_string();
+    assert_eq!(
+        c100[0][..8],
+        ["C100", "1", "0", "", "65", "00", "1", numero.as_str(),]
+    );
+    assert_eq!(c100[0][8].len(), 44, "a chave da autorizada");
+    assert_eq!(c100[0][11], "50,00");
+    assert_eq!(c100[1][5], "02");
+    assert_eq!(c100[2][1..6], ["0", "1", "11444777000161", "55", "00"]);
+    let c190 = do_reg("C190");
+    assert_eq!(
+        c190[0][1..7],
+        ["000", "5102", "18,00", "50,00", "50,00", "9,00"]
+    );
+    assert_eq!(
+        c190[1][1..7],
+        ["000", "1102", "17,00", "100,00", "100,00", "17,00"]
+    );
+    let codigo = mod_fiscal::codigo_do_produto(cen.produto);
+    assert_eq!(do_reg("C170")[0][2], codigo);
+    assert_eq!(do_reg("0200")[0][1], codigo);
+    assert_eq!(linhas[0][1], "020");
+    assert_eq!(linhas[0][13], "A");
+    // 9 de débito, 17 de crédito: 8 de saldo credor para o mês seguinte.
+    assert_eq!(arquivo.apuracao.debitos, Dinheiro::reais(9));
+    assert_eq!(arquivo.apuracao.creditos, Dinheiro::reais(17));
+    assert_eq!(
+        arquivo.apuracao.saldo_credor_a_transportar,
+        Dinheiro::reais(8)
+    );
+    assert!(
+        arquivo.avisos[0].contains("Sem a apuração"),
+        "{:?}",
+        arquivo.avisos
+    );
+
+    // Registrada a apuração, o mês seguinte abre com o saldo.
+    m.rodar(
+        "fiscal.registrar_apuracao_icms.v1",
+        &RegistrarApuracaoIcms {
+            competencia: mes,
+            apuracao: arquivo.apuracao,
+        },
+    )
+    .unwrap();
+    let seguinte = gerar(mes.proxima(), vec![]).arquivo.unwrap();
+    assert_eq!(seguinte.apuracao.saldo_credor_anterior, Dinheiro::reais(8));
+    assert_eq!(
+        seguinte.apuracao.saldo_credor_a_transportar,
+        Dinheiro::reais(8)
+    );
+    assert!(!seguinte.avisos.iter().any(|x| x.contains("Sem a apuração")));
+    assert_eq!(seguinte.documentos, 0);
 }

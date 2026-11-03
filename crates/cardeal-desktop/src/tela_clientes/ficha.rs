@@ -12,6 +12,8 @@ pub(super) struct Ficha {
     pub(super) ordens: Vec<OrdemServico>,
     pub(super) em_aberto: Dinheiro,
     pub(super) vencido: Dinheiro,
+    /// Como paga (sem a permissão de ver o a receber, nada).
+    pub(super) pagamento: Option<mod_financeiro::pagamento::PerfilDePagamento>,
 }
 
 /// O que a ficha pede para a tela de OS fazer (a navegação é do `main`).
@@ -51,10 +53,21 @@ impl Ficha {
                 vencido += t.saldo();
             }
         }
+        let pagamento = motor
+            .consultar(
+                sessao,
+                "financeiro.perfis_de_pagamento.v1",
+                &mod_financeiro::pagamento::PerfisDePagamento {
+                    clientes: vec![cliente],
+                },
+            )
+            .ok()
+            .and_then(|v: Vec<mod_financeiro::pagamento::PerfilDePagamento>| v.into_iter().next());
         Self {
             ordens,
             em_aberto,
             vencido,
+            pagamento,
         }
     }
 
@@ -114,6 +127,18 @@ pub(super) fn secao_ficha(ui: &mut egui::Ui, ficha: &Ficha) -> Option<PedidoPara
         CartaoKpi::contagem("Em garantia", ficha.em_garantia(hoje)),
     ])
     .mostrar(ui);
+    if let Some(p) = &ficha.pagamento {
+        ui.horizontal(|ui| {
+            ui.add(Rotulo::campo("Pagamento"));
+            ui.add(super::curva::etiqueta_do_selo(p.selo));
+            if let Some(nota) = p.nota {
+                ui.add(Rotulo::campo(format!(
+                    "nota {nota} de 1000 · {} de {} parcela(s) em dia nos últimos 12 meses",
+                    p.pagas_em_dia, p.pagas
+                )));
+            }
+        });
+    }
 
     let aparelhos = ficha.aparelhos();
     if !aparelhos.is_empty() {

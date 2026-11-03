@@ -38,6 +38,9 @@ pub struct AbrirCupom {
     pub tabela_preco: Id,
     /// O local de estoque de onde os itens saem ao finalizar.
     pub local_expedicao: Id,
+    /// O vendedor (quem ganha a comissão), se escolhido.
+    #[serde(default)]
+    pub vendedor: Option<Id>,
 }
 
 /// O que o comando devolve.
@@ -88,6 +91,9 @@ impl Comando for AbrirCupom {
 
         // 4. Persistir.
         RepositorioPdv::novo(uow).inserir_cupom(&cupom)?;
+        if self.vendedor.is_some() {
+            super::vendedor::gravar(uow.conexao(), cupom.id, self.vendedor)?;
+        }
 
         Ok(CupomAberto {
             cupom: cupom.id,

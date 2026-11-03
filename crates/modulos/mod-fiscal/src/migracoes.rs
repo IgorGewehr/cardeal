@@ -133,6 +133,258 @@ ALTER TABLE fiscal_documento ADD COLUMN anulada INTEGER NOT NULL DEFAULT 0
     CHECK (anulada IN (0,1));
 ";
 
+/// v5: o XML do evento — o `procEventoNFe` do cancelamento ou o `procInutNFe` da inutilização,
+/// que a lei manda guardar por 5 anos junto com o da nota e que o contador recebe no pacote do
+/// mês. Antes só o protocolo ficava.
+const SQL_V5: &str = "
+ALTER TABLE fiscal_documento ADD COLUMN xml_evento TEXT;
+";
+
+/// v6: a nota assinada da emissão incerta (vai na consulta, que devolve o `nfeProc`) e a busca
+/// dos XMLs que faltam a notas fechadas — `xml_a_buscar` é quantas tentativas a busca ainda
+/// tem (0 = nada a buscar). Os cancelamentos que ficaram sem o XML (o `sefaz-api` não o
+/// devolvia) já entram na busca: a consulta da nota cancelada o traz.
+const SQL_V6: &str = "
+ALTER TABLE fiscal_documento ADD COLUMN xml_assinado TEXT;
+ALTER TABLE fiscal_documento ADD COLUMN xml_a_buscar INTEGER NOT NULL DEFAULT 0
+    CHECK (xml_a_buscar BETWEEN 0 AND 9);
+UPDATE fiscal_documento SET xml_a_buscar = 3
+ WHERE ambiente = 'producao' AND estado = 'Cancelada' AND xml_evento IS NULL
+   AND chave IS NOT NULL;
+DROP INDEX fiscal_documento_fila;
+CREATE INDEX fiscal_documento_fila ON fiscal_documento(empresa, proxima_tentativa)
+    WHERE estado IN ('Pendente','Incerta') OR pedido IS NOT NULL OR xml_a_buscar > 0;
+";
+
+/// v7: a NFC-e em **contingência off-line** — o estado `Contingencia` (a nota assinada com
+/// `tpEmis = 9`, o DANFCE já impresso, esperando a SEFAZ voltar) e `contingencia_em` (o
+/// `dhCont`). O SQLite não muda um `CHECK`: a tabela é recriada com os dados.
+const SQL_V7: &str = "
+CREATE TABLE fiscal_documento_v7 (
+    id                BLOB PRIMARY KEY,
+    empresa           BLOB    NOT NULL REFERENCES nucleo_empresa(id),
+    modelo            TEXT    NOT NULL CHECK (modelo IN ('55','65')),
+    serie             INTEGER NOT NULL,
+    numero            INTEGER NOT NULL,
+    ambiente          TEXT    NOT NULL CHECK (ambiente IN ('homologacao','producao')),
+    origem_modulo     TEXT    NOT NULL,
+    origem_id         BLOB    NOT NULL,
+    estado            TEXT    NOT NULL CHECK (estado IN
+                          ('Pendente','Incerta','Contingencia','Autorizada','Rejeitada',
+                           'Denegada','Cancelada','Inutilizada')),
+    total             INTEGER NOT NULL,
+    nota              BLOB,
+    chave             TEXT,
+    protocolo         TEXT,
+    codigo            TEXT,
+    motivo            TEXT,
+    xml               TEXT,
+    tentativas        INTEGER NOT NULL DEFAULT 0,
+    proxima_tentativa INTEGER NOT NULL DEFAULT 0,
+    criado_em         INTEGER NOT NULL,
+    atualizado_em     INTEGER NOT NULL,
+    autorizado_em     INTEGER,
+    pedido            TEXT    CHECK (pedido IN ('cancelar','inutilizar')),
+    justificativa     TEXT,
+    protocolo_evento  TEXT,
+    evento_em         INTEGER,
+    anulada           INTEGER NOT NULL DEFAULT 0 CHECK (anulada IN (0,1)),
+    xml_evento        TEXT,
+    xml_assinado      TEXT,
+    xml_a_buscar      INTEGER NOT NULL DEFAULT 0 CHECK (xml_a_buscar BETWEEN 0 AND 9),
+    contingencia_em   INTEGER,
+    UNIQUE (empresa, origem_modulo, origem_id),
+    UNIQUE (empresa, modelo, serie, ambiente, numero)
+) STRICT;
+INSERT INTO fiscal_documento_v7
+    (id, empresa, modelo, serie, numero, ambiente, origem_modulo, origem_id, estado, total, nota,
+     chave, protocolo, codigo, motivo, xml, tentativas, proxima_tentativa, criado_em,
+     atualizado_em, autorizado_em, pedido, justificativa, protocolo_evento, evento_em, anulada,
+     xml_evento, xml_assinado, xml_a_buscar)
+SELECT id, empresa, modelo, serie, numero, ambiente, origem_modulo, origem_id, estado, total, nota,
+       chave, protocolo, codigo, motivo, xml, tentativas, proxima_tentativa, criado_em,
+       atualizado_em, autorizado_em, pedido, justificativa, protocolo_evento, evento_em, anulada,
+       xml_evento, xml_assinado, xml_a_buscar
+FROM fiscal_documento;
+DROP TABLE fiscal_documento;
+ALTER TABLE fiscal_documento_v7 RENAME TO fiscal_documento;
+CREATE INDEX fiscal_documento_fila ON fiscal_documento(empresa, proxima_tentativa)
+    WHERE estado IN ('Pendente','Incerta','Contingencia') OR pedido IS NOT NULL
+       OR xml_a_buscar > 0;
+CREATE INDEX fiscal_documento_criado ON fiscal_documento(empresa, criado_em);
+";
+
+/// v8: a série da NFC-e por terminal (caixa) — uma série é de um terminal só; o terminal sem série
+/// própria usa a da empresa (`fiscal_configuracao.serie_nfce`).
+const SQL_V8: &str = "
+CREATE TABLE fiscal_serie_terminal (
+    empresa  BLOB    NOT NULL REFERENCES nucleo_empresa(id),
+    terminal BLOB    NOT NULL,
+    nome     TEXT    NOT NULL,
+    serie    INTEGER NOT NULL CHECK (serie BETWEEN 1 AND 889),
+    PRIMARY KEY (empresa, terminal),
+    UNIQUE (empresa, serie)
+) STRICT;
+";
+
+/// v9: a **substituição** (NT 2018.004) — `substitui` (a nota que esta substitui) e
+/// `substituida_por` (a substituta desta), e o pedido `cancelar_substituicao` (evento 110112). A
+/// nota de uma venda é única só entre as vigentes (`substituida_por IS NULL`): a original e a
+/// substituta têm a mesma origem. O SQLite não muda `CHECK` nem `UNIQUE`: a tabela é recriada.
+const SQL_V9: &str = "
+CREATE TABLE fiscal_documento_v9 (
+    id                BLOB PRIMARY KEY,
+    empresa           BLOB    NOT NULL REFERENCES nucleo_empresa(id),
+    modelo            TEXT    NOT NULL CHECK (modelo IN ('55','65')),
+    serie             INTEGER NOT NULL,
+    numero            INTEGER NOT NULL,
+    ambiente          TEXT    NOT NULL CHECK (ambiente IN ('homologacao','producao')),
+    origem_modulo     TEXT    NOT NULL,
+    origem_id         BLOB    NOT NULL,
+    estado            TEXT    NOT NULL CHECK (estado IN
+                          ('Pendente','Incerta','Contingencia','Autorizada','Rejeitada',
+                           'Denegada','Cancelada','Inutilizada')),
+    total             INTEGER NOT NULL,
+    nota              BLOB,
+    chave             TEXT,
+    protocolo         TEXT,
+    codigo            TEXT,
+    motivo            TEXT,
+    xml               TEXT,
+    tentativas        INTEGER NOT NULL DEFAULT 0,
+    proxima_tentativa INTEGER NOT NULL DEFAULT 0,
+    criado_em         INTEGER NOT NULL,
+    atualizado_em     INTEGER NOT NULL,
+    autorizado_em     INTEGER,
+    pedido            TEXT    CHECK (pedido IN ('cancelar','inutilizar','cancelar_substituicao')),
+    justificativa     TEXT,
+    protocolo_evento  TEXT,
+    evento_em         INTEGER,
+    anulada           INTEGER NOT NULL DEFAULT 0 CHECK (anulada IN (0,1)),
+    xml_evento        TEXT,
+    xml_assinado      TEXT,
+    xml_a_buscar      INTEGER NOT NULL DEFAULT 0 CHECK (xml_a_buscar BETWEEN 0 AND 9),
+    contingencia_em   INTEGER,
+    substitui         BLOB,
+    substituida_por   BLOB,
+    UNIQUE (empresa, modelo, serie, ambiente, numero)
+) STRICT;
+INSERT INTO fiscal_documento_v9
+    (id, empresa, modelo, serie, numero, ambiente, origem_modulo, origem_id, estado, total, nota,
+     chave, protocolo, codigo, motivo, xml, tentativas, proxima_tentativa, criado_em,
+     atualizado_em, autorizado_em, pedido, justificativa, protocolo_evento, evento_em, anulada,
+     xml_evento, xml_assinado, xml_a_buscar, contingencia_em)
+SELECT id, empresa, modelo, serie, numero, ambiente, origem_modulo, origem_id, estado, total, nota,
+       chave, protocolo, codigo, motivo, xml, tentativas, proxima_tentativa, criado_em,
+       atualizado_em, autorizado_em, pedido, justificativa, protocolo_evento, evento_em, anulada,
+       xml_evento, xml_assinado, xml_a_buscar, contingencia_em
+FROM fiscal_documento;
+DROP TABLE fiscal_documento;
+ALTER TABLE fiscal_documento_v9 RENAME TO fiscal_documento;
+CREATE UNIQUE INDEX fiscal_documento_origem ON fiscal_documento(empresa, origem_modulo, origem_id)
+    WHERE substituida_por IS NULL;
+CREATE INDEX fiscal_documento_fila ON fiscal_documento(empresa, proxima_tentativa)
+    WHERE estado IN ('Pendente','Incerta','Contingencia') OR pedido IS NOT NULL
+       OR xml_a_buscar > 0;
+CREATE INDEX fiscal_documento_criado ON fiscal_documento(empresa, criado_em);
+";
+
+/// v10: a série da NF-e (modelo 55), separada da da NFC-e — a numeração é por modelo e série.
+const SQL_V10: &str = "
+ALTER TABLE fiscal_configuracao ADD COLUMN serie_nfe INTEGER NOT NULL DEFAULT 1
+    CHECK (serie_nfe BETWEEN 1 AND 889);
+";
+
+/// v11: a carta de correção (CC-e, evento 110110) da NF-e — um pedido que a fila leva à SEFAZ,
+/// até 20 por nota.
+const SQL_V11: &str = "
+CREATE TABLE fiscal_carta_correcao (
+    id                BLOB PRIMARY KEY,
+    empresa           BLOB    NOT NULL REFERENCES nucleo_empresa(id),
+    documento         BLOB    NOT NULL REFERENCES fiscal_documento(id),
+    sequencia         INTEGER NOT NULL CHECK (sequencia BETWEEN 1 AND 20),
+    texto             TEXT    NOT NULL,
+    estado            TEXT    NOT NULL CHECK (estado IN ('Pendente','Registrada','Recusada')),
+    motivo            TEXT,
+    protocolo         TEXT,
+    xml               TEXT,
+    tentativas        INTEGER NOT NULL DEFAULT 0,
+    proxima_tentativa INTEGER NOT NULL DEFAULT 0,
+    criada_em         INTEGER NOT NULL,
+    registrada_em     INTEGER
+) STRICT;
+CREATE INDEX fiscal_carta_documento ON fiscal_carta_correcao(documento);
+CREATE INDEX fiscal_carta_fila ON fiscal_carta_correcao(empresa, proxima_tentativa)
+    WHERE estado = 'Pendente';
+";
+
+/// v12: a NFS-e (DPS do Padrão Nacional) — a configuração (o código do serviço, a série e o
+/// próximo número por ambiente) e a nota, com a fila própria.
+/// v13: o SPED — a configuração (o contabilista, o perfil, o código de receita) e a apuração
+/// do ICMS registrada de cada mês (o saldo credor que abre o seguinte).
+const SQL_V13: &str = "
+CREATE TABLE fiscal_configuracao_efd (
+    empresa       BLOB PRIMARY KEY,
+    dados         BLOB    NOT NULL,
+    atualizado_em INTEGER NOT NULL
+) STRICT;
+CREATE TABLE fiscal_apuracao_icms (
+    empresa                  BLOB    NOT NULL,
+    competencia              INTEGER NOT NULL,
+    debitos                  INTEGER NOT NULL,
+    creditos                 INTEGER NOT NULL,
+    a_recolher               INTEGER NOT NULL,
+    saldo_credor_transportar INTEGER NOT NULL,
+    registrado_em            INTEGER NOT NULL,
+    PRIMARY KEY (empresa, competencia)
+) STRICT;
+";
+
+const SQL_V12: &str = "
+CREATE TABLE fiscal_configuracao_nfse (
+    empresa                     BLOB PRIMARY KEY REFERENCES nucleo_empresa(id),
+    codigo_tributacao_nacional  TEXT    NOT NULL,
+    item_lc116                  TEXT    NOT NULL,
+    codigo_tributacao_municipal TEXT,
+    nbs                         TEXT,
+    aliquota                    INTEGER NOT NULL,
+    serie                       INTEGER NOT NULL,
+    proximo_homologacao         INTEGER NOT NULL DEFAULT 1,
+    proximo_producao            INTEGER NOT NULL DEFAULT 1
+) STRICT;
+CREATE TABLE fiscal_nfse (
+    id                  BLOB PRIMARY KEY,
+    empresa             BLOB    NOT NULL REFERENCES nucleo_empresa(id),
+    origem_modulo       TEXT    NOT NULL,
+    origem              BLOB    NOT NULL,
+    ambiente            TEXT    NOT NULL CHECK (ambiente IN ('homologacao','producao')),
+    serie               INTEGER NOT NULL,
+    numero              INTEGER NOT NULL,
+    estado              TEXT    NOT NULL
+                        CHECK (estado IN ('Pendente','Incerta','Autorizada','Rejeitada','Cancelada')),
+    cancelar            INTEGER NOT NULL DEFAULT 0,
+    motivo_cancelamento TEXT,
+    justificativa       TEXT,
+    total               INTEGER NOT NULL,
+    nota                BLOB,
+    numero_nfse         INTEGER,
+    chave               TEXT,
+    codigo_verificacao  TEXT,
+    xml                 TEXT,
+    xml_evento          TEXT,
+    motivo              TEXT,
+    tentativas          INTEGER NOT NULL DEFAULT 0,
+    proxima_tentativa   INTEGER NOT NULL DEFAULT 0,
+    criado_em           INTEGER NOT NULL,
+    autorizado_em       INTEGER,
+    cancelado_em        INTEGER,
+    UNIQUE (empresa, ambiente, serie, numero)
+) STRICT;
+CREATE UNIQUE INDEX fiscal_nfse_origem ON fiscal_nfse(empresa, origem_modulo, origem)
+    WHERE estado <> 'Cancelada';
+CREATE INDEX fiscal_nfse_fila ON fiscal_nfse(empresa, proxima_tentativa);
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -156,6 +408,60 @@ const MIGRACOES: &[Migracao] = &[
         versao: 4,
         nome: "fiscal_documento_anulado_pela_venda",
         sql: SQL_V4,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 5,
+        nome: "fiscal_xml_do_evento",
+        sql: SQL_V5,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 6,
+        nome: "fiscal_nota_assinada_e_busca_de_xml",
+        sql: SQL_V6,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 7,
+        nome: "fiscal_contingencia_offline",
+        sql: SQL_V7,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 8,
+        nome: "fiscal_serie_por_terminal",
+        sql: SQL_V8,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 9,
+        nome: "fiscal_substituicao_da_nfce",
+        sql: SQL_V9,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 10,
+        nome: "fiscal_serie_da_nfe",
+        sql: SQL_V10,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 11,
+        nome: "fiscal_carta_de_correcao",
+        sql: SQL_V11,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 12,
+        nome: "fiscal_nfse",
+        sql: SQL_V12,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 13,
+        nome: "fiscal_sped",
+        sql: SQL_V13,
         tipo: TipoMigracao::Esquema,
     },
 ];

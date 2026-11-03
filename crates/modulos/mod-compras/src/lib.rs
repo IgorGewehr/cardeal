@@ -15,22 +15,16 @@
 //!
 //! E a amarração ao motor ([`ModuloCompras`]): migrações (`compras_nota_entrada`/
 //! `compras_item_nota_entrada`/`compras_regra_casamento`/`compras_preferencias`/
-//! `compras_estado_dfe`) e quatro comandos de despacho (**[`DefinirPreferenciasCompras`]**,
-//! **[`VincularProdutoManual`]**, **[`ConfirmarEntrada`]**,
-//! **[`ImportarNotaDeArquivoXml`]** — XML lido de um arquivo local pela UI, sem depender da
-//! SEFAZ estar disponível) — mais duas funções `pub` que **não** são comandos de despacho:
-//! [`importar_nota_da_sefaz`] e [`verificar_notas_na_sefaz`]. O porquê de não serem
-//! `Comando`: elas precisam de um `PortaFiscal` (`cardeal-fiscal`), e
-//! `cardeal_modkit::Ctx::porta()` — a forma de injetar uma porta dentro de um comando — ainda
-//! está listado como "adiado" (`docs/contratos-internos.md` §4). Até lá,
-//! `verificar_notas_na_sefaz` é chamada direto por quem tiver a porta em mãos (hoje, só
-//! teste de integração com `FiscalSimulado`; quando um agendador de tarefas existir, ele
-//! chama a mesma função — é exatamente o que a sequência "Tarefa agendada (1h)" do
-//! `docs/modulos/compras.md` §5 já descrevia).
+//! `compras_dfe_estado`/`compras_dfe_nota`), os comandos de despacho
+//! (**[`DefinirPreferenciasCompras`]**, **[`VincularProdutoManual`]**, **[`ConfirmarEntrada`]**,
+//! **[`ImportarNotaDeArquivoXml`]** — XML lido de um arquivo local pela UI —, ...) e a
+//! **tarefa** [`TAREFA_BUSCAR_NA_SEFAZ`]: as notas de compra que a SEFAZ entrega ao CNPJ
+//! (distribuição `DFe`), com a Ciência da Operação das que chegam só como resumo — fora de
+//! qualquer transação, como a transmissão da NFC-e (ver o módulo `dfe`).
+//! [`importar_nota_da_sefaz`] é a importação de um XML já interpretado, que a tarefa usa.
 //!
-//! O casamento **automático que o usuário pediu de ponta a ponta** funciona assim:
-//! `verificar_notas_na_sefaz` (ou, para um arquivo local, [`ImportarNotaDeArquivoXml`]) varre
-//! a distribuição `DFe`/lê o XML, interpreta (`cardeal_fiscal::interpretar`), resolve (ou
+//! O casamento **automático que o usuário pediu de ponta a ponta** funciona assim: a busca na
+//! SEFAZ (ou, para um arquivo local, [`ImportarNotaDeArquivoXml`]) traz o XML, interpreta (`cardeal_fiscal::interpretar`), resolve (ou
 //! cadastra) o fornecedor pelo CNPJ do emitente, roda a cascata de casamento por item, rateia
 //! frete/seguro/outras despesas (`Dinheiro::ratear_por_pesos`, nunca perde centavo), e — se
 //! as preferências da empresa permitirem e **todo** item tiver casado por GTIN ou regra
@@ -40,15 +34,14 @@
 //! `pago_no_ato_padrao` também mandar). Caso contrário, a nota fica `AConferir` para um
 //! humano revisar com `VincularProdutoManual` + `ConfirmarEntrada`.
 //!
+//! A **cotação** ([`cotacao`]) e o **pedido de compra** ([`pedido`], 2026-10-31): a nota que
+//! chega se liga ao pedido (pelo `xPed` do XML ou pelo único pedido em aberto do fornecedor), é
+//! conferida contra ele e, confirmada, o recebe.
+//!
 //! ## O que falta (ver `docs/17-roadmap.md`, Fase 3)
 //!
-//! Cotação e pedido de compra (o doc original tem o spec; esta versão vai direto da nota ao
-//! estoque, como o `gestao-raiz` faz — mas sem copiar a ausência de pedido formal dele, só
-//! adiando); devolução ao fornecedor; leitura de condições de pagamento do XML (`cobr/dup`)
-//! — hoje `ConfirmarEntrada` sempre gera um título de parcela única vencendo na emissão;
-//! `ApiFiscalHttp` de verdade (hoje só `FiscalSimulado`); e `Ctx::porta()` em
-//! `cardeal-modkit`, que destrava `verificar_notas_na_sefaz` virar um comando de despacho de
-//! verdade em vez de função chamada por fora.
+//! As manifestações conclusivas do destinatário (confirmação, desconhecimento) — hoje só a
+//! ciência, automática.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs, clippy::pedantic)]
@@ -58,7 +51,11 @@
 mod casamento;
 mod comandos;
 mod consultas;
+pub mod cotacao;
+pub mod devolucao;
+mod dfe;
 mod erros;
+pub mod escrituracao;
 pub mod eventos;
 mod manifesto;
 #[cfg(feature = "sqlite")]
@@ -66,25 +63,60 @@ pub mod migracoes;
 #[cfg(feature = "sqlite")]
 mod modulo;
 mod nota;
+pub mod pedido;
 mod preferencias;
 #[cfg(feature = "sqlite")]
 mod repositorio;
+pub mod st;
+pub mod transferencia;
 
 pub use casamento::{casar, RegraCasamentoAprendida, ResultadoCasamento, LIMIAR_SUGESTAO_FORTE};
 #[cfg(feature = "sqlite")]
-pub use comandos::{confirmar_entrada_comum, importar_nota_da_sefaz, verificar_notas_na_sefaz};
+pub use comandos::{
+    confirmar_entrada_com_parcelas, confirmar_entrada_comum, importar_nota_da_sefaz,
+};
 pub use comandos::{
     ConfirmacaoEntrada, ConfirmarEntrada, DefinirPreferenciasCompras, EntradaConfirmada,
-    ImportarNotaDeArquivoXml, ItemNotaManual, LancarNotaManual, RelatorioImportacao,
-    VincularProdutoManual,
+    EntradaFoiEstornada, EstornarEntrada, ImportarNotaDeArquivoXml, ItemNotaManual,
+    LancarNotaManual, RelatorioImportacao, VincularProdutoManual, MOTIVO_MINIMO_ESTORNO,
 };
 pub use comandos::{CriarProdutoDoItem, ProdutoDoItemCriado};
-pub use consultas::{ItemNota, ItensDaNota, NotasRecentes};
+pub use consultas::{
+    ItemDoEstorno, ItemNota, ItensDaNota, NotaDeEntradaDoMes, NotasDeEntradaDoMes, NotasRecentes,
+    ParcelasDaNota, PreviaDoEstornoDaEntrada, PreviaEstornoEntrada,
+};
+pub use cotacao::{
+    CancelarCotacao, ComparativoDaCotacao, Cotacao, CotacaoCompleta, Cotacoes, DecidirCotacao,
+    EscolhaDaCotacao, EstadoCotacao, ItemDaCotacao, RegistrarPropostaFornecedor, SalvarCotacao,
+};
+#[cfg(feature = "sqlite")]
+pub use devolucao::EmitirNfeDaDevolucao;
+pub use devolucao::{
+    valor_devolvido, DevolucaoAoFornecedor, DevolucaoFeita, DevolucoesDaNota, DevolverAoFornecedor,
+    ItemADevolver, ItemDevolvido, MOTIVO_MINIMO_DEVOLUCAO,
+};
+pub use dfe::{
+    EstadoNaSefaz, HoraDeBuscarNaSefaz, ImportarDeNovoDaSefaz, NotaNaSefaz, NotasNaSefaz,
+    SituacaoDaBusca, TAREFA_BUSCAR_NA_SEFAZ,
+};
 pub use erros::ErroCompras;
 pub use manifesto::{manifesto, MANIFESTO};
 #[cfg(feature = "sqlite")]
 pub use modulo::ModuloCompras;
-pub use nota::{EstadoCasamento, EstadoNotaEntrada, ItemNotaEntrada, NotaEntrada};
+pub use nota::{
+    conferir_parcelas, EstadoCasamento, EstadoNotaEntrada, ItemNotaEntrada, NotaEntrada,
+    ParcelaCompra,
+};
+pub use pedido::{
+    ACaminho, AprovarPedidoCompra, CancelarPedidoCompra, ConferenciaComPedido,
+    EncerrarPedidoCompra, EstadoPedido, ItemDoPedido, PedidoCompra, PedidoDeCompra, PedidoSalvo,
+    PedidosDeCompra, SalvarPedidoCompra, UltimosPrecosPagos, VincularNotaAoPedido,
+};
 pub use preferencias::{PreferenciasCompras, RateioPor};
 #[cfg(feature = "sqlite")]
 pub use repositorio::RepositorioCompras;
+pub use transferencia::{
+    CancelarTransferencia, EmitirNfeDaTransferencia, EnviarTransferencia, EstadoTransferencia,
+    ItemATransferir, ItemDaTransferencia, ItensDaTransferencia, ReceberTransferencia,
+    SituacaoDaNota, TransferenciaEntreFiliais, TransferenciaEnviada, TransferenciasEntreFiliais,
+};

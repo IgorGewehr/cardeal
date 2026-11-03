@@ -72,7 +72,8 @@ pub use comandos::{
 };
 #[cfg(feature = "sqlite")]
 pub use consultas::{
-    documentos_da_pessoa, indice_de_pessoas, limite_credito_da_pessoa, pessoa_por_id,
+    contatos_da_pessoa, documentos_da_pessoa, enderecos_da_pessoa, indice_de_pessoas,
+    limite_credito_da_pessoa, pessoa_por_id,
 };
 pub use consultas::{
     DetalhePessoa, ItemPessoa, PessoaDetalhada, PessoasPorPapel, PreviaDaImportacaoDePessoas,

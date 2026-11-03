@@ -70,6 +70,11 @@ impl EstadoTelaFinanceiro {
             } else {
                 None
             };
+            self.obrigacoes = super::obrigacoes::carregar(motor, sessao);
+            self.contador.conhecer(motor, sessao);
+        }
+        if self.aba == Aba::Contador {
+            self.contador.carregar(motor, sessao);
         }
         if matches!(self.aba, Aba::Receber | Aba::Pagar) {
             self.carregar_parcelas_periodo(motor, sessao);
@@ -82,6 +87,11 @@ impl EstadoTelaFinanceiro {
         }
         if self.aba == Aba::Cheques {
             self.cheques.carregar(motor, sessao);
+        }
+        if self.aba == Aba::Grupo {
+            self.grupo.carregar(motor, sessao);
+        } else {
+            self.grupo.conhecer(motor, sessao);
         }
         if self.aba == Aba::Plano {
             self.plano.carregar(motor, sessao);

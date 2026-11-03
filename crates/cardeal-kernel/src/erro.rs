@@ -75,6 +75,9 @@ impl CodigoErro {
     pub const CREDENCIAL_INVALIDA: Self = Self(3005);
     /// Conta temporariamente bloqueada por excesso de tentativas.
     pub const CONTA_BLOQUEADA: Self = Self(3006);
+    /// A senha confere, mas a conta tem verificação em duas etapas: falta o código do
+    /// aplicativo autenticador (ou um código de recuperação).
+    pub const SEGUNDO_FATOR_NECESSARIO: Self = Self(3007);
 
     // ── 4xxx — concorrência ──────────────────────────────────────────────────
     /// O registro foi alterado por outra pessoa desde a leitura.

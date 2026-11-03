@@ -78,6 +78,7 @@ fn carga(v: &impl serde::Serialize) -> Vec<u8> {
 }
 
 const PERMISSOES: &[&str] = &[
+    "estoque.preco.simples.ver",
     "estoque.produto.criar",
     "estoque.produto.editar",
     "estoque.produto.ver",
@@ -839,4 +840,109 @@ fn comissao_pela_alteracao_em_lote_e_desfazer_volta_a_herdar() {
     for p in [a, b] {
         assert_eq!(c.preco(p).origem_comissao, OrigemComissao::Padrao);
     }
+}
+
+/// Uma venda de `reais` no Razão, no dia `data` (D Caixa / C Receita de vendas).
+fn venda_no_razao(arm: &Armazenamento, empresa: Id, data: cardeal_kernel::Data, reais: i64) {
+    use cardeal_ledger::{ConstrutorLancamento, Origem, Razao, RepositorioRazao};
+    arm.escritor()
+        .executar(
+            ContextoEscrita::novo(empresa, Id::novo(), Id::novo(), Id::novo()),
+            move |uow| {
+                let erro = |e: String| ErroArmazenamento::Sqlite(e);
+                let conta = |uow: &mut cardeal_storage::UnidadeDeTrabalho<'_>, codigo: &str| {
+                    uow.conexao()
+                        .query_row(
+                            "SELECT id FROM razao_conta WHERE empresa = ?1 AND codigo = ?2",
+                            rusqlite::params![empresa.em_bytes().as_slice(), codigo],
+                            |r| r.get::<_, Vec<u8>>(0),
+                        )
+                        .map(|b| Id::de_bytes(b.as_slice().try_into().unwrap()))
+                        .map_err(|e| erro(e.to_string()))
+                };
+                let (caixa, receita) = (conta(uow, "1.1.01")?, conta(uow, "4.1")?);
+                let l = ConstrutorLancamento::novo(empresa, data, "Venda")
+                    .origem(Origem::modulo("teste").tipo("manual"))
+                    .criado_por(Id::novo(), Id::novo())
+                    .agora(Instante::EPOCA)
+                    .liquidacao(data)
+                    .debitar(caixa, Dinheiro::reais(reais))
+                    .creditar(receita, Dinheiro::reais(reais))
+                    .construir()
+                    .map_err(|e| erro(e.to_string()))?;
+                Razao::registrar(&mut RepositorioRazao::novo(uow), l)
+                    .map_err(|e| erro(e.to_string()))?;
+                Ok(())
+            },
+        )
+        .unwrap();
+}
+
+#[test]
+fn o_resumo_do_simples_e_o_preco_usam_o_mesmo_rbt12_da_lei() {
+    use mod_estoque::simples::{
+        AvisoDoSimples, DefinirHistoricoDoSimples, HistoricoDoSimples, OrigemDoRbt12,
+        ResumoDoSimples, ResumoDoSimplesDoMes,
+    };
+    let c = Cenario::novo();
+    let hoje = cardeal_kernel::Data::hoje(cardeal_kernel::Fuso::BRASILIA);
+    let mes = hoje.competencia();
+    // Três meses de R$ 30 mil antes deste, e uma venda neste mês (que não entra no RBT12).
+    for meses_atras in 1..=3 {
+        venda_no_razao(
+            &c.arm,
+            c.empresa,
+            mes.primeiro_dia().mais_meses(-meses_atras),
+            30_000,
+        );
+    }
+    venda_no_razao(&c.arm, c.empresa, hoje, 50_000);
+
+    let r: ResumoDoSimples = c.consulta(
+        "estoque.resumo_do_simples.v1",
+        &ResumoDoSimplesDoMes { mes },
+    );
+    assert_eq!(r.mes.receita, Dinheiro::reais(50_000));
+    assert_eq!(r.mes.rbt12, Dinheiro::reais(90_000));
+    assert_eq!(r.mes.origem, OrigemDoRbt12::HistoricoCurto { meses: 3 });
+    assert_eq!(r.avisos, vec![AvisoDoSimples::HistoricoCurto { meses: 3 }]);
+    // Anexo I, 1ª faixa: 4%, sem parcela a deduzir — o DAS do mês é R$ 2.000.
+    assert_eq!(r.mes.aliquota, Some(Percentual::pontos(4)));
+    assert_eq!(r.mes.das, Some(Dinheiro::reais(2_000)));
+
+    // A empresa é antiga: a receita de antes do Cardeal entra no RBT12 (R$ 25 mil × 9 meses).
+    let anteriores = (4..=12)
+        .map(|n| {
+            let mut m = mes;
+            for _ in 0..n {
+                m = m.anterior();
+            }
+            (m, Dinheiro::reais(25_000))
+        })
+        .collect();
+    c.cmd(
+        "estoque.definir_historico_do_simples.v1",
+        &DefinirHistoricoDoSimples {
+            historico: HistoricoDoSimples {
+                inicio_atividade: None,
+                receita_anterior: anteriores,
+            },
+        },
+    )
+    .unwrap();
+    let r: ResumoDoSimples = c.consulta(
+        "estoque.resumo_do_simples.v1",
+        &ResumoDoSimplesDoMes { mes },
+    );
+    assert_eq!(r.mes.rbt12, Dinheiro::reais(315_000));
+    assert_eq!(r.mes.origem, OrigemDoRbt12::DozeMeses);
+    assert!(r.avisos.is_empty());
+    assert_eq!(r.faixa, Some(2));
+
+    // O preço sugerido usa o mesmo RBT12 e a mesma alíquota efetiva.
+    let g = c.grupo("REV", None);
+    let p = c.produto_com_custo("Refrigerante", g, Preco::centavos(400));
+    let sugestao = c.preco(p);
+    assert_eq!(sugestao.rbt12, r.mes.rbt12);
+    assert_eq!(Some(sugestao.imposto), r.mes.aliquota);
 }

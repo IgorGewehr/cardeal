@@ -11,15 +11,18 @@
 //! síncronas usam para embrulhar clientes HTTP assíncronos, sem vazar `async` para quem
 //! chama. Isso é reavaliado quando `Ctx::porta()` for implementado.
 //!
-//! O que esta versão cobre: a distribuição `DFe` que `mod-compras` usa e o status do serviço
-//! da SEFAZ; o restante da trait do doc 10 (emitir, cancelar, carta de correção…) entra com
-//! cada fatia da onda 7. O adaptador real é [`crate::ApiFiscalHttp`], cliente do `sefaz-api`.
+//! O que esta versão cobre: a distribuição `DFe` e a Manifestação do Destinatário que
+//! `mod-compras` usa, o status do serviço da SEFAZ e a NFC-e (emitir, consultar, cancelar,
+//! inutilizar). O adaptador real é [`crate::ApiFiscalHttp`], cliente do `sefaz-api`.
 
 use cardeal_kernel::{Cnpj, Resultado, Uf};
 use serde::{Deserialize, Serialize};
 
 use crate::chave::ChaveAcesso;
-use crate::emissao::{Csc, Nfce, PedidoInutilizacao, RetornoSefaz};
+use crate::dfe::{Manifestacao, PaginaDfe};
+use crate::emissao::{
+    Csc, EntradaEmContingencia, Nfce, Nfe, NotaEmContingencia, PedidoInutilizacao, RetornoSefaz,
+};
 
 /// O modelo do documento fiscal eletrônico.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -37,6 +40,17 @@ impl ModeloFiscal {
         match self {
             Self::Nfe => "55",
             Self::Nfce => "65",
+        }
+    }
+
+    /// O prazo nacional para cancelar depois da autorização, em segundos: 30 minutos para a
+    /// NFC-e, 24 horas para a NF-e. Fora dele a SEFAZ recusa (501) — algumas UFs aceitam, e
+    /// homologam fora do prazo (155).
+    #[must_use]
+    pub const fn prazo_de_cancelamento_segundos(self) -> i64 {
+        match self {
+            Self::Nfe => 24 * 60 * 60,
+            Self::Nfce => 30 * 60,
         }
     }
 }
@@ -64,40 +78,45 @@ pub struct StatusSefaz {
 
 /// O "próximo a buscar" na distribuição `DFe` — um cursor opaco que a SEFAZ define. `0` pede
 /// desde o início.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Nsu(pub u64);
 
-/// Um documento fiscal resumido, listado pela distribuição `DFe` — ainda sem o XML completo.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResumoDfe {
-    /// A chave de acesso do documento.
-    pub chave_acesso: ChaveAcesso,
-    /// O CNPJ de quem emitiu.
-    pub cnpj_emitente: Cnpj,
-    /// O NSU deste resumo — usado para pedir a próxima página a partir daqui.
-    pub nsu: Nsu,
-}
-
-/// O XML de uma nota, ainda cru — quem interpreta é `crate::nfe::interpretar`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct XmlNota(pub String);
-
-/// A porta fiscal mínima que `mod-compras` precisa nesta fase: descobrir documentos novos
-/// endereçados ao CNPJ da empresa e baixar o XML de um deles.
+/// A porta fiscal: a SEFAZ, por trás do provedor.
 pub trait PortaFiscal: Send + Sync {
-    /// Lista os resumos de documentos fiscais emitidos contra `cnpj` desde `desde`
-    /// (exclusive). A chamada real pagina pelo NSU; o chamador guarda o maior NSU visto e
-    /// o usa como `desde` na próxima varredura.
+    /// Uma página da distribuição `DFe` do `cnpj` (o da empresa, dono do certificado) a partir
+    /// de `desde` (exclusive). Quem chama guarda o `ultimo_nsu` e para quando ele alcança o
+    /// `maior_nsu` — e só pede de novo depois de uma hora (a SEFAZ barra: 656).
     ///
     /// # Errors
-    /// [`crate::ErroFiscal::ServicoIndisponivel`] (só no adaptador real).
-    fn distribuicao_dfe(&self, cnpj: &Cnpj, desde: Nsu) -> Resultado<Vec<ResumoDfe>>;
+    /// [`crate::ErroFiscal::ServicoIndisponivel`] quando a resposta não chegou ou não serve
+    /// (nunca avançar o NSU com ela); [`crate::ErroFiscal::ApiFiscalRecusou`] quando a SEFAZ
+    /// recusou o pedido (CNPJ diferente do certificado, por exemplo).
+    fn distribuicao_dfe(&self, cnpj: &Cnpj, uf: Uf, desde: Nsu) -> Resultado<PaginaDfe>;
 
-    /// Baixa o XML completo de um documento pela chave de acesso.
+    /// Os documentos `DFe` de uma chave: a nota completa, se a empresa já deu ciência; senão o
+    /// resumo.
     ///
     /// # Errors
-    /// [`crate::ErroFiscal::ServicoIndisponivel`] (só no adaptador real).
-    fn baixar_xml(&self, chave: &ChaveAcesso) -> Resultado<XmlNota>;
+    /// Como [`Self::distribuicao_dfe`].
+    fn consultar_dfe_por_chave(
+        &self,
+        cnpj: &Cnpj,
+        uf: Uf,
+        chave: &ChaveAcesso,
+    ) -> Resultado<PaginaDfe>;
+
+    /// A Manifestação do Destinatário sobre uma nota recebida. Registrada vem como
+    /// `Autorizado` (135), com o XML do evento; já registrada antes, `Rejeitado` com 573.
+    ///
+    /// # Errors
+    /// Como [`Self::emitir_nfce`].
+    fn manifestar(
+        &self,
+        cnpj: &Cnpj,
+        chave: &ChaveAcesso,
+        tipo: Manifestacao,
+        justificativa: Option<&str>,
+    ) -> Resultado<RetornoSefaz>;
 
     /// Consulta se o serviço de autorização da SEFAZ da `uf` está no ar para o `modelo` — a
     /// primeira chamada que confere, ponta a ponta, certificado, credencial e rede.
@@ -106,6 +125,14 @@ pub trait PortaFiscal: Send + Sync {
     /// [`crate::ErroFiscal::ServicoIndisponivel`] se a API fiscal não responde; os erros de
     /// credencial/certificado que ela devolver.
     fn status_servico(&self, uf: Uf, modelo: ModeloFiscal) -> Resultado<StatusSefaz>;
+
+    /// Emite uma NF-e (modelo 55; o `sefaz-api` faz o lote e o polling). Como
+    /// [`Self::emitir_nfce`]: rejeição e denegação em `Ok`; o resultado que não chegou vem
+    /// `Processando`/`Erro` com a chave, para consultar.
+    ///
+    /// # Errors
+    /// Como [`Self::emitir_nfce`].
+    fn emitir_nfe(&self, nota: &Nfe) -> Resultado<RetornoSefaz>;
 
     /// Emite uma NFC-e (síncrona na SEFAZ). Rejeição e denegação voltam em `Ok`, no
     /// [`RetornoSefaz`]; `Err` é não ter conseguido falar com a API.
@@ -116,11 +143,18 @@ pub trait PortaFiscal: Send + Sync {
     fn emitir_nfce(&self, nota: &Nfce, csc: &Csc) -> Resultado<RetornoSefaz>;
 
     /// Consulta a situação de um documento pela chave — o passo obrigatório antes de reenviar
-    /// uma nota cujo resultado não chegou.
+    /// uma nota cujo resultado não chegou. Com o `xml_assinado` (o que a emissão incerta
+    /// devolveu), a nota autorizada ou denegada volta com o `nfeProc`; a cancelada volta
+    /// `Cancelado` (101/151/155) e com o XML do cancelamento.
     ///
     /// # Errors
     /// Como [`Self::emitir_nfce`].
-    fn consultar_documento(&self, chave: &ChaveAcesso, uf: Uf) -> Resultado<RetornoSefaz>;
+    fn consultar_documento(
+        &self,
+        chave: &ChaveAcesso,
+        uf: Uf,
+        xml_assinado: Option<&str>,
+    ) -> Resultado<RetornoSefaz>;
 
     /// Cancela um documento autorizado (evento 110111). Aceito vem como `Autorizado` (135,
     /// 136, 155); recusado (prazo, por exemplo) como `Rejeitado`.
@@ -140,16 +174,115 @@ pub trait PortaFiscal: Send + Sync {
     /// # Errors
     /// Como [`Self::emitir_nfce`].
     fn inutilizar(&self, pedido: &PedidoInutilizacao) -> Resultado<RetornoSefaz>;
+
+    /// Emite uma **NFS-e** (DPS do Padrão Nacional; o `sefaz-api` roteia pelo município).
+    ///
+    /// # Errors
+    /// API fora do ar ou sem credencial (a recusa do município volta como
+    /// [`crate::SituacaoNfse::Rejeitada`]).
+    fn emitir_nfse(&self, nota: &crate::Nfse) -> Resultado<crate::RetornoNfse>;
+
+    /// Consulta a NFS-e de um DPS (a série e o número do prestador) — a recuperação de uma emissão
+    /// sem resposta. Não encontrada volta `Rejeitada` com a mensagem 404.
+    ///
+    /// # Errors
+    /// Como [`Self::emitir_nfse`].
+    fn consultar_nfse_por_dps(
+        &self,
+        prestador: &crate::Emitente,
+        serie: u32,
+        numero: u64,
+    ) -> Resultado<crate::RetornoNfse>;
+
+    /// Cancela uma NFS-e autorizada (evento 101101 no Padrão Nacional).
+    ///
+    /// # Errors
+    /// Como [`Self::emitir_nfse`].
+    fn cancelar_nfse(
+        &self,
+        prestador: &crate::Emitente,
+        cancelamento: &crate::CancelamentoNfse,
+    ) -> Resultado<crate::RetornoNfse>;
+
+    /// Registra uma **carta de correção** (CC-e, evento 110110) da NF-e autorizada, com a
+    /// `sequencia` (1 a 20 — cada uma substitui a anterior). Registrada vem como `Autorizado`
+    /// (135/136), com o `procEventoNFe`.
+    ///
+    /// # Errors
+    /// Como [`Self::emitir_nfce`].
+    fn carta_de_correcao(
+        &self,
+        chave: &ChaveAcesso,
+        texto: &str,
+        sequencia: u32,
+        uf: Uf,
+    ) -> Resultado<RetornoSefaz>;
+
+    /// Cancela **por substituição** (NFC-e, evento 110112): a nota que ficou sem resposta e
+    /// acabou autorizada, quando outra — `substituta`, emitida em contingência e já autorizada,
+    /// com o mesmo total e número de itens — cobriu a venda. Prazo de 168 h. Aceito vem como
+    /// `Autorizado` (135/136/155), como o cancelamento.
+    ///
+    /// # Errors
+    /// Como [`Self::emitir_nfce`].
+    fn cancelar_por_substituicao(
+        &self,
+        chave: &ChaveAcesso,
+        protocolo: &str,
+        justificativa: &str,
+        uf: Uf,
+        substituta: &ChaveAcesso,
+    ) -> Resultado<RetornoSefaz>;
+
+    /// Assina a NFC-e em **contingência off-line** (`tpEmis = 9`), sem transmitir: a chave e o
+    /// XML com o QR Code, que vai impresso no DANFCE e é transmitido depois, sem mudar
+    /// ([`Self::transmitir_nfce_em_contingencia`]). Para quando a SEFAZ está fora e a API não.
+    ///
+    /// # Errors
+    /// Como [`Self::emitir_nfce`] — a recusa dos dados vem como
+    /// [`crate::ErroFiscal::ApiFiscalRecusou`].
+    fn preparar_nfce_em_contingencia(
+        &self,
+        nota: &Nfce,
+        csc: &Csc,
+        entrada: &EntradaEmContingencia,
+    ) -> Resultado<NotaEmContingencia>;
+
+    /// Transmite a NFC-e assinada em contingência — o mesmo XML, quantas vezes for preciso: a
+    /// chave não muda, e se uma transmissão anterior chegou a SEFAZ responde duplicidade (204).
+    ///
+    /// # Errors
+    /// Como [`Self::emitir_nfce`].
+    fn transmitir_nfce_em_contingencia(
+        &self,
+        xml_assinado: &str,
+        uf: Uf,
+    ) -> Resultado<RetornoSefaz>;
 }
 
 /// Uma porta compartilhada é uma porta (o simulado de um teste, servindo várias empresas).
 impl<T: PortaFiscal + ?Sized> PortaFiscal for std::sync::Arc<T> {
-    fn distribuicao_dfe(&self, cnpj: &Cnpj, desde: Nsu) -> Resultado<Vec<ResumoDfe>> {
-        (**self).distribuicao_dfe(cnpj, desde)
+    fn distribuicao_dfe(&self, cnpj: &Cnpj, uf: Uf, desde: Nsu) -> Resultado<PaginaDfe> {
+        (**self).distribuicao_dfe(cnpj, uf, desde)
     }
 
-    fn baixar_xml(&self, chave: &ChaveAcesso) -> Resultado<XmlNota> {
-        (**self).baixar_xml(chave)
+    fn consultar_dfe_por_chave(
+        &self,
+        cnpj: &Cnpj,
+        uf: Uf,
+        chave: &ChaveAcesso,
+    ) -> Resultado<PaginaDfe> {
+        (**self).consultar_dfe_por_chave(cnpj, uf, chave)
+    }
+
+    fn manifestar(
+        &self,
+        cnpj: &Cnpj,
+        chave: &ChaveAcesso,
+        tipo: Manifestacao,
+        justificativa: Option<&str>,
+    ) -> Resultado<RetornoSefaz> {
+        (**self).manifestar(cnpj, chave, tipo, justificativa)
     }
 
     fn status_servico(&self, uf: Uf, modelo: ModeloFiscal) -> Resultado<StatusSefaz> {
@@ -160,8 +293,17 @@ impl<T: PortaFiscal + ?Sized> PortaFiscal for std::sync::Arc<T> {
         (**self).emitir_nfce(nota, csc)
     }
 
-    fn consultar_documento(&self, chave: &ChaveAcesso, uf: Uf) -> Resultado<RetornoSefaz> {
-        (**self).consultar_documento(chave, uf)
+    fn emitir_nfe(&self, nota: &Nfe) -> Resultado<RetornoSefaz> {
+        (**self).emitir_nfe(nota)
+    }
+
+    fn consultar_documento(
+        &self,
+        chave: &ChaveAcesso,
+        uf: Uf,
+        xml_assinado: Option<&str>,
+    ) -> Resultado<RetornoSefaz> {
+        (**self).consultar_documento(chave, uf, xml_assinado)
     }
 
     fn cancelar(
@@ -176,5 +318,64 @@ impl<T: PortaFiscal + ?Sized> PortaFiscal for std::sync::Arc<T> {
 
     fn inutilizar(&self, pedido: &PedidoInutilizacao) -> Resultado<RetornoSefaz> {
         (**self).inutilizar(pedido)
+    }
+
+    fn cancelar_por_substituicao(
+        &self,
+        chave: &ChaveAcesso,
+        protocolo: &str,
+        justificativa: &str,
+        uf: Uf,
+        substituta: &ChaveAcesso,
+    ) -> Resultado<RetornoSefaz> {
+        (**self).cancelar_por_substituicao(chave, protocolo, justificativa, uf, substituta)
+    }
+
+    fn carta_de_correcao(
+        &self,
+        chave: &ChaveAcesso,
+        texto: &str,
+        sequencia: u32,
+        uf: Uf,
+    ) -> Resultado<RetornoSefaz> {
+        (**self).carta_de_correcao(chave, texto, sequencia, uf)
+    }
+
+    fn emitir_nfse(&self, nota: &crate::Nfse) -> Resultado<crate::RetornoNfse> {
+        (**self).emitir_nfse(nota)
+    }
+
+    fn consultar_nfse_por_dps(
+        &self,
+        prestador: &crate::Emitente,
+        serie: u32,
+        numero: u64,
+    ) -> Resultado<crate::RetornoNfse> {
+        (**self).consultar_nfse_por_dps(prestador, serie, numero)
+    }
+
+    fn cancelar_nfse(
+        &self,
+        prestador: &crate::Emitente,
+        cancelamento: &crate::CancelamentoNfse,
+    ) -> Resultado<crate::RetornoNfse> {
+        (**self).cancelar_nfse(prestador, cancelamento)
+    }
+
+    fn preparar_nfce_em_contingencia(
+        &self,
+        nota: &Nfce,
+        csc: &Csc,
+        entrada: &EntradaEmContingencia,
+    ) -> Resultado<NotaEmContingencia> {
+        (**self).preparar_nfce_em_contingencia(nota, csc, entrada)
+    }
+
+    fn transmitir_nfce_em_contingencia(
+        &self,
+        xml_assinado: &str,
+        uf: Uf,
+    ) -> Resultado<RetornoSefaz> {
+        (**self).transmitir_nfce_em_contingencia(xml_assinado, uf)
     }
 }

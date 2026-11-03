@@ -694,6 +694,56 @@ fn aba_resultado_apura_o_mes_pelo_razao_e_navega_entre_meses() {
             painel_dre(ui, &t.motor, &t.sessao, &mut estado);
         });
     });
+    // O resumo do Simples do mês carrega junto: a receita de 250, e desenha.
+    let simples = estado
+        .simples
+        .clone()
+        .expect("o dono vê o Simples")
+        .expect("o resumo");
+    assert_eq!(simples.mes.receita, Dinheiro::reais(250));
+    estado.visao_resultado = 3;
+    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            painel_dre(ui, &t.motor, &t.sessao, &mut estado);
+        });
+    });
+    // O orçamento: orçar a conta da receita no mês põe o orçado na DRE; as duas visões desenham.
+    let o = estado
+        .orcamento
+        .clone()
+        .expect("o orçamento")
+        .expect("carregou");
+    let conta = o
+        .linhas
+        .iter()
+        .find(|l| !l.realizado_ate(12).e_zero())
+        .expect("a conta da receita")
+        .conta;
+    let mut meses = [Dinheiro::ZERO; 12];
+    meses[estado.mes_dre().mes() as usize - 1] = Dinheiro::reais(300);
+    let _: () = t
+        .motor
+        .executar(
+            &t.sessao,
+            "financeiro.definir_orcamento_da_conta.v1",
+            &mod_financeiro::orcamento::DefinirOrcamentoDaConta {
+                conta,
+                ano: estado.mes_dre().ano(),
+                meses,
+            },
+        )
+        .unwrap();
+    estado.carregar_dre(&t.motor, &t.sessao);
+    let orcado = estado.dre.clone().unwrap().orcado.expect("orçado na DRE");
+    assert_eq!(orcado.lucro_liquido, Dinheiro::reais(300));
+    for visao in [0, 4] {
+        estado.visao_resultado = visao;
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                painel_dre(ui, &t.motor, &t.sessao, &mut estado);
+            });
+        });
+    }
     estado.visao_resultado = 0;
 
     // Mês passado: nada lançado.
@@ -1155,17 +1205,23 @@ fn pacote_do_contador_grava_pdf_e_planilha_do_mes() {
     };
     estado.carregar(&t.motor, &t.sessao);
     let dir = tempfile::tempdir().unwrap();
-    let pasta = super::pacote_contador::gravar(&t.motor, &t.sessao, &estado, dir.path())
+    let gravado = super::pacote_contador::gravar(&t.motor, &t.sessao, &estado, dir.path())
         .expect("gravar o pacote");
-    let mut arquivos: Vec<std::path::PathBuf> = std::fs::read_dir(&pasta)
+    assert_eq!(
+        (gravado.xmls, gravado.pendencias, gravado.buscando),
+        (0, 0, 0),
+        "mês sem notas: sem ZIP"
+    );
+    let mut arquivos: Vec<std::path::PathBuf> = std::fs::read_dir(&gravado.pasta)
         .unwrap()
         .map(|e| e.unwrap().path())
         .collect();
     arquivos.sort();
-    assert_eq!(arquivos.len(), 2, "{arquivos:?}");
+    assert_eq!(arquivos.len(), 3, "{arquivos:?}");
     let xlsx = std::fs::read(&arquivos[0]).unwrap();
-    let pdf = std::fs::read(&arquivos[1]).unwrap();
+    let pdf = std::fs::read(&arquivos[2]).unwrap();
     assert!(arquivos[0].to_string_lossy().ends_with(".xlsx"));
+    assert!(arquivos[1].to_string_lossy().ends_with(".csv"));
     assert!(pdf.starts_with(b"%PDF-1."));
     // O `.xlsx` guarda os XMLs sem compressão: dá para conferir o conteúdo nos bytes.
     let texto = String::from_utf8_lossy(&xlsx);
@@ -1187,6 +1243,263 @@ fn pacote_do_contador_grava_pdf_e_planilha_do_mes() {
             .unwrap();
         }
     }
+}
+
+#[test]
+fn pacote_do_contador_leva_os_xmls_do_mes_num_zip() {
+    let t = motor_de_teste();
+    let hoje = Data::hoje(Fuso::BRASILIA);
+    let chave = "4".repeat(44);
+    let xml = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe"><NFe>
+<infNFe Id="NFe{chave}" versao="4.00">
+  <ide><nNF>77</nNF><serie>1</serie><dhEmi>{}T09:00:00-03:00</dhEmi></ide>
+  <emit><CNPJ>45543915000181</CNPJ><xNome>Atacado Beta LTDA</xNome></emit>
+  <det nItem="1"><prod><cProd>FER-10</cProd><xProd>FERM BIOLOGICO 10G</xProd><NCM>21021090</NCM>
+    <qCom>24.0000</qCom><vUnCom>1.500000</vUnCom><vProd>36.00</vProd></prod></det>
+  <total><ICMSTot><vProd>36.00</vProd><vFrete>0.00</vFrete><vSeg>0.00</vSeg><vOutro>0.00</vOutro>
+    <vNF>36.00</vNF></ICMSTot></total>
+</infNFe></NFe></nfeProc>"#,
+        hoje.formatar_iso()
+    );
+    let _: mod_compras::RelatorioImportacao = t
+        .motor
+        .executar(
+            &t.sessao,
+            "compras.importar_nota_de_arquivo_xml.v1",
+            &mod_compras::ImportarNotaDeArquivoXml { xml: xml.clone() },
+        )
+        .expect("importa a nota de compra");
+    let mut estado = EstadoTelaFinanceiro {
+        aba: Aba::Resultado,
+        ..Default::default()
+    };
+    estado.carregar(&t.motor, &t.sessao);
+    let dir = tempfile::tempdir().unwrap();
+    let gravado = super::pacote_contador::gravar(&t.motor, &t.sessao, &estado, dir.path())
+        .expect("gravar o pacote");
+    assert_eq!((gravado.xmls, gravado.pendencias), (1, 0));
+    let mes = hoje.competencia();
+    let aaaamm = format!("{}-{:02}", mes.ano(), mes.mes());
+    let zip = std::fs::read(gravado.pasta.join(format!("XMLs {aaaamm}.zip"))).unwrap();
+    assert_eq!(
+        cardeal_planilha::zip::ler(&zip),
+        vec![(format!("Entradas/{chave}-nfe.xml"), xml.into_bytes())],
+        "o XML como veio do fornecedor"
+    );
+    let xlsx = std::fs::read(gravado.pasta.join(format!("Contabilidade {aaaamm}.xlsx"))).unwrap();
+    let texto = String::from_utf8_lossy(&xlsx);
+    assert!(texto.contains("name=\"Notas de entrada\""));
+    assert!(texto.contains("Atacado Beta LTDA"));
+    assert!(
+        !texto.contains("name=\"Notas emitidas\""),
+        "nenhuma nota emitida: sem a aba"
+    );
+    // Para conferir o ZIP num descompactador de verdade: CARDEAL_SALVAR_PACOTE=<pasta> cargo test …
+    if let Ok(destino) = std::env::var("CARDEAL_SALVAR_PACOTE") {
+        for e in std::fs::read_dir(&gravado.pasta).unwrap() {
+            let a = e.unwrap().path();
+            std::fs::copy(
+                &a,
+                std::path::Path::new(&destino).join(a.file_name().unwrap()),
+            )
+            .unwrap();
+        }
+    }
+}
+
+#[test]
+fn pacote_do_contador_resume_as_notas_e_lista_as_pendencias() {
+    use super::pacote_contador::{
+        arquivos_xml, pendencias, planilha, relatorio, DadosDoPacote, NotasDeEntrada, NotasEmitidas,
+    };
+    use mod_fiscal::{
+        AmbienteFiscal, DocumentoResumo, EstadoDocumento, ModeloFiscal, NotaDoMes, NotasDoMes,
+        PedidoDocumento, SituacaoNoMes,
+    };
+    let t = motor_de_teste();
+    let mut estado = EstadoTelaFinanceiro {
+        aba: Aba::Resultado,
+        ..Default::default()
+    };
+    estado.carregar(&t.motor, &t.sessao);
+    let hoje = Data::hoje(Fuso::BRASILIA);
+    let nota = |situacao, numero: u64| NotaDoMes {
+        modelo: ModeloFiscal::Nfce,
+        serie: 1,
+        numero,
+        situacao,
+        data: hoje,
+        chave: Some(format!("{numero:044}")),
+        protocolo: Some("143260000000001".into()),
+        protocolo_evento: None,
+        total: Dinheiro::reais(10),
+        xml: Some("<nfeProc/>".into()),
+        xml_evento: None,
+        nota_assinada_guardada: false,
+    };
+    let rejeitada = DocumentoResumo {
+        id: Id::novo(),
+        modelo: ModeloFiscal::Nfce,
+        serie: 1,
+        numero: 9,
+        ambiente: AmbienteFiscal::Producao,
+        estado: EstadoDocumento::Rejeitada,
+        total: Dinheiro::reais(5),
+        chave: None,
+        protocolo: None,
+        codigo: None,
+        motivo: None,
+        origem: Id::novo(),
+        tentativas: 1,
+        criado_em: cardeal_kernel::Instante::agora(),
+        autorizado_em: None,
+        pedido: None,
+        anulada: false,
+        contingencia_em: None,
+        substitui: None,
+        substituida_por: None,
+    };
+    let emitidas: NotasEmitidas = Ok(NotasDoMes {
+        notas: vec![
+            nota(SituacaoNoMes::Autorizada, 1),
+            nota(SituacaoNoMes::Cancelada, 2),
+        ],
+        sem_desfecho: vec![
+            rejeitada.clone(),
+            // A venda estornada já pôs a inutilização na fila: falta transmitir.
+            DocumentoResumo {
+                numero: 10,
+                pedido: Some(PedidoDocumento::Inutilizar),
+                ..rejeitada
+            },
+        ],
+        de_homologacao: 3,
+        cartas: vec![mod_fiscal::CartaDoMes {
+            chave: "4".repeat(44),
+            sequencia: 1,
+            xml: "<procEventoNFe/>".into(),
+        }],
+        nfse: vec![mod_fiscal::NfseDoMes {
+            numero: Some(7),
+            chave: Some("5".repeat(50)),
+            total: Dinheiro::reais(150),
+            cancelada: false,
+            xml: Some("<NFSe/>".into()),
+            xml_evento: None,
+            autorizada_em: cardeal_kernel::Instante::agora(),
+        }],
+    });
+    let entradas: NotasDeEntrada = Ok(vec![mod_compras::NotaDeEntradaDoMes {
+        nota: Id::novo(),
+        fornecedor: "Atacado Beta LTDA".into(),
+        chave: Some("5".repeat(44)),
+        numero: "12".into(),
+        serie: "1".into(),
+        data_emissao: hoje,
+        valor_total: Dinheiro::reais(36),
+        estado: mod_compras::EstadoNotaEntrada::Confirmada,
+        xml: None,
+    }]);
+
+    // O que precisa de atenção, com o que fazer.
+    let p = pendencias(&emitidas, &entradas);
+    assert_eq!(p.len(), 4, "{p:?}");
+    assert!(p[0].0.starts_with("NFC-e série 1 nº 9 — rejeitada"));
+    assert!(p[0].1.contains("inutilize"));
+    assert_eq!(
+        p[1].1,
+        "Inutilização na fila — transmita em Notas fiscais e gere o pacote de novo."
+    );
+    assert!(p[2].0.starts_with("1 × XML do cancelamento"));
+    assert!(p[3].1.contains("Importe o arquivo XML de novo"));
+    // No ZIP: as duas notas (a cancelada sem o evento) e a carta de correção; a entrada não tem
+    // XML.
+    let xmls = arquivos_xml(&emitidas, &entradas);
+    assert_eq!(xmls.len(), 4);
+    assert_eq!(
+        xmls[3].0,
+        format!("Saidas/NFS-e/Autorizadas/{}-nfse.xml", "5".repeat(50))
+    );
+    assert_eq!(
+        xmls[2].0,
+        format!(
+            "Saidas/NF-e/CartasDeCorrecao/110110{}01-procEventoNFe.xml",
+            "4".repeat(44)
+        )
+    );
+
+    let dados = DadosDoPacote {
+        mes: hoje.competencia(),
+        dre: estado.dre.as_ref().unwrap(),
+        direto: estado.dfc.as_ref().unwrap(),
+        indireto: estado.dfc_indireto.as_ref().unwrap(),
+        balancete: estado.balancete.as_deref().unwrap(),
+        diario: &[],
+        emitidas: &emitidas,
+        entradas: &entradas,
+        sem_de_para: &[],
+    };
+    let r = relatorio(&dados);
+    let notas = r
+        .secoes
+        .iter()
+        .find(|s| s.titulo == "Notas fiscais do mês")
+        .expect("a seção das notas");
+    let linhas: Vec<Vec<String>> = notas.linhas.iter().map(|l| l.celulas.clone()).collect();
+    assert_eq!(linhas[0], vec!["NFC-e autorizadas", "1", "R$ 10,00"]);
+    assert_eq!(
+        linhas[1][..2],
+        ["NFC-e canceladas".to_owned(), "1".to_owned()]
+    );
+    assert_eq!(linhas[2], vec!["Cartas de correção (NF-e)", "1", ""]);
+    assert_eq!(linhas[3], vec!["NFS-e autorizadas", "1", "R$ 150,00"]);
+    assert_eq!(linhas[4], vec!["Notas de entrada", "1", "R$ 36,00"]);
+    assert_eq!(
+        linhas[5][..2],
+        ["XMLs no pacote".to_owned(), "4".to_owned()]
+    );
+    assert!(notas
+        .nota
+        .as_deref()
+        .unwrap()
+        .contains("3 nota(s) de homologação"));
+    assert!(r.secoes.iter().any(|s| s.titulo == "Pendências do mês"));
+    let pdf = cardeal_pdf::gerar_relatorio(
+        &cardeal_pdf::IdentidadeEmpresa::default(),
+        &r,
+        cardeal_kernel::Instante::agora(),
+    )
+    .expect("o PDF");
+    assert!(pdf.starts_with(b"%PDF-1."));
+    let xlsx = planilha(&dados).gerar();
+    let texto = String::from_utf8_lossy(&xlsx);
+    assert!(texto.contains("name=\"Notas emitidas\""));
+    assert!(texto.contains("Sem desfecho (rejeitada)"));
+    assert!(texto.contains("falta o XML do cancelamento"));
+    assert!(texto.contains("importe o arquivo XML de novo"));
+
+    // Sem permissão para ver as notas: o PDF diz por quê, e nada vai no ZIP.
+    let sem: NotasEmitidas = Err("o seu usuário não vê as notas fiscais".into());
+    let nada: NotasDeEntrada = Ok(Vec::new());
+    assert!(arquivos_xml(&sem, &nada).is_empty());
+    let r = relatorio(&DadosDoPacote {
+        emitidas: &sem,
+        entradas: &nada,
+        ..dados
+    });
+    let notas = r
+        .secoes
+        .iter()
+        .find(|s| s.titulo == "Notas fiscais do mês")
+        .unwrap();
+    assert!(notas
+        .nota
+        .as_deref()
+        .unwrap()
+        .contains("Notas emitidas: o seu usuário não vê as notas fiscais."));
+    assert!(!r.secoes.iter().any(|s| s.titulo == "Pendências do mês"));
 }
 
 #[test]
@@ -1462,4 +1775,149 @@ fn conta_nova_com_saldo_e_transferencia_aparecem_na_aba_de_bancos() {
             }
         });
     }
+}
+
+/// O CSV de lançamentos do pacote, lido de volta (ISO-8859-1 → texto).
+fn csv_do_pacote(pasta: &std::path::Path) -> String {
+    let mes = Data::hoje(Fuso::BRASILIA).competencia();
+    let nome = format!("Lançamentos {}-{:02}.csv", mes.ano(), mes.mes());
+    std::fs::read(pasta.join(nome))
+        .expect("o CSV dos lançamentos")
+        .into_iter()
+        .map(char::from)
+        .collect()
+}
+
+#[test]
+fn portal_do_contador_o_de_para_vai_no_csv_do_pacote_e_o_apontamento_avisa_a_visao() {
+    use mod_financeiro::contador::{
+        Apontamentos, DeParaDoContador, DefinirDePara, LinhaDePara, RegistrarApontamento,
+        ResponderApontamento,
+    };
+    let t = motor_de_teste();
+    lancar_a_receber(&t.motor, &t.sessao, 250);
+    let mut estado = EstadoTelaFinanceiro {
+        aba: Aba::Resultado,
+        ..Default::default()
+    };
+    estado.carregar(&t.motor, &t.sessao);
+
+    // Sem DE/PARA nenhum: o CSV sai com os códigos do Cardeal e não é pendência.
+    let dir = tempfile::tempdir().unwrap();
+    let antes = super::pacote_contador::gravar(&t.motor, &t.sessao, &estado, dir.path()).unwrap();
+    assert_eq!(antes.pendencias, 0);
+    let csv = csv_do_pacote(&antes.pasta);
+    let linhas: Vec<&str> = csv.split("\r\n").filter(|l| !l.is_empty()).collect();
+    assert_eq!(linhas[0], "data;lancamento;conta;dc;valor;historico");
+    assert!(
+        linhas.len() >= 3,
+        "o título lançado, partida a partida: {csv}"
+    );
+    assert!(linhas.iter().any(|l| l.contains(";250,00;")), "{csv}");
+    let primeira = linhas[1].split(';').nth(2).unwrap().to_owned();
+
+    // O contador põe o código dele numa conta: o CSV troca, e as outras viram pendência.
+    let de_para: Vec<LinhaDePara> = t
+        .motor
+        .consultar(
+            &t.sessao,
+            "financeiro.de_para_do_contador.v1",
+            &DeParaDoContador,
+        )
+        .unwrap();
+    let conta = de_para
+        .iter()
+        .find(|l| l.codigo == primeira)
+        .expect("conta analítica");
+    let n: usize = t
+        .motor
+        .executar(
+            &t.sessao,
+            "financeiro.definir_de_para.v1",
+            &DefinirDePara {
+                codigos: vec![(conta.conta, Some(" 1105 ".into()))],
+            },
+        )
+        .unwrap();
+    assert_eq!(n, 1);
+    let errado = t.motor.executar(
+        &t.sessao,
+        "financeiro.definir_de_para.v1",
+        &DefinirDePara {
+            codigos: vec![(conta.conta, Some("11;05".into()))],
+        },
+    );
+    assert!(errado.is_err(), "o separador do CSV não entra no código");
+    let dir = tempfile::tempdir().unwrap();
+    let depois = super::pacote_contador::gravar(&t.motor, &t.sessao, &estado, dir.path()).unwrap();
+    assert_eq!(depois.pendencias, 1, "as contas que ficaram sem código");
+    let csv = csv_do_pacote(&depois.pasta);
+    assert!(csv.contains(";1105;"), "{csv}");
+    assert!(!csv.contains(&format!(";{primeira};")), "{csv}");
+
+    // O apontamento: avisa a Visão geral até a empresa responder.
+    let id: Id = t
+        .motor
+        .executar(
+            &t.sessao,
+            "financeiro.registrar_apontamento.v1",
+            &RegistrarApontamento {
+                competencia: Data::hoje(Fuso::BRASILIA).competencia(),
+                texto: "falta a nota da compra de 12/10".into(),
+            },
+        )
+        .unwrap();
+    let curto = t.motor.executar(
+        &t.sessao,
+        "financeiro.responder_apontamento.v1",
+        &ResponderApontamento {
+            apontamento: id,
+            resposta: "ok".into(),
+        },
+    );
+    assert!(curto.is_err(), "resposta curta demais");
+    estado.aba = Aba::Visao;
+    estado.carregar(&t.motor, &t.sessao);
+    assert_eq!(estado.contador.aguardando(), 1);
+    t.motor
+        .executar(
+            &t.sessao,
+            "financeiro.responder_apontamento.v1",
+            &ResponderApontamento {
+                apontamento: id,
+                resposta: "anexei no e-mail de hoje".into(),
+            },
+        )
+        .unwrap();
+    estado.carregar(&t.motor, &t.sessao);
+    assert_eq!(estado.contador.aguardando(), 0);
+    let pendentes: Vec<mod_financeiro::contador::Apontamento> = t
+        .motor
+        .consultar(
+            &t.sessao,
+            "financeiro.apontamentos.v1",
+            &Apontamentos { so_pendentes: true },
+        )
+        .unwrap();
+    assert_eq!(
+        pendentes.len(),
+        1,
+        "respondido ainda espera o contador conferir"
+    );
+    assert_eq!(
+        pendentes[0].resposta.as_deref(),
+        Some("anexei no e-mail de hoje")
+    );
+
+    // A aba desenha (com a lista e o DE/PARA carregados).
+    estado.aba = Aba::Contador;
+    estado.carregar(&t.motor, &t.sessao);
+    let ctx = egui::Context::default();
+    cardeal_ui::tokens::instalar_fontes(&ctx);
+    cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            super::contador::painel(ui, &t.motor, &t.sessao, &mut estado.contador);
+        });
+    });
 }

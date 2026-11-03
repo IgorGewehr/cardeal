@@ -19,8 +19,9 @@
 
 - **Não guarda saldo nem calcula custo médio.** Confirmar a entrada é um comando que chama
   `estoque.RegistrarEntrada`; o custo médio pós-entrada é responsabilidade de `estoque`.
-- **Não assina nem transmite XML.** Recebe o XML já autorizado via `PortaFiscal::baixar_xml`; emissão
-  e assinatura são do provedor externo (ver [doc 10](../10-modulo-fiscal.md)).
+- **Não assina nem transmite XML.** Recebe o XML já autorizado pela distribuição `DFe` da SEFAZ
+  (`PortaFiscal::distribuicao_dfe`, pelo `sefaz-api`) ou por arquivo; emissão e assinatura são do
+  provedor externo (ver [doc 10](../10-modulo-fiscal.md)).
 - **Não paga o fornecedor.** Confirmar a entrada gera o `Titulo` a pagar por evento; a baixa é do
   `financeiro` — mesmo quando a compra já foi paga à vista (`pago_no_ato`), quem executa a baixa
   é `mod_financeiro::baixar_pagamento_comum`, chamado direto pela mesma transação; `compras` não
@@ -43,10 +44,11 @@
 
 | Entidade | Campos principais | Observações |
 |---|---|---|
-| **Cotacao** | `id`, `empresa`, `data`, `estado`(`Aberta`,`Recebida`,`Decidida`,`Cancelada`), `fornecedor_vencedor` | |
-| **ItemCotacao** | `id`, `cotacao`, `fornecedor`, `produto`, `quantidade`(Quantidade), `preco_unitario`(Preco), `prazo_entrega_dias`(Quantidade inteiro) | uma linha por fornecedor × produto cotado |
-| **PedidoCompra** | `id`, `empresa`, `fornecedor`, `cotacao_origem`, `data`, `previsao_entrega`(Data), `condicao_pagamento`, `estado`(`Rascunho`,`Enviado`,`ParcialmenteRecebido`,`Recebido`,`Cancelado`), `total`(Dinheiro), `versao` | |
-| **ItemPedidoCompra** | `id`, `pedido_compra`, `produto`, `quantidade`(Quantidade), `preco_unitario`(Preco), `quantidade_recebida`(Quantidade) | |
+| **Cotacao** ✅ (2026-10-31) | `id`, `empresa`, `numero`, `descricao`, `data`, `prazo_resposta`, `estado`(`Aberta`,`Decidida`,`Cancelada`), `motivo` | O "vencedor" é por **item** (`ItemCotacao.escolhido`), não da cotação: dividir entre fornecedores é a decisão comum |
+| **ItemCotacao** ✅ | `id`, `cotacao`, `produto`, `descricao`, `unidade`, `quantidade`, `escolhido` | |
+| **PropostaFornecedor** ✅ | `cotacao`, `fornecedor`, `respondeu`, `prazo_entrega_dias`, `condicao_pagamento`(texto), `frete`, `observacao` + o preço de cada item (`compras_cotacao_preco`) | o item sem preço o fornecedor não tem |
+| **PedidoCompra** ✅ (2026-10-31) | `id`, `empresa`, `numero` (sequencial, o que volta no `xPed`), `fornecedor`, `cotacao`, `data`, `previsao_entrega`, `condicao_pagamento`(texto), `frete`, `observacao`, `estado`(`Rascunho`,`Enviado`,`ParcialmenteRecebido`,`Recebido`,`Encerrado`,`Cancelado`), `motivo` | o total é calculado (itens + frete); sem `versao` (o despacho é escritor único) |
+| **ItemPedidoCompra** ✅ | `id`, `pedido`, `produto`, `descricao`, `unidade`, `quantidade`, `preco_unitario`; `recebida` = soma de `compras_pedido_recebimento` | o recebido não é coluna: sai das notas, e o estorno o desfaz |
 | **NotaEntrada** | `id`, `empresa`, `fornecedor`, `pedido_compra_origem`, `chave_acesso`(String, 44 dígitos), `numero`, `serie`, `data_emissao`(Data), `valor_produtos`, `valor_frete`, `valor_seguro`, `valor_outras_despesas`, `valor_total`(Dinheiro), `estado`(`AConferir`,`Conferida`,`Confirmada`,`Devolvida`), `versao` | |
 | **ItemNotaEntrada** | `id`, `nota_entrada`, `produto_casado`, `codigo_fornecedor`, `descricao_fornecedor`, `ncm`, `quantidade`(Quantidade), `valor_unitario`(Preco), `valor_rateio`(Dinheiro), `custo_final_unitario`(Preco), `estado_casamento`(`NaoCasado`,`SugestaoForte`,`Casado`) | `custo_final_unitario` já inclui o rateio |
 | **RegraCasamentoAprendida** | `empresa`, `fornecedor`, `codigo_fornecedor`, `produto`, `aprendido_em`(Instante) | `PRIMARY KEY(empresa, fornecedor, codigo_fornecedor)` |
@@ -59,6 +61,8 @@ stateDiagram-v2
     [*] --> AConferir: XML recebido via DFe ou digitado
     AConferir --> Conferida: todos os itens casados e quantidade validada
     Conferida --> Confirmada: ConfirmarEntrada (estoque + razão + título a pagar)
+    AConferir --> Confirmada: ConfirmarEntrada (todo item Casado)
+    Confirmada --> AConferir: EstornarEntrada (estoque ao custo da nota, título cancelado)
     Confirmada --> Devolvida: DevolverAoFornecedor (parcial ou total)
 ```
 
@@ -70,24 +74,53 @@ stateDiagram-v2
     NaoCasado --> Casado: usuário vincula manualmente (aprendido para a próxima nota)
 ```
 
+```mermaid
+stateDiagram-v2
+    [*] --> Rascunho: SalvarPedidoCompra
+    Rascunho --> Enviado: AprovarPedidoCompra
+    Enviado --> Rascunho: SalvarPedidoCompra (editar, sem recebimento)
+    Enviado --> ParcialmenteRecebido: nota ligada confirmada (parte)
+    ParcialmenteRecebido --> Recebido: nota ligada confirmada (o resto)
+    Recebido --> ParcialmenteRecebido: EstornarEntrada da nota
+    ParcialmenteRecebido --> Encerrado: EncerrarPedidoCompra (o saldo não vem)
+    Rascunho --> Cancelado: CancelarPedidoCompra
+    Enviado --> Cancelado: CancelarPedidoCompra (sem recebimento)
+```
+
+```mermaid
+stateDiagram-v2
+    [*] --> Aberta: SalvarCotacao
+    Aberta --> Aberta: RegistrarPropostaFornecedor
+    Aberta --> Decidida: DecidirCotacao (um pedido por fornecedor escolhido)
+    Aberta --> Cancelada: CancelarCotacao
+```
+
 ## 5. Comandos
 
 | Comando | Permissão | Risco | O que faz | Erros possíveis |
 |---|---|---|---|---|
-| `CriarCotacao` | `compras.cotacao.criar` | Baixo | Ainda não implementado — cotação/pedido de compra formal ficaram para quando tiverem consumidor (esta versão vai direto da nota ao estoque, como o `gestao-raiz` faz) | — |
-| `RegistrarPropostaFornecedor` | `compras.cotacao.editar` | Baixo | Ainda não implementado | `CotacaoDecidida` |
-| `DecidirCotacao` | `compras.cotacao.decidir` | Médio | Ainda não implementado | — |
-| `CriarPedidoCompra` | `compras.pedido.criar` | Baixo | Ainda não implementado | — |
-| `importar_nota_da_sefaz` ✅ / `verificar_notas_na_sefaz` ✅ | `compras.entrada.importar` | Baixo | **Não são `Comando`** (dependem de `PortaFiscal`, que o despacho ainda não injeta — ver nota abaixo). `verificar_notas_na_sefaz` varre a distribuição `DFe` desde o último NSU e chama `importar_nota_da_sefaz` por nota nova: interpreta o XML (`cardeal_fiscal::interpretar`), resolve/cadastra o fornecedor por CNPJ, roda o casamento em cascata por item (GTIN → regra aprendida → NCM+similaridade) e rateia frete/seguro/outras despesas | `ChaveJaImportada` |
+| `SalvarCotacao` ✅ (2026-10-31, `compras.salvar_cotacao.v1`; era `CriarCotacao`) | `compras.cotacao.criar` | Baixo | Cria ou edita a cotação aberta: os itens (produto e quantidade; o nome e a unidade vêm do cadastro) e os fornecedores convidados. O item e o fornecedor que continuam guardam os preços já registrados; o que sai leva os preços. A solicitação vai a cada fornecedor como texto (`Cotacao::texto_da_solicitacao`, copiado para o WhatsApp/e-mail) | `CotacaoSemItens`, `CotacaoSemFornecedores`, `ProdutoRepetido`, `CotacaoFechada` |
+| `RegistrarPropostaFornecedor` ✅ (`compras.registrar_proposta.v1`) | `compras.cotacao.editar` | Baixo | Grava (ou substitui) a proposta de um fornecedor: o preço unitário de cada item cotado (o que fica de fora ele não tem), o prazo em dias, a condição de pagamento e o frete. O fornecedor **não convidado** que mandou proposta entra na cotação | `CotacaoFechada` |
+| `DecidirCotacao` ✅ (`compras.decidir_cotacao.v1`) | `compras.cotacao.decidir` | Médio | Quem compra escolhe **de quem comprar cada item** (o item fora da escolha não se compra) e a cotação gera **um pedido por fornecedor**, com o preço cotado, o frete, a condição e a entrega (hoje + prazo); em rascunho, ou já aprovados (`aprovar_pedidos`, exige `compras.pedido.aprovar`). A cotação fica `Decidida` | `DecisaoVazia`, `EscolhaSemPreco`, `SEM_PERMISSAO` |
+| `CancelarCotacao` ✅ (`compras.cancelar_cotacao.v1`) | `compras.cotacao.decidir` | Baixo | A cotação aberta deixa de valer, com motivo | `MotivoDoPedidoCurto`, `CotacaoFechada` |
+| `SalvarPedidoCompra` ✅ (2026-10-31, `compras.salvar_pedido.v1`; era `CriarPedidoCompra`) | `compras.pedido.criar` | Baixo | Cria (em `Rascunho`, número sequencial na empresa) ou edita o pedido: fornecedor, itens (produto, quantidade, preço combinado), entrega, condição de pagamento, frete e observação. **Editar o aprovado sem recebimento o devolve ao rascunho** (precisa de nova aprovação) | `PedidoVazio`, `ProdutoRepetido`, `EstadoDoPedidoInvalido` |
+| `AprovarPedidoCompra` ✅ (`compras.aprovar_pedido.v1`) | `compras.pedido.aprovar` | Médio | `Rascunho` → `Enviado`: o pedido passa a esperar mercadoria (as notas do fornecedor se ligam a ele, conta "a caminho") | `EstadoDoPedidoInvalido`, `PedidoVazio` |
+| `CancelarPedidoCompra` ✅ (`compras.cancelar_pedido.v1`) | `compras.pedido.aprovar` | Médio | O pedido que **nada recebeu** deixa de valer, com motivo; as notas ainda não confirmadas deixam de apontar para ele | `PedidoComRecebimento`, `MotivoDoPedidoCurto` |
+| `EncerrarPedidoCompra` ✅ (`compras.encerrar_pedido.v1`, não estava no spec) | `compras.pedido.aprovar` | Médio | O pedido recebido em parte cujo saldo **não vem mais**: `Encerrado`, com motivo. Sem isso o pedido ficaria "a caminho" para sempre e o radar de reposição contaria com mercadoria que não vem | `EstadoDoPedidoInvalido`, `MotivoDoPedidoCurto` |
+| `VincularNotaAoPedido` ✅ (`compras.vincular_nota_ao_pedido.v1`) | `compras.entrada.conferir` | Baixo | Liga a nota ainda não confirmada a um pedido aprovado do mesmo fornecedor (ou desliga). A ligação automática acontece na importação: pelo número que o fornecedor escreveu no XML (`compra/xPed` ou `det/prod/xPed` — o primeiro bloco de dígitos, "PC-0042" = 42) ou, sem ele, ao **único** pedido em aberto do fornecedor que tenha algum produto da nota | `PedidoDeOutroFornecedor`, `EstadoDoPedidoInvalido`, `NotaJaConfirmada` |
+| Tarefa `compras.buscar_notas_na_sefaz` ✅ (2026-10-26) | `compras.entrada.importar` | Baixo | As notas que a SEFAZ entrega ao CNPJ (distribuição `DFe`), **fora de transação**, como a transmissão da NFC-e (ver a nota abaixo). Chama `importar_nota_da_sefaz` por nota completa: interpreta o XML (`cardeal_fiscal::interpretar`), resolve/cadastra o fornecedor por CNPJ, roda o casamento em cascata por item (GTIN → regra aprendida → NCM+similaridade) e rateia frete/seguro/outras despesas | — |
+| `ImportarDeNovoDaSefaz` ✅ (2026-10-26) | `compras.entrada.importar` | Baixo | A nota que chegou da SEFAZ e não importou (o XML ficou guardado) entra de novo, depois de cadastrar o que faltava | o erro da importação |
 | `ImportarNotaDeArquivoXml` ✅ (não estava no spec original) | `compras.entrada.importar` | Baixo | Mesmo XML de NF-e de `importar_nota_da_sefaz`, mas lido de um arquivo local (a UI escolhe o arquivo via `rfd`; este comando só recebe o texto já em UTF-8) em vez de baixado da distribuição `DFe` — não depende de `PortaFiscal`, então **é** um `Comando` de despacho de verdade. Corpo compartilhado com `importar_nota_da_sefaz` (`importar_nota_interpretada`, `pub(crate)`): mesma resolução de fornecedor, cascata de casamento, rateio e idempotência por `(empresa, chave_acesso)` | `ChaveJaImportada` (idempotente: reimportar não duplica, devolve o relatório da nota existente) |
 | `LancarNotaManual` ✅ (não estava no spec original) | `compras.entrada.importar` | Baixo | Compra sem nota fiscal formal — mesma cascata de casamento/rateio de `importar_nota_da_sefaz`, mas os itens vêm digitados (`ItemNotaManual`, com `codigo_barras` opcional para entrar na cascata por GTIN também) em vez de um XML, e `chave_acesso` fica `None` (o índice `UNIQUE` do SQLite trata múltiplos `NULL` como distintos, então não colide com a idempotência das notas importadas) | — |
 | `DefinirPreferenciasCompras` ✅ (não estava no spec original) | `compras.entrada.preferencias` | Médio | Grava `PreferenciasCompras` — confirmação automática, geração de título a pagar, rateio por valor/peso, local padrão, `pago_no_ato_padrao` — a resposta desta versão ao pedido do usuário por "vários ajustes de preferências" e por "permitir gerar ou não registro automático no financeiro seja algo pago ou não" | — |
 | `VincularProdutoManual` ✅ | `compras.entrada.conferir` | Baixo | Casa a linha e grava `RegraCasamentoAprendida` | `ItemNaoPertenceANota` |
 | `CriarProdutoDoItem` ✅ (2026-10-13, `compras.criar_produto_do_item.v1`) | `compras.entrada.conferir` **e** `estoque.produto.criar` (`ctx.concede`) | Baixo | Item que não casou com nada: cria o produto (nome escolhido pelo usuário — a sugestão padronizada de `estoque.sugerir_nome_do_produto.v1`, possivelmente corrigida —, NCM e código de barras da nota, grupo opcional ou "Sem grupo", unidade `UN`) via `mod_estoque::criar_produto_de_compra_comum`, vincula o item, grava a `RegraCasamentoAprendida` e ensina ao dicionário DE/PARA de nomes o que a correção explica | `NotaJaConfirmada`, `SEM_PERMISSAO`, grupo inexistente |
 | `RatearDespesas` | `compras.entrada.conferir` | Baixo | Ainda não é um comando separado — o rateio acontece dentro de `importar_nota_da_sefaz`, não como passo manual | `ReferenciaInvalida` |
-| `ConferirQuantidade` | `compras.entrada.conferir` | Baixo | Ainda não implementado (não há `PedidoCompra` para comparar) | `QuantidadeDivergente` (aviso) |
-| `ConfirmarEntrada` ✅ | `compras.entrada.confirmar` | Alto | Exige todo item `Casado`; `mod_estoque::registrar_entrada_comum` por item e, se a preferência (ou o campo `gerar_titulo_a_pagar`) mandar, `mod_financeiro::lancar_titulo_comum` — chamados **direto, na mesma transação** (não via despacho — `docs/contratos-internos.md` §7 regra 2). Quando `pago_no_ato` (campo do comando, ou a preferência `pago_no_ato_padrao`) também é verdadeiro, a mesma transação já dá baixa completa no título recém-criado com `mod_financeiro::baixar_pagamento_comum`, na data da confirmação — a compra paga à vista nunca aparece "em aberto" no Contas a Pagar. Quando as preferências permitem e a varredura de `verificar_notas_na_sefaz` já casou tudo por GTIN ou regra aprendida, isto roda sozinho (`confirmar_entrada_comum`, mesma função por trás do comando) | `ItemNaoCasado`, `NotaJaConfirmada`, `EstadoDeNotaInvalido` |
-| `DevolverAoFornecedor` | `compras.devolucao.criar` | Alto | Ainda não implementado | `ValorSuperaOriginal` |
+| `ConferirQuantidade` | `compras.entrada.conferir` | Baixo | Não é comando: a consulta `ConferenciaComPedido` compara a nota com o pedido (abaixo), e a confirmação **recebe** no pedido. A nota que diverge (a mais, preço acima de 1 centavo por unidade, item fora do pedido) **nunca se confirma sozinha** | — |
+| `ConfirmarEntrada` ✅ | `compras.entrada.confirmar` | Alto | Exige todo item `Casado`; `mod_estoque::registrar_entrada_comum` por item e, se a preferência (ou o campo `gerar_titulo_a_pagar`) mandar, `mod_financeiro::lancar_titulo_comum` — chamados **direto, na mesma transação** (não via despacho — `docs/contratos-internos.md` §7 regra 2). Quando `pago_no_ato` (campo do comando, ou a preferência `pago_no_ato_padrao`) também é verdadeiro, a mesma transação já dá baixa completa no título recém-criado com `mod_financeiro::baixar_pagamento_comum`, na data da confirmação — a compra paga à vista nunca aparece "em aberto" no Contas a Pagar. Quando as preferências permitem e a varredura de `verificar_notas_na_sefaz` já casou tudo por GTIN ou regra aprendida, isto roda sozinho (`confirmar_entrada_comum`, mesma função por trás do comando). **Parcelas (2026-10-20):** o título a pagar nasce com as parcelas da nota — as duplicatas do XML (`cobr/dup`, guardadas na importação em `compras_nota_parcela`) ou as do campo `parcelas` (vencimento e valor de cada; a tela preenche com as duplicatas, divide em N a cada X dias ou acrescenta). Sem nenhuma, uma parcela vencendo na emissão. As parcelas precisam somar o total da nota e não vencer antes da emissão; as usadas ficam gravadas na nota. Duplicatas que não fecham com o total viram **aviso** na importação (a nota não se confirma sozinha). Pago no ato ignora as parcelas: uma só, quitada | `ItemNaoCasado`, `NotaJaConfirmada`, `EstadoDeNotaInvalido`, `ParcelasNaoFecham`, `ParcelaInvalida` |
+| `EstornarEntrada` ✅ (2026-10-20, `compras.estornar_entrada.v1`; prévia `compras.previa_estorno_entrada.v1`) | `compras.entrada.estornar` | Alto | Desfaz a entrada confirmada para corrigir (lição do `revertNoteImport` do `gestao-raiz`), numa transação: a mercadoria sai do estoque **ao custo da nota** (`mod_estoque::retirar_entradas_da_origem` — o custo médio volta ao que seria sem a entrada), o lançamento D Estoque / C Fornecedores é estornado e o título cancelado (`mod_financeiro::desfazer_titulo_da_origem_comum`), e a nota volta para `AConferir` com os itens casados como estavam — corrige-se o vínculo ou as parcelas e confirma de novo. **Recusa** se a mercadoria já não está toda no local (vendida, movida) e, se a conta já tem pagamento, exige `estornar_pagamento` (o pagamento é estornado e o dinheiro volta para a conta de onde saiu). Parcela renegociada bloqueia. Motivo ≥ 10 caracteres, que vai ao histórico do Razão. Nunca apaga | `EstadoDeNotaInvalido`, `MotivoDoEstornoCurto`, `EntradaComPagamento`, `EntradaJaConsumida`, `TituloComMovimento` |
+| `DevolverAoFornecedor` ✅ (2026-10-27, `compras.devolver_ao_fornecedor.v1`; `compras.devolucoes_da_nota.v1`) | `compras.devolucao.criar` | Alto | Parte ou toda a mercadoria de uma nota **confirmada** volta, item a item (a nota pode voltar em várias devoluções). Numa transação: a mercadoria sai do estoque ao valor da compra, só se ainda está no local (`mod_estoque::devolver_parte_da_entrada`, com a mesma origem da entrada — o que voltou deixa de ser entrada viva); a conta a pagar da nota é **abatida** das parcelas em aberto, da que vence primeiro em diante (`mod_financeiro::abater_titulo_da_origem_comum`: D Fornecedores / C Estoque, sem caixa, sem juros); o que não couber (a conta já paga) vira **crédito com o fornecedor**, um título a receber dele (origem `compras_devolucao`). O valor de cada item é a parte dele no custo da nota (produto − desconto + frete/seguro/outras rateados + ST e IPI), na proporção; a última devolução do item leva o resto, e a soma fecha ao centavo. Devolvida toda, a nota vira `Devolvida`. A nota com devolução não se estorna mais (`NotaComDevolucao`). Motivo ≥ 10 caracteres (vai na NF-e). Sem aprovação em duas etapas (a spec previa `Solicitada` → `Concluida`): o comando é auditado | `EstadoDeNotaInvalido`, `DevolucaoVazia`, `DevolveMaisQueEntrou`, `MotivoDaDevolucaoCurto`, `DevolucaoMaiorQueOResto` (estoque) |
+| `EmitirNfeDaDevolucao` ✅ (2026-10-27, `compras.emitir_nfe_da_devolucao.v1`) | `fiscal.emitir` | Médio | A NF-e de devolução (finalidade 4) da devolução: o compras junta a nota, os itens e o XML da compra e o `mod-fiscal` monta e põe na fila (`docs/modulos/fiscal.md` §7). A rejeitada se emite de novo por aqui, depois de corrigir (no mesmo número) | os da NF-e |
 
 > **Nota (2026-09-13):** casamento por GTIN, importação por arquivo local e pago-no-ato
 > entraram nesta rodada — ver o histórico de "Nota (2026-09-05)" abaixo para o que já vinha de
@@ -116,6 +149,22 @@ stateDiagram-v2
 > porta em mãos chama a função direto, montando o `Ctx` com `cardeal_modkit::Ctx::de_sessao`
 > (novo). `Manifesto::depende_de` declara `clientes`/`estoque`/`financeiro` — sem essas três
 > ativas o módulo não sobe (o código chama `pub fn` delas incondicionalmente).
+
+> **Nota (2026-10-26) — as notas que chegam pela SEFAZ (item 9 do doc 21).** A varredura que era
+> uma função chamada por fora (`verificar_notas_na_sefaz`, dentro de uma transação) virou a tarefa
+> `compras.buscar_notas_na_sefaz`, sobre as rotas novas do `sefaz-api` (distribuição, consulta por
+> chave, manifestação). Lições do `gestao-raiz`, em produção: o **NSU nunca volta** (resposta ruim
+> não grava NSU; a base guarda o maior); em dia ou com 656, a próxima consulta **só depois de uma
+> hora**; uma rodada por vez por empresa — a vez é tomada **na base**, para dois terminais não
+> consultarem juntos; documento que não importa **não trava a fila** (fica guardado com o XML e o
+> motivo, e `ImportarDeNovoDaSefaz` tenta de novo); o resumo (`resNFe`) recebe a **Ciência da
+> Operação** sozinho e a nota completa vem pela consulta por chave ou pelo NSU seguinte; ciência
+> fora do prazo (596, 10 dias da emissão) pede o XML ao fornecedor. Aqui, além disso: o NSU é **por
+> ambiente** (passar de homologação para produção não pula nota); nota de homologação não entra no
+> estoque; o cancelamento pelo fornecedor tira a nota da espera, ou vira aviso se ela já entrou.
+> O desktop busca sozinho (`compras_fundo`, a cada minuto confere se a hora chegou) e tem o botão
+> "Buscar na SEFAZ". Ficaram para depois: as manifestações conclusivas (confirmação ao confirmar a
+> entrada, desconhecimento), e conferir contra o Ambiente Nacional de homologação.
 
 > **Nota (2026-09-15) — importação em lote e validação mais dura:** pedido explícito do
 > usuário — a burocracia que sobrava era repetir "escolher arquivo → conferir → fechar" uma
@@ -149,18 +198,47 @@ stateDiagram-v2
 > que vai para o estoque passa a ser **bruto − desconto + rateio de despesas + ICMS-ST + IPI** — impostos que
 > quem compra para revender não recupera. O total da nota passou a ser o que o fornecedor cobra (o `vNF`):
 > **antes era só produtos + despesas, e o título a pagar saía menor que o boleto** em toda nota com ST ou IPI.
-> Na conferência, cada item mostra de onde vem o custo. Fora: estimar ST pela MVA quando a nota não traz o
-> valor (compra interestadual com antecipação, compra sem nota) — depende das tabelas por UF/NCM e de
-> conferência com o contador.
+> Na conferência, cada item mostra de onde vem o custo.
+
+> **Nota (2026-10-28) — ICMS-ST estimado pela MVA** (`mod_compras::st`, `compras.estimativa_de_st.v1`): o item
+> casado com produto que tem MVA-ST e alíquota no perfil fiscal (o efetivo, herdado do grupo) e que chegou
+> **sem** ST — nem cobrado nesta nota, nem retido antes (CST 10/30/60/70, CSOSN 201/202/203/500) — tem a
+> antecipação estimada: base = valor da operação (produto − desconto + frete/seguro/outras + IPI) × (1 + MVA);
+> na compra de outro estado (a UF da chave não é a da empresa), a **MVA ajustada** do Convênio ICMS 52/2017
+> (`(1 + MVA) × (1 − interestadual) / (1 − interna) − 1`, com duas casas); ST = base × alíquota interna − o ICMS
+> da origem (o destacado na nota, ou o valor × a alíquota de origem); nunca negativo. A conferência mostra item
+> a item e quem confirma decide (`ConfirmarEntrada.incluir_st_estimado`): o ST entra no custo do item
+> (`compras_item_nota_entrada.st_estimado`, migração v10) e vira a **guia a pagar ao estado** (título de origem
+> `compras_st`, D Estoque / C Fornecedores — a baixa do financeiro debita o papel padrão; vencimento no dia 20
+> do mês seguinte, o prazo mais comum, que se altera no financeiro). A nota com estimativa **não se confirma
+> sozinha** (fica com o aviso). O estorno da entrada tira o ST do custo e cancela a guia. Lição do gestao-raiz:
+> ST por MVA se detecta e vai para revisão humana — aqui a conta é feita, mas a decisão é de quem confere.
+
+> **Nota (2026-10-20):** a tela só mostrava "Confirmar entrada" para nota `Conferida` — estado
+> que nenhum comando alcança. Na prática, a nota que não se confirmava sozinha não tinha como
+> ser confirmada pela tela. Agora a confirmação aparece na nota em conferência quando todo item
+> tem produto (`ConfirmarEntrada` já aceitava `AConferir`).
 
 ## 6. Consultas
 
 | Consulta | Permissão | Uso na UI | Índice que a sustenta |
 |---|---|---|---|
 | `NotasAConferir` | `compras.entrada.ver` | Fila "4 notas para conferir" no Pulso | `compras_nota_entrada(empresa, estado)` |
-| `CotacoesAbertas` | `compras.cotacao.ver` | Painel de cotação | `compras_cotacao(empresa, estado)` |
-| `PedidosPendentesDeRecebimento` | `compras.pedido.ver` | Painel de recebimento | `compras_pedido_compra(empresa, estado)` |
+| `Cotacoes` ✅ (2026-10-31, `compras.cotacoes.v1`; era `CotacoesAbertas`) | `compras.cotacao.ver` | Compras › Cotações: as abertas (ou todas), com itens e respostas | `compras_cotacao(empresa, estado)` |
+| `CotacaoCompleta` ✅ (`compras.cotacao.v1`) | `compras.cotacao.ver` | A cotação inteira: itens, propostas com os preços, pedidos gerados | `compras_cotacao_item(cotacao, ordem)` |
+| `ComparativoDaCotacao` ✅ (`compras.comparativo_da_cotacao.v1`) | `compras.cotacao.ver` | As propostas lado a lado: o menor preço de cada item, o total de cada fornecedor com o frete, o último preço pago e a **escolha sugerida** — o fornecedor único mais barato que cotou tudo, ou a divisão pelo menor preço de cada item quando ela sai mais barata **com os fretes somados** (`cotacao::comparar`, testado) | — |
+| `PedidosDeCompra` ✅ (2026-10-31, `compras.pedidos.v1`; era `PedidosPendentesDeRecebimento`) | `compras.pedido.ver` | Compras › Pedidos: em andamento (ou todos), por fornecedor, com total e recebido; atrasado = passou da entrega e ainda espera | `compras_pedido(empresa, estado)`, `compras_pedido(empresa, fornecedor, estado)` |
+| `PedidoDeCompra` ✅ (`compras.pedido.v1`) | `compras.pedido.ver` | O pedido: itens com o recebido, as notas ligadas | `compras_pedido_item(pedido, ordem)`, `compras_nota_entrada(pedido)` |
+| `ConferenciaComPedido` ✅ (`compras.conferencia_com_pedido.v1`) | `compras.entrada.ver` | A seção "Pedido de compra" da conferência da nota: por produto, o pedido, o que já chegou, o que esta nota traz, o que falta, o preço do pedido e o da nota, e as divergências | — |
+| `ACaminho` ✅ (`compras.a_caminho.v1`) | `compras.pedido.ver` | O saldo dos pedidos aprovados que esperam mercadoria, por produto: o radar de reposição do Estoque mostra "a caminho" e o "puxar do radar" do pedido desconta | — |
+| `UltimosPrecosPagos` ✅ (`compras.ultimos_precos_pagos.v1`) | `compras.pedido.ver` | O último preço pago por produto (a última nota confirmada): o preço sugerido do pedido e a referência do comparativo | `compras_item_nota_entrada` por produto |
 | `SugestaoDeCasamento` | `compras.entrada.conferir` | Tela de conferência | `compras_regra_casamento(fornecedor, codigo_fornecedor)` |
+| `ParcelasDaNota` ✅ (2026-10-20) | `compras.entrada.ver` | As parcelas no "Confirmar entrada" | `compras_nota_parcela(nota, ordem)` |
+| `PreviaDoEstornoDaEntrada` ✅ (2026-10-20) | `compras.entrada.ver` | O que o estorno faz: o que sai do estoque (e quanto há no local), a conta cancelada, o pagamento | movimentos da origem + `financeiro::situacao_do_titulo_da_origem` |
+| `NotasDeEntradaDoMes` ✅ (2026-10-20, `compras.notas_do_mes.v1`) | `compras.entrada.ver` | O pacote do contador: as notas emitidas no mês (pela emissão, o dia em que a compra entra no Razão) com o fornecedor, a situação e o **XML original** | `compras_nota_entrada(empresa, data_emissao)` (varredura do mês) |
+| `EntradasParaEscriturar` ✅ (2026-10-28, `compras.entradas_para_escriturar.v1`) | `compras.entrada.ver` | O SPED (EFD ICMS/IPI): as notas confirmadas (e as devolvidas depois) no mês da **entrada** — a confirmação, gravada em `data_entrada` (migração v11); a confirmada antes usa a emissão —, com o XML e o produto casado de cada item (nome, unidade, NCM, GTIN, CEST), e as que entraram sem XML. Difere do `NotasDeEntradaDoMes` (o mês da emissão, o do Razão): a EFD escritura pela data da entrada | `compras_nota_entrada(empresa, estado)` |
+| `NotasNaSefaz` ✅ (2026-10-26, `compras.notas_na_sefaz.v1`) | `compras.entrada.ver` | Compras › "Notas que chegaram pela SEFAZ": a última busca, quando a SEFAZ aceita a próxima, e as notas que pedem atenção (à espera, que não importaram, ignoradas e por quê) | `compras_dfe_estado(empresa, ambiente)`, `compras_dfe_nota(empresa, chave)` |
+| `HoraDeBuscarNaSefaz` ✅ (2026-10-26) | `compras.entrada.importar` | A vigia do desktop (a cada minuto): a hora da próxima busca chegou | `compras_dfe_estado(empresa, ambiente)` |
 
 > **Nota (2026-09-13):** a fatia implementada (`crates/modulos/mod-compras/src/consultas.rs`)
 > tem `NotasRecentes` (as 200 notas mais recentes da empresa, com `estado` — a UI filtra por
@@ -183,13 +261,19 @@ stateDiagram-v2
 | Confirmação de entrada (NF de compra) | Estoque (1.3.01) | Fornecedores (2.1.01) | Confirmado |
 | Frete/seguro/outras despesas rateados | Estoque (já embutido no custo unitário) | Fornecedores/Caixa (conforme quem cobrou) | Confirmado |
 | Crédito de ICMS/PIS/COFINS na compra | Impostos a recuperar (1.2.05) | Estoque | Confirmado |
-| Devolução ao fornecedor (nota ainda não paga) | Fornecedores | Estoque | Confirmado (estorno proporcional) |
-| Devolução ao fornecedor (nota já paga) | Adiantamentos a fornecedores (1.2.04) | Estoque | Realizado |
+| Devolução ao fornecedor (nota ainda não paga) | Fornecedores | Estoque | Realizado (o abatimento é uma baixa sem dinheiro) |
+| Devolução ao fornecedor (nota já paga) | Clientes a receber (o fornecedor como contraparte) | Estoque | Confirmado (título a receber do fornecedor) |
+
+> **Desvio (2026-10-27):** a spec punha o crédito da nota já paga em Adiantamentos a fornecedores
+> (1.2.04). Fica em Clientes a receber: a baixa do financeiro credita sempre o papel padrão (Clientes a
+> receber), e um título em 1.2.04 deixaria as duas contas erradas quando o fornecedor devolvesse o
+> dinheiro. Levar para 1.2.04 pede a baixa pela conta do próprio título.
 
 ## 8. Eventos
 
 **Publicados:** `compras.nota_confirmada.v1` (assinado por `financeiro`, que gera o `Titulo` a
-pagar), `compras.entrada_a_conferir.v1`, `compras.devolucao_concluida.v1`.
+pagar), `compras.entrada_a_conferir.v1`, `compras.entrada_estornada.v1` (2026-10-20),
+`compras.devolucao_concluida.v1`.
 
 **Assinados:** `estoque.abaixo_ponto_pedido.v1` → sugere criação de cotação/pedido no radar.
 
@@ -199,11 +283,24 @@ pagar), `compras.entrada_a_conferir.v1`, `compras.devolucao_concluida.v1`.
 |---|---|---|
 | `compras.cotacao.ver` / `.criar` / `.editar` / `.decidir` | Ciclo de cotação | Baixo/Baixo/Baixo/Médio |
 | `compras.pedido.ver` / `.criar` | Pedido de compra | Baixo |
+| `compras.pedido.aprovar` (2026-10-31) | Aprovar, cancelar e encerrar o pedido | Médio |
 | `compras.entrada.ver` / `.importar` / `.conferir` | Entrada de nota | Baixo |
 | `compras.entrada.confirmar` | Confirmar entrada (gera estoque e título) | Alto |
+| `compras.entrada.estornar` | Estornar a entrada (tira do estoque e cancela a conta a pagar) | Alto |
 | `compras.devolucao.criar` | Devolver ao fornecedor | Alto |
 
 ## 10. Telas
+
+Compras tem três abas (2026-10-31): **Notas de entrada** (a conferência abaixo, agora com a seção
+**Pedido de compra**: o pedido a que a nota se ligou e como, item a item pedido × já chegou × nesta nota ×
+falta × preços, as divergências e "desligar"; sem pedido, "ligar" a um dos que o fornecedor tem
+aguardando), **Pedidos** (KPIs aguardando/atrasados/rascunhos; o formulário com "Puxar do radar de
+reposição" — abaixo do ponto, menos o que vem a caminho, ao último preço pago —; o pedido aberto com
+aprovar, editar, copiar o texto, WhatsApp do fornecedor, PDF, cancelar e encerrar o saldo) e
+**Cotações** (o comparativo: as propostas com o total e o frete de cada fornecedor, os preços de cada item
+com o menor em verde e o último pago, "de quem comprar" item a item já com a sugestão, e a decisão que
+gera os pedidos). O radar de reposição do Estoque ganhou a coluna "A caminho" e a situação "Pedido a
+caminho".
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────────────────┐
@@ -265,6 +362,23 @@ fornecedor.
 caminho de `ConfirmarEntrada` em modo autônomo, então não há conflito possível nesse comando.
 
 ## 13. Tabelas
+
+> **Nota (2026-10-31):** a migração v12 cria a cotação (`compras_cotacao`, `compras_cotacao_item`,
+> `compras_cotacao_fornecedor`, `compras_cotacao_preco`) e o pedido (`compras_pedido`,
+> `compras_pedido_item`, `compras_pedido_recebimento` — quanto cada nota deu a cada item, o que o
+> estorno apaga), e dá a `compras_nota_entrada` as colunas `pedido` e `pedido_ligacao` (como se
+> ligou: pelo XML, pelo único em aberto, na conferência). Os nomes e as colunas diferem do esquema-alvo
+> abaixo (`compras_pedido_compra`…), que ficou como estava escrito: vale o de `migracoes.rs`.
+
+> **Nota (2026-10-26):** a migração v8 troca `compras_estado_dfe` por `compras_dfe_estado` (por
+> empresa **e ambiente**, com a hora da próxima consulta e o resumo da última) — o NSU antigo não é
+> copiado, só o simulador o gravava — e cria `compras_dfe_nota` (o resumo que espera a ciência, a
+> ciência dada com o protocolo e o XML do evento, e o XML da nota que não importou).
+
+> **Nota (2026-10-20):** a migração v7 dá a `compras_nota_entrada` a coluna `xml`: o XML original da
+> nota, como veio do fornecedor. A lei manda guardar por 5 anos, e o contador o recebe no pacote do mês.
+> As duas importações (arquivo e `DFe`) o gravam. A nota importada antes disso ganha o XML ao importar o
+> mesmo arquivo de novo, sem duplicar. A nota lançada à mão não tem XML.
 
 > **Nota (2026-09-05):** este é o esquema-alvo completo. A fatia implementada
 > (`crates/modulos/mod-compras/src/migracoes.rs`) tem só `compras_nota_entrada`/
@@ -363,14 +477,79 @@ CREATE TABLE compras_regra_casamento (
     PRIMARY KEY (empresa, fornecedor, codigo_fornecedor)
 ) STRICT, WITHOUT ROWID;
 
-CREATE TABLE compras_devolucao_fornecedor (
-    id                   BLOB PRIMARY KEY,
-    empresa              BLOB    NOT NULL,
-    nota_entrada_origem  BLOB    NOT NULL REFERENCES compras_nota_entrada(id),
-    fornecedor           BLOB    NOT NULL,
-    data                 INTEGER NOT NULL,
-    motivo               TEXT    NOT NULL,
-    valor_total          INTEGER NOT NULL,
-    estado               TEXT    NOT NULL CHECK (estado IN ('Solicitada','Concluida'))
+-- v9 (2026-10-27): a devolução ao fornecedor, item a item.
+CREATE TABLE compras_devolucao (
+    id           BLOB PRIMARY KEY,
+    empresa      BLOB    NOT NULL REFERENCES nucleo_empresa(id),
+    nota_entrada BLOB    NOT NULL REFERENCES compras_nota_entrada(id),
+    fornecedor   BLOB    NOT NULL,
+    data         INTEGER NOT NULL,
+    motivo       TEXT    NOT NULL,
+    valor_total  INTEGER NOT NULL,
+    abatido      INTEGER NOT NULL,   -- quanto abateu da conta a pagar
+    credito      BLOB,               -- o título a receber do fornecedor, se sobrou
+    criada_em    INTEGER NOT NULL,
+    criada_por   BLOB    NOT NULL
 ) STRICT;
+CREATE TABLE compras_devolucao_item (
+    devolucao  BLOB    NOT NULL REFERENCES compras_devolucao(id),
+    item       BLOB    NOT NULL REFERENCES compras_item_nota_entrada(id),
+    quantidade INTEGER NOT NULL CHECK (quantidade > 0),
+    valor      INTEGER NOT NULL,
+    PRIMARY KEY (devolucao, item)
+) STRICT, WITHOUT ROWID;
+```
+
+## 14. Transferência entre filiais (2026-10-31, onda 8)
+
+A mercadoria de um CNPJ do grupo para outro **da mesma raiz** (matriz e filiais), com a NF-e de
+transferência e a etapa a caminho (`transferencia.rs`, migração v13; a NF-e em
+`mod_fiscal::transferencia`). O catálogo de produtos é do grupo: o produto é o mesmo nas duas.
+
+| Comando | Permissão | Onde | O que faz |
+|---|---|---|---|
+| `EnviarTransferencia` (`compras.enviar_transferencia.v1`) | `compras.transferencia.enviar` (Médio, auditado) | filial que envia | Numa transação: confere a filial (outra empresa da base, mesma raiz, Simples, dados fiscais das duas); a mercadoria sai do local ao **custo médio** (`TransferenciaSaida`, só o que o local tem, sem lote ativo, sem custo zero); D Conta corrente com empresas do grupo / C Estoque; a NF-e vai para a fila (ou fica rejeitada já, com o porquê) |
+| `EmitirNfeDaTransferencia` | `compras.transferencia.enviar` | filial que envia | Remonta a rejeitada no mesmo número (como a devolução de compra; o fiscal não reenvia sozinho) |
+| `ReceberTransferencia` | `compras.transferencia.receber` (Médio, auditado) | filial que recebe | Só com a NF-e **autorizada** ("a mercadoria só circula com ela"): entrada no local escolhido ao mesmo custo (`TransferenciaEntrada`), D Estoque / C Conta corrente |
+| `CancelarTransferencia` | `compras.transferencia.enviar` | filial que envia | Antes de receber e **sem NF-e autorizada nem na fila** (rejeitada ou sem nota): a mercadoria volta ao local ao mesmo custo e o lançamento se estorna. Autorizada, cancela-se a NF-e em Notas fiscais antes; o número rejeitado é um buraco na série, que as pendências fiscais mandam inutilizar |
+
+Consultas: `TransferenciasEntreFiliais` (as enviadas e as que vêm, com a situação da NF-e da filial que
+enviou) e `ItensDaTransferencia`, com `compras.transferencia.ver`.
+
+**A NF-e** (`mod_fiscal::transferencia::montar_nfe_de_transferencia`, função pura): CFOP 5152 (6152 para
+outra UF), finalidade normal, sem pagamento, ao custo, destinatário = a filial (pelo emitente que ela
+seria), CSOSN 400 e PIS/COFINS 49, informações complementares com a raiz do CNPJ e a não incidência.
+
+Decisões que fogem do que se esperaria:
+- **Só a mesma raiz.** CNPJs de raízes diferentes no mesmo grupo são empresas diferentes: a mercadoria vai
+  por **venda** (NF-e de venda), não por transferência. A recusa diz isso.
+- **Só no Simples Nacional.** Desde o STF (ADC 49) e a LC 204/2023 não há ICMS na transferência entre
+  estabelecimentos do mesmo titular, mas no regime normal a lei manda (ou deixa) transferir o crédito
+  destacando-o na nota; essa regra não está no cálculo e precisa do contador. Mesmo recorte da devolução de
+  compra.
+- **Ao custo médio**, não "o valor da entrada mais recente" (LC 87/1996 art. 13 §4º I): no Simples, sem
+  ICMS destacado, a base não muda imposto, e o custo médio é o que sai do estoque e entra na outra filial.
+- **Duas transações, não uma** (a ADR-0017 previa uma): a filial que recebe confere e dá entrada na sessão
+  dela, com o local dela, depois da autorização.
+- **Fora desta fatia:** a entrada na filial não vira nota de entrada de compras (não entra em "notas de
+  entrada do mês" nem no ZIP de XMLs do pacote do contador da filial); o relatório de eliminação do
+  intercompany; transferência por lote; o regime normal.
+
+Tela: Estoque › **Entre filiais** (só com outro CNPJ no grupo) — o envio à esquerda (filial, local,
+produtos, observação, "Enviar com NF-e") e, à direita, o que está a caminho e o que chegou: na que recebe,
+o local e "Receber" (só com a NF-e autorizada); na que enviou, "Emitir NF-e de novo" e "Cancelar envio".
+
+```sql
+CREATE TABLE compras_transferencia (
+    id BLOB PRIMARY KEY, empresa BLOB NOT NULL, destino BLOB NOT NULL, local_origem BLOB NOT NULL,
+    local_destino BLOB, estado TEXT NOT NULL CHECK (estado IN ('Enviada','Recebida','Cancelada')),
+    observacao TEXT, valor_total INTEGER NOT NULL, enviada_em INTEGER NOT NULL, enviada_por BLOB NOT NULL,
+    lancamento_envio BLOB, recebida_em INTEGER, recebida_por BLOB, lancamento_recebimento BLOB,
+    cancelada_em INTEGER, motivo_cancelamento TEXT, CHECK (destino <> empresa)
+) STRICT;
+CREATE TABLE compras_transferencia_item (
+    transferencia BLOB NOT NULL, ordem INTEGER NOT NULL, produto BLOB NOT NULL,
+    quantidade INTEGER NOT NULL CHECK (quantidade > 0), custo_unitario INTEGER NOT NULL,
+    valor INTEGER NOT NULL, PRIMARY KEY (transferencia, ordem)
+) STRICT, WITHOUT ROWID;
 ```

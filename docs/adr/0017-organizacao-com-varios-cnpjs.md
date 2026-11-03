@@ -64,8 +64,10 @@ isolamento físico (ADR-0016 inalterada).
 
 ## Próximos passos
 
-- Transferência de estoque entre CNPJs: agora é uma transação só (saída num, entrada no
-  outro). Precisa da nota fiscal de transferência.
+- ~~Transferência de estoque entre CNPJs~~ — feita em 2026-10-31 (`mod_compras::transferencia`,
+  `docs/modulos/compras.md` §14), em **duas** transações, não uma: a mercadoria só circula com a
+  NF-e de transferência autorizada, então a filial que recebe dá entrada depois, na sessão dela. Só
+  entre CNPJs da mesma raiz (raiz diferente é outra empresa: vai por venda) e só no Simples Nacional.
 - Relatórios consolidados do grupo (vendas, financeiro): uma consulta sobre a mesma base.
 
 ## Consequências

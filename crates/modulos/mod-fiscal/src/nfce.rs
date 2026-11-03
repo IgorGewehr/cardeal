@@ -2,7 +2,7 @@
 //! criado na hora da venda (rápido, sem rede — **a venda nunca espera a SEFAZ**, `docs/10` §3)
 //! e a **tarefa** que transmite a fila fora de qualquer transação.
 
-use cardeal_fiscal::{AmbienteFiscal, Nfce};
+use cardeal_fiscal::{AmbienteFiscal, Nfce, Nfe};
 use cardeal_kernel::Id;
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::Resultado;
@@ -276,7 +276,27 @@ impl Consulta for ResumoDaFilaFiscal {
             cardeal_kernel::Hora::MEIA_NOITE,
             ctx.fuso,
         );
-        crate::sql_documento::resumo(c, ctx.empresa, inicio)
+        let mut r = crate::sql_documento::resumo(c, ctx.empresa, inicio, ctx.agora)?;
+        r.cartas_pendentes = crate::correcao::sqlite::quantas_pendentes(c, ctx.empresa)?;
+        r.nfse_na_fila = crate::nfse::sqlite::quantas_na_fila(c, ctx.empresa)?;
+        Ok(r)
+    }
+}
+
+/// Põe na fila a busca, na consulta da nota, dos XMLs que faltam às notas de produção: o do
+/// cancelamento que não veio na resposta (ou cuja resposta se perdeu) e o da nota confirmada
+/// pela consulta cuja nota assinada ficou guardada. O pacote do contador pede antes de montar o
+/// mês. Devolve quantas notas estão na busca; quem busca é a transmissão.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+pub struct BuscarXmlsQueFaltam;
+
+impl Comando for BuscarXmlsQueFaltam {
+    type Saida = u32;
+    const PERMISSAO: &'static str = "fiscal.emitir";
+
+    #[cfg(feature = "sqlite")]
+    fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<u32> {
+        crate::sql_documento::marcar_xmls_a_buscar(uow.conexao(), ctx.empresa)
     }
 }
 
@@ -285,10 +305,15 @@ impl Consulta for ResumoDaFilaFiscal {
 pub struct DetalheDocumento {
     /// O resumo.
     pub resumo: DocumentoResumo,
-    /// A nota como foi montada (`None` se a montagem falhou).
+    /// A NFC-e como foi montada (`None` se a montagem falhou, ou se é uma NF-e).
     pub nota: Option<Nfce>,
+    /// A NF-e como foi montada (`None` se a montagem falhou, ou se é uma NFC-e).
+    pub nfe: Option<Nfe>,
     /// O XML autorizado.
     pub xml: Option<String>,
+    /// A nota assinada em contingência (ou na emissão incerta), enquanto o XML autorizado não
+    /// vem — o DANFCE da contingência tira dela o QR Code.
+    pub xml_assinado: Option<String>,
 }
 
 /// Um documento fiscal.
@@ -306,10 +331,22 @@ impl Consulta for DocumentoFiscal {
     fn executar(self, ctx: &Ctx, c: &Connection) -> Resultado<DetalheDocumento> {
         let d = crate::sql_documento::documento(c, ctx.empresa, self.documento)?
             .ok_or_else(|| cardeal_kernel::Erro::nao_encontrado("documento fiscal"))?;
+        // A nota guardada é de um tipo ou de outro, conforme o modelo.
+        let nfe = d.resumo.modelo == cardeal_fiscal::ModeloFiscal::Nfe;
         Ok(DetalheDocumento {
+            nota: d
+                .nota
+                .as_deref()
+                .filter(|_| !nfe)
+                .and_then(|b| postcard::from_bytes(b).ok()),
+            nfe: d
+                .nota
+                .as_deref()
+                .filter(|_| nfe)
+                .and_then(|b| postcard::from_bytes(b).ok()),
             resumo: d.resumo,
-            nota: d.nota.and_then(|b| postcard::from_bytes(&b).ok()),
             xml: d.xml,
+            xml_assinado: d.xml_assinado,
         })
     }
 }
@@ -342,7 +379,7 @@ pub(crate) mod sqlite {
 
     use cardeal_fiscal::{
         AmbienteFiscal, ChaveAcesso, Consumidor, Crt, Csc, DocumentoConsumidor, Emitente,
-        EnderecoEmitente, MeioPagamento, ModeloFiscal, Nfce, PortaFiscal,
+        EnderecoEmitente, EntradaEmContingencia, MeioPagamento, ModeloFiscal, Nfce, PortaFiscal,
     };
     use cardeal_kernel::{CodigoErro, Erro, Id, Instante, Resultado, Uf};
     use cardeal_modkit::{ContextoTarefa, Ctx};
@@ -351,7 +388,10 @@ pub(crate) mod sqlite {
 
     use super::{ConfiguracaoNfce, ConfigurarNfce};
     use crate::documento::{
-        decidir, decidir_evento, Desfecho, DocumentoResumo, EstadoDocumento, PedidoDocumento,
+        decidir, decidir_busca, decidir_evento, em_contingencia, esperar,
+        justificativa_da_contingencia, nao_reemitir, pede_contingencia, pede_substituicao,
+        pedido_da_substituida, Busca, Desfecho, DocumentoResumo, EstadoDocumento, Mudanca,
+        PedidoDocumento, JUSTIFICATIVA_DA_SUBSTITUICAO,
     };
     use crate::montagem::{marcar_homologacao, montar_nfce, DadosDaVenda, ItemDaVenda};
     use crate::sql_documento as sqld;
@@ -406,6 +446,7 @@ pub(crate) mod sqlite {
             )
             .no_campo("csc_id"));
         }
+        crate::terminal::sqlite::exigir_serie_livre(c, ctx.empresa, cmd.serie)?;
         let ambiente = crate::sql::ambiente(c, ctx.empresa)?;
         if let Some(maior) = sqld::maior_numero(c, ctx.empresa, MODELO, cmd.serie, ambiente)? {
             if cmd.proximo_numero <= maior {
@@ -630,10 +671,19 @@ pub(crate) mod sqlite {
         if let Some(d) = sqld::documento_da_origem(uow.conexao(), ctx.empresa, ORIGEM_PDV, cupom)? {
             return Ok(d);
         }
+        // A série do terminal que vendeu, se ele tiver uma; senão a da empresa.
+        let terminal = mod_pdv::RepositorioPdv::novo(uow)
+            .buscar_cupom(cupom)?
+            .map(|c| c.terminal);
         let (serie, ambiente) = {
             let c = uow.conexao();
+            let do_terminal = match terminal {
+                Some(t) => crate::terminal::sqlite::serie_do_terminal(c, ctx.empresa, t)?,
+                None => None,
+            };
             (
-                sqld::config_nfce(c, ctx.empresa)?.serie,
+                do_terminal
+                    .map_or_else(|| sqld::config_nfce(c, ctx.empresa).map(|c| c.serie), Ok)?,
                 crate::sql::ambiente(c, ctx.empresa)?,
             )
         };
@@ -668,6 +718,7 @@ pub(crate) mod sqlite {
                 nota: blob,
                 motivo,
                 agora: ctx.agora,
+                substitui: None,
             },
         )?;
         sqld::documento_da_origem(c, ctx.empresa, ORIGEM_PDV, cupom)?
@@ -697,29 +748,58 @@ pub(crate) mod sqlite {
                 "Esta nota não se reenvia: a venda foi desfeita ou o número já vai ser inutilizado",
             ));
         }
-        if origem_modulo != ORIGEM_PDV {
+        let (total, blob, motivo) = if origem_modulo == ORIGEM_PDV {
+            let (total, nota) = montar_do_cupom(
+                ctx,
+                uow,
+                resumo.origem,
+                resumo.serie,
+                resumo.numero,
+                resumo.ambiente,
+            )?;
+            let (blob, motivo) = blob_ou_motivo(nota)?;
+            (total, blob, motivo)
+        } else if origem_modulo == crate::nfe_venda::ORIGEM_VENDAS {
+            let (total, nota) = crate::nfe_venda::sqlite::montar_do_pedido(
+                ctx,
+                uow,
+                resumo.origem,
+                resumo.serie,
+                resumo.numero,
+            )?;
+            let (blob, motivo) = blob_ou_motivo(nota)?;
+            (total, blob, motivo)
+        } else if origem_modulo == crate::devolucao_venda::ORIGEM_DEVOLUCAO_VENDA {
+            let nota = crate::devolucao_venda::sqlite::montar(
+                ctx,
+                uow,
+                resumo.origem,
+                resumo.serie,
+                resumo.numero,
+            )?;
+            let total = nota
+                .as_ref()
+                .map_or(resumo.total, cardeal_fiscal::Nfe::total);
+            let (blob, motivo) = blob_ou_motivo(nota)?;
+            (total, blob, motivo)
+        } else if origem_modulo == crate::transferencia::ORIGEM_TRANSFERENCIA {
+            // Os dados da transferência são do compras: a nota se remonta por lá.
+            return Err(Erro::novo(
+                CodigoErro::ESTADO_INVALIDO,
+                "A NF-e de transferência se reenvia pela transferência, em Estoque ›                  Transferências (Emitir NF-e de novo, depois de corrigir)",
+            ));
+        } else if origem_modulo == crate::devolucao_compra::ORIGEM_DEVOLUCAO_COMPRA {
+            // Os dados da devolução são do compras: a nota se remonta por lá.
+            return Err(Erro::novo(
+                CodigoErro::ESTADO_INVALIDO,
+                "A NF-e de devolução se reenvia pela devolução, em Compras (Emitir NF-e de \
+                 devolução de novo, depois de corrigir)",
+            ));
+        } else {
             return Err(Erro::novo(
                 CodigoErro::ESTADO_INVALIDO,
                 "Origem do documento desconhecida",
             ));
-        }
-        let (total, nota) = montar_do_cupom(
-            ctx,
-            uow,
-            resumo.origem,
-            resumo.serie,
-            resumo.numero,
-            resumo.ambiente,
-        )?;
-        let (blob, motivo) = match nota {
-            Ok(n) => (
-                Some(
-                    postcard::to_stdvec(&n)
-                        .map_err(|e| Erro::novo(CodigoErro::FALHA_INTERNA, e.to_string()))?,
-                ),
-                None,
-            ),
-            Err(p) => (None, Some(p.join("; "))),
         };
         let c = uow.conexao();
         sqld::remontar(
@@ -734,6 +814,22 @@ pub(crate) mod sqlite {
         sqld::documento(c, ctx.empresa, documento)?
             .map(|d| d.resumo)
             .ok_or_else(|| Erro::nao_encontrado("documento fiscal"))
+    }
+
+    /// A nota em postcard — ou o que impede, numa frase.
+    fn blob_ou_motivo<T: serde::Serialize>(
+        nota: Result<T, Vec<String>>,
+    ) -> Resultado<(Option<Vec<u8>>, Option<String>)> {
+        Ok(match nota {
+            Ok(n) => (
+                Some(
+                    postcard::to_stdvec(&n)
+                        .map_err(|e| Erro::novo(CodigoErro::FALHA_INTERNA, e.to_string()))?,
+                ),
+                None,
+            ),
+            Err(p) => (None, Some(p.join("; "))),
+        })
     }
 
     /// A justificativa da SEFAZ: de 15 a 255 caracteres.
@@ -792,14 +888,18 @@ pub(crate) mod sqlite {
             .ok_or_else(|| Erro::nao_encontrado("documento fiscal"))?;
         let resumo = guardado.resumo;
         let exigido = match pedido {
-            PedidoDocumento::Cancelar => EstadoDocumento::Autorizada,
+            PedidoDocumento::Cancelar | PedidoDocumento::CancelarPorSubstituicao => {
+                EstadoDocumento::Autorizada
+            }
             PedidoDocumento::Inutilizar => EstadoDocumento::Rejeitada,
         };
         if resumo.estado != exigido {
             return Err(Erro::novo(
                 CodigoErro::ESTADO_INVALIDO,
                 match pedido {
-                    PedidoDocumento::Cancelar => "Só NFC-e autorizada é cancelada",
+                    PedidoDocumento::Cancelar | PedidoDocumento::CancelarPorSubstituicao => {
+                        "Só NFC-e autorizada é cancelada"
+                    }
                     PedidoDocumento::Inutilizar => {
                         "Só o número de uma NFC-e rejeitada (que nunca foi autorizada) é inutilizado"
                     }
@@ -887,11 +987,19 @@ pub(crate) mod sqlite {
         let Some(_guarda) = Guarda::tomar(empresa) else {
             return Ok("já há uma transmissão em andamento".into());
         };
-        let fila = t.ler(|c| sqld::fila(c, empresa, Instante::agora(), 20))?;
-        if fila.is_empty() {
+        let agora = Instante::agora();
+        let fila = t.ler(|c| sqld::fila(c, empresa, agora, 20))?;
+        let cartas = t.ler(|c| crate::correcao::sqlite::pendentes(c, empresa, agora, 10))?;
+        let nfses = t.ler(|c| crate::nfse::sqlite::fila(c, empresa, agora, 10))?;
+        if fila.is_empty() && cartas.is_empty() && nfses.is_empty() {
             return Ok("nada na fila".into());
         }
-        let ambientes: HashSet<AmbienteFiscal> = fila.iter().map(|d| d.ambiente).collect();
+        let ambientes: HashSet<AmbienteFiscal> = fila
+            .iter()
+            .map(|d| d.ambiente)
+            .chain(cartas.iter().map(|k| k.ambiente))
+            .chain(nfses.iter().map(|n| n.ambiente))
+            .collect();
         let (portas, csc, uf): (Portas, Option<Csc>, Option<Uf>) = t.ler(|c| {
             let mut portas = HashMap::new();
             for a in ambientes {
@@ -907,84 +1015,568 @@ pub(crate) mod sqlite {
         let cnpj = t.ler(|c| {
             Ok(cardeal_kernel::Cnpj::novo(&mod_empresa::sql::dados(c, empresa)?.cnpj).ok())
         })?;
-        let mut eventos = (0_u32, 0_u32, 0_u32); // cancelados, inutilizados, recusados
-        let mut contagem: HashMap<EstadoDocumento, u32> = HashMap::new();
+        let mut rodada = Rodada::default();
         for doc in fila {
             let Some(porta) = portas.get(&doc.ambiente) else {
                 continue;
             };
-            let desfecho = match doc.pedido {
-                Some(pedido) => {
-                    desfecho_do_pedido(porta.as_ref(), pedido, &doc, uf, cnpj, t.ctx.fuso)
-                }
-                None => desfecho_da_emissao(porta.as_ref(), &doc, csc.as_ref(), uf),
+            let ctx = Contexto {
+                porta: porta.as_ref(),
+                csc: csc.as_ref(),
+                uf,
+                cnpj,
             };
-            let parar = matches!(desfecho, Desfecho::Indisponivel(_));
-            let mudanca = if let Some(pedido) = doc.pedido {
-                let m = decidir_evento(pedido, doc.estado, doc.tentativas, desfecho);
-                match m.estado {
-                    EstadoDocumento::Cancelada => eventos.0 += 1,
-                    EstadoDocumento::Inutilizada => eventos.1 += 1,
-                    _ if m.limpar_pedido => eventos.2 += 1,
-                    _ => {}
-                }
-                m
-            } else {
-                let m = decidir(doc.estado, doc.tentativas, desfecho);
-                *contagem.entry(m.estado).or_default() += 1;
-                m
+            if processar(t, &ctx, doc, &mut rodada)? {
+                return Ok(resumo_da_rodada(&rodada));
+            }
+        }
+        for carta in cartas {
+            let Some(porta) = portas.get(&carta.ambiente) else {
+                continue;
             };
-            // Venda desfeita: o documento que acaba de chegar a autorizado ou rejeitado já
-            // recebe o pedido de cancelar ou inutilizar.
-            let pedido_da_anulacao =
-                (doc.anulada && doc.pedido.is_none() && mudanca.estado != doc.estado)
-                    .then(|| crate::documento::pedido_da_anulacao(mudanca.estado, 0))
-                    .flatten()
-                    .filter(|_| mudanca.estado != EstadoDocumento::Pendente);
-            let justificativa = doc.justificativa.clone().unwrap_or_default();
-            let (id, estado_lido) = (doc.id, doc.estado);
-            t.escrever(move |uow| {
-                let agora = Instante::agora();
-                let aplicou = sqld::aplicar_mudanca(
+            if levar_carta(t, porta.as_ref(), &carta, uf, &mut rodada)? {
+                return Ok(resumo_da_rodada(&rodada));
+            }
+        }
+        if !nfses.is_empty() {
+            // O prestador (para consultar pelo DPS e cancelar): a empresa como está hoje.
+            let prestador = t.ler(|c| crate::nfce::sqlite::emitente(c, empresa))?.ok();
+            for nfse in nfses {
+                let Some(porta) = portas.get(&nfse.ambiente) else {
+                    continue;
+                };
+                if levar_nfse(t, porta.as_ref(), &nfse, prestador.as_ref(), &mut rodada)? {
+                    break;
+                }
+            }
+        }
+        Ok(resumo_da_rodada(&rodada))
+    }
+
+    /// Leva uma NFS-e ao município (emitir, conferir pelo DPS ou cancelar) e grava o que veio.
+    /// Devolve se a rodada para (a API fora do ar).
+    fn levar_nfse(
+        t: &ContextoTarefa<'_>,
+        porta: &dyn PortaFiscal,
+        n: &crate::nfse::sqlite::NfseNaFila,
+        prestador: Option<&cardeal_fiscal::Emitente>,
+        rodada: &mut Rodada,
+    ) -> Resultado<bool> {
+        use crate::nfse::{decidir_nfse, DestinoNfse, EstadoNfse};
+        let resposta: Result<cardeal_fiscal::RetornoNfse, String> = match (n.estado, prestador) {
+            (EstadoNfse::Autorizada, Some(p)) if n.cancelar => match (&n.chave, n.numero_nfse) {
+                (Some(chave), Some(numero)) => porta
+                    .cancelar_nfse(
+                        p,
+                        &cardeal_fiscal::CancelamentoNfse {
+                            chave: chave.clone(),
+                            numero,
+                            motivo: n
+                                .motivo_cancelamento
+                                .unwrap_or(cardeal_fiscal::MotivoCancelamentoNfse::ErroNaEmissao),
+                            justificativa: n.justificativa.clone().unwrap_or_default(),
+                        },
+                    )
+                    .map_err(|e| e.mensagem),
+                _ => Ok(cardeal_fiscal::RetornoNfse {
+                    situacao: cardeal_fiscal::SituacaoNfse::Rejeitada,
+                    numero: None,
+                    chave: None,
+                    codigo_verificacao: None,
+                    xml: None,
+                    mensagens: vec!["a NFS-e não tem a chave de acesso guardada".into()],
+                }),
+            },
+            (EstadoNfse::Incerta, Some(p)) => porta
+                .consultar_nfse_por_dps(p, n.serie, n.numero)
+                .map_err(|e| e.mensagem),
+            (EstadoNfse::Pendente, _) => match n
+                .nota
+                .as_deref()
+                .map(postcard::from_bytes::<cardeal_fiscal::Nfse>)
+            {
+                Some(Ok(nota)) => porta.emitir_nfse(&nota).map_err(|e| e.mensagem),
+                _ => Ok(cardeal_fiscal::RetornoNfse {
+                    situacao: cardeal_fiscal::SituacaoNfse::Rejeitada,
+                    numero: None,
+                    chave: None,
+                    codigo_verificacao: None,
+                    xml: None,
+                    mensagens: vec!["a NFS-e guardada está ilegível — emita de novo".into()],
+                }),
+            },
+            _ => Err("os dados fiscais da empresa estão incompletos".into()),
+        };
+        let parar = resposta.is_err();
+        let destino = decidir_nfse(resposta, n.cancelar && n.estado == EstadoNfse::Autorizada);
+        match &destino {
+            DestinoNfse::Autorizada(_) => rodada.nfse.0 += 1,
+            DestinoNfse::Rejeitada(_) | DestinoNfse::CancelamentoRecusado(_) => rodada.nfse.1 += 1,
+            DestinoNfse::Cancelada(_) => rodada.nfse.2 += 1,
+            _ => {}
+        }
+        let (id, tentativas) = (n.id, n.tentativas);
+        t.escrever(move |uow| {
+            crate::nfse::sqlite::aplicar(uow.conexao(), id, &destino, tentativas, Instante::agora())
+        })?;
+        Ok(parar)
+    }
+
+    /// Leva uma carta de correção à SEFAZ e grava o que veio. Devolve se a rodada para.
+    fn levar_carta(
+        t: &ContextoTarefa<'_>,
+        porta: &dyn PortaFiscal,
+        carta: &crate::correcao::sqlite::CartaNaFila,
+        uf: Option<Uf>,
+        rodada: &mut Rodada,
+    ) -> Resultado<bool> {
+        use crate::correcao::{decidir_carta, DestinoDaCarta};
+        let desfecho = match (carta.chave.as_deref(), uf) {
+            (Some(chave), Some(uf)) => match ChaveAcesso::nova(chave) {
+                Ok(chave) => {
+                    desfecho(porta.carta_de_correcao(&chave, &carta.texto, carta.sequencia, uf))
+                }
+                Err(e) => Desfecho::Recusado(e.to_string()),
+            },
+            _ => Desfecho::Recusado("a nota não tem chave, ou a empresa não tem a UF".into()),
+        };
+        let parar = matches!(desfecho, Desfecho::Indisponivel(_));
+        let destino = decidir_carta(desfecho);
+        match destino {
+            DestinoDaCarta::Registrada { .. } => rodada.cartas.0 += 1,
+            DestinoDaCarta::Recusada(_) => rodada.cartas.1 += 1,
+            DestinoDaCarta::Esperar(_) => {}
+        }
+        let (empresa, id, tentativas) = (t.ctx.empresa, carta.id, carta.tentativas);
+        t.escrever(move |uow| {
+            crate::correcao::sqlite::aplicar(
+                uow.conexao(),
+                empresa,
+                id,
+                &destino,
+                tentativas,
+                Instante::agora(),
+            )
+        })?;
+        Ok(parar)
+    }
+
+    /// O que a rodada fez, para o resumo.
+    #[derive(Default)]
+    struct Rodada {
+        /// Cancelados, inutilizados, recusados.
+        eventos: (u32, u32, u32),
+        contagem: HashMap<EstadoDocumento, u32>,
+        recuperados: u32,
+        substituidas: u32,
+        /// Cartas de correção registradas e recusadas.
+        cartas: (u32, u32),
+        /// NFS-e autorizadas, recusadas e canceladas.
+        nfse: (u32, u32, u32),
+    }
+
+    /// O que vale para a rodada inteira.
+    struct Contexto<'a> {
+        porta: &'a dyn PortaFiscal,
+        csc: Option<&'a Csc>,
+        uf: Option<Uf>,
+        cnpj: Option<cardeal_kernel::Cnpj>,
+    }
+
+    /// Leva um documento à SEFAZ e grava o que veio. Devolve se a rodada para (a API não
+    /// respondeu).
+    fn processar(
+        t: &ContextoTarefa<'_>,
+        x: &Contexto<'_>,
+        doc: sqld::NaFila,
+        rodada: &mut Rodada,
+    ) -> Resultado<bool> {
+        let empresa = t.ctx.empresa;
+        // Documento fechado com XML a buscar: só a consulta, sem mudar o estado.
+        let fechado = !matches!(
+            doc.estado,
+            EstadoDocumento::Pendente | EstadoDocumento::Incerta | EstadoDocumento::Contingencia
+        );
+        if doc.pedido.is_none() && doc.buscar_xml && fechado {
+            return Ok(match buscar_xmls(t, x.porta, &doc, x.uf)? {
+                Some(n) => {
+                    rodada.recuperados += n;
+                    false
+                }
+                None => true,
+            });
+        }
+        // O cancelamento por substituição espera a substituta autorizada (a SEFAZ exige).
+        let substituta = if doc.pedido == Some(PedidoDocumento::CancelarPorSubstituicao) {
+            let Some(chave) = substituta_autorizada(t, &doc)? else {
+                return Ok(false);
+            };
+            Some(chave)
+        } else {
+            None
+        };
+        let (mudanca, parar, api_respondeu) =
+            decidir_documento(t, x, &doc, substituta.as_deref(), rodada);
+        if doc.pedido.is_none() {
+            *rodada.contagem.entry(mudanca.estado).or_default() += 1;
+        }
+        // A incerta que segue sem resposta, com o cliente ainda no balcão: a substituta.
+        let idade = doc.criado_em.micros_ate(Instante::agora()) / 1_000_000;
+        let substituir = doc.pedido.is_none()
+            && doc.modelo == ModeloFiscal::Nfce
+            && doc.nota.is_some()
+            && pede_substituicao(
+                doc.estado,
+                &mudanca,
+                api_respondeu,
+                idade,
+                doc.substituida_por.is_some(),
+            );
+        let pedido_novo = pedido_que_nasce(&doc, &mudanca);
+        let justificativa = if doc.substituida_por.is_some() {
+            JUSTIFICATIVA_DA_SUBSTITUICAO.to_owned()
+        } else {
+            doc.justificativa.clone().unwrap_or_default()
+        };
+        let (id, estado_lido) = (doc.id, doc.estado);
+        let criou_substituta = t.escrever(move |uow| {
+            let agora = Instante::agora();
+            let aplicou =
+                sqld::aplicar_mudanca(uow.conexao(), empresa, id, estado_lido, &mudanca, agora)?;
+            if let (true, Some(p)) = (aplicou, pedido_novo) {
+                sqld::pedir(
                     uow.conexao(),
                     empresa,
                     id,
-                    estado_lido,
-                    &mudanca,
+                    p,
+                    &justificativa,
+                    mudanca.estado,
                     agora,
                 )?;
-                if let (true, Some(p)) = (aplicou, pedido_da_anulacao) {
-                    sqld::pedir(
-                        uow.conexao(),
-                        empresa,
-                        id,
-                        p,
-                        &justificativa,
-                        mudanca.estado,
-                        agora,
-                    )?;
-                }
-                Ok(aplicou)
-            })?;
-            if parar {
-                break;
+            }
+            if aplicou && substituir {
+                return criar_substituta(uow, empresa, &doc, agora);
+            }
+            Ok(false)
+        })?;
+        if criou_substituta {
+            rodada.substituidas += 1;
+        }
+        Ok(parar)
+    }
+
+    /// A chave da substituta, quando ela já está autorizada; senão grava a espera e devolve
+    /// `None`.
+    fn substituta_autorizada(
+        t: &ContextoTarefa<'_>,
+        doc: &sqld::NaFila,
+    ) -> Resultado<Option<String>> {
+        let empresa = t.ctx.empresa;
+        let sub = match doc.substituida_por {
+            Some(s) => t.ler(|c| sqld::estado_e_chave(c, empresa, s))?,
+            None => None,
+        };
+        if let Some((EstadoDocumento::Autorizada, Some(chave))) = sub {
+            return Ok(Some(chave));
+        }
+        let m = esperar(
+            doc.estado,
+            doc.tentativas,
+            "Esperando a NFC-e substituta ser autorizada para cancelar esta",
+        );
+        let (id, lido) = (doc.id, doc.estado);
+        t.escrever(move |uow| {
+            sqld::aplicar_mudanca(uow.conexao(), empresa, id, lido, &m, Instante::agora())
+        })?;
+        Ok(None)
+    }
+
+    /// O pedido que nasce do desfecho: a substituída resolvida (cancelar por substituição ou
+    /// inutilizar) ou a venda desfeita (cancelar ou inutilizar).
+    fn pedido_que_nasce(doc: &sqld::NaFila, mudanca: &Mudanca) -> Option<PedidoDocumento> {
+        if doc.pedido.is_some() || mudanca.estado == doc.estado {
+            return None;
+        }
+        if doc.substituida_por.is_some() {
+            pedido_da_substituida(mudanca.estado)
+        } else if doc.anulada {
+            crate::documento::pedido_da_anulacao(mudanca.estado, 0)
+                .filter(|_| mudanca.estado != EstadoDocumento::Pendente)
+        } else {
+            None
+        }
+    }
+
+    /// Leva o documento à SEFAZ e decide: o pedido, a substituta (sempre em contingência) ou a
+    /// emissão/consulta. Devolve a mudança, se a rodada para e se a API respondeu.
+    fn decidir_documento(
+        t: &ContextoTarefa<'_>,
+        x: &Contexto<'_>,
+        doc: &sqld::NaFila,
+        substituta: Option<&str>,
+        rodada: &mut Rodada,
+    ) -> (Mudanca, bool, bool) {
+        if let Some(pedido) = doc.pedido {
+            let desfecho =
+                desfecho_do_pedido(x.porta, pedido, doc, x.uf, x.cnpj, t.ctx.fuso, substituta);
+            let parar = matches!(desfecho, Desfecho::Indisponivel(_));
+            (
+                mudanca_do_pedido(pedido, doc, desfecho, &mut rodada.eventos),
+                parar,
+                !parar,
+            )
+        } else if doc.estado == EstadoDocumento::Pendente && doc.substitui.is_some() {
+            // A substituta sai sempre em contingência: a SEFAZ exige `tpEmis` 9 no 110112.
+            (contingencia_da_substituta(x, doc, t.ctx.fuso), false, true)
+        } else {
+            let desfecho = desfecho_da_emissao(x.porta, doc, x.csc, x.uf);
+            let parar = matches!(desfecho, Desfecho::Indisponivel(_));
+            let api_respondeu = matches!(desfecho, Desfecho::Resposta(_));
+            let mut m = mudanca_da_emissao(x.porta, doc, x.csc, desfecho, t.ctx.fuso);
+            if doc.substituida_por.is_some() {
+                m = nao_reemitir(m);
+            }
+            (m, parar, api_respondeu)
+        }
+    }
+
+    /// Cria a substituta de `doc` (a mesma nota, outro número da mesma série) e a marca como
+    /// substituída. Devolve se criou.
+    fn criar_substituta(
+        uow: &mut UnidadeDeTrabalho,
+        empresa: Id,
+        doc: &sqld::NaFila,
+        agora: Instante,
+    ) -> Resultado<bool> {
+        let Some(blob) = doc.nota.as_deref() else {
+            return Ok(false);
+        };
+        let Ok(mut nota) = postcard::from_bytes::<Nfce>(blob) else {
+            return Ok(false);
+        };
+        let c = uow.conexao();
+        let numero = sqld::reservar_numero(c, empresa, MODELO, doc.serie, doc.ambiente)?;
+        nota.numero = numero;
+        let blob = postcard::to_stdvec(&nota)
+            .map_err(|e| Erro::novo(CodigoErro::FALHA_INTERNA, e.to_string()))?;
+        let id_da_substituta = Id::novo();
+        // Primeiro a original deixa de ser a vigente da venda (a origem é única entre elas).
+        if !sqld::marcar_substituida(c, empresa, doc.id, id_da_substituta)? {
+            return Ok(false);
+        }
+        sqld::inserir_documento(
+            c,
+            &sqld::NovoDocumento {
+                id: id_da_substituta,
+                empresa,
+                modelo: MODELO,
+                serie: doc.serie,
+                numero,
+                ambiente: doc.ambiente,
+                origem_modulo: &doc.origem_modulo,
+                origem: doc.origem,
+                estado: EstadoDocumento::Pendente,
+                total: doc.total,
+                nota: Some(blob),
+                motivo: Some(format!(
+                    "Substitui a NFC-e {}-{}, que ficou sem resposta da SEFAZ",
+                    doc.serie, doc.numero
+                )),
+                agora,
+                substitui: Some(doc.id),
+            },
+        )?;
+        Ok(true)
+    }
+
+    /// A substituta vai direto para a contingência; sem a assinatura, espera como pendente.
+    fn contingencia_da_substituta(
+        x: &Contexto<'_>,
+        doc: &sqld::NaFila,
+        fuso: cardeal_kernel::Fuso,
+    ) -> Mudanca {
+        let r = cardeal_fiscal::RetornoSefaz {
+            situacao: cardeal_fiscal::SituacaoRetorno::Erro,
+            codigo: "SUB".into(),
+            motivo: "a NFC-e anterior desta venda ficou sem resposta".into(),
+            chave: None,
+            protocolo: None,
+            recebido_em: None,
+            xml: None,
+            xml_assinado: None,
+            xml_cancelamento: None,
+            erros: Vec::new(),
+            // "Não chegou": sem a assinatura, a pendente espera em vez de virar rejeitada.
+            nao_enviado: true,
+        };
+        contingencia(x.porta, doc, x.csc, Desfecho::Resposta(r), fuso)
+    }
+
+    /// O que gravar depois de levar um pedido (cancelar, inutilizar) — e a conta da rodada:
+    /// cancelados, inutilizados, recusados.
+    fn mudanca_do_pedido(
+        pedido: PedidoDocumento,
+        doc: &sqld::NaFila,
+        desfecho: Desfecho,
+        eventos: &mut (u32, u32, u32),
+    ) -> Mudanca {
+        let m = decidir_evento(pedido, doc.estado, doc.tentativas, desfecho);
+        match m.estado {
+            EstadoDocumento::Cancelada => eventos.0 += 1,
+            EstadoDocumento::Inutilizada => eventos.1 += 1,
+            _ if m.limpar_pedido => eventos.2 += 1,
+            _ => {}
+        }
+        m
+    }
+
+    /// O que gravar depois de emitir, transmitir ou consultar: a decisão — ou, quando a SEFAZ
+    /// está fora e a nota não chegou a ela, a contingência, já.
+    fn mudanca_da_emissao(
+        porta: &dyn PortaFiscal,
+        doc: &sqld::NaFila,
+        csc: Option<&Csc>,
+        desfecho: Desfecho,
+        fuso: cardeal_kernel::Fuso,
+    ) -> Mudanca {
+        // A contingência off-line é da NFC-e (a da NF-e é outra, a SVC).
+        if doc.modelo == ModeloFiscal::Nfce && pede_contingencia(doc.estado, &desfecho) {
+            contingencia(porta, doc, csc, desfecho, fuso)
+        } else {
+            decidir(doc.estado, doc.tentativas, desfecho)
+        }
+    }
+
+    /// Assina em contingência a nota pendente que a SEFAZ fora não recebeu. Se a assinatura
+    /// falha, a nota espera como pendente — com o motivo dos dois.
+    fn contingencia(
+        porta: &dyn PortaFiscal,
+        doc: &sqld::NaFila,
+        csc: Option<&Csc>,
+        desfecho: Desfecho,
+        fuso: cardeal_kernel::Fuso,
+    ) -> Mudanca {
+        let assinada = match (&desfecho, &doc.nota, csc) {
+            (Desfecho::Resposta(r), Some(blob), Some(csc)) => {
+                let inicio = Instante::agora();
+                postcard::from_bytes::<Nfce>(blob)
+                    .map_err(|e| e.to_string())
+                    .and_then(|nota| {
+                        porta
+                            .preparar_nfce_em_contingencia(
+                                &nota,
+                                csc,
+                                &EntradaEmContingencia {
+                                    inicio,
+                                    justificativa: justificativa_da_contingencia(r),
+                                    fuso,
+                                },
+                            )
+                            .map_err(|e| e.mensagem)
+                    })
+                    .map(|n| em_contingencia(n, r, inicio))
+            }
+            _ => Err("sem a nota guardada ou o CSC".into()),
+        };
+        match assinada {
+            Ok(m) => m,
+            Err(falha) => {
+                let mut m = decidir(doc.estado, doc.tentativas, desfecho);
+                m.motivo = Some(format!(
+                    "{} — e a contingência não saiu: {falha}",
+                    m.motivo.unwrap_or_default()
+                ));
+                m
             }
         }
-        let n = |e| contagem.get(&e).copied().unwrap_or(0);
+    }
+
+    /// A frase do fim da rodada: as emissões, os pedidos, as substituições e os XMLs recuperados.
+    fn resumo_da_rodada(rodada: &Rodada) -> String {
+        let (cancelados, inutilizados, recusados) = rodada.eventos;
+        let recuperados = rodada.recuperados;
+        let n = |e| rodada.contagem.get(&e).copied().unwrap_or(0);
         let mut resumo = format!(
             "{} autorizada(s), {} rejeitada(s), {} na fila",
             n(EstadoDocumento::Autorizada),
             n(EstadoDocumento::Rejeitada) + n(EstadoDocumento::Denegada),
             n(EstadoDocumento::Pendente) + n(EstadoDocumento::Incerta)
         );
-        let (cancelados, inutilizados, recusados) = eventos;
+        if n(EstadoDocumento::Contingencia) > 0 {
+            let _ = write!(
+                resumo,
+                "; {} em contingência",
+                n(EstadoDocumento::Contingencia)
+            );
+        }
         if cancelados + inutilizados + recusados > 0 {
             let _ = write!(
                 resumo,
                 "; {cancelados} cancelada(s), {inutilizados} inutilizada(s), {recusados} pedido(s) recusado(s)"
             );
         }
-        Ok(resumo)
+        if rodada.nfse.0 + rodada.nfse.1 + rodada.nfse.2 > 0 {
+            let _ = write!(
+                resumo,
+                "; NFS-e: {} autorizada(s), {} recusada(s), {} cancelada(s)",
+                rodada.nfse.0, rodada.nfse.1, rodada.nfse.2
+            );
+        }
+        if rodada.cartas.0 + rodada.cartas.1 > 0 {
+            let _ = write!(
+                resumo,
+                "; {} carta(s) de correção registrada(s), {} recusada(s)",
+                rodada.cartas.0, rodada.cartas.1
+            );
+        }
+        if rodada.substituidas > 0 {
+            let _ = write!(
+                resumo,
+                "; {} sem resposta substituída(s) em contingência",
+                rodada.substituidas
+            );
+        }
+        if recuperados > 0 {
+            let _ = write!(resumo, "; {recuperados} XML(s) recuperado(s) na SEFAZ");
+        }
+        resumo
+    }
+
+    /// Busca os XMLs que faltam a um documento fechado e grava o que veio: devolve quantos
+    /// vieram, ou `None` se a API não respondeu (a rodada para).
+    fn buscar_xmls(
+        t: &ContextoTarefa<'_>,
+        porta: &dyn PortaFiscal,
+        doc: &sqld::NaFila,
+        uf: Option<Uf>,
+    ) -> Resultado<Option<u32>> {
+        let busca = decidir_busca(desfecho_da_busca(porta, doc, uf));
+        let vieram = match &busca {
+            Busca::Encerrar {
+                xml, xml_evento, ..
+            } => Some(u32::from(xml.is_some()) + u32::from(xml_evento.is_some())),
+            Busca::TentarDeNovo { gasta: true, .. } => Some(0),
+            Busca::TentarDeNovo { gasta: false, .. } => None,
+        };
+        let (empresa, id) = (t.ctx.empresa, doc.id);
+        t.escrever(move |uow| {
+            sqld::aplicar_busca(uow.conexao(), empresa, id, &busca, Instante::agora())
+        })?;
+        Ok(vieram)
+    }
+
+    /// Consulta um documento fechado para buscar os XMLs que faltam (com a nota assinada, se
+    /// ficou guardada).
+    fn desfecho_da_busca(porta: &dyn PortaFiscal, doc: &sqld::NaFila, uf: Option<Uf>) -> Desfecho {
+        let (Some(chave), Some(uf)) = (doc.chave.as_deref(), uf) else {
+            return Desfecho::Recusado("sem a chave da nota ou a UF da empresa".into());
+        };
+        match ChaveAcesso::nova(chave) {
+            Ok(chave) => {
+                desfecho(porta.consultar_documento(&chave, uf, doc.xml_assinado.as_deref()))
+            }
+            Err(e) => Desfecho::Recusado(e.to_string()),
+        }
     }
 
     /// Emite (pendente) ou consulta (incerta) um documento.
@@ -995,6 +1587,13 @@ pub(crate) mod sqlite {
         uf: Option<Uf>,
     ) -> Desfecho {
         match (doc.estado, &doc.nota, &doc.chave, csc, uf) {
+            // A NF-e não tem CSC.
+            (EstadoDocumento::Pendente, Some(blob), _, _, _) if doc.modelo == ModeloFiscal::Nfe => {
+                match postcard::from_bytes::<cardeal_fiscal::Nfe>(blob) {
+                    Ok(nota) => desfecho(porta.emitir_nfe(&nota)),
+                    Err(e) => Desfecho::Recusado(format!("a nota guardada está ilegível: {e}")),
+                }
+            }
             (EstadoDocumento::Pendente, Some(blob), _, Some(csc), _) => {
                 match postcard::from_bytes::<Nfce>(blob) {
                     Ok(nota) => desfecho(porta.emitir_nfce(&nota, csc)),
@@ -1004,9 +1603,19 @@ pub(crate) mod sqlite {
             (EstadoDocumento::Pendente, _, _, None, _) => Desfecho::Recusado(
                 "o CSC da NFC-e não está cadastrado (Configurações › Fiscal)".into(),
             ),
+            // A contingência: o mesmo XML assinado, quantas vezes for preciso.
+            (EstadoDocumento::Contingencia, _, _, _, Some(uf)) => match doc.xml_assinado.as_deref()
+            {
+                Some(xml) => desfecho(porta.transmitir_nfce_em_contingencia(xml, uf)),
+                None => {
+                    Desfecho::Recusado("a nota assinada em contingência não está guardada".into())
+                }
+            },
             (EstadoDocumento::Incerta, _, Some(chave), _, Some(uf)) => {
                 match ChaveAcesso::nova(chave) {
-                    Ok(chave) => desfecho(porta.consultar_documento(&chave, uf)),
+                    Ok(chave) => {
+                        desfecho(porta.consultar_documento(&chave, uf, doc.xml_assinado.as_deref()))
+                    }
                     Err(e) => Desfecho::Recusado(e.to_string()),
                 }
             }
@@ -1022,6 +1631,7 @@ pub(crate) mod sqlite {
         uf: Option<Uf>,
         cnpj: Option<cardeal_kernel::Cnpj>,
         fuso: cardeal_kernel::Fuso,
+        substituta: Option<&str>,
     ) -> Desfecho {
         let (Some(justificativa), Some(uf)) = (doc.justificativa.as_deref(), uf) else {
             return Desfecho::Recusado("faltam a justificativa ou a UF da empresa".into());
@@ -1040,6 +1650,25 @@ pub(crate) mod sqlite {
                     Err(e) => Desfecho::Recusado(e.to_string()),
                 }
             }
+            PedidoDocumento::CancelarPorSubstituicao => {
+                let (Some(chave), Some(protocolo), Some(sub)) =
+                    (doc.chave.as_deref(), doc.protocolo.as_deref(), substituta)
+                else {
+                    return Desfecho::Recusado(
+                        "a nota não tem chave e protocolo, ou a substituta não tem chave".into(),
+                    );
+                };
+                match (ChaveAcesso::nova(chave), ChaveAcesso::nova(sub)) {
+                    (Ok(chave), Ok(sub)) => desfecho(porta.cancelar_por_substituicao(
+                        &chave,
+                        protocolo,
+                        justificativa,
+                        uf,
+                        &sub,
+                    )),
+                    (Err(e), _) | (_, Err(e)) => Desfecho::Recusado(e.to_string()),
+                }
+            }
             PedidoDocumento::Inutilizar => {
                 let Some(cnpj) = cnpj else {
                     return Desfecho::Recusado("o CNPJ da empresa é inválido".into());
@@ -1048,7 +1677,7 @@ pub(crate) mod sqlite {
                     u16::try_from(doc.criado_em.data(fuso).ano().rem_euclid(100)).unwrap_or(0);
                 desfecho(porta.inutilizar(&cardeal_fiscal::PedidoInutilizacao {
                     cnpj,
-                    modelo: MODELO,
+                    modelo: doc.modelo,
                     serie: doc.serie,
                     inicio: doc.numero,
                     fim: doc.numero,

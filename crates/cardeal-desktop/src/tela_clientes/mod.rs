@@ -9,6 +9,7 @@
 //! "sem documento", ordenação por coluna) e o dialog "Ver" precisa trazer telefone/endereço —
 //! já cadastrados no backend (`PessoaDetalhada`), só não apareciam na tela.
 
+mod curva;
 mod ficha;
 mod importacao;
 
@@ -17,7 +18,7 @@ use cardeal_kernel::Id;
 use cardeal_modkit::Icone;
 use cardeal_ui::atoms::{Botao, Divisor, Etiqueta, Rotulo, ValorDinheiro, ATALHO_NOVO};
 use cardeal_ui::molecules::{
-    dado, AcaoRegistro, AcoesRegistro, BarraFiltros, Campo, CartaoKpi, EstadoVazio, Mascara,
+    dado, Abas, AcaoRegistro, AcoesRegistro, BarraFiltros, Campo, CartaoKpi, EstadoVazio, Mascara,
     SecaoExpansivel, SeletorOpcao,
 };
 use cardeal_ui::organisms::{
@@ -233,6 +234,10 @@ pub struct EstadoTelaClientes {
     pedido_abrir: Option<Id>,
     /// "Importar clientes…" aberto: a planilha escolhida e a prévia.
     importacao: Option<importacao::EstadoImportacao>,
+    /// A aba "Curva de clientes" está aberta.
+    na_curva: bool,
+    /// A curva de clientes (carregada ao abrir a aba).
+    curva: Option<Result<Vec<mod_pdv::ClienteNaCurva>, String>>,
 }
 
 impl EstadoTelaClientes {
@@ -293,6 +298,30 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
             }
         },
         |ui, estado| {
+            if sessao.concede(curva::PERMISSAO) {
+                if let Some(v) = Abas::nova(&[(false, "Cadastro"), (true, "Curva de clientes")])
+                    .selecionada(estado.na_curva)
+                    .id_salt("clientes-visao")
+                    .mostrar(ui)
+                {
+                    estado.na_curva = v;
+                    if v {
+                        estado.curva = Some(curva::carregar(motor, sessao));
+                    }
+                }
+                ui.add_space(Espaco::E8);
+            }
+            if estado.na_curva {
+                if estado.curva.is_none() {
+                    estado.curva = Some(curva::carregar(motor, sessao));
+                }
+                if let Some(c) = &estado.curva {
+                    if let Some(id) = curva::mostrar(ui, c) {
+                        estado.abrir_detalhe(motor, sessao, id);
+                    }
+                }
+                return;
+            }
             if !estado.pessoas.is_empty() {
                 let sem_documento = estado
                     .pessoas

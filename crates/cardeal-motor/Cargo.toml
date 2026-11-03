@@ -18,6 +18,7 @@ mod-empresa.workspace     = true
 rusqlite.workspace = true
 serde.workspace    = true
 postcard.workspace = true
+tracing.workspace = true
 blake3.workspace   = true
 
 [dev-dependencies]

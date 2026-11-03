@@ -97,6 +97,22 @@ pub mod consultas {
             .map_err(super::persist)
     }
 
+    /// O segundo fator do usuário, como foi gravado (o selado do cofre, em hexadecimal).
+    /// `Ok(None)` = sem verificação em duas etapas.
+    ///
+    /// # Errors
+    /// [`crate::ErroAuth::FalhaDePersistencia`] em erro do SQLite.
+    pub fn segundo_fator_selado(c: &Connection, usuario: Id) -> Resultado<Option<String>> {
+        c.query_row(
+            "SELECT mfa_segredo FROM nucleo_usuario WHERE id = ?1",
+            [usuario.em_bytes().as_slice()],
+            |r| r.get::<_, Option<String>>(0),
+        )
+        .optional()
+        .map(Option::flatten)
+        .map_err(super::persist)
+    }
+
     /// Carrega um papel pelo `id`, com suas permissões e limites. `Ok(None)` = não existe.
     ///
     /// # Errors
@@ -307,6 +323,21 @@ impl<'a, 'b> RepositorioAuth<'a, 'b> {
         Ok(())
     }
 
+    /// Grava o segundo fator do usuário (o selado do cofre, em hexadecimal), ou o desliga
+    /// (`None`).
+    ///
+    /// # Errors
+    /// [`crate::ErroAuth::FalhaDePersistencia`] em erro do SQLite.
+    pub fn gravar_segundo_fator(&mut self, usuario: Id, selado: Option<&str>) -> Resultado<()> {
+        self.conn()
+            .execute(
+                "UPDATE nucleo_usuario SET mfa_segredo = ?2 WHERE id = ?1",
+                rusqlite::params![blob(usuario), selado],
+            )
+            .map_err(persist)?;
+        Ok(())
+    }
+
     /// Busca um usuário pelo `login`. `Ok(None)` = não existe.
     ///
     /// # Errors
@@ -432,6 +463,33 @@ impl<'a, 'b> RepositorioAuth<'a, 'b> {
                 .map_err(persist)?;
         }
         Ok(novos)
+    }
+
+    /// Grava (ou troca) um limite do papel — o ajuste que o dono faz no teto de um papel,
+    /// **inclusive de fábrica**: o que um papel de fábrica pode fazer (as permissões) é
+    /// imutável; o tamanho do poder (o teto) é da empresa. A sincronização do motor só
+    /// preenche limite ausente, então o ajuste fica. Sobe a versão do papel.
+    ///
+    /// # Errors
+    /// [`crate::ErroAuth::FalhaDePersistencia`] em erro do SQLite.
+    pub fn definir_limite(&mut self, papel: Id, chave: &str, valor: ValorLimite) -> Resultado<()> {
+        let (tipo, bruto) = limite_split(valor);
+        self.conn()
+            .execute(
+                "INSERT INTO nucleo_papel_limite (papel, chave, tipo, valor)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT (papel, chave) DO UPDATE SET tipo = excluded.tipo,
+                                                          valor = excluded.valor",
+                rusqlite::params![blob(papel), chave, tipo, bruto],
+            )
+            .map_err(persist)?;
+        self.conn()
+            .execute(
+                "UPDATE nucleo_papel SET versao = versao + 1 WHERE id = ?1",
+                [blob(papel)],
+            )
+            .map_err(persist)?;
+        Ok(())
     }
 
     /// Carrega um papel pelo `id`, com permissões e limites.

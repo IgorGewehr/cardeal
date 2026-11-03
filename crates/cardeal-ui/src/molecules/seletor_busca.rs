@@ -21,6 +21,7 @@ use crate::tokens::{Espaco, TemaUi};
 /// Uma opção buscável: o valor selecionável, um título (comparado à busca) e um subtítulo
 /// opcional (também comparado — nome + código, nome + documento…).
 #[must_use]
+#[derive(Debug, Clone)]
 pub struct OpcaoBusca<T> {
     valor: T,
     titulo: String,

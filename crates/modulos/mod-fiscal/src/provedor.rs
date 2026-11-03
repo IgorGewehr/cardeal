@@ -123,6 +123,19 @@ pub fn porta_da_empresa(
     porta_da_empresa_no_ambiente(ctx, c, ambiente)
 }
 
+/// O ambiente fiscal da empresa (homologação até ela ligar a produção) — para quem fala com a
+/// SEFAZ por outros caminhos (a busca de notas de compra, em `mod-compras`).
+///
+/// # Errors
+/// Erro do SQLite.
+#[cfg(feature = "sqlite")]
+pub fn ambiente_da_empresa(
+    c: &rusqlite::Connection,
+    empresa: cardeal_kernel::Id,
+) -> Resultado<AmbienteFiscal> {
+    crate::sql::ambiente(c, empresa)
+}
+
 /// Como [`porta_da_empresa`], num ambiente dado — o de um documento já criado (uma nota de
 /// homologação na fila continua indo para a homologação, mesmo que a empresa já tenha passado
 /// para a produção).

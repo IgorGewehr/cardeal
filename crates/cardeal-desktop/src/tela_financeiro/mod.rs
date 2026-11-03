@@ -13,12 +13,16 @@ mod cheques;
 mod cobranca;
 mod conciliacao_banco;
 mod conferencia;
+mod contador;
 mod contas;
 mod custos;
 mod dre;
 mod fluxo;
+mod grupo;
 mod importacao;
 mod lancar;
+mod obrigacoes;
+mod orcamento;
 mod pacote_contador;
 mod pessoal;
 mod plano_contas;
@@ -26,6 +30,7 @@ mod recorrencias;
 mod regua;
 mod renegociar;
 mod saude;
+mod simples;
 #[cfg(test)]
 mod testes;
 mod visao;
@@ -88,6 +93,10 @@ enum Aba {
     Cheques,
     Fluxo,
     Bancos,
+    /// Os CNPJs do grupo lado a lado (só com mais de um).
+    Grupo,
+    /// O Portal do Contador: apontamentos e DE/PARA.
+    Contador,
 }
 
 /// A chave do topo: as contas da empresa ou as finanças pessoais do usuário.
@@ -392,6 +401,10 @@ impl Default for FormLancar {
 #[derive(Default)]
 pub struct EstadoTelaFinanceiro {
     aba: Aba,
+    /// O painel do grupo (os CNPJs em que a pessoa entra).
+    grupo: grupo::EstadoGrupo,
+    /// O Portal do Contador.
+    contador: contador::EstadoContador,
     /// As parcelas da aba ativa (Receber/Pagar) com vencimento em `periodo` — **qualquer
     /// estado**, não só em aberto (pedido explícito do usuário: a aba deve mostrar também o
     /// que já foi pago/recebido, igual ao histórico do fluxo de caixa).
@@ -422,6 +435,8 @@ pub struct EstadoTelaFinanceiro {
     fila_cobranca: Option<mod_financeiro::FilaDoDia>,
     /// A situação fiscal (para o aviso do certificado na Visão).
     situacao_fiscal: Option<mod_fiscal::SituacaoFiscalDaEmpresa>,
+    /// As obrigações que vencem (o cartão da Visão).
+    obrigacoes: Vec<mod_fiscal::calendario::Obrigacao>,
     /// O aviso do certificado pediu para abrir Configurações › Fiscal (o `main` atende).
     pub pedido_config_fiscal: bool,
     /// O editor da régua aberto.
@@ -438,8 +453,16 @@ pub struct EstadoTelaFinanceiro {
     dfc_indireto: Option<mod_financeiro::dfc::DfcIndireto>,
     /// A aba do DFC mostra o método indireto.
     dfc_metodo_indireto: bool,
-    /// Dentro de Resultado: 0 = DRE, 1 = DFC, 2 = balancete.
+    /// Dentro de Resultado: 0 = DRE, 1 = DFC, 2 = balancete, 3 = Simples, 4 = orçamento.
     visao_resultado: u8,
+    /// O resumo do Simples do mês (`None`: sem a permissão).
+    simples: Option<Result<mod_estoque::simples::ResumoDoSimples, String>>,
+    /// O formulário do mês de abertura e do faturamento de antes do Cardeal.
+    form_simples: simples::FormHistoricoSimples,
+    /// O orçamento do ano do mês escolhido (Resultado › Orçamento).
+    orcamento: Option<Result<mod_financeiro::orcamento::OrcamentoAnual, String>>,
+    /// O editor do orçamento de uma conta e a cópia do ano anterior.
+    form_orcamento: orcamento::FormOrcamento,
     /// O balancete do mês (aba Resultado › Balancete).
     balancete: Option<Vec<cardeal_ledger::LinhaBalancete>>,
     projecao: Vec<mod_financeiro::ItemProjecaoCategoria>,
@@ -557,6 +580,8 @@ pub fn mostrar(
                 Aba::Plano => painel_plano(ui, motor, sessao, estado),
                 Aba::Conciliacao => painel_conciliacao(ui, motor, sessao, estado),
                 Aba::Cheques => cheques::painel_cheques(ui, motor, sessao, estado),
+                Aba::Grupo => grupo::painel(ui, motor, sessao, &mut estado.grupo),
+                Aba::Contador => contador::painel(ui, motor, sessao, &mut estado.contador),
                 _ => lista(ui, motor, sessao, estado),
             }
         },
@@ -669,7 +694,7 @@ fn acoes_empresa(
 }
 
 fn abas(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTelaFinanceiro) {
-    let nova = Abas::nova(&[
+    let mut lista = vec![
         (Aba::Visao, "Visão geral"),
         (Aba::Receber, "A receber"),
         (Aba::Pagar, "A pagar"),
@@ -681,9 +706,14 @@ fn abas(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTe
         (Aba::Cheques, "Cheques"),
         (Aba::Fluxo, "Fluxo de caixa"),
         (Aba::Bancos, "Contas bancárias"),
-    ])
-    .selecionada(estado.aba)
-    .mostrar(ui);
+    ];
+    if estado.grupo.ha_grupo() {
+        lista.push((Aba::Grupo, "Grupo"));
+    }
+    if sessao.concede("financeiro.contador.ver") {
+        lista.push((Aba::Contador, "Contador"));
+    }
+    let nova = Abas::nova(&lista).selecionada(estado.aba).mostrar(ui);
     if let Some(nova) = nova {
         estado.aba = nova;
         estado.carregar(motor, sessao);
@@ -802,5 +832,13 @@ impl EstadoTelaFinanceiro {
                 };
             }
         }
+    }
+}
+
+impl EstadoTelaFinanceiro {
+    /// Abre direto em "Contas bancárias" (os primeiros passos levam para cá).
+    pub fn abrir_bancos(&mut self, motor: &Motor, sessao: &Sessao) {
+        self.aba = Aba::Bancos;
+        self.carregar(motor, sessao);
     }
 }

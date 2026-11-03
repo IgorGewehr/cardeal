@@ -1,6 +1,7 @@
 //! Os dados que as consultas devolvem.
 
-use cardeal_kernel::Id;
+use cardeal_auth::PapelDeFabrica;
+use cardeal_kernel::{Id, Percentual};
 use serde::{Deserialize, Serialize};
 
 /// Teto da logo da empresa: 512 KB. Ela viaja em todo PDF e, no cliente web, pela rede.
@@ -53,6 +54,10 @@ pub struct UsuarioResumo {
     pub nome: String,
     /// Se está ativo.
     pub ativo: bool,
+    /// Tem verificação em duas etapas.
+    pub segundo_fator: bool,
+    /// O papel nesta empresa (o primeiro, se tiver mais de um).
+    pub papel: Option<String>,
 }
 
 /// Um papel, resumido para a lista de Configurações.
@@ -66,4 +71,15 @@ pub struct PapelResumo {
     pub sistema: bool,
     /// Quantas permissões concede.
     pub permissoes: usize,
+}
+
+/// O teto de desconto de um papel que vende, para Configurações › Usuários e acesso.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TetoDeDesconto {
+    /// O papel.
+    pub papel: PapelDeFabrica,
+    /// O teto (`None` = sem teto). Do papel ainda não usado, o padrão com que ele nasce.
+    pub teto: Option<Percentual>,
+    /// Quantos usuários ativos têm o papel nesta empresa.
+    pub usuarios: usize,
 }

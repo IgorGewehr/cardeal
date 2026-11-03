@@ -6,7 +6,9 @@ use cardeal_kernel::Instante;
 use crate::documento::{Canvas, Cor, Documento, MM};
 use crate::fonte::{largura_texto, Fonte};
 use crate::imagem::decodificar_logo;
-use crate::{ComprovanteOsPdf, ErroPdf, IdentidadeEmpresa, OrcamentoPdf, RelatorioPdf};
+use crate::{
+    ComprovanteOsPdf, ErroPdf, IdentidadeEmpresa, OrcamentoPdf, PedidoCompraPdf, RelatorioPdf,
+};
 
 // ── Paleta (espelha os tokens do design system Rubro) ─────────────────────────
 const TEXTO_FORTE: Cor = Cor::rgb(17, 17, 20);
@@ -132,6 +134,59 @@ pub fn gerar_os(
     c.aceite();
     c.rodape_em_todas(&os.tecnico_responsavel);
 
+    for pagina in c.paginas {
+        doc.pagina_bruta(pagina.em_operadores());
+    }
+    Ok(doc.finalizar())
+}
+
+/// Gera o PDF do pedido de compra — o mesmo motor do orçamento: cabeçalho, tabela de itens,
+/// totais (com o frete) e condições; o bloco de identificação é o do fornecedor.
+///
+/// # Errors
+/// [`ErroPdf::Logo`] se a logo cadastrada não for uma imagem válida.
+pub fn gerar_pedido(
+    empresa: &IdentidadeEmpresa,
+    pedido: &PedidoCompraPdf,
+    gerado_em: Instante,
+) -> Result<Vec<u8>, ErroPdf> {
+    let mut doc = Documento::novo();
+    let logo = match &empresa.logo_png {
+        Some(bytes) if !bytes.is_empty() => {
+            let img = decodificar_logo(bytes)?;
+            let prop = img.proporcao();
+            Some((doc.adicionar_imagem(img), prop))
+        }
+        _ => None,
+    };
+    let mut c = Compositor {
+        paginas: vec![Canvas::nova_a4()],
+        y: TOPO,
+        logo,
+        empresa,
+        gerado_em: gerado_em.formatar(cardeal_kernel::Fuso::BRASILIA),
+    };
+    c.cabecalho_marca();
+    c.bloco_titulo_pedido(pedido);
+    c.bloco_fornecedor(pedido);
+    c.tabela_itens(&pedido.itens);
+    c.quadro_totais_com_frete(pedido.subtotal, pedido.frete, pedido.total);
+    let secoes = [
+        ("CONDIÇÃO DE PAGAMENTO", pedido.condicao_pagamento.clone()),
+        ("OBSERVAÇÕES", pedido.observacoes.clone()),
+        (
+            "NA NOTA FISCAL",
+            format!(
+                "Por favor, informe o número {} deste pedido na nota fiscal (campo xPed).",
+                pedido.numero
+            ),
+        ),
+    ];
+    for (rot, texto) in &secoes {
+        c.bloco_condicao(rot, texto);
+    }
+    c.aceite();
+    c.rodape_em_todas(&pedido.responsavel);
     for pagina in c.paginas {
         doc.pagina_bruta(pagina.em_operadores());
     }
@@ -496,6 +551,100 @@ impl Compositor<'_> {
             }
             self.y += 4.0;
         }
+    }
+
+    // ── Pedido de compra ─────────────────────────────────────────────────
+    fn bloco_titulo_pedido(&mut self, p: &PedidoCompraPdf) {
+        let y = self.y;
+        self.texto_em(
+            MX,
+            y,
+            Fonte::Negrito,
+            17.0,
+            TEXTO_FORTE,
+            &format!("Pedido de compra Nº {:04}", p.numero),
+        );
+        self.texto_direita(
+            DIR,
+            y - 3.5,
+            Fonte::Regular,
+            9.0,
+            TEXTO_MEDIO,
+            &format!("Emissão  {}", p.data.formatar()),
+        );
+        if let Some(e) = p.previsao_entrega {
+            self.texto_direita(
+                DIR,
+                y + 1.0,
+                Fonte::Negrito,
+                9.0,
+                RUBRO,
+                &format!("Entrega  {}", e.formatar()),
+            );
+        }
+        self.y = y + 9.0;
+    }
+
+    fn bloco_fornecedor(&mut self, p: &PedidoCompraPdf) {
+        self.rotulo("FORNECEDOR");
+        self.y += 4.6;
+        let y = self.y;
+        self.texto_em(MX, y, Fonte::Negrito, 10.5, TEXTO_FORTE, &p.fornecedor_nome);
+        let linha2: Vec<&str> = [
+            p.fornecedor_documento.as_str(),
+            p.fornecedor_contato.as_str(),
+        ]
+        .into_iter()
+        .filter(|s| !s.is_empty())
+        .collect();
+        if !linha2.is_empty() {
+            self.texto_em(
+                MX,
+                y + 4.4,
+                Fonte::Regular,
+                9.0,
+                TEXTO_MEDIO,
+                &linha2.join("   ·   "),
+            );
+            self.y = y + 4.4;
+        }
+        self.y += 8.0;
+    }
+
+    fn quadro_totais_com_frete(
+        &mut self,
+        subtotal: cardeal_kernel::Dinheiro,
+        frete: cardeal_kernel::Dinheiro,
+        total: cardeal_kernel::Dinheiro,
+    ) {
+        self.garantir(26.0);
+        let x = DIR - 78.0;
+        let mut y = self.y + 2.0;
+        y = self.linha_total(x, y, "Itens", &subtotal.formatar_com_simbolo(), false);
+        if !frete.e_zero() {
+            y = self.linha_total(x, y, "Frete", &frete.formatar_com_simbolo(), false);
+        }
+        self.canvas().linha(x, y - 2.0, DIR, y - 2.0, 0.6, BORDA);
+        y += 1.0;
+        y = self.linha_total(x, y, "TOTAL", &total.formatar_com_simbolo(), true);
+        self.y = y + 6.0;
+    }
+
+    /// Um bloco de condição (rótulo + texto quebrado); vazio, nada.
+    fn bloco_condicao(&mut self, rotulo: &str, texto: &str) {
+        if texto.trim().is_empty() {
+            return;
+        }
+        self.garantir(14.0);
+        self.rotulo(rotulo);
+        self.y += 4.4;
+        for linha in quebrar(texto, Fonte::Regular, 9.0, LARGURA_CONTEUDO) {
+            self.garantir(6.0);
+            let y = self.y;
+            self.texto_em(MX, y, Fonte::Regular, 9.0, TEXTO, &linha);
+            self.y += 4.4;
+        }
+        self.y += 4.0;
     }
 
     // ── Título — comprovante de OS ────────────────────────────────────────

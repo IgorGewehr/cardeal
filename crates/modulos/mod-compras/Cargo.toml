@@ -12,7 +12,9 @@ repository.workspace   = true
 default = ["sqlite"]
 # Persistência em SQLite (despacho, repositório, migrações). Desligada, sobra o domínio
 # e os tipos de comando/consulta — o que o cliente egui/WASM compila (ADR-0016).
-sqlite = ["dep:cardeal-storage", "dep:cardeal-fiscal", "dep:rusqlite", "cardeal-ledger/sqlite", "cardeal-modkit/sqlite", "mod-financeiro/sqlite", "mod-estoque/sqlite", "mod-clientes/sqlite"]
+# A busca de notas na SEFAZ abre a porta fiscal da empresa (`mod-fiscal`) e lê a UF dela
+# (`mod-empresa`): só com a persistência.
+sqlite = ["dep:cardeal-storage", "dep:cardeal-fiscal", "dep:rusqlite", "dep:mod-fiscal", "dep:mod-empresa", "cardeal-ledger/sqlite", "cardeal-modkit/sqlite", "mod-financeiro/sqlite", "mod-estoque/sqlite", "mod-clientes/sqlite", "mod-fiscal/sqlite", "mod-empresa/sqlite"]
 # Telas do módulo (compiladas apenas no desktop).
 ui = ["dep:cardeal-ui", "dep:egui"]
 # Submódulos — ver docs/04-pilar-modularidade.md §2.1
@@ -32,6 +34,8 @@ cardeal-fiscal = { workspace = true, optional = true }
 mod-financeiro = { path = "../mod-financeiro", default-features = false }
 mod-estoque = { path = "../mod-estoque", default-features = false }
 mod-clientes = { path = "../mod-clientes", default-features = false }
+mod-fiscal = { path = "../mod-fiscal", default-features = false, optional = true }
+mod-empresa = { path = "../mod-empresa", default-features = false, optional = true }
 cardeal-ui = { workspace = true, optional = true }
 egui       = { workspace = true, optional = true }
 serde.workspace     = true

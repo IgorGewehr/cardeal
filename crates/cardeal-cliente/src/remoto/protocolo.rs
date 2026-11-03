@@ -87,6 +87,68 @@ pub fn login(pedido: &cardeal_protocol::PedidoLogin) -> Resultado<Pedido> {
     )))
 }
 
+/// O login com o código da verificação em duas etapas.
+///
+/// # Errors
+/// Falha de serialização.
+pub fn login_com_codigo(pedido: &cardeal_protocol::PedidoLoginComCodigo) -> Resultado<Pedido> {
+    Ok(sem_reenvio(base(
+        Metodo::Post,
+        cardeal_protocol::ROTA_SESSAO_CODIGO.to_owned(),
+        carga(pedido)?,
+    )))
+}
+
+/// A conta tem verificação em duas etapas?
+#[must_use]
+pub fn segundo_fator_ativo() -> Pedido {
+    base(
+        Metodo::Get,
+        cardeal_protocol::ROTA_SEGUNDO_FATOR.to_owned(),
+        Vec::new(),
+    )
+}
+
+/// Um segredo novo para o aplicativo autenticador.
+#[must_use]
+pub fn propor_segundo_fator() -> Pedido {
+    sem_reenvio(base(
+        Metodo::Post,
+        cardeal_protocol::ROTA_SEGUNDO_FATOR_PROPOSTA.to_owned(),
+        Vec::new(),
+    ))
+}
+
+/// Ativa a verificação em duas etapas.
+///
+/// # Errors
+/// Falha de serialização.
+pub fn ativar_segundo_fator(segredo: &str, codigo: &str) -> Resultado<Pedido> {
+    Ok(sem_reenvio(base(
+        Metodo::Post,
+        cardeal_protocol::ROTA_SEGUNDO_FATOR.to_owned(),
+        carga(&cardeal_protocol::PedidoAtivarSegundoFator {
+            segredo: segredo.to_owned(),
+            codigo: codigo.to_owned(),
+        })?,
+    )))
+}
+
+/// Desliga a verificação em duas etapas.
+///
+/// # Errors
+/// Falha de serialização.
+pub fn desativar_segundo_fator(senha: &str, codigo: &str) -> Resultado<Pedido> {
+    Ok(sem_reenvio(base(
+        Metodo::Post,
+        cardeal_protocol::ROTA_SEGUNDO_FATOR_DESLIGAR.to_owned(),
+        carga(&cardeal_protocol::PedidoDesativarSegundoFator {
+            senha: senha.to_owned(),
+            codigo: codigo.to_owned(),
+        })?,
+    )))
+}
+
 /// "Quem sou eu": a sessão do cookie ainda vale? (Mesma resposta do login, sem token.)
 #[must_use]
 pub fn sessao_atual() -> Pedido {

@@ -4,8 +4,11 @@
 
 use std::collections::HashMap;
 
-use cardeal_kernel::{Data, Fuso};
-use mod_fiscal::{AnularDocumentoDaVenda, DocumentoResumo, DocumentosDasVendas, EstadoDocumento};
+use cardeal_kernel::{Data, Fuso, Instante};
+use mod_fiscal::{
+    AnularDocumentoDaVenda, DocumentoResumo, DocumentosDasVendas, EstadoDocumento,
+    PrazoDeCancelamento,
+};
 use mod_pdv::{
     EstadoCupom, EstornarVenda, FormaPagamentoPdv, VendaDoPeriodo, VendaFoiEstornada,
     VendasDoPeriodo,
@@ -123,8 +126,49 @@ fn etiqueta_nota(nota: Option<&DocumentoResumo>) -> Etiqueta {
     match d.estado {
         EstadoDocumento::Autorizada => Etiqueta::positiva(rotulo),
         EstadoDocumento::Pendente | EstadoDocumento::Incerta => Etiqueta::info(rotulo),
+        EstadoDocumento::Contingencia => Etiqueta::atencao(rotulo),
         EstadoDocumento::Rejeitada | EstadoDocumento::Denegada => Etiqueta::negativa(rotulo),
         EstadoDocumento::Cancelada | EstadoDocumento::Inutilizada => Etiqueta::neutra(rotulo),
+    }
+}
+
+/// O prazo de cancelamento da NFC-e da venda selecionada, se ela ainda vale e pode ser
+/// estornada — a SEFAZ dá 30 minutos depois da autorização.
+fn prazo_da_nota(v: &EstadoVendasDoDia, agora: Instante) -> Option<PrazoDeCancelamento> {
+    let venda = v.venda_sel()?;
+    if venda.estado != EstadoCupom::Finalizado {
+        return None;
+    }
+    v.nota_sel()
+        .filter(|d| !d.anulada && d.pedido.is_none())
+        .and_then(|d| d.prazo_de_cancelamento(agora))
+}
+
+/// O que o prazo diz para quem vai estornar a venda: dentro dele, o cancelamento da NFC-e vai
+/// junto; fora, a venda se desfaz, mas a SEFAZ pode recusar a nota (não bloqueia: algumas UFs
+/// aceitam fora do prazo).
+fn aviso_do_prazo(p: PrazoDeCancelamento) -> String {
+    if p.dentro() {
+        let mut t = format!(
+            "NFC-e autorizada há {}: estornando agora, o cancelamento vai dentro do prazo \
+             (faltam {}).",
+            p.ha(),
+            p.falta()
+        );
+        if p.falta_pouco() {
+            t.push_str(
+                " Falta pouco — sem internet, o pedido espera na fila e o prazo continua correndo.",
+            );
+        }
+        t
+    } else {
+        format!(
+            "NFC-e autorizada há {}: passou o prazo de cancelamento ({}). O estorno desfaz a \
+             venda, mas a SEFAZ pode recusar o cancelamento da nota — aí a saída é uma NFC-e de \
+             devolução.",
+            p.ha(),
+            p.prazo()
+        )
     }
 }
 
@@ -218,6 +262,7 @@ pub(super) fn estornar(
     if !autorizador.concede(PERMISSAO_ESTORNAR) {
         return Err(format!("{login} não pode autorizar o estorno de venda."));
     }
+    let fora_do_prazo = prazo_da_nota(dlg, Instante::agora()).is_some_and(|p| !p.dentro());
     let estorno: VendaFoiEstornada = motor
         .executar(
             &autorizador,
@@ -230,6 +275,12 @@ pub(super) fn estornar(
         )
         .map_err(|e| e.mensagem)?;
     let mut frase = frase_da_devolucao(venda.numero, &estorno);
+    if fora_do_prazo {
+        frase.push_str(
+            " A NFC-e passou do prazo de cancelamento: se a SEFAZ recusar, emita uma NFC-e de \
+             devolução.",
+        );
+    }
     if let Err(e) = anular_nfce(
         ctx,
         motor,
@@ -306,10 +357,7 @@ pub(super) fn dialogo_vendas_do_dia(
         }
         Some(AcaoVendas::Imprimir(documento)) => {
             match crate::danfce::imprimir(motor, sessao, documento) {
-                Ok(_) => notificar(
-                    ctx,
-                    Notificacao::sucesso("Cupom fiscal aberto para imprimir"),
-                ),
+                Ok(saida) => notificar(ctx, Notificacao::sucesso(saida.mensagem("Cupom fiscal"))),
                 Err(e) => notificar(ctx, Notificacao::erro(e)),
             }
         }
@@ -440,6 +488,22 @@ fn corpo(
             e.motivo
         )));
     }
+    if let Some(p) = prazo_da_nota(v, Instante::agora()) {
+        if p.dentro() {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_secs(30));
+        }
+        ui.add_space(Espaco::E8);
+        ui.add(
+            Rotulo::apoio(aviso_do_prazo(p))
+                .quebravel()
+                .cor(if p.dentro() {
+                    ui.cores().texto_fraco
+                } else {
+                    ui.cores().atencao
+                }),
+        );
+    }
     if v.nota_sel().is_some_and(DocumentoResumo::anulacao_pendente) {
         ui.add_space(Espaco::E8);
         ui.add(
@@ -507,7 +571,12 @@ fn rodape(ui: &mut egui::Ui, v: &EstadoVendasDoDia, acao: &mut Option<AcaoVendas
             *acao = Some(AcaoVendas::Comprovante(v.cupom));
         }
     }
-    if let Some(d) = nota.filter(|d| d.estado == EstadoDocumento::Autorizada && !d.anulada) {
+    if let Some(d) = nota.filter(|d| {
+        matches!(
+            d.estado,
+            EstadoDocumento::Autorizada | EstadoDocumento::Contingencia
+        ) && !d.anulada
+    }) {
         if ui.add(Botao::secundario("Imprimir cupom fiscal")).clicked() {
             *acao = Some(AcaoVendas::Imprimir(d.id));
         }
@@ -525,6 +594,21 @@ fn rodape(ui: &mut egui::Ui, v: &EstadoVendasDoDia, acao: &mut Option<AcaoVendas
 #[cfg(test)]
 pub(super) mod testes {
     use super::*;
+
+    #[test]
+    fn o_prazo_da_nfce_avisa_quem_estorna() {
+        let p = |min: i64| PrazoDeCancelamento {
+            modelo: mod_fiscal::ModeloFiscal::Nfce,
+            decorrido_segundos: min * 60,
+        };
+        assert_eq!(
+            aviso_do_prazo(p(12)),
+            "NFC-e autorizada há 12 min: estornando agora, o cancelamento vai dentro do prazo \
+             (faltam 18 min)."
+        );
+        assert!(aviso_do_prazo(p(27)).contains("Falta pouco"));
+        assert!(aviso_do_prazo(p(45)).contains("passou o prazo de cancelamento (30 min)"));
+    }
 
     #[test]
     fn justificativa_cabe_na_sefaz() {
@@ -704,6 +788,7 @@ pub(super) mod testes {
                     cliente: None,
                     tabela_preco: tabela.tabela_preco,
                     local_expedicao: local.local,
+                    vendedor: None,
                 },
             )
             .unwrap();
@@ -786,7 +871,10 @@ pub(super) mod testes {
         };
 
         let pdf = std::fs::read(
-            crate::comprovante::imprimir(m, s, cupom, Dinheiro::reais(5), false).unwrap(),
+            crate::comprovante::imprimir(m, s, cupom, Dinheiro::reais(5), false)
+                .unwrap()
+                .caminho()
+                .unwrap(),
         )
         .unwrap();
         let texto = String::from_utf8_lossy(&pdf).into_owned();
@@ -806,13 +894,37 @@ pub(super) mod testes {
             },
         );
         r.unwrap();
-        let pdf =
-            std::fs::read(crate::comprovante::imprimir(m, s, cupom, Dinheiro::ZERO, true).unwrap())
-                .unwrap();
+        let pdf = std::fs::read(
+            crate::comprovante::imprimir(m, s, cupom, Dinheiro::ZERO, true)
+                .unwrap()
+                .caminho()
+                .unwrap(),
+        )
+        .unwrap();
         let texto = String::from_utf8_lossy(&pdf).into_owned();
         assert!((largura(&pdf) - 164.409).abs() < 0.01, "58 mm");
         assert!(texto.contains("Trocas em"));
         assert!(!texto.contains("Troco"), "a reimpressão não sabe o troco");
+        // Com a térmica configurada, o mesmo comprovante vai em ESC/POS, na bobina de 58 mm.
+        let (endereco, recebido) = crate::impressora::testes::impressora_de_rede();
+        let saida = crate::comprovante::imprimir_em(
+            m,
+            s,
+            cupom,
+            Dinheiro::ZERO,
+            true,
+            &crate::maquina::ImpressoraDaMaquina {
+                destino: crate::maquina::Destino::Rede(endereco.clone()),
+                acentos: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(saida, crate::impressora::Saida::Impressora(endereco));
+        let bytes = recebido.join().unwrap();
+        assert!(bytes.starts_with(b"\x1b@"));
+        let texto = String::from_utf8_lossy(&bytes);
+        assert!(texto.contains("COMPROVANTE DE VENDA") && texto.contains("Trocas em"));
+        assert!(texto.contains(&"-".repeat(32)), "32 colunas na de 58 mm");
         // A tela de PDV lê a preferência.
         let mut estado = EstadoTelaPdv::default();
         estado.carregar(m, s);

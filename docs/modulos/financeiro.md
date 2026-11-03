@@ -342,7 +342,7 @@ stateDiagram-v2
 > vem depois.
 | `EstornarBaixa` ✅ | `financeiro.receber.estornar` | Alto | Estorna o lançamento `Realizado` (`Razao::estornar`), reabre a parcela (`Parcial` ou `Aberta` conforme sobra saldo baixado) | `BaixaJaEstornada` |
 | `RenegociarTitulo` ✅ | `financeiro.receber.renegociar` | Alto | Marca as parcelas em aberto como `Renegociada`, cria um `Titulo` novo com o saldo consolidado e as condições novas — **sem** lançamento novo (ver nota abaixo) | `SemSaldoParaRenegociar` |
-| `CancelarTitulo` ✅ (2026-10-15, `financeiro.cancelar_titulo.v1`) | `financeiro.titulo.cancelar` | Alto | Cancela a conta lançada errado: estorna no Razão o `Confirmado` de cada parcela e marca parcelas e título como cancelados (nunca apaga). Só para título lançado **no financeiro** (avulso, de recorrência ou importado na implantação): o que veio de compra, venda, PDV, OS ou renegociação se desfaz pela origem. Recusa título com baixa válida (estornar um recebimento de verdade é decisão à parte, `EstornarBaixa`). Motivo ≥ 10 caracteres. Parcela cancelada não aceita baixa | `TituloJaCancelado`, `TituloDeOutraOrigem`, `TituloComMovimento`, `MotivoDoCancelamentoCurto` |
+| `CancelarTitulo` ✅ (2026-10-15, `financeiro.cancelar_titulo.v1`) | `financeiro.titulo.cancelar` | Alto | Cancela a conta lançada errado: estorna no Razão o `Confirmado` de cada parcela e marca parcelas e título como cancelados (nunca apaga). Só para título lançado **no financeiro** (avulso, de recorrência ou importado na implantação): o que veio de compra, venda, PDV, OS ou renegociação se desfaz pela origem. Recusa título com baixa válida (estornar um recebimento de verdade é decisão à parte, `EstornarBaixa`). Motivo ≥ 10 caracteres. Parcela cancelada não aceita baixa. O caminho "pela origem" é `desfazer_titulo_da_origem_comum` (2026-10-20, usado pelo estorno da entrada de compra): estorna as baixas, o lançamento de cada parcela e cancela — quem chama decide antes se estornar pagamento é aceitável. O **abatimento** pela origem é `abater_titulo_da_origem_comum` (2026-10-27, usado pelas devoluções ao fornecedor e de venda): abate as parcelas em aberto do título, da que vence primeiro em diante, com uma baixa **sem dinheiro** (`valor_recebido` zero — os relatórios de pago e recebido não a contam; sem juros nem multa) — a pagar: D Fornecedores / C a conta que o chamador diz; a receber: D essa conta / C Clientes a receber; o que não couber vira um título da espécie oposta com a contraparte (o crédito com o fornecedor, em Clientes a receber; o crédito do cliente, em Fornecedores) | `TituloJaCancelado`, `TituloDeOutraOrigem`, `TituloComMovimento`, `MotivoDoCancelamentoCurto` |
 | `AlterarVencimento` ✅ (2026-10-15, `financeiro.alterar_vencimento.v1`) | `financeiro.titulo.editar` | Médio | Muda o vencimento de uma parcela `Aberta`/`Parcial`, de título de qualquer origem (o fornecedor que prorrogou). A parcela é a fonte do vencimento para listas, aging, projeção e régua; o lançamento do Razão não se edita | `ParcelaNaoBaixavel`, `VencimentoAntesDaEmissao` |
 | `CriarRecorrencia` ✅ | `financeiro.recorrencia.criar` | Médio | Grava a regra (`categoria` opcional); não gera título imediatamente | `RegraDeRecorrenciaInvalida` |
 | `MaterializarRecorrencia` ✅ | (tarefa agendada, sem permissão de usuário) | Baixo | `materializar_recorrencias_pendentes` — gera `Titulo` real quando falta `antecedencia_geracao_dias`, idempotente por `(origem_id, emissao)` | — |
@@ -399,6 +399,14 @@ stateDiagram-v2
 > melhor o objetivo final (acompanhar receita por projeto/cliente mês a mês, mesmo quando o
 > lançamento em si é avulso).
 
+> **Nota (2026-10-20):** `DadosLancamentoTitulo.cronograma` (e `ConstrutorTitulo::cronograma`)
+> dá as parcelas uma a uma — vencimento e valor de cada, como as duplicatas de uma nota de
+> compra —, no lugar de N parcelas iguais a cada X dias; a soma precisa fechar com o título
+> (`CronogramaNaoFecha`). E `titulo_da_origem` passou a devolver o título **vivo** antes do
+> cancelado: desfeita e refeita no mesmo dia, a origem tem dois títulos com a mesma emissão, e o
+> empate podia devolver o cancelado (o desfaturamento de uma OS refaturada no mesmo dia não
+> cancelaria o título novo).
+
 ## 6. Consultas
 
 | Consulta | Permissão | Uso na UI | Índice que a sustenta |
@@ -417,6 +425,7 @@ stateDiagram-v2
 | `DfcIndiretoDoPeriodo` ✅ (2026-10-14, `financeiro.dfc_indireto_do_periodo.v1`) | `financeiro.dre.ver` | Aba Resultado e caixa › DFC › "Método indireto": o **lucro líquido da DRE** e, com o sinal trocado, a variação de cada conta patrimonial fora do caixa nos mesmos lançamentos da DRE (Confirmado/Realizado/Estornado, pela competência) — ativo que cresce prendeu dinheiro, passivo que cresce o soltou. Classificação: depreciação/amortização (pelo nome) nas operacionais; senão o grupo de fluxo da conta; senão o papel (Empréstimos, Capital, Retiradas, Lucros acumulados → financiamento; Aplicações → investimento); senão o imobilizado pelo código (1.4 → investimento); o resto, operacional, com rótulos como "(Aumento) redução de contas a receber". Termina na **mesma variação** do método direto; se um lançamento tem competência num período e liquidação noutro, a sobra aparece numa linha própria ("Diferença de datas"), nunca some — zero no caso normal (testado com venda e compra a prazo, baixas, depreciação, máquina à vista, empréstimo e retirada) | `cardeal_ledger::variacoes_patrimoniais` + `resultado_por_conta` + `movimentos_de_caixa` |
 | `CarteiraDeCheques` ✅ (2026-10-14, `financeiro.carteira_de_cheques.v1`) | `financeiro.cheque.ver` | Aba Cheques: os cheques (filtro por estado) com o cliente e a descrição do título, o "bom para" mais antigo primeiro; a tela soma em carteira, os que já podem ir ao banco e os devolvidos | `financeiro_cheque(empresa, estado, bom_para)` (migração v11) |
 | `BalanceteDoPeriodo` ✅ (2026-10-14, `financeiro.balancete_do_periodo.v1`) | `financeiro.dre.ver` | Aba Resultado e caixa › Balancete: cada conta com saldo anterior, débitos, créditos e saldo atual (D/C), agrupadoras somadas, ordem numérica dos códigos. Pela competência (Confirmado/Realizado/Estornado), então sempre fecha. Sem encerramento de exercício no sistema, as contas de resultado acumulam só o **ano**; o resultado dos anos anteriores entra numa linha do PL ("Resultado de exercícios anteriores (não encerrado)") | `cardeal_ledger::balancete` |
+| `OrcamentoDoAno` ✅ (2026-10-26, `financeiro.orcamento_do_ano.v1`) | `financeiro.dre.ver` | Resultado › Orçamento: cada conta de resultado (analítica, ativa) com o orçado e o realizado de cada mês no sentido em que se orça | `financeiro_orcamento(empresa, conta, competencia)` + `resultado_por_conta` por mês |
 | `DiarioDoPeriodo` ✅ (2026-10-14, `financeiro.diario_do_periodo.v1`) | `financeiro.dre.ver` | O diário do período: cada lançamento (número, competência, histórico, estado) com as partidas — para o pacote do contador | `cardeal_ledger::diario` |
 | `DreDoPeriodo` / `DreComparativa` ✅ (2026-10-09; no lugar de `DreDoMes`) | `financeiro.dre.ver` | Aba Resultado: DRE de um período; comparativo mês × mês anterior × mesmo mês do ano anterior. Estrutura: receita bruta › deduções (descontos, devoluções, impostos sobre venda) › receita líquida › CMV/CSV › lucro bruto › outras receitas e despesas operacionais › EBITDA › resultado financeiro › lucro líquido. Cada linha é uma **contribuição com sinal**, então o lucro líquido é sempre receitas − despesas do Razão (propriedade testada). Conta aberta pelo usuário herda o papel da sintética; sem papel conhecido cai em "outras", nunca some. Entram `Confirmado`/`Realizado`/`Estornado` pela competência; `Previsto` não | `razao_lancamento(empresa, competencia, estado)` + `razao_partida(conta)` (`cardeal_ledger::resultado_por_conta`) |
 | `PosicaoPorCentroCusto` | `financeiro.centro_custo.ver` | Relatório de centro de custo | `razao_partida_cc(centro_custo, lancamento)` |
@@ -425,6 +434,61 @@ stateDiagram-v2
 | `Categorias` ✅ | `financeiro.categoria.ver` | Seletor de categoria ao lançar título/recorrência | `financeiro_categoria(empresa, nome) WHERE ativa = 1` |
 | `TotalPorCategoriaNoPeriodo` ✅ | `financeiro.categoria.ver` | Gráfico de custo/receita por categoria e mês (churn, MRR por projeto) | agregação em memória sobre `financeiro_baixa` join `financeiro_titulo`, filtrando por `data` |
 | `TituloDaOrigem` ✅ (novo, 2026-09-11) | `financeiro.receber.ver` | Detalhe de OS (`os`)/vendas/compras faturada: "qual título isto gerou" | `financeiro_titulo(empresa, origem_modulo, origem_id)` — o par de correlação que `Titulo` já carregava desde a origem; usado por outro módulo pela consulta pública, nunca por SQL direto em `financeiro_titulo` (`docs/contratos-internos.md` §7 regra 2) |
+
+## 6.8 Portal do Contador (2026-10-31, onda 8)
+
+O que liga a empresa ao escritório de contabilidade, além do pacote do mês (`contador.rs`, migração
+v15). Financeiro › **Contador**:
+
+- **DE/PARA do plano** (`financeiro.de_para_do_contador.v1` / `financeiro.definir_de_para.v1`): o
+  código de cada conta analítica no sistema do contador. Quem preenche é o próprio contador — o papel
+  de fábrica Contador (somente leitura e exportação) ganhou `financeiro.contador.*`.
+- **Lançamentos para o sistema do contador**: o pacote do mês leva `Lançamentos AAAA-MM.csv` — o
+  diário partida a partida (`data;lancamento;conta;dc;valor;historico`, `;`, CRLF, valor sem
+  separador de milhar, D/C pelo sinal, histórico sem `;` nem quebra de linha), em **ISO-8859-1**
+  como os sistemas contábeis importam (`contador::em_latin1`: travessão e aspas tipográficas viram
+  os simples; o resto que não cabe, `?`). Cada conta sai com o código do contador; a que não tem,
+  com o do Cardeal — e, quando o DE/PARA já está em uso (ao menos um código), as que faltam viram
+  uma pendência no fim do PDF. Sem nenhum código, o CSV vai com os do Cardeal e não é pendência:
+  o contador ainda não começou a usar. Quem gera o pacote sem `financeiro.contador.ver` também
+  leva os códigos do Cardeal.
+- **Apontamentos** (`financeiro.apontamentos.v1`, `…registrar_apontamento.v1`,
+  `…responder_apontamento.v1`, `…resolver_apontamento.v1`): o contador pede, a empresa responde
+  (`financeiro.apontamento.responder`, que o papel Contador **não** tem), o contador resolve ou
+  reabre (o respondido continua pendente até ele conferir). A Visão geral avisa os que esperam a
+  empresa, com "Responder" levando à aba. Texto e resposta com ao menos 5 caracteres; o resolvido
+  não aceita resposta.
+- **Código do contador**: até 40 caracteres, sem `;` (quebraria o CSV); vazio apaga. `DefinirDePara`
+  é auditado (Médio).
+
+## 6.7 Orçamento por conta (2026-10-26, item 13 do doc 21)
+
+O orçado de cada conta do resultado, mês a mês (`orcamento.rs`, migração v14
+`financeiro_orcamento`, valor positivo no sentido em que a conta se comporta):
+- `DefinirOrcamentoDaConta` (`financeiro.definir_orcamento_da_conta.v1`) grava os 12 meses de uma
+  conta (só conta de receita ou despesa analítica);
+- `CopiarOrcamentoDoAno` (`financeiro.copiar_orcamento_do_ano.v1`) copia de um ano para outro com
+  reajuste, **só nas contas ainda sem orçamento** no destino (não apaga o que foi feito);
+- a `DreComparativa` ganha `orcado` (a DRE do orçamento do mês, montada com a mesma regra de sinais):
+  a tela mostra "Orçado" e "Real × orçado", e a conta orçada sem movimento aparece zerada;
+- Resultado › **Orçamento**: as contas com o orçado no ano, o orçado e o realizado até o mês e o
+  desvio; clicar abre os 12 meses (com "o mesmo valor em todo mês"); "Copiar de {ano − 1}" com o
+  reajuste. Permissão nova `financeiro.orcamento.editar` (Médio).
+
+Lição do `gestao-raiz` (`financial_budgets`): lá a variação é `realizado ÷ orçado − 1` em toda linha —
+a despesa que estoura o orçado aparece **positiva**, como se fosse bom. Aqui o desvio segue o sinal
+do resultado: positivo é sempre melhor.
+
+## 6.6 Resumo do Simples Nacional (2026-10-26, item 13 do doc 21)
+
+Resultado ganha a visão **Simples Nacional** (com `estoque.preco.simples.ver`; a consulta é de
+`mod-estoque`, dono do regime e das tabelas do Simples — ADR-0018): o faturamento do mês e dos 12
+meses anteriores, a alíquota efetiva, o DAS estimado, a faixa (e onde começa a próxima), os 12
+meses um a um e os avisos de limite. O RBT12 é o da lei — os 12 meses **anteriores** ao mês, pela
+competência —, com a anualização do primeiro ano e a receita de antes do Cardeal, que a seção "Mês
+de abertura e faturamento de antes do Cardeal" deixa informar (`estoque.tributario.editar`). O
+preço sugerido usa o mesmo RBT12. É estimativa: não separa as vendas com ST ou monofásico (que
+pagam menos no Anexo I); a guia é do contador. O MEI vê o faturamento do ano contra o limite.
 
 ## 6.5 Régua de cobrança (2026-10-14)
 
@@ -451,7 +515,35 @@ cabeçalho da empresa — `cardeal_pdf::gerar_relatorio`, relatório tabular gen
 separados). O `.xlsx` vem do crate novo `cardeal-planilha`: Office Open XML escrito à mão (ZIP armazenado +
 XML), sem dependência externa — dinheiro como número `#.##0,00`, datas como data, negrito, larguras e cabeçalho
 congelado; conferido no Excel (amostra) e pelo leitor de pacotes Open XML do .NET (o pacote real). "Envio" é
-manual: o usuário anexa a pasta no e-mail/WhatsApp — SMTP e o Portal do Contador (onda 8) ficam para depois.
+manual: o usuário anexa a pasta no e-mail/WhatsApp — SMTP fica para depois; o Portal do Contador (§6.8)
+acrescenta o CSV dos lançamentos com o DE/PARA.
+
+**Com as notas do mês (2026-10-20, item 11 do doc 21).** O pacote ganha um terceiro arquivo,
+`XMLs AAAA-MM.zip`, comprimido (`cardeal_planilha::zip::empacotar_comprimido`; o deflate é do
+`miniz_oxide`, que já vinha no grafo pelo `png`):
+- as notas emitidas em `Saidas/<modelo>/<situação>/`: autorizadas; canceladas com a nota e o evento;
+  inutilizadas com o evento; denegadas;
+- as notas de entrada em `Entradas/`, com o XML como veio do fornecedor.
+
+O PDF ganha duas seções:
+- **Notas fiscais do mês**: quantidade e valor por modelo e situação, as notas de entrada e os XMLs no
+  pacote; as de homologação ficam de fora, contadas;
+- **Pendências do mês**, quando há, cada uma com o que fazer: a nota sem desfecho, o XML que falta e
+  por quê, a nota de entrada importada antes de o XML ser guardado.
+
+A planilha ganha as abas **Notas emitidas** e **Notas de entrada**, nota a nota, com chave, protocolos
+e a situação do XML. Cada parte só entra com a permissão de vê-la (`fiscal.ver`, `compras.entrada.ver`);
+sem ela, o PDF diz por que ficou de fora e o resto do pacote sai.
+
+Antes de montar o mês, o pacote põe na busca o que dá para recuperar na SEFAZ (2026-10-26:
+`fiscal.buscar_xmls_que_faltam.v1`, com `fiscal.emitir`) — o XML do cancelamento que não veio e o da
+nota confirmada pela consulta com a nota assinada guardada — e dispara a fila fiscal. O aviso diz quantos
+estão sendo buscados; gerado de novo depois da transmissão, o pacote já os leva.
+
+Fica de fora, por decisão (doc 21, §5, item 11):
+- o **DANFE** de cada nota: o documento fiscal é o XML, e o sistema do contador importa XML, não PDF;
+- o **SPED EFD**: a empresa do Simples em geral é dispensada da EFD ICMS/IPI, e o contador a gera dos
+  XMLs no sistema dele.
 
 ## 6.3 Lançamento pré-preenchido pelo último da pessoa (2026-10-14)
 

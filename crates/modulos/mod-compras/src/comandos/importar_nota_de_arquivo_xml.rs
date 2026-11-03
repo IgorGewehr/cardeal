@@ -5,7 +5,7 @@
 //! (XML que o fornecedor mandou por e-mail, nota de uma filial sem certificado configurado
 //! ainda, XML salvo de outro sistema).
 //!
-//! Ao contrário de [`super::importar_nota_da_sefaz`]/[`super::verificar_notas_na_sefaz`],
+//! Ao contrário da busca de notas na SEFAZ (`crate::dfe`, que usa [`super::importar_nota_da_sefaz`]),
 //! este **é** um `Comando` de despacho de verdade: não depende de `PortaFiscal` nenhum, só
 //! interpreta o texto do XML (`cardeal_fiscal::interpretar`, puro, sem rede) e roda o mesmo
 //! miolo comum ([`super::importar_nota_interpretada`]) que a importação por SEFAZ usa —
@@ -46,6 +46,6 @@ impl Comando for ImportarNotaDeArquivoXml {
     #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         let nota_xml = cardeal_fiscal::interpretar(&self.xml).map_err(|e| Erro::de_dominio(&e))?;
-        importar_nota_interpretada(&nota_xml, ctx, uow)
+        importar_nota_interpretada(&nota_xml, &self.xml, ctx, uow)
     }
 }

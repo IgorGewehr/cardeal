@@ -276,11 +276,15 @@ impl BaseDePreco {
         let linhas = cardeal_ledger::resultado_por_conta(conexao, ctx.empresa, janela)
             .map_err(|e| Erro::novo(CodigoErro::FALHA_INTERNA, format!("estoque/preço: {e}")))?;
         let resumo = cardeal_ledger::resumir(&linhas);
+        // O RBT12 é o da lei, o mesmo do resumo do Simples: os 12 meses antes deste, com a
+        // receita de antes do Cardeal e a anualização do primeiro ano (`simples.rs`).
+        let rbt12 =
+            crate::simples::sqlite::rbt12_da_empresa(conexao, ctx.empresa, hoje.competencia())?;
         Ok(Self {
             parametros,
             perfis,
             arvore,
-            rbt12: resumo.receita_bruta,
+            rbt12,
             opex_do_razao: resumo.custo_operacional_percentual(),
         })
     }

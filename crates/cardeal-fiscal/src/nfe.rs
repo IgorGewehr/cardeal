@@ -6,9 +6,10 @@
 //! padrão (tag essencial ausente, chave malformada) vira [`ErroFiscal::XmlInvalido`], nunca
 //! panic.
 
-use cardeal_kernel::{Cnpj, Data, Dinheiro, Preco, Quantidade};
+use cardeal_kernel::{Cnpj, Data, Dinheiro, Percentual, Preco, Quantidade};
 use quick_xml::events::Event;
 use quick_xml::reader::Reader;
+use serde::{Deserialize, Serialize};
 
 use crate::chave::ChaveAcesso;
 use crate::erros::ErroFiscal;
@@ -43,6 +44,43 @@ pub struct ItemNfe {
     pub valor_ipi: Dinheiro,
     /// O CFOP do item (`det/prod/CFOP`), na ótica de quem emitiu.
     pub cfop: Option<String>,
+    /// O ICMS, o ST e o FCP do ST destacados no item, campo a campo — o que a devolução
+    /// devolve na proporção.
+    pub tributos: TributosDaCompra,
+    /// O pedido de compra do destinatário a que o item atende (`det/prod/xPed`), como o
+    /// fornecedor escreveu.
+    pub pedido: Option<String>,
+}
+
+/// Os tributos destacados num item da nota de compra (`det/imposto/ICMS/*` e o IPI).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TributosDaCompra {
+    /// A origem da mercadoria (`orig`).
+    pub origem: u8,
+    /// O CST ou o CSOSN, como veio.
+    pub situacao: Option<String>,
+    /// A base do ICMS próprio (`vBC`).
+    pub base_icms: Dinheiro,
+    /// A alíquota do ICMS próprio (`pICMS`).
+    pub aliquota_icms: Option<Percentual>,
+    /// O ICMS próprio (`vICMS`).
+    pub valor_icms: Dinheiro,
+    /// A modalidade da base do ST (`modBCST`).
+    pub modalidade_st: Option<String>,
+    /// A margem do ST (`pMVAST`).
+    pub mva_st: Option<Percentual>,
+    /// A base do ST (`vBCST`).
+    pub base_st: Dinheiro,
+    /// A alíquota do ST (`pICMSST`).
+    pub aliquota_st: Option<Percentual>,
+    /// O ST (`vICMSST`), sem o FCP.
+    pub valor_st: Dinheiro,
+    /// A base do FCP do ST (`vBCFCPST`).
+    pub base_fcp_st: Dinheiro,
+    /// A alíquota do FCP do ST (`pFCPST`).
+    pub aliquota_fcp_st: Option<Percentual>,
+    /// O FCP do ST (`vFCPST`).
+    pub valor_fcp_st: Dinheiro,
 }
 
 impl ItemNfe {
@@ -85,10 +123,26 @@ pub struct NotaFiscalXml {
     pub finalidade: FinalidadeNfe,
     /// O documento do destinatário (`dest/CNPJ` ou `dest/CPF`, só dígitos), quando há.
     pub destinatario: Option<String>,
+    /// As duplicatas (`cobr/dup`): como o fornecedor vai cobrar — vencimento e valor de cada
+    /// parcela. Vazio quando a nota não traz cobrança (paga à vista, ou boleto à parte).
+    pub duplicatas: Vec<Duplicata>,
+    /// O pedido de compra do destinatário (`compra/xPed`), como o fornecedor escreveu.
+    pub pedido: Option<String>,
+}
+
+/// Uma duplicata da nota (`cobr/dup`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Duplicata {
+    /// O número (`nDup`), como veio — `"001"`, `"1234/1"`… Vazio se ausente.
+    pub numero: String,
+    /// O vencimento (`dVenc`).
+    pub vencimento: Data,
+    /// O valor (`vDup`).
+    pub valor: Dinheiro,
 }
 
 /// A finalidade da NF-e (`ide/finNFe`).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FinalidadeNfe {
     /// 1 — normal.
     #[default]
@@ -102,6 +156,17 @@ pub enum FinalidadeNfe {
 }
 
 impl FinalidadeNfe {
+    /// O código `finNFe`.
+    #[must_use]
+    pub const fn codigo(self) -> &'static str {
+        match self {
+            Self::Normal => "1",
+            Self::Complementar => "2",
+            Self::Ajuste => "3",
+            Self::Devolucao => "4",
+        }
+    }
+
     fn de_codigo(codigo: &str) -> Self {
         match codigo.trim() {
             "2" => Self::Complementar,
@@ -277,6 +342,7 @@ pub fn interpretar(xml: &str) -> Result<NotaFiscalXml, ErroFiscal> {
     let mut valor_total = None;
     let mut itens = Vec::new();
     let mut ide = Identificacao::default();
+    let mut cobranca = Cobranca::default();
 
     // Pilha de nomes de tag abertos — dá contexto para tags de nome repetido em seções
     // diferentes (nenhuma colide aqui, mas a pilha deixa o parser honesto sobre onde está).
@@ -305,6 +371,7 @@ pub fn interpretar(xml: &str) -> Result<NotaFiscalXml, ErroFiscal> {
                 if nome == "det" {
                     item_atual = Some(ItemParcial::default());
                 }
+                cobranca.abrir(&nome, &pilha);
                 pilha.push(nome);
             }
             Event::End(e) => {
@@ -314,6 +381,7 @@ pub fn interpretar(xml: &str) -> Result<NotaFiscalXml, ErroFiscal> {
                         itens.push(parcial.finalizar()?);
                     }
                 }
+                cobranca.fechar(&nome)?;
                 pilha.pop();
             }
             Event::Text(t) => {
@@ -322,6 +390,9 @@ pub fn interpretar(xml: &str) -> Result<NotaFiscalXml, ErroFiscal> {
                     continue;
                 }
                 let caminho: Vec<&str> = pilha.iter().map(String::as_str).collect();
+                if cobranca.ler(&caminho, &texto)? {
+                    continue;
+                }
                 processar_texto(
                     &caminho,
                     &texto,
@@ -360,7 +431,76 @@ pub fn interpretar(xml: &str) -> Result<NotaFiscalXml, ErroFiscal> {
         entrada_do_emitente: ide.entrada_do_emitente,
         finalidade: ide.finalidade,
         destinatario: ide.destinatario,
+        duplicatas: cobranca.duplicatas,
+        pedido: ide.pedido,
     })
+}
+
+/// As duplicatas (`cobr/dup`) sendo lidas.
+#[derive(Default)]
+struct Cobranca {
+    duplicatas: Vec<Duplicata>,
+    atual: Option<DuplicataParcial>,
+}
+
+impl Cobranca {
+    fn abrir(&mut self, nome: &str, pilha: &[String]) {
+        if nome == "dup" && pilha.last().is_some_and(|p| p == "cobr") {
+            self.atual = Some(DuplicataParcial::default());
+        }
+    }
+
+    fn fechar(&mut self, nome: &str) -> Result<(), ErroFiscal> {
+        if nome == "dup" {
+            if let Some(parcial) = self.atual.take() {
+                self.duplicatas.push(parcial.finalizar()?);
+            }
+        }
+        Ok(())
+    }
+
+    /// Lê o texto quando ele é de uma duplicata; `true` se era.
+    fn ler(&mut self, caminho: &[&str], texto: &str) -> Result<bool, ErroFiscal> {
+        match &mut self.atual {
+            Some(dup) => dup.ler(caminho, texto).map(|()| true),
+            None => Ok(false),
+        }
+    }
+}
+
+/// Uma duplicata sendo lida.
+#[derive(Default)]
+struct DuplicataParcial {
+    numero: String,
+    vencimento: Option<Data>,
+    valor: Option<Dinheiro>,
+}
+
+impl DuplicataParcial {
+    fn ler(&mut self, caminho: &[&str], texto: &str) -> Result<(), ErroFiscal> {
+        match caminho {
+            [.., "dup", "nDup"] => texto.trim().clone_into(&mut self.numero),
+            [.., "dup", "dVenc"] => {
+                self.vencimento =
+                    Some(data_de_dh_emi(texto.trim()).map_err(|_| {
+                        ErroFiscal::XmlInvalido(format!("dVenc inválido: {texto}"))
+                    })?);
+            }
+            [.., "dup", "vDup"] => self.valor = Some(dinheiro_de(texto, "vDup")?),
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn finalizar(self) -> Result<Duplicata, ErroFiscal> {
+        Ok(Duplicata {
+            numero: self.numero,
+            vencimento: self
+                .vencimento
+                .ok_or_else(|| campo_ausente("cobr/dup/dVenc"))?,
+            valor: self.valor.ok_or_else(|| campo_ausente("cobr/dup/vDup"))?,
+        })
+    }
 }
 
 /// Tipo, finalidade e destinatário — o que diz se a nota é mesmo uma compra.
@@ -369,6 +509,7 @@ struct Identificacao {
     entrada_do_emitente: bool,
     finalidade: FinalidadeNfe,
     destinatario: Option<String>,
+    pedido: Option<String>,
 }
 
 #[derive(Default)]
@@ -384,6 +525,8 @@ struct ItemParcial {
     valor_icms_st: Dinheiro,
     valor_ipi: Dinheiro,
     cfop: Option<String>,
+    tributos: TributosDaCompra,
+    pedido: Option<String>,
 }
 
 /// O literal que a NF-e usa em `cEAN`/`cEANTrib` para "este produto não tem código de
@@ -414,6 +557,8 @@ impl ItemParcial {
             valor_icms_st: self.valor_icms_st,
             valor_ipi: self.valor_ipi,
             cfop: self.cfop,
+            tributos: self.tributos,
+            pedido: self.pedido,
         })
     }
 }
@@ -441,6 +586,8 @@ fn processar_texto(
             ide.destinatario = Some(texto.chars().filter(char::is_ascii_digit).collect());
         }
         [.., "prod", "CFOP"] => set_item(item_atual, |i| i.cfop = Some(texto.trim().to_string())),
+        [.., "prod", "xPed"] => set_item(item_atual, |i| i.pedido = Some(texto.trim().to_string())),
+        [.., "compra", "xPed"] => ide.pedido = Some(texto.trim().to_string()),
         [.., "ide", "nNF"] => *numero = Some(texto.to_string()),
         [.., "ide", "serie"] => *serie = Some(texto.to_string()),
         [.., "ide", "dhEmi"] => *emissao = Some(data_de_dh_emi(texto)?),
@@ -504,13 +651,84 @@ fn processar_texto(
             set_item(item_atual, |i| i.valor_desconto = v);
         }
         // ST cobrado nesta nota (ICMS10/30/70/90, ICMSSN201/202/900, ICMSPart) e o FCP dele.
-        [.., "imposto", "ICMS", _, "vICMSST" | "vFCPST"] => {
+        [.., "imposto", "ICMS", _, "vICMSST"] => {
             let v = dinheiro_de(texto, "vICMSST")?;
-            set_item(item_atual, |i| i.valor_icms_st += v);
+            set_item(item_atual, |i| {
+                i.valor_icms_st += v;
+                i.tributos.valor_st = v;
+            });
         }
+        [.., "imposto", "ICMS", _, "vFCPST"] => {
+            let v = dinheiro_de(texto, "vFCPST")?;
+            set_item(item_atual, |i| {
+                i.valor_icms_st += v;
+                i.tributos.valor_fcp_st = v;
+            });
+        }
+        [.., "imposto", "ICMS", _, campo] => tributo_do_icms(item_atual, campo, texto)?,
         [.., "imposto", "IPI", "IPITrib", "vIPI"] => {
             let v = dinheiro_de(texto, "vIPI")?;
             set_item(item_atual, |i| i.valor_ipi = v);
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Os campos do grupo de ICMS do item que a devolução usa.
+fn tributo_do_icms(
+    item_atual: &mut Option<ItemParcial>,
+    campo: &str,
+    texto: &str,
+) -> Result<(), ErroFiscal> {
+    let percentual = || {
+        Percentual::de_str(texto)
+            .map_err(|_| ErroFiscal::XmlInvalido(format!("{campo} inválido: {texto}")))
+    };
+    match campo {
+        "orig" => {
+            let o = texto.trim().parse::<u8>().unwrap_or(0);
+            set_item(item_atual, |i| i.tributos.origem = o);
+        }
+        "CST" | "CSOSN" => {
+            let s = texto.trim().to_owned();
+            set_item(item_atual, |i| i.tributos.situacao = Some(s));
+        }
+        "vBC" => {
+            let v = dinheiro_de(texto, campo)?;
+            set_item(item_atual, |i| i.tributos.base_icms = v);
+        }
+        "pICMS" => {
+            let p = percentual()?;
+            set_item(item_atual, |i| i.tributos.aliquota_icms = Some(p));
+        }
+        "vICMS" => {
+            let v = dinheiro_de(texto, campo)?;
+            set_item(item_atual, |i| i.tributos.valor_icms = v);
+        }
+        "modBCST" => {
+            let m = texto.trim().to_owned();
+            set_item(item_atual, |i| i.tributos.modalidade_st = Some(m));
+        }
+        "pMVAST" => {
+            let p = percentual()?;
+            set_item(item_atual, |i| i.tributos.mva_st = Some(p));
+        }
+        "vBCST" => {
+            let v = dinheiro_de(texto, campo)?;
+            set_item(item_atual, |i| i.tributos.base_st = v);
+        }
+        "pICMSST" => {
+            let p = percentual()?;
+            set_item(item_atual, |i| i.tributos.aliquota_st = Some(p));
+        }
+        "vBCFCPST" => {
+            let v = dinheiro_de(texto, campo)?;
+            set_item(item_atual, |i| i.tributos.base_fcp_st = v);
+        }
+        "pFCPST" => {
+            let p = percentual()?;
+            set_item(item_atual, |i| i.tributos.aliquota_fcp_st = Some(p));
         }
         _ => {}
     }
@@ -538,7 +756,10 @@ mod testes {
     <prod><cProd>A</cProd><xProd>CERVEJA</xProd><NCM>22030000</NCM><qCom>12</qCom>
       <vUnCom>5.00</vUnCom><vProd>60.00</vProd><vDesc>6.00</vDesc></prod>
     <imposto>
-      <ICMS><ICMS10><vICMS>10.80</vICMS><vICMSST>9.50</vICMSST><vFCPST>1.20</vFCPST></ICMS10></ICMS>
+      <ICMS><ICMS10><orig>1</orig><CST>10</CST><modBC>3</modBC><vBC>60.00</vBC><pICMS>18.00</pICMS>
+        <vICMS>10.80</vICMS><modBCST>4</modBCST><pMVAST>40.00</pMVAST><vBCST>84.00</vBCST>
+        <pICMSST>24.00</pICMSST><vICMSST>9.50</vICMSST><vBCFCPST>84.00</vBCFCPST>
+        <pFCPST>2.00</pFCPST><vFCPST>1.20</vFCPST></ICMS10></ICMS>
       <IPI><IPITrib><vIPI>3.00</vIPI></IPITrib></IPI>
     </imposto>
   </det>
@@ -556,6 +777,24 @@ mod testes {
         assert_eq!(a.valor_icms_st, Dinheiro::centavos(1_070));
         assert_eq!(a.valor_ipi, Dinheiro::reais(3));
         assert_eq!(a.valor_na_nota(), Dinheiro::centavos(6_770));
+        // Campo a campo, para a devolução.
+        let t = &a.tributos;
+        assert_eq!((t.origem, t.situacao.as_deref()), (1, Some("10")));
+        assert_eq!(
+            (t.base_icms, t.valor_icms),
+            (Dinheiro::reais(60), Dinheiro::centavos(1_080))
+        );
+        assert_eq!(t.aliquota_icms, Some(Percentual::de_str("18").unwrap()));
+        assert_eq!(t.modalidade_st.as_deref(), Some("4"));
+        assert_eq!(t.mva_st, Some(Percentual::de_str("40").unwrap()));
+        assert_eq!(
+            (t.base_st, t.valor_st),
+            (Dinheiro::reais(84), Dinheiro::centavos(950))
+        );
+        assert_eq!(t.aliquota_st, Some(Percentual::de_str("24").unwrap()));
+        assert_eq!(t.valor_fcp_st, Dinheiro::centavos(120));
+        assert_eq!(t.aliquota_fcp_st, Some(Percentual::de_str("2").unwrap()));
+        assert_eq!(n.itens[1].tributos.situacao.as_deref(), None);
         let b = &n.itens[1];
         assert_eq!(
             b.valor_icms_st,
@@ -565,6 +804,27 @@ mod testes {
         // Itens somados batem com o vNF.
         let soma: Dinheiro = n.itens.iter().map(ItemNfe::valor_na_nota).sum();
         assert_eq!(soma, n.valor_total);
+        assert_eq!(n.pedido, None, "sem o grupo compra");
+        assert_eq!(a.pedido, None);
+    }
+
+    #[test]
+    fn le_o_pedido_de_compra_da_nota_e_do_item() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe"><NFe>
+<infNFe Id="NFe35240912345678000181550010000012341123456789" versao="4.00">
+  <ide><nNF>9</nNF><serie>1</serie><dhEmi>2024-09-12T10:00:00-03:00</dhEmi></ide>
+  <emit><CNPJ>11222333000181</CNPJ><xNome>Fornecedor</xNome></emit>
+  <det nItem="1">
+    <prod><cProd>A</cProd><xProd>CERVEJA</xProd><NCM>22030000</NCM><qCom>12</qCom>
+      <vUnCom>5.00</vUnCom><vProd>60.00</vProd><xPed> PC-0042 </xPed><nItemPed>1</nItemPed></prod>
+  </det>
+  <total><ICMSTot><vProd>60.00</vProd><vNF>60.00</vNF></ICMSTot></total>
+  <compra><xPed>42</xPed></compra>
+</infNFe></NFe></nfeProc>"#;
+        let n = interpretar(xml).unwrap();
+        assert_eq!(n.pedido.as_deref(), Some("42"));
+        assert_eq!(n.itens[0].pedido.as_deref(), Some("PC-0042"));
     }
 
     const XML_EXEMPLO: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -660,6 +920,35 @@ mod testes {
                 &format!("<NCM>22021000</NCM><CFOP>{cfop}</CFOP>"),
             );
         interpretar(&xml).unwrap()
+    }
+
+    #[test]
+    fn le_as_duplicatas_da_cobranca() {
+        let xml = XML_EXEMPLO.replace(
+            "</total>",
+            "</total><cobr><fat><nFat>123</nFat><vOrig>100.00</vOrig><vLiq>100.00</vLiq></fat>\
+             <dup><nDup>001</nDup><dVenc>2024-10-12</dVenc><vDup>40.00</vDup></dup>\
+             <dup><nDup>002</nDup><dVenc>2024-11-12</dVenc><vDup>60.00</vDup></dup></cobr>",
+        );
+        let n = interpretar(&xml).unwrap();
+        assert_eq!(
+            n.duplicatas,
+            vec![
+                Duplicata {
+                    numero: "001".into(),
+                    vencimento: Data::de_ymd(2024, 10, 12).unwrap(),
+                    valor: Dinheiro::reais(40),
+                },
+                Duplicata {
+                    numero: "002".into(),
+                    vencimento: Data::de_ymd(2024, 11, 12).unwrap(),
+                    valor: Dinheiro::reais(60),
+                },
+            ]
+        );
+        assert!(interpretar(XML_EXEMPLO).unwrap().duplicatas.is_empty());
+        let sem_valor = xml.replace("<vDup>60.00</vDup>", "");
+        assert!(interpretar(&sem_valor).is_err(), "duplicata sem valor");
     }
 
     #[test]

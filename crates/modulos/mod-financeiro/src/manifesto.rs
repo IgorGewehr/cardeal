@@ -298,6 +298,31 @@ const PERMISSOES: &[Permissao] = &[
         Risco::Baixo,
         None,
     ),
+    // ── portal do contador ───────────────────────────────────────────────────
+    perm(
+        "financeiro.contador.ver",
+        "Ver o DE/PARA do contador e os apontamentos",
+        Risco::Baixo,
+        None,
+    ),
+    perm(
+        "financeiro.contador.de_para",
+        "Definir o código de cada conta no sistema do contador (DE/PARA)",
+        Risco::Medio,
+        None,
+    ),
+    perm(
+        "financeiro.contador.apontar",
+        "Registrar e resolver apontamentos do contador",
+        Risco::Baixo,
+        None,
+    ),
+    perm(
+        "financeiro.apontamento.responder",
+        "Responder aos apontamentos do contador",
+        Risco::Baixo,
+        None,
+    ),
     // ── plano de contas ──────────────────────────────────────────────────────
     perm(
         "financeiro.plano.ver",
@@ -372,6 +397,12 @@ const PERMISSOES: &[Permissao] = &[
     perm(
         "financeiro.dre.ver",
         "Ver DRE gerencial",
+        Risco::Medio,
+        Some("dre"),
+    ),
+    perm(
+        "financeiro.orcamento.editar",
+        "Orçar receitas e despesas por conta",
         Risco::Medio,
         Some("dre"),
     ),

@@ -71,5 +71,5 @@ pub use razao::Razao;
 #[cfg(feature = "sqlite")]
 pub use repositorio::{semear_plano_padrao, RepositorioRazao};
 #[cfg(feature = "sqlite")]
-pub use resultado::resultado_por_conta;
+pub use resultado::{contas_de_resultado, resultado_por_conta};
 pub use resultado::{resumir, LinhaResultado, ResumoGerencial};

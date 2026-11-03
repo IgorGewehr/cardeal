@@ -7,6 +7,16 @@
 //! aceite em um clique → quando `Conferida`, confirmar a entrada (baixa no estoque + título a
 //! pagar, opcionalmente já baixado quando a compra foi paga na hora).
 //!
+//! As notas que a SEFAZ entrega ao CNPJ (distribuição `DFe`) chegam sozinhas: a busca roda em
+//! segundo plano (`crate::compras_fundo`) e o botão "Buscar na SEFAZ" a dispara na hora. A
+//! seção "Notas que chegaram pela SEFAZ" mostra a última busca e as que pedem atenção (à espera
+//! da SEFAZ liberar a nota completa, as que não importaram, as ignoradas e por quê).
+//!
+//! Três abas (2026-10-31): **Notas de entrada**, **Pedidos** (`pedidos`: o pedido de compra,
+//! aprovado, mandado ao fornecedor e recebido pelas notas) e **Cotações** (`cotacoes`: as
+//! propostas de vários fornecedores lado a lado, decididas item a item). A nota ligada a um
+//! pedido mostra na conferência o que veio contra o que se pediu (`conferencia_pedido`).
+//!
 //! Revisão de 2026-09-13 (mesma rodada de modernização de estoque/clientes/OS/financeiro):
 //! busca + ordenação por coluna na lista, `Etiqueta` colorida por estado (nota e casamento de
 //! item), diálogo de conferência decoupled do índice da lista (guarda a nota aberta por valor,
@@ -16,12 +26,12 @@
 use std::collections::HashMap;
 
 use cardeal_cliente::{Motor, Sessao};
-use cardeal_kernel::{Dinheiro, Id};
+use cardeal_kernel::{Dinheiro, Fuso, Id};
 use cardeal_modkit::Icone;
 use cardeal_ui::atoms::{Botao, Caixa, Divisor, Etiqueta, Rotulo, Tom, ValorDinheiro, ATALHO_NOVO};
 use cardeal_ui::molecules::{
-    dado, BarraFiltros, Campo, EstadoVazio, Mascara, OpcaoBusca, SecaoExpansivel, SeletorBusca,
-    SeletorOpcao,
+    dado, Abas, BarraFiltros, Campo, EstadoVazio, Mascara, OpcaoBusca, SecaoExpansivel,
+    SeletorBusca, SeletorOpcao,
 };
 use cardeal_ui::organisms::{
     notificar, ColunaGrade, Dialogo, Direcao, EstadoSeletorArvore, Grade, LayoutTela, NoArvore,
@@ -29,16 +39,36 @@ use cardeal_ui::organisms::{
 };
 use cardeal_ui::tokens::{Espaco, TemaUi};
 use eframe::egui;
-use mod_clientes::{Papel, PessoasPorPapel};
+use mod_clientes::{ItemPessoa, Papel, PessoasPorPapel};
 use mod_compras::{
-    ConfirmarEntrada, CriarProdutoDoItem, EstadoCasamento, EstadoNotaEntrada,
-    ImportarNotaDeArquivoXml, ItemNota, ItemNotaEntrada, ItemNotaManual, ItensDaNota,
-    LancarNotaManual, NotasRecentes, ProdutoDoItemCriado, VincularProdutoManual,
+    ConfirmarEntrada, CriarProdutoDoItem, EstadoCasamento, EstadoNaSefaz, EstadoNotaEntrada,
+    ImportarDeNovoDaSefaz, ImportarNotaDeArquivoXml, ItemNota, ItemNotaEntrada, ItemNotaManual,
+    ItensDaNota, LancarNotaManual, NotasNaSefaz, NotasRecentes, ProdutoDoItemCriado,
+    RelatorioImportacao, SituacaoDaBusca, VincularProdutoManual,
 };
 use mod_estoque::{
     ArvoreGruposProduto, ItemLocal, ItemProdutoComSaldo, Locais, ProdutosComSaldo,
     SugerirNomeDoProduto,
 };
+
+mod conferencia_pedido;
+mod cotacoes;
+mod devolucao;
+mod estorno;
+mod parcelas;
+mod pedidos;
+
+/// As abas da tela.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum AbaCompras {
+    #[default]
+    Notas,
+    Pedidos,
+    Cotacoes,
+}
+
+/// O fuso das datas e horas da tela.
+const FUSO: Fuso = Fuso::BRASILIA;
 
 /// O formulário "Criar produto novo" de um item não casado: o nome (começa com a sugestão
 /// padronizada pelo dicionário) e o grupo opcional.
@@ -96,8 +126,15 @@ fn form_nova_padrao() -> FormNova {
 /// Estado local da tela.
 #[derive(Default)]
 pub struct EstadoTelaCompras {
+    aba: AbaCompras,
     notas: Vec<ItemNota>,
     fornecedores: HashMap<Id, String>,
+    /// Os fornecedores com documento e telefone (o pedido vai ao fornecedor por eles).
+    lista_fornecedores: Vec<ItemPessoa>,
+    pedidos: pedidos::EstadoPedidos,
+    cotacoes: cotacoes::EstadoCotacoes,
+    /// O pedido de compra da nota aberta.
+    conf_pedido: conferencia_pedido::EstadoConferenciaPedido,
     produtos: Vec<ItemProdutoComSaldo>,
     locais: Vec<ItemLocal>,
     itens_nota: Vec<ItemNotaEntrada>,
@@ -116,16 +153,36 @@ pub struct EstadoTelaCompras {
     grupos: Vec<NoArvore>,
     /// "Já foi pago" no diálogo de confirmar entrada — item 2 do briefing.
     pago_no_ato: bool,
+    /// O ICMS-ST estimado pela MVA dos itens que vieram sem ST (a nota aberta).
+    st_estimado: Vec<mod_compras::st::EstimativaSt>,
+    /// Incluir o ST estimado no custo ao confirmar (decisão de quem confere).
+    incluir_st: bool,
+    /// As parcelas da conta a pagar da nota aberta.
+    parcelas: parcelas::EditorParcelas,
+    /// O estorno da entrada da nota aberta (confirmada).
+    estorno: estorno::EstadoEstorno,
+    /// As devoluções ao fornecedor da nota aberta.
+    devolucao: devolucao::EstadoDevolucao,
     busca: String,
     ordenacao: Ordenacao,
     nova: FormNova,
     erro: Option<String>,
     dlg: Dlg,
+    /// A busca de notas na SEFAZ: a última rodada e as notas que pedem atenção.
+    sefaz: Option<SituacaoDaBusca>,
+    /// A rodada da busca que a tela já mostrou (`crate::compras_fundo::geracao`).
+    geracao_sefaz: u64,
+    /// O usuário pediu a busca: avisa o resultado quando a rodada terminar.
+    busca_pedida: bool,
 }
 
 impl EstadoTelaCompras {
     /// Recarrega notas, fornecedores, produtos e locais.
     pub fn carregar(&mut self, motor: &Motor, sessao: &Sessao) {
+        self.geracao_sefaz = crate::compras_fundo::geracao();
+        self.sefaz = motor
+            .consultar(sessao, "compras.notas_na_sefaz.v1", &NotasNaSefaz)
+            .ok();
         match motor.consultar(sessao, "compras.notas_recentes.v1", &NotasRecentes) {
             Ok(n) => {
                 self.notas = n;
@@ -146,7 +203,16 @@ impl EstadoTelaCompras {
                 busca: None,
             },
         ) {
-            self.fornecedores = f.into_iter().map(|p| (p.pessoa, p.nome)).collect();
+            self.fornecedores = f.iter().map(|p| (p.pessoa, p.nome.clone())).collect();
+            self.lista_fornecedores = f;
+        }
+        if sessao.concede("compras.pedido.ver") {
+            self.pedidos
+                .carregar(motor, sessao, self.lista_fornecedores.clone());
+        }
+        if sessao.concede("compras.cotacao.ver") {
+            self.cotacoes
+                .carregar(motor, sessao, self.lista_fornecedores.clone());
         }
         if let Ok(p) = motor.consultar(sessao, "estoque.produtos_com_saldo.v1", &ProdutosComSaldo) {
             self.produtos = p;
@@ -205,6 +271,23 @@ impl EstadoTelaCompras {
         self.vinc_produto.clear();
         self.busca_produto.clear();
         self.pago_no_ato = false;
+        self.incluir_st = false;
+        self.st_estimado = motor
+            .consultar(
+                sessao,
+                "compras.estimativa_de_st.v1",
+                &mod_compras::st::EstimativaDeStDaNota { nota_entrada: nota },
+            )
+            .unwrap_or_default();
+        self.parcelas = parcelas::EditorParcelas::carregar(motor, sessao, &item);
+        self.estorno = estorno::EstadoEstorno::default();
+        self.devolucao = devolucao::EstadoDevolucao::default();
+        self.conf_pedido = conferencia_pedido::EstadoConferenciaPedido::carregar(
+            motor,
+            sessao,
+            nota,
+            item.fornecedor,
+        );
         self.nota_aberta = Some(item);
         self.dlg = Dlg::Ver;
     }
@@ -225,41 +308,145 @@ impl EstadoTelaCompras {
 
 /// Desenha a tela inteira.
 pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTelaCompras) {
+    // A busca na SEFAZ terminou uma rodada: as notas novas aparecem; quem pediu, sabe o que deu.
+    if estado.geracao_sefaz != crate::compras_fundo::geracao() {
+        estado.carregar(motor, sessao);
+        if std::mem::take(&mut estado.busca_pedida) {
+            match crate::compras_fundo::ultimo_resultado() {
+                Some(Ok(r)) => notificar(ui.ctx(), Notificacao::sucesso(format!("SEFAZ: {r}"))),
+                Some(Err(e)) => {
+                    notificar(ui.ctx(), Notificacao::erro(format!("Busca na SEFAZ: {e}")))
+                }
+                None => {}
+            }
+        }
+    }
+    // A cotação decidida pediu para abrir um dos pedidos gerados.
+    if let Some(p) = estado.cotacoes.abrir_pedido.take() {
+        estado.aba = AbaCompras::Pedidos;
+        estado
+            .pedidos
+            .carregar(motor, sessao, estado.lista_fornecedores.clone());
+        pedidos::abrir_pedido(&mut estado.pedidos, motor, sessao, p);
+    }
     LayoutTela::nova("Compras").mostrar(
         ui,
         estado,
-        |ui, estado| {
-            if ui
-                .add(Botao::primario("+ Nota manual").tecla(ATALHO_NOVO))
-                .clicked()
-            {
-                estado.nova = form_nova_padrao();
-                estado.dlg = Dlg::Nova;
+        |ui, estado| match estado.aba {
+            AbaCompras::Pedidos => {
+                if sessao.concede("compras.pedido.criar")
+                    && ui
+                        .add(Botao::primario("+ Novo pedido").tecla(ATALHO_NOVO))
+                        .clicked()
+                {
+                    pedidos::abrir_novo(&mut estado.pedidos);
+                }
             }
-            if ui.add(Botao::secundario("Importar XML")).clicked() {
-                importar_xml(ui.ctx(), motor, sessao, estado);
+            AbaCompras::Cotacoes => {
+                if sessao.concede("compras.cotacao.criar")
+                    && ui
+                        .add(Botao::primario("+ Nova cotação").tecla(ATALHO_NOVO))
+                        .clicked()
+                {
+                    cotacoes::abrir_nova(&mut estado.cotacoes);
+                }
             }
-            if ui.add(Botao::secundario("Importar pasta")).clicked() {
-                importar_pasta_xml(ui.ctx(), motor, sessao, estado);
-            }
+            AbaCompras::Notas => cabecalho_notas(ui, motor, sessao, estado),
         },
         |ui, estado| {
-            if let Some(erro) = &estado.erro {
-                ui.add(
-                    Rotulo::interface(erro.clone())
-                        .quebravel()
-                        .cor(ui.cores().negativo),
-                );
-                ui.add_space(Espaco::E12);
+            let mut abas = vec![(AbaCompras::Notas, "Notas de entrada")];
+            if sessao.concede("compras.pedido.ver") {
+                abas.push((AbaCompras::Pedidos, "Pedidos"));
             }
-            lista(ui, motor, sessao, estado);
+            if sessao.concede("compras.cotacao.ver") {
+                abas.push((AbaCompras::Cotacoes, "Cotações"));
+            }
+            if abas.len() > 1 {
+                if let Some(nova) = Abas::nova(&abas).selecionada(estado.aba).mostrar(ui) {
+                    estado.aba = nova;
+                    estado.carregar(motor, sessao);
+                }
+                ui.add_space(Espaco::E16);
+            }
+            match estado.aba {
+                AbaCompras::Pedidos => pedidos::corpo(ui, motor, sessao, &mut estado.pedidos),
+                AbaCompras::Cotacoes => cotacoes::corpo(ui, motor, sessao, &mut estado.cotacoes),
+                AbaCompras::Notas => {
+                    if let Some(erro) = &estado.erro {
+                        ui.add(
+                            Rotulo::interface(erro.clone())
+                                .quebravel()
+                                .cor(ui.cores().negativo),
+                        );
+                        ui.add_space(Espaco::E12);
+                    }
+                    notas_na_sefaz(ui, motor, sessao, estado);
+                    lista(ui, motor, sessao, estado);
+                }
+            }
         },
     );
 
-    match estado.dlg {
-        Dlg::Fechado => {}
-        Dlg::Ver => dialogo_ver(ui.ctx(), motor, sessao, estado),
-        Dlg::Nova => dialogo_nova(ui.ctx(), motor, sessao, estado),
+    match estado.aba {
+        AbaCompras::Pedidos => {
+            pedidos::dialogos(
+                ui.ctx(),
+                motor,
+                sessao,
+                &estado.produtos,
+                &mut estado.pedidos,
+            );
+        }
+        AbaCompras::Cotacoes => {
+            cotacoes::dialogos(
+                ui.ctx(),
+                motor,
+                sessao,
+                &estado.produtos,
+                &mut estado.cotacoes,
+            );
+        }
+        AbaCompras::Notas => match estado.dlg {
+            Dlg::Fechado => {}
+            Dlg::Ver => dialogo_ver(ui.ctx(), motor, sessao, estado),
+            Dlg::Nova => dialogo_nova(ui.ctx(), motor, sessao, estado),
+        },
+    }
+}
+
+/// O cabeçalho da aba das notas: lançar, importar e buscar na SEFAZ.
+fn cabecalho_notas(
+    ui: &mut egui::Ui,
+    motor: &Motor,
+    sessao: &Sessao,
+    estado: &mut EstadoTelaCompras,
+) {
+    if ui
+        .add(Botao::primario("+ Nota manual").tecla(ATALHO_NOVO))
+        .clicked()
+    {
+        estado.nova = form_nova_padrao();
+        estado.dlg = Dlg::Nova;
+    }
+    if ui.add(Botao::secundario("Importar XML")).clicked() {
+        importar_xml(ui.ctx(), motor, sessao, estado);
+    }
+    if ui.add(Botao::secundario("Importar pasta")).clicked() {
+        importar_pasta_xml(ui.ctx(), motor, sessao, estado);
+    }
+    if sessao.concede("compras.entrada.importar") {
+        let rodando = crate::compras_fundo::rodando();
+        if ui
+            .add(
+                Botao::secundario("Buscar na SEFAZ")
+                    .carregando(rodando)
+                    .habilitado(!rodando),
+            )
+            .clicked()
+            && crate::compras_fundo::disparar(ui.ctx(), motor, sessao)
+        {
+            estado.busca_pedida = true;
+        }
     }
 }
 
@@ -495,6 +682,118 @@ fn lista(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoT
     if let Some(i) = resposta.linha_clicada {
         let id = estado.notas[indices[i]].nota;
         estado.abrir_nota(motor, sessao, id);
+    }
+}
+
+/// A seção das notas que chegaram pela SEFAZ: a última busca e as notas que pedem atenção.
+/// Some enquanto a empresa nunca buscou.
+fn notas_na_sefaz(
+    ui: &mut egui::Ui,
+    motor: &Motor,
+    sessao: &Sessao,
+    estado: &mut EstadoTelaCompras,
+) {
+    let Some(s) = estado.sefaz.as_ref() else {
+        return;
+    };
+    if s.ultima_consulta.is_none() && s.notas.is_empty() {
+        return;
+    }
+    let pedem_atencao = s
+        .notas
+        .iter()
+        .filter(|n| matches!(n.estado, EstadoNaSefaz::Aguardando | EstadoNaSefaz::Erro))
+        .count();
+    let pode_importar = sessao.concede("compras.entrada.importar");
+    let mut de_novo: Option<String> = None;
+    SecaoExpansivel::nova("Notas que chegaram pela SEFAZ")
+        .aberta_por_padrao(pedem_atencao > 0)
+        .mostrar(ui, |ui| {
+            if let Some(quando) = s.ultima_consulta {
+                ui.add(
+                    Rotulo::campo(format!(
+                        "Última busca: {} — {}",
+                        quando.formatar(FUSO),
+                        s.ultimo_resultado.as_deref().unwrap_or("sem resumo")
+                    ))
+                    .quebravel(),
+                );
+            }
+            if let Some(p) = s.proxima_consulta {
+                ui.add(Rotulo::campo(format!(
+                    "A SEFAZ aceita a próxima busca a partir das {}.",
+                    p.hora(FUSO).formatar()
+                )));
+            }
+            if s.notas.is_empty() {
+                return;
+            }
+            ui.add_space(Espaco::E8);
+            Grade::nova(vec![
+                ColunaGrade::nova("Fornecedor"),
+                ColunaGrade::nova("Emissão").largura(110.0),
+                ColunaGrade::nova("Valor").largura(120.0).numero(),
+                ColunaGrade::nova("Situação").largura(170.0),
+                ColunaGrade::nova("Por quê"),
+                ColunaGrade::nova("").largura(160.0),
+            ])
+            .com_acoes()
+            .id_salt("compras-notas-na-sefaz")
+            .mostrar(ui, s.notas.len(), |i, row| {
+                let n = &s.notas[i];
+                row.col(|ui| {
+                    let nome = if n.emitente.is_empty() {
+                        n.chave.clone()
+                    } else {
+                        n.emitente.clone()
+                    };
+                    ui.add(Rotulo::interface(nome));
+                });
+                row.col(|ui| {
+                    ui.add(Rotulo::campo(
+                        n.emissao.map(|d| d.formatar()).unwrap_or_default(),
+                    ));
+                });
+                row.col(|ui| {
+                    ui.add(ValorDinheiro::novo(n.valor).neutro());
+                });
+                row.col(|ui| {
+                    let etiqueta = match n.estado {
+                        EstadoNaSefaz::Aguardando => Etiqueta::atencao(n.estado.rotulo()),
+                        EstadoNaSefaz::Baixada => Etiqueta::positiva(n.estado.rotulo()),
+                        EstadoNaSefaz::Ignorada => Etiqueta::neutra(n.estado.rotulo()),
+                        EstadoNaSefaz::Erro => Etiqueta::negativa(n.estado.rotulo()),
+                    };
+                    ui.add(etiqueta);
+                });
+                row.col(|ui| {
+                    ui.add(Rotulo::campo(n.motivo.clone().unwrap_or_default()).quebravel());
+                });
+                row.col(|ui| {
+                    if n.estado == EstadoNaSefaz::Erro
+                        && pode_importar
+                        && ui
+                            .add(Botao::primario("Importar de novo").pequeno())
+                            .clicked()
+                    {
+                        de_novo = Some(n.chave.clone());
+                    }
+                });
+            });
+        });
+    if let Some(chave) = de_novo {
+        let r: Result<RelatorioImportacao, _> = motor.executar(
+            sessao,
+            "compras.importar_de_novo_da_sefaz.v1",
+            &ImportarDeNovoDaSefaz { chave },
+        );
+        match r {
+            Ok(_) => {
+                notificar(ui.ctx(), Notificacao::sucesso("Nota importada"));
+                estado.carregar(motor, sessao);
+            }
+            Err(e) => notificar(ui.ctx(), Notificacao::erro(e.mensagem)),
+        }
     }
 }
 
@@ -754,6 +1053,7 @@ fn dialogo_ver(
                     }
                     ui.add_space(Espaco::E8);
                 }
+                let produto_mudou = acao.is_some();
                 match acao {
                     Some((item_nota, AcaoItem::Vincular(produto))) => {
                         vincular_item(ui.ctx(), motor, sessao, estado, n.nota, item_nota, produto);
@@ -763,30 +1063,128 @@ fn dialogo_ver(
                     }
                     None => {}
                 }
+                let editavel = matches!(
+                    n.estado,
+                    EstadoNotaEntrada::AConferir | EstadoNotaEntrada::Conferida
+                );
+                if conferencia_pedido::secao(
+                    ui,
+                    motor,
+                    sessao,
+                    &mut estado.conf_pedido,
+                    n.nota,
+                    editavel,
+                ) || produto_mudou
+                {
+                    estado.conf_pedido = conferencia_pedido::EstadoConferenciaPedido::carregar(
+                        motor,
+                        sessao,
+                        n.nota,
+                        n.fornecedor,
+                    );
+                }
 
-                if matches!(n.estado, EstadoNotaEntrada::Conferida) {
+                // A nota em conferência se confirma quando todo item tem produto (`Conferida`
+                // nunca é alcançada por nenhum comando: esperar por ela escondia o botão).
+                if matches!(
+                    n.estado,
+                    EstadoNotaEntrada::AConferir | EstadoNotaEntrada::Conferida
+                ) {
                     ui.add_space(Espaco::E12);
                     ui.add(Divisor::novo());
                     ui.add_space(Espaco::E12);
                     ui.add(Rotulo::titulo_secao("Confirmar entrada"));
                     ui.add_space(Espaco::E8);
-                    SeletorOpcao::novo("Local que recebe", &mut estado.local_sel)
-                        .opcoes(ops_local.clone())
-                        .mostrar(ui);
-                    ui.add_space(Espaco::E8);
-                    ui.add(Caixa::nova(
-                        &mut estado.pago_no_ato,
-                        "Nota já foi paga — baixar o título a pagar automaticamente",
-                    ));
-                    if estado.pago_no_ato {
+                    let pendentes = estado
+                        .itens_nota
+                        .iter()
+                        .filter(|i| i.estado_casamento != EstadoCasamento::Casado)
+                        .count();
+                    if pendentes > 0 {
                         ui.add(
-                            Rotulo::campo("O título nasce quitado em vez de pendente.")
-                                .cor(ui.cores().positivo),
+                            Rotulo::campo(format!(
+                                "Vincule {} a um produto do estoque para dar entrada.",
+                                if pendentes == 1 {
+                                    "o item que falta".to_owned()
+                                } else {
+                                    format!("os {pendentes} itens que faltam")
+                                }
+                            ))
+                            .quebravel(),
                         );
+                    } else {
+                        SeletorOpcao::novo("Local que recebe", &mut estado.local_sel)
+                            .opcoes(ops_local.clone())
+                            .mostrar(ui);
+                        ui.add_space(Espaco::E8);
+                        ui.add(Caixa::nova(
+                            &mut estado.pago_no_ato,
+                            "Nota já foi paga — baixar o título a pagar automaticamente",
+                        ));
+                        if estado.pago_no_ato {
+                            ui.add(
+                                Rotulo::campo(
+                                    "O título nasce quitado, numa parcela só, em vez de \
+                                     pendente.",
+                                )
+                                .cor(ui.cores().positivo),
+                            );
+                        } else {
+                            ui.add_space(Espaco::E8);
+                            parcelas::secao(
+                                ui,
+                                &mut estado.parcelas,
+                                n.valor_total,
+                                n.data_emissao,
+                            );
+                        }
+                        ui.add_space(Espaco::E12);
+                        secao_st_estimado(ui, &estado.st_estimado, &mut estado.incluir_st);
+                        if estado.conf_pedido.diverge() {
+                            ui.add(
+                                Rotulo::campo("A nota diverge do pedido de compra — confira acima antes de confirmar.")
+                                    .cor(ui.cores().atencao),
+                            );
+                        }
+                        if ui.add(Botao::primario("Confirmar entrada")).clicked() {
+                            confirmar(ui.ctx(), motor, sessao, estado, n.nota);
+                        }
                     }
-                    ui.add_space(Espaco::E8);
-                    if ui.add(Botao::primario("Confirmar entrada")).clicked() {
-                        confirmar(ui.ctx(), motor, sessao, estado, n.nota);
+                }
+                if matches!(
+                    n.estado,
+                    EstadoNotaEntrada::Confirmada | EstadoNotaEntrada::Devolvida
+                ) {
+                    ui.add_space(Espaco::E12);
+                    ui.add(Divisor::novo());
+                    ui.add_space(Espaco::E12);
+                    let itens = estado.itens_nota.clone();
+                    if devolucao::secao(
+                        ui,
+                        motor,
+                        sessao,
+                        &mut estado.devolucao,
+                        n.nota,
+                        &itens,
+                        n.estado == EstadoNotaEntrada::Confirmada,
+                    ) {
+                        estado.carregar(motor, sessao);
+                        if let Some(aberta) = estado.notas.iter().find(|x| x.nota == n.nota) {
+                            estado.nota_aberta = Some(aberta.clone());
+                        }
+                    }
+                }
+                if n.estado == EstadoNotaEntrada::Confirmada {
+                    ui.add_space(Espaco::E12);
+                    ui.add(Divisor::novo());
+                    ui.add_space(Espaco::E12);
+                    if estorno::secao(ui, motor, sessao, &mut estado.estorno, n.nota) {
+                        estado.carregar(motor, sessao);
+                        estado.recarregar_itens(motor, sessao, n.nota);
+                        if let Some(aberta) = estado.nota_aberta.clone() {
+                            estado.parcelas =
+                                parcelas::EditorParcelas::carregar(motor, sessao, &aberta);
+                        }
                     }
                 }
             },
@@ -801,8 +1199,58 @@ fn dialogo_ver(
     }
 }
 
+/// O ST estimado pela MVA: os itens, o total e a decisão de incluir no custo (com a guia a
+/// pagar ao estado). Sem estimativa, nada.
+fn secao_st_estimado(
+    ui: &mut egui::Ui,
+    estimativas: &[mod_compras::st::EstimativaSt],
+    incluir: &mut bool,
+) {
+    if estimativas.is_empty() {
+        return;
+    }
+    let total: Dinheiro = estimativas.iter().map(|e| e.valor).sum();
+    Painel::novo().realce(Tom::Atencao).mostrar(ui, |ui| {
+        ui.add(Rotulo::interface("ICMS-ST estimado pela MVA").quebravel());
+        ui.add(
+            Rotulo::apoio(
+                "Estes itens têm MVA no cadastro e vieram sem ST na nota — a antecipação fica com \
+                 a empresa. É uma estimativa: confira com o contador.",
+            )
+            .quebravel(),
+        );
+        ui.add_space(Espaco::E4);
+        for e in estimativas {
+            ui.add(Rotulo::campo(format!(
+                "{} — base {} (MVA {}), {} − {} da origem = {}",
+                e.descricao,
+                e.base_st.formatar_com_simbolo(),
+                e.mva.formatar_com_simbolo(),
+                e.aliquota_interna.formatar_com_simbolo(),
+                e.credito.formatar_com_simbolo(),
+                e.valor.formatar_com_simbolo()
+            )));
+        }
+        ui.add_space(Espaco::E4);
+        ui.add(Caixa::nova(
+            incluir,
+            format!(
+                "Incluir os {} no custo e lançar a guia a pagar ao estado",
+                total.formatar_com_simbolo()
+            ),
+        ));
+    });
+    ui.add_space(Espaco::E8);
+}
+
 /// As opções de produto para um `SeletorBusca` — reconstruída a cada item porque
 /// `OpcaoBusca` não é `Clone` (o vetor é consumido por `.opcoes()`).
+/// A etiqueta do estado da nota (a lista de notas e as notas do pedido).
+pub(crate) fn etiqueta_da_nota(e: EstadoNotaEntrada) -> Etiqueta {
+    let (rotulo, tom) = estado_nota_etiqueta(e);
+    Etiqueta::nova(rotulo, tom)
+}
+
 fn opcoes_busca_produtos(produtos: &[ItemProdutoComSaldo]) -> Vec<OpcaoBusca<Id>> {
     produtos
         .iter()
@@ -1050,6 +1498,18 @@ fn confirmar(
         );
         return;
     };
+    // Pago no ato: uma parcela só, quitada — as parcelas não vão.
+    let parcelas = if estado.pago_no_ato {
+        None
+    } else {
+        match estado.parcelas.lidas() {
+            Ok(p) => Some(p),
+            Err(e) => {
+                notificar(ctx, Notificacao::aviso(e));
+                return;
+            }
+        }
+    };
     match motor.executar(
         sessao,
         "compras.confirmar_entrada.v1",
@@ -1058,6 +1518,8 @@ fn confirmar(
             local,
             gerar_titulo_a_pagar: None,
             pago_no_ato: Some(estado.pago_no_ato),
+            parcelas,
+            incluir_st_estimado: estado.incluir_st,
         },
     ) {
         Ok(saida) => {
@@ -1076,6 +1538,124 @@ fn confirmar(
             }
         }
         Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
+    }
+}
+
+/// O que os testes das abas de compras precisam: um fornecedor (com celular) e um produto,
+/// cadastrados pelo motor, e os catálogos que a tela carrega.
+#[cfg(test)]
+pub(crate) mod apoio_testes {
+    use cardeal_cliente::{Motor, Sessao};
+    use cardeal_kernel::Id;
+    use eframe::egui;
+    use mod_clientes::{
+        ContatoInicial, CriarPessoa, ItemPessoa, Papel, PessoaCadastrada, PessoasPorPapel,
+        TipoContato, TipoPessoa,
+    };
+    use mod_estoque::{
+        CriarGrupoProduto, CriarProduto, CriarUnidade, GrupoProdutoCriado, ItemProdutoComSaldo,
+        ProdutoCriado, ProdutosComSaldo, UnidadeCriada,
+    };
+
+    /// O fornecedor e o produto criados, e os catálogos.
+    pub struct Base {
+        pub fornecedor: Id,
+        pub outro_fornecedor: Id,
+        pub produto: Id,
+        pub produtos: Vec<ItemProdutoComSaldo>,
+        pub fornecedores: Vec<ItemPessoa>,
+    }
+
+    fn pessoa(motor: &Motor, sessao: &Sessao, nome: &str) -> Id {
+        let p: PessoaCadastrada = motor
+            .executar(
+                sessao,
+                "clientes.criar_pessoa.v1",
+                &CriarPessoa {
+                    tipo: TipoPessoa::Juridica,
+                    nome: nome.to_owned(),
+                    nome_fantasia: None,
+                    papel_inicial: Papel::Fornecedor,
+                    documento_tipo: None,
+                    documento_numero: None,
+                    data_nascimento: None,
+                    endereco: None,
+                    contato: Some(ContatoInicial {
+                        tipo: TipoContato::Celular,
+                        valor: "31999998888".to_owned(),
+                    }),
+                },
+            )
+            .expect("fornecedor");
+        p.pessoa
+    }
+
+    /// Cadastra e carrega.
+    pub fn base(motor: &Motor, sessao: &Sessao) -> Base {
+        let fornecedor = pessoa(motor, sessao, "Distribuidora Alfa");
+        let outro_fornecedor = pessoa(motor, sessao, "Atacado Beta");
+        let grupo: GrupoProdutoCriado = motor
+            .executar(
+                sessao,
+                "estoque.criar_grupo_produto.v1",
+                &CriarGrupoProduto {
+                    codigo: "BEB".to_owned(),
+                    nome: "Bebidas".to_owned(),
+                    pai: None,
+                },
+            )
+            .expect("grupo");
+        let unidade: UnidadeCriada = motor
+            .executar(
+                sessao,
+                "estoque.criar_unidade.v1",
+                &CriarUnidade {
+                    sigla: "GF".to_owned(),
+                    nome: "Garrafa".to_owned(),
+                    fracionavel: false,
+                },
+            )
+            .expect("unidade");
+        let produto: ProdutoCriado = motor
+            .executar(
+                sessao,
+                "estoque.criar_produto.v1",
+                &CriarProduto {
+                    grupo_produto: grupo.grupo_produto,
+                    nome: "Refrigerante Cola 2L".to_owned(),
+                    ncm: "22021000".to_owned(),
+                    unidade_padrao: unidade.unidade,
+                    codigo_barras: None,
+                    detalhes_tecnicos: None,
+                },
+            )
+            .expect("produto");
+        Base {
+            fornecedor,
+            outro_fornecedor,
+            produto: produto.produto,
+            produtos: motor
+                .consultar(sessao, "estoque.produtos_com_saldo.v1", &ProdutosComSaldo)
+                .expect("produtos"),
+            fornecedores: motor
+                .consultar(
+                    sessao,
+                    "clientes.pessoas_por_papel.v1",
+                    &PessoasPorPapel {
+                        papel: Papel::Fornecedor,
+                        busca: None,
+                    },
+                )
+                .expect("fornecedores"),
+        }
+    }
+
+    /// Um contexto egui com as fontes e o estilo do app.
+    pub fn contexto() -> egui::Context {
+        let ctx = egui::Context::default();
+        cardeal_ui::tokens::instalar_fontes(&ctx);
+        cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+        ctx
     }
 }
 
@@ -1159,5 +1739,200 @@ mod testes {
             estado.produto_novo.is_empty(),
             "o formulário sai depois de criar"
         );
+    }
+
+    #[test]
+    fn nota_vinculada_confirma_em_parcelas_e_se_estorna_pela_tela() {
+        let t = motor_de_teste();
+        let r: mod_compras::RelatorioImportacao = t
+            .motor
+            .executar(
+                &t.sessao,
+                "compras.importar_nota_de_arquivo_xml.v1",
+                &ImportarNotaDeArquivoXml { xml: XML.into() },
+            )
+            .expect("importa");
+        let mut estado = EstadoTelaCompras::default();
+        estado.carregar(&t.motor, &t.sessao);
+        estado.abrir_nota(&t.motor, &t.sessao, r.nota_entrada);
+        let item = estado.itens_nota[0].clone();
+        let ctx = egui::Context::default();
+        cardeal_ui::tokens::instalar_fontes(&ctx);
+        cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+        let quadro = |estado: &mut EstadoTelaCompras| {
+            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                dialogo_ver(ctx, &t.motor, &t.sessao, estado);
+            });
+        };
+        quadro(&mut estado);
+        // Sem produto vinculado, o diálogo pede o vínculo em vez de oferecer a confirmação.
+        criar_produto_do_item(
+            &ctx,
+            &t.motor,
+            &t.sessao,
+            &mut estado,
+            r.nota_entrada,
+            item.id,
+        );
+        assert_eq!(
+            estado.itens_nota[0].estado_casamento,
+            EstadoCasamento::Casado
+        );
+        // A nota está "A conferir" com tudo vinculado: o diálogo oferece a confirmação.
+        quadro(&mut estado);
+        assert_eq!(
+            estado.parcelas.lidas().unwrap().len(),
+            1,
+            "sem duplicatas, uma parcela na emissão"
+        );
+        estado.parcelas = parcelas::EditorParcelas::carregar(
+            &t.motor,
+            &t.sessao,
+            estado.nota_aberta.as_ref().unwrap(),
+        );
+        let local: mod_estoque::LocalCriado = t
+            .motor
+            .executar(
+                &t.sessao,
+                "estoque.criar_local.v1",
+                &mod_estoque::CriarLocal {
+                    nome: "Depósito".into(),
+                    tipo: mod_estoque::TipoLocal::Deposito,
+                },
+            )
+            .unwrap();
+        estado.local_sel = Some(local.local);
+        confirmar(&ctx, &t.motor, &t.sessao, &mut estado, r.nota_entrada);
+        estado.carregar(&t.motor, &t.sessao);
+        let nota = estado
+            .notas
+            .iter()
+            .find(|n| n.nota == r.nota_entrada)
+            .unwrap();
+        assert_eq!(nota.estado, EstadoNotaEntrada::Confirmada);
+
+        // Estornar: a prévia, o motivo e a nota de volta à conferência.
+        estado.abrir_nota(&t.motor, &t.sessao, r.nota_entrada);
+        quadro(&mut estado);
+        let feito: mod_compras::EntradaFoiEstornada = t
+            .motor
+            .executar(
+                &t.sessao,
+                "compras.estornar_entrada.v1",
+                &mod_compras::EstornarEntrada {
+                    nota_entrada: r.nota_entrada,
+                    motivo: "Quantidade errada na conferência".into(),
+                    estornar_pagamento: false,
+                },
+            )
+            .expect("estorna");
+        assert_eq!(feito.itens, 1);
+        estado.carregar(&t.motor, &t.sessao);
+        assert_eq!(
+            estado.nota_aberta.as_ref().map(|n| n.estado),
+            Some(EstadoNotaEntrada::AConferir)
+        );
+        quadro(&mut estado);
+        quadro(&mut estado);
+    }
+
+    #[test]
+    fn nota_confirmada_volta_ao_fornecedor_pela_tela() {
+        let t = motor_de_teste();
+        let r: mod_compras::RelatorioImportacao = t
+            .motor
+            .executar(
+                &t.sessao,
+                "compras.importar_nota_de_arquivo_xml.v1",
+                &ImportarNotaDeArquivoXml { xml: XML.into() },
+            )
+            .expect("importa");
+        let mut estado = EstadoTelaCompras::default();
+        estado.carregar(&t.motor, &t.sessao);
+        estado.abrir_nota(&t.motor, &t.sessao, r.nota_entrada);
+        let item = estado.itens_nota[0].clone();
+        let ctx = egui::Context::default();
+        cardeal_ui::tokens::instalar_fontes(&ctx);
+        cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+        let quadro = |estado: &mut EstadoTelaCompras| {
+            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                dialogo_ver(ctx, &t.motor, &t.sessao, estado);
+            });
+        };
+        quadro(&mut estado);
+        criar_produto_do_item(
+            &ctx,
+            &t.motor,
+            &t.sessao,
+            &mut estado,
+            r.nota_entrada,
+            item.id,
+        );
+        quadro(&mut estado);
+        estado.parcelas = parcelas::EditorParcelas::carregar(
+            &t.motor,
+            &t.sessao,
+            estado.nota_aberta.as_ref().unwrap(),
+        );
+        let local: mod_estoque::LocalCriado = t
+            .motor
+            .executar(
+                &t.sessao,
+                "estoque.criar_local.v1",
+                &mod_estoque::CriarLocal {
+                    nome: "Depósito".into(),
+                    tipo: mod_estoque::TipoLocal::Deposito,
+                },
+            )
+            .unwrap();
+        estado.local_sel = Some(local.local);
+        confirmar(&ctx, &t.motor, &t.sessao, &mut estado, r.nota_entrada);
+        estado.carregar(&t.motor, &t.sessao);
+        estado.abrir_nota(&t.motor, &t.sessao, r.nota_entrada);
+        quadro(&mut estado);
+        quadro(&mut estado);
+
+        // Tudo volta: a nota fica "Devolvida", e a devolução aparece com a NF-e a emitir.
+        let feito: mod_compras::DevolucaoFeita = t
+            .motor
+            .executar(
+                &t.sessao,
+                "compras.devolver_ao_fornecedor.v1",
+                &mod_compras::DevolverAoFornecedor {
+                    nota_entrada: r.nota_entrada,
+                    itens: vec![mod_compras::ItemADevolver {
+                        item: item.id,
+                        quantidade: item.quantidade,
+                    }],
+                    motivo: "Produto com a validade vencida".into(),
+                },
+            )
+            .expect("devolve");
+        assert!(feito.nota_devolvida);
+        assert_eq!(feito.abatido, feito.valor_total, "a conta a pagar abatida");
+        estado.carregar(&t.motor, &t.sessao);
+        estado.abrir_nota(&t.motor, &t.sessao, r.nota_entrada);
+        assert_eq!(
+            estado.nota_aberta.as_ref().map(|n| n.estado),
+            Some(EstadoNotaEntrada::Devolvida)
+        );
+        quadro(&mut estado);
+        quadro(&mut estado);
+        // Sem a empresa pronta para emitir, a NF-e de devolução nasce rejeitada, com o porquê.
+        let doc: mod_fiscal::DocumentoResumo = t
+            .motor
+            .executar(
+                &t.sessao,
+                "compras.emitir_nfe_da_devolucao.v1",
+                &mod_compras::EmitirNfeDaDevolucao {
+                    devolucao: feito.devolucao,
+                },
+            )
+            .expect("cria a NF-e");
+        assert_eq!(doc.estado, mod_fiscal::EstadoDocumento::Rejeitada);
+        assert!(doc.motivo.is_some());
+        estado.abrir_nota(&t.motor, &t.sessao, r.nota_entrada);
+        quadro(&mut estado);
+        quadro(&mut estado);
     }
 }

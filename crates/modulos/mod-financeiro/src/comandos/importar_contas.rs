@@ -110,6 +110,7 @@ impl Comando for ImportarContasEmAberto {
                     parcelas: 1,
                     primeiro_vencimento: conta.vencimento,
                     intervalo_dias: 30,
+                    cronograma: None,
                     observacao: conta.observacao,
                     categoria: None,
                     origem_modulo: ORIGEM_IMPORTACAO,

@@ -228,6 +228,16 @@ stateDiagram-v2
 | `DuplicidadesSugeridas` | `clientes.duplicidade.mesclar` | Fila de conferência de cadastro | `clientes_pessoa_busca` por trigrama |
 | `LimiteDisponivel` | `clientes.credito.ver` | Selo na tela de venda/PDV | `clientes_limite_credito(pessoa)` + agregação em `financeiro_parcela` |
 | `ScoreDePagamento` | `clientes.credito.ver` | Selo "bom pagador" na ficha | `clientes_historico_credito(pessoa, data DESC)` |
+
+> **Nota (2026-10-26) — o score de pagamento saiu diferente do desenho acima.** Em vez do
+> `HistoricoCredito` gravado por evento aqui em `clientes`, é **calculado na hora** pelo financeiro,
+> dono das parcelas e das baixas (`mod_financeiro::pagamento`, `financeiro.perfis_de_pagamento.v1`,
+> `financeiro.receber.ver`): derivado, nunca fica velho nem precisa de reprocessamento quando uma
+> baixa é estornada. Só conta a venda **a prazo** (vencimento depois da emissão); pago até 3 dias
+> depois do vencimento é em dia; nota 0–1000 = fração do valor pago em dia nos últimos 12 meses,
+> menos 10 pontos por dia do maior atraso em aberto; selos Bom pagador / Regular / Atenção /
+> Inadimplente (vencido há mais de 30 dias) / Sem histórico. A ficha do cliente mostra o selo; a
+> curva de clientes do PDV o usa para dizer quem cobrar.
 | `CarteiraDoVendedor` | `clientes.carteira.ver` | Painel do vendedor | `clientes_carteira(vendedor)` |
 | `PreviaDaImportacaoDePessoas` ✅ (`clientes.previa_importacao_pessoas.v1`) | `clientes.pessoa.ver` | O diálogo "Importar clientes…": novos, já existiam, fornecedores, com limite, erros por linha e os 200 primeiros — sem gravar | `clientes_documento(empresa, tipo, numero)` + nomes (`indice_de_pessoas`, também usado pela importação de contas do financeiro) |
 | `PessoasPorPapel` ✅ | `clientes.pessoa.ver` | Listas de clientes/fornecedores, também serve busca (parâmetro `busca` opcional faz `LIKE` em nome/documento) | `clientes_papel(papel, ativo)` — `LIMIT 200`, sem `Pagina`/`Cursor` ainda |

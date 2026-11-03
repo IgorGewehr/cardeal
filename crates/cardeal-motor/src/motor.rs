@@ -28,6 +28,9 @@ pub struct MotorLocal {
     pub(crate) empresa: Id,
     pub(crate) dispositivo: Id,
     pub(crate) recursos: Arc<Recursos>,
+    /// O CNPJ em que a tela está (ADR-0017): o que os dados cadastrais, a identidade e os
+    /// usuários de [`MotorLocal::empresa_resumo`] e companhia mostram. `None`: a matriz.
+    pub(crate) ativa: std::sync::Mutex<Option<Id>>,
 }
 
 /// Uma sessão autenticada — o que uma tela guarda depois do login para chamar `executar`/
@@ -149,6 +152,7 @@ impl MotorLocal {
             empresa,
             dispositivo: Id::novo(),
             recursos: Arc::default(),
+            ativa: std::sync::Mutex::default(),
         })
     }
 
@@ -243,6 +247,218 @@ impl MotorLocal {
     pub fn autenticar(&self, login: &str, senha: &str) -> Resultado<SessaoLocal> {
         let sessao = autenticar_usuario(&self.arm, self.empresa, login, senha)?;
         Ok(SessaoLocal { sessao })
+    }
+
+    /// O **login** desta empresa: a senha e, para quem tem verificação em duas etapas, o código
+    /// do aplicativo autenticador (ou um de recuperação). [`Self::autenticar`] confere só a
+    /// senha — é o da liberação por supervisor no PDV, não o da porta de entrada.
+    ///
+    /// # Errors
+    /// `SEGUNDO_FATOR_NECESSARIO` (a senha confere, falta o código); credencial inválida
+    /// (senha ou código); conta inativa ou bloqueada.
+    pub fn entrar(&self, login: &str, senha: &str, codigo: Option<&str>) -> Resultado<SessaoLocal> {
+        let sessao = crate::acesso::entrar_usuario(
+            &self.arm,
+            &self.recursos,
+            self.empresa,
+            login,
+            senha,
+            codigo,
+        )?;
+        // O login entra na matriz: a tela volta a ela.
+        self.ativar_empresa(self.empresa);
+        Ok(SessaoLocal { sessao })
+    }
+
+    /// Cadastra um usuário do banco local com a senha inicial (marcada para troca no primeiro
+    /// acesso) e um papel. A senha é conferida pela política e vira hash **aqui** — o comando
+    /// (`empresa.cadastrar_usuario.v1`, auditado) só leva o hash.
+    ///
+    /// # Errors
+    /// Senha fora da política; sem permissão; login repetido; os do comando.
+    pub fn cadastrar_usuario(
+        &self,
+        sessao: &SessaoLocal,
+        login: &str,
+        nome: &str,
+        papel: cardeal_auth::PapelDeFabrica,
+        senha_inicial: &str,
+    ) -> Resultado<Id> {
+        let hash = hash_conferido(senha_inicial)?;
+        self.executar(
+            sessao,
+            "empresa.cadastrar_usuario.v1",
+            &mod_empresa::CadastrarUsuario {
+                login: login.to_owned(),
+                nome: nome.to_owned(),
+                papel,
+                hash_senha: hash,
+            },
+        )
+    }
+
+    /// O administrador redefine a senha de quem esqueceu (a provisória fica marcada para troca).
+    ///
+    /// # Errors
+    /// Senha fora da política; sem permissão; os do comando.
+    pub fn redefinir_senha_de(
+        &self,
+        sessao: &SessaoLocal,
+        usuario: Id,
+        nova: &str,
+    ) -> Resultado<()> {
+        let hash = hash_conferido(nova)?;
+        self.executar(
+            sessao,
+            "empresa.redefinir_senha_do_usuario.v1",
+            &mod_empresa::RedefinirSenhaDoUsuario {
+                usuario,
+                hash_senha: hash,
+            },
+        )
+    }
+
+    /// A pessoa da sessão troca a própria senha, provando a atual. Tira a marca de "trocar no
+    /// primeiro acesso".
+    ///
+    /// # Errors
+    /// Senha atual errada; nova fora da política; erro de escrita.
+    pub fn trocar_senha(&self, sessao: &SessaoLocal, atual: &str, nova: &str) -> Resultado<()> {
+        let mut u = self.usuario_da_sessao(sessao)?;
+        u.trocar_senha(
+            atual,
+            nova,
+            cardeal_auth::PoliticaSenha::PADRAO,
+            Instante::agora(),
+        )
+        .map_err(|e| Erro::de_dominio(&e).no_campo("senha"))?;
+        let ctx = ContextoEscrita::novo(sessao.empresa(), u.id, self.dispositivo, Id::novo());
+        self.arm
+            .escritor()
+            .executar(ctx, move |uow| {
+                RepositorioAuth::novo(uow)
+                    .atualizar_credenciais(&u)
+                    .map_err(|e| como_erro_armazenamento(&e))
+            })
+            .map(|_| ())
+            .map_err(erro_armazenamento)
+    }
+
+    /// A pessoa da sessão ainda está com a senha que outra pessoa definiu (a inicial ou uma
+    /// redefinida) e precisa trocar antes de trabalhar?
+    ///
+    /// # Errors
+    /// Erro de leitura.
+    pub fn precisa_trocar_senha(&self, sessao: &SessaoLocal) -> Resultado<bool> {
+        Ok(self.usuario_da_sessao(sessao)?.exige_troca_senha)
+    }
+
+    /// O CNPJ em que a tela está (a matriz, até trocar).
+    #[must_use]
+    pub fn empresa_ativa(&self) -> Id {
+        self.ativa
+            .lock()
+            .map_or(self.empresa, |g| g.unwrap_or(self.empresa))
+    }
+
+    /// Troca o CNPJ em que a tela está — o que os dados cadastrais, a identidade dos documentos
+    /// e a lista de usuários passam a mostrar. A sessão do CNPJ vem de
+    /// [`Self::sessao_do_usuario_em`].
+    pub fn ativar_empresa(&self, empresa: Id) {
+        if let Ok(mut g) = self.ativa.lock() {
+            *g = (empresa != self.empresa).then_some(empresa);
+        }
+    }
+
+    /// A pessoa da sessão tem verificação em duas etapas?
+    ///
+    /// # Errors
+    /// Erro de leitura.
+    pub fn segundo_fator_ativo(&self, sessao: &SessaoLocal) -> Resultado<bool> {
+        crate::segundo_fator::ativo(&self.arm, sessao.usuario())
+    }
+
+    /// Um segredo novo para a pessoa da sessão levar ao aplicativo (nada é gravado ainda).
+    ///
+    /// # Errors
+    /// Usuário inexistente; erro de leitura.
+    pub fn propor_segundo_fator(
+        &self,
+        sessao: &SessaoLocal,
+    ) -> Resultado<crate::SegundoFatorProposto> {
+        let u = self.usuario_da_sessao(sessao)?;
+        Ok(crate::segundo_fator::propor(&u.login))
+    }
+
+    /// Ativa a verificação em duas etapas da pessoa da sessão: o primeiro código do aplicativo
+    /// confirma o segredo. Devolve os códigos de recuperação, para mostrar uma vez.
+    ///
+    /// # Errors
+    /// Segredo ou código que não confere; já ativa; erro do cofre ou de escrita.
+    pub fn ativar_segundo_fator(
+        &self,
+        sessao: &SessaoLocal,
+        segredo: &str,
+        codigo: &str,
+    ) -> Resultado<Vec<String>> {
+        crate::segundo_fator::ativar(
+            &self.arm,
+            &self.recursos,
+            sessao.empresa(),
+            sessao.usuario(),
+            segredo,
+            codigo,
+        )
+    }
+
+    /// Desativa a da pessoa da sessão: a senha e um código.
+    ///
+    /// # Errors
+    /// Senha ou código que não confere; não estava ativa; erro de escrita.
+    pub fn desativar_segundo_fator(
+        &self,
+        sessao: &SessaoLocal,
+        senha: &str,
+        codigo: &str,
+    ) -> Resultado<()> {
+        let u = self.usuario_da_sessao(sessao)?;
+        crate::segundo_fator::desativar(
+            &self.arm,
+            &self.recursos,
+            sessao.empresa(),
+            &u,
+            senha,
+            codigo,
+        )
+    }
+
+    /// O administrador desliga a verificação em duas etapas de outra pessoa (perdeu o celular
+    /// e os códigos de recuperação). Exige `empresa.usuarios.gerenciar`.
+    ///
+    /// # Errors
+    /// Sem permissão; erro de escrita.
+    pub fn desligar_segundo_fator_de(&self, sessao: &SessaoLocal, usuario: Id) -> Resultado<()> {
+        if !sessao.concede("empresa.usuarios.gerenciar") {
+            return Err(Erro::novo(
+                CodigoErro::SEM_PERMISSAO,
+                "Desligar a verificação em duas etapas de outra pessoa exige a permissão de \
+                 gerenciar usuários",
+            ));
+        }
+        tracing::warn!(?usuario, por = ?sessao.usuario(), "verificação em duas etapas desligada pelo administrador");
+        crate::segundo_fator::desligar(&self.arm, &self.recursos, sessao.empresa(), usuario)
+    }
+
+    fn usuario_da_sessao(&self, sessao: &SessaoLocal) -> Resultado<cardeal_auth::Usuario> {
+        let id = sessao.usuario();
+        self.arm
+            .leitor()
+            .consultar(move |c| {
+                cardeal_auth::consultas::usuario_por_id(c, id)
+                    .map_err(|e| como_erro_armazenamento(&e))
+            })
+            .map_err(erro_armazenamento)?
+            .ok_or_else(|| Erro::novo(CodigoErro::SESSAO_INVALIDA, "usuário inexistente"))
     }
 
     /// A sessão de um usuário **já autenticado por outro meio** — a conta do servidor
@@ -502,4 +718,13 @@ fn gravar_impressao(arm: &Armazenamento, empresa: Id, impressao: [u8; 32]) -> Re
         })
         .map(|_| ())
         .map_err(erro_armazenamento)
+}
+
+/// A senha conferida pela política e transformada em hash Argon2id (formato PHC).
+fn hash_conferido(senha: &str) -> Resultado<String> {
+    cardeal_auth::PoliticaSenha::PADRAO
+        .validar(senha)
+        .and_then(|()| cardeal_auth::hash_senha(senha))
+        .map(|h| h.como_phc().to_owned())
+        .map_err(|e| Erro::de_dominio(&e).no_campo("senha"))
 }

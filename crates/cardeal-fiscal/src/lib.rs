@@ -35,25 +35,39 @@
 mod certificado;
 mod chave;
 mod der;
+mod dfe;
 mod emissao;
 mod erros;
+mod escrituracao;
 mod nfe;
+mod nfse;
 mod porta;
 mod sefaz_api;
 mod simulado;
+mod simulado_xml;
 
 pub use certificado::{
     ler_certificado_a1, preparar_certificado_a1, CertificadoPreparado, InfoCertificado,
 };
 pub use chave::ChaveAcesso;
+pub use dfe::{
+    ler_evento, ler_resumo_nfe, DocumentoDfe, EventoDfe, Manifestacao, PaginaDfe, ResumoNfe,
+    SituacaoDoResumo, TipoDfe,
+};
+pub use emissao::{chave_de_contingencia, EntradaEmContingencia, NotaEmContingencia};
 pub use emissao::{
     Consumidor, ContribuicaoItem, Crt, Csc, DocumentoConsumidor, Emitente, EnderecoEmitente,
     IcmsItem, ImpostosItem, ItemDocumento, MeioPagamento, Nfce, PagamentoDocumento,
     PedidoInutilizacao, RetornoSefaz, SituacaoRetorno,
 };
+pub use emissao::{Destinatario, DevolucaoDoItem, IndicadorIe, Nfe};
 pub use erros::ErroFiscal;
+pub use escrituracao::{ler_para_escriturar, DocumentoXml, ItemXml, ParticipanteXml, TotaisXml};
 pub use nfe::{cfop_de_venda, descrever_cfop, ClassificacaoEntrada, FinalidadeNfe};
-pub use nfe::{interpretar, ItemNfe, NotaFiscalXml};
-pub use porta::{AmbienteFiscal, ModeloFiscal, Nsu, PortaFiscal, ResumoDfe, StatusSefaz, XmlNota};
+pub use nfe::{interpretar, Duplicata, ItemNfe, NotaFiscalXml, TributosDaCompra};
+pub use nfse::{
+    CancelamentoNfse, MotivoCancelamentoNfse, Nfse, RetornoNfse, SituacaoNfse, TomadorNfse,
+};
+pub use porta::{AmbienteFiscal, ModeloFiscal, Nsu, PortaFiscal, StatusSefaz};
 pub use sefaz_api::{ApiFiscalHttp, CertificadoA1, ConfigApiFiscal};
 pub use simulado::FiscalSimulado;

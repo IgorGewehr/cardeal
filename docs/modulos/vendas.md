@@ -175,15 +175,18 @@ stateDiagram-v2
 | `AdicionarItemPedido` ✅ | `vendas.pedido.editar` | Baixo | Resolve preço vigente na `TabelaPreco` do pedido (produto/grupo via `mod-estoque`), congela no item; recusa desconto acima de `vendas.desconto_maximo` na hora (não escala para autorização de supervisor ainda) | `PrecoNaoEncontrado`, `DescontoAcimaDoLimite` |
 | `AplicarDesconto` | `vendas.pedido.descontar` | Médio | Ainda não implementado como comando separado — o desconto é parâmetro de `AdicionarItemPedido` | `DescontoAcimaDoLimite` |
 | `ConfirmarPedido` ✅ | `vendas.pedido.confirmar` | Médio | Só a transição `Rascunho → Confirmado` (§11.2) — **não** reserva estoque nem consulta `LimiteDisponivel` ainda (`ReservarEstoque`/`LimiteDisponivel` não existem em `mod-estoque`/`mod-clientes`) | `PedidoEmEstadoInvalido`, `PedidoSemItens` |
+| `fiscal.emitir_nfe_do_pedido.v1` ✅ (2026-10-27, no `mod-fiscal`) | `fiscal.emitir` | Médio | A NF-e de venda do pedido faturado: o cliente é o destinatário (endereço com o código IBGE pelo nome da cidade), a prazo as parcelas do título viram duplicatas; vai pela fila fiscal (`docs/modulos/fiscal.md` §7) | — |
 | `FaturarPedido` ✅ | `vendas.pedido.faturar` | Alto | Consome estoque item a item (`mod_estoque::registrar_saida_comum`, somando o CMV), monta o lançamento combinado (D CMV/C Estoque + D Caixa-Clientes/C Receita) e, só a prazo, cria um título a receber de parcela única vinculado a esse lançamento; publica `vendas.pedido_faturado.v1` | `PedidoEmEstadoInvalido`, `PedidoSemItens` |
 | `CancelarPedido` ✅ | `vendas.pedido.cancelar` | Médio | Só antes de `Faturado` | `PedidoJaFaturado` |
 | `RegistrarEntrega` | `vendas.entrega.registrar` | Baixo | Ainda não implementado | `PedidoNaoFaturado` |
-| `SolicitarDevolucao` | `vendas.devolucao.solicitar` | Médio | Ainda não implementado | `PedidoNaoFaturado` |
-| `AprovarDevolucao` | `vendas.devolucao.aprovar` | Alto | Ainda não implementado | `DevolucaoJaAprovada` |
-| `ConcluirDevolucao` | `vendas.devolucao.concluir` | Alto | Ainda não implementado (domínio pronto: `Devolucao` + `receituario::concluir_devolucao`) | `ValorSuperaOriginal` |
+| `SolicitarDevolucao` ✅ (2026-10-27, `vendas.solicitar_devolucao.v1`) | `vendas.devolucao.solicitar` | Médio | Pede a devolução de parte ou de todo um pedido faturado, item a item, com o motivo (≥ 10 caracteres). Desconta o que já voltou em devoluções anteriores (não canceladas): a quantidade não passa do que resta, e a última devolução de cada item leva o resto do valor dele | `PedidoEmEstadoInvalido`, `QuantidadeDevolvidaExcede`, `DevolucaoVazia` |
+| `AprovarDevolucao` ✅ / `CancelarDevolucao` ✅ (2026-10-27) | `vendas.devolucao.aprovar` | Alto | `Solicitada → Aprovada`; cancelar vale até concluir | `DevolucaoEmEstadoInvalido` |
+| `ConcluirDevolucao` ✅ (2026-10-27, `vendas.concluir_devolucao.v1`) | `vendas.devolucao.concluir` | Alto | Numa transação: a mercadoria volta ao estoque **ao custo de quando saiu** (`mod_estoque::devolver_parte_da_saida`); o dinheiro — à vista, volta ao cliente pelo caixa (D Devoluções de venda / C Caixa); a prazo, o título a receber é **abatido** (`mod_financeiro::abater_titulo_da_origem_comum`, D Devoluções de venda / C Clientes a receber, sem dinheiro) e o que já tinha sido recebido vira **crédito do cliente** (um título a pagar a ele); o CMV volta (D Estoque / C CMV); e a **comissão**: se o pedido já foi apurado, a parte devolvida (o percentual congelado de cada item sobre o valor dele) é estornada (D Comissões a pagar / C Despesas comerciais, em `vendas_comissao_ajuste`) e descontada no próximo pagamento do vendedor — se ainda não, a apuração já sai sem ela. Publica `vendas.devolucao_concluida.v1` | `DevolucaoEmEstadoInvalido`, `DevolucaoMaiorQueOResto` (estoque) |
+| `fiscal.emitir_nfe_da_devolucao_de_venda.v1` ✅ (2026-10-27, no `mod-fiscal`) | `fiscal.emitir` | Médio | A NF-e de entrada da devolução concluída, quando a venda saiu em NF-e e o cliente não é contribuinte (`docs/modulos/fiscal.md` §7) | — |
 | `CriarTabelaPreco` ✅ | `vendas.tabela_preco.criar` | Baixo | | `NomeDuplicado` |
 | `CriarRegraPreco` ✅ | `vendas.tabela_preco.editar` | Baixo | Recusa regra que mira produto **e** grupo, ou nenhum dos dois | `RegraPrecoAmbigua` |
 | `ApurarComissoes` ✅ (2026-10-14, `vendas.apurar_comissoes.v1`) | `vendas.comissao.apurar` (nova) | Médio | Idempotente por pedido: um lançamento por pedido faturado no mês ainda sem comissão, item a item com o percentual congelado no faturamento; rodar de novo só pega os pedidos novos | — |
+| Venda comissionável do PDV ✅ (2026-10-28, `registrar_venda_comissionavel_comum` / `estornar_venda_comissionavel_comum`) | (a do PDV) | — | A venda do PDV com vendedor (`F4`) entra na comissão como um pedido: o PDV a registra ao finalizar, com o percentual de cada produto **congelado ali** (`vendas_venda_comissionavel` + `_item`, migração v4), e a `ApurarComissoes`, as `ComissoesDoMes` e o `PagarComissoes` leem os dois (`vendas_comissao.origem` = `pedido` ou `pdv`; a v4 recria `vendas_comissao` e `vendas_comissao_ajuste` sem a chave estrangeira para `vendas_pedido`). O estorno do cupom tira a venda da apuração ou, se ela já foi apurada, estorna a comissão inteira (D Comissões a pagar / C Despesas comerciais, em `vendas_comissao_ajuste`) e ela é descontada no próximo pagamento — o mesmo caminho da devolução | — |
 | `PagarComissoes` ✅ (2026-10-14, `vendas.pagar_comissoes.v1`) | `vendas.comissao.pagar` | Médio | Quita tudo o que o vendedor tem apurado no mês, num lançamento só, de uma conta do Disponível (1.1), com data entre a apuração e hoje | `SemComissaoAPagar`, `DataDoPagamentoInvalida`, `ContaDePagamentoInvalida` |
 | `CriarContratoRecorrente` | `vendas.contrato_recorrente.criar` | Baixo | Ainda não implementado | `ClienteSemCadastro` |
 
@@ -218,6 +221,15 @@ stateDiagram-v2
 | Desconto concedido no pedido | Descontos concedidos (4.4) | Receita de vendas | igual ao lançamento acima |
 | Devolução total | Devoluções de venda (4.5) + Estoque | Caixa/Clientes a receber + CMV (estorno) | Realizado |
 | Devolução parcial | Devoluções de venda (proporcional) + Estoque (itens devolvidos) | Caixa/Clientes a receber (proporcional) + CMV (proporcional) | Realizado |
+| Devolução de venda a prazo já recebida | Devoluções de venda | Fornecedores (o crédito do cliente, título a pagar a ele) | Confirmado |
+| Estorno de comissão por devolução (pedido já apurado) | Salários e encargos (2.1.03) | Comissões de vendedores (5.42) ou Despesas comerciais (5.5) | Confirmado |
+
+> **Nota (2026-10-27) — devolução de venda:** o pagamento das comissões do vendedor desconta os estornos por
+> devolução ainda não descontados (do mês ou de antes); se o estorno passa da comissão do mês, o pagamento é
+> recusado (`EstornoMaiorQueAComissao`) e o estorno espera. O crédito do cliente fica em Fornecedores (com o
+> cliente como contraparte), não numa conta de adiantamento: a baixa do financeiro usa o papel padrão da
+> espécie. O papel de fábrica **Vendedor** pede e acompanha a devolução (`vendas.devolucao.ver` e
+> `.solicitar`); aprovar e concluir fica com o gerente.
 | Comissão apurada | Comissões de vendedores (5.42, do modelo Comércio) ou Despesas comerciais (5.5) | Salários e encargos (2.1.03) | Confirmado |
 | Pagamento de comissão | Salários e encargos (2.1.03) | Caixa ou Bancos (conta escolhida) | Realizado |
 | Contrato recorrente faturado no ciclo | Clientes a receber | Receita de vendas/serviços | Confirmado |

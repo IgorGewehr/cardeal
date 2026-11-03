@@ -94,6 +94,201 @@ const SQL_ALERTA_NOTA: &str = r"
 ALTER TABLE compras_nota_entrada ADD COLUMN alerta TEXT;
 ";
 
+// Migração v6 (2026-10-20): as parcelas da nota — as duplicatas do XML (`cobr/dup`) ou as que
+// quem confirmou informou. Viram as parcelas do título a pagar.
+const SQL_PARCELAS_NOTA: &str = r"
+CREATE TABLE compras_nota_parcela (
+    nota        BLOB    NOT NULL REFERENCES compras_nota_entrada(id),
+    ordem       INTEGER NOT NULL,
+    numero      TEXT    NOT NULL,
+    vencimento  INTEGER NOT NULL,
+    valor       INTEGER NOT NULL,
+    PRIMARY KEY (nota, ordem)
+) STRICT, WITHOUT ROWID;
+";
+
+// Migração v7 (2026-10-20): o XML original da nota (o que o fornecedor emitiu, como veio) —
+// a lei manda guardar por 5 anos e o contador o recebe no pacote do mês. Antes ele só servia
+// para importar e era descartado; a nota importada antes disso ganha o XML ao importar o mesmo
+// arquivo de novo.
+const SQL_XML_NOTA: &str = r"
+ALTER TABLE compras_nota_entrada ADD COLUMN xml TEXT;
+";
+
+/// v8: as notas que chegam pela SEFAZ (distribuição `DFe`). O estado da busca passa a ser por
+/// **ambiente** (o NSU de homologação não serve na produção) e ganha a hora da próxima consulta
+/// (a SEFAZ barra quem pede antes — 656) e o resumo da última rodada. O NSU antigo não é
+/// copiado: só o simulador o gravava (o `sefaz-api` não tinha a distribuição). A tabela das
+/// notas guarda o resumo que espera a Ciência da Operação, a ciência dada e, da nota que não
+/// importou, o XML.
+const SQL_V8: &str = r"
+DROP TABLE compras_estado_dfe;
+CREATE TABLE compras_dfe_estado (
+    empresa           BLOB    NOT NULL,
+    ambiente          TEXT    NOT NULL CHECK (ambiente IN ('homologacao','producao')),
+    ultimo_nsu        INTEGER NOT NULL DEFAULT 0,
+    proxima_consulta  INTEGER NOT NULL DEFAULT 0,
+    ultima_consulta   INTEGER,
+    ultimo_resultado  TEXT,
+    PRIMARY KEY (empresa, ambiente)
+) STRICT, WITHOUT ROWID;
+CREATE TABLE compras_dfe_nota (
+    empresa            BLOB    NOT NULL,
+    chave              TEXT    NOT NULL,
+    ambiente           TEXT    NOT NULL CHECK (ambiente IN ('homologacao','producao')),
+    nsu                INTEGER NOT NULL,
+    emitente_documento TEXT    NOT NULL,
+    emitente_nome      TEXT    NOT NULL,
+    emissao            INTEGER,
+    valor              INTEGER NOT NULL,
+    situacao           INTEGER NOT NULL CHECK (situacao IN (1,2,3)),
+    estado             TEXT    NOT NULL
+                       CHECK (estado IN ('Aguardando','Baixada','Ignorada','Erro')),
+    motivo             TEXT,
+    xml                TEXT,
+    ciencia_em         INTEGER,
+    ciencia_protocolo  TEXT,
+    ciencia_xml        TEXT,
+    tentativas         INTEGER NOT NULL DEFAULT 0,
+    proxima_tentativa  INTEGER NOT NULL DEFAULT 0,
+    recebida_em        INTEGER NOT NULL,
+    PRIMARY KEY (empresa, chave)
+) STRICT, WITHOUT ROWID;
+CREATE INDEX compras_dfe_nota_espera ON compras_dfe_nota(empresa, ambiente, estado, proxima_tentativa);
+";
+
+/// v10: o ICMS-ST estimado pela MVA que entrou no custo do item (para o estorno tirar).
+/// v11: o dia em que a nota entrou (a confirmação) — o mês da escrituração (SPED). A nota
+/// confirmada antes fica sem ele e usa o dia da emissão.
+const SQL_V11: &str = "
+ALTER TABLE compras_nota_entrada ADD COLUMN data_entrada INTEGER;
+";
+
+/// v12: a cotação (itens, fornecedores convidados, preços) e o pedido de compra (itens e o
+/// recebimento de cada nota); a nota de entrada aponta para o pedido que atende.
+const SQL_V12: &str = "
+CREATE TABLE compras_cotacao (
+    id             BLOB PRIMARY KEY,
+    empresa        BLOB    NOT NULL REFERENCES nucleo_empresa(id),
+    numero         INTEGER NOT NULL CHECK (numero > 0),
+    descricao      TEXT    NOT NULL,
+    data           INTEGER NOT NULL,
+    prazo_resposta INTEGER,
+    estado         TEXT    NOT NULL CHECK (estado IN ('Aberta','Decidida','Cancelada')),
+    motivo         TEXT,
+    criada_em      INTEGER NOT NULL,
+    criada_por     BLOB    NOT NULL,
+    decidida_em    INTEGER,
+    UNIQUE (empresa, numero)
+) STRICT;
+CREATE INDEX compras_cotacao_estado ON compras_cotacao(empresa, estado);
+CREATE TABLE compras_cotacao_item (
+    id         BLOB PRIMARY KEY,
+    cotacao    BLOB    NOT NULL REFERENCES compras_cotacao(id),
+    ordem      INTEGER NOT NULL,
+    produto    BLOB    NOT NULL,
+    descricao  TEXT    NOT NULL,
+    unidade    TEXT    NOT NULL,
+    quantidade INTEGER NOT NULL CHECK (quantidade > 0),
+    escolhido  BLOB
+) STRICT;
+CREATE INDEX compras_cotacao_item_cotacao ON compras_cotacao_item(cotacao, ordem);
+CREATE TABLE compras_cotacao_fornecedor (
+    cotacao            BLOB    NOT NULL REFERENCES compras_cotacao(id),
+    fornecedor         BLOB    NOT NULL,
+    ordem              INTEGER NOT NULL,
+    respondeu          INTEGER NOT NULL DEFAULT 0,
+    prazo_entrega_dias INTEGER,
+    condicao_pagamento TEXT    NOT NULL DEFAULT '',
+    frete              INTEGER NOT NULL DEFAULT 0 CHECK (frete >= 0),
+    observacao         TEXT    NOT NULL DEFAULT '',
+    respondida_em      INTEGER,
+    PRIMARY KEY (cotacao, fornecedor)
+) STRICT, WITHOUT ROWID;
+CREATE TABLE compras_cotacao_preco (
+    item           BLOB    NOT NULL REFERENCES compras_cotacao_item(id),
+    fornecedor     BLOB    NOT NULL,
+    preco_unitario INTEGER NOT NULL CHECK (preco_unitario > 0),
+    PRIMARY KEY (item, fornecedor)
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE compras_pedido (
+    id                 BLOB PRIMARY KEY,
+    empresa            BLOB    NOT NULL REFERENCES nucleo_empresa(id),
+    numero             INTEGER NOT NULL CHECK (numero > 0),
+    fornecedor         BLOB    NOT NULL,
+    cotacao            BLOB REFERENCES compras_cotacao(id),
+    data               INTEGER NOT NULL,
+    previsao_entrega   INTEGER,
+    condicao_pagamento TEXT    NOT NULL DEFAULT '',
+    frete              INTEGER NOT NULL DEFAULT 0 CHECK (frete >= 0),
+    observacao         TEXT    NOT NULL DEFAULT '',
+    estado             TEXT    NOT NULL CHECK (estado IN
+                         ('Rascunho','Enviado','ParcialmenteRecebido','Recebido','Encerrado',
+                          'Cancelado')),
+    motivo             TEXT,
+    criado_em          INTEGER NOT NULL,
+    criado_por         BLOB    NOT NULL,
+    aprovado_em        INTEGER,
+    aprovado_por       BLOB,
+    UNIQUE (empresa, numero)
+) STRICT;
+CREATE INDEX compras_pedido_estado ON compras_pedido(empresa, estado);
+CREATE INDEX compras_pedido_fornecedor ON compras_pedido(empresa, fornecedor, estado);
+CREATE INDEX compras_pedido_cotacao ON compras_pedido(cotacao);
+CREATE TABLE compras_pedido_item (
+    id             BLOB PRIMARY KEY,
+    pedido         BLOB    NOT NULL REFERENCES compras_pedido(id),
+    ordem          INTEGER NOT NULL,
+    produto        BLOB    NOT NULL,
+    descricao      TEXT    NOT NULL,
+    unidade        TEXT    NOT NULL,
+    quantidade     INTEGER NOT NULL CHECK (quantidade > 0),
+    preco_unitario INTEGER NOT NULL CHECK (preco_unitario >= 0)
+) STRICT;
+CREATE INDEX compras_pedido_item_pedido ON compras_pedido_item(pedido, ordem);
+CREATE TABLE compras_pedido_recebimento (
+    item_pedido BLOB    NOT NULL REFERENCES compras_pedido_item(id),
+    nota        BLOB    NOT NULL REFERENCES compras_nota_entrada(id),
+    quantidade  INTEGER NOT NULL CHECK (quantidade > 0),
+    PRIMARY KEY (item_pedido, nota)
+) STRICT, WITHOUT ROWID;
+CREATE INDEX compras_pedido_recebimento_nota ON compras_pedido_recebimento(nota);
+
+ALTER TABLE compras_nota_entrada ADD COLUMN pedido BLOB REFERENCES compras_pedido(id);
+ALTER TABLE compras_nota_entrada ADD COLUMN pedido_ligacao TEXT;
+CREATE INDEX compras_nota_pedido ON compras_nota_entrada(pedido);
+";
+
+const SQL_V10: &str = "
+ALTER TABLE compras_item_nota_entrada ADD COLUMN st_estimado INTEGER NOT NULL DEFAULT 0;
+";
+
+/// v9: a devolução ao fornecedor, item a item (a nota pode voltar em partes).
+const SQL_V9: &str = "
+CREATE TABLE compras_devolucao (
+    id           BLOB PRIMARY KEY,
+    empresa      BLOB    NOT NULL REFERENCES nucleo_empresa(id),
+    nota_entrada BLOB    NOT NULL REFERENCES compras_nota_entrada(id),
+    fornecedor   BLOB    NOT NULL,
+    data         INTEGER NOT NULL,
+    motivo       TEXT    NOT NULL,
+    valor_total  INTEGER NOT NULL,
+    abatido      INTEGER NOT NULL,
+    credito      BLOB,
+    criada_em    INTEGER NOT NULL,
+    criada_por   BLOB    NOT NULL
+) STRICT;
+CREATE INDEX compras_devolucao_nota ON compras_devolucao(nota_entrada);
+CREATE TABLE compras_devolucao_item (
+    devolucao  BLOB    NOT NULL REFERENCES compras_devolucao(id),
+    item       BLOB    NOT NULL REFERENCES compras_item_nota_entrada(id),
+    quantidade INTEGER NOT NULL CHECK (quantidade > 0),
+    valor      INTEGER NOT NULL,
+    PRIMARY KEY (devolucao, item)
+) STRICT, WITHOUT ROWID;
+";
+
 const MIGRACOES: &[Migracao] = &[
     Migracao {
         versao: 1,
@@ -125,7 +320,90 @@ const MIGRACOES: &[Migracao] = &[
         sql: SQL_ALERTA_NOTA,
         tipo: TipoMigracao::Esquema,
     },
+    Migracao {
+        versao: 6,
+        nome: "compras_parcelas_da_nota",
+        sql: SQL_PARCELAS_NOTA,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 7,
+        nome: "compras_xml_da_nota",
+        sql: SQL_XML_NOTA,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 8,
+        nome: "compras_notas_da_sefaz",
+        sql: SQL_V8,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 9,
+        nome: "compras_devolucao_ao_fornecedor",
+        sql: SQL_V9,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 10,
+        nome: "compras_st_estimado",
+        sql: SQL_V10,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 11,
+        nome: "compras_data_da_entrada",
+        sql: SQL_V11,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 12,
+        nome: "compras_cotacao_e_pedido",
+        sql: SQL_V12,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 13,
+        nome: "compras_transferencia_entre_filiais",
+        sql: SQL_V13,
+        tipo: TipoMigracao::Esquema,
+    },
 ];
+
+/// v13: a transferência de mercadoria entre filiais do grupo (`transferencia.rs`). `empresa` é a
+/// que envia; `destino`, a que recebe (as duas na mesma base: a organização).
+const SQL_V13: &str = "
+CREATE TABLE compras_transferencia (
+    id                     BLOB PRIMARY KEY,
+    empresa                BLOB    NOT NULL REFERENCES nucleo_empresa(id),
+    destino                BLOB    NOT NULL REFERENCES nucleo_empresa(id),
+    local_origem           BLOB    NOT NULL,
+    local_destino          BLOB,
+    estado                 TEXT    NOT NULL CHECK (estado IN ('Enviada','Recebida','Cancelada')),
+    observacao             TEXT,
+    valor_total            INTEGER NOT NULL,
+    enviada_em             INTEGER NOT NULL,
+    enviada_por            BLOB    NOT NULL,
+    lancamento_envio       BLOB,
+    recebida_em            INTEGER,
+    recebida_por           BLOB,
+    lancamento_recebimento BLOB,
+    cancelada_em           INTEGER,
+    motivo_cancelamento    TEXT,
+    CHECK (destino <> empresa)
+) STRICT;
+CREATE INDEX compras_transferencia_origem ON compras_transferencia(empresa, estado, enviada_em);
+CREATE INDEX compras_transferencia_destino ON compras_transferencia(destino, estado, enviada_em);
+CREATE TABLE compras_transferencia_item (
+    transferencia  BLOB    NOT NULL REFERENCES compras_transferencia(id),
+    ordem          INTEGER NOT NULL,
+    produto        BLOB    NOT NULL,
+    quantidade     INTEGER NOT NULL CHECK (quantidade > 0),
+    custo_unitario INTEGER NOT NULL,
+    valor          INTEGER NOT NULL,
+    PRIMARY KEY (transferencia, ordem)
+) STRICT, WITHOUT ROWID;
+";
 
 /// O conjunto de migrações do módulo de compras.
 #[must_use]

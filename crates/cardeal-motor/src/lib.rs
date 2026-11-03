@@ -23,12 +23,14 @@ mod empresa;
 mod motor;
 mod organizacao;
 mod plano;
+mod segundo_fator;
 
 pub use alteracoes::Alteracoes;
 pub use empresa::{EmpresaResumo, IdentidadeVisual, PapelResumo, UsuarioResumo};
 pub use motor::{ExecutorDeTarefas, MotorLocal, SessaoLocal};
 pub use organizacao::{EmpresaDaOrganizacao, PERMISSAO_ORGANIZACAO};
 pub use plano::Plano;
+pub use segundo_fator::{SegundoFatorProposto, EMISSOR};
 
 use cardeal_kernel::{CodigoErro, Erro};
 use cardeal_storage::ErroArmazenamento;

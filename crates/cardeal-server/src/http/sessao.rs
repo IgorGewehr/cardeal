@@ -21,8 +21,35 @@ pub(super) async fn entrar(
     headers: HeaderMap,
     corpo: Bytes,
 ) -> Result<Response, ErroHttp> {
+    let pedido: PedidoLogin = ler(&corpo)?;
+    login(servidor, par, &headers, pedido, None).await
+}
+
+/// `POST /v1/sessao/codigo`: o login com o código da verificação em duas etapas.
+pub(super) async fn entrar_com_codigo(
+    State(servidor): State<Arc<Servidor>>,
+    par: Option<ConnectInfo<SocketAddr>>,
+    headers: HeaderMap,
+    corpo: Bytes,
+) -> Result<Response, ErroHttp> {
+    let p: cardeal_protocol::PedidoLoginComCodigo = ler(&corpo)?;
+    let pedido = PedidoLogin {
+        email: p.email,
+        senha: p.senha,
+        cliente: p.cliente,
+    };
+    login(servidor, par, &headers, pedido, Some(p.codigo)).await
+}
+
+async fn login(
+    servidor: Arc<Servidor>,
+    par: Option<ConnectInfo<SocketAddr>>,
+    headers: &HeaderMap,
+    pedido: PedidoLogin,
+    codigo: Option<String>,
+) -> Result<Response, ErroHttp> {
     let ip = origem::ip_do_cliente(
-        &headers,
+        headers,
         par.map(|ConnectInfo(p)| p),
         servidor.config.confiar_cloudflare,
     );
@@ -36,7 +63,6 @@ pub(super) async fn entrar(
             )));
         }
     }
-    let pedido: PedidoLogin = ler(&corpo)?;
     // O semáforo limita quantos Argon2id (19 MiB cada) rodam ao mesmo tempo.
     let _licenca = servidor
         .logins
@@ -46,9 +72,18 @@ pub(super) async fn entrar(
     let s = Arc::clone(&servidor);
     let validade = servidor.config.validade_sessao;
     let (email, senha) = (pedido.email, pedido.senha);
-    let aceito = bloqueante(move || autenticacao::entrar(&s.diretorio, &email, &senha, validade))
-        .await
-        .inspect_err(|_| servidor.metricas.login_recusado())?;
+    let aceito = bloqueante(move || {
+        autenticacao::entrar(
+            &s.diretorio,
+            &s.cofre,
+            &email,
+            &senha,
+            codigo.as_deref(),
+            validade,
+        )
+    })
+    .await
+    .inspect_err(|_| servidor.metricas.login_recusado())?;
 
     let mut resposta = aceito.resposta;
     let mut headers = HeaderMap::new();
@@ -108,6 +143,91 @@ pub(super) async fn atual(
     })
     .await?;
     Ok(postcard(&resposta)?.into_response())
+}
+
+/// `GET /v1/sessao/segundo-fator`: a conta tem verificação em duas etapas?
+pub(super) async fn segundo_fator_ativo(
+    State(servidor): State<Arc<Servidor>>,
+    headers: HeaderMap,
+) -> Result<Response, ErroHttp> {
+    let token = credencial::exigir_token(&headers)?;
+    let s = Arc::clone(&servidor);
+    let ativo = bloqueante(move || {
+        let sessao = s.sessoes.resolver(&s.diretorio, &token)?;
+        autenticacao::segundo_fator_ativo(&s.diretorio, sessao.conta)
+    })
+    .await?;
+    Ok(postcard(&ativo)?.into_response())
+}
+
+/// `POST /v1/sessao/segundo-fator/proposta`: um segredo novo para o aplicativo.
+pub(super) async fn propor_segundo_fator(
+    State(servidor): State<Arc<Servidor>>,
+    headers: HeaderMap,
+) -> Result<Response, ErroHttp> {
+    let token = credencial::exigir_token(&headers)?;
+    let s = Arc::clone(&servidor);
+    let proposta = bloqueante(move || {
+        let sessao = s.sessoes.resolver(&s.diretorio, &token)?;
+        autenticacao::propor_segundo_fator(&s.diretorio, sessao.conta)
+    })
+    .await?;
+    Ok(postcard(&proposta)?.into_response())
+}
+
+/// `POST /v1/sessao/segundo-fator`: ativa e devolve os códigos de recuperação.
+pub(super) async fn ativar_segundo_fator(
+    State(servidor): State<Arc<Servidor>>,
+    headers: HeaderMap,
+    corpo: Bytes,
+) -> Result<Response, ErroHttp> {
+    let token = credencial::exigir_token(&headers)?;
+    let pedido: cardeal_protocol::PedidoAtivarSegundoFator = ler(&corpo)?;
+    let s = Arc::clone(&servidor);
+    let codigos = bloqueante(move || {
+        let sessao = s.sessoes.resolver(&s.diretorio, &token)?;
+        let codigos = autenticacao::ativar_segundo_fator(
+            &s.diretorio,
+            &s.cofre,
+            sessao.conta,
+            &pedido.segredo,
+            &pedido.codigo,
+        )?;
+        tracing::info!(conta = %sessao.conta, "verificação em duas etapas ativada");
+        Ok(codigos)
+    })
+    .await?;
+    Ok(postcard(&codigos)?.into_response())
+}
+
+/// `POST /v1/sessao/segundo-fator/desligar`: a senha e um código.
+pub(super) async fn desativar_segundo_fator(
+    State(servidor): State<Arc<Servidor>>,
+    headers: HeaderMap,
+    corpo: Bytes,
+) -> Result<Response, ErroHttp> {
+    let token = credencial::exigir_token(&headers)?;
+    let pedido: cardeal_protocol::PedidoDesativarSegundoFator = ler(&corpo)?;
+    let _licenca = servidor
+        .logins
+        .acquire()
+        .await
+        .map_err(|e| ErroHttp(Erro::novo(CodigoErro::FALHA_INTERNA, e.to_string())))?;
+    let s = Arc::clone(&servidor);
+    bloqueante(move || {
+        let sessao = s.sessoes.resolver(&s.diretorio, &token)?;
+        autenticacao::desativar_segundo_fator(
+            &s.diretorio,
+            &s.cofre,
+            sessao.conta,
+            &pedido.senha,
+            &pedido.codigo,
+        )?;
+        tracing::warn!(conta = %sessao.conta, "verificação em duas etapas desligada");
+        Ok(())
+    })
+    .await?;
+    Ok(StatusCode::NO_CONTENT.into_response())
 }
 
 /// `POST /v1/sessao/senha`.

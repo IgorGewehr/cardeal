@@ -6,6 +6,9 @@
 //! em linha (`inlineStr`), dinheiro como número com formato `#.##0,00`, datas como data de
 //! verdade, negrito, larguras de coluna e cabeçalho congelado.
 //!
+//! O [`zip`] também empacota os XMLs das notas do mês para o contador, comprimidos — o deflate
+//! é o único pedaço de fora (`miniz_oxide`, que já vinha no grafo pelo `png`).
+//!
 //! ```
 //! use cardeal_planilha::{Aba, Celula, Planilha};
 //! let mut aba = Aba::nova("DRE").colunas(&[40.0, 16.0]);
@@ -18,7 +21,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs, clippy::pedantic)]
 
-mod zip;
+pub mod zip;
 
 use std::fmt::Write as _;
 
@@ -438,7 +441,7 @@ mod testes {
             Celula::inteiro(7),
         ]);
         let bytes = Planilha::nova().aba(dre).aba(Aba::nova("DRE")).gerar();
-        let partes = zip::testes::ler(&bytes);
+        let partes = zip::ler(&bytes);
         let nomes: Vec<&str> = partes.iter().map(|(n, _)| n.as_str()).collect();
         assert_eq!(
             nomes,

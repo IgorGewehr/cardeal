@@ -99,6 +99,10 @@ pub enum PapelConta {
     AdiantamentoFornecedor,
     /// Impostos a recuperar (crédito de ICMS/PIS/COFINS na compra).
     ImpostosARecuperar,
+    /// A conta corrente com as outras empresas (CNPJs) do grupo: a transferência de mercadoria
+    /// entre filiais debita na que envia e credita na que recebe — somada no grupo, zera (o que
+    /// sobra é o que está em trânsito).
+    ContaCorrenteGrupo,
     // ── estoques ─────────────────────────────────────────────────────────────
     /// Mercadorias para revenda.
     EstoqueMercadorias,

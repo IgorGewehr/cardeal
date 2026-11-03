@@ -181,18 +181,27 @@ pub(super) fn resultado_venda(ui: &mut egui::Ui, estado: &mut EstadoTelaPdv) {
                     | mod_fiscal::EstadoDocumento::Denegada => {
                         Etiqueta::negativa(n.estado.rotulo())
                     }
+                    mod_fiscal::EstadoDocumento::Contingencia => {
+                        Etiqueta::atencao(n.estado.rotulo())
+                    }
                     _ => Etiqueta::info(n.estado.rotulo()),
                 };
                 ui.add(etiqueta.com_ponto());
-                if n.estado == mod_fiscal::EstadoDocumento::Autorizada
-                    && ui
-                        .add(Botao::secundario("Imprimir cupom fiscal").pequeno())
-                        .clicked()
+                if matches!(
+                    n.estado,
+                    mod_fiscal::EstadoDocumento::Autorizada
+                        | mod_fiscal::EstadoDocumento::Contingencia
+                ) && ui
+                    .add(Botao::secundario("Imprimir cupom fiscal").pequeno())
+                    .clicked()
                 {
                     imprimir = Some(n.id);
                 }
             });
-            if n.estado == mod_fiscal::EstadoDocumento::Rejeitada {
+            if matches!(
+                n.estado,
+                mod_fiscal::EstadoDocumento::Rejeitada | mod_fiscal::EstadoDocumento::Contingencia
+            ) {
                 if let Some(m) = &n.motivo {
                     ui.add(Rotulo::apoio(m.clone()).quebravel());
                 }
@@ -385,6 +394,7 @@ pub(super) fn detalhe(ui: &mut egui::Ui, estado: &mut EstadoTelaPdv) {
         .fold(estado.valor_do_desconto_no_total(), |a, b| a + b);
     let total = estado.total;
     let cliente = estado.cliente.as_ref().map(|c| c.1.clone());
+    let vendedor = estado.vendedor.as_ref().map(|v| v.1.clone());
     Painel::novo().mostrar(ui, |ui| {
         ui.add(Rotulo::sobrelinha("Total"));
         ui.add_space(Espaco::E4);
@@ -412,6 +422,14 @@ pub(super) fn detalhe(ui: &mut egui::Ui, estado: &mut EstadoTelaPdv) {
                 None => ui.add(Rotulo::campo("— não identificado")),
             };
             ui.add(Tecla::nova("F6"));
+        });
+        ui.horizontal(|ui| {
+            ui.add(Rotulo::campo("Vendedor"));
+            match &vendedor {
+                Some(nome) => ui.add(Rotulo::interface(nome.clone())),
+                None => ui.add(Rotulo::campo("— sem vendedor")),
+            };
+            ui.add(Tecla::nova("F4"));
         });
     });
     ui.add_space(Espaco::E12);
