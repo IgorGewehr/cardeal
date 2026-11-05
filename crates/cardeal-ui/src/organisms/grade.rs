@@ -217,6 +217,7 @@ pub struct Grade {
     selecionavel: bool,
     ordenacao: Option<(usize, Direcao)>,
     id_salt: Option<&'static str>,
+    rolagem_horizontal: bool,
 }
 
 impl Grade {
@@ -231,7 +232,16 @@ impl Grade {
             selecionavel: false,
             ordenacao: None,
             id_salt: None,
+            rolagem_horizontal: false,
         }
+    }
+
+    /// Rola na horizontal quando as colunas não cabem — a tabela de 12 meses do fluxo de caixa
+    /// numa tela de notebook: as colunas mantêm a largura e a grade ganha uma barra de rolagem
+    /// embaixo, em vez de cortar os últimos meses na borda da janela.
+    pub const fn rolagem_horizontal(mut self) -> Self {
+        self.rolagem_horizontal = true;
+        self
     }
 
     /// Sobrescreve o id de memória da tabela (largura de coluna redimensionada,
@@ -304,8 +314,30 @@ impl Grade {
             || self.colunas.iter().map(|c| c.rotulo).collect(),
             str::to_owned,
         );
-        ui.push_id(sal, |ui| self.desenhar(ui, total_linhas, linha))
-            .inner
+        ui.push_id(sal, |ui| {
+            if self.rolagem_horizontal {
+                // A largura que as colunas pedem (as flexíveis no mínimo delas), com o espaço
+                // entre elas e a moldura: abaixo disso, a área rola em vez de espremer.
+                let colunas: f32 = self
+                    .colunas
+                    .iter()
+                    .map(|c| c.largura_inicial.unwrap_or(LARGURA_MINIMA_FLEXIVEL))
+                    .sum();
+                #[allow(clippy::cast_precision_loss)]
+                let vaos = self.colunas.len() as f32 * ui.spacing().item_spacing.x;
+                let largura = colunas + vaos + Espaco::E16;
+                egui::ScrollArea::horizontal()
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                        ui.set_min_width(largura);
+                        self.desenhar(ui, total_linhas, linha)
+                    })
+                    .inner
+            } else {
+                self.desenhar(ui, total_linhas, linha)
+            }
+        })
+        .inner
     }
 
     fn desenhar(

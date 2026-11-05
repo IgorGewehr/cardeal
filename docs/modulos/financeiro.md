@@ -425,6 +425,7 @@ stateDiagram-v2
 | `DfcIndiretoDoPeriodo` ✅ (2026-10-14, `financeiro.dfc_indireto_do_periodo.v1`) | `financeiro.dre.ver` | Aba Resultado e caixa › DFC › "Método indireto": o **lucro líquido da DRE** e, com o sinal trocado, a variação de cada conta patrimonial fora do caixa nos mesmos lançamentos da DRE (Confirmado/Realizado/Estornado, pela competência) — ativo que cresce prendeu dinheiro, passivo que cresce o soltou. Classificação: depreciação/amortização (pelo nome) nas operacionais; senão o grupo de fluxo da conta; senão o papel (Empréstimos, Capital, Retiradas, Lucros acumulados → financiamento; Aplicações → investimento); senão o imobilizado pelo código (1.4 → investimento); o resto, operacional, com rótulos como "(Aumento) redução de contas a receber". Termina na **mesma variação** do método direto; se um lançamento tem competência num período e liquidação noutro, a sobra aparece numa linha própria ("Diferença de datas"), nunca some — zero no caso normal (testado com venda e compra a prazo, baixas, depreciação, máquina à vista, empréstimo e retirada) | `cardeal_ledger::variacoes_patrimoniais` + `resultado_por_conta` + `movimentos_de_caixa` |
 | `CarteiraDeCheques` ✅ (2026-10-14, `financeiro.carteira_de_cheques.v1`) | `financeiro.cheque.ver` | Aba Cheques: os cheques (filtro por estado) com o cliente e a descrição do título, o "bom para" mais antigo primeiro; a tela soma em carteira, os que já podem ir ao banco e os devolvidos | `financeiro_cheque(empresa, estado, bom_para)` (migração v11) |
 | `BalanceteDoPeriodo` ✅ (2026-10-14, `financeiro.balancete_do_periodo.v1`) | `financeiro.dre.ver` | Aba Resultado e caixa › Balancete: cada conta com saldo anterior, débitos, créditos e saldo atual (D/C), agrupadoras somadas, ordem numérica dos códigos. Pela competência (Confirmado/Realizado/Estornado), então sempre fecha. Sem encerramento de exercício no sistema, as contas de resultado acumulam só o **ano**; o resultado dos anos anteriores entra numa linha do PL ("Resultado de exercícios anteriores (não encerrado)") | `cardeal_ledger::balancete` |
+| `DfcGerencialDoAno` ✅ (2026-11-05, `financeiro.dfc_gerencial_do_ano.v1`) | `financeiro.dre.ver` | Resultado › DFC › "Mês a mês, por conta" e "Orçado × realizado" (§6.9): o caixa realizado do ano, 12 meses, por conta do plano — a baixa vai para a conta do título de origem — com o orçado no mesmo sinal | `movimentos_de_caixa` + `financeiro_baixa` × `financeiro_parcela.lancamento` (e o estorno por `razao_lancamento.estorna`) + `financeiro_orcamento` |
 | `OrcamentoDoAno` ✅ (2026-10-26, `financeiro.orcamento_do_ano.v1`) | `financeiro.dre.ver` | Resultado › Orçamento: cada conta de resultado (analítica, ativa) com o orçado e o realizado de cada mês no sentido em que se orça | `financeiro_orcamento(empresa, conta, competencia)` + `resultado_por_conta` por mês |
 | `DiarioDoPeriodo` ✅ (2026-10-14, `financeiro.diario_do_periodo.v1`) | `financeiro.dre.ver` | O diário do período: cada lançamento (número, competência, histórico, estado) com as partidas — para o pacote do contador | `cardeal_ledger::diario` |
 | `DreDoPeriodo` / `DreComparativa` ✅ (2026-10-09; no lugar de `DreDoMes`) | `financeiro.dre.ver` | Aba Resultado: DRE de um período; comparativo mês × mês anterior × mesmo mês do ano anterior. Estrutura: receita bruta › deduções (descontos, devoluções, impostos sobre venda) › receita líquida › CMV/CSV › lucro bruto › outras receitas e despesas operacionais › EBITDA › resultado financeiro › lucro líquido. Cada linha é uma **contribuição com sinal**, então o lucro líquido é sempre receitas − despesas do Razão (propriedade testada). Conta aberta pelo usuário herda o papel da sintética; sem papel conhecido cai em "outras", nunca some. Entram `Confirmado`/`Realizado`/`Estornado` pela competência; `Previsto` não | `razao_lancamento(empresa, competencia, estado)` + `razao_partida(conta)` (`cardeal_ledger::resultado_por_conta`) |
@@ -434,6 +435,52 @@ stateDiagram-v2
 | `Categorias` ✅ | `financeiro.categoria.ver` | Seletor de categoria ao lançar título/recorrência | `financeiro_categoria(empresa, nome) WHERE ativa = 1` |
 | `TotalPorCategoriaNoPeriodo` ✅ | `financeiro.categoria.ver` | Gráfico de custo/receita por categoria e mês (churn, MRR por projeto) | agregação em memória sobre `financeiro_baixa` join `financeiro_titulo`, filtrando por `data` |
 | `TituloDaOrigem` ✅ (novo, 2026-09-11) | `financeiro.receber.ver` | Detalhe de OS (`os`)/vendas/compras faturada: "qual título isto gerou" | `financeiro_titulo(empresa, origem_modulo, origem_id)` — o par de correlação que `Titulo` já carregava desde a origem; usado por outro módulo pela consulta pública, nunca por SQL direto em `financeiro_titulo` (`docs/contratos-internos.md` §7 regra 2) |
+
+## 6.9 DFC gerencial: mês a mês, por conta, e orçado × realizado (2026-11-05)
+
+Pedido de quem usa o lunno, a partir de uma planilha-sistema que eles montaram para uso próprio
+("Planejamento orçamentário" e a "Central de relatórios": DFC por categorias, DFC visão mensal com
+%, orçado × realizado). O DFC direto (§6) responde "recebi de clientes, paguei a fornecedores"; o
+dono quer "recebi de vendas, paguei aluguel" — **o caixa pela conta do plano**
+(`mod_financeiro::dfc_gerencial`, domínio puro + `DfcGerencialDoAno`).
+
+- **A baixa vai para a conta do título.** O recebimento é D Banco / C Clientes a receber; a parcela
+  guarda o lançamento de competência dela (D Clientes a receber / C Receita de vendas). Cada baixa — e o
+  estorno dela, por `razao_lancamento.estorna` — é ligada a esse lançamento e o dinheiro se reparte, na
+  proporção e sem perder centavo, pelas contas do **outro lado** dele: a receita, a despesa da
+  categoria (§6.1), o estoque e o imposto a recuperar da compra. Do outro lado só contam as contas de
+  **natureza diferente** da passagem: na venda a prazo, o C Estoque do CMV (ativo, como clientes a
+  receber) não é de onde o dinheiro veio. A receita entra **líquida** do desconto da venda (o outro lado
+  é a receita bruta, na proporção) — o desconto já não passou pelo caixa.
+- **O que não se liga fica na passagem, com um rótulo que diz o que é**: "Recebimentos de cartões" (a
+  operadora pagou), "Cheques compensados", "Recebimentos de clientes / Pagamentos a fornecedores (sem
+  conta de origem)" — o título importado sem lançamento, o renegociado (clientes a receber dos **dois**
+  lados do título: não há como saber a origem sem descer à dívida antiga). O total desses dois últimos
+  vem em `sem_origem` e a tela avisa.
+- **A venda à vista com o CMV no mesmo lançamento** (D Caixa, C Receita, D CMV, C Estoque) tem o par
+  CMV × estoque anulado: não mexe no caixa e apareceria como um custo e uma "compra" negativa.
+- **Grupos**: receitas operacionais, deduções e impostos sobre as vendas, custos e compras ("Compras:
+  Mercadorias para revenda"), despesas operacionais, resultado financeiro, atividades de investimento e
+  de financiamento, outros. As contas do resultado seguem o recorte da DRE (`dre::grupo_gerencial`; a
+  taxa de cartão fica nas despesas operacionais, como na DRE); as patrimoniais, o grupo de fluxo, o
+  papel e o imobilizado pelo código (1.4). A agrupadora intermediária do plano (5.50 "Despesas
+  administrativas" › 5.50.01 "Aluguel") vira um subtotal. Geração de caixa operacional = receitas +
+  deduções + custos + despesas.
+- **O orçado** (§6.7) entra no sinal do caixa: a conta se orça "no sentido em que se comporta" e isso
+  entra (receita) ou sai (dedução, custo, despesa); para as patrimoniais (ainda não orçáveis pela tela),
+  ativo sai, passivo e capital entram, retirada sai.
+- **Tela** (Resultado › DFC): "Mês a mês, por conta" — os 12 meses lado a lado com o total, o caixa
+  no início e no fim de cada mês, **Realizado** ou **Orçado** (o caixa previsto pelo orçamento: o de 1º
+  de janeiro mais o que o orçamento prevê) e **em reais** ou **em % das receitas** do mês (a análise
+  vertical); "Orçado × realizado" — de janeiro até o mês escolhido, orçado, realizado, diferença
+  (positiva é sempre melhor para o caixa) e quanto do orçado se realizou. A `Grade` ganhou
+  `.rolagem_horizontal()` para as 14 colunas caberem num notebook.
+
+Lição do outro sistema: lá o plano de contas **é** o fluxo de caixa (01 Receitas operacionais … 06
+Atividades de investimento), e "Zerar transferências"/"Zerar contas e lançamentos" apagam o histórico
+de vez. Aqui o plano é contábil (partidas dobradas, DRE e balancete fecham) e o DFC gerencial é uma
+**leitura** dele — e não há "zerar": lançamento se estorna, com autoria (doc 05 §2); para recomeçar do
+zero, uma base nova.
 
 ## 6.8 Portal do Contador (2026-10-31, onda 8)
 

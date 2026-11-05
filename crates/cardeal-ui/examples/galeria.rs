@@ -721,6 +721,38 @@ impl eframe::App for Galeria {
 
                 ui.add_space(Espaco::E24);
                 ui.add(Rotulo::titulo_secao(
+                    "Grade larga: rolagem_horizontal (12 meses, estreite a janela)",
+                ));
+                {
+                    const MESES: [&str; 12] = [
+                        "Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out",
+                        "Nov", "Dez",
+                    ];
+                    let mut colunas = vec![ColunaGrade::nova("Conta").largura(220.0)];
+                    colunas.extend(MESES.iter().map(|m| ColunaGrade::nova(m).largura(96.0).numero()));
+                    colunas.push(ColunaGrade::nova("Total").largura(110.0).numero());
+                    let contas = [("Venda de mercadorias", 18_500), ("Aluguel", -2_400)];
+                    Grade::nova(colunas)
+                        .id_salt("galeria-grade-larga")
+                        .rolagem_horizontal()
+                        .mostrar(ui, contas.len(), |i, row| {
+                            let (nome, reais) = contas[i];
+                            row.col(|ui| {
+                                ui.add(Rotulo::interface(nome));
+                            });
+                            for _ in MESES {
+                                row.col(|ui| {
+                                    ui.add(ValorDinheiro::novo(Dinheiro::reais(reais)));
+                                });
+                            }
+                            row.col(|ui| {
+                                ui.add(ValorDinheiro::novo(Dinheiro::reais(reais * 12)));
+                            });
+                        });
+                }
+
+                ui.add_space(Espaco::E24);
+                ui.add(Rotulo::titulo_secao(
                     "Listagem de cadastro: BarraFiltros · Grade.com_acoes · AcoesRegistro · Ordenacao",
                 ));
                 self.listagem(ui);

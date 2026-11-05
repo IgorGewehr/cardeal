@@ -116,6 +116,9 @@ impl Modulo for ModuloFinanceiro {
             .consulta::<crate::SaudeFinanceira>("financeiro.saude.v1")
             .consulta::<crate::DfcDoPeriodo>("financeiro.dfc_do_periodo.v1")
             .consulta::<crate::DfcIndiretoDoPeriodo>("financeiro.dfc_indireto_do_periodo.v1")
+            .consulta::<crate::dfc_gerencial::DfcGerencialDoAno>(
+                "financeiro.dfc_gerencial_do_ano.v1",
+            )
             .consulta::<crate::BalanceteDoPeriodo>("financeiro.balancete_do_periodo.v1")
             .consulta::<crate::DiarioDoPeriodo>("financeiro.diario_do_periodo.v1")
             .consulta::<crate::DreDoPeriodo>("financeiro.dre_do_periodo.v1")

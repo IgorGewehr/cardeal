@@ -16,6 +16,7 @@ mod conferencia;
 mod contador;
 mod contas;
 mod custos;
+mod dfc_mensal;
 mod dre;
 mod fluxo;
 mod grupo;
@@ -451,8 +452,10 @@ pub struct EstadoTelaFinanceiro {
     dfc: Option<mod_financeiro::dfc::Dfc>,
     /// O DFC pelo método indireto (do lucro ao caixa) do mesmo mês.
     dfc_indireto: Option<mod_financeiro::dfc::DfcIndireto>,
-    /// A aba do DFC mostra o método indireto.
-    dfc_metodo_indireto: bool,
+    /// A subaba do DFC: 0 = método direto, 1 = indireto, 2 = mês a mês, 3 = orçado × realizado.
+    dfc_visao: u8,
+    /// O DFC do ano por conta (mês a mês e orçado × realizado).
+    dfc_mensal: dfc_mensal::EstadoDfcMensal,
     /// Dentro de Resultado: 0 = DRE, 1 = DFC, 2 = balancete, 3 = Simples, 4 = orçamento.
     visao_resultado: u8,
     /// O resumo do Simples do mês (`None`: sem a permissão).

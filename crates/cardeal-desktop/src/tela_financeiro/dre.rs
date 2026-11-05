@@ -51,6 +51,7 @@ impl EstadoTelaFinanceiro {
         self.balancete = self.anotar(r);
         self.carregar_simples(motor, sessao);
         self.carregar_orcamento(motor, sessao);
+        self.carregar_dfc_mensal(motor, sessao);
     }
 }
 
@@ -81,7 +82,7 @@ fn variacao(atual: Dinheiro, base: Dinheiro) -> Option<(String, bool)> {
     ))
 }
 
-fn celula_valor(ui: &mut egui::Ui, v: Dinheiro) {
+pub(super) fn celula_valor(ui: &mut egui::Ui, v: Dinheiro) {
     if v.e_zero() {
         ui.add(Rotulo::interface("—").cor(ui.cores().texto_fraco));
     } else {
@@ -180,21 +181,24 @@ pub(super) fn painel_dre(
         return;
     }
     if estado.visao_resultado == 1 {
-        if let Some(v) = Abas::nova(&[(false, "Método direto"), (true, "Método indireto")])
-            .selecionada(estado.dfc_metodo_indireto)
-            .id_salt("dfc-metodo")
-            .mostrar(ui)
+        if let Some(v) = Abas::nova(&[
+            (0_u8, "Método direto"),
+            (1, "Método indireto"),
+            (2, "Mês a mês, por conta"),
+            (3, "Orçado × realizado"),
+        ])
+        .selecionada(estado.dfc_visao)
+        .id_salt("dfc-metodo")
+        .mostrar(ui)
         {
-            estado.dfc_metodo_indireto = v;
+            estado.dfc_visao = v;
         }
         ui.add_space(Espaco::E8);
-        match (
-            estado.dfc_metodo_indireto,
-            &estado.dfc,
-            &estado.dfc_indireto,
-        ) {
-            (false, Some(dfc), _) => tabela_dfc(ui, dfc),
-            (true, _, Some(ind)) => tabela_dfc_indireto(ui, ind),
+        match (estado.dfc_visao, &estado.dfc, &estado.dfc_indireto) {
+            (2, _, _) => super::dfc_mensal::painel_mes_a_mes(ui, motor, sessao, estado),
+            (3, _, _) => super::dfc_mensal::painel_orcado_realizado(ui, motor, sessao, estado),
+            (0, Some(dfc), _) => tabela_dfc(ui, dfc),
+            (1, _, Some(ind)) => tabela_dfc_indireto(ui, ind),
             _ => {
                 EstadoVazio::novo(Icone::Dinheiro, "Sem dados para apurar o fluxo de caixa.")
                     .mostrar(ui);

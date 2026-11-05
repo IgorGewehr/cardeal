@@ -76,6 +76,7 @@ mod conferencia;
 mod consultas;
 pub mod contador;
 pub mod dfc;
+pub mod dfc_gerencial;
 pub mod dre;
 mod dre_consulta;
 mod erros;

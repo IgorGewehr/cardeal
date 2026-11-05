@@ -60,6 +60,10 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   `modulos/compras.md` §14): Estoque › Entre filiais envia com a NF-e de transferência (5152/6152, CSOSN
   400, `mod_fiscal::transferencia`), a filial recebe só com ela autorizada, o Razão espelha pela conta
   corrente com empresas do grupo (papel novo `ContaCorrenteGrupo`); só mesma raiz de CNPJ e Simples.
+  O **DFC gerencial** (2026-11-05, `mod_financeiro::dfc_gerencial`, doc `modulos/financeiro.md` §6.9):
+  Resultado › DFC › "Mês a mês, por conta" (12 meses, realizado ou orçado, em R$ ou % das receitas) e
+  "Orçado × realizado" pelo caixa — cada baixa vai para a conta do título de origem, não para
+  clientes/fornecedores.
   Onda 6 (Financeiro 2) começou: **conciliação com alerta de pendências e saldo banco × sistema**,
   **lançamento pré-preenchido pelo último da pessoa**, **DFC indireto**, **cheques**, **balancete/diário** e o
   **pacote do contador** (PDF + `.xlsx`) e a **régua de cobrança** (fila do dia com envio de um clique) feitos

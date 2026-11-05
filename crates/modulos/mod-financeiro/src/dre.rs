@@ -147,6 +147,20 @@ pub fn rotulo_do_bloco(l: &LinhaResultado) -> &'static str {
     }
 }
 
+/// O grupo do DFC gerencial (`crate::dfc_gerencial`) em que a conta do resultado entra — o
+/// mesmo recorte da DRE: a receita bruta e as outras receitas são receitas operacionais, o CMV e
+/// o custo do serviço são custos, os juros (recebidos e pagos) são o resultado financeiro.
+pub(crate) fn grupo_gerencial(l: &LinhaResultado) -> crate::dfc_gerencial::GrupoGerencial {
+    use crate::dfc_gerencial::GrupoGerencial as G;
+    match bloco_de(l) {
+        Bloco::ReceitaBruta | Bloco::OutrasReceitas => G::Receitas,
+        Bloco::Deducoes => G::Deducoes,
+        Bloco::Cmv => G::Custos,
+        Bloco::DespesasOperacionais => G::Despesas,
+        Bloco::ReceitaFinanceira | Bloco::DespesaFinanceira => G::Financeiro,
+    }
+}
+
 /// Se a conta soma no resultado (receitas) ou subtrai (deduções, custos, despesas).
 #[must_use]
 pub fn soma_no_resultado(l: &LinhaResultado) -> bool {
