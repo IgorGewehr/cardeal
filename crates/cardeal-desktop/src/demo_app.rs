@@ -35,6 +35,66 @@ pub struct Captura {
     quadros: u32,
     pediu: bool,
     maximizou: bool,
+    /// Gestos de `CARDEAL_DEMO_GESTOS` (clique, texto, tecla), cada um no quadro em que entra —
+    /// para capturar um menu aberto ou uma busca digitada sem mexer no mouse de ninguém.
+    gestos: Vec<(u32, egui::Event)>,
+    quadros_de_entrada: u32,
+}
+
+/// Lê `CARDEAL_DEMO_GESTOS` ("clique:753,500;texto:as;tecla:enter", posições em pontos lógicos)
+/// como eventos de entrada, um gesto a cada 3 quadros a partir do 6º.
+fn gestos_do_ambiente() -> Vec<(u32, egui::Event)> {
+    let Ok(roteiro) = std::env::var("CARDEAL_DEMO_GESTOS") else {
+        return Vec::new();
+    };
+    let mut eventos = Vec::new();
+    let mut quadro = 6;
+    for gesto in roteiro.split(';').map(str::trim).filter(|g| !g.is_empty()) {
+        let (tipo, valor) = gesto.split_once(':').unwrap_or((gesto, ""));
+        match tipo {
+            "clique" => {
+                let mut xy = valor
+                    .split(',')
+                    .filter_map(|n| n.trim().parse::<f32>().ok());
+                let (Some(x), Some(y)) = (xy.next(), xy.next()) else {
+                    continue;
+                };
+                let pos = egui::pos2(x, y);
+                let botao = |pressionado| egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: pressionado,
+                    modifiers: egui::Modifiers::NONE,
+                };
+                eventos.push((quadro, egui::Event::PointerMoved(pos)));
+                eventos.push((quadro, botao(true)));
+                eventos.push((quadro + 1, botao(false)));
+            }
+            "texto" => eventos.push((quadro, egui::Event::Text(valor.to_owned()))),
+            "tecla" => {
+                let tecla = match valor {
+                    "enter" => egui::Key::Enter,
+                    "baixo" => egui::Key::ArrowDown,
+                    "cima" => egui::Key::ArrowUp,
+                    "esc" => egui::Key::Escape,
+                    _ => continue,
+                };
+                eventos.push((
+                    quadro,
+                    egui::Event::Key {
+                        key: tecla,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ));
+            }
+            _ => continue,
+        }
+        quadro += 3;
+    }
+    eventos
 }
 
 impl Captura {
@@ -58,7 +118,21 @@ impl Captura {
             quadros: 0,
             pediu: false,
             maximizou: false,
+            gestos: gestos_do_ambiente(),
+            quadros_de_entrada: 0,
         })
+    }
+
+    /// Põe na entrada deste quadro os gestos marcados para ele (`CARDEAL_DEMO_GESTOS`).
+    pub fn injetar(&mut self, entrada: &mut egui::RawInput) {
+        self.quadros_de_entrada += 1;
+        let agora = self.quadros_de_entrada;
+        entrada.events.extend(
+            self.gestos
+                .iter()
+                .filter(|(q, _)| *q == agora)
+                .map(|(_, e)| e.clone()),
+        );
     }
 
     /// Maximiza a janela no primeiro quadro (a demo é para mostrar: na tela cheia do notebook,

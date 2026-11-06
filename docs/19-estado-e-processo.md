@@ -93,6 +93,10 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   Obrigações depois dos números na Visão geral. **Não repetir:** o eframe grava a memória do egui —
   inclusive o zoom — em `%APPDATA%\cardeal-desktop\data\app.ron`; uma captura com `CARDEAL_DEMO_ZOOM`
   deixava o app ampliado nas aberturas seguintes. A demo não grava mais (`persist_egui_memory`).
+  Depois, no ensaio do usuário: o filtro de categoria (dezenas de contas da gestão financeira) virava
+  caça-palavras — `SeletorOpcao` ganhou busca com foco ao abrir em listas longas e passou a desenhar o
+  próprio botão e painel (o `ComboBox` do egui fecha em qualquer clique, inclusive na busca). A captura
+  da demo aceita `CARDEAL_DEMO_GESTOS` (clique, texto, tecla) para fotografar menus abertos.
   Onda 6 (Financeiro 2) começou: **conciliação com alerta de pendências e saldo banco × sistema**,
   **lançamento pré-preenchido pelo último da pessoa**, **DFC indireto**, **cheques**, **balancete/diário** e o
   **pacote do contador** (PDF + `.xlsx`) e a **régua de cobrança** (fila do dia com envio de um clique) feitos

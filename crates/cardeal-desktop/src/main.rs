@@ -784,6 +784,14 @@ impl eframe::App for App {
         true
     }
 
+    /// A captura da demo pode simular cliques e teclas (`CARDEAL_DEMO_GESTOS`).
+    #[cfg(feature = "demo")]
+    fn raw_input_hook(&mut self, _ctx: &egui::Context, entrada: &mut egui::RawInput) {
+        if let Some(demo) = &mut self.demo {
+            demo.injetar(entrada);
+        }
+    }
+
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if self.motor.is_none() && !matches!(self.tela, Tela::FalhaAoAbrir(_)) {
             self.carregar();

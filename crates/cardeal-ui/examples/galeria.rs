@@ -509,6 +509,27 @@ impl eframe::App for Galeria {
                 SeletorOpcao::novo("Seletor de opção", &mut self.opcao)
                     .opcoes([(1_u8, "Dinheiro"), (2, "Pix"), (3, "Cartão de crédito")])
                     .mostrar(ui);
+                ui.add_space(Espaco::E12);
+                // Mais de LIMIAR_BUSCA opções: o painel abre com a busca focada.
+                SeletorOpcao::novo("Seletor longo (com busca)", &mut self.opcao)
+                    .opcoes(
+                        [
+                            "Água",
+                            "Aluguel",
+                            "Assessoria contábil",
+                            "Energia elétrica",
+                            "Internet",
+                            "Impostos sobre vendas",
+                            "Material de escritório",
+                            "Pró-labore",
+                            "Salários",
+                            "Telefone",
+                        ]
+                        .into_iter()
+                        .enumerate()
+                        .map(|(i, t)| (u8::try_from(i).unwrap_or(0) + 10, t)),
+                    )
+                    .mostrar(ui);
 
                 ui.add_space(Espaco::E24);
                 ui.add(Rotulo::titulo_secao("Seletor de pagamento (faturar OS, dar baixa)"));
