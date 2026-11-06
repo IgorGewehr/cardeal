@@ -521,6 +521,24 @@ dono quer "recebi de vendas, paguei aluguel" — **o caixa pela conta do plano**
   (positiva é sempre melhor para o caixa) e quanto do orçado se realizou. A `Grade` ganhou
   `.rolagem_horizontal()` para as 14 colunas caberem num notebook.
 
+**O a vencer, os subtotais do dono e o orçado × realizado mês a mês (2026-11-06).** Com os prints da
+central de relatórios do sistema de origem ("DFC: status Pagos/Pendentes/Todos", "DFC Visão Mensal",
+"Orçado vs. Realizado" com Orç/Real de cada mês):
+- **A vencer** (`LinhaGerencial::a_vencer`): as parcelas em aberto entram como movimentos esperados na
+  data do vencimento — o vencido e ainda em aberto, **no mês de hoje** (é dinheiro que se espera agora,
+  não num mês que já passou) — com a contrapartida em clientes a receber ou fornecedores e, nas origens,
+  as partidas do lançamento de competência da parcela: o dinheiro vai para a conta do título pela mesma
+  regra da baixa. A tabela de 12 meses mostra **Realizado**, **A vencer**, **Realizado + a vencer** (o
+  caixa do ano se tudo for recebido e pago no vencimento) ou **Orçado**.
+- **Subtotais na ordem que o dono lê**: (=) Receita líquida (receitas + deduções), (=) Margem de
+  contribuição (− custos e compras), (=) Resultado operacional (− despesas), depois o resultado
+  financeiro, investimento, financiamento e outros, e **(=) Resultado líquido do caixa** (a variação) —
+  os mesmos nomes do sistema de origem, com o caixa no início e no fim de cada mês (que lá não havia).
+- **Orçado × realizado** acumulado até o mês **ou mês a mês** (Orç e Real de cada mês lado a lado, total
+  orçado, total realizado e diferença — positiva é sempre melhor para o caixa; lá a mesma linha saía
+  vermelha numa visão e verde na outra).
+- As duas visões **exportam** em PDF e `.xlsx` (§6.11).
+
 Lição do outro sistema: lá o plano de contas **é** o fluxo de caixa (01 Receitas operacionais … 06
 Atividades de investimento), e "Zerar transferências"/"Zerar contas e lançamentos" apagam o histórico
 de vez. Aqui o plano é contábil (partidas dobradas, DRE e balancete fecham) e o DFC gerencial é uma

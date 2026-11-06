@@ -183,7 +183,7 @@ pub(super) fn painel(
     if ver_caixa {
         estado.visao_resultado = 1;
         estado.dfc_visao = 2;
-        estado.dfc_mensal.orcado = true;
+        estado.dfc_mensal.fonte = super::dfc_mensal::Fonte::Orcado;
         return;
     }
     if descartar {

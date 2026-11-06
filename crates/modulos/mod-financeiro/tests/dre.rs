@@ -1306,3 +1306,49 @@ fn recebimentos_e_pagamentos_do_periodo_sem_as_baixas_estornadas() {
     );
     assert!(antes.is_empty());
 }
+
+#[test]
+fn o_dfc_gerencial_traz_o_a_vencer_na_conta_do_titulo_e_o_vencido_no_mes_de_hoje() {
+    use mod_financeiro::dfc_gerencial::{DfcGerencial, DfcGerencialDoAno, GrupoGerencial};
+    let c = cena();
+    let s = c.sessao(
+        Id::novo(),
+        &[
+            "financeiro.receber.criar",
+            "financeiro.pagar.criar",
+            "financeiro.dre.ver",
+        ],
+    );
+    let h = hoje();
+    let mes = h.competencia().mes() as usize - 1;
+    // A receber vencido há 10 dias (ainda em aberto) e a pagar vencendo hoje.
+    lancar_receita(&c, &s, Dinheiro::reais(700), h.mais_dias(-10));
+    lancar_despesa(&c, &s, Dinheiro::reais(250), h);
+    let d: DfcGerencial = c.consulta(
+        &s,
+        "financeiro.dfc_gerencial_do_ano.v1",
+        &DfcGerencialDoAno {
+            ano: h.competencia().ano(),
+        },
+    );
+    let grupo = |g: GrupoGerencial| d.grupos.iter().find(|x| x.grupo == g).unwrap();
+    // O vencido em aberto entra no mês de hoje, na receita (não em "clientes a receber").
+    if h.mais_dias(-10).competencia().ano() == h.competencia().ano() {
+        assert_eq!(
+            grupo(GrupoGerencial::Receitas).a_vencer[mes],
+            Dinheiro::reais(700)
+        );
+        assert_eq!(d.variacao_a_vencer()[mes], Dinheiro::reais(450));
+    }
+    assert_eq!(
+        grupo(GrupoGerencial::Despesas).a_vencer[mes],
+        Dinheiro::reais(-250)
+    );
+    assert!(d
+        .grupos
+        .iter()
+        .flat_map(|g| &g.linhas)
+        .all(|l| !l.codigo.starts_with("1.2.") && !l.codigo.starts_with("2.1.")));
+    // Nada foi pago: o realizado está zerado.
+    assert!(d.variacao.iter().all(|v| v.e_zero()));
+}

@@ -820,16 +820,21 @@ fn dfc_mes_a_mes_poe_o_recebido_na_conta_da_receita_e_compara_com_o_orcado() {
     cardeal_ui::tokens::instalar_fontes(&ctx);
     cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
     estado.visao_resultado = 1;
-    for (visao, orcado, percentual) in [
-        (2, false, false),
-        (2, false, true),
-        (2, true, false),
-        (2, true, true),
-        (3, false, false),
+    use super::dfc_mensal::Fonte;
+    for (visao, fonte, percentual, mes_a_mes) in [
+        (2, Fonte::Realizado, false, false),
+        (2, Fonte::Realizado, true, false),
+        (2, Fonte::Orcado, false, false),
+        (2, Fonte::Orcado, true, false),
+        (2, Fonte::AVencer, false, false),
+        (2, Fonte::Projetado, true, false),
+        (3, Fonte::Realizado, false, false),
+        (3, Fonte::Realizado, false, true),
     ] {
         estado.dfc_visao = visao;
-        estado.dfc_mensal.orcado = orcado;
+        estado.dfc_mensal.fonte = fonte;
         estado.dfc_mensal.percentual = percentual;
+        estado.dfc_mensal.comparado_mes_a_mes = mes_a_mes;
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 painel_dre(ui, &t.motor, &t.sessao, &mut estado);

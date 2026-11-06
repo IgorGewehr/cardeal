@@ -191,6 +191,9 @@ pub struct LinhaGerencial {
     pub agrupadora: Option<String>,
     /// O que entrou (positivo) ou saiu (negativo) do caixa em cada mês, de janeiro a dezembro.
     pub realizado: [Dinheiro; 12],
+    /// O que está em aberto para entrar ou sair, pelo vencimento (as parcelas a receber e a pagar
+    /// ligadas à conta pelo título) — o vencido e ainda em aberto conta no mês de hoje.
+    pub a_vencer: [Dinheiro; 12],
     /// O orçado de cada mês, no mesmo sinal.
     pub orcado: [Dinheiro; 12],
 }
@@ -218,6 +221,8 @@ pub struct GrupoDfcGerencial {
     pub linhas: Vec<LinhaGerencial>,
     /// O realizado do grupo em cada mês.
     pub realizado: [Dinheiro; 12],
+    /// O a vencer do grupo em cada mês.
+    pub a_vencer: [Dinheiro; 12],
     /// O orçado do grupo em cada mês.
     pub orcado: [Dinheiro; 12],
 }
@@ -257,6 +262,20 @@ impl DfcGerencial {
     #[must_use]
     pub fn variacao_orcada(&self) -> [Dinheiro; 12] {
         self.somar(|_| true, |g| g.orcado)
+    }
+
+    /// O que está a vencer em cada mês (todos os grupos): o que entra menos o que sai.
+    #[must_use]
+    pub fn variacao_a_vencer(&self) -> [Dinheiro; 12] {
+        self.somar(|_| true, |g| g.a_vencer)
+    }
+
+    /// Se há algo a vencer no ano.
+    #[must_use]
+    pub fn tem_a_vencer(&self) -> bool {
+        self.grupos
+            .iter()
+            .any(|g| g.a_vencer.iter().any(|v| !v.e_zero()))
     }
 
     /// As receitas operacionais de cada mês: a base da análise vertical (o "%" de cada linha).
@@ -577,35 +596,30 @@ fn anular_custo_da_venda(plano: &Plano, partes: &mut Vec<(String, Dinheiro)>) {
 #[derive(Default)]
 struct Acumulado {
     realizado: [Dinheiro; 12],
+    a_vencer: [Dinheiro; 12],
     orcado: [Dinheiro; 12],
 }
 
-/// O realizado do ano por conta (pelo código; fora do plano, pelo nome com `?`), a variação do
-/// caixa de cada mês e o que ficou sem título de origem.
-struct Realizado {
-    linhas: HashMap<String, Acumulado>,
-    variacao: [Dinheiro; 12],
-    sem_origem: Dinheiro,
-}
-
+/// Soma os movimentos do ano nas linhas (pelo código; fora do plano, pelo nome com `?`) — no
+/// realizado ou no a vencer — e devolve a variação do caixa de cada mês e o que ficou sem título
+/// de origem.
 fn acumular(
     plano: &Plano,
     ano: i32,
     movimentos: &[MovimentoDeCaixa],
     origens: &OrigensDasBaixas,
-) -> Realizado {
-    let mut r = Realizado {
-        linhas: HashMap::new(),
-        variacao: [Dinheiro::ZERO; 12],
-        sem_origem: Dinheiro::ZERO,
-    };
+    linhas: &mut HashMap<String, Acumulado>,
+    a_vencer: bool,
+) -> ([Dinheiro; 12], Dinheiro) {
+    let mut variacao = [Dinheiro::ZERO; 12];
+    let mut sem_origem = Dinheiro::ZERO;
     for m in movimentos {
         let c = m.data.competencia();
         if c.ano() != ano {
             continue;
         }
         let mes = c.mes() as usize - 1;
-        r.variacao[mes] += m.caixa;
+        variacao[mes] += m.caixa;
         let origem = origens.get(&m.lancamento);
         let mut partes: Vec<(String, Dinheiro)> = Vec::new();
         for cp in &m.contrapartidas {
@@ -619,7 +633,7 @@ fn acumular(
                 cp.papel.as_deref(),
                 Some("ClientesAReceber" | "Fornecedores")
             ) {
-                r.sem_origem += cp.valor.abs();
+                sem_origem += cp.valor.abs();
             }
             let chave = if plano.conta(&cp.codigo).is_some() {
                 cp.codigo.clone()
@@ -631,17 +645,27 @@ fn acumular(
         anular_custo_da_venda(plano, &mut partes);
         for (chave, valor) in partes {
             // O que a contrapartida carrega é, com o sinal trocado, o que entrou no caixa.
-            r.linhas.entry(chave).or_default().realizado[mes] -= valor;
+            let a = linhas.entry(chave).or_default();
+            if a_vencer {
+                a.a_vencer[mes] -= valor;
+            } else {
+                a.realizado[mes] -= valor;
+            }
         }
     }
-    r
+    (variacao, sem_origem)
 }
 
 /// As contas com realizado ou orçado, nos grupos, pela ordem do plano, com os totais.
 fn agrupar(plano: &Plano, linhas: HashMap<String, Acumulado>) -> Vec<GrupoDfcGerencial> {
     let mut por_grupo: HashMap<GrupoGerencial, Vec<LinhaGerencial>> = HashMap::new();
     for (chave, a) in linhas {
-        if a.realizado.iter().chain(&a.orcado).all(|v| v.e_zero()) {
+        if a.realizado
+            .iter()
+            .chain(&a.a_vencer)
+            .chain(&a.orcado)
+            .all(|v| v.e_zero())
+        {
             continue;
         }
         let (grupo, linha) = match plano.conta(&chave) {
@@ -653,6 +677,7 @@ fn agrupar(plano: &Plano, linhas: HashMap<String, Acumulado>) -> Vec<GrupoDfcGer
                     nome: plano.rotulo(c),
                     agrupadora: plano.agrupadora(c),
                     realizado: a.realizado,
+                    a_vencer: a.a_vencer,
                     orcado: a.orcado,
                 },
             ),
@@ -664,6 +689,7 @@ fn agrupar(plano: &Plano, linhas: HashMap<String, Acumulado>) -> Vec<GrupoDfcGer
                     nome: chave.trim_start_matches('?').to_owned(),
                     agrupadora: None,
                     realizado: a.realizado,
+                    a_vencer: a.a_vencer,
                     orcado: a.orcado,
                 },
             ),
@@ -680,10 +706,12 @@ fn agrupar(plano: &Plano, linhas: HashMap<String, Acumulado>) -> Vec<GrupoDfcGer
                     .then_with(|| a.nome.cmp(&b.nome))
             });
             let mut realizado = [Dinheiro::ZERO; 12];
+            let mut a_vencer = [Dinheiro::ZERO; 12];
             let mut orcado = [Dinheiro::ZERO; 12];
             for l in &ls {
                 for i in 0..12 {
                     realizado[i] += l.realizado[i];
+                    a_vencer[i] += l.a_vencer[i];
                     orcado[i] += l.orcado[i];
                 }
             }
@@ -691,6 +719,7 @@ fn agrupar(plano: &Plano, linhas: HashMap<String, Acumulado>) -> Vec<GrupoDfcGer
                 grupo: *g,
                 linhas: ls,
                 realizado,
+                a_vencer,
                 orcado,
             })
         })
@@ -698,22 +727,23 @@ fn agrupar(plano: &Plano, linhas: HashMap<String, Acumulado>) -> Vec<GrupoDfcGer
 }
 
 /// Monta o DFC gerencial do ano a partir do caixa de 1º de janeiro, dos movimentos de caixa do
-/// ano, das origens das baixas, do plano e do orçado de cada conta (no sentido em que se orça).
+/// ano, das parcelas em aberto (como movimentos na data em que se espera o dinheiro, ligadas ao
+/// título pelas mesmas origens), das origens das baixas, do plano e do orçado de cada conta (no
+/// sentido em que se orça).
 #[must_use]
 pub fn montar(
     ano: i32,
     abertura: Dinheiro,
     movimentos: &[MovimentoDeCaixa],
+    a_vencer: &[MovimentoDeCaixa],
     origens: &OrigensDasBaixas,
     contas: &[ContaDoPlano],
     orcado: &[(Id, [Dinheiro; 12])],
 ) -> DfcGerencial {
     let plano = Plano::novo(contas);
-    let Realizado {
-        mut linhas,
-        variacao,
-        sem_origem,
-    } = acumular(&plano, ano, movimentos, origens);
+    let mut linhas: HashMap<String, Acumulado> = HashMap::new();
+    let (variacao, sem_origem) = acumular(&plano, ano, movimentos, origens, &mut linhas, false);
+    let _ = acumular(&plano, ano, a_vencer, origens, &mut linhas, true);
     for (conta, meses) in orcado {
         let Some(c) = plano.por_id.get(conta) else {
             continue;
@@ -777,11 +807,20 @@ impl DfcGerencialDoAno {
                 )
             })?;
         let contas = sqlite::plano(conexao, empresa)?;
-        let origens = sqlite::origens(conexao, empresa, periodo)?;
+        let mut origens = sqlite::origens(conexao, empresa, periodo)?;
+        let a_vencer = sqlite::a_vencer(
+            conexao,
+            empresa,
+            self.ano,
+            Data::hoje(cardeal_kernel::Fuso::BRASILIA),
+            &contas,
+            &mut origens,
+        )?;
         Ok(montar(
             self.ano,
             abertura,
             &movimentos,
+            &a_vencer,
             &origens,
             &contas,
             orcado,
@@ -828,8 +867,8 @@ pub fn mes_do_ano(c: Competencia, ano: i32) -> Option<u32> {
 
 #[cfg(feature = "sqlite")]
 pub(crate) mod sqlite {
-    use cardeal_kernel::{CodigoErro, Dinheiro, Erro, Id, Periodo, Resultado};
-    use cardeal_ledger::Natureza;
+    use cardeal_kernel::{CodigoErro, Data, Dinheiro, Erro, Id, Periodo, Resultado};
+    use cardeal_ledger::{ContrapartidaDeCaixa, MovimentoDeCaixa, Natureza};
     use rusqlite::{params, Connection};
 
     use super::{ContaDoPlano, OrigensDasBaixas};
@@ -878,6 +917,111 @@ pub(crate) mod sqlite {
             .collect::<rusqlite::Result<Vec<_>>>()
             .map_err(falha)?;
         Ok(contas)
+    }
+
+    /// id, vencimento, saldo, espécie e o lançamento de competência de uma parcela em aberto.
+    type Parcela = (Vec<u8>, i64, i64, String, Option<Vec<u8>>);
+
+    /// As parcelas em aberto como movimentos de caixa esperados: na data do vencimento (ou hoje,
+    /// para a vencida), entrando (a receber) ou saindo (a pagar) pelo saldo, com a contrapartida
+    /// em clientes a receber ou fornecedores — e, nas `origens`, as partidas do lançamento de
+    /// competência da parcela, para o dinheiro ir para a conta do título como numa baixa. Só as
+    /// que caem no `ano`.
+    pub(super) fn a_vencer(
+        c: &Connection,
+        empresa: Id,
+        ano: i32,
+        hoje: Data,
+        contas: &[ContaDoPlano],
+        origens: &mut OrigensDasBaixas,
+    ) -> Resultado<Vec<MovimentoDeCaixa>> {
+        let fim = Data::de_ymd(ano, 12, 31)?;
+        let mut stmt = c
+            .prepare(
+                "SELECT p.id, p.vencimento, p.valor - p.valor_baixado, t.especie, p.lancamento
+                 FROM financeiro_parcela p JOIN financeiro_titulo t ON t.id = p.titulo
+                 WHERE t.empresa = ?1 AND p.estado IN ('Aberta','Parcial')
+                   AND p.vencimento <= ?2 AND p.valor > p.valor_baixado",
+            )
+            .map_err(falha)?;
+        let parcelas: Vec<Parcela> = stmt
+            .query_map(
+                params![empresa.em_bytes().as_slice(), i64::from(fim.em_dias())],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            )
+            .map_err(falha)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(falha)?;
+        let plano = super::Plano::novo(contas);
+        let passagem_do_papel = |papel: &str| {
+            contas
+                .iter()
+                .filter(|k| !k.sintetica && plano.papel(&k.codigo) == Some(papel))
+                .min_by_key(|k| (k.codigo.len(), k.codigo.clone()))
+                .map(|k| (k.codigo.clone(), k.nome.clone()))
+        };
+        let mut partidas = c
+            .prepare(
+                "SELECT rc.codigo, rp.valor FROM razao_partida rp
+                 JOIN razao_conta rc ON rc.id = rp.conta
+                 WHERE rp.lancamento = ?1 ORDER BY rp.ordem",
+            )
+            .map_err(falha)?;
+        let mut saida = Vec::new();
+        for (id, venc, saldo, especie, lancamento) in parcelas {
+            let vencimento = Data::de_dias(i32::try_from(venc).unwrap_or(0));
+            let data = if vencimento < hoje { hoje } else { vencimento };
+            if data.ano() != ano {
+                continue;
+            }
+            let receber = especie == "Receber";
+            let papel = if receber {
+                "ClientesAReceber"
+            } else {
+                "Fornecedores"
+            };
+            let parcela = id_de(&id);
+            let origem: Vec<(String, Dinheiro)> = match &lancamento {
+                Some(l) => partidas
+                    .query_map([l.as_slice()], |r| {
+                        Ok((r.get::<_, String>(0)?, Dinheiro::centavos(r.get(1)?)))
+                    })
+                    .map_err(falha)?
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .map_err(falha)?,
+                None => Vec::new(),
+            };
+            // A passagem: a conta de clientes/fornecedores do próprio título, ou a do papel.
+            let passagem = origem
+                .iter()
+                .find(|(k, _)| plano.papel(k) == Some(papel))
+                .and_then(|(k, _)| plano.conta(k).map(|c| (c.codigo.clone(), c.nome.clone())))
+                .or_else(|| passagem_do_papel(papel));
+            let Some((codigo, nome)) = passagem else {
+                continue;
+            };
+            let caixa = if receber {
+                Dinheiro::centavos(saldo)
+            } else {
+                -Dinheiro::centavos(saldo)
+            };
+            if !origem.is_empty() {
+                origens.insert(parcela, origem);
+            }
+            saida.push(MovimentoDeCaixa {
+                lancamento: parcela,
+                data,
+                caixa,
+                contrapartidas: vec![ContrapartidaDeCaixa {
+                    codigo,
+                    nome,
+                    papel: Some(papel.to_owned()),
+                    grupo_fluxo: None,
+                    valor: -caixa,
+                }],
+            });
+        }
+        Ok(saida)
     }
 
     /// Para cada lançamento de caixa do período que é uma baixa — ou o estorno de uma —, as
@@ -1109,6 +1253,7 @@ mod testes {
             2026,
             Dinheiro::reais(200),
             &[recebe, paga_metade, paga_aluguel],
+            &[],
             &origens,
             &contas,
             &[],
@@ -1179,6 +1324,7 @@ mod testes {
             2026,
             Dinheiro::ZERO,
             &[recebe, estorno],
+            &[],
             &origens,
             &contas,
             &[],
@@ -1205,6 +1351,7 @@ mod testes {
             2026,
             Dinheiro::ZERO,
             &[cartao, avulso, renegociado],
+            &[],
             &origens,
             &contas,
             &[],
@@ -1240,6 +1387,7 @@ mod testes {
             2026,
             Dinheiro::ZERO,
             &[venda, compra],
+            &[],
             &OrigensDasBaixas::new(),
             &contas,
             &[],
@@ -1273,6 +1421,7 @@ mod testes {
             2026,
             Dinheiro::ZERO,
             &[maquina, emprestimo, retirada],
+            &[],
             &OrigensDasBaixas::new(),
             &contas,
             &[
@@ -1311,6 +1460,35 @@ mod testes {
             percentual(Dinheiro::reais(-300), Dinheiro::reais(1_000)),
             Some(Percentual::pontos(-30))
         );
+    }
+
+    #[test]
+    fn o_a_vencer_vai_para_a_conta_do_titulo_sem_mexer_no_realizado() {
+        let contas = plano();
+        // Uma venda a prazo em aberto (vence em dezembro) e o aluguel a pagar.
+        let venda = origem(&[("1.2.01", 1_000), ("4.1", -1_000)]);
+        let aluguel = origem(&[("5.50.01", 300), ("2.1.01", -300)]);
+        let receber = mov(12, 1_000, vec![cp("1.2.01", -1_000)]);
+        let pagar = mov(12, -300, vec![cp("2.1.01", 300)]);
+        let mut origens = OrigensDasBaixas::new();
+        origens.insert(receber.lancamento, venda);
+        origens.insert(pagar.lancamento, aluguel);
+        let d = montar(
+            2026,
+            Dinheiro::reais(50),
+            &[],
+            &[receber, pagar],
+            &origens,
+            &contas,
+            &[],
+        );
+        assert_eq!(linha(&d, "4.1").a_vencer[11], Dinheiro::reais(1_000));
+        assert_eq!(linha(&d, "5.50.01").a_vencer[11], Dinheiro::reais(-300));
+        assert!(linha(&d, "4.1").realizado.iter().all(|v| v.e_zero()));
+        assert!(d.variacao.iter().all(|v| v.e_zero()));
+        assert_eq!(d.variacao_a_vencer()[11], Dinheiro::reais(700));
+        assert!(d.tem_a_vencer());
+        assert_eq!(d.saldo_final[11], Dinheiro::reais(50));
     }
 
     #[test]

@@ -69,6 +69,9 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   vencimento** (§6.10): esta semana, este mês, o próximo — previsto, realizado e pendente do que vence —
   e o atraso. Financeiro › **Relatórios** (§6.11): contas a pagar/receber por faixa de vencimento,
   recebimentos e pagamentos por dia e o fluxo de caixa previsto, todos com exportação em PDF e `.xlsx`.
+  O DFC mês a mês ganhou o **a vencer** (parcelas em aberto na conta do título), os subtotais do dono
+  (receita líquida, margem de contribuição, resultado operacional, resultado líquido do caixa) e o orçado
+  × realizado **mês a mês**, com exportação.
   Onda 6 (Financeiro 2) começou: **conciliação com alerta de pendências e saldo banco × sistema**,
   **lançamento pré-preenchido pelo último da pessoa**, **DFC indireto**, **cheques**, **balancete/diário** e o
   **pacote do contador** (PDF + `.xlsx`) e a **régua de cobrança** (fila do dia com envio de um clique) feitos
