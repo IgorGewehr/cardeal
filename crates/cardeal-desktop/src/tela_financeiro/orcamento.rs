@@ -1,6 +1,7 @@
-//! Resultado › "Orçamento": o orçado de cada conta do resultado no ano, o orçado e o realizado até
-//! o mês escolhido e o desvio (positivo é sempre melhor), o editor dos 12 meses de uma conta e a
-//! cópia do ano anterior com reajuste (`mod_financeiro::orcamento`).
+//! Resultado › "Orçamento": o orçado de cada conta no ano — as do resultado e as que se orçam pelo
+//! caixa (compras, investimentos, financiamentos) —, o orçado e o realizado até o mês escolhido e o
+//! desvio (positivo é sempre melhor), o editor dos 12 meses de uma conta, a planilha do ano
+//! (`orcamento_planilha`) e a cópia do ano anterior com reajuste (`mod_financeiro::orcamento`).
 
 use super::*;
 use cardeal_kernel::Percentual;
@@ -24,6 +25,10 @@ pub(super) struct FormOrcamento {
     todos: String,
     reajuste: String,
     erro: Option<String>,
+    /// Mostra a planilha do ano (todas as contas × 12 meses) em vez da lista por conta.
+    pub(super) planilha: bool,
+    /// O que está digitado na planilha.
+    pub(super) planilha_do_ano: Option<super::orcamento_planilha::Planilha>,
 }
 
 impl EstadoTelaFinanceiro {
@@ -83,17 +88,33 @@ pub(super) fn painel_orcamento(
     let ate = estado.mes_dre().mes();
     let pode_editar = sessao.concede(PERMISSAO_EDITAR);
     ui.add(Rotulo::titulo_secao(format!("Orçamento de {}", o.ano)));
-    ui.add(Rotulo::apoio(format!(
-        "Quanto se espera de cada receita e de cada despesa, mês a mês. Até {}: o orçado e o \
-         realizado (pela competência, como na DRE); o desvio é positivo quando é melhor — receita \
-         acima do orçado, despesa abaixo. Resultado orçado no ano: {}.",
-        nome_mes(estado.mes_dre()),
-        o.resultado_orcado().formatar_com_simbolo()
-    )));
+    ui.add(
+        Rotulo::apoio(format!(
+            "Quanto se espera de cada receita e de cada despesa, mês a mês — e das compras, dos \
+             investimentos e dos financiamentos, pelo caixa. Até {}: o orçado e o realizado \
+             (receitas e despesas pela competência, como na DRE; as de caixa pelo que entrou e \
+             saiu); o desvio é positivo quando é melhor. Resultado orçado no ano: {}.",
+            nome_mes(estado.mes_dre()),
+            o.resultado_orcado().formatar_com_simbolo()
+        ))
+        .quebravel(),
+    );
     ui.add_space(Espaco::E8);
     if pode_editar {
         copiar_do_ano_anterior(ui, motor, sessao, estado, &o);
         ui.add_space(Espaco::E8);
+        if let Some(v) = Abas::nova(&[(false, "Por conta"), (true, "Planilha do ano")])
+            .selecionada(estado.form_orcamento.planilha)
+            .id_salt("orcamento-modo")
+            .mostrar(ui)
+        {
+            estado.form_orcamento.planilha = v;
+        }
+        ui.add_space(Espaco::E8);
+        if estado.form_orcamento.planilha {
+            super::orcamento_planilha::painel(ui, motor, sessao, estado, &o);
+            return;
+        }
     }
     let mut abrir: Option<LinhaDeOrcamento> = None;
     // Quem orça vê também as contas ainda sem orçamento nem movimento, para orçar.
@@ -219,7 +240,8 @@ fn editor(
             continue;
         }
         match Dinheiro::de_str(texto) {
-            Ok(v) if !v.e_negativo() => meses[i] = v,
+            // Negativo só na conta de caixa: a parcela paga do empréstimo.
+            Ok(v) if !v.e_negativo() || l.de_caixa => meses[i] = v,
             _ => {
                 estado.form_orcamento.erro =
                     Some(format!("o valor de {} não é um valor positivo", MESES[i]));

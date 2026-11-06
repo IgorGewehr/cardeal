@@ -61,6 +61,7 @@ struct Galeria {
     campo: String,
     campo_erro: String,
     campo_multilinha: String,
+    celulas: [String; 3],
     busca: String,
     lista_busca: String,
     lista_filtro: Option<u8>,
@@ -485,6 +486,13 @@ impl eframe::App for Galeria {
                         .rotulo("Campo simples")
                         .marcador("digite algo"),
                 );
+                ui.add_space(Espaco::E8);
+                ui.add(Rotulo::campo("Numérico e compacto (célula de grade)"));
+                ui.columns(3, |cols| {
+                    for (col, celula) in cols.iter_mut().zip(self.celulas.iter_mut()) {
+                        col.add(CampoTexto::novo(celula).numerico().compacto().marcador("0,00"));
+                    }
+                });
                 ui.add_space(Espaco::E8);
                 ui.add(
                     Campo::novo("Campo com erro", &mut self.campo_erro)

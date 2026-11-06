@@ -1053,3 +1053,145 @@ fn o_dfc_gerencial_poe_o_dinheiro_na_conta_do_titulo_com_o_orcado_ao_lado() {
     assert_eq!(d.geracao_operacional()[mes], Dinheiro::reais(300));
     assert_eq!(d.geracao_operacional_orcada()[mes], Dinheiro::reais(-350));
 }
+
+#[test]
+fn a_planilha_do_orcamento_grava_o_ano_de_uma_vez_e_orca_tambem_pelo_caixa() {
+    use mod_financeiro::dfc_gerencial::{DfcGerencial, DfcGerencialDoAno, GrupoGerencial};
+    use mod_financeiro::orcamento::{DefinirOrcamentoDoAno, OrcamentoAnual, OrcamentoDoAno};
+    let c = cena();
+    let s = c.sessao(
+        Id::novo(),
+        &[
+            "financeiro.dre.ver",
+            "financeiro.orcamento.editar",
+            "financeiro.plano.ver",
+        ],
+    );
+    let ano = hoje().competencia().ano();
+    let o: OrcamentoAnual = c.consulta(
+        &s,
+        "financeiro.orcamento_do_ano.v1",
+        &OrcamentoDoAno { ano },
+    );
+    let de_caixa: Vec<(&str, &str, bool)> = o
+        .linhas
+        .iter()
+        .filter(|l| l.de_caixa)
+        .map(|l| (l.codigo.as_str(), l.bloco.as_str(), l.soma_no_resultado))
+        .collect();
+    // Compras (estoques), investimentos (aplicações, imobilizado sem a depreciação) e
+    // financiamentos (empréstimos, capital, retiradas), pela ordem do plano.
+    assert!(
+        de_caixa.contains(&("1.3.01", "Compras", false)),
+        "{de_caixa:?}"
+    );
+    assert!(de_caixa.contains(&("1.1.03", "Investimentos", false)));
+    assert!(de_caixa.contains(&("1.4.01", "Investimentos", false)));
+    assert!(de_caixa.contains(&("2.1.04", "Financiamentos", true)));
+    assert!(de_caixa.contains(&("3.1", "Financiamentos", true)));
+    assert!(de_caixa.contains(&("3.3", "Financiamentos", false)));
+    assert!(de_caixa
+        .iter()
+        .all(|(c, _, _)| *c != "1.4.02" && *c != "1.2.01"));
+    let conta = |codigo: &str| o.linhas.iter().find(|l| l.codigo == codigo).unwrap().conta;
+    let (aluguel, emprestimo, vendas) = (conta("5.6"), conta("2.1.04"), conta("4.1"));
+
+    // Uma conta de receita com valor negativo recusa o lote inteiro: nada é gravado.
+    let mut negativo = [Dinheiro::reais(100); 12];
+    negativo[3] = Dinheiro::reais(-1);
+    let recusa =
+        c.d.executar_comando(
+            "financeiro.definir_orcamento_do_ano.v1",
+            &postcard::to_stdvec(&DefinirOrcamentoDoAno {
+                ano,
+                contas: vec![(aluguel, [Dinheiro::reais(100); 12]), (vendas, negativo)],
+            })
+            .unwrap(),
+            &s,
+            &c.ambiente(),
+            c.arm.escritor(),
+        )
+        .unwrap_err();
+    assert!(recusa.mensagem.contains("negativo"), "{}", recusa.mensagem);
+    // Uma conta que não se orça (clientes a receber) também.
+    assert!(c
+        .d
+        .executar_comando(
+            "financeiro.definir_orcamento_do_ano.v1",
+            &postcard::to_stdvec(&DefinirOrcamentoDoAno {
+                ano,
+                contas: vec![(conta_do_codigo(&c, &s, "1.2.01"), [Dinheiro::reais(1); 12])],
+            })
+            .unwrap(),
+            &s,
+            &c.ambiente(),
+            c.arm.escritor(),
+        )
+        .is_err());
+    let o: OrcamentoAnual = c.consulta(
+        &s,
+        "financeiro.orcamento_do_ano.v1",
+        &OrcamentoDoAno { ano },
+    );
+    assert!(o.linhas.iter().all(|l| !l.tem_orcamento()));
+
+    // O empréstimo: entra em janeiro, a parcela sai nos outros meses (negativo, na conta de caixa).
+    let mut parcelas = [Dinheiro::reais(-2_000); 12];
+    parcelas[0] = Dinheiro::reais(20_000);
+    let gravadas: u32 = c.cmd(
+        &s,
+        "financeiro.definir_orcamento_do_ano.v1",
+        &DefinirOrcamentoDoAno {
+            ano,
+            contas: vec![
+                (aluguel, [Dinheiro::reais(100); 12]),
+                (emprestimo, parcelas),
+            ],
+        },
+    );
+    assert_eq!(gravadas, 2);
+    let o: OrcamentoAnual = c.consulta(
+        &s,
+        "financeiro.orcamento_do_ano.v1",
+        &OrcamentoDoAno { ano },
+    );
+    // O resultado orçado é só o do aluguel: o empréstimo não é resultado.
+    assert_eq!(o.resultado_orcado(), Dinheiro::reais(-1_200));
+    let e = o.linhas.iter().find(|l| l.conta == emprestimo).unwrap();
+    assert_eq!(e.orcado_no_ano(), Dinheiro::reais(-2_000));
+    // No DFC do orçado, o empréstimo nas atividades de financiamento, no sinal do caixa.
+    let d: DfcGerencial = c.consulta(
+        &s,
+        "financeiro.dfc_gerencial_do_ano.v1",
+        &DfcGerencialDoAno { ano },
+    );
+    let fin = d
+        .grupos
+        .iter()
+        .find(|g| g.grupo == GrupoGerencial::Financiamentos)
+        .unwrap();
+    assert_eq!(fin.orcado[0], Dinheiro::reais(20_000));
+    assert_eq!(fin.orcado[1], Dinheiro::reais(-2_000));
+    assert_eq!(d.variacao_orcada()[0], Dinheiro::reais(19_900));
+    // A DRE do mês com orçado mostra só o aluguel.
+    let cmp: ComparativoDre = c.consulta(
+        &s,
+        "financeiro.dre_comparativa.v1",
+        &DreComparativa {
+            mes: hoje().competencia(),
+        },
+    );
+    assert_eq!(
+        cmp.orcado.expect("orçado na DRE").lucro_liquido,
+        Dinheiro::reais(-100)
+    );
+}
+
+fn conta_do_codigo(c: &Cena, s: &Sessao, codigo: &str) -> Id {
+    let plano: Vec<mod_financeiro::NoPlano> = c.consulta(
+        s,
+        "financeiro.plano_de_contas.v1",
+        &mod_financeiro::PlanoDeContas,
+    );
+    plano.iter().find(|n| n.codigo == codigo).unwrap().id
+}

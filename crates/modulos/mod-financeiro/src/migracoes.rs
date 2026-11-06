@@ -423,6 +423,12 @@ const MIGRACOES: &[Migracao] = &[
         sql: SQL_CONTADOR,
         tipo: TipoMigracao::Esquema,
     },
+    Migracao {
+        versao: 16,
+        nome: "financeiro_orcamento_pelo_caixa",
+        sql: SQL_ORCAMENTO_PELO_CAIXA,
+        tipo: TipoMigracao::Esquema,
+    },
 ];
 
 /// v15: o Portal do Contador (`contador.rs`) — o código de cada conta no sistema do contador
@@ -461,6 +467,24 @@ CREATE TABLE financeiro_orcamento (
     valor       INTEGER NOT NULL CHECK (valor > 0),
     PRIMARY KEY (empresa, conta, competencia)
 ) STRICT, WITHOUT ROWID;
+CREATE INDEX financeiro_orcamento_mes ON financeiro_orcamento(empresa, competencia);
+";
+
+/// v16: o orçamento também pelo caixa (compras, investimentos, financiamentos — `orcamento.rs`):
+/// a parcela paga de um empréstimo se orça negativa, então o valor só não pode ser zero (mês sem
+/// orçamento continua sem linha). O SQLite não altera um `CHECK`: a tabela é refeita.
+const SQL_ORCAMENTO_PELO_CAIXA: &str = "
+CREATE TABLE financeiro_orcamento_v16 (
+    empresa     BLOB    NOT NULL,
+    conta       BLOB    NOT NULL,
+    competencia INTEGER NOT NULL,
+    valor       INTEGER NOT NULL CHECK (valor <> 0),
+    PRIMARY KEY (empresa, conta, competencia)
+) STRICT, WITHOUT ROWID;
+INSERT INTO financeiro_orcamento_v16 (empresa, conta, competencia, valor)
+SELECT empresa, conta, competencia, valor FROM financeiro_orcamento;
+DROP TABLE financeiro_orcamento;
+ALTER TABLE financeiro_orcamento_v16 RENAME TO financeiro_orcamento;
 CREATE INDEX financeiro_orcamento_mes ON financeiro_orcamento(empresa, competencia);
 ";
 

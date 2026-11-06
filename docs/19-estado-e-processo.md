@@ -63,7 +63,9 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   O **DFC gerencial** (2026-11-05, `mod_financeiro::dfc_gerencial`, doc `modulos/financeiro.md` §6.9):
   Resultado › DFC › "Mês a mês, por conta" (12 meses, realizado ou orçado, em R$ ou % das receitas) e
   "Orçado × realizado" pelo caixa — cada baixa vai para a conta do título de origem, não para
-  clientes/fornecedores.
+  clientes/fornecedores. E a **planilha do orçamento** (§6.7 do financeiro): todas as contas × 12
+  meses, "Salvar orçamento" tudo ou nada, e as compras, investimentos e financiamentos orçados pelo
+  caixa (financeiro v16: o orçado pode ser negativo na conta de caixa).
   Onda 6 (Financeiro 2) começou: **conciliação com alerta de pendências e saldo banco × sistema**,
   **lançamento pré-preenchido pelo último da pessoa**, **DFC indireto**, **cheques**, **balancete/diário** e o
   **pacote do contador** (PDF + `.xlsx`) e a **régua de cobrança** (fila do dia com envio de um clique) feitos

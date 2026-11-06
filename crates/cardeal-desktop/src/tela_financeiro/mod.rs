@@ -24,6 +24,7 @@ mod importacao;
 mod lancar;
 mod obrigacoes;
 mod orcamento;
+mod orcamento_planilha;
 mod pacote_contador;
 mod pessoal;
 mod plano_contas;

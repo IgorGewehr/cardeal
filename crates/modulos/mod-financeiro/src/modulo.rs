@@ -134,6 +134,9 @@ impl Modulo for ModuloFinanceiro {
             .comando::<crate::orcamento::DefinirOrcamentoDaConta>(
                 "financeiro.definir_orcamento_da_conta.v1",
             )
+            .comando::<crate::orcamento::DefinirOrcamentoDoAno>(
+                "financeiro.definir_orcamento_do_ano.v1",
+            )
             .comando::<crate::orcamento::CopiarOrcamentoDoAno>(
                 "financeiro.copiar_orcamento_do_ano.v1",
             )

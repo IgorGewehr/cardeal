@@ -426,7 +426,7 @@ stateDiagram-v2
 | `CarteiraDeCheques` ✅ (2026-10-14, `financeiro.carteira_de_cheques.v1`) | `financeiro.cheque.ver` | Aba Cheques: os cheques (filtro por estado) com o cliente e a descrição do título, o "bom para" mais antigo primeiro; a tela soma em carteira, os que já podem ir ao banco e os devolvidos | `financeiro_cheque(empresa, estado, bom_para)` (migração v11) |
 | `BalanceteDoPeriodo` ✅ (2026-10-14, `financeiro.balancete_do_periodo.v1`) | `financeiro.dre.ver` | Aba Resultado e caixa › Balancete: cada conta com saldo anterior, débitos, créditos e saldo atual (D/C), agrupadoras somadas, ordem numérica dos códigos. Pela competência (Confirmado/Realizado/Estornado), então sempre fecha. Sem encerramento de exercício no sistema, as contas de resultado acumulam só o **ano**; o resultado dos anos anteriores entra numa linha do PL ("Resultado de exercícios anteriores (não encerrado)") | `cardeal_ledger::balancete` |
 | `DfcGerencialDoAno` ✅ (2026-11-05, `financeiro.dfc_gerencial_do_ano.v1`) | `financeiro.dre.ver` | Resultado › DFC › "Mês a mês, por conta" e "Orçado × realizado" (§6.9): o caixa realizado do ano, 12 meses, por conta do plano — a baixa vai para a conta do título de origem — com o orçado no mesmo sinal | `movimentos_de_caixa` + `financeiro_baixa` × `financeiro_parcela.lancamento` (e o estorno por `razao_lancamento.estorna`) + `financeiro_orcamento` |
-| `OrcamentoDoAno` ✅ (2026-10-26, `financeiro.orcamento_do_ano.v1`) | `financeiro.dre.ver` | Resultado › Orçamento: cada conta de resultado (analítica, ativa) com o orçado e o realizado de cada mês no sentido em que se orça | `financeiro_orcamento(empresa, conta, competencia)` + `resultado_por_conta` por mês |
+| `OrcamentoDoAno` ✅ (2026-10-26, `financeiro.orcamento_do_ano.v1`) | `financeiro.dre.ver` | Resultado › Orçamento: cada conta de resultado (analítica, ativa) com o orçado e o realizado de cada mês no sentido em que se orça — e, desde 2026-11-05, as contas que se orçam pelo caixa (`de_caixa`: compras, investimentos, financiamentos), com o realizado pelo caixa (§6.7) | `financeiro_orcamento(empresa, conta, competencia)` + `resultado_por_conta` por mês + `dfc_gerencial::caixa_por_conta` |
 | `DiarioDoPeriodo` ✅ (2026-10-14, `financeiro.diario_do_periodo.v1`) | `financeiro.dre.ver` | O diário do período: cada lançamento (número, competência, histórico, estado) com as partidas — para o pacote do contador | `cardeal_ledger::diario` |
 | `DreDoPeriodo` / `DreComparativa` ✅ (2026-10-09; no lugar de `DreDoMes`) | `financeiro.dre.ver` | Aba Resultado: DRE de um período; comparativo mês × mês anterior × mesmo mês do ano anterior. Estrutura: receita bruta › deduções (descontos, devoluções, impostos sobre venda) › receita líquida › CMV/CSV › lucro bruto › outras receitas e despesas operacionais › EBITDA › resultado financeiro › lucro líquido. Cada linha é uma **contribuição com sinal**, então o lucro líquido é sempre receitas − despesas do Razão (propriedade testada). Conta aberta pelo usuário herda o papel da sintética; sem papel conhecido cai em "outras", nunca some. Entram `Confirmado`/`Realizado`/`Estornado` pela competência; `Previsto` não | `razao_lancamento(empresa, competencia, estado)` + `razao_partida(conta)` (`cardeal_ledger::resultado_por_conta`) |
 | `PosicaoPorCentroCusto` | `financeiro.centro_custo.ver` | Relatório de centro de custo | `razao_partida_cc(centro_custo, lancamento)` |
@@ -525,6 +525,26 @@ O orçado de cada conta do resultado, mês a mês (`orcamento.rs`, migração v1
 Lição do `gestao-raiz` (`financial_budgets`): lá a variação é `realizado ÷ orçado − 1` em toda linha —
 a despesa que estoura o orçado aparece **positiva**, como se fosse bom. Aqui o desvio segue o sinal
 do resultado: positivo é sempre melhor.
+
+**Planilha do ano e contas de caixa (2026-11-05, com o DFC gerencial do §6.9).** O "planejamento
+orçamentário" de quem orça numa planilha:
+- Resultado › Orçamento › **Planilha do ano**: todas as contas que se orçam × os 12 meses numa grade só
+  (célula editável `CampoTexto::numerico().compacto()`, a grade com `.rolagem_horizontal()`), o
+  subtotal de cada bloco e o total de cada conta recalculados enquanto se digita, e **Salvar
+  orçamento**, que manda só as contas que mudaram em `DefinirOrcamentoDoAno`
+  (`financeiro.definir_orcamento_do_ano.v1`, `financeiro.orcamento.editar`, Médio): **tudo ou nada**
+  — uma conta que não se orça, repetida, ou um negativo onde não cabe recusa o lote inteiro (até 500
+  contas). "Descartar alterações" volta ao gravado; "Ver o caixa orçado, mês a mês" abre o DFC › Mês a
+  mês › Orçado. A lista "Por conta" continua (com o editor de uma conta e a cópia do ano anterior).
+- **Contas que se orçam pelo caixa** (`de_caixa`): o que o planejamento do dono prevê e a DRE não mostra
+  — estoques ("Compras"), imobilizado (menos depreciação e amortização) e aplicações
+  ("Investimentos"), empréstimos, capital e retiradas ("Financiamentos"); analíticas e ativas
+  (`dfc_gerencial::contas_orcaveis_pelo_caixa`). O orçado é "no sentido em que a conta se comporta"
+  (a compra feita, o empréstimo tomado, a retirada) e **pode ser negativo** — a parcela paga do
+  empréstimo: migração **v16** refaz `financeiro_orcamento` com `CHECK (valor <> 0)` (era `> 0`). O
+  realizado delas é o que entrou ou saiu do caixa (`dfc_gerencial::caixa_por_conta`), não a
+  competência; ficam fora do "resultado orçado" e da DRE orçada (a `DreComparativa` passou a filtrar
+  as contas do resultado antes de montar a DRE do orçado). Receita e despesa continuam só positivas.
 
 ## 6.6 Resumo do Simples Nacional (2026-10-26, item 13 do doc 21)
 

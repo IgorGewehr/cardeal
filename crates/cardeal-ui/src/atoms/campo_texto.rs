@@ -14,6 +14,10 @@ use crate::tokens::{ativar, lerp_cor, Mov, Papel, Raio, TemaUi};
 /// junto da escala tipográfica — campo e dropdown ganham a mesma altura de toque confortável.
 pub(crate) const MARGEM_CAMPO: Vec2 = Vec2::new(12.0, 10.0);
 
+/// A margem do campo [`compacto`](CampoTexto::compacto): cabe numa linha de grade
+/// (`AlturaLinha::Toque`) com folga para o anel de foco.
+const MARGEM_COMPACTA: Vec2 = Vec2::new(8.0, 5.0);
+
 /// Desenha a **moldura responsiva** de um campo por cima da borda crua do `egui`: no hover a
 /// borda ganha contraste; no foco ela vira `acento` (a marca, ou `negativo` num campo com
 /// erro) e um halo suave cresce ao redor. `docs/12-ui-ux.md` §9 (foco sempre visível).
@@ -60,6 +64,10 @@ pub struct CampoTexto<'a> {
     marcador: Option<String>,
     senha: bool,
     preenche_largura: bool,
+    /// À esquerda; à direita no [`numerico`](Self::numerico).
+    alinhamento: egui::Align,
+    /// [`MARGEM_CAMPO`]; menor no [`compacto`](Self::compacto).
+    margem: Vec2,
 }
 
 impl<'a> CampoTexto<'a> {
@@ -71,7 +79,23 @@ impl<'a> CampoTexto<'a> {
             marcador: None,
             senha: false,
             preenche_largura: true,
+            alinhamento: egui::Align::LEFT,
+            margem: MARGEM_CAMPO,
         }
+    }
+
+    /// Alinha o texto à direita, como os números de uma coluna (`docs/12-ui-ux.md` §7): o valor
+    /// digitado fica embaixo do valor da linha de cima.
+    pub const fn numerico(mut self) -> Self {
+        self.alinhamento = egui::Align::RIGHT;
+        self
+    }
+
+    /// Margem interna menor, para editar **dentro de uma célula** de grade — a planilha do
+    /// orçamento, uma conta por linha e um campo por mês.
+    pub const fn compacto(mut self) -> Self {
+        self.margem = MARGEM_COMPACTA;
+        self
     }
 
     /// Rótulo mostrado acima do campo (`docs/12-ui-ux.md` §3, papel `RotuloCampo`).
@@ -108,11 +132,13 @@ impl Widget for CampoTexto<'_> {
                 ui.add_space(crate::tokens::Espaco::E4);
             }
 
+            let margem = self.margem;
             let mut edicao = egui::TextEdit::singleline(self.valor)
                 .password(self.senha)
                 .font(Papel::Interface.font_id())
                 .text_color(cores.texto)
-                .margin(egui::Margin::symmetric(MARGEM_CAMPO.x, MARGEM_CAMPO.y));
+                .margin(egui::Margin::symmetric(margem.x, margem.y))
+                .horizontal_align(self.alinhamento);
             if self.preenche_largura {
                 edicao = edicao.desired_width(f32::INFINITY);
             }
@@ -120,7 +146,7 @@ impl Widget for CampoTexto<'_> {
                 edicao = edicao.hint_text(marcador.clone());
             }
             let resp = ui.add(edicao);
-            moldura_foco_campo(ui, &resp, MARGEM_CAMPO, None);
+            moldura_foco_campo(ui, &resp, margem, None);
             resp
         })
         .inner

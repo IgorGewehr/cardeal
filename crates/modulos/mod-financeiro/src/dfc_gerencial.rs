@@ -110,6 +110,71 @@ pub struct ContaDoPlano {
     pub papel: Option<String>,
     /// `Operacional`, `Investimento` ou `Financiamento`, quando a conta classifica.
     pub grupo_fluxo: Option<String>,
+    /// Aceita lançamento (a inativa ainda aparece se teve movimento).
+    pub ativa: bool,
+}
+
+/// Uma conta patrimonial que se orça pelo caixa: a compra de mercadoria, o investimento, o
+/// empréstimo, o aporte e a retirada — o que o planejamento do dono prevê e a DRE não mostra.
+#[cfg(any(feature = "sqlite", test))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ContaOrcavelPeloCaixa {
+    pub(crate) conta: Id,
+    pub(crate) codigo: String,
+    pub(crate) nome: String,
+    /// "Compras", "Investimentos" ou "Financiamentos".
+    pub(crate) bloco: &'static str,
+    /// O orçado positivo entra no caixa (empréstimo tomado, aporte); senão sai.
+    pub(crate) entra: bool,
+}
+
+/// As contas patrimoniais analíticas e ativas que se orçam pelo caixa, pela ordem do plano:
+/// estoques (compras), imobilizado e aplicações (investimentos), empréstimos, capital e retiradas
+/// (financiamentos). A depreciação e a amortização não: não passam pelo caixa.
+#[cfg(any(feature = "sqlite", test))]
+pub(crate) fn contas_orcaveis_pelo_caixa(contas: &[ContaDoPlano]) -> Vec<ContaOrcavelPeloCaixa> {
+    let plano = Plano::novo(contas);
+    let mut saida: Vec<ContaOrcavelPeloCaixa> = contas
+        .iter()
+        .filter(|c| {
+            !c.sintetica
+                && c.ativa
+                && matches!(
+                    c.natureza,
+                    Natureza::Ativo | Natureza::Passivo | Natureza::PatrimonioLiquido
+                )
+                && !plano.e_caixa(&c.codigo)
+        })
+        .filter_map(|c| {
+            let papel = plano.papel(&c.codigo).unwrap_or("");
+            let nome = c.nome.to_lowercase();
+            let bloco = if papel.starts_with("Estoque") {
+                "Compras"
+            } else if (c.codigo.starts_with("1.4.")
+                && !nome.starts_with("deprecia")
+                && !nome.starts_with("amortiza"))
+                || papel == "Aplicacoes"
+                || c.grupo_fluxo.as_deref() == Some("Investimento")
+            {
+                "Investimentos"
+            } else if matches!(papel, "Emprestimos" | "Capital" | "Retiradas")
+                || c.grupo_fluxo.as_deref() == Some("Financiamento")
+            {
+                "Financiamentos"
+            } else {
+                return None;
+            };
+            Some(ContaOrcavelPeloCaixa {
+                conta: c.id,
+                codigo: c.codigo.clone(),
+                nome: c.nome.clone(),
+                bloco,
+                entra: plano.sinal_do_orcado(c) > 0,
+            })
+        })
+        .collect();
+    saida.sort_by_key(|a| chave_de_codigo(&a.codigo));
+    saida
 }
 
 /// Uma linha (uma conta) do DFC gerencial.
@@ -692,36 +757,67 @@ pub struct DfcGerencialDoAno {
     pub ano: i32,
 }
 
-impl Consulta for DfcGerencialDoAno {
-    type Saida = DfcGerencial;
-    const PERMISSAO: &'static str = "financeiro.dre.ver";
-
+impl DfcGerencialDoAno {
     #[cfg(feature = "sqlite")]
-    fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<DfcGerencial> {
-        let (de, ate) = (
+    fn apurar(
+        self,
+        conexao: &Connection,
+        empresa: Id,
+        orcado: &[(Id, [Dinheiro; 12])],
+    ) -> Resultado<DfcGerencial> {
+        let periodo = Periodo::novo(
             Data::de_ymd(self.ano, 1, 1)?,
             Data::de_ymd(self.ano, 12, 31)?,
         );
-        let periodo = Periodo::novo(de, ate);
-        let (abertura, movimentos) =
-            cardeal_ledger::movimentos_de_caixa(conexao, ctx.empresa, periodo).map_err(|e| {
+        let (abertura, movimentos) = cardeal_ledger::movimentos_de_caixa(conexao, empresa, periodo)
+            .map_err(|e| {
                 Erro::novo(
                     CodigoErro::FALHA_INTERNA,
                     format!("financeiro/DFC gerencial: {e}"),
                 )
             })?;
-        let contas = sqlite::plano(conexao, ctx.empresa)?;
-        let origens = sqlite::origens(conexao, ctx.empresa, periodo)?;
-        let orcado = crate::orcamento::sqlite::orcado_por_conta(conexao, ctx.empresa, self.ano)?;
+        let contas = sqlite::plano(conexao, empresa)?;
+        let origens = sqlite::origens(conexao, empresa, periodo)?;
         Ok(montar(
             self.ano,
             abertura,
             &movimentos,
             &origens,
             &contas,
-            &orcado,
+            orcado,
         ))
     }
+}
+
+impl Consulta for DfcGerencialDoAno {
+    type Saida = DfcGerencial;
+    const PERMISSAO: &'static str = "financeiro.dre.ver";
+
+    #[cfg(feature = "sqlite")]
+    fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<DfcGerencial> {
+        let orcado = crate::orcamento::sqlite::orcado_por_conta(conexao, ctx.empresa, self.ano)?;
+        self.apurar(conexao, ctx.empresa, &orcado)
+    }
+}
+
+/// O que entrou (positivo) ou saiu (negativo) do caixa por conta em cada mês do ano — o realizado
+/// das contas que se orçam pelo caixa ([`crate::orcamento`]).
+///
+/// # Errors
+/// Os da leitura do Razão.
+#[cfg(feature = "sqlite")]
+pub(crate) fn caixa_por_conta(
+    conexao: &Connection,
+    empresa: Id,
+    ano: i32,
+) -> Resultado<HashMap<Id, [Dinheiro; 12]>> {
+    let d = DfcGerencialDoAno { ano }.apurar(conexao, empresa, &[])?;
+    Ok(d.grupos
+        .into_iter()
+        .flat_map(|g| g.linhas)
+        .filter(|l| l.conta != Id::NULO)
+        .map(|l| (l.conta, l.realizado))
+        .collect())
 }
 
 /// O mês do ano (1 a 12) de uma competência; `None` noutro ano.
@@ -731,7 +827,7 @@ pub fn mes_do_ano(c: Competencia, ano: i32) -> Option<u32> {
 }
 
 #[cfg(feature = "sqlite")]
-mod sqlite {
+pub(crate) mod sqlite {
     use cardeal_kernel::{CodigoErro, Dinheiro, Erro, Id, Periodo, Resultado};
     use cardeal_ledger::Natureza;
     use rusqlite::{params, Connection};
@@ -758,10 +854,10 @@ mod sqlite {
     }
 
     /// Todas as contas da empresa (as inativas também: podem ter movimento no ano).
-    pub(super) fn plano(c: &Connection, empresa: Id) -> Resultado<Vec<ContaDoPlano>> {
+    pub(crate) fn plano(c: &Connection, empresa: Id) -> Resultado<Vec<ContaDoPlano>> {
         let mut stmt = c
             .prepare(
-                "SELECT id, codigo, nome, natureza, tipo, papel_padrao, grupo_fluxo
+                "SELECT id, codigo, nome, natureza, tipo, papel_padrao, grupo_fluxo, ativa
                  FROM razao_conta WHERE empresa = ?1",
             )
             .map_err(falha)?;
@@ -775,6 +871,7 @@ mod sqlite {
                     sintetica: r.get::<_, String>(4)? == "Sintetica",
                     papel: r.get(5)?,
                     grupo_fluxo: r.get(6)?,
+                    ativa: r.get::<_, i64>(7)? != 0,
                 })
             })
             .map_err(falha)?
@@ -862,6 +959,7 @@ mod testes {
             sintetica: false,
             papel: papel.map(Into::into),
             grupo_fluxo: None,
+            ativa: true,
         }
     }
 
@@ -1212,6 +1310,39 @@ mod testes {
         assert_eq!(
             percentual(Dinheiro::reais(-300), Dinheiro::reais(1_000)),
             Some(Percentual::pontos(-30))
+        );
+    }
+
+    #[test]
+    fn orcaveis_pelo_caixa_sao_compras_investimentos_e_financiamentos() {
+        let mut contas = plano();
+        contas.push(conta(
+            "1.4.02",
+            "Depreciação acumulada",
+            Natureza::Ativo,
+            None,
+        ));
+        let mut capital = conta(
+            "3.1",
+            "Capital",
+            Natureza::PatrimonioLiquido,
+            Some("Capital"),
+        );
+        capital.grupo_fluxo = Some("Financiamento".into());
+        contas.push(capital);
+        let o: Vec<(String, &str, bool)> = contas_orcaveis_pelo_caixa(&contas)
+            .into_iter()
+            .map(|c| (c.codigo, c.bloco, c.entra))
+            .collect();
+        assert_eq!(
+            o,
+            [
+                ("1.3.01".to_owned(), "Compras", false),
+                ("1.4.01".to_owned(), "Investimentos", false),
+                ("2.1.04".to_owned(), "Financiamentos", true),
+                ("3.1".to_owned(), "Financiamentos", true),
+                ("3.3".to_owned(), "Financiamentos", false),
+            ]
         );
     }
 
