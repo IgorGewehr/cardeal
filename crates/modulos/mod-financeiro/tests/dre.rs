@@ -1352,3 +1352,107 @@ fn o_dfc_gerencial_traz_o_a_vencer_na_conta_do_titulo_e_o_vencido_no_mes_de_hoje
     // Nada foi pago: o realizado está zerado.
     assert!(d.variacao.iter().all(|v| v.e_zero()));
 }
+
+#[test]
+fn o_modelo_de_gestao_financeira_cria_a_arvore_e_as_categorias_ligadas() {
+    use mod_financeiro::dfc_gerencial::{DfcGerencial, DfcGerencialDoAno, GrupoGerencial};
+    use mod_financeiro::{
+        AplicarModeloDePlano, CategoriaFinanceira, Categorias, ModeloAplicado, NoPlano,
+        PlanoDeContas,
+    };
+    let c = cena();
+    let s = c.sessao(
+        Id::novo(),
+        &[
+            "financeiro.pagar.criar",
+            "financeiro.pagar.baixar",
+            "financeiro.dre.ver",
+            "financeiro.plano.ver",
+            "financeiro.plano.editar",
+            "financeiro.categoria.ver",
+        ],
+    );
+    let r: ModeloAplicado = c.cmd(
+        &s,
+        "financeiro.aplicar_modelo_de_plano.v1",
+        &AplicarModeloDePlano {
+            modelo: cardeal_ledger::ModeloDePlano::GestaoFinanceira,
+        },
+    );
+    assert!(r.criadas.len() > 70, "{}", r.criadas.len());
+    assert!(r.categorias_criadas > 60);
+    assert_eq!(r.categorias_vinculadas, r.categorias_criadas);
+    // De novo: nada a criar (idempotente).
+    let de_novo: ModeloAplicado = c.cmd(
+        &s,
+        "financeiro.aplicar_modelo_de_plano.v1",
+        &AplicarModeloDePlano {
+            modelo: cardeal_ledger::ModeloDePlano::GestaoFinanceira,
+        },
+    );
+    assert!(de_novo.criadas.is_empty() && de_novo.categorias_criadas == 0);
+    let plano: Vec<NoPlano> = c.consulta(&s, "financeiro.plano_de_contas.v1", &PlanoDeContas);
+    let estrutura = plano.iter().find(|n| n.codigo == "5.52").unwrap();
+    assert!(estrutura.sintetica);
+    assert_eq!(estrutura.nome, "Despesas administrativas de estrutura");
+    let cats: Vec<CategoriaFinanceira> = c.consulta(&s, "financeiro.categorias.v1", &Categorias);
+    let cat = |nome: &str| cats.iter().find(|x| x.nome == nome).unwrap().id;
+    // Paga o aluguel e o Simples com as categorias do modelo.
+    let h = hoje();
+    for (nome, reais) in [("Aluguel", 1_200), ("Simples Nacional", 300)] {
+        let p: mod_financeiro::TituloAPagarLancado = c.cmd(
+            &s,
+            "financeiro.lancar_titulo_a_pagar.v1",
+            &LancarTituloAPagar {
+                fornecedor: None,
+                valor_total: Dinheiro::reais(reais),
+                emissao: h,
+                parcelas: 1,
+                primeiro_vencimento: h,
+                intervalo_dias: 0,
+                observacao: None,
+                categoria: Some(cat(nome)),
+                quitado_agora: None,
+            },
+        );
+        let _: mod_financeiro::PagamentoBaixado = c.cmd(
+            &s,
+            "financeiro.baixar_pagamento.v1",
+            &BaixarPagamento {
+                parcela: p.parcelas[0],
+                valor: Dinheiro::reais(reais),
+                data: h,
+                meio_pagamento: MeioPagamento::Dinheiro,
+                conta_destino: None,
+            },
+        );
+    }
+    let d: DfcGerencial = c.consulta(
+        &s,
+        "financeiro.dfc_gerencial_do_ano.v1",
+        &DfcGerencialDoAno {
+            ano: h.competencia().ano(),
+        },
+    );
+    let mes = h.competencia().mes() as usize - 1;
+    let linha = |nome: &str| {
+        d.grupos
+            .iter()
+            .flat_map(|g| g.linhas.iter().map(move |l| (g.grupo, l)))
+            .find(|(_, l)| l.nome == nome)
+            .unwrap()
+    };
+    let (g, aluguel) = linha("Aluguel");
+    assert_eq!(g, GrupoGerencial::Despesas);
+    assert_eq!(
+        aluguel.agrupadora.as_deref(),
+        Some("Despesas administrativas de estrutura")
+    );
+    assert_eq!(aluguel.realizado[mes], Dinheiro::reais(-1_200));
+    // A venda pela categoria "Venda de mercadorias" cai na receita de vendas do plano base.
+    assert!(cats.iter().any(|x| x.nome == "Venda de mercadorias"));
+    // O Simples herda o papel da agrupadora: é dedução da receita, não despesa operacional.
+    let (g, simples) = linha("Simples Nacional");
+    assert_eq!(g, GrupoGerencial::Deducoes);
+    assert_eq!(simples.realizado[mes], Dinheiro::reais(-300));
+}

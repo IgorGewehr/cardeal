@@ -733,7 +733,15 @@ empresa. Em cima dele:
   impostos e taxas — mais as próprias do segmento: fretes e comissões; serviços recorrentes e
   subcontratação; serviços de bancada, peças e garantia). Idempotente, só cria o que falta, nunca altera
   conta existente; despesas a partir de `5.20`, receitas de modelo (com papel de vendas ou serviços,
-  para a DRE agrupar certo) a partir de `4.20`. Pode-se aplicar mais de um.
+  para a DRE agrupar certo) a partir de `4.20`. Pode-se aplicar mais de um. **Gestão financeira
+  completa** (2026-11-06) é a árvore de quem controla o caixa por categoria, como no controle que o
+  pessoal do lunno usa: agrupadoras de `5.50` a `5.58` (impostos sobre o faturamento — com papel de
+  dedução, para a DRE e o DFC tirarem da receita —, custos, despesas de estrutura, serviços
+  profissionais, outras administrativas, veículos, marketing, pessoal e financeiras; mais as receitas
+  financeiras em `4.30`), cada uma com as suas contas, e
+  **uma categoria por conta, com o mesmo nome**, já ligada; as receitas que o plano base já tem com
+  outro nome (vendas, serviços, outras) ganham a categoria pelo papel da conta. É o modelo que a tela
+  sugere primeiro.
 - **Contas novas** (`CriarContaDoPlano`): filha de uma agrupadora, agrupadora ou que recebe lançamento,
   até **5 níveis**; o código é o próximo livre do pai.
 - **Categoria → conta** (`VincularCategoriaAConta`, migração financeiro v7): a categoria pode apontar

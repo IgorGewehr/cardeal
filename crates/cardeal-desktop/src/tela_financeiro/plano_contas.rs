@@ -93,13 +93,21 @@ fn modelos(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estad
             .map(|m| (*m, m.nome()))
             .collect();
         if let Some(m) = Abas::nova(&itens)
-            .selecionada(estado.plano.modelo.unwrap_or(ModeloDePlano::Comercio))
+            .selecionada(
+                estado
+                    .plano
+                    .modelo
+                    .unwrap_or(ModeloDePlano::GestaoFinanceira),
+            )
             .id_salt("plano-modelo")
             .mostrar(ui)
         {
             estado.plano.modelo = Some(m);
         }
-        let modelo = estado.plano.modelo.unwrap_or(ModeloDePlano::Comercio);
+        let modelo = estado
+            .plano
+            .modelo
+            .unwrap_or(ModeloDePlano::GestaoFinanceira);
         ui.add_space(Espaco::E4);
         ui.add(Rotulo::apoio(modelo.descricao()));
         ui.add_space(Espaco::E8);
@@ -123,8 +131,10 @@ fn modelos(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estad
                         "Nada a acrescentar: o plano já tem todas as contas deste modelo".to_owned()
                     } else {
                         format!(
-                            "{} conta(s) acrescentada(s); {} categoria(s) ligada(s) a contas",
+                            "{} conta(s) acrescentada(s); {} categoria(s) criada(s); {} \
+                             categoria(s) ligada(s) a contas",
                             r.criadas.len(),
+                            r.categorias_criadas,
                             r.categorias_vinculadas
                         )
                     };

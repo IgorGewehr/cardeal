@@ -6,6 +6,12 @@
 //! existente. As contas novas ficam sob as sintéticas `4` (Receitas) e `5` (Custos e Despesas),
 //! numeradas a partir de `4.20` e `5.20` para não colidir com o plano base; as de receita levam
 //! o papel da receita que representam (vendas ou serviços), para a DRE agrupá-las certo.
+//!
+//! O modelo **Gestão financeira** é diferente: em vez de contas soltas, a árvore que o dono que
+//! controla o caixa numa planilha conhece — agrupadoras ("Despesas administrativas de estrutura",
+//! "Despesas com veículos", "Impostos sobre o faturamento"…) com as contas dentro, o mesmo recorte
+//! do controle financeiro que serviu de base ao DFC gerencial. A agrupadora leva o papel que as
+//! filhas herdam (impostos como dedução, pessoal, despesas financeiras).
 
 use serde::{Deserialize, Serialize};
 
@@ -20,11 +26,20 @@ pub enum ModeloDePlano {
     Servicos,
     /// Assistência técnica e oficina (peças + serviço de bancada).
     AssistenciaTecnica,
+    /// A árvore completa de quem controla o caixa por categoria: agrupadoras com as contas
+    /// dentro, como no controle financeiro (receitas, impostos, custos, despesas por natureza,
+    /// pessoal e financeiras).
+    GestaoFinanceira,
 }
 
 impl ModeloDePlano {
     /// Todos, na ordem em que a tela os mostra.
-    pub const TODOS: [Self; 3] = [Self::Comercio, Self::Servicos, Self::AssistenciaTecnica];
+    pub const TODOS: [Self; 4] = [
+        Self::GestaoFinanceira,
+        Self::Comercio,
+        Self::Servicos,
+        Self::AssistenciaTecnica,
+    ];
 
     /// O nome para o usuário.
     #[must_use]
@@ -33,6 +48,7 @@ impl ModeloDePlano {
             Self::Comercio => "Comércio",
             Self::Servicos => "Prestação de serviços",
             Self::AssistenciaTecnica => "Assistência técnica / oficina",
+            Self::GestaoFinanceira => "Gestão financeira completa",
         }
     }
 
@@ -52,6 +68,12 @@ impl ModeloDePlano {
                 "As despesas do dia a dia separadas, receitas de bancada e de peças, e custos de \
                  peças, ferramentas, garantia e laboratório terceirizado."
             }
+            Self::GestaoFinanceira => {
+                "A árvore de quem controla o caixa por categoria: impostos sobre o faturamento, \
+                 custos, despesas de estrutura, serviços profissionais, veículos, marketing, \
+                 pessoal e financeiras, cada grupo com as suas contas — e as categorias de mesmo \
+                 nome, já ligadas. Empréstimos, aportes, retiradas e imobilizado já estão no plano."
+            }
         }
     }
 }
@@ -65,8 +87,11 @@ pub struct ContaDeModelo {
     pub nome: &'static str,
     /// Receita ou despesa.
     pub natureza: Natureza,
-    /// O papel, só nas contas de receita que a DRE deve agrupar.
+    /// O papel, só nas contas de receita que a DRE deve agrupar (e nas agrupadoras cujo papel as
+    /// filhas herdam).
     pub papel: Option<PapelConta>,
+    /// Agrupadora (recebe filhas, não lançamento).
+    pub agrupadora: bool,
 }
 
 const fn despesa(codigo: &'static str, nome: &'static str) -> ContaDeModelo {
@@ -75,6 +100,7 @@ const fn despesa(codigo: &'static str, nome: &'static str) -> ContaDeModelo {
         nome,
         natureza: Natureza::Despesa,
         papel: None,
+        agrupadora: false,
     }
 }
 
@@ -84,6 +110,32 @@ const fn receita(codigo: &'static str, nome: &'static str, papel: PapelConta) ->
         nome,
         natureza: Natureza::Receita,
         papel: Some(papel),
+        agrupadora: false,
+    }
+}
+
+const fn grupo(
+    codigo: &'static str,
+    nome: &'static str,
+    natureza: Natureza,
+    papel: Option<PapelConta>,
+) -> ContaDeModelo {
+    ContaDeModelo {
+        codigo,
+        nome,
+        natureza,
+        papel,
+        agrupadora: true,
+    }
+}
+
+const fn filha_receita(codigo: &'static str, nome: &'static str) -> ContaDeModelo {
+    ContaDeModelo {
+        codigo,
+        nome,
+        natureza: Natureza::Receita,
+        papel: None,
+        agrupadora: false,
     }
 }
 
@@ -137,13 +189,142 @@ const ASSISTENCIA: &[ContaDeModelo] = &[
     despesa("5.43", "Laboratório terceirizado"),
 ];
 
-/// As contas que o modelo acrescenta ao plano base (as comuns primeiro).
+/// A árvore de quem controla o caixa por categoria (o mesmo recorte do controle financeiro que
+/// serviu de base ao DFC gerencial). As agrupadoras vêm antes das filhas.
+const GESTAO: &[ContaDeModelo] = &[
+    receita("4.24", "Venda de produção", PapelConta::ReceitaVendas),
+    grupo(
+        "4.30",
+        "Rendimentos e juros recebidos",
+        Natureza::Receita,
+        Some(PapelConta::ReceitaFinanceira),
+    ),
+    filha_receita("4.30.01", "Juros cobrados"),
+    filha_receita("4.30.02", "Rendimento de aplicações financeiras"),
+    grupo(
+        "5.50",
+        "Impostos sobre o faturamento",
+        Natureza::Despesa,
+        Some(PapelConta::ImpostosSobreVenda),
+    ),
+    despesa("5.50.01", "Simples Nacional"),
+    despesa("5.50.02", "ICMS"),
+    despesa("5.50.03", "ISS"),
+    despesa("5.50.04", "PIS"),
+    despesa("5.50.05", "COFINS"),
+    despesa("5.50.06", "IRPJ"),
+    despesa("5.50.07", "CSLL"),
+    grupo(
+        "5.51",
+        "Custos dos produtos e serviços",
+        Natureza::Despesa,
+        Some(PapelConta::Cmv),
+    ),
+    despesa("5.51.01", "Compra de matéria-prima"),
+    despesa("5.51.02", "Compra de mercadorias para revenda"),
+    despesa("5.51.03", "Compra de embalagens"),
+    despesa("5.51.04", "Fretes sobre compras"),
+    despesa("5.51.05", "Fretes sobre vendas"),
+    grupo(
+        "5.52",
+        "Despesas administrativas de estrutura",
+        Natureza::Despesa,
+        None,
+    ),
+    despesa("5.52.01", "Aluguel"),
+    despesa("5.52.02", "Água"),
+    despesa("5.52.03", "Energia elétrica"),
+    despesa("5.52.04", "Telefone / Celular"),
+    despesa("5.52.05", "Internet"),
+    despesa("5.52.06", "Manutenção de imóvel"),
+    despesa("5.52.07", "Taxas / Alvarás / Licenças"),
+    despesa("5.52.08", "Seguro predial"),
+    despesa("5.52.09", "IPTU"),
+    grupo("5.53", "Serviços profissionais", Natureza::Despesa, None),
+    despesa("5.53.01", "Honorários do contador"),
+    despesa("5.53.02", "Honorários de consultoria"),
+    despesa("5.53.03", "Honorários de advogado"),
+    despesa("5.53.04", "Segurança do trabalho"),
+    grupo(
+        "5.54",
+        "Outras despesas administrativas",
+        Natureza::Despesa,
+        None,
+    ),
+    despesa("5.54.01", "Sistemas"),
+    despesa("5.54.02", "Materiais de expediente"),
+    despesa("5.54.03", "Materiais de uso e consumo"),
+    despesa("5.54.04", "Manutenção de equipamentos"),
+    despesa("5.54.05", "Cartório"),
+    despesa("5.54.06", "Eventos"),
+    despesa("5.54.07", "Brindes / Doações"),
+    despesa("5.54.08", "ARTs"),
+    grupo("5.55", "Despesas com veículos", Natureza::Despesa, None),
+    despesa("5.55.01", "Combustíveis"),
+    despesa("5.55.02", "Manutenção de veículos"),
+    despesa("5.55.03", "Pneus"),
+    despesa("5.55.04", "IPVA / Despachante"),
+    despesa("5.55.05", "Seguro de veículos"),
+    despesa("5.55.06", "Multas"),
+    despesa("5.55.07", "Lavação"),
+    grupo(
+        "5.56",
+        "Marketing",
+        Natureza::Despesa,
+        Some(PapelConta::DespesaComercial),
+    ),
+    despesa("5.56.01", "Publicidade e propaganda"),
+    despesa("5.56.02", "Assinatura de revistas e jornais"),
+    grupo(
+        "5.57",
+        "Despesas com pessoal (detalhe)",
+        Natureza::Despesa,
+        Some(PapelConta::DespesaPessoal),
+    ),
+    despesa("5.57.01", "Salários"),
+    despesa("5.57.02", "Pró-labore"),
+    despesa("5.57.03", "Comissões"),
+    despesa("5.57.04", "Décimo terceiro salário"),
+    despesa("5.57.05", "Férias"),
+    despesa("5.57.06", "Rescisões"),
+    despesa("5.57.07", "FGTS"),
+    despesa("5.57.08", "INSS"),
+    despesa("5.57.09", "IRRF e outros impostos sobre a folha"),
+    despesa("5.57.10", "Adiantamento de salário"),
+    despesa("5.57.11", "Plano de saúde"),
+    despesa("5.57.12", "Seguro de vida"),
+    despesa("5.57.13", "Medicina ocupacional"),
+    despesa("5.57.14", "EPIs"),
+    despesa("5.57.15", "Uniformes"),
+    despesa("5.57.16", "Treinamentos"),
+    despesa("5.57.17", "Viagens / Hospedagem / Alimentação"),
+    despesa("5.57.18", "Ações trabalhistas"),
+    grupo(
+        "5.58",
+        "Despesas financeiras e bancárias",
+        Natureza::Despesa,
+        Some(PapelConta::DespesaFinanceira),
+    ),
+    despesa("5.58.01", "Despesas bancárias"),
+    despesa("5.58.02", "Tarifa de cartão"),
+    despesa("5.58.03", "Juros e multas sobre tributos"),
+    despesa("5.58.04", "IOF"),
+    despesa("5.58.05", "Juros sobre parcelas de empréstimos"),
+    despesa("5.58.06", "Juros de limite de conta"),
+    despesa("5.58.07", "Juros de fornecedores"),
+    despesa("5.58.08", "Juros de custódias"),
+    despesa("5.58.09", "Inadimplência"),
+];
+
+/// As contas que o modelo acrescenta ao plano base (as comuns primeiro; na gestão financeira, a
+/// árvore própria, que já tem as do dia a dia).
 #[must_use]
 pub fn contas_do_modelo(modelo: ModeloDePlano) -> Vec<ContaDeModelo> {
     let proprias = match modelo {
         ModeloDePlano::Comercio => COMERCIO,
         ModeloDePlano::Servicos => SERVICOS,
         ModeloDePlano::AssistenciaTecnica => ASSISTENCIA,
+        ModeloDePlano::GestaoFinanceira => return GESTAO.to_vec(),
     };
     COMUNS.iter().chain(proprias).copied().collect()
 }
@@ -175,10 +356,15 @@ mod testes {
                     "{m:?}: código repetido {}",
                     c.codigo
                 );
-                // O pai (sem o último segmento) é uma sintética do plano base.
+                // O pai (sem o último segmento) é uma sintética do plano base ou uma agrupadora
+                // do próprio modelo, que vem antes.
                 let pai = &c.codigo[..c.codigo.rfind('.').unwrap()];
+                let pai_do_modelo = contas
+                    .iter()
+                    .take_while(|x| x.codigo != c.codigo)
+                    .any(|x| x.agrupadora && x.codigo == pai);
                 assert!(
-                    base.contains(pai),
+                    base.contains(pai) || pai_do_modelo,
                     "{m:?}: pai {pai} de {} não existe",
                     c.codigo
                 );
@@ -195,15 +381,28 @@ mod testes {
     #[test]
     fn receitas_do_modelo_levam_papel_e_despesas_nao() {
         for m in ModeloDePlano::TODOS {
-            for c in contas_do_modelo(m) {
-                assert_eq!(
-                    c.papel.is_some(),
-                    c.natureza == Natureza::Receita,
-                    "{}",
-                    c.codigo
-                );
+            let contas = contas_do_modelo(m);
+            for c in contas.iter().filter(|c| !c.agrupadora) {
+                // O papel é da própria conta ou da agrupadora em que ela está.
+                let pai = &c.codigo[..c.codigo.rfind('.').unwrap()];
+                let do_pai = contas
+                    .iter()
+                    .find(|x| x.agrupadora && x.codigo == pai)
+                    .and_then(|x| x.papel);
+                if c.natureza == Natureza::Receita {
+                    assert!(c.papel.or(do_pai).is_some(), "{}", c.codigo);
+                } else {
+                    assert!(c.papel.is_none(), "{}", c.codigo);
+                }
             }
         }
+        // A gestão financeira tem a árvore: agrupadoras com filhas, até o 3º nível.
+        let g = contas_do_modelo(ModeloDePlano::GestaoFinanceira);
+        assert!(g.iter().filter(|c| c.agrupadora).count() >= 9);
+        assert!(g
+            .iter()
+            .any(|c| c.nome == "Aluguel" && c.codigo == "5.52.01"));
+        assert!(g.iter().all(|c| c.codigo.matches('.').count() <= 2));
         assert!(contas_do_modelo(ModeloDePlano::Comercio)
             .iter()
             .any(|c| c.nome == "Aluguel"));
