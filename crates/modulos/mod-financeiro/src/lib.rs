@@ -98,6 +98,7 @@ mod projecao;
 pub mod receituario;
 mod recorrencia;
 pub mod regua;
+pub mod relatorios;
 #[cfg(feature = "sqlite")]
 mod repositorio;
 pub mod saude;

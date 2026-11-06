@@ -425,6 +425,7 @@ stateDiagram-v2
 | `DfcIndiretoDoPeriodo` ✅ (2026-10-14, `financeiro.dfc_indireto_do_periodo.v1`) | `financeiro.dre.ver` | Aba Resultado e caixa › DFC › "Método indireto": o **lucro líquido da DRE** e, com o sinal trocado, a variação de cada conta patrimonial fora do caixa nos mesmos lançamentos da DRE (Confirmado/Realizado/Estornado, pela competência) — ativo que cresce prendeu dinheiro, passivo que cresce o soltou. Classificação: depreciação/amortização (pelo nome) nas operacionais; senão o grupo de fluxo da conta; senão o papel (Empréstimos, Capital, Retiradas, Lucros acumulados → financiamento; Aplicações → investimento); senão o imobilizado pelo código (1.4 → investimento); o resto, operacional, com rótulos como "(Aumento) redução de contas a receber". Termina na **mesma variação** do método direto; se um lançamento tem competência num período e liquidação noutro, a sobra aparece numa linha própria ("Diferença de datas"), nunca some — zero no caso normal (testado com venda e compra a prazo, baixas, depreciação, máquina à vista, empréstimo e retirada) | `cardeal_ledger::variacoes_patrimoniais` + `resultado_por_conta` + `movimentos_de_caixa` |
 | `CarteiraDeCheques` ✅ (2026-10-14, `financeiro.carteira_de_cheques.v1`) | `financeiro.cheque.ver` | Aba Cheques: os cheques (filtro por estado) com o cliente e a descrição do título, o "bom para" mais antigo primeiro; a tela soma em carteira, os que já podem ir ao banco e os devolvidos | `financeiro_cheque(empresa, estado, bom_para)` (migração v11) |
 | `BalanceteDoPeriodo` ✅ (2026-10-14, `financeiro.balancete_do_periodo.v1`) | `financeiro.dre.ver` | Aba Resultado e caixa › Balancete: cada conta com saldo anterior, débitos, créditos e saldo atual (D/C), agrupadoras somadas, ordem numérica dos códigos. Pela competência (Confirmado/Realizado/Estornado), então sempre fecha. Sem encerramento de exercício no sistema, as contas de resultado acumulam só o **ano**; o resultado dos anos anteriores entra numa linha do PL ("Resultado de exercícios anteriores (não encerrado)") | `cardeal_ledger::balancete` |
+| `RecebimentosNoPeriodo` / `PagamentosNoPeriodo` ✅ (2026-11-06, `financeiro.recebimentos_no_periodo.v1` / `…pagamentos…`) | `financeiro.receber.ver` / `financeiro.pagar.ver` | Financeiro › Relatórios › "Recebimentos/Pagamentos por dia" (§6.11): as baixas não estornadas do período com o título (pessoa, descrição, categoria) | `financeiro_baixa(parcela, data)` × parcela × título |
 | `VencimentosAReceber` / `VencimentosAPagar` ✅ (2026-11-05, `financeiro.vencimentos_a_receber.v1` / `…_a_pagar.v1`) | `financeiro.receber.ver` / `financeiro.pagar.ver` | Visão geral › quadros "Esta semana", "Este mês", "Próximo mês" e "Em atraso" (§6.10) | `financeiro_parcela(empresa, vencimento)` × `financeiro_titulo(especie)` |
 | `DfcGerencialDoAno` ✅ (2026-11-05, `financeiro.dfc_gerencial_do_ano.v1`) | `financeiro.dre.ver` | Resultado › DFC › "Mês a mês, por conta" e "Orçado × realizado" (§6.9): o caixa realizado do ano, 12 meses, por conta do plano — a baixa vai para a conta do título de origem — com o orçado no mesmo sinal | `movimentos_de_caixa` + `financeiro_baixa` × `financeiro_parcela.lancamento` (e o estorno por `razao_lancamento.estorna`) + `financeiro_orcamento` |
 | `OrcamentoDoAno` ✅ (2026-10-26, `financeiro.orcamento_do_ano.v1`) | `financeiro.dre.ver` | Resultado › Orçamento: cada conta de resultado (analítica, ativa) com o orçado e o realizado de cada mês no sentido em que se orça — e, desde 2026-11-05, as contas que se orçam pelo caixa (`de_caixa`: compras, investimentos, financiamentos), com o realizado pelo caixa (§6.7) | `financeiro_orcamento(empresa, conta, competencia)` + `resultado_por_conta` por mês + `dfc_gerencial::caixa_por_conta` |
@@ -436,6 +437,30 @@ stateDiagram-v2
 | `Categorias` ✅ | `financeiro.categoria.ver` | Seletor de categoria ao lançar título/recorrência | `financeiro_categoria(empresa, nome) WHERE ativa = 1` |
 | `TotalPorCategoriaNoPeriodo` ✅ | `financeiro.categoria.ver` | Gráfico de custo/receita por categoria e mês (churn, MRR por projeto) | agregação em memória sobre `financeiro_baixa` join `financeiro_titulo`, filtrando por `data` |
 | `TituloDaOrigem` ✅ (novo, 2026-09-11) | `financeiro.receber.ver` | Detalhe de OS (`os`)/vendas/compras faturada: "qual título isto gerou" | `financeiro_titulo(empresa, origem_modulo, origem_id)` — o par de correlação que `Titulo` já carregava desde a origem; usado por outro módulo pela consulta pública, nunca por SQL direto em `financeiro_titulo` (`docs/contratos-internos.md` §7 regra 2) |
+
+## 6.11 Relatórios do caixa e exportação (2026-11-06)
+
+A "central de relatórios" do controle financeiro que serviu de base (§6.9), em Financeiro ›
+**Relatórios** (`mod_financeiro::relatorios` + `tela_financeiro/relatorios.rs`), cada um com a busca por
+pessoa, descrição ou categoria e **Exportar PDF / Exportar Excel**:
+
+- **Contas a pagar / a receber por vencimento**: todo o em aberto nas seis faixas — vencidos, vence hoje,
+  próximos 7 dias, 8 a 15, 16 a 30, depois de 30 — com a situação ("vencida há 12 dias", "em 5 dias") e
+  os totais. **Todo** o em aberto, não só o de um período: no sistema de origem, "Contas a pagar" de
+  novembro dizia "Vencidos: R$ 0,00" com 102 contas vencidas antes (o filtro de período escondia o
+  atraso).
+- **Recebimentos / Pagamentos por dia**: as baixas do período agrupadas por dia (por extenso), com o total
+  do dia, o total do período, o maior dia e a média; baixa estornada não entra.
+- **Fluxo de caixa previsto**: do saldo de hoje das contas do Disponível, cada conta a receber e a pagar em
+  aberto pelo vencimento até 30, 60 ou 90 dias, com entrada, saída e o saldo acumulado; as vencidas e em
+  aberto vêm primeiro, marcadas (dinheiro que o saldo de hoje ainda não viu), e no mesmo dia o que sai
+  antes do que entra (o pior caso primeiro). O **menor saldo** do período aparece, em vermelho quando
+  falta dinheiro. Sem filtro por conta bancária: a parcela em aberto não tem conta até ser baixada.
+
+**Exportação** (`tela_financeiro/exportar.rs`): a mesma tabela da tela em **PDF** (cabeçalho e logo da
+empresa, `cardeal_pdf::gerar_relatorio`) e em **Excel** de verdade (`.xlsx` do `cardeal_planilha`:
+dinheiro como número, data como data, cabeçalho congelado — o "Exportar Excel" do sistema de origem
+gravava um CSV), montada só no clique; a pessoa escolhe onde gravar e o arquivo abre.
 
 ## 6.10 Quadros de vencimento na Visão geral (2026-11-05)
 

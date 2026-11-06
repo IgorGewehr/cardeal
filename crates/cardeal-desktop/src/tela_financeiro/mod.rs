@@ -18,6 +18,7 @@ mod contas;
 mod custos;
 mod dfc_mensal;
 mod dre;
+mod exportar;
 mod fluxo;
 mod grupo;
 mod importacao;
@@ -30,6 +31,7 @@ mod pessoal;
 mod plano_contas;
 mod recorrencias;
 mod regua;
+mod relatorios;
 mod renegociar;
 mod saude;
 mod simples;
@@ -91,6 +93,8 @@ enum Aba {
     Custos,
     Cobranca,
     Resultado,
+    /// Os relatórios do caixa: contas por vencimento, por dia, o previsto.
+    Relatorios,
     Plano,
     Conciliacao,
     Cheques,
@@ -486,6 +490,8 @@ pub struct EstadoTelaFinanceiro {
     dash_pagar: Dinheiro,
     dash_venc_receber: (usize, Dinheiro),
     dash_venc_pagar: (usize, Dinheiro),
+    /// A aba Relatórios.
+    relatorios: relatorios::EstadoRelatorios,
     /// Os quadros da semana, do mês, do próximo mês e do atraso (Visão geral).
     vencimentos: vencimentos::EstadoVencimentos,
     dash_recebido_mes: Dinheiro,
@@ -584,6 +590,7 @@ pub fn mostrar(
                 Aba::Custos => painel_custos(ui, motor, sessao, estado),
                 Aba::Cobranca => painel_cobranca(ui, motor, sessao, estado),
                 Aba::Resultado => painel_dre(ui, motor, sessao, estado),
+                Aba::Relatorios => relatorios::painel(ui, motor, sessao, estado),
                 Aba::Plano => painel_plano(ui, motor, sessao, estado),
                 Aba::Conciliacao => painel_conciliacao(ui, motor, sessao, estado),
                 Aba::Cheques => cheques::painel_cheques(ui, motor, sessao, estado),
@@ -708,6 +715,7 @@ fn abas(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTe
         (Aba::Custos, "Custos por categoria"),
         (Aba::Cobranca, "Cobrança"),
         (Aba::Resultado, "Resultado e caixa"),
+        (Aba::Relatorios, "Relatórios"),
         (Aba::Plano, "Plano de contas"),
         (Aba::Conciliacao, "Conciliação"),
         (Aba::Cheques, "Cheques"),

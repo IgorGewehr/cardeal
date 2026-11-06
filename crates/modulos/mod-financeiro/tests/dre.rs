@@ -1195,3 +1195,114 @@ fn conta_do_codigo(c: &Cena, s: &Sessao, codigo: &str) -> Id {
     );
     plano.iter().find(|n| n.codigo == codigo).unwrap().id
 }
+
+#[test]
+fn recebimentos_e_pagamentos_do_periodo_sem_as_baixas_estornadas() {
+    use mod_financeiro::relatorios::{
+        por_dia, ItemBaixaNoPeriodo, PagamentosNoPeriodo, RecebimentosNoPeriodo,
+    };
+    use mod_financeiro::EstornarBaixa;
+    let c = cena();
+    let s = c.sessao(
+        Id::novo(),
+        &[
+            "financeiro.receber.criar",
+            "financeiro.receber.baixar",
+            "financeiro.receber.estornar",
+            "financeiro.receber.ver",
+            "financeiro.pagar.criar",
+            "financeiro.pagar.baixar",
+            "financeiro.pagar.ver",
+        ],
+    );
+    let h = hoje();
+    let r: mod_financeiro::TituloAReceberLancado = c.cmd(
+        &s,
+        "financeiro.lancar_titulo_a_receber.v1",
+        &LancarTituloAReceber {
+            cliente: None,
+            valor_total: Dinheiro::reais(1_000),
+            emissao: h,
+            parcelas: 1,
+            primeiro_vencimento: h,
+            intervalo_dias: 0,
+            observacao: Some("Venda de balcão".into()),
+            categoria: None,
+            quitado_agora: None,
+        },
+    );
+    baixar_receber(&c, &s, r.parcelas[0], Dinheiro::reais(600));
+    let segunda: mod_financeiro::RecebimentoBaixado = c.cmd(
+        &s,
+        "financeiro.baixar_recebimento.v1",
+        &BaixarRecebimento {
+            parcela: r.parcelas[0],
+            valor: Dinheiro::reais(400),
+            data: h,
+            meio_pagamento: MeioPagamento::Dinheiro,
+            conta_destino: None,
+        },
+    );
+    let _: mod_financeiro::BaixaFoiEstornada = c.cmd(
+        &s,
+        "financeiro.estornar_baixa.v1",
+        &EstornarBaixa {
+            baixa: segunda.baixa,
+            motivo: "recebido em duplicidade, devolvido".into(),
+        },
+    );
+    let p: mod_financeiro::TituloAPagarLancado = c.cmd(
+        &s,
+        "financeiro.lancar_titulo_a_pagar.v1",
+        &LancarTituloAPagar {
+            fornecedor: None,
+            valor_total: Dinheiro::reais(300),
+            emissao: h,
+            parcelas: 1,
+            primeiro_vencimento: h,
+            intervalo_dias: 0,
+            observacao: Some("Aluguel".into()),
+            categoria: None,
+            quitado_agora: None,
+        },
+    );
+    let _: mod_financeiro::PagamentoBaixado = c.cmd(
+        &s,
+        "financeiro.baixar_pagamento.v1",
+        &BaixarPagamento {
+            parcela: p.parcelas[0],
+            valor: Dinheiro::reais(300),
+            data: h,
+            meio_pagamento: MeioPagamento::Dinheiro,
+            conta_destino: None,
+        },
+    );
+    let periodo = Periodo::novo(h.inicio_do_mes(), h.fim_do_mes());
+    let rec: Vec<ItemBaixaNoPeriodo> = c.consulta(
+        &s,
+        "financeiro.recebimentos_no_periodo.v1",
+        &RecebimentosNoPeriodo { periodo },
+    );
+    assert_eq!(rec.len(), 1, "a baixa estornada não entra");
+    assert_eq!(rec[0].valor, Dinheiro::reais(600));
+    assert_eq!(rec[0].descricao.as_deref(), Some("Venda de balcão"));
+    let pag: Vec<ItemBaixaNoPeriodo> = c.consulta(
+        &s,
+        "financeiro.pagamentos_no_periodo.v1",
+        &PagamentosNoPeriodo { periodo },
+    );
+    assert_eq!(pag.len(), 1);
+    assert_eq!(por_dia(&pag)[0].total, Dinheiro::reais(300));
+    // Fora do período: nada.
+    let antes: Vec<ItemBaixaNoPeriodo> = c.consulta(
+        &s,
+        "financeiro.recebimentos_no_periodo.v1",
+        &RecebimentosNoPeriodo {
+            periodo: Periodo::novo(
+                h.mais_meses(-2).inicio_do_mes(),
+                h.mais_meses(-2).fim_do_mes(),
+            ),
+        },
+    );
+    assert!(antes.is_empty());
+}

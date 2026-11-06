@@ -123,6 +123,12 @@ impl Modulo for ModuloFinanceiro {
                 "financeiro.vencimentos_a_receber.v1",
             )
             .consulta::<crate::vencimentos::VencimentosAPagar>("financeiro.vencimentos_a_pagar.v1")
+            .consulta::<crate::relatorios::RecebimentosNoPeriodo>(
+                "financeiro.recebimentos_no_periodo.v1",
+            )
+            .consulta::<crate::relatorios::PagamentosNoPeriodo>(
+                "financeiro.pagamentos_no_periodo.v1",
+            )
             .consulta::<crate::BalanceteDoPeriodo>("financeiro.balancete_do_periodo.v1")
             .consulta::<crate::DiarioDoPeriodo>("financeiro.diario_do_periodo.v1")
             .consulta::<crate::DreDoPeriodo>("financeiro.dre_do_periodo.v1")
