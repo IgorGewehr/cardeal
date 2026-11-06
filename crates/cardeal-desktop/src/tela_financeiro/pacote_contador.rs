@@ -65,7 +65,7 @@ pub(super) fn pendencia_do_de_para(sem: &[String]) -> Option<(String, String)> {
             sem.len()
         ),
         "Preencha em Financeiro › Contador › DE/PARA e gere o pacote de novo — no CSV elas \
-         saíram com o código do Cardeal."
+         saíram com o código do Lunno."
             .to_owned(),
     ))
 }
@@ -1010,7 +1010,7 @@ pub(super) fn botao(
                     "Pacote do contador gravado: PDF, planilha e lançamentos do mês{efd}"
                 )),
                 (_, n) if p.buscando > 0 => Notificacao::aviso(format!(
-                    "Pacote do contador gravado, com {n} pendência(s) — o Cardeal está buscando {} \
+                    "Pacote do contador gravado, com {n} pendência(s) — o Lunno está buscando {} \
                      XML(s) na SEFAZ: gere o pacote de novo daqui a pouco",
                     p.buscando
                 )),

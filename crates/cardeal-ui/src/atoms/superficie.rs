@@ -74,7 +74,8 @@ pub fn superficie_clicavel(
 /// Altura de linha recomendada para item de navegação (sidebar).
 #[must_use]
 pub const fn altura_navegacao() -> f32 {
-    40.0
+    // 36, não 40: com 40 os nove itens da sidebar não cabiam numa tela de 720 px lógicos.
+    36.0
 }
 
 /// Altura de linha recomendada para item de lista com título + subtítulo.

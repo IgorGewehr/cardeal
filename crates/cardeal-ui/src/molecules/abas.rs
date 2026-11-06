@@ -7,6 +7,11 @@
 //! lógicos, Windows a 150%) as 13 abas do Financeiro alargavam a tela inteira, e os cartões e
 //! as faixas de KPI abaixo saíam cortados à direita.
 //!
+//! Dois estilos: **segmentos** (o padrão — a pílula numa trilha, para escolher período, visão,
+//! filtro) e **navegação** ([`Abas::navegacao`] — as abas de primeiro nível de uma tela: texto
+//! com um traço da marca sob a ativa e uma linha sob a barra). Com os dois iguais, a tela do
+//! Financeiro empilhava quatro barras idênticas e não dava para ver qual mandava em qual.
+//!
 //! Substitui o `egui::Frame` + `Botao::primario/fantasma().pequeno()` copiado à mão em cada
 //! tela (`tela_financeiro`, `tela_settings`, `tela_os`). Genérica sobre o tipo da aba
 //! (`enum`, `usize`…), desde que `PartialEq + Copy`.
@@ -30,6 +35,7 @@ pub struct Abas<'a, T> {
     itens: &'a [(T, &'a str)],
     selecionada: Option<T>,
     id_salt: &'a str,
+    navegacao: bool,
 }
 
 impl<'a, T: PartialEq + Copy> Abas<'a, T> {
@@ -39,7 +45,16 @@ impl<'a, T: PartialEq + Copy> Abas<'a, T> {
             itens,
             selecionada: None,
             id_salt: "abas",
+            navegacao: false,
         }
+    }
+
+    /// As abas de primeiro nível de uma tela: sem trilha, com um traço da marca sob a ativa e
+    /// uma linha sob a barra inteira, que ocupa a largura toda. Os seletores de segundo nível
+    /// continuam segmentos.
+    pub fn navegacao(mut self) -> Self {
+        self.navegacao = true;
+        self
     }
 
     /// A aba ativa (a pílula desliza para ela).
@@ -56,9 +71,13 @@ impl<'a, T: PartialEq + Copy> Abas<'a, T> {
 
     /// Desenha a barra. Devolve `Some(valor)` quando o usuário clica numa aba diferente.
     pub fn mostrar(self, ui: &mut Ui) -> Option<T> {
-        const PAD_X: f32 = 14.0;
-        const ALTURA: f32 = 30.0;
-        const MARGEM: f32 = 3.0;
+        // Segmentos: pílula numa trilha com margem; navegação: rótulos soltos, linhas mais altas
+        // (o traço da ativa mora na base da linha).
+        let (pad_x, altura, margem) = if self.navegacao {
+            (12.0_f32, 36.0_f32, 0.0_f32)
+        } else {
+            (14.0_f32, 30.0_f32, 3.0_f32)
+        };
 
         if self.itens.is_empty() {
             return None;
@@ -75,34 +94,23 @@ impl<'a, T: PartialEq + Copy> Abas<'a, T> {
                     .layout_no_wrap((*rot).to_owned(), fonte.clone(), cores.texto)
                     .size()
                     .x
-                    + PAD_X * 2.0
+                    + pad_x * 2.0
             })
             .collect();
-        // Quebra de linha: cada segmento vai para a linha seguinte quando passaria da largura
-        // disponível (o primeiro de cada linha fica, mesmo que sozinho não caiba).
-        let cabe = (ui.available_width() - MARGEM * 2.0).max(0.0);
-        let mut posicoes: Vec<egui::Vec2> = Vec::with_capacity(larguras.len());
-        let (mut x, mut linha, mut largura_max) = (0.0_f32, 0.0_f32, 0.0_f32);
-        for larg in &larguras {
-            if x > 0.0 && x + larg > cabe {
-                x = 0.0;
-                linha += 1.0;
-            }
-            posicoes.push(egui::vec2(x, linha * ALTURA));
-            x += larg;
-            largura_max = largura_max.max(x);
-        }
-        let largura_total = largura_max + MARGEM * 2.0;
-        let altura_total = ALTURA * (linha + 1.0) + MARGEM * 2.0;
+        let cabe = (ui.available_width() - margem * 2.0).max(0.0);
+        let (posicoes, largura_max, linhas) = quebrar_em_linhas(&larguras, cabe, altura);
+        let largura_total = if self.navegacao {
+            ui.available_width().max(largura_max)
+        } else {
+            largura_max + margem * 2.0
+        };
+        let altura_total = altura * linhas + margem * 2.0;
 
         let (rect, _) =
             ui.allocate_exact_size(egui::vec2(largura_total, altura_total), Sense::hover());
         if !ui.is_rect_visible(rect) {
             return None;
         }
-
-        ui.painter()
-            .rect_filled(rect, Raio::ITEM, cores.superficie_2);
 
         let idx_sel = self
             .selecionada
@@ -123,28 +131,30 @@ impl<'a, T: PartialEq + Copy> Abas<'a, T> {
         };
 
         let pilula = Rect::from_min_size(
-            egui::pos2(rect.left() + MARGEM + x_anim, rect.top() + MARGEM + y_anim),
-            egui::vec2(larg_anim, ALTURA),
+            egui::pos2(rect.left() + margem + x_anim, rect.top() + margem + y_anim),
+            egui::vec2(larg_anim, altura),
         );
-        ui.painter()
-            .rect_filled(pilula, Raio::CAMPO, cores.superficie);
-        ui.painter()
-            .rect_stroke(pilula, Raio::CAMPO, egui::Stroke::new(1.0_f32, cores.borda));
+        desenhar_fundo(ui, rect, pilula, self.navegacao, pad_x);
 
         // Segmentos clicáveis.
         let mut clicada = None;
-        let origem = rect.min + egui::vec2(MARGEM, MARGEM);
+        let origem = rect.min + egui::vec2(margem, margem);
         for (i, (((valor, rotulo), larg), pos)) in
             self.itens.iter().zip(&larguras).zip(&posicoes).enumerate()
         {
-            let seg = Rect::from_min_size(origem + *pos, egui::vec2(*larg, ALTURA));
+            let seg = Rect::from_min_size(origem + *pos, egui::vec2(*larg, altura));
             let resp = ui.interact(seg, id.with(i), Sense::click());
             let ativa = i == idx_sel;
             // A ativa leva a cor da marca; a inativa acende um fundo leve no hover — o
             // segmento diz que é clicável antes do clique.
             if !ativa && resp.hovered() {
+                let fundo = if self.navegacao {
+                    seg.shrink2(egui::vec2(2.0, 5.0))
+                } else {
+                    seg.shrink(1.0)
+                };
                 ui.painter()
-                    .rect_filled(seg.shrink(1.0), Raio::CAMPO, cores.superficie_hover);
+                    .rect_filled(fundo, Raio::CAMPO, cores.superficie_hover);
             }
             let cor = if ativa {
                 cores.rubro
@@ -171,12 +181,59 @@ impl<'a, T: PartialEq + Copy> Abas<'a, T> {
     }
 }
 
+/// A posição de cada segmento: vai para a linha seguinte quando passaria de `cabe` (o primeiro de
+/// cada linha fica, mesmo que sozinho não caiba). Devolve também a largura da linha mais larga e
+/// quantas linhas há.
+fn quebrar_em_linhas(larguras: &[f32], cabe: f32, altura: f32) -> (Vec<egui::Vec2>, f32, f32) {
+    let mut posicoes = Vec::with_capacity(larguras.len());
+    let (mut x, mut linha, mut largura_max) = (0.0_f32, 0.0_f32, 0.0_f32);
+    for larg in larguras {
+        if x > 0.0 && x + larg > cabe {
+            x = 0.0;
+            linha += 1.0;
+        }
+        posicoes.push(egui::vec2(x, linha * altura));
+        x += larg;
+        largura_max = largura_max.max(x);
+    }
+    (posicoes, largura_max, linha + 1.0)
+}
+
+/// O fundo da barra e o indicador da ativa (`pilula`: o retângulo animado do segmento ativo).
+/// Segmentos: trilha cinza e pílula clara; navegação: linha sob a barra e o traço da marca sob
+/// o rótulo ativo, na base da linha dele.
+fn desenhar_fundo(ui: &Ui, rect: Rect, pilula: Rect, navegacao: bool, pad_x: f32) {
+    let cores = ui.cores();
+    let pintor = ui.painter();
+    if navegacao {
+        pintor.hline(
+            rect.x_range(),
+            rect.bottom() - 0.5,
+            egui::Stroke::new(1.0_f32, cores.borda),
+        );
+        let recuo = pad_x - 4.0;
+        let traco = Rect::from_min_max(
+            egui::pos2(pilula.left() + recuo, pilula.bottom() - 2.0),
+            egui::pos2(pilula.right() - recuo, pilula.bottom()),
+        );
+        pintor.rect_filled(traco, 1.0, cores.rubro);
+    } else {
+        pintor.rect_filled(rect, Raio::ITEM, cores.superficie_2);
+        pintor.rect_filled(pilula, Raio::CAMPO, cores.superficie);
+        pintor.rect_stroke(pilula, Raio::CAMPO, egui::Stroke::new(1.0_f32, cores.borda));
+    }
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;
 
     /// O retângulo que a barra ocupa num painel de `largura` px, e a largura que cabia.
     fn ocupado(largura: f32, rotulos: &[&str]) -> (Rect, f32) {
+        ocupado_em(largura, rotulos, false)
+    }
+
+    fn ocupado_em(largura: f32, rotulos: &[&str], navegacao: bool) -> (Rect, f32) {
         let ctx = egui::Context::default();
         crate::tokens::instalar_fontes(&ctx);
         let entrada = egui::RawInput {
@@ -192,7 +249,14 @@ mod testes {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let cabe = ui.available_width();
                 let usado = ui
-                    .scope(|ui| Abas::nova(&itens).selecionada(9).mostrar(ui))
+                    .scope(|ui| {
+                        let abas = Abas::nova(&itens).selecionada(9);
+                        if navegacao {
+                            abas.navegacao().mostrar(ui)
+                        } else {
+                            abas.mostrar(ui)
+                        }
+                    })
                     .response
                     .rect;
                 r = (usado, cabe);
@@ -226,5 +290,17 @@ mod testes {
         let (r, cabe) = ocupado(420.0, &rotulos);
         assert!(r.width() <= cabe + 0.5, "{r:?} > {cabe}");
         assert!(r.height() > 90.0, "deveria ter 3+ linhas: {r:?}");
+
+        // A navegação quebra do mesmo jeito e ocupa a largura toda (a linha sob a barra).
+        let (r, cabe) = ocupado_em(420.0, &rotulos, true);
+        assert!((r.width() - cabe).abs() < 0.5, "{r:?} != {cabe}");
+        assert!(r.height() > 100.0, "deveria ter 3+ linhas: {r:?}");
+    }
+
+    #[test]
+    fn navegacao_numa_linha_ocupa_a_largura_toda() {
+        let (r, cabe) = ocupado_em(800.0, &["Lista", "Gráfico"], true);
+        assert!((r.width() - cabe).abs() < 0.5, "{r:?} != {cabe}");
+        assert!(r.height() < 60.0, "{r:?}");
     }
 }

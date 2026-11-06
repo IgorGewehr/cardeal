@@ -1,5 +1,5 @@
 //! Camada 1 (atoms) — `BotaoJanela`: minimizar, maximizar/restaurar e fechar da barra de título
-//! desenhada à mão (o Cardeal não usa a decoração nativa da janela).
+//! desenhada à mão (o app não usa a decoração nativa da janela).
 //!
 //! Os ícones são traços desenhados, não glifos: não dependem de fonte alguma. Só o **fechar**
 //! fica vermelho ao passar o mouse (convenção do sistema); os outros usam o realce neutro.
@@ -96,7 +96,7 @@ impl Widget for BotaoJanela {
             let fechar = self.tipo == TipoBotaoJanela::Fechar;
             if resp.hovered() {
                 let fundo = if fechar {
-                    Rubro::R600
+                    Rubro::FECHAR_JANELA
                 } else {
                     ui.style().visuals.widgets.hovered.bg_fill
                 };

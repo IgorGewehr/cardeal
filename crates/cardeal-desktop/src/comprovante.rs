@@ -151,7 +151,7 @@ pub fn imprimir_em(
             .map(crate::impressora::Saida::Impressora);
     }
     let pdf = cardeal_pdf::gerar_comprovante(&comprovante, bobina(dados.impressao.bobina));
-    let pasta = std::env::temp_dir().join("Cardeal").join("cupons");
+    let pasta = std::env::temp_dir().join("Lunno").join("cupons");
     std::fs::create_dir_all(&pasta).map_err(|e| e.to_string())?;
     let caminho = pasta.join(format!("Comprovante-{}.pdf", dados.numero));
     std::fs::write(&caminho, pdf).map_err(|e| e.to_string())?;

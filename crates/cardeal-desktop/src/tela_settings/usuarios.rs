@@ -94,7 +94,7 @@ pub fn secao(
         } else {
             (
                 "E-mail",
-                "Quem já tem conta no Cardeal online só ganha acesso a esta empresa (a senha \
+                "Quem já tem conta no Lunno online só ganha acesso a esta empresa (a senha \
                  inicial é ignorada); um e-mail novo vira conta com ela.",
             )
         };

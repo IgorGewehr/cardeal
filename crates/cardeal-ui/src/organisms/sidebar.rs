@@ -58,10 +58,13 @@ impl<'a> Sidebar<'a> {
         let mut clicado = None;
 
         ui.vertical(|ui| {
+            // O espaço entre itens é o daqui, não o `item_spacing` do tema (8 px a mais por
+            // item): com ele os nove itens não cabiam numa tela de 720 px lógicos.
+            ui.spacing_mut().item_spacing.y = 0.0;
             for (gi, grupo) in self.grupos.iter().enumerate() {
                 if let Some(titulo) = grupo.titulo {
                     if self.expandida {
-                        ui.add_space(if gi == 0 { Espaco::E8 } else { Espaco::E16 });
+                        ui.add_space(if gi == 0 { Espaco::E4 } else { Espaco::E8 });
                         ui.horizontal(|ui| {
                             let (tick, _) = ui.allocate_exact_size(
                                 egui::vec2(Espaco::E12, 14.0),

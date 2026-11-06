@@ -257,7 +257,7 @@ fn a_conta_com_verificacao_em_duas_etapas_so_entra_com_o_codigo() {
     let r = Remoto::entrar(novo(), "ana@x.com", SENHA).unwrap();
     assert!(!r.segundo_fator_ativo().unwrap());
     let p = r.propor_segundo_fator().unwrap();
-    assert!(p.uri.starts_with("otpauth://totp/Cardeal:ana%40x.com?"));
+    assert!(p.uri.starts_with("otpauth://totp/Lunno:ana%40x.com?"));
     let segredo = cardeal_auth::totp::SegredoTotp::de_base32(&p.segredo).unwrap();
     // O código errado não ativa.
     assert!(r.ativar_segundo_fator(&p.segredo, "000000").is_err());

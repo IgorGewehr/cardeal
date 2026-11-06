@@ -191,7 +191,7 @@ pub fn imprimir(
         )
         .map_err(|e| e.mensagem)?;
     let pdf = cardeal_pdf::gerar_danfe(&montar(&detalhe)?);
-    let pasta = std::env::temp_dir().join("Cardeal").join("notas");
+    let pasta = std::env::temp_dir().join("Lunno").join("notas");
     std::fs::create_dir_all(&pasta).map_err(|e| e.to_string())?;
     let caminho = pasta.join(format!(
         "NFe-{}-{}.pdf",

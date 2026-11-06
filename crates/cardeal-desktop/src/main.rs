@@ -74,13 +74,17 @@ fn diretorio_de_dados() -> PathBuf {
     {
         // Convenção do Windows: dados de app não-roaming ficam sob `%APPDATA%\<App>`.
         let base = std::env::var_os("APPDATA").map_or_else(std::env::temp_dir, PathBuf::from);
-        base.join("Cardeal")
+        pasta_do_app(&base, "Lunno", "Cardeal")
     }
     #[cfg(target_os = "macos")]
     {
         // Convenção do macOS: `~/Library/Application Support/<App>`.
         let base = dirs_home().unwrap_or_else(std::env::temp_dir);
-        base.join("Library/Application Support/Cardeal")
+        pasta_do_app(
+            &base.join("Library/Application Support"),
+            "Lunno",
+            "Cardeal",
+        )
     }
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
@@ -91,6 +95,19 @@ fn diretorio_de_dados() -> PathBuf {
             .or_else(|| dirs_home().map(|h| h.join(".local/share")))
             .unwrap_or_else(std::env::temp_dir);
         base.join("cardeal")
+    }
+}
+
+/// A pasta do app dentro de `base`: a do nome atual (`nova`), salvo quando só existe a base de
+/// antes da troca de nome (`antiga`, com `cardeal.db` dentro) — quem já usava o app como
+/// Cardeal continua com os mesmos dados depois que ele passou a se chamar Lunno.
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+fn pasta_do_app(base: &std::path::Path, nova: &str, antiga: &str) -> PathBuf {
+    let (nova, antiga) = (base.join(nova), base.join(antiga));
+    if !nova.exists() && antiga.join("cardeal.db").exists() {
+        antiga
+    } else {
+        nova
     }
 }
 
@@ -106,14 +123,13 @@ fn caminho_da_base() -> PathBuf {
     dir.join("cardeal.db")
 }
 
-/// Bytes do PNG mestre da marca (cardeal geométrico em Rubro 500, ver `assets/marca/`) —
-/// embutidos no binário, decodificados uma vez no boot. Substitui o quadrado arredondado
-/// gerado por código que existia antes da marca ter sido desenhada.
-const LOGO_PNG: &[u8] = include_bytes!("../../../assets/marca/cardeal-icone-256.png");
+/// Bytes do PNG mestre da marca (a lua do Lunno, ver `assets/marca/`) — embutidos no binário,
+/// decodificados uma vez no boot: ícone da janela, barra de título e login.
+pub(crate) const LOGO_PNG: &[u8] = include_bytes!("../../../assets/marca/lunno-icone-256.png");
 
 fn icone_janela() -> egui::IconData {
     let img = image::load_from_memory(LOGO_PNG)
-        .expect("assets/marca/cardeal-icone-256.png deve ser um PNG válido")
+        .expect("assets/marca/lunno-icone-256.png deve ser um PNG válido")
         .to_rgba8();
     let (largura, altura) = img.dimensions();
     egui::IconData {
@@ -128,7 +144,7 @@ fn main() -> eframe::Result<()> {
     #[cfg_attr(not(target_os = "windows"), allow(unused_mut))]
     let mut opcoes = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("Cardeal")
+            .with_title("Lunno")
             // Wayland identifica a janela pelo `app_id` (não por WM_CLASS, coisa de X11) —
             // sem isso o GNOME Shell não acha o `.desktop` correspondente e mostra a janela
             // como "Desconhecido" com um ícone genérico na barra/dash, em vez do nome e ícone
@@ -157,7 +173,7 @@ fn main() -> eframe::Result<()> {
             .unwrap_or(wgpu::Backends::VULKAN | wgpu::Backends::DX12);
     }
     eframe::run_native(
-        "Cardeal",
+        "Lunno",
         opcoes,
         Box::new(|cc| {
             instalar_fontes(&cc.egui_ctx);
@@ -757,6 +773,17 @@ impl App {
 }
 
 impl eframe::App for App {
+    /// A demo (base temporária) não deixa rastro na memória do egui que o eframe grava em
+    /// `%APPDATA%\cardeal-desktop\data\app.ron`: o zoom de uma captura (`CARDEAL_DEMO_ZOOM`)
+    /// ficava gravado e a abertura seguinte do app — demo ou não — vinha ampliada.
+    fn persist_egui_memory(&self) -> bool {
+        #[cfg(feature = "demo")]
+        if self.demo.is_some() {
+            return false;
+        }
+        true
+    }
+
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if self.motor.is_none() && !matches!(self.tela, Tela::FalhaAoAbrir(_)) {
             self.carregar();
@@ -773,11 +800,17 @@ impl eframe::App for App {
         // nossas. A borda vai primeiro — antes de qualquer painel reivindicar o ponteiro,
         // senão um clique perto da borda dentro da sidebar nunca chegaria aqui.
         tratar_redimensionar_pela_borda(ctx);
+        // A empresa aberta ao lado do nome: com mais de um CNPJ, é o que diz onde se está.
+        let empresa = match (&self.tela, &self.motor) {
+            (Tela::Autenticado(estado), Some(motor)) => estado.nome_da_empresa(motor),
+            _ => None,
+        };
         JANELA.barra_titulo(
             ctx,
             self.tema,
-            ("bytes://cardeal-logo.png", LOGO_PNG),
-            "Cardeal",
+            ("bytes://lunno-logo.png", LOGO_PNG),
+            "Lunno",
+            empresa.as_deref(),
         );
 
         if ctx.input(|i| i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::D)) {
@@ -900,15 +933,27 @@ impl eframe::App for App {
                     // lá em cima e outro lá embaixo.
                     ui.add_space(Espaco::E4);
 
-                    if let Some(id) =
-                        Sidebar::nova(GRUPOS_SIDEBAR, estado.area.id(), mostra_rotulos).mostrar(ui)
-                    {
-                        acao = Acao::MudarArea(Area::de_id(id));
-                    }
+                    // A navegação rola quando não cabe acima do rodapé: numa tela de notebook
+                    // (720 px lógicos, Windows a 150%) os últimos itens — o Financeiro — ficavam
+                    // por baixo de "Configurações". A altura do rodapé é a do quadro anterior.
+                    let id_rodape = egui::Id::new("sidebar-rodape-altura");
+                    let altura_rodape = ctx.data(|d| d.get_temp::<f32>(id_rodape)).unwrap_or(120.0);
+                    egui::ScrollArea::vertical()
+                        .id_salt("sidebar-navegacao")
+                        .max_height((ui.available_height() - altura_rodape - Espaco::E8).max(0.0))
+                        .auto_shrink([false, true])
+                        .show(ui, |ui| {
+                            if let Some(id) =
+                                Sidebar::nova(GRUPOS_SIDEBAR, estado.area.id(), mostra_rotulos)
+                                    .mostrar(ui)
+                            {
+                                acao = Acao::MudarArea(Area::de_id(id));
+                            }
+                        });
 
                     // Rodapé fixo: chevron de recolher + Configurações, separados do resto
                     // da navegação por uma linha fina.
-                    ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
+                    let rodape = ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
                         ui.add_space(Espaco::E8);
                         if estado.empresas.len() > 1 {
                             let nome = self
@@ -942,37 +987,58 @@ impl eframe::App for App {
                         } else {
                             self.tema.cores().texto_medio
                         };
-                        let clic = cardeal_ui::atoms::superficie_clicavel(
-                            ui,
-                            sel,
-                            cardeal_ui::atoms::altura_navegacao(),
-                            |ui| {
-                                cardeal_ui::atoms::desenhar_icone(ui, Icone::Config, 18.0, cor);
-                                if mostra_rotulos {
-                                    ui.add_space(Espaco::E12);
-                                    ui.add(Rotulo::interface("Configurações").cor(cor));
-                                }
-                            },
-                        );
-                        if clic.clicked() {
-                            acao = Acao::MudarArea(Area::Configuracoes);
-                        }
-
-                        ui.add_space(Espaco::E4);
-                        ui.horizontal(|ui| {
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
+                        let configuracoes = |ui: &mut egui::Ui| {
+                            cardeal_ui::atoms::superficie_clicavel(
+                                ui,
+                                sel,
+                                cardeal_ui::atoms::altura_navegacao(),
                                 |ui| {
-                                    if ui.add(BotaoChevron::novo(self.sidebar_expandida)).clicked()
-                                    {
-                                        acao = Acao::AlternarSidebar;
+                                    cardeal_ui::atoms::desenhar_icone(ui, Icone::Config, 18.0, cor);
+                                    if mostra_rotulos {
+                                        ui.add_space(Espaco::E12);
+                                        ui.add(Rotulo::interface("Configurações").cor(cor));
                                     }
                                 },
-                            );
-                        });
+                            )
+                        };
+                        let expandida = self.sidebar_expandida;
+                        let mut chevron = |ui: &mut egui::Ui| {
+                            if ui.add(BotaoChevron::novo(expandida)).clicked() {
+                                acao = Acao::AlternarSidebar;
+                            }
+                        };
+                        let mut abrir_configuracoes = false;
+                        if mostra_rotulos {
+                            // Expandida, o chevron de recolher fica na linha de Configurações: uma
+                            // linha a menos no rodapé é o que faz o Financeiro caber sem rolar
+                            // numa tela de 720 px lógicos.
+                            ui.horizontal(|ui| {
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        chevron(ui);
+                                        abrir_configuracoes = configuracoes(ui).clicked();
+                                    },
+                                );
+                            });
+                        } else {
+                            abrir_configuracoes = configuracoes(ui).clicked();
+                            ui.add_space(Espaco::E4);
+                            ui.horizontal(|ui| {
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| chevron(ui),
+                                );
+                            });
+                        }
+                        if abrir_configuracoes {
+                            acao = Acao::MudarArea(Area::Configuracoes);
+                        }
                         ui.add_space(Espaco::E8);
                         ui.add(Divisor::novo());
                     });
+                    let altura = rodape.response.rect.height();
+                    ctx.data_mut(|d| d.insert_temp(id_rodape, altura));
                 });
         }
 
@@ -1014,7 +1080,13 @@ impl eframe::App for App {
                     ui.add_space(Espaco::E48);
                     Cartao::novo().largura(440.0).mostrar(ui, |ui| {
                         ui.vertical_centered(|ui| {
-                            ui.add(Rotulo::titulo_tela("Bem-vindo ao Cardeal"));
+                            ui.add(
+                                egui::Image::from_bytes("bytes://lunno-logo.png", LOGO_PNG)
+                                    .max_height(56.0)
+                                    .fit_to_original_size(1.0),
+                            );
+                            ui.add_space(Espaco::E8);
+                            ui.add(Rotulo::titulo_tela("Bem-vindo ao Lunno"));
                             ui.add_space(Espaco::E4);
                             ui.add(Rotulo::apoio(
                                 "Primeiro acesso — cadastre sua empresa e o administrador.",

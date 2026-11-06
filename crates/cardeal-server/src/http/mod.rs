@@ -125,7 +125,7 @@ async fn exigir_protocolo(req: Request, next: Next) -> Response {
         Some(v) if versao_aceita(v) => next.run(req).await,
         Some(v) => ErroHttp(Erro::novo(
             CodigoErro::VERSAO_DESATUALIZADA,
-            format!("protocolo {v} não é aceito por este servidor — atualize o Cardeal"),
+            format!("protocolo {v} não é aceito por este servidor — atualize o Lunno"),
         ))
         .into_response(),
         None => ErroHttp(Erro::novo(

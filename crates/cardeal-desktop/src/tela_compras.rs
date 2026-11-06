@@ -362,7 +362,11 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
                 abas.push((AbaCompras::Cotacoes, "Cotações"));
             }
             if abas.len() > 1 {
-                if let Some(nova) = Abas::nova(&abas).selecionada(estado.aba).mostrar(ui) {
+                if let Some(nova) = Abas::nova(&abas)
+                    .navegacao()
+                    .selecionada(estado.aba)
+                    .mostrar(ui)
+                {
                     estado.aba = nova;
                     estado.carregar(motor, sessao);
                 }

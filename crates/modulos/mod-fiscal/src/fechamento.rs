@@ -101,7 +101,7 @@ impl XmlQueFalta {
                  a nota assinada não ficou guardada"
             }
             Self::NotaABuscar => {
-                "XML de nota confirmada pela consulta à SEFAZ — o Cardeal busca na SEFAZ"
+                "XML de nota confirmada pela consulta à SEFAZ — o Lunno busca na SEFAZ"
             }
             Self::EventoDeCancelamento => "XML do cancelamento — não veio na resposta da SEFAZ",
             Self::EventoDeInutilizacao => "XML da inutilização — não veio na resposta da SEFAZ",
@@ -117,7 +117,7 @@ impl XmlQueFalta {
             }
             Self::NotaABuscar => "Gere o pacote de novo depois que a fila fiscal transmitir.",
             Self::EventoDeCancelamento => {
-                "O Cardeal busca na consulta da nota: gere o pacote de novo depois que a fila \
+                "O Lunno busca na consulta da nota: gere o pacote de novo depois que a fila \
                  fiscal transmitir. Se continuar faltando, a planilha traz o protocolo, que \
                  comprova o cancelamento."
             }

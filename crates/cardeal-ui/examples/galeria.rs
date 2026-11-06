@@ -373,10 +373,11 @@ impl eframe::App for Galeria {
                 ctx,
                 self.tema,
                 (
-                    "bytes://cardeal-logo.png",
-                    include_bytes!("../../../assets/marca/cardeal-icone-256.png"),
+                    "bytes://lunno-logo.png",
+                    include_bytes!("../../../assets/marca/lunno-icone-256.png"),
                 ),
-                "Cardeal",
+                "Lunno",
+                Some("Loja Exemplo LTDA"),
             );
         }
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -532,6 +533,23 @@ impl eframe::App for Galeria {
                     (3, "Fluxo"),
                 ])
                 .selecionada(self.aba)
+                .mostrar(ui)
+                {
+                    self.aba = n;
+                }
+                ui.add_space(Espaco::E12);
+                ui.add(Rotulo::apoio(
+                    "Navegação (as abas de primeiro nível da tela): .navegacao()",
+                ));
+                if let Some(n) = Abas::nova(&[
+                    (0_u8, "Visão geral"),
+                    (1, "A receber"),
+                    (2, "A pagar"),
+                    (3, "Fluxo"),
+                ])
+                .navegacao()
+                .selecionada(self.aba)
+                .id_salt("abas-navegacao")
                 .mostrar(ui)
                 {
                     self.aba = n;

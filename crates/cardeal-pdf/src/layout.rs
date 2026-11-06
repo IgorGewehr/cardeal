@@ -18,7 +18,9 @@ const TEXTO_FRACO: Cor = Cor::rgb(138, 138, 147);
 const BORDA: Cor = Cor::rgb(224, 224, 228);
 const ZEBRA: Cor = Cor::rgb(249, 249, 250);
 const CABECALHO_TABELA: Cor = Cor::rgb(243, 244, 246);
-const RUBRO: Cor = Cor::rgb(239, 68, 59);
+/// A cor da marca (Lua 500, `#5B45E0`) — destaque de total e de situação, nunca vermelho:
+/// num relatório financeiro vermelho é valor negativo.
+const MARCA: Cor = Cor::rgb(91, 69, 224);
 
 // ── Geometria (mm) ───────────────────────────────────────────────────────────
 const MX: f32 = 18.0;
@@ -273,7 +275,7 @@ impl Compositor<'_> {
         }
 
         let base = y.max(topo_texto + 16.0);
-        self.canvas().linha(MX, base, DIR, base, 1.2, RUBRO);
+        self.canvas().linha(MX, base, DIR, base, 1.2, MARCA);
         self.y = base + 9.0;
     }
 
@@ -301,7 +303,7 @@ impl Compositor<'_> {
             y + 1.0,
             Fonte::Negrito,
             9.0,
-            RUBRO,
+            MARCA,
             &format!("Válido até  {}", orc.validade.formatar()),
         );
         self.y = y + 9.0;
@@ -525,7 +527,7 @@ impl Compositor<'_> {
             (Fonte::Regular, TEXTO_MEDIO, 9.5)
         };
         self.texto_em(x, y, peso, tam, cor, rot);
-        self.texto_direita(DIR, y, peso, tam, if destaque { RUBRO } else { TEXTO }, val);
+        self.texto_direita(DIR, y, peso, tam, if destaque { MARCA } else { TEXTO }, val);
         y + if destaque { 7.0 } else { 5.4 }
     }
 
@@ -578,7 +580,7 @@ impl Compositor<'_> {
                 y + 1.0,
                 Fonte::Negrito,
                 9.0,
-                RUBRO,
+                MARCA,
                 &format!("Entrega  {}", e.formatar()),
             );
         }
@@ -666,7 +668,7 @@ impl Compositor<'_> {
             TEXTO_MEDIO,
             &format!("Abertura  {}", os.data_abertura.formatar()),
         );
-        self.texto_direita(DIR, y + 1.0, Fonte::Negrito, 9.0, RUBRO, &os.situacao);
+        self.texto_direita(DIR, y + 1.0, Fonte::Negrito, 9.0, MARCA, &os.situacao);
         self.y = y + 9.0;
     }
 
@@ -778,7 +780,7 @@ impl Compositor<'_> {
         } else {
             format!("  ·  Responsável: {responsavel}")
         };
-        let esquerda = format!("Gerado pelo Cardeal em {}{}", self.gerado_em, responsavel);
+        let esquerda = format!("Gerado pelo Lunno em {}{}", self.gerado_em, responsavel);
         for (i, pagina) in self.paginas.iter_mut().enumerate() {
             let y = 288.0;
             pagina.linha(MX, y - 4.0, DIR, y - 4.0, 0.4, BORDA);

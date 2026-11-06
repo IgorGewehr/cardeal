@@ -286,7 +286,7 @@ fn secao_de_para(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, e: &mut Esta
     ui.add(
         Rotulo::apoio(
             "O código de cada conta no sistema do contador. O pacote do mês leva os lançamentos \
-             num CSV com estes códigos (a conta sem código sai com o do Cardeal).",
+             num CSV com estes códigos (a conta sem código sai com o do Lunno).",
         )
         .quebravel(),
     );

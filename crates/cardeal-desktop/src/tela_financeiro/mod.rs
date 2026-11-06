@@ -728,7 +728,10 @@ fn abas(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTe
     if sessao.concede("financeiro.contador.ver") {
         lista.push((Aba::Contador, "Contador"));
     }
-    let nova = Abas::nova(&lista).selecionada(estado.aba).mostrar(ui);
+    let nova = Abas::nova(&lista)
+        .navegacao()
+        .selecionada(estado.aba)
+        .mostrar(ui);
     if let Some(nova) = nova {
         estado.aba = nova;
         estado.carregar(motor, sessao);

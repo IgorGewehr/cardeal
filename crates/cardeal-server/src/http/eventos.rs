@@ -49,7 +49,7 @@ pub(super) async fn eventos(
         Some(v) => {
             return Err(ErroHttp(Erro::novo(
                 CodigoErro::VERSAO_DESATUALIZADA,
-                format!("protocolo {v} não é aceito por este servidor — atualize o Cardeal"),
+                format!("protocolo {v} não é aceito por este servidor — atualize o Lunno"),
             )))
         }
         None => {

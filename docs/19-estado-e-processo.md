@@ -84,6 +84,15 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   do Financeiro alargavam a tela e cortavam KPIs, o "Receber várias", o saldo das contas bancárias e o
   "Importar extrato…" — `Abas` quebra linha e o seletor da conciliação tem largura própria; (3) o
   release abria uma janela de console junto — agora `windows_subsystem = "windows"` fora do debug.
+  **O app se chama Lunno (2026-11-06):** nome na janela, login, PDFs e 2FA; marca provisória (lua
+  crescente) em `assets/marca/lunno-*`; a marca do design system é violeta (`#5B45E0`, doc 12 §2.1) e
+  vermelho ficou só para `negativo`. Pasta de dados `%APPDATA%\Lunno`, mas quem já tem
+  `%APPDATA%\Cardeal\cardeal.db` continua nela. Crates, binário (`cardeal-desktop`), `app_id` e o
+  empacotamento Linux seguem com o nome Cardeal. Trato na interface: empresa na barra de título,
+  sidebar que cabe em 720 px lógicos (e rola), `Abas::navegacao()` nas abas de primeiro nível,
+  Obrigações depois dos números na Visão geral. **Não repetir:** o eframe grava a memória do egui —
+  inclusive o zoom — em `%APPDATA%\cardeal-desktop\data\app.ron`; uma captura com `CARDEAL_DEMO_ZOOM`
+  deixava o app ampliado nas aberturas seguintes. A demo não grava mais (`persist_egui_memory`).
   Onda 6 (Financeiro 2) começou: **conciliação com alerta de pendências e saldo banco × sistema**,
   **lançamento pré-preenchido pelo último da pessoa**, **DFC indireto**, **cheques**, **balancete/diário** e o
   **pacote do contador** (PDF + `.xlsx`) e a **régua de cobrança** (fila do dia com envio de um clique) feitos

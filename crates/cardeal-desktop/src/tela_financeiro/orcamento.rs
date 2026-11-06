@@ -277,16 +277,21 @@ fn copiar_do_ano_anterior(
     o: &OrcamentoAnual,
 ) {
     let mut copiar = false;
-    ui.horizontal(|ui| {
-        ui.add(
-            Campo::novo(
-                "Reajuste sobre o ano anterior (%)",
-                &mut estado.form_orcamento.reajuste,
-            )
-            .marcador("0"),
-        );
+    // O campo tem largura própria: sozinho ele ocupa a linha inteira e empurrava o botão para
+    // fora da tela. O botão alinha pela base, com a caixa do campo (não com o rótulo).
+    let linha = egui::vec2(ui.available_width(), 64.0);
+    ui.allocate_ui_with_layout(linha, egui::Layout::left_to_right(egui::Align::Max), |ui| {
+        ui.allocate_ui(egui::vec2(260.0, 64.0), |ui| {
+            ui.add(
+                Campo::novo(
+                    "Reajuste sobre o ano anterior (%)",
+                    &mut estado.form_orcamento.reajuste,
+                )
+                .marcador("0"),
+            );
+        });
         copiar = ui
-            .add(Botao::secundario(format!("Copiar de {}", o.ano - 1)).pequeno())
+            .add(Botao::secundario(format!("Copiar de {}", o.ano - 1)))
             .clicked();
     });
     if !copiar {

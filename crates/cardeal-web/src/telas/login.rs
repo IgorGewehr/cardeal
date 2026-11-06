@@ -41,7 +41,7 @@ pub fn mostrar(ui: &mut egui::Ui, e: &mut Estado) -> Option<Tela> {
     ui.add_space(Espaco::E64);
     ui.vertical_centered(|ui| {
         Cartao::novo().largura(380.0).mostrar(ui, |ui| {
-            ui.vertical_centered(|ui| ui.add(Rotulo::titulo_tela("Cardeal")));
+            ui.vertical_centered(|ui| ui.add(Rotulo::titulo_tela("Lunno")));
             ui.add_space(Espaco::E24);
             if ui.add(Campo::novo("E-mail", &mut e.email)).changed() {
                 e.pede_codigo = false;

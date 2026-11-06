@@ -116,7 +116,7 @@ impl LayoutTela {
 }
 
 /// `_titulo`: a sidebar já indica a seção ativa e a barra de título da janela mostra
-/// "Cardeal" — repetir o nome da tela aqui só comia espaço vertical sem dizer nada de novo
+/// o nome do app — repetir o nome da tela aqui só comia espaço vertical sem dizer nada de novo
 /// (pedido explícito do usuário). O parâmetro fica para uso futuro (título de janela por
 /// aba, telemetria) — cada tela continua passando `LayoutTela::nova("Financeiro")` etc., só
 /// não aparece mais desenhado.

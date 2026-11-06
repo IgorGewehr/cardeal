@@ -102,7 +102,7 @@ fn instalada(nome: &str, bytes: &[u8]) -> Result<(), String> {
         StartPagePrinter, WritePrinter, DOC_INFO_1W, PRINTER_HANDLE,
     };
     let nome_w = largo(nome);
-    let mut documento = largo("Cardeal - cupom");
+    let mut documento = largo("Lunno - cupom");
     let mut tipo = largo("RAW");
     let mut h = PRINTER_HANDLE::default();
     let tamanho = u32::try_from(bytes.len()).map_err(|_| "cupom grande demais".to_owned())?;
