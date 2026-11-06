@@ -71,7 +71,19 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   recebimentos e pagamentos por dia e o fluxo de caixa previsto, todos com exportação em PDF e `.xlsx`.
   O DFC mês a mês ganhou o **a vencer** (parcelas em aberto na conta do título), os subtotais do dono
   (receita líquida, margem de contribuição, resultado operacional, resultado líquido do caixa) e o orçado
-  × realizado **mês a mês**, com exportação.
+  × realizado **mês a mês**, com exportação. O modelo de plano **Gestão financeira completa**
+  (2026-11-06, `modulos/financeiro.md` §6.1) traz a árvore do controle por categoria, com uma categoria
+  por conta.
+  **Preparação da demo do lunno (2026-11-06):** a demo (`--features demo`) semeia um ano de caixa no
+  modelo da gestão financeira (saldo inicial, vendas semanais, despesas do mês, orçamento de todas as
+  contas e um extrato a conciliar) e aceita `--demo [cena]` na linha de comando, para um atalho do
+  Windows abrir direto (`CARDEAL_DEMO_ZOOM` só serve à captura). Achados no notebook do usuário
+  (1280×720 lógicos, Windows a 150%, Intel UHD 630 + GTX 1650): (1) o app caía na partida com
+  0xC0000005 no `ig9icd64.dll` — o wgpu inicializava o OpenGL do driver Intel de 2019; no Windows agora
+  só Vulkan ou DX12 (`wgpu` com `dx12` no desktop; `WGPU_BACKEND` ainda força outro); (2) as 13 abas
+  do Financeiro alargavam a tela e cortavam KPIs, o "Receber várias", o saldo das contas bancárias e o
+  "Importar extrato…" — `Abas` quebra linha e o seletor da conciliação tem largura própria; (3) o
+  release abria uma janela de console junto — agora `windows_subsystem = "windows"` fora do debug.
   Onda 6 (Financeiro 2) começou: **conciliação com alerta de pendências e saldo banco × sistema**,
   **lançamento pré-preenchido pelo último da pessoa**, **DFC indireto**, **cheques**, **balancete/diário** e o
   **pacote do contador** (PDF + `.xlsx`) e a **régua de cobrança** (fila do dia com envio de um clique) feitos

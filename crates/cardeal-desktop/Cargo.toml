@@ -61,6 +61,9 @@ tempfile = { workspace = true, optional = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys.workspace = true
+# O backend DirectX 12 do wgpu (o eframe só liga Vulkan/OpenGL no Windows): a alternativa ao
+# Vulkan nas máquinas sem ele, já que o OpenGL fica de fora (ver `main`).
+wgpu = { version = "22.1", default-features = false, features = ["dx12"] }
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -6,6 +6,14 @@
 //! inteira; criar/ver um item acontece num `Dialogo` (regra de UI do projeto). Telas com UI:
 //! Ordens de Serviço e Estoque; as demais mostram `tela_em_construcao` (backend já responde).
 
+// No Windows, o build de release é um app de janela: sem isso, abrir o Cardeal pelo atalho
+// abria junto uma janela preta de console. O build de desenvolvimento continua de console, para
+// os logs aparecerem no terminal do `cargo run`.
+#![cfg_attr(
+    all(target_os = "windows", not(debug_assertions)),
+    windows_subsystem = "windows"
+)]
+
 mod aviso_defasados;
 mod compras_fundo;
 mod comprovante;
@@ -117,7 +125,8 @@ fn icone_janela() -> egui::IconData {
 
 fn main() -> eframe::Result<()> {
     tracing_subscriber::fmt::init();
-    let opcoes = eframe::NativeOptions {
+    #[cfg_attr(not(target_os = "windows"), allow(unused_mut))]
+    let mut opcoes = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Cardeal")
             // Wayland identifica a janela pelo `app_id` (não por WM_CLASS, coisa de X11) —
@@ -137,6 +146,16 @@ fn main() -> eframe::Result<()> {
             .with_transparent(true),
         ..eframe::NativeOptions::default()
     };
+    // Windows: Vulkan ou DirectX 12, nunca o OpenGL. Achado de 2026-11-06 num notebook com Intel
+    // UHD 630 (driver OpenGL de 2019) e NVIDIA: o wgpu, ao procurar placas, inicializa também o
+    // OpenGL, e o `ig9icd64.dll` da Intel derruba o app na partida (0xC0000005) — antes de
+    // qualquer tela. `WGPU_BACKEND` continua valendo para forçar outro numa máquina específica.
+    #[cfg(target_os = "windows")]
+    {
+        use eframe::egui_wgpu::wgpu;
+        opcoes.wgpu_options.supported_backends = wgpu::util::backend_bits_from_env()
+            .unwrap_or(wgpu::Backends::VULKAN | wgpu::Backends::DX12);
+    }
     eframe::run_native(
         "Cardeal",
         opcoes,

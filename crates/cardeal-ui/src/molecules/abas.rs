@@ -2,6 +2,11 @@
 //! indicador **deslizando** entre as opções (`docs/12-ui-ux.md` §1.5 / §5 — animação explica
 //! a transição de estado).
 //!
+//! Quando as abas não cabem na largura disponível, a barra **quebra em mais linhas** (a pílula
+//! desliza também entre elas). Antes ela passava da borda: numa tela de notebook (1280 px
+//! lógicos, Windows a 150%) as 13 abas do Financeiro alargavam a tela inteira, e os cartões e
+//! as faixas de KPI abaixo saíam cortados à direita.
+//!
 //! Substitui o `egui::Frame` + `Botao::primario/fantasma().pequeno()` copiado à mão em cada
 //! tela (`tela_financeiro`, `tela_settings`, `tela_os`). Genérica sobre o tipo da aba
 //! (`enum`, `usize`…), desde que `PartialEq + Copy`.
@@ -73,8 +78,22 @@ impl<'a, T: PartialEq + Copy> Abas<'a, T> {
                     + PAD_X * 2.0
             })
             .collect();
-        let largura_total: f32 = larguras.iter().sum::<f32>() + MARGEM * 2.0;
-        let altura_total = ALTURA + MARGEM * 2.0;
+        // Quebra de linha: cada segmento vai para a linha seguinte quando passaria da largura
+        // disponível (o primeiro de cada linha fica, mesmo que sozinho não caiba).
+        let cabe = (ui.available_width() - MARGEM * 2.0).max(0.0);
+        let mut posicoes: Vec<egui::Vec2> = Vec::with_capacity(larguras.len());
+        let (mut x, mut linha, mut largura_max) = (0.0_f32, 0.0_f32, 0.0_f32);
+        for larg in &larguras {
+            if x > 0.0 && x + larg > cabe {
+                x = 0.0;
+                linha += 1.0;
+            }
+            posicoes.push(egui::vec2(x, linha * ALTURA));
+            x += larg;
+            largura_max = largura_max.max(x);
+        }
+        let largura_total = largura_max + MARGEM * 2.0;
+        let altura_total = ALTURA * (linha + 1.0) + MARGEM * 2.0;
 
         let (rect, _) =
             ui.allocate_exact_size(egui::vec2(largura_total, altura_total), Sense::hover());
@@ -90,17 +109,21 @@ impl<'a, T: PartialEq + Copy> Abas<'a, T> {
             .and_then(|s| self.itens.iter().position(|(v, _)| *v == s))
             .unwrap_or(0);
 
-        // Posição-alvo da pílula = soma das larguras anteriores.
-        let alvo_x: f32 = larguras[..idx_sel].iter().sum::<f32>();
+        // Posição-alvo da pílula = a do segmento ativo (linha e coluna).
+        let alvo = posicoes[idx_sel];
         let id = ui.id().with(("abas-pilula", self.id_salt));
-        let x_anim = perseguir(ui, id, alvo_x, Mov::CALMA);
+        let x_anim = perseguir(ui, id, alvo.x, Mov::CALMA);
+        let y_anim = {
+            let id_y = ui.id().with(("abas-linha", self.id_salt));
+            perseguir(ui, id_y, alvo.y, Mov::CALMA)
+        };
         let larg_anim = {
             let id_w = ui.id().with(("abas-larg", self.id_salt));
             perseguir(ui, id_w, larguras[idx_sel], Mov::CALMA)
         };
 
         let pilula = Rect::from_min_size(
-            egui::pos2(rect.left() + MARGEM + x_anim, rect.top() + MARGEM),
+            egui::pos2(rect.left() + MARGEM + x_anim, rect.top() + MARGEM + y_anim),
             egui::vec2(larg_anim, ALTURA),
         );
         ui.painter()
@@ -110,12 +133,11 @@ impl<'a, T: PartialEq + Copy> Abas<'a, T> {
 
         // Segmentos clicáveis.
         let mut clicada = None;
-        let mut x = rect.left() + MARGEM;
-        for (i, ((valor, rotulo), larg)) in self.itens.iter().zip(&larguras).enumerate() {
-            let seg = Rect::from_min_size(
-                egui::pos2(x, rect.top() + MARGEM),
-                egui::vec2(*larg, ALTURA),
-            );
+        let origem = rect.min + egui::vec2(MARGEM, MARGEM);
+        for (i, (((valor, rotulo), larg), pos)) in
+            self.itens.iter().zip(&larguras).zip(&posicoes).enumerate()
+        {
+            let seg = Rect::from_min_size(origem + *pos, egui::vec2(*larg, ALTURA));
             let resp = ui.interact(seg, id.with(i), Sense::click());
             let ativa = i == idx_sel;
             // A ativa leva a cor da marca; a inativa acende um fundo leve no hover — o
@@ -142,10 +164,67 @@ impl<'a, T: PartialEq + Copy> Abas<'a, T> {
             if resp.clicked() && !ativa {
                 clicada = Some(*valor);
             }
-            x += *larg;
         }
 
         ui.add_space(Espaco::E4);
         clicada
+    }
+}
+
+#[cfg(test)]
+mod testes {
+    use super::*;
+
+    /// O retângulo que a barra ocupa num painel de `largura` px, e a largura que cabia.
+    fn ocupado(largura: f32, rotulos: &[&str]) -> (Rect, f32) {
+        let ctx = egui::Context::default();
+        crate::tokens::instalar_fontes(&ctx);
+        let entrada = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(largura, 600.0),
+            )),
+            ..Default::default()
+        };
+        let itens: Vec<(usize, &str)> = rotulos.iter().copied().enumerate().collect();
+        let mut r = (Rect::NOTHING, 0.0);
+        let _ = ctx.run(entrada, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let cabe = ui.available_width();
+                let usado = ui
+                    .scope(|ui| Abas::nova(&itens).selecionada(9).mostrar(ui))
+                    .response
+                    .rect;
+                r = (usado, cabe);
+            });
+        });
+        r
+    }
+
+    #[test]
+    fn cabe_numa_linha_quando_ha_espaco() {
+        let (r, _) = ocupado(800.0, &["Lista", "Gráfico"]);
+        assert!(r.height() < 60.0, "{r:?}");
+    }
+
+    #[test]
+    fn quebra_em_linhas_sem_passar_da_largura() {
+        let rotulos = [
+            "Visão geral",
+            "A receber",
+            "A pagar",
+            "Custos por categoria",
+            "Cobrança",
+            "Resultado e caixa",
+            "Relatórios",
+            "Plano de contas",
+            "Conciliação",
+            "Cheques",
+            "Fluxo de caixa",
+            "Contas bancárias",
+        ];
+        let (r, cabe) = ocupado(420.0, &rotulos);
+        assert!(r.width() <= cabe + 0.5, "{r:?} > {cabe}");
+        assert!(r.height() > 90.0, "deveria ter 3+ linhas: {r:?}");
     }
 }

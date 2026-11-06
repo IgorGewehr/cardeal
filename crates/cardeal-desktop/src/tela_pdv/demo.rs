@@ -161,6 +161,7 @@ pub fn estado(cenario: &str) -> Option<EstadoTelaPdv> {
             e.dlg = Dlg::Cliente {
                 busca: "ma".to_owned(),
                 sel: 1,
+                novo: None,
             };
         }
         "consulta-preco" => {
@@ -185,7 +186,7 @@ pub fn desenhar_quadro(ui: &mut eframe::egui::Ui, estado: &mut EstadoTelaPdv) {
     match estado.dlg {
         Dlg::Pagamento(_) => dialogo_pagamento(ui.ctx(), estado),
         Dlg::ConsultaPreco { .. } => dialogo_consulta_preco(ui.ctx(), estado),
-        Dlg::Cliente { .. } => dialogo_cliente(ui.ctx(), estado),
+        Dlg::Cliente { .. } => dialogo_cliente(ui.ctx(), estado, true),
         _ => {}
     }
 }

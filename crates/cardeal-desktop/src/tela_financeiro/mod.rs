@@ -797,6 +797,35 @@ impl EstadoTelaFinanceiro {
                 self.aba = Aba::Resultado;
                 self.visao_resultado = 1;
             }
+            "financeiro-dfc-mensal" | "financeiro-dfc-projetado" => {
+                self.aba = Aba::Resultado;
+                self.visao_resultado = 1;
+                self.dfc_visao = 2;
+                if cena == "financeiro-dfc-projetado" {
+                    self.dfc_mensal.fonte = dfc_mensal::Fonte::Projetado;
+                }
+            }
+            "financeiro-orcado" | "financeiro-orcado-mensal" => {
+                self.aba = Aba::Resultado;
+                self.visao_resultado = 1;
+                self.dfc_visao = 3;
+                self.dfc_mensal.comparado_mes_a_mes = cena == "financeiro-orcado-mensal";
+            }
+            "financeiro-orcamento" => {
+                self.aba = Aba::Resultado;
+                self.visao_resultado = 4;
+                self.form_orcamento.planilha = true;
+            }
+            "financeiro-relatorios"
+            | "financeiro-relatorio-dia"
+            | "financeiro-relatorio-previsto" => {
+                self.aba = Aba::Relatorios;
+                self.relatorios.qual = match cena {
+                    "financeiro-relatorio-dia" => relatorios::QualRelatorio::PagamentosPorDia,
+                    "financeiro-relatorio-previsto" => relatorios::QualRelatorio::FluxoPrevisto,
+                    _ => relatorios::QualRelatorio::ContasAPagar,
+                };
+            }
             "financeiro-pagar" => self.aba = Aba::Pagar,
             "financeiro-fluxo" => self.aba = Aba::Fluxo,
             "financeiro-bancos" => self.aba = Aba::Bancos,

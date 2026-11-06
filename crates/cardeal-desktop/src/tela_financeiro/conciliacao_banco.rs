@@ -176,9 +176,13 @@ fn cabecalho(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Est
             .map(|c| (c.conta, c.nome.clone()))
             .collect();
         let antes = estado.conciliacao.conta;
-        SeletorOpcao::novo("Conta bancária", &mut estado.conciliacao.conta)
-            .opcoes(ops)
-            .mostrar(ui);
+        // Largura fixa: o seletor ocupa o que sobra da linha, e sem isso empurrava o "Importar
+        // extrato…" para fora da tela.
+        ui.allocate_ui(egui::vec2(360.0, 40.0), |ui| {
+            SeletorOpcao::novo("Conta bancária", &mut estado.conciliacao.conta)
+                .opcoes(ops)
+                .mostrar(ui);
+        });
         if antes != estado.conciliacao.conta {
             estado.conciliacao.recarregar_itens(motor, sessao);
         }
@@ -286,6 +290,7 @@ fn tabela(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estado
         ColunaGrade::nova("").largura(260.0),
     ])
     .com_acoes()
+    .rolagem_horizontal()
     .id_salt("conciliacao-itens")
     .vazio("Nenhuma linha neste recorte. Importe um extrato.")
     .mostrar(ui, linhas.len(), |i, row| {
