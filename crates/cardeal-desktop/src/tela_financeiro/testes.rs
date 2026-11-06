@@ -952,6 +952,82 @@ fn visao_geral_carrega_o_score_de_saude() {
 }
 
 #[test]
+fn visao_geral_mostra_semana_mes_proximo_mes_e_atraso() {
+    let t = motor_de_teste();
+    let hoje = Data::hoje(Fuso::BRASILIA);
+    // A receber hoje (250, metade recebida) e uma conta a pagar vencida há 10 dias.
+    let parcela = lancar_a_receber(&t.motor, &t.sessao, 250);
+    let _: mod_financeiro::RecebimentoBaixado = t
+        .motor
+        .executar(
+            &t.sessao,
+            "financeiro.baixar_recebimento.v1",
+            &mod_financeiro::BaixarRecebimento {
+                parcela,
+                valor: Dinheiro::reais(100),
+                data: hoje,
+                meio_pagamento: mod_financeiro::MeioPagamento::Dinheiro,
+                conta_destino: None,
+            },
+        )
+        .unwrap();
+    let _: mod_financeiro::TituloAPagarLancado = t
+        .motor
+        .executar(
+            &t.sessao,
+            "financeiro.lancar_titulo_a_pagar.v1",
+            &mod_financeiro::LancarTituloAPagar {
+                fornecedor: None,
+                valor_total: Dinheiro::reais(80),
+                emissao: hoje.mais_dias(-10),
+                parcelas: 1,
+                primeiro_vencimento: hoje.mais_dias(-10),
+                intervalo_dias: 0,
+                observacao: None,
+                categoria: None,
+                quitado_agora: None,
+            },
+        )
+        .unwrap();
+    let mut estado = EstadoTelaFinanceiro {
+        aba: Aba::Visao,
+        ..Default::default()
+    };
+    estado.carregar(&t.motor, &t.sessao);
+    assert!(estado.erro.is_none(), "{:?}", estado.erro);
+    let r = estado.vencimentos.receber.expect("a receber");
+    let p = estado.vencimentos.pagar.expect("a pagar");
+    for q in [r.semana, r.mes] {
+        assert_eq!(q.previsto, Dinheiro::reais(250));
+        assert_eq!(q.realizado, Dinheiro::reais(100));
+        assert_eq!(q.pendente, Dinheiro::reais(150));
+    }
+    assert!(r.proximo_mes.previsto.e_zero());
+    assert_eq!(r.atraso.parcelas, 0);
+    assert_eq!(p.atraso.parcelas, 1);
+    assert_eq!(p.atraso.saldo, Dinheiro::reais(80));
+    assert_eq!(p.atraso.mais_antigo, Some(hoje.mais_dias(-10)));
+    // Desenha nas três larguras (quatro colunas, duas e empilhado).
+    let ctx = egui::Context::default();
+    cardeal_ui::tokens::instalar_fontes(&ctx);
+    cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+    for largura in [1400.0_f32, 800.0, 400.0] {
+        let entrada = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(largura, 900.0),
+            )),
+            ..Default::default()
+        };
+        let _ = ctx.run(entrada, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                super::vencimentos::painel(ui, &estado);
+            });
+        });
+    }
+}
+
+#[test]
 fn aba_conciliacao_importa_ofx_sugere_a_baixa_e_concilia() {
     let t = motor_de_teste();
     let banco: ContaBancariaCriada = t

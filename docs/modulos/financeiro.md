@@ -425,6 +425,7 @@ stateDiagram-v2
 | `DfcIndiretoDoPeriodo` ✅ (2026-10-14, `financeiro.dfc_indireto_do_periodo.v1`) | `financeiro.dre.ver` | Aba Resultado e caixa › DFC › "Método indireto": o **lucro líquido da DRE** e, com o sinal trocado, a variação de cada conta patrimonial fora do caixa nos mesmos lançamentos da DRE (Confirmado/Realizado/Estornado, pela competência) — ativo que cresce prendeu dinheiro, passivo que cresce o soltou. Classificação: depreciação/amortização (pelo nome) nas operacionais; senão o grupo de fluxo da conta; senão o papel (Empréstimos, Capital, Retiradas, Lucros acumulados → financiamento; Aplicações → investimento); senão o imobilizado pelo código (1.4 → investimento); o resto, operacional, com rótulos como "(Aumento) redução de contas a receber". Termina na **mesma variação** do método direto; se um lançamento tem competência num período e liquidação noutro, a sobra aparece numa linha própria ("Diferença de datas"), nunca some — zero no caso normal (testado com venda e compra a prazo, baixas, depreciação, máquina à vista, empréstimo e retirada) | `cardeal_ledger::variacoes_patrimoniais` + `resultado_por_conta` + `movimentos_de_caixa` |
 | `CarteiraDeCheques` ✅ (2026-10-14, `financeiro.carteira_de_cheques.v1`) | `financeiro.cheque.ver` | Aba Cheques: os cheques (filtro por estado) com o cliente e a descrição do título, o "bom para" mais antigo primeiro; a tela soma em carteira, os que já podem ir ao banco e os devolvidos | `financeiro_cheque(empresa, estado, bom_para)` (migração v11) |
 | `BalanceteDoPeriodo` ✅ (2026-10-14, `financeiro.balancete_do_periodo.v1`) | `financeiro.dre.ver` | Aba Resultado e caixa › Balancete: cada conta com saldo anterior, débitos, créditos e saldo atual (D/C), agrupadoras somadas, ordem numérica dos códigos. Pela competência (Confirmado/Realizado/Estornado), então sempre fecha. Sem encerramento de exercício no sistema, as contas de resultado acumulam só o **ano**; o resultado dos anos anteriores entra numa linha do PL ("Resultado de exercícios anteriores (não encerrado)") | `cardeal_ledger::balancete` |
+| `VencimentosAReceber` / `VencimentosAPagar` ✅ (2026-11-05, `financeiro.vencimentos_a_receber.v1` / `…_a_pagar.v1`) | `financeiro.receber.ver` / `financeiro.pagar.ver` | Visão geral › quadros "Esta semana", "Este mês", "Próximo mês" e "Em atraso" (§6.10) | `financeiro_parcela(empresa, vencimento)` × `financeiro_titulo(especie)` |
 | `DfcGerencialDoAno` ✅ (2026-11-05, `financeiro.dfc_gerencial_do_ano.v1`) | `financeiro.dre.ver` | Resultado › DFC › "Mês a mês, por conta" e "Orçado × realizado" (§6.9): o caixa realizado do ano, 12 meses, por conta do plano — a baixa vai para a conta do título de origem — com o orçado no mesmo sinal | `movimentos_de_caixa` + `financeiro_baixa` × `financeiro_parcela.lancamento` (e o estorno por `razao_lancamento.estorna`) + `financeiro_orcamento` |
 | `OrcamentoDoAno` ✅ (2026-10-26, `financeiro.orcamento_do_ano.v1`) | `financeiro.dre.ver` | Resultado › Orçamento: cada conta de resultado (analítica, ativa) com o orçado e o realizado de cada mês no sentido em que se orça — e, desde 2026-11-05, as contas que se orçam pelo caixa (`de_caixa`: compras, investimentos, financiamentos), com o realizado pelo caixa (§6.7) | `financeiro_orcamento(empresa, conta, competencia)` + `resultado_por_conta` por mês + `dfc_gerencial::caixa_por_conta` |
 | `DiarioDoPeriodo` ✅ (2026-10-14, `financeiro.diario_do_periodo.v1`) | `financeiro.dre.ver` | O diário do período: cada lançamento (número, competência, histórico, estado) com as partidas — para o pacote do contador | `cardeal_ledger::diario` |
@@ -435,6 +436,25 @@ stateDiagram-v2
 | `Categorias` ✅ | `financeiro.categoria.ver` | Seletor de categoria ao lançar título/recorrência | `financeiro_categoria(empresa, nome) WHERE ativa = 1` |
 | `TotalPorCategoriaNoPeriodo` ✅ | `financeiro.categoria.ver` | Gráfico de custo/receita por categoria e mês (churn, MRR por projeto) | agregação em memória sobre `financeiro_baixa` join `financeiro_titulo`, filtrando por `data` |
 | `TituloDaOrigem` ✅ (novo, 2026-09-11) | `financeiro.receber.ver` | Detalhe de OS (`os`)/vendas/compras faturada: "qual título isto gerou" | `financeiro_titulo(empresa, origem_modulo, origem_id)` — o par de correlação que `Titulo` já carregava desde a origem; usado por outro módulo pela consulta pública, nunca por SQL direto em `financeiro_titulo` (`docs/contratos-internos.md` §7 regra 2) |
+
+## 6.10 Quadros de vencimento na Visão geral (2026-11-05)
+
+O "resumo semanal / mês corrente / próximo mês / contas em atraso" de quem controla o caixa pelos
+vencimentos (o mesmo pedido do §6.9), em `mod_financeiro::vencimentos`: para cada período — a semana
+de **segunda a domingo**, o mês e o seguinte —, do que **vence** nele, o **previsto** (o valor das
+parcelas), o **realizado** (o principal já baixado delas) e o **pendente** (o que falta), a receber e
+a pagar, com o saldo; e o **atraso**: as parcelas em aberto vencidas antes de hoje, o saldo e a mais
+antiga.
+
+- Pelo vencimento, não pela data do pagamento: pagar adiantado conta no período do vencimento, e o
+  que se pagou hoje de uma conta atrasada não conta "nesta semana" (o que entrou e saiu pela data
+  está no "Saldo do mês" e no DFC). Previsto = realizado + pendente, a menos do desconto (a parcela
+  quitada com desconto tem o realizado abaixo do previsto). Juros e multa não entram.
+- Cancelada e renegociada saem (as parcelas novas da renegociação entram).
+- Duas consultas, uma por espécie, cada uma com a permissão de vê-la (como o aging): quem só vê o a
+  receber vê o quadro sem o a pagar e sem o saldo.
+- Tela: os quatro cartões abaixo dos indicadores — numa linha só a partir de 1100 px, dois por linha
+  num notebook, um por linha numa tela estreita; o de atraso ganha o realce negativo quando há algo.
 
 ## 6.9 DFC gerencial: mês a mês, por conta, e orçado × realizado (2026-11-05)
 

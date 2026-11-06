@@ -204,6 +204,7 @@ pub(super) fn painel_visao(
         });
     });
     ui.add_space(Espaco::E24);
+    super::vencimentos::painel(ui, estado);
 
     let tem_dados = estado
         .serie

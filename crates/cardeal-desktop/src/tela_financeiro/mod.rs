@@ -35,6 +35,7 @@ mod saude;
 mod simples;
 #[cfg(test)]
 mod testes;
+mod vencimentos;
 mod visao;
 
 use std::collections::HashMap;
@@ -485,6 +486,8 @@ pub struct EstadoTelaFinanceiro {
     dash_pagar: Dinheiro,
     dash_venc_receber: (usize, Dinheiro),
     dash_venc_pagar: (usize, Dinheiro),
+    /// Os quadros da semana, do mês, do próximo mês e do atraso (Visão geral).
+    vencimentos: vencimentos::EstadoVencimentos,
     dash_recebido_mes: Dinheiro,
     dash_pago_mes: Dinheiro,
     /// O "em aberto" de cada espécie, carregado uma vez pelo painel e reaproveitado pela

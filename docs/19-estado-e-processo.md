@@ -65,7 +65,9 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   "Orçado × realizado" pelo caixa — cada baixa vai para a conta do título de origem, não para
   clientes/fornecedores. E a **planilha do orçamento** (§6.7 do financeiro): todas as contas × 12
   meses, "Salvar orçamento" tudo ou nada, e as compras, investimentos e financiamentos orçados pelo
-  caixa (financeiro v16: o orçado pode ser negativo na conta de caixa).
+  caixa (financeiro v16: o orçado pode ser negativo na conta de caixa). Na Visão geral, os **quadros de
+  vencimento** (§6.10): esta semana, este mês, o próximo — previsto, realizado e pendente do que vence —
+  e o atraso.
   Onda 6 (Financeiro 2) começou: **conciliação com alerta de pendências e saldo banco × sistema**,
   **lançamento pré-preenchido pelo último da pessoa**, **DFC indireto**, **cheques**, **balancete/diário** e o
   **pacote do contador** (PDF + `.xlsx`) e a **régua de cobrança** (fila do dia com envio de um clique) feitos

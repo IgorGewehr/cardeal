@@ -231,6 +231,7 @@ impl EstadoTelaFinanceiro {
         self.dash_pagar = soma(&pagar);
         self.dash_venc_receber = venc(&receber);
         self.dash_venc_pagar = venc(&pagar);
+        self.carregar_vencimentos(motor, sessao);
         self.abertos_receber = receber;
         self.abertos_pagar = pagar;
 

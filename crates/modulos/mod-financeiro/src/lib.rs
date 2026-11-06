@@ -104,6 +104,7 @@ pub mod saude;
 pub mod sugestao;
 mod titulo;
 mod ultimo_lancamento;
+pub mod vencimentos;
 
 pub use aging::{AgingAPagar, AgingAReceber};
 pub use baixa::{PlanoBaixa, SituacaoParcela};
