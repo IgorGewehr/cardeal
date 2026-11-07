@@ -239,7 +239,66 @@ pub fn gerar_comprovante_os(
     comprovante: &ComprovanteOsPdf,
     gerado_em: Instante,
 ) -> Result<Vec<u8>, ErroPdf> {
-    layout::gerar_os(empresa, comprovante, gerado_em)
+    layout::gerar_os(
+        empresa,
+        comprovante,
+        &OpcoesDocumentoOs::default(),
+        gerado_em,
+    )
+}
+
+/// Que documento sai de uma OS.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TipoDocumentoOs {
+    /// O comprovante de sempre (entrada, andamento ou entrega).
+    #[default]
+    Comprovante,
+    /// O orçamento para o cliente aprovar — valor estimado, válido até `validade`.
+    Orcamento {
+        /// Até quando o orçamento vale.
+        validade: Data,
+    },
+    /// O relatório do serviço feito — "a nota do que foi feito", para a entrega.
+    Relatorio,
+}
+
+/// Uma forma de pagamento com o seu total (ex.: "Pix" — "5% de desconto" — R$ 95,00).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FormaPagamentoPdf {
+    /// A forma ("Pix", "Dinheiro", "Cartão de crédito").
+    pub forma: String,
+    /// A condição ("à vista, 5% de desconto", "em até 10x de R$ 10,00").
+    pub condicao: String,
+    /// O total nessa forma.
+    pub total: Dinheiro,
+}
+
+/// Como montar o documento de uma OS ([`gerar_documento_os`]).
+#[derive(Debug, Clone, Default)]
+pub struct OpcoesDocumentoOs {
+    /// Comprovante, orçamento ou relatório.
+    pub tipo: TipoDocumentoOs,
+    /// `true`: a tabela com o valor de cada peça e serviço. `false`: só o que entra (sem
+    /// valores por linha) e o total.
+    pub detalhado: bool,
+    /// As formas de pagamento com o total de cada uma (vazio = bloco omitido).
+    pub formas_pagamento: Vec<FormaPagamentoPdf>,
+    /// Observações livres no fim (pode ser vazio).
+    pub observacoes: String,
+}
+
+/// Gera o PDF de um documento de OS — orçamento, relatório do serviço ou comprovante —, com
+/// ou sem o valor de cada item e com as formas de pagamento.
+///
+/// # Errors
+/// [`ErroPdf::Logo`] se `empresa.logo_png` não decodificar.
+pub fn gerar_documento_os(
+    empresa: &IdentidadeEmpresa,
+    os: &ComprovanteOsPdf,
+    opcoes: &OpcoesDocumentoOs,
+    gerado_em: Instante,
+) -> Result<Vec<u8>, ErroPdf> {
+    layout::gerar_os(empresa, os, opcoes, gerado_em)
 }
 
 /// Uma coluna de um relatório tabular.

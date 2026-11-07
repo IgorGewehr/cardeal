@@ -1,4 +1,4 @@
-//! O comprovante da OS em PDF.
+//! Os documentos da OS em PDF: a montagem dos dados e o salvar/abrir.
 
 use super::*;
 
@@ -18,14 +18,10 @@ pub(super) fn situacao_amigavel(e: EstadoOs) -> &'static str {
     }
 }
 
-/// Monta e salva o comprovante de OS em PDF — mesmo padrão de
-/// `tela_orcamentos::gerar_pdf` (identidade visual da empresa + diálogo nativo "Salvar
-/// como"). Gerável em qualquer estado da OS: uma OS recém-aberta ainda sem laudo/orçamento
-/// vira o comprovante de entrada (só cliente + equipamento); uma faturada leva o laudo, os
-/// itens aplicados e a garantia — o mesmo documento cobre as duas pontas do fluxo.
-pub(super) fn gerar_pdf(ctx: &egui::Context, estado: &EstadoTelaOs, d: &DetalheOrdem) {
+/// A identidade visual da empresa para os documentos.
+pub(super) fn identidade_empresa(estado: &EstadoTelaOs) -> IdentidadeEmpresa {
     let ident = estado.identidade.clone().unwrap_or_default();
-    let empresa = IdentidadeEmpresa {
+    IdentidadeEmpresa {
         nome_fantasia: ident.nome_fantasia,
         razao_social: ident.razao_social,
         cnpj: ident.cnpj,
@@ -34,8 +30,13 @@ pub(super) fn gerar_pdf(ctx: &egui::Context, estado: &EstadoTelaOs, d: &DetalheO
         email: ident.email,
         site: ident.site,
         logo_png: ident.logo_png,
-    };
+    }
+}
 
+/// Os dados da OS no formato do PDF — o mesmo para comprovante, orçamento e relatório.
+/// Gerável em qualquer estado: recém-aberta (só cliente + equipamento) até faturada (laudo,
+/// itens aplicados e garantia).
+pub(super) fn montar_documento(estado: &EstadoTelaOs, d: &DetalheOrdem) -> ComprovanteOsPdf {
     let os = &d.ordem;
     let cliente = estado.clientes.iter().find(|c| c.pessoa == os.cliente);
     let tecnico = estado
@@ -45,11 +46,7 @@ pub(super) fn gerar_pdf(ctx: &egui::Context, estado: &EstadoTelaOs, d: &DetalheO
 
     let mut itens: Vec<ItemPdf> = Vec::new();
     for peca in &d.itens_peca {
-        let nome_produto = estado
-            .produtos
-            .iter()
-            .find(|p| p.produto == peca.produto)
-            .map_or_else(|| "Peça".to_owned(), |p| p.nome.clone());
+        let nome_produto = nome_do_produto(&estado.produtos, peca.produto);
         let rotulo = if peca.coberto_garantia {
             format!("Peça — {nome_produto} (garantia)")
         } else {
@@ -67,7 +64,7 @@ pub(super) fn gerar_pdf(ctx: &egui::Context, estado: &EstadoTelaOs, d: &DetalheO
     for mdo in &d.itens_mao_de_obra {
         let quantidade = mdo.horas.unwrap_or_else(|| Quantidade::unidades(1));
         itens.push(ItemPdf {
-            descricao: format!("Mão de obra — {}", mdo.descricao),
+            descricao: format!("Serviço — {}", mdo.descricao),
             quantidade,
             unidade: if mdo.horas.is_some() {
                 "h".to_owned()
@@ -81,19 +78,21 @@ pub(super) fn gerar_pdf(ctx: &egui::Context, estado: &EstadoTelaOs, d: &DetalheO
     }
     let subtotal = itens.iter().fold(Dinheiro::ZERO, |acc, i| acc + i.total);
 
-    let doc = ComprovanteOsPdf {
+    ComprovanteOsPdf {
         numero: os.numero,
         situacao: situacao_amigavel(os.estado).to_owned(),
         cliente_nome: cliente.map_or_else(String::new, |c| c.nome.clone()),
         cliente_documento: cliente
             .and_then(|c| c.documento.clone())
             .unwrap_or_default(),
-        cliente_contato: String::new(),
+        cliente_contato: cliente
+            .and_then(|c| c.telefone.as_deref())
+            .map(crate::telefone::formatar)
+            .unwrap_or_default(),
         equipamento: os.equipamento.clone(),
         data_abertura: os.data_abertura,
-        // O defeito relatado agora é capturado na abertura (`OrdemServico::defeito_relatado`,
-        // obrigatório) — o laudo só entra como respaldo para uma OS aberta antes desta versão
-        // (migração aditiva, coluna nova preenchida com "" nas linhas antigas).
+        // O defeito relatado é capturado na abertura; o laudo só entra como respaldo para
+        // uma OS aberta antes disso (coluna preenchida com "" nas linhas antigas).
         defeito_relatado: if os.defeito_relatado.trim().is_empty() {
             d.laudo
                 .as_ref()
@@ -112,34 +111,33 @@ pub(super) fn gerar_pdf(ctx: &egui::Context, estado: &EstadoTelaOs, d: &DetalheO
         garantia_dias: os.garantia_dias,
         aprovado_por: os.aprovado_por.clone().unwrap_or_default(),
         tecnico_responsavel: tecnico.map_or_else(String::new, |t| t.nome.clone()),
-    };
+    }
+}
 
-    let bytes = match gerar_comprovante_os(&empresa, &doc, Instante::agora()) {
-        Ok(b) => b,
-        Err(e) => {
-            notificar(ctx, Notificacao::erro(format!("PDF: {e}")));
-            return;
-        }
-    };
-    let nome = format!("OS-{:04}.pdf", os.numero);
+/// Pergunta onde salvar, grava e abre o PDF. Devolve `true` se salvou.
+pub(super) fn salvar_e_abrir_pdf(ctx: &egui::Context, bytes: &[u8], nome: &str) -> bool {
     let Some(caminho) = rfd::FileDialog::new()
-        .set_file_name(&nome)
+        .set_file_name(nome)
         .add_filter("PDF", &["pdf"])
         .save_file()
     else {
-        return;
+        return false;
     };
-    match std::fs::write(&caminho, &bytes) {
+    match std::fs::write(&caminho, bytes) {
         Ok(()) => {
             let _ = open::that_detached(&caminho);
             notificar(
                 ctx,
                 Notificacao::sucesso(format!("PDF salvo em {}", caminho.display())),
             );
+            true
         }
-        Err(e) => notificar(
-            ctx,
-            Notificacao::erro(format!("Não foi possível salvar: {e}")),
-        ),
+        Err(e) => {
+            notificar(
+                ctx,
+                Notificacao::erro(format!("Não foi possível salvar: {e}")),
+            );
+            false
+        }
     }
 }

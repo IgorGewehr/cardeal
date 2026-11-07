@@ -1,5 +1,5 @@
 //! O andamento da OS: a linha do tempo (o que já aconteceu, com quem e quando, e o que falta)
-//! e o **próximo passo** — a única ação principal da gaveta, no rodapé. Antes cada estado
+//! e o **próximo passo** — a única ação principal do dialog, no rodapé. Antes cada estado
 //! tinha seu botão primário perdido no meio do corpo, junto de "Faturar" e "Comprovante"
 //! também primários: o técnico precisava procurar o que fazer.
 
@@ -9,6 +9,8 @@ use cardeal_ui::molecules::{LinhaDoTempo, PassoLinhaDoTempo, SituacaoPasso};
 /// O que empurra a OS para o estado seguinte.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum ProximoPasso {
+    /// O caminho do balcão: aprovado na hora, já começa o serviço.
+    IniciarServico,
     EnviarParaAprovacao,
     Aprovar,
     IniciarExecucao,
@@ -19,22 +21,30 @@ pub(super) enum ProximoPasso {
 impl ProximoPasso {
     pub(super) fn rotulo(&self) -> String {
         match self {
-            Self::EnviarParaAprovacao => "Enviar orçamento".to_owned(),
-            Self::Aprovar => "Aprovar orçamento".to_owned(),
-            Self::IniciarExecucao => "Iniciar execução".to_owned(),
-            Self::ConcluirExecucao => "Concluir execução".to_owned(),
+            Self::IniciarServico => "Iniciar serviço".to_owned(),
+            Self::EnviarParaAprovacao => "Pedir aprovação formal".to_owned(),
+            Self::Aprovar => "Cliente aprovou".to_owned(),
+            Self::IniciarExecucao => "Iniciar serviço".to_owned(),
+            Self::ConcluirExecucao => "Serviço pronto".to_owned(),
             Self::Faturar => "Faturar".to_owned(),
         }
     }
 }
 
-/// O passo natural a partir do estado atual, se houver um. Aberta sem orçamento não tem:
-/// falta o técnico diagnosticar e orçar (ou faturar direto, que continua no rodapé).
+/// Tem algo orçado (peça ou serviço) — o que aprovar e executar.
+pub(super) fn tem_itens(detalhe: &DetalheOrdem) -> bool {
+    !detalhe.itens_peca.is_empty() || !detalhe.itens_mao_de_obra.is_empty()
+}
+
+/// O passo natural a partir do estado atual, se houver um. No balcão (pedido do usuário,
+/// 2026-11-07) o cliente aprova o pré-orçamento na hora: de aberta/em diagnóstico com algo
+/// orçado, o passo é **iniciar o serviço** — o orçamento formal fica como alternativa.
+/// Aberta sem nada orçado não tem passo: falta diagnosticar e orçar.
 pub(super) fn proximo_passo(detalhe: &DetalheOrdem) -> Option<ProximoPasso> {
     let os = &detalhe.ordem;
     match os.estado {
         EstadoOs::Aberta | EstadoOs::EmDiagnostico => {
-            (!os.valor_total.e_zero()).then_some(ProximoPasso::EnviarParaAprovacao)
+            tem_itens(detalhe).then_some(ProximoPasso::IniciarServico)
         }
         EstadoOs::AguardandoAprovacao => Some(ProximoPasso::Aprovar),
         EstadoOs::Aprovada => Some(ProximoPasso::IniciarExecucao),
@@ -55,6 +65,31 @@ pub(super) fn executar_proximo(
     passo: ProximoPasso,
 ) {
     match passo {
+        ProximoPasso::IniciarServico => {
+            let aprovador = if estado.aprovador.trim().is_empty() {
+                let cliente = estado
+                    .detalhe
+                    .as_ref()
+                    .map(|d| nome_cliente(&estado.clientes, d.ordem.cliente))
+                    .unwrap_or_default();
+                format!("{cliente} (aprovado no balcão)")
+            } else {
+                estado.aprovador.trim().to_owned()
+            };
+            aplicar_e_recarregar(
+                ctx,
+                motor,
+                sessao,
+                estado,
+                os,
+                "os.iniciar_servico_no_balcao.v1",
+                &mod_os::IniciarServicoNoBalcao {
+                    ordem_servico: os,
+                    identificacao_aprovador: aprovador,
+                },
+                "Serviço iniciado — aprovação registrada",
+            );
+        }
         ProximoPasso::EnviarParaAprovacao => aplicar_e_recarregar(
             ctx,
             motor,
@@ -110,7 +145,7 @@ const fn titulo_do_estado(e: EstadoOs) -> &'static str {
 /// O caminho comum de uma OS — o que a linha do tempo mostra como "ainda falta".
 const CAMINHO: [EstadoOs; 6] = [
     EstadoOs::Aberta,
-    EstadoOs::AguardandoAprovacao,
+    EstadoOs::EmDiagnostico,
     EstadoOs::Aprovada,
     EstadoOs::EmExecucao,
     EstadoOs::Concluida,
@@ -168,9 +203,15 @@ pub(super) fn passos_da_linha_do_tempo(
         })
         .collect();
     if pode_faturar(os.estado) {
+        // Aguardando aprovação (o caminho formal) fica entre o diagnóstico e a aprovação.
+        let atual = if os.estado == EstadoOs::AguardandoAprovacao {
+            EstadoOs::EmDiagnostico
+        } else {
+            os.estado
+        };
         let desde = CAMINHO
             .iter()
-            .position(|e| *e == os.estado)
+            .position(|e| *e == atual)
             .map_or(1, |i| i + 1);
         for e in &CAMINHO[desde.min(CAMINHO.len())..] {
             saida.push(PassoLinhaDoTempo {
@@ -183,13 +224,68 @@ pub(super) fn passos_da_linha_do_tempo(
     saida
 }
 
-/// A seção "Andamento" do corpo da gaveta.
-pub(super) fn secao_andamento(ui: &mut egui::Ui, estado: &EstadoTelaOs, detalhe: &DetalheOrdem) {
+/// O bloco "Andamento" da coluna lateral: a linha do tempo e, embaixo, **o que fazer agora**
+/// — o técnico não precisa adivinhar como mudar de etapa.
+pub(super) fn secao_andamento(
+    ui: &mut egui::Ui,
+    motor: &Motor,
+    sessao: &Sessao,
+    estado: &mut EstadoTelaOs,
+    detalhe: &DetalheOrdem,
+) {
+    let os = &detalhe.ordem;
     let passos = passos_da_linha_do_tempo(detalhe, &estado.usuarios);
-    SecaoExpansivel::nova("Andamento")
-        .aberta_por_padrao(true)
+    let proximo = proximo_passo(detalhe);
+    let formal =
+        matches!(os.estado, EstadoOs::Aberta | EstadoOs::EmDiagnostico) && tem_itens(detalhe);
+    let mut clicado: Option<ProximoPasso> = None;
+    Painel::novo()
+        .plano()
+        .compacto()
+        .titulo("Andamento")
         .mostrar(ui, |ui| {
             ui.add(LinhaDoTempo::nova(&passos));
+            ui.add_space(Espaco::E8);
+            match &proximo {
+                Some(p) => {
+                    ui.add(Rotulo::campo("Próximo passo"));
+                    ui.add_space(Espaco::E4);
+                    if ui
+                        .add(Botao::primario(p.rotulo()).preenche_largura())
+                        .clicked()
+                    {
+                        clicado = Some(p.clone());
+                    }
+                    if *p == ProximoPasso::IniciarServico {
+                        ui.add(
+                            Rotulo::apoio("O cliente aprovou o pré-orçamento aqui no balcão.")
+                                .quebravel(),
+                        );
+                    }
+                }
+                None if matches!(os.estado, EstadoOs::Aberta | EstadoOs::EmDiagnostico) => {
+                    ui.add(
+                        Rotulo::apoio(
+                            "Registre o diagnóstico e as peças/serviços — aí dá para iniciar o \
+                             serviço.",
+                        )
+                        .quebravel(),
+                    );
+                }
+                None => {}
+            }
+            if formal {
+                ui.add_space(Espaco::E4);
+                if ui
+                    .add(Botao::fantasma("Prefiro mandar orçamento formal").pequeno())
+                    .clicked()
+                {
+                    clicado = Some(ProximoPasso::EnviarParaAprovacao);
+                }
+            }
         });
     ui.add_space(Espaco::E12);
+    if let Some(p) = clicado {
+        executar_proximo(ui.ctx(), motor, sessao, estado, os.id, p);
+    }
 }

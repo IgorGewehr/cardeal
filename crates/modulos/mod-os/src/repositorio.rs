@@ -252,6 +252,28 @@ impl<'a, 'b> RepositorioOs<'a, 'b> {
     ///
     /// # Errors
     /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+    /// Grava o preço unitário de uma peça ([`crate::DefinirPrecoDaPeca`]).
+    ///
+    /// # Errors
+    /// Falha do SQLite.
+    pub fn atualizar_preco_item_peca(&mut self, item: &ItemPeca) -> Resultado<()> {
+        self.conn()
+            .execute(
+                "UPDATE os_item_peca SET preco_unitario = ?2, custo_unitario = ?3 WHERE id = ?1",
+                params![
+                    blob(item.id),
+                    item.preco_unitario.unidades_internas(),
+                    item.custo_unitario.unidades_internas()
+                ],
+            )
+            .map_err(persist)?;
+        Ok(())
+    }
+
+    /// Grava o custo, a aplicação, o local, o lote e o estorno de uma peça.
+    ///
+    /// # Errors
+    /// Falha do SQLite.
     pub fn atualizar_item_peca(&mut self, item: &ItemPeca) -> Resultado<()> {
         self.conn()
             .execute(

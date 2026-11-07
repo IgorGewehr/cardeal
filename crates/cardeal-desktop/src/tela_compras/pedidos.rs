@@ -28,6 +28,9 @@ use mod_compras::{
 };
 use mod_estoque::{ItemAbaixoDoPontoPedido, ItemProdutoComSaldo, ProdutosAbaixoDoPontoPedido};
 
+mod da_os;
+pub use da_os::{PecaEmFalta, PecasDaOs};
+
 /// Uma linha do formulário.
 #[derive(Default, Clone)]
 struct LinhaPedido {
@@ -48,6 +51,8 @@ struct FormPedido {
     frete: String,
     observacao: String,
     linhas: Vec<LinhaPedido>,
+    /// As peças vieram de uma OS: ao salvar, ficam encomendadas nela.
+    da_os: Option<da_os::VinculoOs>,
 }
 
 impl FormPedido {
@@ -78,6 +83,7 @@ impl FormPedido {
                     sugerido_para: Some(i.produto),
                 })
                 .collect(),
+            da_os: None,
         }
     }
 
@@ -108,11 +114,13 @@ impl FormPedido {
                 .trim()
                 .parse::<Quantidade>()
                 .map_err(|_| format!("Linha {}: a quantidade não é um número.", n + 1))?;
-            let preco_unitario = l
-                .preco
-                .trim()
-                .parse::<Preco>()
-                .map_err(|_| format!("Linha {}: informe o preço combinado.", n + 1))?;
+            // Preço em branco = a combinar (peça de OS que ainda não tem orçamento).
+            let preco_unitario = match l.preco.trim() {
+                "" => Preco::ZERO,
+                t => t
+                    .parse::<Preco>()
+                    .map_err(|_| format!("Linha {}: o preço não é um valor.", n + 1))?,
+            };
             itens.push(ItemDoPedido {
                 produto,
                 quantidade,
@@ -172,6 +180,8 @@ pub struct EstadoPedidos {
     erro: Option<String>,
     dlg: Dlg,
     identidade: Option<IdentidadeVisual>,
+    /// As peças de uma OS à espera de pedido (o painel no topo da lista).
+    da_os: Option<da_os::EscolhaDaOs>,
 }
 
 impl EstadoPedidos {
@@ -219,6 +229,15 @@ impl EstadoPedidos {
 }
 
 /// Abre o formulário de pedido novo (o botão do cabeçalho).
+/// Recebe as peças em falta de uma OS: aparecem no topo da lista, para ir a um pedido.
+pub fn receber_da_os(estado: &mut EstadoPedidos, pecas: PecasDaOs) {
+    estado.dlg = Dlg::Fechado;
+    estado.da_os = Some(da_os::EscolhaDaOs {
+        pecas,
+        destino: Some(None),
+    });
+}
+
 pub fn abrir_novo(estado: &mut EstadoPedidos) {
     estado.dlg = Dlg::Form(Box::new(FormPedido::novo()));
 }
@@ -248,6 +267,7 @@ pub fn etiqueta_estado(e: EstadoPedido, atrasado: bool) -> Etiqueta {
 
 /// O miolo da aba.
 pub fn corpo(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoPedidos) {
+    da_os::painel(ui, motor, sessao, estado);
     if let Some(erro) = &estado.erro {
         ui.add(
             Rotulo::interface(erro.clone())
@@ -481,6 +501,23 @@ fn dialogo_form(
             let Dlg::Form(f) = &mut estado.dlg else {
                 return;
             };
+            if let Some(v) = &f.da_os {
+                Painel::novo()
+                    .realce(Tom::Info)
+                    .compacto()
+                    .mostrar(ui, |ui| {
+                        ui.add(
+                            Rotulo::interface(format!(
+                            "{} peça(s) da OS #{} — ao salvar, ficam encomendadas na OS. Preço \
+                             em branco = a combinar.",
+                            v.itens.len(),
+                            v.numero
+                        ))
+                            .quebravel(),
+                        );
+                    });
+                ui.add_space(Espaco::E8);
+            }
             if f.editar.is_some() {
                 ui.add(
                     Rotulo::apoio(
@@ -646,8 +683,18 @@ fn salvar(ctx: &egui::Context, motor: &Motor, sessao: &Sessao, estado: &mut Esta
             return;
         }
     };
+    let vinculo = f.da_os.clone();
     match motor.executar(sessao, "compras.salvar_pedido.v1", &cmd) {
         Ok(s) => {
+            if let Some(v) = &vinculo {
+                let fornecedor = estado
+                    .fornecedores
+                    .iter()
+                    .find(|x| x.pessoa == cmd.fornecedor)
+                    .map(|x| x.nome.clone())
+                    .unwrap_or_default();
+                da_os::marcar_encomendadas(ctx, motor, sessao, v, &cmd, &fornecedor);
+            }
             notificar(
                 ctx,
                 Notificacao::sucesso(format!("Pedido {:04} salvo em rascunho", s.numero)),
@@ -1149,6 +1196,9 @@ mod testes {
         f.linhas[0].qtd = "3".into();
         assert!(f.comando().unwrap_err().contains("produto"));
         f.linhas[0].produto = Some(Id::novo());
+        // Preço em branco = a combinar (peça de OS sem orçamento ainda); inválido, não.
+        assert_eq!(f.comando().unwrap().itens[0].preco_unitario, Preco::ZERO);
+        f.linhas[0].preco = "abc".into();
         assert!(f.comando().unwrap_err().contains("preço"));
         f.linhas[0].preco = "4,50".into();
         f.frete = "10,00".into();

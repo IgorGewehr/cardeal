@@ -320,3 +320,43 @@ fn gera_pdf_do_pedido_de_compra_com_frete_e_o_numero_para_a_nota() {
     assert!(texto.contains("Frete"));
     assert!(texto.matches("/Type /Page ").count() >= 2);
 }
+
+#[test]
+fn gera_orcamento_e_relatorio_de_os_com_formas_de_pagamento() {
+    use cardeal_pdf::{gerar_documento_os, FormaPagamentoPdf, OpcoesDocumentoOs, TipoDocumentoOs};
+    let os = comprovante_os(true, false);
+    let formas = vec![
+        FormaPagamentoPdf {
+            forma: "Pix".to_owned(),
+            condicao: "à vista, 5% de desconto".to_owned(),
+            total: Dinheiro::centavos(48_450),
+        },
+        FormaPagamentoPdf {
+            forma: "Cartão de crédito".to_owned(),
+            condicao: "em até 10x de R$ 51,00 sem juros".to_owned(),
+            total: Dinheiro::reais(510),
+        },
+    ];
+    for (tipo, detalhado) in [
+        (
+            TipoDocumentoOs::Orcamento {
+                validade: Data::de_dias(20_007),
+            },
+            false,
+        ),
+        (TipoDocumentoOs::Relatorio, true),
+    ] {
+        let opcoes = OpcoesDocumentoOs {
+            tipo,
+            detalhado,
+            formas_pagamento: formas.clone(),
+            observacoes: "Peça com prazo de 3 dias úteis.".to_owned(),
+        };
+        let bytes = gerar_documento_os(&empresa(false), &os, &opcoes, Instante::EPOCA).unwrap();
+        assert!(bytes.starts_with(b"%PDF-1."));
+        if let Ok(dir) = std::env::var("CARDEAL_PDF_AMOSTRA") {
+            let nome = if detalhado { "relatorio" } else { "orcamento" };
+            std::fs::write(format!("{dir}/{nome}.pdf"), &bytes).unwrap();
+        }
+    }
+}

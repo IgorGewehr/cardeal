@@ -997,3 +997,73 @@ fn a_nota_confirmada_entra_no_mes_da_entrada_para_o_sped() {
         assert!(entradas(setembro).entradas.is_empty());
     }
 }
+
+/// Pedido do usuário (2026-11-07): numa compra com vários itens, o frete vai só para os itens
+/// escolhidos — o custo deles sobe, os outros ficam sem rateio, e nenhum centavo se perde.
+#[test]
+fn o_frete_se_rateia_so_entre_os_itens_escolhidos() {
+    let b = Base::nova();
+    let chave: String = std::iter::repeat_n('8', 44).collect();
+    let item = |n: u32, cod: &str, nome: &str, valor: &str| {
+        format!(
+            r#"<det nItem="{n}"><prod><cProd>{cod}</cProd><xProd>{nome}</xProd><NCM>85171231</NCM>
+    <qCom>1.0000</qCom><vUnCom>{valor}</vUnCom><vProd>{valor}</vProd></prod></det>"#
+        )
+    };
+    let xml = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe"><NFe>
+<infNFe Id="NFe{chave}" versao="4.00">
+  <ide><nNF>777</nNF><serie>1</serie><dhEmi>2026-09-01T09:00:00-03:00</dhEmi></ide>
+  <emit><CNPJ>{CNPJ_FORNECEDOR}</CNPJ><xNome>Distribuidora Alfa LTDA</xNome></emit>
+  {}{}{}
+  <total><ICMSTot><vProd>300.00</vProd><vFrete>30.00</vFrete><vSeg>0.00</vSeg><vOutro>0.00</vOutro>
+    <vNF>330.00</vNF></ICMSTot></total>
+</infNFe></NFe></nfeProc>"#,
+        item(1, "TELA-1", "TELA NOTEBOOK 15.6", "100.000000"),
+        item(2, "CABO-1", "CABO HDMI", "100.000000"),
+        item(3, "BAT-1", "BATERIA NOTEBOOK", "100.000000"),
+    );
+    let r: RelatorioImportacao = b
+        .executar(
+            "compras.importar_nota_de_arquivo_xml.v1",
+            &ImportarNotaDeArquivoXml { xml },
+        )
+        .unwrap();
+    let itens = |b: &Base| -> Vec<mod_compras::ItemNotaEntrada> {
+        b.consultar(
+            "compras.itens_da_nota.v1",
+            &ItensDaNota {
+                nota: r.nota_entrada,
+            },
+        )
+    };
+    let antes = itens(&b);
+    assert_eq!(antes.len(), 3);
+    assert!(antes.iter().all(|i| i.valor_rateio == Dinheiro::reais(10)));
+
+    let escolhidos = vec![antes[0].id, antes[2].id];
+    let (): () = b
+        .executar(
+            "compras.ratear_despesas_entre.v1",
+            &mod_compras::RatearDespesasEntre {
+                nota_entrada: r.nota_entrada,
+                itens: escolhidos,
+            },
+        )
+        .unwrap();
+    let depois = itens(&b);
+    let rateio = |id: Id| depois.iter().find(|i| i.id == id).unwrap().valor_rateio;
+    assert_eq!(rateio(antes[0].id), Dinheiro::reais(15));
+    assert_eq!(rateio(antes[1].id), Dinheiro::ZERO);
+    assert_eq!(rateio(antes[2].id), Dinheiro::reais(15));
+
+    let vazio: Result<(), Erro> = b.executar(
+        "compras.ratear_despesas_entre.v1",
+        &mod_compras::RatearDespesasEntre {
+            nota_entrada: r.nota_entrada,
+            itens: Vec::new(),
+        },
+    );
+    assert!(vazio.is_err());
+}

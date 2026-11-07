@@ -110,12 +110,6 @@ pub(super) fn painel_visao(
     super::regua::aviso_na_visao(ui, motor, sessao, estado);
     super::contador::aviso_na_visao(ui, motor, sessao, estado);
     aviso_do_certificado(ui, estado);
-    // As obrigações (texto longo) vêm depois dos números do caixa — salvo quando alguma vence
-    // em até três dias: aí são o aviso mais importante da tela.
-    let obrigacoes_no_topo = super::obrigacoes::ha_urgente(&estado.obrigacoes);
-    if obrigacoes_no_topo {
-        super::obrigacoes::cartao(ui, &estado.obrigacoes);
-    }
 
     // Faixa de KPIs — três cartões esticados pra ocupar a largura toda, em vez de flutuar
     // colados à esquerda com um vão morto do lado (pedido explícito do usuário: a Visão
@@ -256,10 +250,6 @@ pub(super) fn painel_visao(
     if ver_categorias {
         estado.carregar_analise(motor, sessao);
         estado.dlg = Dlg::Analise;
-    }
-    if !obrigacoes_no_topo && !estado.obrigacoes.is_empty() {
-        ui.add_space(Espaco::E16);
-        super::obrigacoes::cartao(ui, &estado.obrigacoes);
     }
 }
 

@@ -45,6 +45,8 @@ impl Modulo for ModuloOs {
             .comando::<RegistrarLaudo>("os.registrar_laudo.v1")
             .comando::<MontarOrcamentoOs>("os.montar_orcamento.v1")
             .comando::<RemoverItemOrcamento>("os.remover_item_orcamento.v1")
+            .comando::<crate::DefinirPrecoDaPeca>("os.definir_preco_da_peca.v1")
+            .comando::<crate::IniciarServicoNoBalcao>("os.iniciar_servico_no_balcao.v1")
             .comando::<EnviarParaAprovacao>("os.enviar_para_aprovacao.v1")
             .comando::<AprovarOrcamentoOs>("os.aprovar_orcamento.v1")
             .comando::<ReprovarOrcamentoOs>("os.reprovar_orcamento.v1")

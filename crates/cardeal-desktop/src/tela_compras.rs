@@ -57,6 +57,8 @@ mod devolucao;
 mod estorno;
 mod parcelas;
 mod pedidos;
+pub use pedidos::{PecaEmFalta, PecasDaOs};
+mod rateio;
 
 /// As abas da tela.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -123,6 +125,15 @@ fn form_nova_padrao() -> FormNova {
     }
 }
 
+impl EstadoTelaCompras {
+    /// Vindo da OS: abre Pedidos com as peças em falta no topo, para ir a um pedido.
+    pub fn encomendar_da_os(&mut self, motor: &Motor, sessao: &Sessao, pecas: PecasDaOs) {
+        self.aba = AbaCompras::Pedidos;
+        self.carregar(motor, sessao);
+        pedidos::receber_da_os(&mut self.pedidos, pecas);
+    }
+}
+
 /// Estado local da tela.
 #[derive(Default)]
 pub struct EstadoTelaCompras {
@@ -138,6 +149,8 @@ pub struct EstadoTelaCompras {
     produtos: Vec<ItemProdutoComSaldo>,
     locais: Vec<ItemLocal>,
     itens_nota: Vec<ItemNotaEntrada>,
+    /// Os itens marcados para levar o frete, na nota aberta (`rateio::secao`).
+    frete_escolhidos: Option<(Id, Vec<Id>)>,
     /// A nota aberta no diálogo `Ver`, guardada por valor — não pelo índice em `notas`, que
     /// pode mudar de posição a qualquer quadro se o usuário ordenar a grade com o diálogo
     /// aberto (mesma decisão de `tela_os.rs::EstadoTelaOs::detalhe`).
@@ -1026,6 +1039,17 @@ fn dialogo_ver(
                 }
 
                 ui.add_space(Espaco::E12);
+                rateio::secao(
+                    ui,
+                    motor,
+                    sessao,
+                    estado,
+                    n.nota,
+                    matches!(
+                        n.estado,
+                        EstadoNotaEntrada::AConferir | EstadoNotaEntrada::Conferida
+                    ),
+                );
                 ui.add(Rotulo::titulo_secao("Itens e casamento"));
                 ui.add_space(Espaco::E4);
 

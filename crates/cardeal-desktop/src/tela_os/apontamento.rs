@@ -26,68 +26,81 @@ pub(super) fn secao_apontamento(
     estado: &mut EstadoTelaOs,
     ordem_servico: Id,
 ) {
-    ui.add(Rotulo::titulo_secao("Apontamento de tempo"));
-    ui.add_space(Espaco::E8);
-
     let aberto_do_usuario = estado
         .apontamentos
         .iter()
         .find(|a| a.tecnico == sessao.usuario() && a.esta_aberto())
         .cloned();
+    let total = match &aberto_do_usuario {
+        Some(ap) => estado.tempo_total_ordem + ap.duracao_segundos(Instante::agora()),
+        None => estado.tempo_total_ordem,
+    };
 
-    ui.horizontal(|ui| {
-        ui.add(Rotulo::campo("Tempo total registrado"));
-        let total = match &aberto_do_usuario {
-            Some(ap) => estado.tempo_total_ordem + ap.duracao_segundos(Instante::agora()),
-            None => estado.tempo_total_ordem,
-        };
-        ui.add(Rotulo::interface(formatar_duracao(total)));
-    });
-    ui.add_space(Espaco::E8);
-
-    match aberto_do_usuario {
-        Some(ap) => {
-            // O total mostrado inclui o cronômetro rodando; sem pedir quadro novo, o egui só
-            // redesenha quando o mouse mexe e o tempo parece congelado.
-            ui.ctx()
-                .request_repaint_after(std::time::Duration::from_secs(1));
-            ui.add(Rotulo::interface(format!(
-                "Cronômetro rodando desde {}",
-                ap.inicio.formatar(cardeal_kernel::Fuso::BRASILIA)
-            )));
-            if ui.add(Botao::secundario("Encerrar apontamento")).clicked() {
-                let r = motor.executar(
-                    sessao,
-                    "os.encerrar_apontamento.v1",
-                    &EncerrarApontamento { apontamento: ap.id },
-                );
-                match r {
-                    Ok(_duracao) => {
-                        estado.carregar_apontamentos(motor, sessao, ordem_servico);
-                        notificar(ui.ctx(), Notificacao::sucesso("Apontamento encerrado"));
-                    }
-                    Err(e) => notificar(ui.ctx(), Notificacao::erro(e.mensagem)),
+    let mut clicou = false;
+    Painel::novo()
+        .plano()
+        .compacto()
+        .titulo("Tempo de reparo")
+        .mostrar_com_acoes(
+            ui,
+            |ui| {
+                if aberto_do_usuario.is_some() {
+                    ui.add(Etiqueta::positiva("rodando").com_ponto());
                 }
-            }
-        }
-        None => {
-            if ui.add(Botao::primario("Iniciar apontamento")).clicked() {
-                let r = motor.executar(
-                    sessao,
-                    "os.iniciar_apontamento.v1",
-                    &IniciarApontamento {
-                        ordem_servico,
-                        tecnico: sessao.usuario(),
-                    },
-                );
-                match r {
-                    Ok(_) => {
-                        estado.carregar_apontamentos(motor, sessao, ordem_servico);
-                        notificar(ui.ctx(), Notificacao::sucesso("Apontamento iniciado"));
+            },
+            |ui| {
+                Dado::novo("Total registrado", formatar_duracao(total)).mostrar(ui);
+                match &aberto_do_usuario {
+                    Some(ap) => {
+                        // O total inclui o cronômetro rodando; sem pedir quadro novo, o egui
+                        // só redesenha quando o mouse mexe e o tempo parece congelado.
+                        ui.ctx()
+                            .request_repaint_after(std::time::Duration::from_secs(1));
+                        ui.add(Rotulo::apoio(format!(
+                            "Seu cronômetro desde {}",
+                            ap.inicio.formatar(cardeal_kernel::Fuso::BRASILIA)
+                        )));
+                        ui.add_space(Espaco::E8);
+                        clicou = ui
+                            .add(Botao::secundario("Parar cronômetro").preenche_largura())
+                            .clicked();
                     }
-                    Err(e) => notificar(ui.ctx(), Notificacao::erro(e.mensagem)),
+                    None => {
+                        clicou = ui
+                            .add(Botao::secundario("Iniciar cronômetro").preenche_largura())
+                            .clicked();
+                    }
                 }
-            }
+            },
+        );
+    ui.add_space(Espaco::E12);
+    if !clicou {
+        return;
+    }
+    let r = match &aberto_do_usuario {
+        Some(ap) => motor
+            .executar(
+                sessao,
+                "os.encerrar_apontamento.v1",
+                &EncerrarApontamento { apontamento: ap.id },
+            )
+            .map(|_| "Apontamento encerrado"),
+        None => motor
+            .executar(
+                sessao,
+                "os.iniciar_apontamento.v1",
+                &IniciarApontamento {
+                    ordem_servico,
+                    tecnico: sessao.usuario(),
+                },
+            )
+            .map(|_| "Apontamento iniciado"),
+    };
+    match r {
+        Ok(msg) => {
+            estado.carregar_apontamentos(motor, sessao, ordem_servico);
+            notificar(ui.ctx(), Notificacao::sucesso(msg));
         }
+        Err(e) => notificar(ui.ctx(), Notificacao::erro(e.mensagem)),
     }
 }

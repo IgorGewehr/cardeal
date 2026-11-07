@@ -23,7 +23,6 @@ mod fluxo;
 mod grupo;
 mod importacao;
 mod lancar;
-mod obrigacoes;
 mod orcamento;
 mod orcamento_planilha;
 mod pacote_contador;
@@ -442,8 +441,6 @@ pub struct EstadoTelaFinanceiro {
     fila_cobranca: Option<mod_financeiro::FilaDoDia>,
     /// A situação fiscal (para o aviso do certificado na Visão).
     situacao_fiscal: Option<mod_fiscal::SituacaoFiscalDaEmpresa>,
-    /// As obrigações que vencem (o cartão da Visão).
-    obrigacoes: Vec<mod_fiscal::calendario::Obrigacao>,
     /// O aviso do certificado pediu para abrir Configurações › Fiscal (o `main` atende).
     pub pedido_config_fiscal: bool,
     /// O editor da régua aberto.
@@ -511,6 +508,9 @@ pub struct EstadoTelaFinanceiro {
     serie: Vec<MesFluxo>,
     // Fluxo de caixa / bancos.
     fluxo_dias: i64,
+    /// O recorte do extrato: 0 = tudo, 1 = só o caixa (fluxo de caixa), 2 = só os bancos
+    /// (fluxo bancário).
+    fluxo_recorte: u8,
     extrato: Vec<ItemMovimentoDisponivel>,
     /// Rótulo amigável por `origem_id` ("OS #123 — João Silva"), resolvido uma vez ao
     /// carregar o extrato — pedido explícito do usuário: o fluxo de caixa deve dizer de onde
@@ -712,6 +712,8 @@ fn abas(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTe
         (Aba::Visao, "Visão geral"),
         (Aba::Receber, "A receber"),
         (Aba::Pagar, "A pagar"),
+        // O fluxo é o que A receber/A pagar já realizou: fica ao lado deles.
+        (Aba::Fluxo, "Fluxo de caixa"),
         (Aba::Custos, "Custos por categoria"),
         (Aba::Cobranca, "Cobrança"),
         (Aba::Resultado, "Resultado e caixa"),
@@ -719,7 +721,6 @@ fn abas(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTe
         (Aba::Plano, "Plano de contas"),
         (Aba::Conciliacao, "Conciliação"),
         (Aba::Cheques, "Cheques"),
-        (Aba::Fluxo, "Fluxo de caixa"),
         (Aba::Bancos, "Contas bancárias"),
     ];
     if estado.grupo.ha_grupo() {

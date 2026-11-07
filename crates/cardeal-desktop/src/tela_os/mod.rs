@@ -9,40 +9,48 @@ mod apontamento;
 mod confirmacoes;
 mod custo_hora;
 mod detalhe;
+mod documento;
 mod encomenda;
 mod faturar;
 mod ficha;
+mod itens;
+mod laudo;
 mod lista;
 mod nfse;
 mod nova;
 mod orcamento;
 mod pdf;
+mod resultado;
 mod resumo;
 #[cfg(test)]
 mod testes;
+mod valores_peca;
 
 use andamento::*;
 use apontamento::*;
 use cardeal_cliente::{IdentidadeVisual, Motor, Sessao, UsuarioResumo};
 use cardeal_kernel::{Data, Dinheiro, Fuso, Id, Instante, Percentual, Preco, Quantidade};
 use cardeal_modkit::Icone;
-use cardeal_pdf::{gerar_comprovante_os, ComprovanteOsPdf, IdentidadeEmpresa, ItemPdf};
+use cardeal_pdf::{ComprovanteOsPdf, IdentidadeEmpresa, ItemPdf};
 use cardeal_ui::atoms::{Botao, Caixa, Divisor, Etiqueta, Rotulo, Tom, ValorDinheiro, ATALHO_NOVO};
 use cardeal_ui::molecules::{
-    Abas, AcaoRegistro, AcoesRegistro, BarraFiltros, Campo, CartaoKpi, EstadoVazio, Mascara,
+    Abas, AcaoRegistro, AcoesRegistro, BarraFiltros, Campo, CartaoKpi, Dado, EstadoVazio, Mascara,
     OpcaoBusca, SecaoExpansivel, SeletorBusca, SeletorOpcao,
 };
 use cardeal_ui::organisms::{
-    notificar, ColunaGrade, Dialogo, Direcao, FaixaKpi, Gaveta, Grade, LayoutTela, Notificacao,
-    Ordenacao,
+    notificar, ColunaGrade, ColunasDialogo, Dialogo, Direcao, FaixaKpi, Grade, LayoutTela,
+    Notificacao, Ordenacao, Painel,
 };
 use cardeal_ui::tokens::{Espaco, TemaUi};
 use confirmacoes::*;
 use detalhe::*;
+use documento::*;
 use eframe::egui;
 use encomenda::*;
 use faturar::*;
 use ficha::*;
+use itens::*;
+use laudo::*;
 use lista::*;
 use mod_clientes::{
     EnderecoInicial, ItemPessoa, Papel as PapelCliente, PessoasPorPapel, TipoEndereco,
@@ -63,7 +71,9 @@ use mod_os::{
 use nova::*;
 use orcamento::*;
 use pdf::*;
+use resultado::*;
 use resumo::*;
+use valores_peca::*;
 
 /// Qual dialog está aberto.
 #[derive(Default)]
@@ -104,6 +114,10 @@ enum Dlg {
     Encomendar(Box<FormEncomenda>),
     /// A peça chegou: entrada, pagamento e aplicação (`os.registrar_chegada_da_peca.v1`).
     Chegou(Box<FormChegada>),
+    /// Orçamento ou relatório do serviço em PDF, a partir do detalhe.
+    Documento(Box<FormDocumento>),
+    /// Custo previsto e preço ao cliente de uma peça da OS.
+    ValoresPeca(Box<FormValoresPeca>),
     /// O custo-hora da equipe técnica (`os.definir_custo_hora.v1`).
     CustoHora,
 }
@@ -181,6 +195,9 @@ pub struct EstadoTelaOs {
     detalhe: Option<DetalheOrdem>,
     /// A margem prevista da OS aberta; `None` sem a permissão `os.margem.ver`.
     margem_prevista: Option<mod_os::MargemPrevista>,
+    /// As escolhas do último orçamento/relatório gerado (formas, descontos) — o próximo já
+    /// abre com elas.
+    ultimo_documento: Option<Box<FormDocumento>>,
     apontamentos: Vec<ApontamentoDeTempo>,
     tempo_total_ordem: i64,
     titulo_gerado: Option<Titulo>,
@@ -224,6 +241,10 @@ pub struct EstadoTelaOs {
     peca_busca: String,
     peca_qtd: String,
     peca_preco: String,
+    /// O custo previsto da peça fora do estoque (opcional; ver `orcamento::valores_da_peca`).
+    peca_custo: String,
+    /// O pedido de encomendar as peças em falta da OS em Compras › Pedidos (o `main` atende).
+    pub pedido_encomenda: Option<crate::tela_compras::PecasDaOs>,
     aprovador: String,
     /// A NFS-e da OS aberta (faturada).
     nfse: nfse::NfseDaOsAberta,
@@ -437,6 +458,7 @@ impl EstadoTelaOs {
         self.peca_busca.clear();
         self.peca_qtd.clear();
         self.peca_preco.clear();
+        self.peca_custo.clear();
         self.peca_preco_dica.clear();
         self.aprovador.clear();
     }
@@ -522,6 +544,8 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
             Dlg::Faturar(_) => dialogo_faturar(ui.ctx(), motor, sessao, estado),
             Dlg::Encomendar(_) => dialogo_encomendar(ui.ctx(), motor, sessao, estado),
             Dlg::Chegou(_) => dialogo_chegada(ui.ctx(), motor, sessao, estado),
+            Dlg::Documento(_) => dialogo_documento(ui.ctx(), estado),
+            Dlg::ValoresPeca(_) => dialogo_valores_peca(ui.ctx(), motor, sessao, estado),
             Dlg::CustoHora => custo_hora::dialogo(ui.ctx(), motor, sessao, estado),
         },
         AbaOs::Orcamentos => {

@@ -7,7 +7,8 @@ use crate::documento::{Canvas, Cor, Documento, MM};
 use crate::fonte::{largura_texto, Fonte};
 use crate::imagem::decodificar_logo;
 use crate::{
-    ComprovanteOsPdf, ErroPdf, IdentidadeEmpresa, OrcamentoPdf, PedidoCompraPdf, RelatorioPdf,
+    ComprovanteOsPdf, ErroPdf, FormaPagamentoPdf, IdentidadeEmpresa, OpcoesDocumentoOs,
+    OrcamentoPdf, PedidoCompraPdf, RelatorioPdf, TipoDocumentoOs,
 };
 
 // ── Paleta (espelha os tokens do design system Rubro) ─────────────────────────
@@ -99,6 +100,7 @@ pub fn gerar(
 pub fn gerar_os(
     empresa: &IdentidadeEmpresa,
     os: &ComprovanteOsPdf,
+    opcoes: &OpcoesDocumentoOs,
     gerado_em: Instante,
 ) -> Result<Vec<u8>, ErroPdf> {
     let mut doc = Documento::novo();
@@ -119,20 +121,35 @@ pub fn gerar_os(
         gerado_em: gerado_em.formatar(cardeal_kernel::Fuso::BRASILIA),
     };
 
+    let comprovante = opcoes.tipo == TipoDocumentoOs::Comprovante;
     c.cabecalho_marca();
-    c.bloco_titulo_os(os);
+    c.bloco_titulo_os(os, opcoes.tipo);
     c.bloco_cliente_equipamento(os);
     if !os.defeito_relatado.is_empty() {
         c.bloco_texto("DEFEITO RELATADO", &os.defeito_relatado);
     }
     if !os.diagnostico.is_empty() {
-        c.bloco_texto("DIAGNÓSTICO TÉCNICO", &os.diagnostico);
+        let rotulo = if opcoes.tipo == TipoDocumentoOs::Relatorio {
+            "DIAGNÓSTICO E SERVIÇO REALIZADO"
+        } else {
+            "DIAGNÓSTICO TÉCNICO"
+        };
+        c.bloco_texto(rotulo, &os.diagnostico);
     }
     if !os.itens.is_empty() {
-        c.tabela_itens(&os.itens);
-        c.quadro_totais(os.subtotal, cardeal_kernel::Dinheiro::ZERO, os.total);
+        if comprovante || opcoes.detalhado {
+            c.tabela_itens(&os.itens);
+            c.quadro_totais(os.subtotal, cardeal_kernel::Dinheiro::ZERO, os.total);
+        } else {
+            c.lista_sem_valores(&os.itens);
+            c.quadro_so_total(os.total);
+        }
+    }
+    if !opcoes.formas_pagamento.is_empty() {
+        c.bloco_formas_pagamento(&opcoes.formas_pagamento);
     }
     c.bloco_garantia_e_aprovacao(os);
+    c.bloco_condicao("OBSERVAÇÕES", &opcoes.observacoes);
     c.aceite();
     c.rodape_em_todas(&os.tecnico_responsavel);
 
@@ -650,16 +667,20 @@ impl Compositor<'_> {
     }
 
     // ── Título — comprovante de OS ────────────────────────────────────────
-    fn bloco_titulo_os(&mut self, os: &ComprovanteOsPdf) {
+    fn bloco_titulo_os(&mut self, os: &ComprovanteOsPdf, tipo: TipoDocumentoOs) {
         let y = self.y;
-        self.texto_em(
-            MX,
-            y,
-            Fonte::Negrito,
-            17.0,
-            TEXTO_FORTE,
-            &format!("Ordem de Serviço Nº {:04}", os.numero),
-        );
+        let titulo = match tipo {
+            TipoDocumentoOs::Comprovante => format!("Ordem de Serviço Nº {:04}", os.numero),
+            TipoDocumentoOs::Orcamento { .. } => format!("Orçamento · OS Nº {:04}", os.numero),
+            TipoDocumentoOs::Relatorio => format!("Relatório de Serviço · OS Nº {:04}", os.numero),
+        };
+        let situacao = match tipo {
+            TipoDocumentoOs::Orcamento { validade } => {
+                format!("Válido até  {}", validade.formatar())
+            }
+            _ => os.situacao.clone(),
+        };
+        self.texto_em(MX, y, Fonte::Negrito, 17.0, TEXTO_FORTE, &titulo);
         self.texto_direita(
             DIR,
             y - 3.5,
@@ -668,7 +689,7 @@ impl Compositor<'_> {
             TEXTO_MEDIO,
             &format!("Abertura  {}", os.data_abertura.formatar()),
         );
-        self.texto_direita(DIR, y + 1.0, Fonte::Negrito, 9.0, MARCA, &os.situacao);
+        self.texto_direita(DIR, y + 1.0, Fonte::Negrito, 9.0, MARCA, &situacao);
         self.y = y + 9.0;
     }
 
@@ -716,6 +737,71 @@ impl Compositor<'_> {
             let y = self.y;
             self.texto_em(MX, y, Fonte::Regular, 9.5, TEXTO, &linha);
             self.y += 4.6;
+        }
+        self.y += 6.0;
+    }
+
+    /// Os itens sem valor por linha — só o que entra (para quem mostra apenas o total).
+    fn lista_sem_valores(&mut self, itens: &[crate::ItemPdf]) {
+        self.garantir(14.0);
+        self.rotulo("O QUE ESTÁ INCLUÍDO");
+        self.y += 5.0;
+        for item in itens {
+            let texto = format!(
+                "•  {}  ({} {})",
+                item.descricao,
+                item.quantidade.formatar(0),
+                item.unidade
+            );
+            for linha in quebrar(&texto, Fonte::Regular, 9.5, LARGURA_CONTEUDO) {
+                self.garantir(6.0);
+                let y = self.y;
+                self.texto_em(MX, y, Fonte::Regular, 9.5, TEXTO, &linha);
+                self.y += 4.8;
+            }
+        }
+        self.y += 2.0;
+    }
+
+    /// Só a linha do TOTAL, no mesmo lugar do quadro de totais.
+    fn quadro_so_total(&mut self, total: cardeal_kernel::Dinheiro) {
+        self.garantir(14.0);
+        let x = DIR - 78.0;
+        let y = self.y + 2.0;
+        self.canvas().linha(x, y - 4.0, DIR, y - 4.0, 0.6, BORDA);
+        let y = self.linha_total(x, y + 1.0, "TOTAL", &total.formatar_com_simbolo(), true);
+        self.y = y + 6.0;
+    }
+
+    /// "FORMAS DE PAGAMENTO": uma linha por forma — forma, condição e o total nela.
+    fn bloco_formas_pagamento(&mut self, formas: &[FormaPagamentoPdf]) {
+        self.garantir(10.0 + formas.len() as f32 * 7.0);
+        self.rotulo("FORMAS DE PAGAMENTO");
+        self.y += 3.0;
+        for (i, f) in formas.iter().enumerate() {
+            let y = self.y;
+            if i % 2 == 0 {
+                self.canvas().retangulo(MX, y, LARGURA_CONTEUDO, 7.0, ZEBRA);
+            }
+            let base = y + 4.8;
+            self.texto_em(MX + 2.0, base, Fonte::Negrito, 9.5, TEXTO_FORTE, &f.forma);
+            self.texto_em(
+                MX + 48.0,
+                base,
+                Fonte::Regular,
+                9.0,
+                TEXTO_MEDIO,
+                &f.condicao,
+            );
+            self.texto_direita(
+                DIR - 2.0,
+                base,
+                Fonte::Negrito,
+                10.0,
+                MARCA,
+                &f.total.formatar_com_simbolo(),
+            );
+            self.y = y + 7.0;
         }
         self.y += 6.0;
     }

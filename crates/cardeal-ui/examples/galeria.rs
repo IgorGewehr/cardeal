@@ -15,8 +15,9 @@ use cardeal_ui::molecules::{
     Severidade, SituacaoPasso,
 };
 use cardeal_ui::organisms::{
-    notificar, ArvoreHierarquia, ColunaGrade, CondicaoPagamento, Dialogo, Gaveta, Grade, Janela,
-    Notificacao, Notificacoes, Ordenacao, Painel, PainelMargem, SeletorEmArvore, SeletorPagamento,
+    notificar, ArvoreHierarquia, ColunaGrade, ColunasDialogo, CondicaoPagamento, Dialogo, Gaveta,
+    Grade, Janela, Notificacao, Notificacoes, Ordenacao, Painel, PainelMargem, SeletorEmArvore,
+    SeletorPagamento,
 };
 use cardeal_ui::tokens::{instalar_estilo, instalar_fontes, Espaco, Rubro, Tema, TemaUi};
 use eframe::egui;
@@ -320,6 +321,48 @@ impl Galeria {
         let Some(tamanho) = self.dialogo.clone() else {
             return;
         };
+        if tamanho == "amplo" {
+            let passos = passos_demo();
+            let fechar = Dialogo::nova("OS #2 · Samsung Galaxy A52")
+                .descricao("Maria Souza · aguardando aprovação do orçamento")
+                .selo("Aguardando aprovação", Tom::Atencao)
+                .amplo()
+                .mostrar(
+                    ctx,
+                    &mut self.motivo,
+                    |ui, motivo| {
+                        ColunasDialogo::nova("galeria-amplo").mostrar(
+                            ui,
+                            motivo,
+                            |ui, _| {
+                                Painel::novo()
+                                    .plano()
+                                    .compacto()
+                                    .titulo("Andamento")
+                                    .mostrar(ui, |ui| ui.add(LinhaDoTempo::nova(&passos)));
+                            },
+                            |ui, motivo| {
+                                Painel::novo()
+                                    .plano()
+                                    .titulo("Laudo técnico")
+                                    .mostrar(ui, |ui| {
+                                        ui.add(
+                                            Campo::novo("Problema relatado", motivo).multilinha(3),
+                                        );
+                                    });
+                            },
+                        );
+                    },
+                    |ui, _| {
+                        ui.add(Botao::primario("Aprovar orçamento"));
+                        ui.add(Botao::fantasma("Fechar"));
+                    },
+                );
+            if fechar {
+                self.dialogo = None;
+            }
+            return;
+        }
         if tamanho == "gaveta" {
             let passos = passos_demo();
             let fechar = Gaveta::nova("OS #2 · Samsung Galaxy A52")
@@ -850,6 +893,7 @@ impl eframe::App for Galeria {
                         ("Pequeno", "pequeno"),
                         ("Médio", "medio"),
                         ("Grande", "grande"),
+                        ("Amplo (OS)", "amplo"),
                         ("Gaveta lateral", "gaveta"),
                     ] {
                         if ui.add(Botao::secundario(rotulo)).clicked() {

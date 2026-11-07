@@ -557,7 +557,8 @@ fn proximo_passo_e_linha_do_tempo_acompanham_o_fluxo() {
         .expect("mão de obra");
     c.estado.abrir_detalhe(&c.motor, &c.sessao, c.os);
     let d = c.estado.detalhe.clone().expect("detalhe");
-    assert_eq!(proximo_passo(&d), Some(ProximoPasso::EnviarParaAprovacao));
+    // No balcão o passo natural é iniciar o serviço; o orçamento formal é a alternativa.
+    assert_eq!(proximo_passo(&d), Some(ProximoPasso::IniciarServico));
 
     executar_proximo(
         &c.ctx,
@@ -577,6 +578,13 @@ fn proximo_passo_e_linha_do_tempo_acompanham_o_fluxo() {
         .map(|p| p.titulo.as_str())
         .collect();
     assert_eq!(feitos, vec!["Aberta", "Orçamento enviado"]);
+    assert_eq!(
+        passos
+            .iter()
+            .find(|p| p.situacao == cardeal_ui::molecules::SituacaoPasso::Pendente)
+            .map(|p| p.titulo.as_str()),
+        Some("Orçamento aprovado")
+    );
 
     // Aprovar sem dizer quem aprovou não abre a confirmação.
     executar_proximo(
@@ -847,4 +855,53 @@ fn os_faturada_emite_a_nfse_e_mostra_o_que_corrigir() {
             });
         });
     }
+}
+
+#[test]
+fn iniciar_servico_no_balcao_pela_tela_vai_direto_para_execucao() {
+    let mut c = cenario();
+    let _: Id = c
+        .motor
+        .executar(
+            &c.sessao,
+            "os.montar_orcamento.v1",
+            &MontarOrcamentoOs {
+                ordem_servico: c.os,
+                item: ItemOrcamentoNovo::MaoDeObra {
+                    descricao: "Troca de bateria".to_owned(),
+                    valor: "120,00".parse().expect("valor"),
+                    tecnico: c.sessao.usuario(),
+                    horas: None,
+                },
+            },
+        )
+        .expect("mão de obra");
+    c.estado.abrir_detalhe(&c.motor, &c.sessao, c.os);
+    executar_proximo(
+        &c.ctx,
+        &c.motor,
+        &c.sessao,
+        &mut c.estado,
+        c.os,
+        ProximoPasso::IniciarServico,
+    );
+    let d = c.estado.detalhe.clone().expect("detalhe");
+    assert_eq!(d.ordem.estado, EstadoOs::EmExecucao);
+    assert!(d
+        .ordem
+        .aprovado_por
+        .as_deref()
+        .is_some_and(|a| a.contains("balcão")));
+    assert_eq!(proximo_passo(&d), Some(ProximoPasso::ConcluirExecucao));
+}
+
+#[test]
+fn custo_e_preco_da_peca_sao_opcionais_e_um_vale_pelo_outro() {
+    use super::orcamento::valores_da_peca;
+    let p = |t: &str| t.parse::<Preco>().unwrap();
+    assert_eq!(valores_da_peca("", ""), Some((Preco::ZERO, Preco::ZERO)));
+    assert_eq!(valores_da_peca("100", ""), Some((p("100"), p("100"))));
+    assert_eq!(valores_da_peca("", "150"), Some((p("150"), p("150"))));
+    assert_eq!(valores_da_peca("100", "150"), Some((p("100"), p("150"))));
+    assert_eq!(valores_da_peca("x", ""), None);
 }

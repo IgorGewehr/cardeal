@@ -9,7 +9,7 @@
 
 use egui::{Align2, Color32, Context, Id, Order, Sense, Ui};
 
-use crate::atoms::{Botao, Divisor, Rotulo};
+use crate::atoms::{Botao, Divisor, Etiqueta, Rotulo, Tom};
 use crate::tokens::{Espaco, Raio, TemaUi};
 
 /// Largura de um dialog de confirmação/entrada curta (1–2 campos).
@@ -18,6 +18,10 @@ const LARGURA_PEQUENA: f32 = 460.0;
 const LARGURA_MEDIA: f32 = 620.0;
 /// Largura padrão — formulário completo, duas colunas.
 const LARGURA_GRANDE: f32 = 780.0;
+/// Largura máxima do dialog amplo — um registro de trabalho (OS) com coluna lateral.
+const LARGURA_AMPLA: f32 = 1280.0;
+/// Altura do cabeçalho + rodapé do dialog, para o amplo calcular o corpo.
+const ALTURA_MOLDURA: f32 = 150.0;
 
 /// Um dialog modal centrado.
 #[must_use]
@@ -25,6 +29,8 @@ pub struct Dialogo {
     titulo: String,
     descricao: Option<String>,
     largura: f32,
+    amplo: bool,
+    selo: Option<(String, Tom)>,
 }
 
 impl Dialogo {
@@ -34,6 +40,8 @@ impl Dialogo {
             titulo: titulo.into(),
             descricao: None,
             largura: LARGURA_GRANDE,
+            amplo: false,
+            selo: None,
         }
     }
 
@@ -53,6 +61,22 @@ impl Dialogo {
     /// 620px — formulário médio.
     pub const fn medio(mut self) -> Self {
         self.largura = LARGURA_MEDIA;
+        self
+    }
+
+    /// Amplo e deitado (paisagem): até 1280px de largura, altura **fixa** sempre menor que a
+    /// largura — o dialog não pula de tamanho quando o conteúdo muda. Para registros de
+    /// trabalho com muita coisa (uma OS). O corpo **não rola sozinho** e vem sem margem: monte-o
+    /// com [`ColunasDialogo`](super::ColunasDialogo), que dá a cada coluna a sua rolagem.
+    pub const fn amplo(mut self) -> Self {
+        self.amplo = true;
+        self.largura = LARGURA_AMPLA;
+        self
+    }
+
+    /// Uma etiqueta de estado ao lado do título (ex.: "Aberta", "Faturada").
+    pub fn selo(mut self, texto: impl Into<String>, tom: Tom) -> Self {
+        self.selo = Some((texto.into(), tom));
         self
     }
 
@@ -91,8 +115,15 @@ impl Dialogo {
             });
 
         // Aproveita a largura; ocupa bem menos que a altura total.
-        let largura = self.largura.min(tela.width() * 0.9).max(120.0);
+        let largura = if self.amplo {
+            self.largura.min(tela.width() * 0.92).max(120.0)
+        } else {
+            self.largura.min(tela.width() * 0.9).max(120.0)
+        };
         let altura_corpo_max = (tela.height() * 0.62).clamp(200.0, 540.0);
+        // Amplo: altura total limitada a 86% da tela e a 62% da largura (sempre deitado).
+        let altura_corpo_ampla =
+            ((tela.height() * 0.86).min(largura * 0.62) - ALTURA_MOLDURA).max(200.0);
 
         egui::Area::new(Id::new(("dialogo", &self.titulo)))
             .order(Order::Foreground)
@@ -118,7 +149,23 @@ impl Dialogo {
                                 ui.set_width(ui.available_width().max(0.0));
                                 ui.horizontal(|ui| {
                                     ui.vertical(|ui| {
-                                        ui.add(Rotulo::titulo_secao(self.titulo.clone()));
+                                        // Sem selo, o título fica direto na coluna: um
+                                        // `horizontal` a mais muda os ids do dialog inteiro
+                                        // (e o foco de campos, como o valor no Pagamento).
+                                        match &self.selo {
+                                            Some((texto, tom)) => {
+                                                ui.horizontal(|ui| {
+                                                    ui.add(Rotulo::titulo_secao(
+                                                        self.titulo.clone(),
+                                                    ));
+                                                    ui.add_space(Espaco::E4);
+                                                    ui.add(Etiqueta::nova(texto.clone(), *tom));
+                                                });
+                                            }
+                                            None => {
+                                                ui.add(Rotulo::titulo_secao(self.titulo.clone()));
+                                            }
+                                        }
                                         if let Some(d) = &self.descricao {
                                             ui.add_space(Espaco::E4);
                                             ui.add(Rotulo::apoio(d.clone()));
@@ -139,19 +186,13 @@ impl Dialogo {
                             });
                         ui.add(Divisor::novo());
 
-                        // Corpo rolável.
-                        egui::Frame::none()
-                            .inner_margin(egui::Margin::symmetric(Espaco::E24, Espaco::E16))
-                            .show(ui, |ui| {
-                                ui.set_width(ui.available_width().max(0.0));
-                                egui::ScrollArea::vertical()
-                                    .max_height(altura_corpo_max)
-                                    .auto_shrink([false, true])
-                                    .show(ui, |ui| {
-                                        ui.set_width(ui.available_width().max(0.0));
-                                        corpo(ui, estado);
-                                    });
-                            });
+                        // Corpo: rolável, ou a área fixa do amplo (sem margem nem rolagem).
+                        let altura = if self.amplo {
+                            Some(altura_corpo_ampla)
+                        } else {
+                            None
+                        };
+                        desenhar_corpo(ui, altura, altura_corpo_max, |ui| corpo(ui, estado));
 
                         // Rodapé: faixa `superficie_2` de borda a borda, cantos de baixo
                         // acompanhando o raio do modal.
@@ -176,4 +217,32 @@ impl Dialogo {
 
         fechar
     }
+}
+
+/// O corpo do dialog. `fixo = Some(altura)` (amplo): uma área dessa altura, sem margem nem
+/// rolagem, para o chamador dividir. `None`: margem padrão e rolagem até `altura_max`.
+fn desenhar_corpo(ui: &mut Ui, fixo: Option<f32>, altura_max: f32, corpo: impl FnOnce(&mut Ui)) {
+    if let Some(altura) = fixo {
+        let (_, area) = ui.allocate_space(egui::vec2(ui.available_width().max(0.0), altura));
+        let mut filho = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(area)
+                .layout(egui::Layout::top_down(egui::Align::Min)),
+        );
+        filho.set_clip_rect(area.intersect(ui.clip_rect()));
+        corpo(&mut filho);
+        return;
+    }
+    egui::Frame::none()
+        .inner_margin(egui::Margin::symmetric(Espaco::E24, Espaco::E16))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width().max(0.0));
+            egui::ScrollArea::vertical()
+                .max_height(altura_max)
+                .auto_shrink([false, true])
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width().max(0.0));
+                    corpo(ui);
+                });
+        });
 }

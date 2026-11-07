@@ -1143,3 +1143,88 @@ fn custo_hora_poe_a_mao_de_obra_nas_margens_prevista_e_real() {
     assert_eq!(real.custo_mao_de_obra, cardeal_kernel::Dinheiro::ZERO);
     assert!(real.mao_de_obra_sem_custo);
 }
+
+/// Pedido do usuário (2026-11-07): a peça que não está no estoque entra sem preço; quando o
+/// valor chega, define-se o custo previsto e o preço ao cliente — o total da OS acompanha e a
+/// margem prevista usa o custo previsto.
+#[test]
+fn peca_sem_preco_recebe_custo_e_preco_depois_e_a_margem_acompanha() {
+    let b = Balcao::novo(&[TODAS, &["os.margem.ver"]].concat());
+    let cliente = b.cliente("Gabriel");
+    let os = b.abrir(cliente, "Notebook Acer", "Não liga").ordem_servico;
+    let item: Id = b
+        .cmd(
+            "os.montar_orcamento.v1",
+            &MontarOrcamentoOs {
+                ordem_servico: os,
+                item: ItemOrcamentoNovo::PecaNova {
+                    nome: "Bateria Acer AC14B8K".into(),
+                    quantidade: Quantidade::unidades(1),
+                    preco_unitario: Preco::ZERO,
+                },
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        b.detalhe(os).ordem.valor_total,
+        cardeal_kernel::Dinheiro::ZERO
+    );
+
+    let () = b
+        .cmd(
+            "os.definir_preco_da_peca.v1",
+            &mod_os::DefinirPrecoDaPeca {
+                ordem_servico: os,
+                item_peca: item,
+                preco_unitario: Preco::reais(150),
+                custo_previsto: Some(Preco::reais(150)),
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        b.detalhe(os).ordem.valor_total,
+        cardeal_kernel::Dinheiro::reais(150)
+    );
+    let m: mod_os::MargemPrevista = b.consulta(
+        "os.margem_prevista_da_ordem.v1",
+        &mod_os::MargemPrevistaDaOrdem { ordem_servico: os },
+    );
+    // Repasse a preço de custo: a peça não dá lucro (o lucro sai do serviço).
+    assert_eq!(m.painel.custo, cardeal_kernel::Dinheiro::reais(150));
+    assert_eq!(m.painel.itens_sem_custo, 0);
+}
+
+/// Pedido do usuário (2026-11-07): o cliente aprova o pré-orçamento no balcão — um clique
+/// leva a OS de "em diagnóstico" a "em execução", com a aprovação registrada.
+#[test]
+fn iniciar_servico_no_balcao_aprova_e_inicia_numa_vez() {
+    let b = Balcao::novo(TODAS);
+    let cliente = b.cliente("Gabriel");
+    let (produto, _) = produto_com_estoque(&b);
+    let os = b.abrir(cliente, "Notebook", "Não liga").ordem_servico;
+    orcar_peca(&b, os, produto);
+    let () = b
+        .cmd(
+            "os.iniciar_servico_no_balcao.v1",
+            &mod_os::IniciarServicoNoBalcao {
+                ordem_servico: os,
+                identificacao_aprovador: "Gabriel (no balcão)".into(),
+            },
+        )
+        .unwrap();
+    let d = b.detalhe(os);
+    assert_eq!(d.ordem.estado, mod_os::EstadoOs::EmExecucao);
+    assert_eq!(d.ordem.aprovado_por.as_deref(), Some("Gabriel (no balcão)"));
+
+    // Sem nada orçado, não começa (não há o que aprovar).
+    let vazia = b.abrir(cliente, "Celular", "Tela").ordem_servico;
+    let r: Result<(), _> = b.cmd(
+        "os.iniciar_servico_no_balcao.v1",
+        &mod_os::IniciarServicoNoBalcao {
+            ordem_servico: vazia,
+            identificacao_aprovador: "Gabriel".into(),
+        },
+    );
+    assert!(r.is_err());
+    assert_eq!(b.detalhe(vazia).ordem.estado, mod_os::EstadoOs::Aberta);
+}

@@ -1,70 +1,79 @@
-//! O topo do detalhe da OS: quem é o cliente (com o WhatsApp a um clique, e a mensagem certa
+//! A coluna lateral do detalhe da OS: quem é o cliente (com o WhatsApp a um clique, e a mensagem certa
 //! para o estado da OS), o que foi anotado na recepção e as outras OS do mesmo aparelho.
 
 use super::*;
 
-/// Desenha o bloco de resumo.
+/// Desenha os blocos "Cliente" e "Aparelho" da coluna lateral.
 pub(super) fn secao_resumo(ui: &mut egui::Ui, estado: &mut EstadoTelaOs, detalhe: &DetalheOrdem) {
     let os = &detalhe.ordem;
     let cliente = estado.clientes.iter().find(|c| c.pessoa == os.cliente);
     let hoje = Data::hoje(Fuso::BRASILIA);
+    let nome = cliente.map_or("Cliente", |c| c.nome.as_str()).to_owned();
+    let telefone = cliente.and_then(|c| c.telefone.clone());
 
-    ui.horizontal(|ui| {
-        ui.add(Rotulo::campo("Cliente"));
-        ui.add(Rotulo::interface(
-            cliente.map_or("Cliente", |c| c.nome.as_str()).to_owned(),
-        ));
-        if let Some(tel) = cliente.and_then(|c| c.telefone.as_deref()) {
-            ui.add(Rotulo::interface(crate::telefone::formatar(tel)).cor(ui.cores().texto_medio));
-            if let Some(link) =
-                crate::telefone::link_whatsapp(tel, &mensagem_whatsapp(estado, detalhe))
-            {
-                if ui.add(Botao::secundario("WhatsApp").pequeno()).clicked() {
-                    if let Err(e) = open::that_detached(&link) {
-                        notificar(
-                            ui.ctx(),
-                            Notificacao::erro("Não foi possível abrir o WhatsApp")
-                                .detalhe(e.to_string()),
-                        );
+    Painel::novo()
+        .plano()
+        .compacto()
+        .titulo("Cliente")
+        .mostrar(ui, |ui| {
+            ui.add(Rotulo::interface(nome).quebravel());
+            match &telefone {
+                Some(tel) => {
+                    ui.add(Rotulo::apoio(crate::telefone::formatar(tel)));
+                    if let Some(link) =
+                        crate::telefone::link_whatsapp(tel, &mensagem_whatsapp(estado, detalhe))
+                    {
+                        ui.add_space(Espaco::E8);
+                        if ui
+                            .add(Botao::secundario("Mandar WhatsApp").preenche_largura())
+                            .clicked()
+                        {
+                            if let Err(e) = open::that_detached(&link) {
+                                notificar(
+                                    ui.ctx(),
+                                    Notificacao::erro("Não foi possível abrir o WhatsApp")
+                                        .detalhe(e.to_string()),
+                                );
+                            }
+                        }
                     }
                 }
-            }
-        }
-    });
-
-    let ficha = &os.ficha;
-    if ficha.previsao_entrega.is_some()
-        || !ficha.numero_serie.is_empty()
-        || !ficha.acessorios.is_empty()
-    {
-        ui.add_space(Espaco::E4);
-        ui.horizontal_wrapped(|ui| {
-            if let Some(e) = etiqueta_previsao(os, hoje) {
-                ui.add(Rotulo::campo("Previsão"));
-                ui.add(e);
-            }
-            if !ficha.numero_serie.is_empty() {
-                ui.add(Rotulo::campo("Série/IMEI"));
-                ui.add(Rotulo::interface(ficha.numero_serie.clone()));
+                None => {
+                    ui.add(Rotulo::apoio("Sem telefone cadastrado."));
+                }
             }
         });
-        if !ficha.acessorios.is_empty() {
-            ui.add(
-                Rotulo::interface(format!("Entrada: {}", ficha.acessorios))
-                    .quebravel()
-                    .cor(ui.cores().texto_medio),
-            );
-        }
-    }
+    ui.add_space(Espaco::E12);
+
+    let ficha = &os.ficha;
+    Painel::novo()
+        .plano()
+        .compacto()
+        .titulo("Aparelho")
+        .mostrar(ui, |ui| {
+            Dado::novo("Equipamento", equipamento_label(os).to_owned()).mostrar(ui);
+            if let Some(e) = etiqueta_previsao(os, hoje) {
+                ui.add(Rotulo::campo("Previsão de entrega"));
+                ui.add(e);
+                ui.add_space(Espaco::E8);
+            }
+            if !ficha.numero_serie.is_empty() {
+                Dado::novo("Série/IMEI", ficha.numero_serie.clone()).mostrar(ui);
+            }
+            if !ficha.acessorios.is_empty() {
+                ui.add(Rotulo::campo("Entrou com"));
+                ui.add(Rotulo::interface(ficha.acessorios.clone()).quebravel());
+            }
+        });
 
     if !estado.historico.is_empty() {
-        ui.add_space(Espaco::E8);
+        ui.add_space(Espaco::E12);
         let titulo = format!("Outras OS deste aparelho ({})", estado.historico.len());
         let historico = estado.historico.clone();
         let mut abrir = None;
         SecaoExpansivel::nova(titulo).mostrar(ui, |ui| {
             for h in &historico {
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     let (rotulo, tom) = estado_etiqueta(h.estado);
                     if ui
                         .add(Botao::fantasma(format!("OS #{}", h.numero)).pequeno())
@@ -72,17 +81,20 @@ pub(super) fn secao_resumo(ui: &mut egui::Ui, estado: &mut EstadoTelaOs, detalhe
                     {
                         abrir = Some(h.id);
                     }
-                    ui.add(Rotulo::interface(format!(
-                        "{} · {} · {}",
-                        h.data_abertura.formatar(),
-                        h.equipamento,
-                        h.defeito_relatado
-                    )));
                     ui.add(Etiqueta::nova(rotulo, tom));
                     if em_garantia(h, hoje) {
                         ui.add(Etiqueta::atencao("em garantia"));
                     }
                 });
+                ui.add(
+                    Rotulo::apoio(format!(
+                        "{} · {}",
+                        h.data_abertura.formatar(),
+                        h.defeito_relatado
+                    ))
+                    .quebravel(),
+                );
+                ui.add_space(Espaco::E4);
             }
         });
         if let Some(id) = abrir {

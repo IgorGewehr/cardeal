@@ -8,6 +8,7 @@ mod definir_preferencias_compras;
 mod estornar_entrada;
 mod importar_nota_de_arquivo_xml;
 mod lancar_nota_manual;
+mod ratear_despesas;
 mod vincular_produto_manual;
 
 pub use confirmar_entrada::{ConfirmarEntrada, EntradaConfirmada};
@@ -16,6 +17,7 @@ pub use definir_preferencias_compras::DefinirPreferenciasCompras;
 pub use estornar_entrada::{EntradaFoiEstornada, EstornarEntrada, MOTIVO_MINIMO_ESTORNO};
 pub use importar_nota_de_arquivo_xml::ImportarNotaDeArquivoXml;
 pub use lancar_nota_manual::{ItemNotaManual, LancarNotaManual};
+pub use ratear_despesas::RatearDespesasEntre;
 pub use vincular_produto_manual::VincularProdutoManual;
 
 use cardeal_kernel::Id;

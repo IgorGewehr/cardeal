@@ -3082,3 +3082,76 @@ fn importar_contas_em_aberto_e_saldo_de_abertura_acha_ou_cadastra_a_pessoa_e_nao
     );
     assert_eq!(conta_lancamentos(&arm, empresa), antes);
 }
+
+/// Pedido do usuário (2026-11-07): o fluxo de caixa/bancário é só o que A pagar/A receber já
+/// realizou — com o **mesmo nome** do título. `ExtratoDisponivel` devolve a descrição do
+/// título por trás da baixa.
+#[test]
+fn extrato_disponivel_traz_o_nome_do_titulo_quitado() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloFinanceiro]).unwrap();
+    let s = sessao(
+        empresa,
+        &[
+            "financeiro.receber.criar",
+            "financeiro.receber.baixar",
+            "financeiro.banco.ver",
+        ],
+    );
+    let receber = LancarTituloAReceber {
+        cliente: None,
+        valor_total: Dinheiro::reais(250),
+        emissao: hoje(),
+        parcelas: 1,
+        primeiro_vencimento: hoje(),
+        intervalo_dias: 0,
+        observacao: Some("Conserto do notebook Acer".to_string()),
+        categoria: None,
+        quitado_agora: None,
+    };
+    let lancado: TituloAReceberLancado = postcard::from_bytes(
+        &d.executar_comando(
+            "financeiro.lancar_titulo_a_receber.v1",
+            &carga(&receber),
+            &s,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    d.executar_comando(
+        "financeiro.baixar_recebimento.v1",
+        &carga(&BaixarRecebimento {
+            parcela: lancado.parcelas[0],
+            valor: Dinheiro::reais(250),
+            data: hoje(),
+            meio_pagamento: MeioPagamento::Pix,
+            conta_destino: None,
+        }),
+        &s,
+        &ambiente(empresa),
+        arm.escritor(),
+    )
+    .unwrap();
+
+    let extrato: Vec<mod_financeiro::ItemMovimentoDisponivel> = postcard::from_bytes(
+        &d.executar_consulta(
+            "financeiro.extrato_disponivel.v1",
+            &carga(&ExtratoDisponivel {
+                periodo: Periodo::novo(hoje().mais_dias(-1), hoje()),
+                conta: None,
+            }),
+            &s,
+            &ambiente(empresa),
+            arm.leitor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(extrato.len(), 1);
+    assert_eq!(
+        extrato[0].descricao_titulo.as_deref(),
+        Some("Conserto do notebook Acer")
+    );
+}

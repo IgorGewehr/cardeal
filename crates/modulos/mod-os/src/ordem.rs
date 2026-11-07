@@ -334,6 +334,27 @@ impl OrdemServico {
         Ok(())
     }
 
+    /// Troca o valor de um item já no orçamento (o preço de uma peça que entrou sem preço):
+    /// tira `antes` do total e soma `depois`. Aceita os mesmos estados de incluir item.
+    ///
+    /// # Errors
+    /// [`ErroOs::EstadoInvalido`] numa OS aguardando aprovação, aprovada ou terminada.
+    pub fn trocar_valor_de_item(
+        &mut self,
+        antes: Dinheiro,
+        depois: Dinheiro,
+    ) -> Result<(), ErroOs> {
+        if !self.estado.aceita_ajuste_de_itens() && self.estado != EstadoOs::EmExecucao {
+            return Err(ErroOs::EstadoInvalido {
+                atual: self.estado.rotulo(),
+                esperado: "Aberta, EmDiagnostico, EmExecucao ou Concluida",
+            });
+        }
+        self.valor_total = (self.valor_total - antes + depois).nao_negativo();
+        self.versao = self.versao.proxima();
+        Ok(())
+    }
+
     /// Remove um item do orçamento — corrige um item digitado errado sem precisar cancelar
     /// a OS inteira. Aceita `Aberta`/`EmDiagnostico` (antes de enviar para aprovação) e
     /// também `Concluida` (correção pós-execução, inclusive numa OS desfaturada de volta a

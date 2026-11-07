@@ -886,6 +886,12 @@ pub struct ItemMovimentoDisponivel {
     /// financeiro precisar conhecer a tabela de nenhum outro módulo
     /// (`docs/contratos-internos.md` §7 regra 2).
     pub origem_id: Option<Id>,
+    /// A descrição do título a pagar/receber que esta baixa quitou — o mesmo texto da coluna
+    /// "Descrição" de A pagar/A receber. O fluxo de caixa usa este nome (pedido do usuário,
+    /// 2026-11-07: o fluxo é só o que a pagar/a receber já realizou, com o mesmo nome).
+    /// `None` sem título por trás ou sem descrição.
+    #[serde(default)]
+    pub descricao_titulo: Option<String>,
 }
 
 /// O extrato realizado (livro-caixa) de todas as contas do Disponível, ou de uma só, num
@@ -913,7 +919,7 @@ impl Consulta for ExtratoDisponivel {
         let mut stmt = conexao
             .prepare(
                 "SELECT rl.liquidacao, rl.historico, rc.nome, rp.valor,
-                        t.origem_modulo, t.origem_id
+                        t.origem_modulo, t.origem_id, NULLIF(TRIM(t.observacao), '')
                  FROM razao_partida rp
                  JOIN razao_lancamento rl ON rl.id = rp.lancamento
                  JOIN razao_conta rc ON rc.id = rp.conta
@@ -944,6 +950,7 @@ impl Consulta for ExtratoDisponivel {
                         valor: Dinheiro::centavos(r.get::<_, i64>(3)?),
                         origem_modulo: r.get(4)?,
                         origem_id: r.get::<_, Option<Vec<u8>>>(5)?.map(id_de),
+                        descricao_titulo: r.get(6)?,
                     })
                 },
             )

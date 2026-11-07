@@ -299,29 +299,9 @@ impl Consulta for MargemPrevistaDaOrdem {
                 .iter()
                 .find(|s| s.produto == p.produto)
                 .map(|s| (s.nome.clone(), s.custo, s.imposto, s.comissao));
-            let custo_unitario = if p.aplicada {
-                Some(Dinheiro::de_total(
-                    cardeal_kernel::Quantidade::unidades(1),
-                    p.custo_unitario,
-                    Arredondamento::MeioAcima,
-                ))
-            } else {
-                // O combinado com o fornecedor na encomenda vale mais que o custo médio de hoje.
-                let combinado = p
-                    .encomenda
-                    .as_ref()
-                    .and_then(|e| e.custo_previsto)
-                    .map(|c| {
-                        Dinheiro::de_total(
-                            cardeal_kernel::Quantidade::unidades(1),
-                            c,
-                            Arredondamento::MeioAcima,
-                        )
-                    });
-                let c = combinado.or_else(|| atual.as_ref().and_then(|(_, c, _, _)| *c));
-                custo_estimado |= c.is_some();
-                c
-            };
+            let custo_medio = atual.as_ref().and_then(|(_, c, _, _)| *c);
+            let (custo_unitario, estimado) = custo_da_peca(p, custo_medio);
+            custo_estimado |= estimado;
             let receita = if p.coberto_garantia {
                 Dinheiro::ZERO
             } else {
@@ -382,4 +362,27 @@ impl Consulta for MargemPrevistaDaOrdem {
             custo_estimado,
         })
     }
+}
+
+/// O custo unitário de uma peça para a margem e se ele é estimado. Aplicada: o custo real.
+/// Senão, nesta ordem: o combinado com o fornecedor na encomenda, o custo previsto digitado na
+/// OS (peça fora do estoque) e o custo médio de hoje.
+#[cfg(feature = "sqlite")]
+fn custo_da_peca(
+    p: &crate::ItemPeca,
+    custo_medio: Option<cardeal_kernel::Dinheiro>,
+) -> (Option<cardeal_kernel::Dinheiro>, bool) {
+    use cardeal_kernel::{Arredondamento, Dinheiro, Quantidade};
+    let unitario = |c| Dinheiro::de_total(Quantidade::unidades(1), c, Arredondamento::MeioAcima);
+    if p.aplicada {
+        return (Some(unitario(p.custo_unitario)), false);
+    }
+    let combinado = p
+        .encomenda
+        .as_ref()
+        .and_then(|e| e.custo_previsto)
+        .map(unitario);
+    let previsto = (!p.custo_unitario.e_zero()).then(|| unitario(p.custo_unitario));
+    let c = combinado.or(previsto).or(custo_medio);
+    (c, c.is_some())
 }

@@ -59,6 +59,37 @@ pub(super) fn adicionar_mao_de_obra(
     }
 }
 
+/// O custo e o preço de uma peça a partir do que foi digitado (os dois opcionais): só o custo
+/// → o cliente paga o custo; só o preço → o preço inteiro é custo (repasse; o lucro sai do
+/// serviço); nenhum → zero, a definir depois. `None` se algum não for um valor.
+pub(super) fn valores_da_peca(custo: &str, preco: &str) -> Option<(Preco, Preco)> {
+    let ler = |t: &str| -> Option<Option<Preco>> {
+        match t.trim() {
+            "" => Some(None),
+            t => t.parse::<Preco>().ok().map(Some),
+        }
+    };
+    let (c, p) = (ler(custo)?, ler(preco)?);
+    Some(match (c, p) {
+        (None, None) => (Preco::ZERO, Preco::ZERO),
+        (Some(c), None) => (c, c),
+        (None, Some(p)) => (p, p),
+        (Some(c), Some(p)) => (c, p),
+    })
+}
+
+/// A peça do formulário não tem saldo: nova (digitada) ou do catálogo com estoque zerado.
+pub(super) fn peca_fora_do_estoque(estado: &EstadoTelaOs) -> bool {
+    match estado.peca_produto {
+        None => true,
+        Some(id) => estado
+            .produtos
+            .iter()
+            .find(|p| p.produto == id)
+            .is_none_or(|p| !p.disponivel.e_positiva()),
+    }
+}
+
 pub(super) fn adicionar_peca(
     ctx: &egui::Context,
     motor: &Motor,
@@ -71,11 +102,21 @@ pub(super) fn adicionar_peca(
     } else {
         estado.peca_qtd.as_str()
     };
-    let (Ok(quantidade), Ok(preco_unitario)) = (
-        quantidade_txt.parse::<Quantidade>(),
-        estado.peca_preco.parse::<Preco>(),
-    ) else {
-        notificar(ctx, Notificacao::aviso("Quantidade ou preço inválidos."));
+    let Ok(quantidade) = quantidade_txt.parse::<Quantidade>() else {
+        notificar(ctx, Notificacao::aviso("Quantidade inválida."));
+        return;
+    };
+    let fora_do_estoque = peca_fora_do_estoque(estado);
+    let custo_txt = if fora_do_estoque {
+        estado.peca_custo.as_str()
+    } else {
+        ""
+    };
+    let Some((custo, preco_unitario)) = valores_da_peca(custo_txt, &estado.peca_preco) else {
+        notificar(
+            ctx,
+            Notificacao::aviso("Custo ou preço inválidos (ex.: 120,00)."),
+        );
         return;
     };
     // Nada escolhido na lista mas algo digitado: é uma peça que ainda não existe no
@@ -110,8 +151,24 @@ pub(super) fn adicionar_peca(
     );
     match r {
         Ok(id) => {
-            let _: Id = id;
+            let item: Id = id;
+            // Fora do estoque, o custo previsto fica no item (a margem usa até a peça chegar).
+            if fora_do_estoque && !custo.e_zero() {
+                if let Err(e) = motor.executar(
+                    sessao,
+                    "os.definir_preco_da_peca.v1",
+                    &mod_os::DefinirPrecoDaPeca {
+                        ordem_servico: os,
+                        item_peca: item,
+                        preco_unitario,
+                        custo_previsto: Some(custo),
+                    },
+                ) {
+                    notificar(ctx, Notificacao::erro(e.mensagem));
+                }
+            }
             estado.peca_produto = None;
+            estado.peca_custo.clear();
             estado.peca_busca.clear();
             estado.peca_qtd.clear();
             estado.peca_preco.clear();

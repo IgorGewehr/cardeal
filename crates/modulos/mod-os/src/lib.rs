@@ -85,11 +85,12 @@ pub use comandos::DefinirCustoHora;
 pub use comandos::{
     AbrirOrdemComClienteNovo, AbrirOrdemServico, AjustarApontamento, AplicarPeca, AplicarPecas,
     ApontamentoIniciado, AprovarOrcamentoOs, CancelarOrdemServico, ConcluirExecucao,
-    DesfaturarOrdemServico, EditarDadosDaOrdem, EncerrarApontamento, EnviarParaAprovacao,
-    FaturarOrdemServico, IniciarApontamento, IniciarExecucao, ItemOrcamentoNovo, MontarOrcamentoOs,
-    OrdemComClienteNovoAberta, OrdemServicoAberta, OrdemServicoCancelada, OrdemServicoDesfaturada,
-    OrdemServicoFaturada, PagamentoNoAto, PecaFoiAplicada, ReabrirOrdemServico, RegistrarLaudo,
-    RegistrarMaoDeObra, RemoverItemOrcamento, ReprovarOrcamentoOs, TipoItemOrcamento,
+    DefinirPrecoDaPeca, DesfaturarOrdemServico, EditarDadosDaOrdem, EncerrarApontamento,
+    EnviarParaAprovacao, FaturarOrdemServico, IniciarApontamento, IniciarExecucao,
+    IniciarServicoNoBalcao, ItemOrcamentoNovo, MontarOrcamentoOs, OrdemComClienteNovoAberta,
+    OrdemServicoAberta, OrdemServicoCancelada, OrdemServicoDesfaturada, OrdemServicoFaturada,
+    PagamentoNoAto, PecaFoiAplicada, ReabrirOrdemServico, RegistrarLaudo, RegistrarMaoDeObra,
+    RemoverItemOrcamento, ReprovarOrcamentoOs, TipoItemOrcamento,
 };
 pub use comandos::{ChegadaRegistrada, EncomendarPeca, PagamentoDaPeca, RegistrarChegadaDaPeca};
 pub use consultas::CustosHora;

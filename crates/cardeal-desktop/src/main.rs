@@ -1166,6 +1166,13 @@ impl eframe::App for App {
                         }
                         Area::Os => {
                             tela_os::mostrar(ui, motor, &estado.sessao, &mut estado.os);
+                            // "Encomendar peças em falta" na OS: vai a Compras › Pedidos.
+                            if let Some(pecas) = estado.os.pedido_encomenda.take() {
+                                estado.area = Area::Compras;
+                                estado
+                                    .compras
+                                    .encomendar_da_os(motor, &estado.sessao, pecas);
+                            }
                         }
                         Area::Estoque => {
                             tela_estoque::mostrar(ui, motor, &estado.sessao, &mut estado.estoque);

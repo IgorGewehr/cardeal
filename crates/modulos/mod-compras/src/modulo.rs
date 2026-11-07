@@ -31,6 +31,7 @@ impl Modulo for ModuloCompras {
         registro
             .comando::<DefinirPreferenciasCompras>("compras.definir_preferencias.v1")
             .comando::<VincularProdutoManual>("compras.vincular_produto_manual.v1")
+            .comando::<crate::RatearDespesasEntre>("compras.ratear_despesas_entre.v1")
             .comando::<crate::CriarProdutoDoItem>("compras.criar_produto_do_item.v1")
             .comando::<ConfirmarEntrada>("compras.confirmar_entrada.v1")
             .comando::<EstornarEntrada>("compras.estornar_entrada.v1")

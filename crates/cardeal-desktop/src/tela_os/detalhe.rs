@@ -1,4 +1,6 @@
-//! O diálogo de detalhe da OS: laudo, orçamento, financeiro e a ação certa para o estado.
+//! O dialog de detalhe da OS (amplo, centrado): à esquerda o contexto — cliente, aparelho,
+//! andamento, tempo — e à direita o trabalho — laudo, orçamento, financeiro — com a ação certa
+//! para o estado no rodapé.
 
 use super::*;
 
@@ -14,43 +16,111 @@ pub(super) fn dialogo_detalhe(
     };
     let os = detalhe.ordem.clone();
     let titulo = format!("OS #{} · {}", os.numero, equipamento_label(&os));
-    let subtitulo = format!(
+    let descricao = format!(
         "{} · {}",
         nome_cliente(&estado.clientes, os.cliente),
         situacao_amigavel(os.estado)
     );
+    let (selo, tom) = estado_etiqueta(os.estado);
     let proximo = proximo_passo(&detalhe);
 
-    let fechar = Gaveta::nova(titulo).subtitulo(subtitulo).mostrar(
-        ctx,
-        estado,
-        |ui, estado| corpo_detalhe(ui, motor, sessao, estado, &detalhe),
-        |ui, estado| {
-            // Um botão principal só: o próximo passo do fluxo (o rodapé desenha da direita
-            // para a esquerda, então ele fica no canto). Faturar continua disponível desde a
-            // abertura (pedido do usuário, 2026-09-15), mas como secundário quando não é o
-            // passo natural.
-            if let Some(passo) = &proximo {
-                if ui.add(Botao::primario(passo.rotulo())).clicked() {
-                    executar_proximo(ui.ctx(), motor, sessao, estado, os.id, passo.clone());
+    // Dialog centrado, deitado e de altura fixa (pedido do usuário, 2026-11-07: a gaveta
+    // lateral apertava tudo numa coluna estreita). À esquerda o contexto, à direita o trabalho.
+    let fechar = Dialogo::nova(titulo)
+        .descricao(descricao)
+        .selo(selo, tom)
+        .amplo()
+        .mostrar(
+            ctx,
+            estado,
+            |ui, estado| {
+                ColunasDialogo::nova("os-detalhe").mostrar(
+                    ui,
+                    estado,
+                    |ui, estado| coluna_contexto(ui, motor, sessao, estado, &detalhe),
+                    |ui, estado| corpo_detalhe(ui, motor, sessao, estado, &detalhe),
+                );
+            },
+            |ui, estado| {
+                // Um botão principal só: o próximo passo do fluxo (o rodapé desenha da
+                // direita para a esquerda, então ele fica no canto). Faturar continua
+                // disponível desde a abertura (pedido do usuário, 2026-09-15), mas como
+                // secundário quando não é o passo natural.
+                if let Some(passo) = &proximo {
+                    if ui.add(Botao::primario(passo.rotulo())).clicked() {
+                        executar_proximo(ui.ctx(), motor, sessao, estado, os.id, passo.clone());
+                    }
                 }
-            }
-            if pode_faturar(os.estado)
-                && proximo != Some(ProximoPasso::Faturar)
-                && ui.add(Botao::secundario("Faturar")).clicked()
-            {
-                estado.dlg = Dlg::faturar();
-            }
-            if ui.add(Botao::secundario("Comprovante (PDF)")).clicked() {
-                gerar_pdf(ui.ctx(), estado, &detalhe);
-            }
-            if ui.add(Botao::fantasma("Fechar")).clicked() {
-                estado.dlg = Dlg::Fechado;
-            }
-        },
-    );
+                if pode_faturar(os.estado)
+                    && proximo != Some(ProximoPasso::Faturar)
+                    && ui.add(Botao::secundario("Faturar")).clicked()
+                {
+                    estado.dlg = Dlg::faturar();
+                }
+                if ui.add(Botao::secundario("Relatório (PDF)")).clicked() {
+                    let f = FormDocumento::novo(true, estado.ultimo_documento.as_deref());
+                    estado.dlg = Dlg::Documento(Box::new(f));
+                }
+                if ui.add(Botao::secundario("Orçamento (PDF)")).clicked() {
+                    let f = FormDocumento::novo(false, estado.ultimo_documento.as_deref());
+                    estado.dlg = Dlg::Documento(Box::new(f));
+                }
+                if ui.add(Botao::fantasma("Fechar")).clicked() {
+                    estado.dlg = Dlg::Fechado;
+                }
+            },
+        );
     if fechar {
         estado.dlg = Dlg::Fechado;
+    }
+}
+
+/// A coluna da esquerda: quem é o cliente, o aparelho, em que pé a OS está, o tempo de
+/// bancada e as ações que mudam o estado fora do fluxo (cancelar, reabrir, desfaturar).
+fn coluna_contexto(
+    ui: &mut egui::Ui,
+    motor: &Motor,
+    sessao: &Sessao,
+    estado: &mut EstadoTelaOs,
+    detalhe: &DetalheOrdem,
+) {
+    let os = &detalhe.ordem;
+    secao_resumo(ui, estado, detalhe);
+    secao_andamento(ui, motor, sessao, estado, detalhe);
+    secao_apontamento(ui, motor, sessao, estado, os.id);
+    secao_garantia(ui, motor, sessao, estado, detalhe);
+
+    let cancelar = pode_cancelar(os.estado);
+    let desfaturar = os.estado == EstadoOs::Faturada;
+    let reabrir = os.estado == EstadoOs::Cancelada;
+    if cancelar || desfaturar || reabrir {
+        Painel::novo()
+            .plano()
+            .compacto()
+            .titulo("Outras ações")
+            .mostrar(ui, |ui| {
+                if cancelar
+                    && ui
+                        .add(Botao::destrutivo("Cancelar OS").preenche_largura())
+                        .clicked()
+                {
+                    estado.confirmar_exclusao = Some((os.id, equipamento_label(os).to_owned()));
+                }
+                if desfaturar
+                    && ui
+                        .add(Botao::secundario("Desfaturar").preenche_largura())
+                        .clicked()
+                {
+                    estado.confirmar_acao = Some(AcaoPendente::Desfaturar(os.id));
+                }
+                if reabrir
+                    && ui
+                        .add(Botao::secundario("Reabrir OS").preenche_largura())
+                        .clicked()
+                {
+                    estado.confirmar_acao = Some(AcaoPendente::Reabrir(os.id));
+                }
+            });
     }
 }
 
@@ -63,6 +133,7 @@ pub(super) const fn pode_faturar(estado: EstadoOs) -> bool {
     )
 }
 
+/// A coluna principal: o trabalho na OS, cada assunto no seu bloco.
 pub(super) fn corpo_detalhe(
     ui: &mut egui::Ui,
     motor: &Motor,
@@ -71,295 +142,52 @@ pub(super) fn corpo_detalhe(
     detalhe: &DetalheOrdem,
 ) {
     let os = &detalhe.ordem;
-    secao_resumo(ui, estado, detalhe);
-    secao_andamento(ui, estado, detalhe);
-    ui.horizontal(|ui| {
-        ui.add(Rotulo::campo("Estado"));
-        let (rotulo, tom) = estado_etiqueta(os.estado);
-        ui.add(Etiqueta::nova(rotulo, tom));
-        if pode_cancelar(os.estado) && ui.add(Botao::destrutivo("Cancelar OS").pequeno()).clicked()
-        {
-            estado.confirmar_exclusao = Some((os.id, equipamento_label(os).to_owned()));
-        }
-        if os.estado == EstadoOs::Faturada
-            && ui.add(Botao::secundario("Desfaturar").pequeno()).clicked()
-        {
-            estado.confirmar_acao = Some(AcaoPendente::Desfaturar(os.id));
-        }
-        if os.estado == EstadoOs::Cancelada
-            && ui.add(Botao::secundario("Reabrir OS").pequeno()).clicked()
-        {
-            estado.confirmar_acao = Some(AcaoPendente::Reabrir(os.id));
-        }
-    });
+    // O que o próximo passo pede antes (quem aprovou, de onde saem as peças) vem primeiro:
+    // é o que o balcão precisa resolver agora.
+    acoes_por_estado(ui, estado, detalhe);
+    // A ordem da bancada: o que o cliente disse e o que eu achei → as peças (já encomendei?)
+    // → os serviços → quanto estou ganhando nisso.
+    secao_laudo(ui, motor, sessao, estado, detalhe);
     ui.add_space(Espaco::E16);
-
-    // ── Laudo ──────────────────────────────────────────────────────────────
-    ui.add(Rotulo::titulo_secao("Laudo técnico"));
-    ui.add_space(Espaco::E8);
-    if matches!(os.estado, EstadoOs::Aberta | EstadoOs::EmDiagnostico) {
-        ui.columns(2, |c| {
-            c[0].add(Campo::novo("Problema relatado", &mut estado.laudo_problema));
-            c[1].add(Campo::novo(
-                "Diagnóstico (opcional)",
-                &mut estado.laudo_diagnostico,
-            ));
-        });
-        ui.add_space(Espaco::E8);
-        let ja_tem_laudo = detalhe.laudo.is_some();
-        let rotulo_laudo = if ja_tem_laudo {
-            "Atualizar laudo"
-        } else {
-            "Registrar laudo"
-        };
-        if ui.add(Botao::primario(rotulo_laudo)).clicked() {
-            let diagnostico = (!estado.laudo_diagnostico.trim().is_empty())
-                .then(|| estado.laudo_diagnostico.clone());
-            aplicar_e_recarregar(
-                ui.ctx(),
-                motor,
-                sessao,
-                estado,
-                os.id,
-                "os.registrar_laudo.v1",
-                &RegistrarLaudo {
-                    ordem_servico: os.id,
-                    descricao_problema: estado.laudo_problema.clone(),
-                    diagnostico,
-                    tecnico: sessao.usuario(),
-                },
-                if ja_tem_laudo {
-                    "Laudo atualizado"
-                } else {
-                    "Laudo registrado"
-                },
-            );
-        }
-    } else if let Some(laudo) = &detalhe.laudo {
-        ui.add(Rotulo::interface(format!("Problema: {}", laudo.descricao_problema)).quebravel());
-        if let Some(dg) = &laudo.diagnostico {
-            ui.add(Rotulo::interface(format!("Diagnóstico: {dg}")).quebravel());
-        }
-    } else {
-        ui.add(Rotulo::interface("—"));
-    }
+    secao_pecas(ui, motor, sessao, estado, detalhe);
     ui.add_space(Espaco::E16);
-
-    // ── Orçamento ──────────────────────────────────────────────────────────
-    ui.add(Rotulo::titulo_secao("Orçamento"));
-    ui.add_space(Espaco::E8);
-    // Remover/aplicar são decididos aqui e executados depois dos laços (os laços seguram
-    // `estado` emprestado para ler os nomes das peças).
-    let pode_ajustar = os.estado.aceita_ajuste_de_itens();
-    let em_execucao = os.estado == EstadoOs::EmExecucao;
-    let mut remover: Option<(Id, TipoItemOrcamento)> = None;
-    let mut aplicar: Option<Id> = None;
-    for item in &detalhe.itens_mao_de_obra {
-        ui.horizontal(|ui| {
-            ui.add(Rotulo::interface(item.descricao.clone()));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if pode_ajustar && ui.add(Botao::fantasma("Remover").pequeno()).clicked() {
-                    remover = Some((item.id, TipoItemOrcamento::MaoDeObra));
-                }
-                ui.add(ValorDinheiro::novo(item.valor));
-            });
-        });
-    }
-    let ativa = pode_faturar(os.estado);
-    let mut abrir_dialogo: Option<Dlg> = None;
-    for item in &detalhe.itens_peca {
-        let nome = nome_do_produto(&estado.produtos, item.produto);
-        ui.horizontal(|ui| {
-            ui.add(Rotulo::interface(format!("{} × {nome}", item.quantidade)));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                // Uma peça já aplicada não sai do orçamento: o estoque já foi baixado.
-                if !item.aplicada {
-                    if pode_ajustar && ui.add(Botao::fantasma("Remover").pequeno()).clicked() {
-                        remover = Some((item.id, TipoItemOrcamento::Peca));
-                    }
-                    if ativa {
-                        let falta = falta_no_estoque(item, &estado.produtos);
-                        if em_execucao
-                            && !falta
-                            && ui.add(Botao::secundario("Aplicar").pequeno()).clicked()
-                        {
-                            aplicar = Some(item.id);
-                        }
-                        if (falta || item.encomenda.is_some())
-                            && ui.add(Botao::secundario("Chegou").pequeno()).clicked()
-                        {
-                            abrir_dialogo = Some(Dlg::Chegou(Box::new(FormChegada::novo(
-                                os.id,
-                                item.id,
-                                item.encomenda.as_ref(),
-                                nome.clone(),
-                                true,
-                            ))));
-                        }
-                        if falta
-                            && item.encomenda.is_none()
-                            && ui.add(Botao::fantasma("Encomendar").pequeno()).clicked()
-                        {
-                            abrir_dialogo = Some(Dlg::Encomendar(Box::new(FormEncomenda::novo(
-                                os.id,
-                                item.id,
-                                None,
-                                nome.clone(),
-                                true,
-                            ))));
-                        }
-                    }
-                }
-                ui.add(Rotulo::interface(format!(
-                    "{} /un",
-                    item.preco_unitario.formatar_com_simbolo()
-                )));
-                ui.add(etiqueta_da_peca(item, &estado.produtos));
-            });
-        });
-    }
-    if let Some(d) = abrir_dialogo {
-        estado.dlg = d;
-    }
-    if let Some((item, tipo)) = remover {
-        aplicar_e_recarregar(
-            ui.ctx(),
-            motor,
-            sessao,
-            estado,
-            os.id,
-            "os.remover_item_orcamento.v1",
-            &RemoverItemOrcamento {
-                ordem_servico: os.id,
-                item,
-                tipo,
-            },
-            "Item removido do orçamento",
-        );
-    }
-    if let Some(item) = aplicar {
-        aplicar_pecas(ui.ctx(), motor, sessao, estado, os.id, &[item]);
-    }
-    ui.add_space(Espaco::E4);
-    ui.horizontal(|ui| {
-        ui.add(Rotulo::campo("Total"));
-        ui.add(ValorDinheiro::novo(os.valor_total));
-    });
-    if let Some(m) = estado.margem_prevista.clone() {
-        ui.add_space(Espaco::E8);
-        let p = &m.painel;
-        cardeal_ui::organisms::PainelMargem::novo(
-            p.receita,
-            p.custo,
-            p.margem_bruta,
-            p.margem_liquida,
-            p.margem_liquida_pct,
-        )
-        .minimo(m.margem_minima)
-        .itens_sem_custo(p.itens_sem_custo)
-        .mostrar(ui);
-        if m.custo_estimado {
-            ui.add(Rotulo::apoio(
-                "Peça ainda não aplicada: o custo é o combinado na encomenda ou o custo médio de hoje.",
-            ));
-        }
-        if p.itens_sem_custo > 0 && !detalhe.itens_mao_de_obra.is_empty() {
-            ui.add(Rotulo::apoio(
-                "Mão de obra entra no custo com as horas (previstas no item ou apontadas) e o                  custo-hora do técnico — defina em \"Custo-hora da equipe…\".",
-            ));
-        }
-    }
-
-    if os.estado.aceita_edicao_de_orcamento() {
-        ui.add_space(Espaco::E12);
-        ui.add(Rotulo::campo("Mão de obra"));
-        ui.add_space(Espaco::E4);
-        ui.columns(3, |c| {
-            c[0].add(Campo::novo("Serviço", &mut estado.mao_de_obra_descricao));
-            c[1].add(Campo::novo("Valor", &mut estado.mao_de_obra_valor).marcador("80,00"));
-            c[2].add(
-                Campo::novo("Horas previstas", &mut estado.mao_de_obra_horas).marcador("opcional"),
-            );
-        });
-        ui.add_space(Espaco::E4);
-        if ui
-            .add(Botao::secundario("+ Adicionar mão de obra"))
-            .clicked()
-        {
-            adicionar_mao_de_obra(ui.ctx(), motor, sessao, estado, os.id);
-        }
-
-        ui.add_space(Espaco::E12);
-        // TODO(backend): a busca aqui compara só o nome do produto — quando o código curto de
-        // rastreabilidade (post-it físico na peça) existir em `ItemProdutoComSaldo`, somar
-        // `p.codigo_curto` ao `subtitulo` abaixo é o suficiente para o técnico bipar/digitar o
-        // código de bancada em vez de catar o nome numa lista de centenas de peças.
-        let opcoes_peca: Vec<OpcaoBusca<Id>> = estado
-            .produtos
-            .iter()
-            .map(|p| {
-                OpcaoBusca::nova(p.produto, p.nome.clone())
-                    .subtitulo(format!("{} disponível(is)", p.disponivel))
-            })
-            .collect();
-        let antes = estado.peca_produto;
-        SeletorBusca::novo(
-            "Peça do estoque",
-            &mut estado.peca_busca,
-            &mut estado.peca_produto,
-        )
-        .opcoes(opcoes_peca)
-        .marcador("Buscar peça, ou digitar o nome de uma nova…")
-        .mostrar(ui);
-        if let Some(produto) = estado.peca_produto.filter(|p| Some(*p) != antes) {
-            sugerir_preco(motor, sessao, estado, produto);
-        }
-        ui.add_space(Espaco::E4);
-        ui.columns(2, |c| {
-            c[0].add(Campo::novo("Quantidade", &mut estado.peca_qtd).marcador("1"));
-            c[1].add(Campo::novo("Preço unitário", &mut estado.peca_preco).marcador("0,00"));
-        });
-        if !estado.peca_preco_dica.is_empty() {
-            ui.add(Rotulo::campo(estado.peca_preco_dica.clone()));
-        } else if estado.peca_produto.is_none() && !estado.peca_busca.trim().is_empty() {
-            ui.add(Rotulo::campo(format!(
-                "Não está no catálogo: \"{}\" entra como peça nova (NCM fica para depois).",
-                estado.peca_busca.trim()
-            )));
-        }
-        ui.add_space(Espaco::E4);
-        if ui.add(Botao::secundario("+ Adicionar peça")).clicked() {
-            adicionar_peca(ui.ctx(), motor, sessao, estado, os.id);
-        }
-    }
-
+    secao_servicos(ui, motor, sessao, estado, detalhe);
     ui.add_space(Espaco::E16);
-    secao_apontamento(ui, motor, sessao, estado, os.id);
+    secao_resultado(ui, sessao, estado, detalhe);
 
     if os.estado == EstadoOs::Faturada {
         ui.add_space(Espaco::E16);
-        ui.add(Rotulo::titulo_secao("Financeiro"));
-        ui.add_space(Espaco::E8);
-        match &estado.titulo_gerado {
-            Some(titulo) => {
-                ui.add(Rotulo::interface(format!(
-                    "Título a receber gerado: {}",
-                    titulo.id.curto()
-                )));
-                ui.add(ValorDinheiro::novo(titulo.valor_original));
-            }
-            None => {
-                ui.add(Rotulo::interface(
-                    "Faturada sem cobrança (garantia/cortesia) — nenhum título gerado.",
-                ));
-            }
-        }
-        ui.add_space(Espaco::E16);
-        super::nfse::secao(ui, motor, sessao, &mut estado.nfse, os.id);
+        Painel::novo()
+            .plano()
+            .titulo("Financeiro")
+            .mostrar(ui, |ui| {
+                match &estado.titulo_gerado {
+                    Some(titulo) => {
+                        ui.horizontal(|ui| {
+                            ui.add(Etiqueta::positiva("título gerado"));
+                            ui.add(Rotulo::interface(format!(
+                                "A receber nº {}",
+                                titulo.id.curto()
+                            )));
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| ui.add(ValorDinheiro::novo(titulo.valor_original)),
+                            );
+                        });
+                    }
+                    None => {
+                        ui.add(
+                            Rotulo::interface(
+                                "Faturada sem cobrança (garantia/cortesia) — nenhum título gerado.",
+                            )
+                            .quebravel(),
+                        );
+                    }
+                }
+                ui.add_space(Espaco::E16);
+                super::nfse::secao(ui, motor, sessao, &mut estado.nfse, os.id);
+            });
     }
-
-    ui.add_space(Espaco::E16);
-    acoes_por_estado(ui, estado, detalhe);
 }
 
 pub(super) fn acoes_por_estado(
@@ -372,24 +200,39 @@ pub(super) fn acoes_por_estado(
     let os = &detalhe.ordem;
     match os.estado {
         EstadoOs::AguardandoAprovacao => {
-            ui.add(Rotulo::titulo_secao("Aprovação do cliente"));
-            ui.add_space(Espaco::E8);
-            ui.add(Campo::novo(
-                "Quem aprovou (nome e documento)",
-                &mut estado.aprovador,
-            ));
-            ui.add_space(Espaco::E8);
-            if ui
-                .add(Botao::destrutivo("Cliente reprovou").pequeno())
-                .clicked()
-            {
-                estado.confirmar_acao = Some(AcaoPendente::ReprovarOrcamento(os.id));
-            }
+            Painel::novo()
+                .realce(Tom::Atencao)
+                .titulo("Aprovação do cliente")
+                .mostrar(ui, |ui| {
+                    ui.add(
+                        Rotulo::apoio(
+                            "Anote quem aprovou e use \"Aprovar orçamento\" no rodapé. Se o \
+                             cliente recusou, registre a reprovação.",
+                        )
+                        .quebravel(),
+                    );
+                    ui.add_space(Espaco::E8);
+                    ui.columns(2, |c| {
+                        c[0].add(
+                            Campo::novo("Quem aprovou (nome e documento)", &mut estado.aprovador)
+                                .marcador("Ex.: Maria Souza, CPF 123…"),
+                        );
+                        c[1].add_space(Espaco::E24);
+                        if c[1].add(Botao::destrutivo("Cliente reprovou")).clicked() {
+                            estado.confirmar_acao = Some(AcaoPendente::ReprovarOrcamento(os.id));
+                        }
+                    });
+                });
+            ui.add_space(Espaco::E16);
         }
         EstadoOs::EmExecucao => {
             let n = detalhe.itens_peca.iter().filter(|i| !i.aplicada).count();
             if n > 0 {
-                ui.add(
+                Painel::novo()
+                    .realce(Tom::Info)
+                    .titulo("Peças a baixar")
+                    .mostrar(ui, |ui| {
+                        ui.add(
                     Rotulo::interface(if n == 1 {
                         "1 peça ainda não saiu do estoque — sai sozinha ao concluir (ou use \
                          \"Aplicar\" na linha para baixar agora)."
@@ -403,17 +246,22 @@ pub(super) fn acoes_por_estado(
                     .quebravel()
                     .cor(ui.cores().texto_medio),
                 );
-                if estado.locais.len() > 1 {
-                    ui.add_space(Espaco::E8);
-                    let opcoes: Vec<(Id, String)> = estado
-                        .locais
-                        .iter()
-                        .map(|l| (l.id, l.nome.clone()))
-                        .collect();
-                    SeletorOpcao::novo("Sai do local de estoque", &mut estado.aplicar_local)
-                        .opcoes(opcoes)
-                        .mostrar(ui);
-                }
+                        if estado.locais.len() > 1 {
+                            ui.add_space(Espaco::E8);
+                            let opcoes: Vec<(Id, String)> = estado
+                                .locais
+                                .iter()
+                                .map(|l| (l.id, l.nome.clone()))
+                                .collect();
+                            SeletorOpcao::novo(
+                                "Sai do local de estoque",
+                                &mut estado.aplicar_local,
+                            )
+                            .opcoes(opcoes)
+                            .mostrar(ui);
+                        }
+                    });
+                ui.add_space(Espaco::E16);
             }
         }
         EstadoOs::Faturada

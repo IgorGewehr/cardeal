@@ -78,7 +78,8 @@ pub use comandos::{
 pub use comandos::{
     ConfirmacaoEntrada, ConfirmarEntrada, DefinirPreferenciasCompras, EntradaConfirmada,
     EntradaFoiEstornada, EstornarEntrada, ImportarNotaDeArquivoXml, ItemNotaManual,
-    LancarNotaManual, RelatorioImportacao, VincularProdutoManual, MOTIVO_MINIMO_ESTORNO,
+    LancarNotaManual, RatearDespesasEntre, RelatorioImportacao, VincularProdutoManual,
+    MOTIVO_MINIMO_ESTORNO,
 };
 pub use comandos::{CriarProdutoDoItem, ProdutoDoItemCriado};
 pub use consultas::{

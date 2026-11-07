@@ -19,6 +19,16 @@ pub(super) fn painel_fluxo(
             estado.fluxo_dias = d;
             estado.carregar_fluxo(motor, sessao);
         }
+        ui.add_space(Espaco::E24);
+        ui.add(Rotulo::sobrelinha("Ver"));
+        ui.add_space(Espaco::E8);
+        if let Some(r) = Abas::nova(&[(0_u8, "Tudo"), (1, "Fluxo de caixa"), (2, "Fluxo bancário")])
+            .selecionada(estado.fluxo_recorte)
+            .id_salt("financeiro-fluxo-recorte")
+            .mostrar(ui)
+        {
+            estado.fluxo_recorte = r;
+        }
     });
     ui.add_space(Espaco::E12);
 
@@ -65,7 +75,26 @@ pub(super) fn painel_fluxo(
     });
     ui.add_space(Espaco::E16);
 
-    if estado.extrato.is_empty() {
+    // Só o que já aconteceu: o extrato vem das baixas realizadas até hoje — título em aberto
+    // (mesmo lançado para daqui a 30 dias) mora em A pagar/A receber, não aqui.
+    let caixas: std::collections::HashSet<&str> = estado
+        .contas_disp
+        .iter()
+        .filter(|c| c.e_caixa)
+        .map(|c| c.nome.as_str())
+        .collect();
+    let recorte = estado.fluxo_recorte;
+    let movimentos: Vec<&ItemMovimentoDisponivel> = estado
+        .extrato
+        .iter()
+        .filter(|m| match recorte {
+            1 => caixas.contains(m.conta_nome.as_str()),
+            2 => !caixas.contains(m.conta_nome.as_str()),
+            _ => true,
+        })
+        .collect();
+
+    if movimentos.is_empty() {
         EstadoVazio::novo(
             Icone::Dinheiro,
             "Nenhum movimento no período. Aqui só entra o que de fato entrou ou saiu do caixa e \
@@ -79,24 +108,28 @@ pub(super) fn painel_fluxo(
     ui.add_space(Espaco::E8);
     let colunas = vec![
         ColunaGrade::nova("Data").largura(96.0),
-        ColunaGrade::nova("Histórico"),
+        ColunaGrade::nova("Lançamento"),
+        ColunaGrade::nova("Origem").largura(170.0),
         ColunaGrade::nova("Conta").largura(140.0),
         ColunaGrade::nova("Valor").largura(130.0).numero(),
         ColunaGrade::nova("Acumulado").largura(130.0).numero(),
     ];
     let mut acc = Dinheiro::ZERO;
-    let linhas: Vec<(String, String, String, Dinheiro, Dinheiro)> = estado
-        .extrato
+    let linhas: Vec<(String, String, String, String, Dinheiro, Dinheiro)> = movimentos
         .iter()
         .map(|m| {
             acc += m.valor;
-            let hist = match estado.rotulo_origem(m) {
-                Some(origem) => format!("{} — {origem}", m.historico),
-                None => m.historico.clone(),
-            };
+            // O mesmo nome da conta a pagar/receber que gerou o movimento; sem título por
+            // trás (suprimento, sangria, venda direto no caixa), o histórico do lançamento.
+            let nome = m
+                .descricao_titulo
+                .clone()
+                .unwrap_or_else(|| m.historico.clone());
+            let origem = estado.rotulo_origem(m).unwrap_or("—").to_owned();
             (
                 m.data.formatar_curta(),
-                hist,
+                nome,
+                origem,
                 m.conta_nome.clone(),
                 m.valor,
                 acc,
@@ -104,12 +137,15 @@ pub(super) fn painel_fluxo(
         })
         .collect();
     Grade::nova(colunas).mostrar(ui, linhas.len(), |i, row| {
-        let (data, hist, conta, valor, acumulado) = &linhas[i];
+        let (data, nome, origem, conta, valor, acumulado) = &linhas[i];
         row.col(|ui| {
             ui.add(Rotulo::campo(data.clone()));
         });
         row.col(|ui| {
-            ui.add(Rotulo::interface(hist.clone()));
+            ui.add(Rotulo::interface(nome.clone()));
+        });
+        row.col(|ui| {
+            ui.add(Rotulo::campo(origem.clone()));
         });
         row.col(|ui| {
             ui.add(Rotulo::campo(conta.clone()));

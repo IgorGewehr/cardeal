@@ -70,7 +70,6 @@ impl EstadoTelaFinanceiro {
             } else {
                 None
             };
-            self.obrigacoes = super::obrigacoes::carregar(motor, sessao);
             self.contador.conhecer(motor, sessao);
         }
         if self.aba == Aba::Contador {
