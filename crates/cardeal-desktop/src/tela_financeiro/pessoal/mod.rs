@@ -152,6 +152,7 @@ pub(crate) fn corpo(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &
         (AbaPessoal::Lancamentos, "Lançamentos do mês"),
         (AbaPessoal::Cartoes, "Cartões de crédito"),
     ])
+    .navegacao()
     .selecionada(estado.aba)
     .id_salt("abas-pessoal")
     .mostrar(ui)

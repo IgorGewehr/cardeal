@@ -16,23 +16,28 @@ mod conferencia;
 mod contador;
 mod contas;
 mod custos;
+mod dfc_mensal;
 mod dre;
+mod exportar;
 mod fluxo;
 mod grupo;
 mod importacao;
 mod lancar;
 mod obrigacoes;
 mod orcamento;
+mod orcamento_planilha;
 mod pacote_contador;
 mod pessoal;
 mod plano_contas;
 mod recorrencias;
 mod regua;
+mod relatorios;
 mod renegociar;
 mod saude;
 mod simples;
 #[cfg(test)]
 mod testes;
+mod vencimentos;
 mod visao;
 
 use std::collections::HashMap;
@@ -88,6 +93,8 @@ enum Aba {
     Custos,
     Cobranca,
     Resultado,
+    /// Os relatórios do caixa: contas por vencimento, por dia, o previsto.
+    Relatorios,
     Plano,
     Conciliacao,
     Cheques,
@@ -451,8 +458,10 @@ pub struct EstadoTelaFinanceiro {
     dfc: Option<mod_financeiro::dfc::Dfc>,
     /// O DFC pelo método indireto (do lucro ao caixa) do mesmo mês.
     dfc_indireto: Option<mod_financeiro::dfc::DfcIndireto>,
-    /// A aba do DFC mostra o método indireto.
-    dfc_metodo_indireto: bool,
+    /// A subaba do DFC: 0 = método direto, 1 = indireto, 2 = mês a mês, 3 = orçado × realizado.
+    dfc_visao: u8,
+    /// O DFC do ano por conta (mês a mês e orçado × realizado).
+    dfc_mensal: dfc_mensal::EstadoDfcMensal,
     /// Dentro de Resultado: 0 = DRE, 1 = DFC, 2 = balancete, 3 = Simples, 4 = orçamento.
     visao_resultado: u8,
     /// O resumo do Simples do mês (`None`: sem a permissão).
@@ -481,6 +490,10 @@ pub struct EstadoTelaFinanceiro {
     dash_pagar: Dinheiro,
     dash_venc_receber: (usize, Dinheiro),
     dash_venc_pagar: (usize, Dinheiro),
+    /// A aba Relatórios.
+    relatorios: relatorios::EstadoRelatorios,
+    /// Os quadros da semana, do mês, do próximo mês e do atraso (Visão geral).
+    vencimentos: vencimentos::EstadoVencimentos,
     dash_recebido_mes: Dinheiro,
     dash_pago_mes: Dinheiro,
     /// O "em aberto" de cada espécie, carregado uma vez pelo painel e reaproveitado pela
@@ -577,6 +590,7 @@ pub fn mostrar(
                 Aba::Custos => painel_custos(ui, motor, sessao, estado),
                 Aba::Cobranca => painel_cobranca(ui, motor, sessao, estado),
                 Aba::Resultado => painel_dre(ui, motor, sessao, estado),
+                Aba::Relatorios => relatorios::painel(ui, motor, sessao, estado),
                 Aba::Plano => painel_plano(ui, motor, sessao, estado),
                 Aba::Conciliacao => painel_conciliacao(ui, motor, sessao, estado),
                 Aba::Cheques => cheques::painel_cheques(ui, motor, sessao, estado),
@@ -701,6 +715,7 @@ fn abas(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTe
         (Aba::Custos, "Custos por categoria"),
         (Aba::Cobranca, "Cobrança"),
         (Aba::Resultado, "Resultado e caixa"),
+        (Aba::Relatorios, "Relatórios"),
         (Aba::Plano, "Plano de contas"),
         (Aba::Conciliacao, "Conciliação"),
         (Aba::Cheques, "Cheques"),
@@ -713,7 +728,10 @@ fn abas(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut EstadoTe
     if sessao.concede("financeiro.contador.ver") {
         lista.push((Aba::Contador, "Contador"));
     }
-    let nova = Abas::nova(&lista).selecionada(estado.aba).mostrar(ui);
+    let nova = Abas::nova(&lista)
+        .navegacao()
+        .selecionada(estado.aba)
+        .mostrar(ui);
     if let Some(nova) = nova {
         estado.aba = nova;
         estado.carregar(motor, sessao);
@@ -781,6 +799,35 @@ impl EstadoTelaFinanceiro {
             "financeiro-dfc" => {
                 self.aba = Aba::Resultado;
                 self.visao_resultado = 1;
+            }
+            "financeiro-dfc-mensal" | "financeiro-dfc-projetado" => {
+                self.aba = Aba::Resultado;
+                self.visao_resultado = 1;
+                self.dfc_visao = 2;
+                if cena == "financeiro-dfc-projetado" {
+                    self.dfc_mensal.fonte = dfc_mensal::Fonte::Projetado;
+                }
+            }
+            "financeiro-orcado" | "financeiro-orcado-mensal" => {
+                self.aba = Aba::Resultado;
+                self.visao_resultado = 1;
+                self.dfc_visao = 3;
+                self.dfc_mensal.comparado_mes_a_mes = cena == "financeiro-orcado-mensal";
+            }
+            "financeiro-orcamento" => {
+                self.aba = Aba::Resultado;
+                self.visao_resultado = 4;
+                self.form_orcamento.planilha = true;
+            }
+            "financeiro-relatorios"
+            | "financeiro-relatorio-dia"
+            | "financeiro-relatorio-previsto" => {
+                self.aba = Aba::Relatorios;
+                self.relatorios.qual = match cena {
+                    "financeiro-relatorio-dia" => relatorios::QualRelatorio::PagamentosPorDia,
+                    "financeiro-relatorio-previsto" => relatorios::QualRelatorio::FluxoPrevisto,
+                    _ => relatorios::QualRelatorio::ContasAPagar,
+                };
             }
             "financeiro-pagar" => self.aba = Aba::Pagar,
             "financeiro-fluxo" => self.aba = Aba::Fluxo,

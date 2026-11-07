@@ -201,7 +201,7 @@ fn formulario(ctx: &egui::Context, e: &mut Estado) {
     }
 
     let fechar = Dialogo::nova("Adicionar à equipe")
-        .descricao("Quem ainda não tem conta no Cardeal entra com o e-mail e a senha inicial.")
+        .descricao("Quem ainda não tem conta no Lunno entra com o e-mail e a senha inicial.")
         .medio()
         .mostrar(
             ctx,

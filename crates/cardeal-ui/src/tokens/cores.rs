@@ -1,4 +1,9 @@
-//! Camada 0 (ions) — a paleta Rubro. `docs/12-ui-ux.md` §2.
+//! Camada 0 (ions) — a paleta da marca e os neutros/semânticos. `docs/12-ui-ux.md` §2.
+//!
+//! No lunno a escala da marca é violeta ("Lua", da marca da lua crescente); o tipo continua
+//! chamado [`Rubro`] — o nome da escala vermelha do Cardeal — para não mexer em todo componente
+//! que a lê. Vermelho agora só quer dizer `negativo` (saída, atraso, erro): numa tela de
+//! financeiro a marca vermelha competia com o valor a pagar.
 //!
 //! Cada token é uma constante tipada, nunca uma string hex solta numa tela: usar a cor
 //! errada aqui é erro de compilação (`ui.cores().rubro_500`, não `"#EF443B"`).
@@ -23,33 +28,37 @@ const fn hex(v: u32) -> Color32 {
     )
 }
 
-/// A escala Rubro (marca), fixa entre os dois temas — `docs/12-ui-ux.md` §2.1.
+/// A escala da marca (Lua, violeta), fixa entre os dois temas — `docs/12-ui-ux.md` §2.1.
 pub struct Rubro;
 
 impl Rubro {
     /// Fundo de destaque muito sutil, linha selecionada.
-    pub const R50: Color32 = hex(0xFFF2F1);
+    pub const R50: Color32 = hex(0xF4F2FE);
     /// Fundo de badge, hover de item de menu.
-    pub const R100: Color32 = hex(0xFFE1DF);
-    /// Bordas suaves, divisórias em contexto rubro.
-    pub const R200: Color32 = hex(0xFFC5C1);
+    pub const R100: Color32 = hex(0xE9E5FD);
+    /// Bordas suaves, divisórias em contexto da marca.
+    pub const R200: Color32 = hex(0xD4CCFB);
     /// Ilustração, gráfico secundário.
-    pub const R300: Color32 = hex(0xFF9C95);
-    /// Hover do botão primário.
-    pub const R400: Color32 = hex(0xF87068);
+    pub const R300: Color32 = hex(0xB3A5F7);
+    /// Hover do botão primário; a marca como texto no tema escuro.
+    pub const R400: Color32 = hex(0x8F7AF2);
     /// A cor da marca: botão primário, indicador ativo, logotipo.
-    pub const R500: Color32 = hex(0xEF443B);
+    pub const R500: Color32 = hex(0x5B45E0);
     /// Pressionado; texto sobre fundo claro.
-    pub const R600: Color32 = hex(0xD93028);
-    /// Erro / destrutivo. Nunca a mesma função visual que `R500` na mesma tela.
-    pub const R700: Color32 = hex(0xB3221C);
-    /// Erro em fundo escuro.
-    pub const R800: Color32 = hex(0x8C1A15);
-    /// Texto de erro em superfície muito clara.
-    pub const R900: Color32 = hex(0x6B1411);
+    pub const R600: Color32 = hex(0x4B35C7);
+    /// Texto da marca em superfície muito clara.
+    pub const R700: Color32 = hex(0x3D2BA3);
+    /// Marca em fundo escuro, sombra de ilustração.
+    pub const R800: Color32 = hex(0x30237F);
+    /// O tom mais fundo da escala.
+    pub const R900: Color32 = hex(0x231A5C);
 
     /// A cor de texto/ícone que vai **sobre** um preenchimento `R400`–`R600` (contraste AA).
     pub const CONTRASTE: Color32 = Color32::WHITE;
+
+    /// O fundo do "fechar" da janela sob o ponteiro: o vermelho do sistema, fora da escala da
+    /// marca (a convenção vale em qualquer marca).
+    pub const FECHAR_JANELA: Color32 = hex(0xC42B1C);
 }
 
 /// Neutros e semânticos de um tema (claro ou escuro) — `docs/12-ui-ux.md` §2.2–2.4.
@@ -85,8 +94,8 @@ pub struct Cores {
     pub positivo: Color32,
     /// Fundo para `positivo`.
     pub positivo_suave: Color32,
-    /// Saída de dinheiro, saldo negativo, rejeitado. = `Rubro::R700` no claro — nunca por
-    /// coincidência (`docs/12-ui-ux.md` §2.3).
+    /// Saída de dinheiro, saldo negativo, rejeitado — o único vermelho da interface
+    /// (`docs/12-ui-ux.md` §2.3).
     pub negativo: Color32,
     /// Fundo para `negativo`.
     pub negativo_suave: Color32,
@@ -111,7 +120,7 @@ impl Cores {
             superficie: hex(0xFFFFFF),
             superficie_2: hex(0xF3F4F6),
             superficie_hover: hex(0xEEEFF1),
-            rubro_ativo: hex(0xFDECEB),
+            rubro_ativo: hex(0xEFEDFC),
             rubro: Rubro::R500,
             borda: hex(0xE7E7EA),
             borda_forte: hex(0xD4D4D8),
@@ -122,7 +131,7 @@ impl Cores {
 
             positivo: hex(0x12855A),
             positivo_suave: hex(0xE6F5EE),
-            negativo: Rubro::R700,
+            negativo: hex(0xB3221C),
             negativo_suave: hex(0xFDEBEA),
             atencao: hex(0xB45309),
             atencao_suave: hex(0xFEF3E2),
@@ -132,9 +141,10 @@ impl Cores {
         }
     }
 
-    /// Tema escuro — mesma estrutura, superfície e texto invertidos; a marca não muda
-    /// (`docs/12-ui-ux.md` §2.4). Os fundos semânticos (`*_suave`) são tinturas **escuras**,
-    /// nunca os valores do tema claro.
+    /// Tema escuro — mesma estrutura, superfície e texto invertidos (`docs/12-ui-ux.md` §2.4).
+    /// A marca como texto/ícone sobe um tom (`R400`): o violeta `R500` sobre fundo quase preto
+    /// não tem contraste para ler; o preenchimento do botão primário continua `R500`. Os fundos
+    /// semânticos (`*_suave`) são tinturas **escuras**, nunca os valores do tema claro.
     #[must_use]
     pub const fn escuro() -> Self {
         Self {
@@ -142,8 +152,8 @@ impl Cores {
             superficie: hex(0x17181B),
             superficie_2: hex(0x1E1F23),
             superficie_hover: hex(0x22242A),
-            rubro_ativo: hex(0x33191A),
-            rubro: Rubro::R500,
+            rubro_ativo: hex(0x221D3F),
+            rubro: Rubro::R400,
             borda: hex(0x2A2B30),
             borda_forte: hex(0x3A3B41),
             texto_fraco: hex(0x7A7B84),

@@ -167,7 +167,7 @@ pub fn imprimir_em(
             .map(crate::impressora::Saida::Impressora);
     }
     let pdf = cardeal_pdf::gerar_danfce(&danfce, bobina).map_err(|e| e.to_string())?;
-    let pasta = std::env::temp_dir().join("Cardeal").join("cupons");
+    let pasta = std::env::temp_dir().join("Lunno").join("cupons");
     std::fs::create_dir_all(&pasta).map_err(|e| e.to_string())?;
     let caminho = pasta.join(format!(
         "NFCe-{}-{}.pdf",

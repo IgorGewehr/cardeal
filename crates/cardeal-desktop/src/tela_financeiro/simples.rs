@@ -232,13 +232,13 @@ fn historico(
     aberto: bool,
 ) {
     let mut salvar = false;
-    SecaoExpansivel::nova("Mês de abertura e faturamento de antes do Cardeal")
+    SecaoExpansivel::nova("Mês de abertura e faturamento de antes do Lunno")
         .aberta_por_padrao(aberto)
         .mostrar(ui, |ui| {
             let f = &mut estado.form_simples;
             ui.add(
                 Rotulo::apoio(
-                    "O Cardeal só conhece o faturamento desde que começou a ser usado. Se a \
+                    "O Lunno só conhece o faturamento desde que começou a ser usado. Se a \
                      empresa é mais antiga, informe o faturamento (receita bruta) dos meses de \
                      antes; se abriu há menos de um ano, o mês de abertura — a receita do \
                      primeiro ano é anualizada, como a lei manda.",
@@ -256,7 +256,7 @@ fn historico(
             for (c, v) in &mut f.valores {
                 ui.add(
                     Campo::novo(
-                        format!("Faturamento de {} antes do Cardeal", mes_texto(*c)),
+                        format!("Faturamento de {} antes do Lunno", mes_texto(*c)),
                         v,
                     )
                     .marcador("0,00"),

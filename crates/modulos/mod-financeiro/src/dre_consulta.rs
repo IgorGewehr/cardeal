@@ -71,14 +71,18 @@ impl Consulta for DreComparativa {
         let periodo = periodo_do_mes(self.mes);
         // O orçamento do mês: a DRE do orçado, e as contas orçadas aparecem no realizado mesmo
         // sem movimento.
-        let orcado = crate::orcamento::sqlite::orcado_do_mes(conexao, ctx.empresa, self.mes)?;
+        // Só as contas do resultado: as de caixa (compras, investimentos, financiamentos) não
+        // entram na DRE.
+        let contas = cardeal_ledger::contas_de_resultado(conexao, ctx.empresa)
+            .map_err(|e| Erro::novo(CodigoErro::FALHA_INTERNA, format!("financeiro/DRE: {e}")))?;
+        let orcado: Vec<(cardeal_kernel::Id, cardeal_kernel::Dinheiro)> =
+            crate::orcamento::sqlite::orcado_do_mes(conexao, ctx.empresa, self.mes)?
+                .into_iter()
+                .filter(|(conta, _)| contas.iter().any(|c| c.conta == *conta))
+                .collect();
         let (atual, dre_orcada) = if orcado.is_empty() {
             (apurar(conexao, ctx, periodo)?, None)
         } else {
-            let contas =
-                cardeal_ledger::contas_de_resultado(conexao, ctx.empresa).map_err(|e| {
-                    Erro::novo(CodigoErro::FALHA_INTERNA, format!("financeiro/DRE: {e}"))
-                })?;
             let linhas_orcadas: Vec<cardeal_ledger::LinhaResultado> = orcado
                 .iter()
                 .filter_map(|(conta, valor)| {

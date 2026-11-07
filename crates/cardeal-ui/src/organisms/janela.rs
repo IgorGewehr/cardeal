@@ -27,14 +27,16 @@ impl Janela {
         Self { raio, altura_barra }
     }
 
-    /// A barra de título: logo, nome, e minimizar/maximizar/fechar. Arrasta a janela, e o
-    /// duplo-clique maximiza ou restaura. Sempre visível — inclusive antes do login.
+    /// A barra de título: logo, nome, o contexto (a empresa aberta, quando há uma) e
+    /// minimizar/maximizar/fechar. Arrasta a janela, e o duplo-clique maximiza ou restaura.
+    /// Sempre visível — inclusive antes do login.
     pub fn barra_titulo(
         self,
         ctx: &Context,
         tema: Tema,
         logo: (&'static str, &'static [u8]),
         titulo: &str,
+        contexto: Option<&str>,
     ) {
         let cores = tema.cores();
         let raio = self.raio;
@@ -70,6 +72,12 @@ impl Janela {
                         );
                         ui.add_space(Espaco::E8);
                         ui.add(Rotulo::titulo_secao(titulo));
+                        if let Some(contexto) = contexto.filter(|c| !c.trim().is_empty()) {
+                            ui.add_space(Espaco::E8);
+                            ui.add(Rotulo::apoio("/").cor(cores.borda_forte));
+                            ui.add_space(Espaco::E8);
+                            ui.add(Rotulo::apoio(contexto));
+                        }
 
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             self.botoes(ui, ctx, maximizada);

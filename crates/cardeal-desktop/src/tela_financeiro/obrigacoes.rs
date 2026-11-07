@@ -52,6 +52,15 @@ pub(super) fn carregar(motor: &Motor, sessao: &Sessao) -> Vec<Obrigacao> {
 }
 
 /// O cartão.
+/// Alguma obrigação vence em até três dias (ou já passou)? Então o cartão sobe para o topo da
+/// Visão geral; senão fica depois dos números do caixa.
+pub(super) fn ha_urgente(obrigacoes: &[Obrigacao]) -> bool {
+    let hoje = Data::hoje(Fuso::BRASILIA);
+    obrigacoes
+        .iter()
+        .any(|o| o.quando.is_some_and(|d| hoje.dias_ate(d) <= 3))
+}
+
 pub(super) fn cartao(ui: &mut egui::Ui, obrigacoes: &[Obrigacao]) {
     if obrigacoes.is_empty() {
         return;

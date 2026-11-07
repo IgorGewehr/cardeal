@@ -277,6 +277,15 @@ impl Comando for CriarContaDoPlano {
     }
 }
 
+/// As receitas que o controle por categoria usa e o plano base já tem com outro nome: a categoria
+/// da gestão financeira e o papel da conta em que ela lança.
+#[cfg(feature = "sqlite")]
+const RECEITAS_DA_BASE: &[(&str, &str)] = &[
+    ("Venda de mercadorias", "ReceitaVendas"),
+    ("Receita de serviços", "ReceitaServicos"),
+    ("Outras receitas", "OutrasReceitas"),
+];
+
 /// Acrescenta ao plano as contas de um modelo de segmento e liga as categorias de mesmo nome.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct AplicarModeloDePlano {
@@ -289,6 +298,8 @@ pub struct AplicarModeloDePlano {
 pub struct ModeloAplicado {
     /// Os códigos das contas criadas (as que já existiam ficam como estão).
     pub criadas: Vec<String>,
+    /// Quantas categorias o modelo criou (a gestão financeira cria uma por conta).
+    pub categorias_criadas: u32,
     /// Quantas categorias passaram a lançar numa conta nova.
     pub categorias_vinculadas: u32,
 }
@@ -324,28 +335,121 @@ impl Comando for AplicarModeloDePlano {
                     .info_conta(pai_id)
                     .map_err(|e| Erro::de_dominio(&e))?
                     .ok_or_else(|| Erro::nao_encontrado("conta pai do modelo"))?;
-                let conta = Conta::abrir_filha(
-                    pai_id,
-                    &pai,
-                    CodigoConta::novo(c.codigo),
-                    c.nome.to_owned(),
-                    c.natureza,
-                    None,
-                    c.papel,
-                    "financeiro",
-                )
-                .map_err(|e| Erro::de_dominio(&e))?;
+                let conta = if c.agrupadora {
+                    let mut g = Conta::abrir_filha_agrupadora(
+                        pai_id,
+                        &pai,
+                        CodigoConta::novo(c.codigo),
+                        c.nome.to_owned(),
+                        c.natureza,
+                        "financeiro",
+                    )
+                    .map_err(|e| Erro::de_dominio(&e))?;
+                    // As filhas herdam o papel da agrupadora (impostos, pessoal, financeiras).
+                    g.papel = c.papel;
+                    g
+                } else {
+                    Conta::abrir_filha(
+                        pai_id,
+                        &pai,
+                        CodigoConta::novo(c.codigo),
+                        c.nome.to_owned(),
+                        c.natureza,
+                        None,
+                        c.papel,
+                        "financeiro",
+                    )
+                    .map_err(|e| Erro::de_dominio(&e))?
+                };
                 repo.inserir_conta(&conta)
                     .map_err(|e| Erro::de_dominio(&e))?;
                 criadas.push(c.codigo.to_owned());
             }
         }
-        let categorias_vinculadas = vincular_categorias_por_nome(uow.conexao(), ctx.empresa)?;
+        // A gestão financeira é o controle por categoria: uma categoria por conta, com o mesmo
+        // nome (as que já existem ficam), para lançar já na conta certa.
+        let gestao = self.modelo == ModeloDePlano::GestaoFinanceira;
+        let categorias_criadas = if gestao {
+            criar_categorias_da_gestao(ctx, uow)?
+        } else {
+            0
+        };
+        let mut categorias_vinculadas = vincular_categorias_por_nome(uow.conexao(), ctx.empresa)?;
+        if gestao {
+            categorias_vinculadas += vincular_receitas_da_base(uow.conexao(), ctx.empresa)?;
+        }
         Ok(ModeloAplicado {
             criadas,
+            categorias_criadas,
             categorias_vinculadas,
         })
     }
+}
+
+/// Uma categoria por conta analítica da gestão financeira, mais as receitas que o plano base já
+/// tem com outro nome — pulando as que já existem (pelo nome, sem caixa nem espaços).
+#[cfg(feature = "sqlite")]
+fn criar_categorias_da_gestao(ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<u32> {
+    use crate::categoria::CategoriaFinanceira;
+    use crate::repositorio::RepositorioFinanceiro;
+    use crate::titulo::EspecieTitulo;
+
+    let normalizar = |s: &str| s.trim().to_lowercase();
+    let existentes: Vec<String> = RepositorioFinanceiro::novo(uow)
+        .categorias_ativas(ctx.empresa)?
+        .iter()
+        .map(|c| normalizar(&c.nome))
+        .collect();
+    let contas = cardeal_ledger::contas_do_modelo(ModeloDePlano::GestaoFinanceira);
+    let das_contas = contas.iter().filter(|c| !c.agrupadora).map(|c| {
+        let especie = if c.natureza == cardeal_ledger::Natureza::Receita {
+            EspecieTitulo::Receber
+        } else {
+            EspecieTitulo::Pagar
+        };
+        (c.nome, especie)
+    });
+    // As receitas do controle por categoria que o plano base já tem (com outro nome): a
+    // categoria liga depois pela conta do papel (`vincular_receitas_da_base`).
+    let da_base = RECEITAS_DA_BASE
+        .iter()
+        .map(|(nome, _)| (*nome, EspecieTitulo::Receber));
+    let mut criadas = 0;
+    for (nome, especie) in das_contas.chain(da_base) {
+        if existentes.contains(&normalizar(nome)) {
+            continue;
+        }
+        let cat = CategoriaFinanceira::nova(ctx.empresa, nome, Some(especie))
+            .map_err(|e| Erro::de_dominio(&e))?;
+        RepositorioFinanceiro::novo(uow).inserir_categoria(&cat)?;
+        criadas += 1;
+    }
+    Ok(criadas)
+}
+
+/// Liga as categorias de [`RECEITAS_DA_BASE`] ainda sem conta à primeira conta analítica ativa
+/// do papel delas; devolve quantas ligou.
+#[cfg(feature = "sqlite")]
+fn vincular_receitas_da_base(conexao: &Connection, empresa: Id) -> Resultado<u32> {
+    let mut vinculadas = 0;
+    for (nome, papel) in RECEITAS_DA_BASE {
+        vinculadas += u32::try_from(
+            conexao
+                .execute(
+                    "UPDATE financeiro_categoria SET conta = (
+                         SELECT id FROM razao_conta
+                         WHERE empresa = ?1 AND papel_padrao = ?3 AND tipo = 'Analitica'
+                           AND ativa = 1
+                         ORDER BY LENGTH(codigo), codigo LIMIT 1)
+                     WHERE empresa = ?1 AND lower(nome) = lower(?2) AND ativa = 1
+                       AND conta IS NULL",
+                    params![blob(empresa), nome, papel],
+                )
+                .map_err(persist)?,
+        )
+        .unwrap_or(0);
+    }
+    Ok(vinculadas)
 }
 
 /// Faz as receitas/despesas lançadas com a categoria caírem numa conta do plano. `conta: None`

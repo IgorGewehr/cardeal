@@ -7,8 +7,10 @@
 2. **Densidade honesta.** ERP é ferramenta de trabalho, não landing page. Muita informação por tela,
    organizada por hierarquia visual — não por espaço em branco.
 3. **Teclado primeiro.** Toda ação tem atalho. O operador de balcão nunca precisa do mouse.
-4. **Vermelho é significado, não decoração.** O vermelho da marca marca **ação primária** e
-   **identidade**. Vermelho de erro é um tom distinto e mais escuro. Nunca se confundem.
+4. **Vermelho é significado, não decoração.** No lunno vermelho é só `negativo` (saída, atraso,
+   erro); a marca — ação primária, item ativo, identidade — é violeta (§2.1). Até 2026-11-06 a
+   marca era o vermelho Rubro do Cardeal, e numa tela de financeiro a aba ativa e o botão primário
+   competiam com o valor a pagar.
 5. **Nada pisca, nada gira sem motivo.** Animação existe para explicar transição de estado; nunca
    para entreter. E animação custa energia (Pilar I).
 6. **Números são tabulares.** Toda coluna monetária alinha as casas decimais. Sempre.
@@ -16,20 +18,27 @@
 
 ## 2. Paleta
 
-### 2.1 Rubro (primária — referência AnyDesk)
+### 2.1 Marca (Lua, violeta — no código ainda `Rubro`)
+
+A escala da marca do lunno, desde 2026-11-06 (antes, o vermelho Rubro do Cardeal: `#EF443B` no
+500). O tipo em `cardeal-ui` continua `Rubro` e os campos `rubro`/`rubro_ativo`, para não mexer em
+cada componente; os valores são estes. A marca gráfica está em `assets/marca/` (lua crescente).
 
 | Token | Hex | Uso |
 |---|---|---|
-| `rubro-50` | `#FFF2F1` | Fundo de destaque muito sutil, linha selecionada |
-| `rubro-100` | `#FFE1DF` | Fundo de badge, hover de item de menu |
-| `rubro-200` | `#FFC5C1` | Bordas suaves, divisórias em contexto rubro |
-| `rubro-300` | `#FF9C95` | Ilustração, gráfico secundário |
-| `rubro-400` | `#F87068` | Hover do botão primário |
-| **`rubro-500`** | **`#EF443B`** | **Cor da marca. Botão primário, indicador ativo, logotipo** |
-| `rubro-600` | `#D93028` | Pressionado, texto sobre fundo claro (contraste AA) |
-| `rubro-700` | `#B3221C` | Erro / destrutivo |
-| `rubro-800` | `#8C1A15` | Erro em fundo escuro |
-| `rubro-900` | `#6B1411` | Texto de erro em superfície muito clara |
+| `rubro-50` | `#F4F2FE` | Fundo de destaque muito sutil, linha selecionada |
+| `rubro-100` | `#E9E5FD` | Fundo de badge, hover de item de menu |
+| `rubro-200` | `#D4CCFB` | Bordas suaves, divisórias em contexto da marca |
+| `rubro-300` | `#B3A5F7` | Ilustração, gráfico secundário |
+| `rubro-400` | `#8F7AF2` | Hover do botão primário; a marca como texto no tema escuro |
+| **`rubro-500`** | **`#5B45E0`** | **Cor da marca. Botão primário, indicador ativo, logotipo** (branco sobre ela: 6,2:1) |
+| `rubro-600` | `#4B35C7` | Pressionado, texto sobre fundo claro |
+| `rubro-700` | `#3D2BA3` | Texto da marca em superfície muito clara |
+| `rubro-800` | `#30237F` | Marca em fundo escuro |
+| `rubro-900` | `#231A5C` | O tom mais fundo |
+
+O "fechar" da barra de título fica vermelho no hover (`Rubro::FECHAR_JANELA`, `#C42B1C`): é a
+convenção do sistema, não a marca.
 
 ### 2.2 Neutros
 
@@ -51,7 +60,7 @@
 |---|---|---|
 | `positivo` | `#12855A` | Entrada de dinheiro, saldo positivo, autorizado |
 | `positivo-suave` | `#E6F5EE` | Fundo |
-| `negativo` | `#B3221C` (= `rubro-700`) | Saída de dinheiro, saldo negativo, rejeitado |
+| `negativo` | `#B3221C` | Saída de dinheiro, saldo negativo, rejeitado — o único vermelho |
 | `negativo-suave` | `#FDEBEA` | Fundo |
 | `atencao` | `#B45309` | Vence hoje, em contingência, requer conferência |
 | `atencao-suave` | `#FEF3E2` | Fundo |
@@ -59,14 +68,15 @@
 | `info-suave` | `#EAF0FE` | Fundo |
 | `neutro-barra` | `#A1A1AA` | Séries neutras em gráfico |
 
-**Regra crítica:** `rubro-500` (marca) e `rubro-700` (erro) nunca aparecem com a mesma função na
-mesma tela. Um botão primário é `rubro-500`; um botão destrutivo é `rubro-700` com borda e texto,
-nunca preenchido — para que o usuário não confunda "confirmar" com "excluir".
+**Regra crítica:** a marca e o `negativo` nunca aparecem com a mesma função na mesma tela. Um
+botão primário é `rubro-500`; um botão destrutivo é `negativo` com borda e texto, nunca preenchido —
+para que o usuário não confunda "confirmar" com "excluir".
 
 ### 2.4 Tema escuro
 
-Mesma estrutura de tokens, valores trocados. `rubro-500` permanece `#EF443B` (a marca não muda);
-o que muda é a superfície. Alternância por `Ctrl+Shift+D` ou seguindo o SO.
+Mesma estrutura de tokens, valores trocados. O preenchimento do botão primário continua
+`rubro-500`; a marca como texto e ícone (`Cores::rubro`) sobe para `rubro-400`, porque o violeta
+500 sobre fundo quase preto não tem contraste de leitura. Alternância por `Ctrl+Shift+D` ou seguindo o SO.
 O tema escuro é o padrão sugerido para terminais de PDV em ambiente de baixa luz e economiza energia
 em telas OLED.
 
@@ -141,6 +151,8 @@ Comportamento:
 - Entradas vêm do registro de módulos ([doc 04](04-pilar-modularidade.md)). Módulo desligado não
   aparece; submódulo desligado não aparece.
 - Indicador ativo: barra `rubro-500` de 3 px à esquerda + fundo `rubro-50` + ícone em `rubro-600`.
+- A navegação rola quando não cabe acima do rodapé (Configurações): numa tela de 720 px lógicos os
+  últimos itens ficavam por baixo dele. O espaço entre itens é o da sidebar (2 px), não o do tema.
 - Badges numéricos (`⚠3`) para itens que exigem ação; nunca badge decorativo.
 - Estado (recolhida/expandida, grupos abertos) é persistido por usuário **e por dispositivo** — o
   operador do PDV quer recolhida, o financeiro quer expandida.
@@ -286,9 +298,9 @@ Todos em `cardeal-ui`, com galeria viva em `cargo run -p cardeal-ui --example ga
 
 | Camada | Componentes |
 |---|---|
-| atoms | `Botao`, `BotaoChevron`, `BotaoJanela`, `Caixa`, `CampoTexto`, `Divisor`, `Etiqueta` (com `.com_ponto()`), `Icone`, `Rotulo`, `Spinner`, `Tecla`, `ValorDinheiro` (`.neutro()` para colunas de medida, `.esmaecido()`), `superficie_clicavel` |
-| molecules | `Abas`, `AcoesRegistro` (Editar · Excluir da linha), `BarraFiltros` (busca + filtros da listagem; `.acao()` à direita), `CabecalhoTela`, `Campo`, `CampoBusca`, `CampoSelecao` (caixa clicável de seletor com painel: valor ou marcador + chevron), `CartaoKpi` (com `.tom()` e `.icone()`), `Dado` (rótulo/valor de leitura; `dado()` e `dado_em_linha()`), `EstadoVazio`, `ItemDeLista` (com `.atalho()` e `.esmaecido()`), `LinhaDeAcao`, `LinhaDoTempo` (passos feito · atual · pendente — o andamento da OS), `SecaoExpansivel`, `SeletorBusca`, `SeletorOpcao` (`.sem_rotulo()` para barras de ferramentas) |
-| organisms | `AgendaCalendario`, `AgendaMes`, `ArvoreHierarquia` (árvore de registros em pré-ordem, nós que recolhem), `Cartao`, `Dialogo` (`.descricao()`, `.pequeno()`/`.medio()`), `dialogo_confirmacao`, `FaixaKpi`, `Gaveta` (painel à direita com a lista visível atrás — detalhe de registro que é processo, como a OS; mesmo contrato do `Dialogo`), `Grade` (com `.vazio()`, `.carregando()`, `.com_acoes()` e `Ordenacao`), `Grafico`, `Janela` (shell sem decoração nativa), `LayoutTela`, `Notificacoes`, `Painel` (elevado · plano · `.realce(Tom)`), `PaletaComandos`, `SeletorEmArvore` (escolhe um nó de uma hierarquia: o campo mostra o caminho "Grupo › Sub › Cat", o painel traz a árvore expansível com busca incremental; `.opcao_vazia()` limpa a escolha, `.sem_rotulo()` para barras de filtro — cadastro de produto, filtro de Preços e de Alteração em lote; galeria: `GALERIA_SELETOR=1` abre o painel), `SeletorPagamento` (à vista/a prazo, meio em pílulas, conta bancária — faturar OS e dar baixa usam o mesmo), `Sidebar` |
+| atoms | `Botao`, `BotaoChevron`, `BotaoJanela`, `Caixa`, `CampoTexto` (`.numerico()` alinha à direita, `.compacto()` para editar dentro de uma célula de grade — a planilha do orçamento), `Divisor`, `Etiqueta` (com `.com_ponto()`), `Icone`, `Rotulo`, `Spinner`, `Tecla`, `ValorDinheiro` (`.neutro()` para colunas de medida, `.esmaecido()`), `superficie_clicavel` |
+| molecules | `Abas` (quebra em mais linhas quando não cabe — nunca alarga a tela; `.navegacao()` para as abas de primeiro nível da tela: traço sob a ativa e linha sob a barra, em vez de segmentos), `AcoesRegistro` (Editar · Excluir da linha), `BarraFiltros` (busca + filtros da listagem; `.acao()` à direita), `CabecalhoTela`, `Campo`, `CampoBusca`, `CampoSelecao` (caixa clicável de seletor com painel: valor ou marcador + chevron), `CartaoKpi` (com `.tom()` e `.icone()`), `Dado` (rótulo/valor de leitura; `dado()` e `dado_em_linha()`), `EstadoVazio`, `ItemDeLista` (com `.atalho()` e `.esmaecido()`), `LinhaDeAcao`, `LinhaDoTempo` (passos feito · atual · pendente — o andamento da OS), `SecaoExpansivel`, `SeletorBusca`, `SeletorOpcao` (`.sem_rotulo()` para barras de ferramentas; com mais de 8 opções o painel abre com uma busca já focada — digitar filtra pelo começo do nome, depois pelo começo de qualquer palavra, sem acento; setas e Enter escolhem; o painel não fecha ao clicar dentro dele; ocupa a largura que sobra — numa linha com botões, dê a largura com `ui.allocate_ui`) |
+| organisms | `AgendaCalendario`, `AgendaMes`, `ArvoreHierarquia` (árvore de registros em pré-ordem, nós que recolhem), `Cartao`, `Dialogo` (`.descricao()`, `.pequeno()`/`.medio()`), `dialogo_confirmacao`, `FaixaKpi`, `Gaveta` (painel à direita com a lista visível atrás — detalhe de registro que é processo, como a OS; mesmo contrato do `Dialogo`), `Grade` (com `.vazio()`, `.carregando()`, `.com_acoes()`, `.rolagem_horizontal()` para tabelas largas como os 12 meses do DFC, e `Ordenacao`), `Grafico`, `Janela` (shell sem decoração nativa), `LayoutTela`, `Notificacoes`, `Painel` (elevado · plano · `.realce(Tom)`), `PaletaComandos`, `SeletorEmArvore` (escolhe um nó de uma hierarquia: o campo mostra o caminho "Grupo › Sub › Cat", o painel traz a árvore expansível com busca incremental; `.opcao_vazia()` limpa a escolha, `.sem_rotulo()` para barras de filtro — cadastro de produto, filtro de Preços e de Alteração em lote; galeria: `GALERIA_SELETOR=1` abre o painel), `SeletorPagamento` (à vista/a prazo, meio em pílulas, conta bancária — faturar OS e dar baixa usam o mesmo), `Sidebar` |
 
 `Tom::cores` é a **única** tabela tom → cor (`Etiqueta`, `Painel` e `CartaoKpi` a compartilham; nunca
 copie o `match`).

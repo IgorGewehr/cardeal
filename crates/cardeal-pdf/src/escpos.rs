@@ -315,7 +315,7 @@ pub fn comprovante_escpos(d: &ComprovantePdf, bobina: Bobina, opcoes: OpcoesEscP
 #[must_use]
 pub fn teste_escpos(bobina: Bobina, opcoes: OpcoesEscPos) -> Vec<u8> {
     let mut e = EscPos::nova(bobina, opcoes);
-    e.centro("Cardeal", Fonte::Negrito, bobina.titulo());
+    e.centro("Lunno", Fonte::Negrito, bobina.titulo());
     e.centro("Teste de impressão", Fonte::Regular, bobina.corpo());
     e.tracejado();
     e.esquerda(

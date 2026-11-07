@@ -232,8 +232,8 @@ impl AvisoDoSimples {
                                        empresa passa para o Simples. Converse com o contador."
                 .into(),
             Self::HistoricoCurto { meses } => format!(
-                "O Cardeal tem só {meses} mês(es) de receita antes deste. Se a empresa é mais \
-                 antiga, informe o faturamento de antes do Cardeal; se abriu há menos de um ano, \
+                "O Lunno tem só {meses} mês(es) de receita antes deste. Se a empresa é mais \
+                 antiga, informe o faturamento de antes do Lunno; se abriu há menos de um ano, \
                  informe o mês de abertura — senão o faturamento dos 12 meses (e a alíquota) sai \
                  menor que o real."
             ),

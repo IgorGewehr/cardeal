@@ -174,7 +174,7 @@ pub fn propor_segundo_fator(
         .ok_or_else(|| Erro::novo(CodigoErro::SESSAO_INVALIDA, "conta inexistente"))?;
     let segredo = cardeal_auth::totp::SegredoTotp::gerar();
     Ok(cardeal_auth::totp::SegundoFatorProposto {
-        uri: segredo.uri("Cardeal", &registro.email),
+        uri: segredo.uri("Lunno", &registro.email),
         segredo: segredo.em_base32(),
     })
 }

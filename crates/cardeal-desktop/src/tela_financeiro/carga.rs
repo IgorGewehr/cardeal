@@ -102,6 +102,9 @@ impl EstadoTelaFinanceiro {
         if self.aba == Aba::Resultado {
             self.carregar_dre(motor, sessao);
         }
+        if self.aba == Aba::Relatorios {
+            self.carregar_relatorios(motor, sessao);
+        }
         if matches!(self.aba, Aba::Fluxo | Aba::Bancos) {
             self.carregar_fluxo(motor, sessao);
         }
@@ -231,6 +234,7 @@ impl EstadoTelaFinanceiro {
         self.dash_pagar = soma(&pagar);
         self.dash_venc_receber = venc(&receber);
         self.dash_venc_pagar = venc(&pagar);
+        self.carregar_vencimentos(motor, sessao);
         self.abertos_receber = receber;
         self.abertos_pagar = pagar;
 

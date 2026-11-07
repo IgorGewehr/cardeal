@@ -99,7 +99,13 @@ pub fn mostrar(
     ui.add_space(Espaco::E64);
     Cartao::novo().largura(380.0).mostrar(ui, |ui| {
         ui.vertical_centered(|ui| {
-            ui.add(Rotulo::titulo_tela("Cardeal"));
+            ui.add(
+                egui::Image::from_bytes("bytes://lunno-logo.png", crate::LOGO_PNG)
+                    .max_height(56.0)
+                    .fit_to_original_size(1.0),
+            );
+            ui.add_space(Espaco::E8);
+            ui.add(Rotulo::titulo_tela("Lunno"));
         });
         ui.add_space(Espaco::E16);
 

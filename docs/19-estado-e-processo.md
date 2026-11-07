@@ -60,6 +60,43 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   `modulos/compras.md` §14): Estoque › Entre filiais envia com a NF-e de transferência (5152/6152, CSOSN
   400, `mod_fiscal::transferencia`), a filial recebe só com ela autorizada, o Razão espelha pela conta
   corrente com empresas do grupo (papel novo `ContaCorrenteGrupo`); só mesma raiz de CNPJ e Simples.
+  O **DFC gerencial** (2026-11-05, `mod_financeiro::dfc_gerencial`, doc `modulos/financeiro.md` §6.9):
+  Resultado › DFC › "Mês a mês, por conta" (12 meses, realizado ou orçado, em R$ ou % das receitas) e
+  "Orçado × realizado" pelo caixa — cada baixa vai para a conta do título de origem, não para
+  clientes/fornecedores. E a **planilha do orçamento** (§6.7 do financeiro): todas as contas × 12
+  meses, "Salvar orçamento" tudo ou nada, e as compras, investimentos e financiamentos orçados pelo
+  caixa (financeiro v16: o orçado pode ser negativo na conta de caixa). Na Visão geral, os **quadros de
+  vencimento** (§6.10): esta semana, este mês, o próximo — previsto, realizado e pendente do que vence —
+  e o atraso. Financeiro › **Relatórios** (§6.11): contas a pagar/receber por faixa de vencimento,
+  recebimentos e pagamentos por dia e o fluxo de caixa previsto, todos com exportação em PDF e `.xlsx`.
+  O DFC mês a mês ganhou o **a vencer** (parcelas em aberto na conta do título), os subtotais do dono
+  (receita líquida, margem de contribuição, resultado operacional, resultado líquido do caixa) e o orçado
+  × realizado **mês a mês**, com exportação. O modelo de plano **Gestão financeira completa**
+  (2026-11-06, `modulos/financeiro.md` §6.1) traz a árvore do controle por categoria, com uma categoria
+  por conta.
+  **Preparação da demo do lunno (2026-11-06):** a demo (`--features demo`) semeia um ano de caixa no
+  modelo da gestão financeira (saldo inicial, vendas semanais, despesas do mês, orçamento de todas as
+  contas e um extrato a conciliar) e aceita `--demo [cena]` na linha de comando, para um atalho do
+  Windows abrir direto (`CARDEAL_DEMO_ZOOM` só serve à captura). Achados no notebook do usuário
+  (1280×720 lógicos, Windows a 150%, Intel UHD 630 + GTX 1650): (1) o app caía na partida com
+  0xC0000005 no `ig9icd64.dll` — o wgpu inicializava o OpenGL do driver Intel de 2019; no Windows agora
+  só Vulkan ou DX12 (`wgpu` com `dx12` no desktop; `WGPU_BACKEND` ainda força outro); (2) as 13 abas
+  do Financeiro alargavam a tela e cortavam KPIs, o "Receber várias", o saldo das contas bancárias e o
+  "Importar extrato…" — `Abas` quebra linha e o seletor da conciliação tem largura própria; (3) o
+  release abria uma janela de console junto — agora `windows_subsystem = "windows"` fora do debug.
+  **O app se chama Lunno (2026-11-06):** nome na janela, login, PDFs e 2FA; marca provisória (lua
+  crescente) em `assets/marca/lunno-*`; a marca do design system é violeta (`#5B45E0`, doc 12 §2.1) e
+  vermelho ficou só para `negativo`. Pasta de dados `%APPDATA%\Lunno`, mas quem já tem
+  `%APPDATA%\Cardeal\cardeal.db` continua nela. Crates, binário (`cardeal-desktop`), `app_id` e o
+  empacotamento Linux seguem com o nome Cardeal. Trato na interface: empresa na barra de título,
+  sidebar que cabe em 720 px lógicos (e rola), `Abas::navegacao()` nas abas de primeiro nível,
+  Obrigações depois dos números na Visão geral. **Não repetir:** o eframe grava a memória do egui —
+  inclusive o zoom — em `%APPDATA%\cardeal-desktop\data\app.ron`; uma captura com `CARDEAL_DEMO_ZOOM`
+  deixava o app ampliado nas aberturas seguintes. A demo não grava mais (`persist_egui_memory`).
+  Depois, no ensaio do usuário: o filtro de categoria (dezenas de contas da gestão financeira) virava
+  caça-palavras — `SeletorOpcao` ganhou busca com foco ao abrir em listas longas e passou a desenhar o
+  próprio botão e painel (o `ComboBox` do egui fecha em qualquer clique, inclusive na busca). A captura
+  da demo aceita `CARDEAL_DEMO_GESTOS` (clique, texto, tecla) para fotografar menus abertos.
   Onda 6 (Financeiro 2) começou: **conciliação com alerta de pendências e saldo banco × sistema**,
   **lançamento pré-preenchido pelo último da pessoa**, **DFC indireto**, **cheques**, **balancete/diário** e o
   **pacote do contador** (PDF + `.xlsx`) e a **régua de cobrança** (fila do dia com envio de um clique) feitos

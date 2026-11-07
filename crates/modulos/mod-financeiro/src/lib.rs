@@ -76,6 +76,7 @@ mod conferencia;
 mod consultas;
 pub mod contador;
 pub mod dfc;
+pub mod dfc_gerencial;
 pub mod dre;
 mod dre_consulta;
 mod erros;
@@ -97,12 +98,14 @@ mod projecao;
 pub mod receituario;
 mod recorrencia;
 pub mod regua;
+pub mod relatorios;
 #[cfg(feature = "sqlite")]
 mod repositorio;
 pub mod saude;
 pub mod sugestao;
 mod titulo;
 mod ultimo_lancamento;
+pub mod vencimentos;
 
 pub use aging::{AgingAPagar, AgingAReceber};
 pub use baixa::{PlanoBaixa, SituacaoParcela};

@@ -314,7 +314,11 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
             }
             abas.push((AbaEstoque::Validade, "Validade"));
             abas.push((AbaEstoque::Radar, "Radar de reposição"));
-            if let Some(nova) = Abas::nova(&abas).selecionada(estado.aba).mostrar(ui) {
+            if let Some(nova) = Abas::nova(&abas)
+                .navegacao()
+                .selecionada(estado.aba)
+                .mostrar(ui)
+            {
                 estado.aba = nova;
                 if nova == AbaEstoque::Precos {
                     estado.prc.carregar(motor, sessao);

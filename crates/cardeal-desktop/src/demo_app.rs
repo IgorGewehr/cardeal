@@ -34,12 +34,80 @@ pub struct Captura {
     pub base: std::path::PathBuf,
     quadros: u32,
     pediu: bool,
+    maximizou: bool,
+    /// Gestos de `CARDEAL_DEMO_GESTOS` (clique, texto, tecla), cada um no quadro em que entra —
+    /// para capturar um menu aberto ou uma busca digitada sem mexer no mouse de ninguém.
+    gestos: Vec<(u32, egui::Event)>,
+    quadros_de_entrada: u32,
+}
+
+/// Lê `CARDEAL_DEMO_GESTOS` ("clique:753,500;texto:as;tecla:enter", posições em pontos lógicos)
+/// como eventos de entrada, um gesto a cada 3 quadros a partir do 6º.
+fn gestos_do_ambiente() -> Vec<(u32, egui::Event)> {
+    let Ok(roteiro) = std::env::var("CARDEAL_DEMO_GESTOS") else {
+        return Vec::new();
+    };
+    let mut eventos = Vec::new();
+    let mut quadro = 6;
+    for gesto in roteiro.split(';').map(str::trim).filter(|g| !g.is_empty()) {
+        let (tipo, valor) = gesto.split_once(':').unwrap_or((gesto, ""));
+        match tipo {
+            "clique" => {
+                let mut xy = valor
+                    .split(',')
+                    .filter_map(|n| n.trim().parse::<f32>().ok());
+                let (Some(x), Some(y)) = (xy.next(), xy.next()) else {
+                    continue;
+                };
+                let pos = egui::pos2(x, y);
+                let botao = |pressionado| egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: pressionado,
+                    modifiers: egui::Modifiers::NONE,
+                };
+                eventos.push((quadro, egui::Event::PointerMoved(pos)));
+                eventos.push((quadro, botao(true)));
+                eventos.push((quadro + 1, botao(false)));
+            }
+            "texto" => eventos.push((quadro, egui::Event::Text(valor.to_owned()))),
+            "tecla" => {
+                let tecla = match valor {
+                    "enter" => egui::Key::Enter,
+                    "baixo" => egui::Key::ArrowDown,
+                    "cima" => egui::Key::ArrowUp,
+                    "esc" => egui::Key::Escape,
+                    _ => continue,
+                };
+                eventos.push((
+                    quadro,
+                    egui::Event::Key {
+                        key: tecla,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ));
+            }
+            _ => continue,
+        }
+        quadro += 3;
+    }
+    eventos
 }
 
 impl Captura {
-    /// `Some` quando `CARDEAL_DEMO` está definido.
+    /// `Some` quando `CARDEAL_DEMO` está definido, ou com `--demo [cena]` na linha de comando
+    /// (a cena padrão é `financeiro`) — o jeito de um atalho do Windows abrir a demonstração,
+    /// já que atalho não define variável de ambiente.
     pub fn do_ambiente() -> Option<Self> {
-        let cena = std::env::var("CARDEAL_DEMO").ok()?;
+        let cena = std::env::var("CARDEAL_DEMO").ok().or_else(|| {
+            let mut args = std::env::args().skip_while(|a| a != "--demo").skip(1);
+            std::env::args()
+                .any(|a| a == "--demo")
+                .then(|| args.next().unwrap_or_else(|| "financeiro".to_owned()))
+        })?;
         let dir = tempfile::tempdir().expect("diretório temporário");
         let base = dir.path().join("demo.db");
         Some(Self {
@@ -49,11 +117,39 @@ impl Captura {
             base,
             quadros: 0,
             pediu: false,
+            maximizou: false,
+            gestos: gestos_do_ambiente(),
+            quadros_de_entrada: 0,
         })
     }
 
-    /// Conta quadros, pede a captura e grava o PNG; fecha a janela depois.
+    /// Põe na entrada deste quadro os gestos marcados para ele (`CARDEAL_DEMO_GESTOS`).
+    pub fn injetar(&mut self, entrada: &mut egui::RawInput) {
+        self.quadros_de_entrada += 1;
+        let agora = self.quadros_de_entrada;
+        entrada.events.extend(
+            self.gestos
+                .iter()
+                .filter(|(q, _)| *q == agora)
+                .map(|(_, e)| e.clone()),
+        );
+    }
+
+    /// Maximiza a janela no primeiro quadro (a demo é para mostrar: na tela cheia do notebook,
+    /// e a captura sai do tamanho que a plateia vê); depois conta quadros, pede a captura e grava
+    /// o PNG, e fecha a janela.
     pub fn quadro(&mut self, ctx: &egui::Context) {
+        if !self.maximizou {
+            self.maximizou = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+            // `CARDEAL_DEMO_ZOOM=0.6`: cabe mais tela na captura (para conferir o pé das telas).
+            if let Some(z) = std::env::var("CARDEAL_DEMO_ZOOM")
+                .ok()
+                .and_then(|z| z.parse::<f32>().ok())
+            {
+                ctx.set_zoom_factor(z);
+            }
+        }
         let Some(destino) = &self.destino else { return };
         self.quadros += 1;
         if self.quadros >= QUADROS_ANTES_DA_CAPTURA && !self.pediu {
@@ -424,7 +520,8 @@ pub fn semear(motor: &Motor) -> Sessao {
             )
             .expect("título");
     }
-    semear_custos_e_pessoal(motor, &s, hoje);
+    semear_ano_financeiro(motor, &s, hoje);
+    semear_pessoal(motor, &s, hoje);
     for nome in ["Nubank", "Banco do Brasil"] {
         let _: mod_financeiro::ContaBancariaCriada = motor
             .executar(
@@ -439,62 +536,279 @@ pub fn semear(motor: &Motor) -> Sessao {
     s
 }
 
-/// Custos da empresa por categoria (aluguel, pró-labore, energia, peças) e as finanças
-/// pessoais do usuário (pró-labore, faculdade, cartão parcelado) para as cenas de custos e
-/// pessoal.
-fn semear_custos_e_pessoal(motor: &Motor, s: &Sessao, hoje: Data) {
-    use mod_financeiro::pessoal::comandos::LancarPessoal;
-    use mod_financeiro::pessoal::{NovoPessoal, Repeticao, TipoPessoal};
+/// Um ano de caixa no plano da gestão financeira (o modelo com a árvore do controle por
+/// categoria): de janeiro até hoje, as vendas, os serviços e as despesas do mês pagos e
+/// recebidos; neste mês, o que já venceu pago (menos a energia, que fica atrasada) e o resto em
+/// aberto; e os dois meses seguintes a vencer. Mais o orçamento do ano — para o DFC mês a mês, o
+/// orçado × realizado, os relatórios e a visão geral terem o que mostrar.
+fn semear_ano_financeiro(motor: &Motor, s: &Sessao, hoje: Data) {
+    use mod_financeiro::orcamento::DefinirOrcamentoDoAno;
 
-    let _: u32 = motor
+    let _: mod_financeiro::ModeloAplicado = motor
         .executar(
             s,
-            "financeiro.criar_categorias_sugeridas.v1",
-            &mod_financeiro::CriarCategoriasSugeridas,
+            "financeiro.aplicar_modelo_de_plano.v1",
+            &mod_financeiro::AplicarModeloDePlano {
+                modelo: cardeal_ledger::ModeloDePlano::GestaoFinanceira,
+            },
         )
-        .expect("categorias");
+        .expect("modelo de plano");
+    let plano: Vec<mod_financeiro::NoPlano> = motor
+        .consultar(
+            s,
+            "financeiro.plano_de_contas.v1",
+            &mod_financeiro::PlanoDeContas,
+        )
+        .expect("plano");
+    let conta = |codigo: &str| plano.iter().find(|n| n.codigo == codigo).map(|n| n.id);
+    // O banco começa o ano com dinheiro (o saldo de implantação em 31/12), senão o caixa do
+    // DFC nasce negativo e a saúde financeira abre "em risco".
+    let _: mod_financeiro::SaldoInicialDefinido = motor
+        .executar(
+            s,
+            "financeiro.definir_saldo_inicial.v1",
+            &mod_financeiro::DefinirSaldoInicial {
+                conta: conta("1.1.02").expect("conta Bancos"),
+                saldo: Dinheiro::reais(38_000),
+                data: hoje.inicio_do_ano().mais_dias(-1),
+            },
+        )
+        .expect("saldo inicial");
     let cats: Vec<mod_financeiro::CategoriaFinanceira> = motor
         .consultar(s, "financeiro.categorias.v1", &mod_financeiro::Categorias)
         .expect("categorias");
     let cat = |nome: &str| cats.iter().find(|c| c.nome == nome).map(|c| c.id);
-    let inicio = hoje.inicio_do_mes();
-    for mes in 0..4 {
-        for (nome, descricao, reais, dia, pago) in [
-            ("Aluguel", "Aluguel da loja", 2_200, 5, mes == 0),
-            ("Pró-labore", "Pró-labore do Igor", 4_000, 5, mes == 0),
-            (
-                "Energia elétrica",
-                "Conta de luz",
-                380 + mes * 20,
-                12,
-                false,
-            ),
-            ("Internet e telefone", "Internet fibra", 150, 15, false),
-            ("Contador", "Honorários do contador", 450, 10, false),
-        ] {
-            let venc = inicio.mais_meses(mes).mais_dias(dia - 1);
-            let _: mod_financeiro::TituloAPagarLancado = motor
-                .executar(
-                    s,
-                    "financeiro.lancar_titulo_a_pagar.v1",
-                    &mod_financeiro::LancarTituloAPagar {
-                        fornecedor: None,
-                        valor_total: Dinheiro::reais(i64::from(reais)),
-                        emissao: venc,
-                        parcelas: 1,
-                        primeiro_vencimento: venc,
-                        intervalo_dias: 0,
-                        observacao: Some(descricao.to_owned()),
-                        categoria: cat(nome),
-                        quitado_agora: pago.then_some(mod_financeiro::QuitadoAgora {
-                            meio_pagamento: mod_financeiro::MeioPagamento::Pix,
-                            conta: None,
-                        }),
-                    },
-                )
-                .expect("custo");
+    // O que passou pelo banco (Pix), para o extrato da conciliação no fim.
+    let pelo_banco = std::cell::RefCell::new(Vec::<(Data, String, String)>::new());
+    let lancar =
+        |receber: bool, categoria: &str, descricao: &str, reais: i64, venc: Data, pago: bool| {
+            let quitado = pago.then_some(mod_financeiro::QuitadoAgora {
+                meio_pagamento: mod_financeiro::MeioPagamento::Pix,
+                conta: None,
+            });
+            if pago {
+                let (texto, sinal) = if receber {
+                    ("PIX RECEBIDO", "")
+                } else {
+                    ("PIX ENVIADO", "-")
+                };
+                pelo_banco.borrow_mut().push((
+                    venc,
+                    format!("{texto} {}", descricao.to_uppercase()),
+                    format!("{sinal}{reais},00"),
+                ));
+            }
+            if receber {
+                let _: mod_financeiro::TituloAReceberLancado = motor
+                    .executar(
+                        s,
+                        "financeiro.lancar_titulo_a_receber.v1",
+                        &mod_financeiro::LancarTituloAReceber {
+                            cliente: None,
+                            valor_total: Dinheiro::reais(reais),
+                            emissao: venc,
+                            parcelas: 1,
+                            primeiro_vencimento: venc,
+                            intervalo_dias: 0,
+                            observacao: Some(descricao.to_owned()),
+                            categoria: cat(categoria),
+                            quitado_agora: quitado,
+                        },
+                    )
+                    .expect("receita");
+            } else {
+                let _: mod_financeiro::TituloAPagarLancado = motor
+                    .executar(
+                        s,
+                        "financeiro.lancar_titulo_a_pagar.v1",
+                        &mod_financeiro::LancarTituloAPagar {
+                            fornecedor: None,
+                            valor_total: Dinheiro::reais(reais),
+                            emissao: venc,
+                            parcelas: 1,
+                            primeiro_vencimento: venc,
+                            intervalo_dias: 0,
+                            observacao: Some(descricao.to_owned()),
+                            categoria: cat(categoria),
+                            quitado_agora: quitado,
+                        },
+                    )
+                    .expect("despesa");
+            }
+        };
+    let este_mes = hoje.inicio_do_mes();
+    let mut mes = hoje.inicio_do_ano();
+    let mut i: i64 = 0;
+    while mes <= este_mes.mais_meses(2) {
+        let dia = |d: i32| mes.mais_dias(d - 1).min(mes.fim_do_mes());
+        let passado = mes < este_mes;
+        let pago = |d: i32| passado || (mes == este_mes && dia(d) < hoje);
+        // Margem de uns 10–20% ao mês: uma empresa saudável, com meses melhores e piores.
+        let vendas = 24_000 + (i * 1_700) % 6_000;
+        let servicos = 8_000 + (i * 450) % 2_000;
+        // As vendas entram toda semana e os serviços duas vezes por mês — como numa loja de
+        // verdade, e para o saldo do mês não abrir negativo nos primeiros dias.
+        for d in [1, 8, 15, 22] {
+            lancar(
+                true,
+                "Venda de mercadorias",
+                "Vendas da semana",
+                vendas / 4,
+                dia(d),
+                pago(d),
+            );
         }
+        for d in [3, 18] {
+            lancar(
+                true,
+                "Receita de serviços",
+                "Serviços da quinzena",
+                servicos / 2,
+                dia(d),
+                pago(d),
+            );
+        }
+        for (categoria, descricao, reais, d) in [
+            ("Aluguel", "Aluguel da loja", 2_200, 10),
+            ("Água", "Conta de água", 120 + i * 5, 10),
+            ("Internet", "Internet fibra", 150, 10),
+            ("Telefone / Celular", "Plano de celular", 130, 10),
+            ("Honorários do contador", "Honorários do contador", 450, 10),
+            ("Sistemas", "Sistemas e assinaturas", 480, 10),
+            ("Salários", "Folha de pagamento", 6_000, 5),
+            ("Pró-labore", "Pró-labore dos sócios", 4_000, 10),
+            ("FGTS", "FGTS da folha", 480, 7),
+            ("INSS", "INSS da folha", 900, 20),
+            (
+                "Simples Nacional",
+                "DAS do mês",
+                (vendas + servicos) * 6 / 100,
+                20,
+            ),
+            (
+                "Compra de mercadorias para revenda",
+                "Reposição de estoque",
+                vendas * 42 / 100,
+                15,
+            ),
+            (
+                "Combustíveis",
+                "Combustível dos carros",
+                600 + (i * 37) % 200,
+                18,
+            ),
+            ("Publicidade e propaganda", "Anúncios", 800, 12),
+            ("Despesas bancárias", "Tarifas do banco", 90, 2),
+        ] {
+            lancar(false, categoria, descricao, reais, dia(d), pago(d));
+        }
+        // A energia deste mês fica atrasada (para o quadro "Em atraso").
+        let energia_paga = passado;
+        lancar(
+            false,
+            "Energia elétrica",
+            "Conta de luz",
+            420 + (i * 23) % 120,
+            dia(8),
+            energia_paga,
+        );
+        if i == 2 {
+            lancar(
+                false,
+                "Manutenção de equipamentos",
+                "Conserto do ar-condicionado",
+                1_850,
+                dia(16),
+                pago(16),
+            );
+        }
+        i += 1;
+        mes = mes.mais_meses(1);
     }
+    // O extrato do banco dos últimos 12 dias, importado e por conciliar: o que o sistema já
+    // conhece (com a sugestão de casamento) e duas linhas que ele não conhece — um Pix de
+    // cliente e uma tarifa —, para a conciliação ter o que mostrar.
+    let mut linhas: Vec<(Data, String, String)> = pelo_banco
+        .into_inner()
+        .into_iter()
+        .filter(|(d, ..)| *d >= hoje.mais_dias(-12))
+        .collect();
+    linhas.push((
+        hoje.mais_dias(-2),
+        "PIX RECEBIDO MARIA SOUZA".to_owned(),
+        "275,00".to_owned(),
+    ));
+    linhas.push((
+        hoje.mais_dias(-4),
+        "TARIFA PACOTE DE SERVICOS".to_owned(),
+        "-39,90".to_owned(),
+    ));
+    linhas.sort_by_key(|(d, ..)| *d);
+    let csv: String = std::iter::once("data;descrição;valor".to_owned())
+        .chain(
+            linhas
+                .iter()
+                .map(|(d, texto, valor)| format!("{};{texto};{valor}", d.formatar())),
+        )
+        .collect::<Vec<_>>()
+        .join("\n");
+    let _: mod_financeiro::ExtratoImportado = motor
+        .executar(
+            s,
+            "financeiro.importar_extrato.v1",
+            &mod_financeiro::ImportarExtrato {
+                conta: conta("1.1.02").expect("conta Bancos"),
+                formato: mod_financeiro::extrato::FormatoExtrato::Csv,
+                arquivo: "extrato-banco.csv".to_owned(),
+                conteudo: csv,
+            },
+        )
+        .expect("extrato");
+    // O orçamento do ano, pelas contas das categorias: perto do realizado, com umas linhas
+    // estourando (energia, sistemas, compras) e outras sobrando (publicidade), como na vida real.
+    let todo_mes = |reais: i64| [Dinheiro::reais(reais); 12];
+    let contas: Vec<(cardeal_kernel::Id, [Dinheiro; 12])> = [
+        ("4.1", todo_mes(26_000)),
+        ("4.2", todo_mes(9_000)),
+        ("5.50.01", todo_mes(2_100)),
+        ("5.51.02", todo_mes(10_800)),
+        ("5.52.01", todo_mes(2_200)),
+        ("5.52.02", todo_mes(150)),
+        ("5.52.03", todo_mes(420)),
+        ("5.52.04", todo_mes(130)),
+        ("5.52.05", todo_mes(150)),
+        ("5.53.01", todo_mes(450)),
+        ("5.54.01", todo_mes(420)),
+        ("5.55.01", todo_mes(700)),
+        ("5.56.01", todo_mes(1_000)),
+        ("5.57.01", todo_mes(6_000)),
+        ("5.57.02", todo_mes(4_000)),
+        ("5.57.07", todo_mes(480)),
+        ("5.57.08", todo_mes(900)),
+        ("5.58.01", todo_mes(90)),
+    ]
+    .into_iter()
+    .filter_map(|(codigo, meses)| Some((conta(codigo)?, meses)))
+    .collect();
+    let _: u32 = motor
+        .executar(
+            s,
+            "financeiro.definir_orcamento_do_ano.v1",
+            &DefinirOrcamentoDoAno {
+                ano: hoje.ano(),
+                contas,
+            },
+        )
+        .expect("orçamento");
+}
+
+/// As finanças pessoais do usuário (pró-labore, faculdade, cartão parcelado) para as cenas do
+/// pessoal. Os custos da empresa vêm do ano de caixa (`semear_ano_financeiro`).
+fn semear_pessoal(motor: &Motor, s: &Sessao, hoje: Data) {
+    use mod_financeiro::pessoal::comandos::LancarPessoal;
+    use mod_financeiro::pessoal::{NovoPessoal, Repeticao, TipoPessoal};
+
+    let inicio = hoje.inicio_do_mes();
     let pessoal = |tipo,
                    descricao: &str,
                    categoria: &str,

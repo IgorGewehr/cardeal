@@ -873,3 +873,586 @@ fn o_orcamento_vai_para_a_dre_e_o_ano_com_o_desvio_no_sentido_do_resultado() {
     );
     assert!(balanco.is_err());
 }
+
+#[test]
+fn o_dfc_gerencial_poe_o_dinheiro_na_conta_do_titulo_com_o_orcado_ao_lado() {
+    use mod_financeiro::dfc_gerencial::{DfcGerencial, DfcGerencialDoAno, GrupoGerencial};
+    use mod_financeiro::orcamento::DefinirOrcamentoDaConta;
+    use mod_financeiro::{
+        CategoriaCriada, ContaDoPlanoCriada, CriarCategoria, CriarContaDoPlano, EspecieTitulo,
+        EstornarBaixa, NoPlano, PlanoDeContas, VincularCategoriaAConta,
+    };
+    let c = cena();
+    let s = c.sessao(
+        Id::novo(),
+        &[
+            "financeiro.receber.criar",
+            "financeiro.receber.baixar",
+            "financeiro.receber.estornar",
+            "financeiro.pagar.criar",
+            "financeiro.pagar.baixar",
+            "financeiro.dre.ver",
+            "financeiro.orcamento.editar",
+            "financeiro.plano.ver",
+            "financeiro.plano.editar",
+            "financeiro.categoria.criar",
+        ],
+    );
+    let h = hoje();
+    let mes = h.competencia().mes() as usize - 1;
+
+    // O plano com uma agrupadora "Despesas de estrutura" e o "Aluguel" dentro dela.
+    let plano: Vec<NoPlano> = c.consulta(&s, "financeiro.plano_de_contas.v1", &PlanoDeContas);
+    let despesas = plano.iter().find(|n| n.codigo == "5").unwrap().id;
+    let estrutura: ContaDoPlanoCriada = c.cmd(
+        &s,
+        "financeiro.criar_conta_do_plano.v1",
+        &CriarContaDoPlano {
+            pai: despesas,
+            nome: "Despesas de estrutura".into(),
+            agrupadora: true,
+        },
+    );
+    let aluguel: ContaDoPlanoCriada = c.cmd(
+        &s,
+        "financeiro.criar_conta_do_plano.v1",
+        &CriarContaDoPlano {
+            pai: estrutura.conta,
+            nome: "Aluguel".into(),
+            agrupadora: false,
+        },
+    );
+    let categoria: CategoriaCriada = c.cmd(
+        &s,
+        "financeiro.criar_categoria.v1",
+        &CriarCategoria {
+            nome: "Aluguel".into(),
+            especie: Some(EspecieTitulo::Pagar),
+        },
+    );
+    let (): () = c.cmd(
+        &s,
+        "financeiro.vincular_categoria_a_conta.v1",
+        &VincularCategoriaAConta {
+            categoria: categoria.categoria,
+            conta: Some(aluguel.conta),
+        },
+    );
+
+    // Pagou o aluguel; recebeu 600 + 400 de uma receita e estornou os 400.
+    let p: mod_financeiro::TituloAPagarLancado = c.cmd(
+        &s,
+        "financeiro.lancar_titulo_a_pagar.v1",
+        &LancarTituloAPagar {
+            fornecedor: None,
+            valor_total: Dinheiro::reais(300),
+            emissao: h,
+            parcelas: 1,
+            primeiro_vencimento: h,
+            intervalo_dias: 0,
+            observacao: None,
+            categoria: Some(categoria.categoria),
+            quitado_agora: None,
+        },
+    );
+    let _: mod_financeiro::PagamentoBaixado = c.cmd(
+        &s,
+        "financeiro.baixar_pagamento.v1",
+        &BaixarPagamento {
+            parcela: p.parcelas[0],
+            valor: Dinheiro::reais(300),
+            data: h,
+            meio_pagamento: MeioPagamento::Dinheiro,
+            conta_destino: None,
+        },
+    );
+    let r: mod_financeiro::TituloAReceberLancado = c.cmd(
+        &s,
+        "financeiro.lancar_titulo_a_receber.v1",
+        &LancarTituloAReceber {
+            cliente: None,
+            valor_total: Dinheiro::reais(1_000),
+            emissao: h,
+            parcelas: 1,
+            primeiro_vencimento: h,
+            intervalo_dias: 0,
+            observacao: None,
+            categoria: None,
+            quitado_agora: None,
+        },
+    );
+    baixar_receber(&c, &s, r.parcelas[0], Dinheiro::reais(600));
+    let segunda: mod_financeiro::RecebimentoBaixado = c.cmd(
+        &s,
+        "financeiro.baixar_recebimento.v1",
+        &BaixarRecebimento {
+            parcela: r.parcelas[0],
+            valor: Dinheiro::reais(400),
+            data: h,
+            meio_pagamento: MeioPagamento::Dinheiro,
+            conta_destino: None,
+        },
+    );
+    let _: mod_financeiro::BaixaFoiEstornada = c.cmd(
+        &s,
+        "financeiro.estornar_baixa.v1",
+        &EstornarBaixa {
+            baixa: segunda.baixa,
+            motivo: "recebido em duplicidade, devolvido ao cliente".into(),
+        },
+    );
+
+    // O orçado do aluguel no mês: 350.
+    let mut meses = [Dinheiro::ZERO; 12];
+    meses[mes] = Dinheiro::reais(350);
+    let (): () = c.cmd(
+        &s,
+        "financeiro.definir_orcamento_da_conta.v1",
+        &DefinirOrcamentoDaConta {
+            conta: aluguel.conta,
+            ano: h.competencia().ano(),
+            meses,
+        },
+    );
+
+    let d: DfcGerencial = c.consulta(
+        &s,
+        "financeiro.dfc_gerencial_do_ano.v1",
+        &DfcGerencialDoAno {
+            ano: h.competencia().ano(),
+        },
+    );
+    let linhas: Vec<_> = d.grupos.iter().flat_map(|g| &g.linhas).collect();
+    // O aluguel pago está no aluguel (não em "fornecedores"), na agrupadora, com o orçado.
+    let a = linhas.iter().find(|l| l.conta == aluguel.conta).unwrap();
+    assert_eq!(a.realizado[mes], Dinheiro::reais(-300));
+    assert_eq!(a.orcado[mes], Dinheiro::reais(-350));
+    assert_eq!(a.agrupadora.as_deref(), Some("Despesas de estrutura"));
+    let despesas_op = d
+        .grupos
+        .iter()
+        .find(|g| g.grupo == GrupoGerencial::Despesas)
+        .unwrap();
+    assert_eq!(despesas_op.realizado[mes], Dinheiro::reais(-300));
+    // A receita: o que ficou (600), já sem o estorno; nada em clientes ou fornecedores.
+    let receitas = d
+        .grupos
+        .iter()
+        .find(|g| g.grupo == GrupoGerencial::Receitas)
+        .unwrap();
+    assert_eq!(receitas.realizado[mes], Dinheiro::reais(600));
+    assert!(
+        linhas
+            .iter()
+            .all(|l| !l.codigo.starts_with("1.2.") && !l.codigo.starts_with("2.1.")),
+        "{linhas:?}"
+    );
+    assert_eq!(d.sem_origem, Dinheiro::ZERO);
+    assert_eq!(d.variacao[mes], Dinheiro::reais(300));
+    assert_eq!(d.saldo_final[11], Dinheiro::reais(300));
+    assert_eq!(d.geracao_operacional()[mes], Dinheiro::reais(300));
+    assert_eq!(d.geracao_operacional_orcada()[mes], Dinheiro::reais(-350));
+}
+
+#[test]
+fn a_planilha_do_orcamento_grava_o_ano_de_uma_vez_e_orca_tambem_pelo_caixa() {
+    use mod_financeiro::dfc_gerencial::{DfcGerencial, DfcGerencialDoAno, GrupoGerencial};
+    use mod_financeiro::orcamento::{DefinirOrcamentoDoAno, OrcamentoAnual, OrcamentoDoAno};
+    let c = cena();
+    let s = c.sessao(
+        Id::novo(),
+        &[
+            "financeiro.dre.ver",
+            "financeiro.orcamento.editar",
+            "financeiro.plano.ver",
+        ],
+    );
+    let ano = hoje().competencia().ano();
+    let o: OrcamentoAnual = c.consulta(
+        &s,
+        "financeiro.orcamento_do_ano.v1",
+        &OrcamentoDoAno { ano },
+    );
+    let de_caixa: Vec<(&str, &str, bool)> = o
+        .linhas
+        .iter()
+        .filter(|l| l.de_caixa)
+        .map(|l| (l.codigo.as_str(), l.bloco.as_str(), l.soma_no_resultado))
+        .collect();
+    // Compras (estoques), investimentos (aplicações, imobilizado sem a depreciação) e
+    // financiamentos (empréstimos, capital, retiradas), pela ordem do plano.
+    assert!(
+        de_caixa.contains(&("1.3.01", "Compras", false)),
+        "{de_caixa:?}"
+    );
+    assert!(de_caixa.contains(&("1.1.03", "Investimentos", false)));
+    assert!(de_caixa.contains(&("1.4.01", "Investimentos", false)));
+    assert!(de_caixa.contains(&("2.1.04", "Financiamentos", true)));
+    assert!(de_caixa.contains(&("3.1", "Financiamentos", true)));
+    assert!(de_caixa.contains(&("3.3", "Financiamentos", false)));
+    assert!(de_caixa
+        .iter()
+        .all(|(c, _, _)| *c != "1.4.02" && *c != "1.2.01"));
+    let conta = |codigo: &str| o.linhas.iter().find(|l| l.codigo == codigo).unwrap().conta;
+    let (aluguel, emprestimo, vendas) = (conta("5.6"), conta("2.1.04"), conta("4.1"));
+
+    // Uma conta de receita com valor negativo recusa o lote inteiro: nada é gravado.
+    let mut negativo = [Dinheiro::reais(100); 12];
+    negativo[3] = Dinheiro::reais(-1);
+    let recusa =
+        c.d.executar_comando(
+            "financeiro.definir_orcamento_do_ano.v1",
+            &postcard::to_stdvec(&DefinirOrcamentoDoAno {
+                ano,
+                contas: vec![(aluguel, [Dinheiro::reais(100); 12]), (vendas, negativo)],
+            })
+            .unwrap(),
+            &s,
+            &c.ambiente(),
+            c.arm.escritor(),
+        )
+        .unwrap_err();
+    assert!(recusa.mensagem.contains("negativo"), "{}", recusa.mensagem);
+    // Uma conta que não se orça (clientes a receber) também.
+    assert!(c
+        .d
+        .executar_comando(
+            "financeiro.definir_orcamento_do_ano.v1",
+            &postcard::to_stdvec(&DefinirOrcamentoDoAno {
+                ano,
+                contas: vec![(conta_do_codigo(&c, &s, "1.2.01"), [Dinheiro::reais(1); 12])],
+            })
+            .unwrap(),
+            &s,
+            &c.ambiente(),
+            c.arm.escritor(),
+        )
+        .is_err());
+    let o: OrcamentoAnual = c.consulta(
+        &s,
+        "financeiro.orcamento_do_ano.v1",
+        &OrcamentoDoAno { ano },
+    );
+    assert!(o.linhas.iter().all(|l| !l.tem_orcamento()));
+
+    // O empréstimo: entra em janeiro, a parcela sai nos outros meses (negativo, na conta de caixa).
+    let mut parcelas = [Dinheiro::reais(-2_000); 12];
+    parcelas[0] = Dinheiro::reais(20_000);
+    let gravadas: u32 = c.cmd(
+        &s,
+        "financeiro.definir_orcamento_do_ano.v1",
+        &DefinirOrcamentoDoAno {
+            ano,
+            contas: vec![
+                (aluguel, [Dinheiro::reais(100); 12]),
+                (emprestimo, parcelas),
+            ],
+        },
+    );
+    assert_eq!(gravadas, 2);
+    let o: OrcamentoAnual = c.consulta(
+        &s,
+        "financeiro.orcamento_do_ano.v1",
+        &OrcamentoDoAno { ano },
+    );
+    // O resultado orçado é só o do aluguel: o empréstimo não é resultado.
+    assert_eq!(o.resultado_orcado(), Dinheiro::reais(-1_200));
+    let e = o.linhas.iter().find(|l| l.conta == emprestimo).unwrap();
+    assert_eq!(e.orcado_no_ano(), Dinheiro::reais(-2_000));
+    // No DFC do orçado, o empréstimo nas atividades de financiamento, no sinal do caixa.
+    let d: DfcGerencial = c.consulta(
+        &s,
+        "financeiro.dfc_gerencial_do_ano.v1",
+        &DfcGerencialDoAno { ano },
+    );
+    let fin = d
+        .grupos
+        .iter()
+        .find(|g| g.grupo == GrupoGerencial::Financiamentos)
+        .unwrap();
+    assert_eq!(fin.orcado[0], Dinheiro::reais(20_000));
+    assert_eq!(fin.orcado[1], Dinheiro::reais(-2_000));
+    assert_eq!(d.variacao_orcada()[0], Dinheiro::reais(19_900));
+    // A DRE do mês com orçado mostra só o aluguel.
+    let cmp: ComparativoDre = c.consulta(
+        &s,
+        "financeiro.dre_comparativa.v1",
+        &DreComparativa {
+            mes: hoje().competencia(),
+        },
+    );
+    assert_eq!(
+        cmp.orcado.expect("orçado na DRE").lucro_liquido,
+        Dinheiro::reais(-100)
+    );
+}
+
+fn conta_do_codigo(c: &Cena, s: &Sessao, codigo: &str) -> Id {
+    let plano: Vec<mod_financeiro::NoPlano> = c.consulta(
+        s,
+        "financeiro.plano_de_contas.v1",
+        &mod_financeiro::PlanoDeContas,
+    );
+    plano.iter().find(|n| n.codigo == codigo).unwrap().id
+}
+
+#[test]
+fn recebimentos_e_pagamentos_do_periodo_sem_as_baixas_estornadas() {
+    use mod_financeiro::relatorios::{
+        por_dia, ItemBaixaNoPeriodo, PagamentosNoPeriodo, RecebimentosNoPeriodo,
+    };
+    use mod_financeiro::EstornarBaixa;
+    let c = cena();
+    let s = c.sessao(
+        Id::novo(),
+        &[
+            "financeiro.receber.criar",
+            "financeiro.receber.baixar",
+            "financeiro.receber.estornar",
+            "financeiro.receber.ver",
+            "financeiro.pagar.criar",
+            "financeiro.pagar.baixar",
+            "financeiro.pagar.ver",
+        ],
+    );
+    let h = hoje();
+    let r: mod_financeiro::TituloAReceberLancado = c.cmd(
+        &s,
+        "financeiro.lancar_titulo_a_receber.v1",
+        &LancarTituloAReceber {
+            cliente: None,
+            valor_total: Dinheiro::reais(1_000),
+            emissao: h,
+            parcelas: 1,
+            primeiro_vencimento: h,
+            intervalo_dias: 0,
+            observacao: Some("Venda de balcão".into()),
+            categoria: None,
+            quitado_agora: None,
+        },
+    );
+    baixar_receber(&c, &s, r.parcelas[0], Dinheiro::reais(600));
+    let segunda: mod_financeiro::RecebimentoBaixado = c.cmd(
+        &s,
+        "financeiro.baixar_recebimento.v1",
+        &BaixarRecebimento {
+            parcela: r.parcelas[0],
+            valor: Dinheiro::reais(400),
+            data: h,
+            meio_pagamento: MeioPagamento::Dinheiro,
+            conta_destino: None,
+        },
+    );
+    let _: mod_financeiro::BaixaFoiEstornada = c.cmd(
+        &s,
+        "financeiro.estornar_baixa.v1",
+        &EstornarBaixa {
+            baixa: segunda.baixa,
+            motivo: "recebido em duplicidade, devolvido".into(),
+        },
+    );
+    let p: mod_financeiro::TituloAPagarLancado = c.cmd(
+        &s,
+        "financeiro.lancar_titulo_a_pagar.v1",
+        &LancarTituloAPagar {
+            fornecedor: None,
+            valor_total: Dinheiro::reais(300),
+            emissao: h,
+            parcelas: 1,
+            primeiro_vencimento: h,
+            intervalo_dias: 0,
+            observacao: Some("Aluguel".into()),
+            categoria: None,
+            quitado_agora: None,
+        },
+    );
+    let _: mod_financeiro::PagamentoBaixado = c.cmd(
+        &s,
+        "financeiro.baixar_pagamento.v1",
+        &BaixarPagamento {
+            parcela: p.parcelas[0],
+            valor: Dinheiro::reais(300),
+            data: h,
+            meio_pagamento: MeioPagamento::Dinheiro,
+            conta_destino: None,
+        },
+    );
+    let periodo = Periodo::novo(h.inicio_do_mes(), h.fim_do_mes());
+    let rec: Vec<ItemBaixaNoPeriodo> = c.consulta(
+        &s,
+        "financeiro.recebimentos_no_periodo.v1",
+        &RecebimentosNoPeriodo { periodo },
+    );
+    assert_eq!(rec.len(), 1, "a baixa estornada não entra");
+    assert_eq!(rec[0].valor, Dinheiro::reais(600));
+    assert_eq!(rec[0].descricao.as_deref(), Some("Venda de balcão"));
+    let pag: Vec<ItemBaixaNoPeriodo> = c.consulta(
+        &s,
+        "financeiro.pagamentos_no_periodo.v1",
+        &PagamentosNoPeriodo { periodo },
+    );
+    assert_eq!(pag.len(), 1);
+    assert_eq!(por_dia(&pag)[0].total, Dinheiro::reais(300));
+    // Fora do período: nada.
+    let antes: Vec<ItemBaixaNoPeriodo> = c.consulta(
+        &s,
+        "financeiro.recebimentos_no_periodo.v1",
+        &RecebimentosNoPeriodo {
+            periodo: Periodo::novo(
+                h.mais_meses(-2).inicio_do_mes(),
+                h.mais_meses(-2).fim_do_mes(),
+            ),
+        },
+    );
+    assert!(antes.is_empty());
+}
+
+#[test]
+fn o_dfc_gerencial_traz_o_a_vencer_na_conta_do_titulo_e_o_vencido_no_mes_de_hoje() {
+    use mod_financeiro::dfc_gerencial::{DfcGerencial, DfcGerencialDoAno, GrupoGerencial};
+    let c = cena();
+    let s = c.sessao(
+        Id::novo(),
+        &[
+            "financeiro.receber.criar",
+            "financeiro.pagar.criar",
+            "financeiro.dre.ver",
+        ],
+    );
+    let h = hoje();
+    let mes = h.competencia().mes() as usize - 1;
+    // A receber vencido há 10 dias (ainda em aberto) e a pagar vencendo hoje.
+    lancar_receita(&c, &s, Dinheiro::reais(700), h.mais_dias(-10));
+    lancar_despesa(&c, &s, Dinheiro::reais(250), h);
+    let d: DfcGerencial = c.consulta(
+        &s,
+        "financeiro.dfc_gerencial_do_ano.v1",
+        &DfcGerencialDoAno {
+            ano: h.competencia().ano(),
+        },
+    );
+    let grupo = |g: GrupoGerencial| d.grupos.iter().find(|x| x.grupo == g).unwrap();
+    // O vencido em aberto entra no mês de hoje, na receita (não em "clientes a receber").
+    if h.mais_dias(-10).competencia().ano() == h.competencia().ano() {
+        assert_eq!(
+            grupo(GrupoGerencial::Receitas).a_vencer[mes],
+            Dinheiro::reais(700)
+        );
+        assert_eq!(d.variacao_a_vencer()[mes], Dinheiro::reais(450));
+    }
+    assert_eq!(
+        grupo(GrupoGerencial::Despesas).a_vencer[mes],
+        Dinheiro::reais(-250)
+    );
+    assert!(d
+        .grupos
+        .iter()
+        .flat_map(|g| &g.linhas)
+        .all(|l| !l.codigo.starts_with("1.2.") && !l.codigo.starts_with("2.1.")));
+    // Nada foi pago: o realizado está zerado.
+    assert!(d.variacao.iter().all(|v| v.e_zero()));
+}
+
+#[test]
+fn o_modelo_de_gestao_financeira_cria_a_arvore_e_as_categorias_ligadas() {
+    use mod_financeiro::dfc_gerencial::{DfcGerencial, DfcGerencialDoAno, GrupoGerencial};
+    use mod_financeiro::{
+        AplicarModeloDePlano, CategoriaFinanceira, Categorias, ModeloAplicado, NoPlano,
+        PlanoDeContas,
+    };
+    let c = cena();
+    let s = c.sessao(
+        Id::novo(),
+        &[
+            "financeiro.pagar.criar",
+            "financeiro.pagar.baixar",
+            "financeiro.dre.ver",
+            "financeiro.plano.ver",
+            "financeiro.plano.editar",
+            "financeiro.categoria.ver",
+        ],
+    );
+    let r: ModeloAplicado = c.cmd(
+        &s,
+        "financeiro.aplicar_modelo_de_plano.v1",
+        &AplicarModeloDePlano {
+            modelo: cardeal_ledger::ModeloDePlano::GestaoFinanceira,
+        },
+    );
+    assert!(r.criadas.len() > 70, "{}", r.criadas.len());
+    assert!(r.categorias_criadas > 60);
+    assert_eq!(r.categorias_vinculadas, r.categorias_criadas);
+    // De novo: nada a criar (idempotente).
+    let de_novo: ModeloAplicado = c.cmd(
+        &s,
+        "financeiro.aplicar_modelo_de_plano.v1",
+        &AplicarModeloDePlano {
+            modelo: cardeal_ledger::ModeloDePlano::GestaoFinanceira,
+        },
+    );
+    assert!(de_novo.criadas.is_empty() && de_novo.categorias_criadas == 0);
+    let plano: Vec<NoPlano> = c.consulta(&s, "financeiro.plano_de_contas.v1", &PlanoDeContas);
+    let estrutura = plano.iter().find(|n| n.codigo == "5.52").unwrap();
+    assert!(estrutura.sintetica);
+    assert_eq!(estrutura.nome, "Despesas administrativas de estrutura");
+    let cats: Vec<CategoriaFinanceira> = c.consulta(&s, "financeiro.categorias.v1", &Categorias);
+    let cat = |nome: &str| cats.iter().find(|x| x.nome == nome).unwrap().id;
+    // Paga o aluguel e o Simples com as categorias do modelo.
+    let h = hoje();
+    for (nome, reais) in [("Aluguel", 1_200), ("Simples Nacional", 300)] {
+        let p: mod_financeiro::TituloAPagarLancado = c.cmd(
+            &s,
+            "financeiro.lancar_titulo_a_pagar.v1",
+            &LancarTituloAPagar {
+                fornecedor: None,
+                valor_total: Dinheiro::reais(reais),
+                emissao: h,
+                parcelas: 1,
+                primeiro_vencimento: h,
+                intervalo_dias: 0,
+                observacao: None,
+                categoria: Some(cat(nome)),
+                quitado_agora: None,
+            },
+        );
+        let _: mod_financeiro::PagamentoBaixado = c.cmd(
+            &s,
+            "financeiro.baixar_pagamento.v1",
+            &BaixarPagamento {
+                parcela: p.parcelas[0],
+                valor: Dinheiro::reais(reais),
+                data: h,
+                meio_pagamento: MeioPagamento::Dinheiro,
+                conta_destino: None,
+            },
+        );
+    }
+    let d: DfcGerencial = c.consulta(
+        &s,
+        "financeiro.dfc_gerencial_do_ano.v1",
+        &DfcGerencialDoAno {
+            ano: h.competencia().ano(),
+        },
+    );
+    let mes = h.competencia().mes() as usize - 1;
+    let linha = |nome: &str| {
+        d.grupos
+            .iter()
+            .flat_map(|g| g.linhas.iter().map(move |l| (g.grupo, l)))
+            .find(|(_, l)| l.nome == nome)
+            .unwrap()
+    };
+    let (g, aluguel) = linha("Aluguel");
+    assert_eq!(g, GrupoGerencial::Despesas);
+    assert_eq!(
+        aluguel.agrupadora.as_deref(),
+        Some("Despesas administrativas de estrutura")
+    );
+    assert_eq!(aluguel.realizado[mes], Dinheiro::reais(-1_200));
+    // A venda pela categoria "Venda de mercadorias" cai na receita de vendas do plano base.
+    assert!(cats.iter().any(|x| x.nome == "Venda de mercadorias"));
+    // O Simples herda o papel da agrupadora: é dedução da receita, não despesa operacional.
+    let (g, simples) = linha("Simples Nacional");
+    assert_eq!(g, GrupoGerencial::Deducoes);
+    assert_eq!(simples.realizado[mes], Dinheiro::reais(-300));
+}

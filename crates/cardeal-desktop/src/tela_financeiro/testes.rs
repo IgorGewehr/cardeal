@@ -670,8 +670,8 @@ fn aba_resultado_apura_o_mes_pelo_razao_e_navega_entre_meses() {
     cardeal_ui::tokens::instalar_fontes(&ctx);
     cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
     estado.visao_resultado = 1;
-    for indireto in [false, true] {
-        estado.dfc_metodo_indireto = indireto;
+    for visao in 0..4 {
+        estado.dfc_visao = visao;
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 painel_dre(ui, &t.motor, &t.sessao, &mut estado);
@@ -750,6 +750,97 @@ fn aba_resultado_apura_o_mes_pelo_razao_e_navega_entre_meses() {
     estado.dre_mes = Some(estado.mes_dre().anterior());
     estado.carregar_dre(&t.motor, &t.sessao);
     assert_eq!(estado.dre.expect("DRE").atual.lucro_liquido, Dinheiro::ZERO);
+}
+
+#[test]
+fn dfc_mes_a_mes_poe_o_recebido_na_conta_da_receita_e_compara_com_o_orcado() {
+    use mod_financeiro::dfc_gerencial::GrupoGerencial;
+    let t = motor_de_teste();
+    let parcela = lancar_a_receber(&t.motor, &t.sessao, 250);
+    let hoje = Data::hoje(Fuso::BRASILIA);
+    let _: mod_financeiro::RecebimentoBaixado = t
+        .motor
+        .executar(
+            &t.sessao,
+            "financeiro.baixar_recebimento.v1",
+            &mod_financeiro::BaixarRecebimento {
+                parcela,
+                valor: Dinheiro::reais(250),
+                data: hoje,
+                meio_pagamento: mod_financeiro::MeioPagamento::Dinheiro,
+                conta_destino: None,
+            },
+        )
+        .unwrap();
+    let mut estado = EstadoTelaFinanceiro {
+        aba: Aba::Resultado,
+        ..Default::default()
+    };
+    estado.carregar(&t.motor, &t.sessao);
+    let mes = hoje.competencia().mes() as usize - 1;
+    let d = estado
+        .dfc_mensal
+        .dados
+        .clone()
+        .expect("carregou com o resultado")
+        .expect("o DFC do ano");
+    let receitas = d
+        .grupos
+        .iter()
+        .find(|g| g.grupo == GrupoGerencial::Receitas)
+        .expect("receitas");
+    // A conta da receita do título (não "clientes a receber").
+    assert_eq!(receitas.realizado[mes], Dinheiro::reais(250));
+    assert!(receitas
+        .linhas
+        .iter()
+        .all(|l| !l.codigo.starts_with("1.2.")));
+
+    // Orça a mesma conta e as quatro subabas do DFC desenham, nos dois formatos.
+    let conta = receitas.linhas[0].conta;
+    let mut meses = [Dinheiro::ZERO; 12];
+    meses[mes] = Dinheiro::reais(300);
+    let _: () = t
+        .motor
+        .executar(
+            &t.sessao,
+            "financeiro.definir_orcamento_da_conta.v1",
+            &mod_financeiro::orcamento::DefinirOrcamentoDaConta {
+                conta,
+                ano: hoje.competencia().ano(),
+                meses,
+            },
+        )
+        .unwrap();
+    estado.carregar_dre(&t.motor, &t.sessao);
+    let d = estado.dfc_mensal.dados.clone().unwrap().unwrap();
+    assert!(d.tem_orcamento());
+    assert_eq!(d.variacao_orcada()[mes], Dinheiro::reais(300));
+    let ctx = egui::Context::default();
+    cardeal_ui::tokens::instalar_fontes(&ctx);
+    cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+    estado.visao_resultado = 1;
+    use super::dfc_mensal::Fonte;
+    for (visao, fonte, percentual, mes_a_mes) in [
+        (2, Fonte::Realizado, false, false),
+        (2, Fonte::Realizado, true, false),
+        (2, Fonte::Orcado, false, false),
+        (2, Fonte::Orcado, true, false),
+        (2, Fonte::AVencer, false, false),
+        (2, Fonte::Projetado, true, false),
+        (3, Fonte::Realizado, false, false),
+        (3, Fonte::Realizado, false, true),
+    ] {
+        estado.dfc_visao = visao;
+        estado.dfc_mensal.fonte = fonte;
+        estado.dfc_mensal.percentual = percentual;
+        estado.dfc_mensal.comparado_mes_a_mes = mes_a_mes;
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                painel_dre(ui, &t.motor, &t.sessao, &mut estado);
+            });
+        });
+    }
 }
 
 #[test]
@@ -863,6 +954,177 @@ fn visao_geral_carrega_o_score_de_saude() {
     let s = estado.saude.clone().expect("score carregado");
     assert!(s.score <= 100);
     assert_eq!(s.sinais.len(), 5);
+}
+
+#[test]
+fn visao_geral_mostra_semana_mes_proximo_mes_e_atraso() {
+    let t = motor_de_teste();
+    let hoje = Data::hoje(Fuso::BRASILIA);
+    // A receber hoje (250, metade recebida) e uma conta a pagar vencida há 10 dias.
+    let parcela = lancar_a_receber(&t.motor, &t.sessao, 250);
+    let _: mod_financeiro::RecebimentoBaixado = t
+        .motor
+        .executar(
+            &t.sessao,
+            "financeiro.baixar_recebimento.v1",
+            &mod_financeiro::BaixarRecebimento {
+                parcela,
+                valor: Dinheiro::reais(100),
+                data: hoje,
+                meio_pagamento: mod_financeiro::MeioPagamento::Dinheiro,
+                conta_destino: None,
+            },
+        )
+        .unwrap();
+    let _: mod_financeiro::TituloAPagarLancado = t
+        .motor
+        .executar(
+            &t.sessao,
+            "financeiro.lancar_titulo_a_pagar.v1",
+            &mod_financeiro::LancarTituloAPagar {
+                fornecedor: None,
+                valor_total: Dinheiro::reais(80),
+                emissao: hoje.mais_dias(-10),
+                parcelas: 1,
+                primeiro_vencimento: hoje.mais_dias(-10),
+                intervalo_dias: 0,
+                observacao: None,
+                categoria: None,
+                quitado_agora: None,
+            },
+        )
+        .unwrap();
+    let mut estado = EstadoTelaFinanceiro {
+        aba: Aba::Visao,
+        ..Default::default()
+    };
+    estado.carregar(&t.motor, &t.sessao);
+    assert!(estado.erro.is_none(), "{:?}", estado.erro);
+    let r = estado.vencimentos.receber.expect("a receber");
+    let p = estado.vencimentos.pagar.expect("a pagar");
+    for q in [r.semana, r.mes] {
+        assert_eq!(q.previsto, Dinheiro::reais(250));
+        assert_eq!(q.realizado, Dinheiro::reais(100));
+        assert_eq!(q.pendente, Dinheiro::reais(150));
+    }
+    assert!(r.proximo_mes.previsto.e_zero());
+    assert_eq!(r.atraso.parcelas, 0);
+    assert_eq!(p.atraso.parcelas, 1);
+    assert_eq!(p.atraso.saldo, Dinheiro::reais(80));
+    assert_eq!(p.atraso.mais_antigo, Some(hoje.mais_dias(-10)));
+    // Desenha nas três larguras (quatro colunas, duas e empilhado).
+    let ctx = egui::Context::default();
+    cardeal_ui::tokens::instalar_fontes(&ctx);
+    cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+    for largura in [1400.0_f32, 800.0, 400.0] {
+        let entrada = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(largura, 900.0),
+            )),
+            ..Default::default()
+        };
+        let _ = ctx.run(entrada, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                super::vencimentos::painel(ui, &estado);
+            });
+        });
+    }
+}
+
+#[test]
+fn aba_relatorios_mostra_faixas_por_dia_e_o_previsto() {
+    use super::relatorios::QualRelatorio;
+    let t = motor_de_teste();
+    let hoje = Data::hoje(Fuso::BRASILIA);
+    // Recebeu 250 hoje; deve 80 vencido há 10 dias e 1.200 daqui a 10 dias.
+    let parcela = lancar_a_receber(&t.motor, &t.sessao, 250);
+    let _: mod_financeiro::RecebimentoBaixado = t
+        .motor
+        .executar(
+            &t.sessao,
+            "financeiro.baixar_recebimento.v1",
+            &mod_financeiro::BaixarRecebimento {
+                parcela,
+                valor: Dinheiro::reais(250),
+                data: hoje,
+                meio_pagamento: mod_financeiro::MeioPagamento::Dinheiro,
+                conta_destino: None,
+            },
+        )
+        .unwrap();
+    for (dias, reais, obs) in [(-10, 80, "Internet"), (10, 1_200, "Aluguel")] {
+        let _: mod_financeiro::TituloAPagarLancado = t
+            .motor
+            .executar(
+                &t.sessao,
+                "financeiro.lancar_titulo_a_pagar.v1",
+                &mod_financeiro::LancarTituloAPagar {
+                    fornecedor: None,
+                    valor_total: Dinheiro::reais(reais),
+                    emissao: hoje.mais_dias(dias),
+                    parcelas: 1,
+                    primeiro_vencimento: hoje.mais_dias(dias),
+                    intervalo_dias: 0,
+                    observacao: Some(obs.into()),
+                    categoria: None,
+                    quitado_agora: None,
+                },
+            )
+            .unwrap();
+    }
+    let mut estado = EstadoTelaFinanceiro {
+        aba: Aba::Relatorios,
+        ..Default::default()
+    };
+    estado.carregar(&t.motor, &t.sessao);
+    assert!(estado.erro.is_none(), "{:?}", estado.erro);
+    let rec = estado
+        .relatorios
+        .recebimentos
+        .clone()
+        .expect("carregou")
+        .expect("os recebimentos");
+    assert_eq!(rec.len(), 1);
+    assert_eq!(rec[0].valor, Dinheiro::reais(250));
+    let saldo = estado
+        .relatorios
+        .saldo_de_hoje
+        .clone()
+        .expect("carregou")
+        .expect("o saldo");
+    assert_eq!(saldo, Dinheiro::reais(250));
+    let faixas = mod_financeiro::relatorios::por_faixa(&estado.abertos_pagar, hoje);
+    assert_eq!(faixas[0].total, Dinheiro::reais(80));
+    assert_eq!(faixas[3].total, Dinheiro::reais(1_200));
+    let previsto = mod_financeiro::relatorios::fluxo_previsto(
+        saldo,
+        &estado.abertos_pagar,
+        hoje,
+        hoje.mais_dias(30),
+    );
+    assert_eq!(previsto.last().unwrap().saldo, Dinheiro::reais(-1_030));
+    // Os cinco relatórios desenham, com e sem busca.
+    let ctx = egui::Context::default();
+    cardeal_ui::tokens::instalar_fontes(&ctx);
+    cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+    for busca in ["", "alug"] {
+        estado.relatorios.busca = busca.to_owned();
+        for qual in [
+            QualRelatorio::ContasAPagar,
+            QualRelatorio::ContasAReceber,
+            QualRelatorio::PagamentosPorDia,
+            QualRelatorio::RecebimentosPorDia,
+            QualRelatorio::FluxoPrevisto,
+        ] {
+            estado.relatorios.qual = qual;
+            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    super::relatorios::painel(ui, &t.motor, &t.sessao, &mut estado);
+                });
+            });
+        }
+    }
 }
 
 #[test]

@@ -16,7 +16,7 @@ use cardeal_storage::{Armazenamento, Cofre, ContextoEscrita};
 use crate::{como_erro_armazenamento, erro_armazenamento};
 
 /// O emissor que o aplicativo autenticador mostra.
-pub const EMISSOR: &str = "Cardeal";
+pub const EMISSOR: &str = "Lunno";
 
 fn cofre(recursos: &Recursos) -> Resultado<std::sync::Arc<Cofre>> {
     recursos.obter::<Cofre>().ok_or_else(|| {

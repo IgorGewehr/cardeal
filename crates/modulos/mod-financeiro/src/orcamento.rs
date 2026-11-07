@@ -31,8 +31,15 @@ pub struct LinhaDeOrcamento {
     pub nome: String,
     /// O bloco da DRE em que ela entra ("Receita bruta", "(−) Despesas operacionais"...).
     pub bloco: String,
-    /// Receita (soma no resultado) ou não (subtrai).
+    /// Receita (soma no resultado) ou não (subtrai). Na conta orçada pelo caixa: o orçado
+    /// positivo entra no caixa (empréstimo tomado, aporte) ou não (compra, investimento,
+    /// retirada) — o desvio segue o mesmo sentido.
     pub soma_no_resultado: bool,
+    /// Conta patrimonial orçada **pelo caixa** (compras de mercadoria, investimentos,
+    /// financiamentos): o realizado é o que entrou ou saiu do caixa (`crate::dfc_gerencial`), não
+    /// a competência, e o orçado pode ser negativo (a parcela paga de um empréstimo). Fica fora do
+    /// resultado orçado e da DRE.
+    pub de_caixa: bool,
     /// O orçado de cada mês (jan a dez), em valor positivo.
     pub orcado: [Dinheiro; 12],
     /// O realizado de cada mês, no mesmo sentido do orçado.
@@ -87,7 +94,8 @@ pub fn desvio(
     ))
 }
 
-/// O orçamento de um ano: todas as contas do resultado (as sem orçamento também, para orçar).
+/// O orçamento de um ano: todas as contas do resultado e as contas patrimoniais que se orçam pelo
+/// caixa (as sem orçamento também, para orçar).
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct OrcamentoAnual {
     /// O ano.
@@ -97,11 +105,12 @@ pub struct OrcamentoAnual {
 }
 
 impl OrcamentoAnual {
-    /// O resultado orçado no ano (receitas − custos e despesas).
+    /// O resultado orçado no ano (receitas − custos e despesas; as contas de caixa ficam fora).
     #[must_use]
     pub fn resultado_orcado(&self) -> Dinheiro {
         self.linhas
             .iter()
+            .filter(|l| !l.de_caixa)
             .map(|l| {
                 let v = l.orcado_no_ano();
                 if l.soma_no_resultado {
@@ -149,13 +158,8 @@ impl Comando for DefinirOrcamentoDaConta {
 
     #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<()> {
-        if self.meses.iter().any(|v| v.e_negativo()) {
-            return Err(Erro::novo(
-                CodigoErro::FORA_DA_FAIXA,
-                "o orçado não pode ser negativo",
-            ));
-        }
-        sqlite::exigir_conta_de_resultado(uow.conexao(), ctx.empresa, self.conta)?;
+        let orcaveis = sqlite::Orcaveis::ler(uow.conexao(), ctx.empresa)?;
+        orcaveis.conferir(self.conta, &self.meses)?;
         sqlite::gravar(
             uow.conexao(),
             ctx.empresa,
@@ -163,6 +167,50 @@ impl Comando for DefinirOrcamentoDaConta {
             self.ano,
             &self.meses,
         )
+    }
+}
+
+/// Quantas contas a planilha grava de uma vez, no máximo.
+pub const MAXIMO_DE_CONTAS_NA_PLANILHA: usize = 500;
+
+/// Grava o orçamento de várias contas num ano de uma vez — a planilha do ano, "Salvar orçamento".
+/// Tudo ou nada: uma conta que não se orça (ou um valor negativo onde não cabe) recusa o lote
+/// inteiro. Devolve quantas contas foram gravadas.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DefinirOrcamentoDoAno {
+    /// O ano.
+    pub ano: i32,
+    /// Cada conta com os 12 meses (zero = sem orçamento no mês).
+    pub contas: Vec<(Id, [Dinheiro; 12])>,
+}
+
+impl Comando for DefinirOrcamentoDoAno {
+    type Saida = u32;
+    const PERMISSAO: &'static str = "financeiro.orcamento.editar";
+    const RISCO: Risco = Risco::Medio;
+
+    #[cfg(feature = "sqlite")]
+    fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<u32> {
+        if self.contas.len() > MAXIMO_DE_CONTAS_NA_PLANILHA {
+            return Err(Erro::novo(
+                CodigoErro::FORA_DA_FAIXA,
+                format!("no máximo {MAXIMO_DE_CONTAS_NA_PLANILHA} contas de uma vez"),
+            ));
+        }
+        let orcaveis = sqlite::Orcaveis::ler(uow.conexao(), ctx.empresa)?;
+        for (i, (conta, meses)) in self.contas.iter().enumerate() {
+            if self.contas[..i].iter().any(|(c, _)| c == conta) {
+                return Err(Erro::novo(
+                    CodigoErro::FORA_DA_FAIXA,
+                    "a mesma conta duas vezes no orçamento",
+                ));
+            }
+            orcaveis.conferir(*conta, meses)?;
+        }
+        for (conta, meses) in &self.contas {
+            sqlite::gravar(uow.conexao(), ctx.empresa, *conta, self.ano, meses)?;
+        }
+        Ok(u32::try_from(self.contas.len()).unwrap_or(u32::MAX))
     }
 }
 
@@ -238,19 +286,51 @@ pub(crate) mod sqlite {
         )
     }
 
-    pub(crate) fn exigir_conta_de_resultado(
-        c: &Connection,
-        empresa: Id,
-        conta: Id,
-    ) -> Resultado<()> {
-        let contas = cardeal_ledger::contas_de_resultado(c, empresa).map_err(ledger)?;
-        if contas.iter().any(|l| l.conta == conta) {
+    /// As contas que se orçam: as do resultado e as de caixa (compras, investimentos,
+    /// financiamentos).
+    pub(crate) struct Orcaveis {
+        resultado: Vec<Id>,
+        de_caixa: Vec<Id>,
+    }
+
+    impl Orcaveis {
+        pub(crate) fn ler(c: &Connection, empresa: Id) -> Resultado<Self> {
+            let resultado = cardeal_ledger::contas_de_resultado(c, empresa)
+                .map_err(ledger)?
+                .into_iter()
+                .map(|l| l.conta)
+                .collect();
+            let plano = crate::dfc_gerencial::sqlite::plano(c, empresa)?;
+            let de_caixa = crate::dfc_gerencial::contas_orcaveis_pelo_caixa(&plano)
+                .into_iter()
+                .map(|c| c.conta)
+                .collect();
+            Ok(Self {
+                resultado,
+                de_caixa,
+            })
+        }
+
+        /// A conta se orça e os valores cabem nela: negativo só na conta de caixa (a parcela
+        /// paga do empréstimo, a retirada devolvida).
+        pub(crate) fn conferir(&self, conta: Id, meses: &[Dinheiro; 12]) -> Resultado<()> {
+            if self.de_caixa.contains(&conta) {
+                return Ok(());
+            }
+            if !self.resultado.contains(&conta) {
+                return Err(Erro::novo(
+                    CodigoErro::FORA_DA_FAIXA,
+                    "orçamento só em conta de receita, despesa, compra, investimento ou \
+                     financiamento (analítica e ativa)",
+                ));
+            }
+            if meses.iter().any(|v| v.e_negativo()) {
+                return Err(Erro::novo(
+                    CodigoErro::FORA_DA_FAIXA,
+                    "o orçado de receita ou despesa não pode ser negativo",
+                ));
+            }
             Ok(())
-        } else {
-            Err(Erro::novo(
-                CodigoErro::FORA_DA_FAIXA,
-                "orçamento só em conta de receita ou despesa (analítica)",
-            ))
         }
     }
 
@@ -376,6 +456,7 @@ pub(crate) mod sqlite {
                 nome: l.nome.clone(),
                 bloco: crate::dre::rotulo_do_bloco(l).to_owned(),
                 soma_no_resultado: crate::dre::soma_no_resultado(l),
+                de_caixa: false,
                 orcado: orcado
                     .iter()
                     .find(|(c, _)| *c == l.conta)
@@ -391,6 +472,27 @@ pub(crate) mod sqlite {
                     l.realizado[mes as usize - 1] = crate::dre::no_sentido_do_orcado(&r);
                 }
             }
+        }
+        // As contas de caixa, com o realizado pelo caixa no sentido em que se orçam.
+        let plano = crate::dfc_gerencial::sqlite::plano(c, empresa)?;
+        let caixa = crate::dfc_gerencial::caixa_por_conta(c, empresa, ano)?;
+        for k in crate::dfc_gerencial::contas_orcaveis_pelo_caixa(&plano) {
+            let realizado = caixa.get(&k.conta).map_or([Dinheiro::ZERO; 12], |m| {
+                m.map(|v| if k.entra { v } else { -v })
+            });
+            linhas.push(LinhaDeOrcamento {
+                conta: k.conta,
+                codigo: k.codigo,
+                nome: k.nome,
+                bloco: k.bloco.to_owned(),
+                soma_no_resultado: k.entra,
+                de_caixa: true,
+                orcado: orcado
+                    .iter()
+                    .find(|(c, _)| *c == k.conta)
+                    .map_or([Dinheiro::ZERO; 12], |(_, m)| *m),
+                realizado,
+            });
         }
         Ok(OrcamentoAnual { ano, linhas })
     }

@@ -116,6 +116,19 @@ impl Modulo for ModuloFinanceiro {
             .consulta::<crate::SaudeFinanceira>("financeiro.saude.v1")
             .consulta::<crate::DfcDoPeriodo>("financeiro.dfc_do_periodo.v1")
             .consulta::<crate::DfcIndiretoDoPeriodo>("financeiro.dfc_indireto_do_periodo.v1")
+            .consulta::<crate::dfc_gerencial::DfcGerencialDoAno>(
+                "financeiro.dfc_gerencial_do_ano.v1",
+            )
+            .consulta::<crate::vencimentos::VencimentosAReceber>(
+                "financeiro.vencimentos_a_receber.v1",
+            )
+            .consulta::<crate::vencimentos::VencimentosAPagar>("financeiro.vencimentos_a_pagar.v1")
+            .consulta::<crate::relatorios::RecebimentosNoPeriodo>(
+                "financeiro.recebimentos_no_periodo.v1",
+            )
+            .consulta::<crate::relatorios::PagamentosNoPeriodo>(
+                "financeiro.pagamentos_no_periodo.v1",
+            )
             .consulta::<crate::BalanceteDoPeriodo>("financeiro.balancete_do_periodo.v1")
             .consulta::<crate::DiarioDoPeriodo>("financeiro.diario_do_periodo.v1")
             .consulta::<crate::DreDoPeriodo>("financeiro.dre_do_periodo.v1")
@@ -130,6 +143,9 @@ impl Modulo for ModuloFinanceiro {
             .consulta::<crate::pagamento::PerfisDePagamento>("financeiro.perfis_de_pagamento.v1")
             .comando::<crate::orcamento::DefinirOrcamentoDaConta>(
                 "financeiro.definir_orcamento_da_conta.v1",
+            )
+            .comando::<crate::orcamento::DefinirOrcamentoDoAno>(
+                "financeiro.definir_orcamento_do_ano.v1",
             )
             .comando::<crate::orcamento::CopiarOrcamentoDoAno>(
                 "financeiro.copiar_orcamento_do_ano.v1",

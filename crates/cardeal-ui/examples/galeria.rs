@@ -61,6 +61,7 @@ struct Galeria {
     campo: String,
     campo_erro: String,
     campo_multilinha: String,
+    celulas: [String; 3],
     busca: String,
     lista_busca: String,
     lista_filtro: Option<u8>,
@@ -372,10 +373,11 @@ impl eframe::App for Galeria {
                 ctx,
                 self.tema,
                 (
-                    "bytes://cardeal-logo.png",
-                    include_bytes!("../../../assets/marca/cardeal-icone-256.png"),
+                    "bytes://lunno-logo.png",
+                    include_bytes!("../../../assets/marca/lunno-icone-256.png"),
                 ),
-                "Cardeal",
+                "Lunno",
+                Some("Loja Exemplo LTDA"),
             );
         }
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -486,6 +488,13 @@ impl eframe::App for Galeria {
                         .marcador("digite algo"),
                 );
                 ui.add_space(Espaco::E8);
+                ui.add(Rotulo::campo("Numérico e compacto (célula de grade)"));
+                ui.columns(3, |cols| {
+                    for (col, celula) in cols.iter_mut().zip(self.celulas.iter_mut()) {
+                        col.add(CampoTexto::novo(celula).numerico().compacto().marcador("0,00"));
+                    }
+                });
+                ui.add_space(Espaco::E8);
                 ui.add(
                     Campo::novo("Campo com erro", &mut self.campo_erro)
                         .erro(Some("CNPJ inválido — 14 dígitos")),
@@ -499,6 +508,27 @@ impl eframe::App for Galeria {
                 ui.add_space(Espaco::E8);
                 SeletorOpcao::novo("Seletor de opção", &mut self.opcao)
                     .opcoes([(1_u8, "Dinheiro"), (2, "Pix"), (3, "Cartão de crédito")])
+                    .mostrar(ui);
+                ui.add_space(Espaco::E12);
+                // Mais de LIMIAR_BUSCA opções: o painel abre com a busca focada.
+                SeletorOpcao::novo("Seletor longo (com busca)", &mut self.opcao)
+                    .opcoes(
+                        [
+                            "Água",
+                            "Aluguel",
+                            "Assessoria contábil",
+                            "Energia elétrica",
+                            "Internet",
+                            "Impostos sobre vendas",
+                            "Material de escritório",
+                            "Pró-labore",
+                            "Salários",
+                            "Telefone",
+                        ]
+                        .into_iter()
+                        .enumerate()
+                        .map(|(i, t)| (u8::try_from(i).unwrap_or(0) + 10, t)),
+                    )
                     .mostrar(ui);
 
                 ui.add_space(Espaco::E24);
@@ -524,6 +554,23 @@ impl eframe::App for Galeria {
                     (3, "Fluxo"),
                 ])
                 .selecionada(self.aba)
+                .mostrar(ui)
+                {
+                    self.aba = n;
+                }
+                ui.add_space(Espaco::E12);
+                ui.add(Rotulo::apoio(
+                    "Navegação (as abas de primeiro nível da tela): .navegacao()",
+                ));
+                if let Some(n) = Abas::nova(&[
+                    (0_u8, "Visão geral"),
+                    (1, "A receber"),
+                    (2, "A pagar"),
+                    (3, "Fluxo"),
+                ])
+                .navegacao()
+                .selecionada(self.aba)
+                .id_salt("abas-navegacao")
                 .mostrar(ui)
                 {
                     self.aba = n;
@@ -718,6 +765,38 @@ impl eframe::App for Galeria {
                         .mostrar(ui, 0, |_, _| {});
                     });
                 });
+
+                ui.add_space(Espaco::E24);
+                ui.add(Rotulo::titulo_secao(
+                    "Grade larga: rolagem_horizontal (12 meses, estreite a janela)",
+                ));
+                {
+                    const MESES: [&str; 12] = [
+                        "Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out",
+                        "Nov", "Dez",
+                    ];
+                    let mut colunas = vec![ColunaGrade::nova("Conta").largura(220.0)];
+                    colunas.extend(MESES.iter().map(|m| ColunaGrade::nova(m).largura(96.0).numero()));
+                    colunas.push(ColunaGrade::nova("Total").largura(110.0).numero());
+                    let contas = [("Venda de mercadorias", 18_500), ("Aluguel", -2_400)];
+                    Grade::nova(colunas)
+                        .id_salt("galeria-grade-larga")
+                        .rolagem_horizontal()
+                        .mostrar(ui, contas.len(), |i, row| {
+                            let (nome, reais) = contas[i];
+                            row.col(|ui| {
+                                ui.add(Rotulo::interface(nome));
+                            });
+                            for _ in MESES {
+                                row.col(|ui| {
+                                    ui.add(ValorDinheiro::novo(Dinheiro::reais(reais)));
+                                });
+                            }
+                            row.col(|ui| {
+                                ui.add(ValorDinheiro::novo(Dinheiro::reais(reais * 12)));
+                            });
+                        });
+                }
 
                 ui.add_space(Espaco::E24);
                 ui.add(Rotulo::titulo_secao(

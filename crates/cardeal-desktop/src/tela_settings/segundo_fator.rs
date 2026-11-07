@@ -218,7 +218,7 @@ mod testes {
         quadro(&mut e);
         // O segredo proposto, o código que o "aplicativo" mostraria agora, e a ativação.
         let p = t.motor.propor_segundo_fator(&t.sessao).unwrap();
-        assert!(p.uri.starts_with("otpauth://totp/Cardeal:igor?"));
+        assert!(p.uri.starts_with("otpauth://totp/Lunno:igor?"));
         e.proposta = Some(p.clone());
         quadro(&mut e);
         let segredo = cardeal_auth::totp::SegredoTotp::de_base32(&p.segredo).unwrap();

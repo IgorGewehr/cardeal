@@ -327,7 +327,7 @@ pub(super) fn dialogo_saldo_inicial(
             };
             ui.add(
                 Rotulo::apoio(
-                    "Quanto havia nesta conta no dia em que você começou a usar o Cardeal. \
+                    "Quanto havia nesta conta no dia em que você começou a usar o Lunno. \
                      Redefinir substitui o anterior; negativo para banco no cheque especial.",
                 )
                 .quebravel(),
