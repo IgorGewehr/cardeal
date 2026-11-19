@@ -108,6 +108,13 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   de tirar a mercadoria e reserva de novo o que outras notas trouxeram; cancelar a OS ou remover a peça
   libera a reserva. O inventário conta o reservado como presente no local (foto = disponível + reservado).
   Uma linha do pedido atende várias OS e o estoque ao mesmo tempo. Testes: `mod-compras/tests/encomenda_da_os.rs`.
+  **Recorte pela estrutura mercadológica em qualquer relatório (2026-11-18):** `cardeal_analytics::estrutura`
+  (`RecorteEstrutura`: "o produto está nesta subárvore?", caminho, soma de qualquer medida por nó) e
+  `cardeal-desktop/src/recorte_estrutura.rs` (`EstadoRecorte`: carrega árvore + classificação, mostra o
+  filtro "Toda a estrutura" e a árvore com o valor de cada nó, clique filtra). Em uso: **Estoque › Análise**
+  (filtro + visão "Por estrutura" do que saiu), **Compras › Análise** (nova: quanto comprei por nível no
+  período, das notas confirmadas — `estoque.entradas_por_produto_e_origem.v1`) e **OS › Peças a comprar**
+  (filtro). Vale a classificação de hoje. Próximas telas a ligar: PDV (vendas do dia), comissões, DRE.
   Onda 6 (Financeiro 2) começou: **conciliação com alerta de pendências e saldo banco × sistema**,
   **lançamento pré-preenchido pelo último da pessoa**, **DFC indireto**, **cheques**, **balancete/diário** e o
   **pacote do contador** (PDF + `.xlsx`) e a **régua de cobrança** (fila do dia com envio de um clique) feitos

@@ -183,6 +183,8 @@ pub struct EstadoTelaOs {
     /// Peças sem saldo ou encomendadas (aba "Peças a comprar").
     pecas_a_comprar: Vec<mod_os::ItemAguardandoEstoque>,
     busca_compras: String,
+    /// O filtro da lista de compras pela estrutura mercadológica.
+    estrutura_compras: crate::recorte_estrutura::EstadoRecorte,
     clientes: Vec<ItemPessoa>,
     produtos: Vec<ItemProdutoComSaldo>,
     /// Locais de estoque de onde as peças saem ao serem aplicadas na execução.
@@ -297,6 +299,9 @@ impl EstadoTelaOs {
             &mod_os::PecasAguardandoEstoque,
         ) {
             self.pecas_a_comprar = p;
+        }
+        if self.aba == AbaOs::Compras {
+            self.estrutura_compras.carregar(motor, sessao);
         }
     }
 
@@ -507,6 +512,9 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
             .mostrar(ui)
             {
                 estado.aba = nova;
+                if nova == AbaOs::Compras {
+                    estado.estrutura_compras.carregar(motor, sessao);
+                }
             }
             ui.add_space(Espaco::E16);
 

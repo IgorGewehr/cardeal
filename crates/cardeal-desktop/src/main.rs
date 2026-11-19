@@ -30,6 +30,7 @@ mod maquina;
 mod pagamento;
 mod pessoa;
 mod primeiros_passos;
+mod recorte_estrutura;
 mod sped;
 mod tela_agenda;
 mod tela_clientes;

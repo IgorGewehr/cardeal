@@ -401,12 +401,17 @@ pub(super) fn aba_compras(ui: &mut egui::Ui, estado: &mut EstadoTelaOs) {
         EstadoVazio::novo(Icone::Ferramenta, "Nenhuma peça para comprar agora.").mostrar(ui);
         return;
     }
+    let estrutura = &mut estado.estrutura_compras;
     BarraFiltros::nova(&mut estado.busca_compras)
         .marcador("Buscar por peça, fornecedor, OS ou cliente")
+        .filtro(|ui| {
+            estrutura.mostrar_filtro(ui, "Estrutura das peças");
+        })
         .mostrar(ui);
     let termo = estado.busca_compras.trim().to_owned();
     let linhas: Vec<&ItemAguardandoEstoque> = pecas
         .iter()
+        .filter(|p| estado.estrutura_compras.contem(p.produto))
         .filter(|p| {
             termo.is_empty()
                 || cardeal_kernel::texto::casa_por_palavras(

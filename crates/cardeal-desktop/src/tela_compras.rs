@@ -51,6 +51,7 @@ use mod_estoque::{
     SugerirNomeDoProduto,
 };
 
+mod analise;
 mod conferencia_pedido;
 mod cotacoes;
 mod devolucao;
@@ -67,6 +68,8 @@ enum AbaCompras {
     Notas,
     Pedidos,
     Cotacoes,
+    /// Quanto se comprou, pela estrutura mercadológica.
+    Analise,
 }
 
 /// O fuso das datas e horas da tela.
@@ -144,6 +147,7 @@ pub struct EstadoTelaCompras {
     lista_fornecedores: Vec<ItemPessoa>,
     pedidos: pedidos::EstadoPedidos,
     cotacoes: cotacoes::EstadoCotacoes,
+    analise: analise::EstadoAnaliseCompras,
     /// O pedido de compra da nota aberta.
     conf_pedido: conferencia_pedido::EstadoConferenciaPedido,
     produtos: Vec<ItemProdutoComSaldo>,
@@ -226,6 +230,9 @@ impl EstadoTelaCompras {
         if sessao.concede("compras.cotacao.ver") {
             self.cotacoes
                 .carregar(motor, sessao, self.lista_fornecedores.clone());
+        }
+        if self.aba == AbaCompras::Analise {
+            self.analise.carregar(motor, sessao);
         }
         if let Ok(p) = motor.consultar(sessao, "estoque.produtos_com_saldo.v1", &ProdutosComSaldo) {
             self.produtos = p;
@@ -365,6 +372,7 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
                 }
             }
             AbaCompras::Notas => cabecalho_notas(ui, motor, sessao, estado),
+            AbaCompras::Analise => {}
         },
         |ui, estado| {
             let mut abas = vec![(AbaCompras::Notas, "Notas de entrada")];
@@ -373,6 +381,9 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
             }
             if sessao.concede("compras.cotacao.ver") {
                 abas.push((AbaCompras::Cotacoes, "Cotações"));
+            }
+            if sessao.concede("estoque.abc.ver") {
+                abas.push((AbaCompras::Analise, "Análise"));
             }
             if abas.len() > 1 {
                 if let Some(nova) = Abas::nova(&abas)
@@ -388,6 +399,9 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
             match estado.aba {
                 AbaCompras::Pedidos => pedidos::corpo(ui, motor, sessao, &mut estado.pedidos),
                 AbaCompras::Cotacoes => cotacoes::corpo(ui, motor, sessao, &mut estado.cotacoes),
+                AbaCompras::Analise => {
+                    analise::corpo(ui, motor, sessao, &estado.produtos, &mut estado.analise);
+                }
                 AbaCompras::Notas => {
                     if let Some(erro) = &estado.erro {
                         ui.add(
@@ -423,6 +437,7 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
                 &mut estado.cotacoes,
             );
         }
+        AbaCompras::Analise => {}
         AbaCompras::Notas => match estado.dlg {
             Dlg::Fechado => {}
             Dlg::Ver => dialogo_ver(ui.ctx(), motor, sessao, estado),
@@ -1714,6 +1729,111 @@ mod testes {
     </infNFe>
   </NFe>
 </nfeProc>"#;
+
+    #[test]
+    fn analise_soma_o_comprado_pela_estrutura_e_filtra_pela_subarvore() {
+        let t = motor_de_teste();
+        let (m, s) = (&t.motor, &t.sessao);
+        let grupo = |nome: &str, pai: Option<Id>| -> Id {
+            let g: mod_estoque::GrupoProdutoCriado = m
+                .executar(
+                    s,
+                    "estoque.criar_grupo_produto.v1",
+                    &mod_estoque::CriarGrupoProduto {
+                        codigo: nome.to_uppercase(),
+                        nome: nome.to_owned(),
+                        pai,
+                    },
+                )
+                .expect("grupo");
+            g.grupo_produto
+        };
+        let mercearia = grupo("Mercearia", None);
+        let fermentos = grupo("Fermentos", Some(mercearia));
+        let limpeza = grupo("Limpeza", None);
+        let local: mod_estoque::LocalCriado = m
+            .executar(
+                s,
+                "estoque.criar_local.v1",
+                &mod_estoque::CriarLocal {
+                    nome: "Loja".into(),
+                    tipo: mod_estoque::TipoLocal::Loja,
+                },
+            )
+            .expect("local");
+        let r: mod_compras::RelatorioImportacao = m
+            .executar(
+                s,
+                "compras.importar_nota_de_arquivo_xml.v1",
+                &ImportarNotaDeArquivoXml { xml: XML.into() },
+            )
+            .expect("importa");
+        let itens: Vec<ItemNotaEntrada> = m
+            .consultar(
+                s,
+                "compras.itens_da_nota.v1",
+                &ItensDaNota {
+                    nota: r.nota_entrada,
+                },
+            )
+            .expect("itens");
+        let _: ProdutoDoItemCriado = m
+            .executar(
+                s,
+                "compras.criar_produto_do_item.v1",
+                &CriarProdutoDoItem {
+                    item_nota: itens[0].id,
+                    nome: "Fermento 10g".into(),
+                    grupo: Some(fermentos),
+                },
+            )
+            .expect("produto");
+        let _: mod_compras::EntradaConfirmada = m
+            .executar(
+                s,
+                "compras.confirmar_entrada.v1",
+                &ConfirmarEntrada {
+                    nota_entrada: r.nota_entrada,
+                    local: local.local,
+                    gerar_titulo_a_pagar: Some(false),
+                    pago_no_ato: Some(false),
+                    parcelas: None,
+                    incluir_st_estimado: false,
+                },
+            )
+            .expect("confirma");
+
+        let mut estado = EstadoTelaCompras {
+            aba: AbaCompras::Analise,
+            ..EstadoTelaCompras::default()
+        };
+        estado.carregar(m, s);
+        let ctx = egui::Context::default();
+        cardeal_ui::tokens::instalar_fontes(&ctx);
+        cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+        let desenhar = |estado: &mut EstadoTelaCompras| {
+            for _ in 0..2 {
+                let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        analise::corpo(ui, m, s, &estado.produtos, &mut estado.analise);
+                    });
+                });
+            }
+        };
+        desenhar(&mut estado);
+        let soma = estado.analise.soma_da_estrutura();
+        let de = |g: Id| soma.nos.iter().find(|n| n.no.id == g).map(|n| n.subarvore);
+        assert_eq!(soma.total, cardeal_kernel::Dinheiro::reais(36));
+        assert_eq!(de(mercearia), Some(cardeal_kernel::Dinheiro::reais(36)));
+        assert_eq!(de(fermentos), Some(cardeal_kernel::Dinheiro::reais(36)));
+        assert_eq!(de(limpeza), None, "Limpeza não comprou");
+
+        estado.analise.filtrar(Some(limpeza));
+        desenhar(&mut estado);
+        assert!(estado.analise.linhas().is_empty(), "fora do filtro");
+        estado.analise.filtrar(Some(mercearia));
+        assert_eq!(estado.analise.linhas().len(), 1, "a subárvore entra");
+    }
 
     #[test]
     fn item_nao_casado_cria_produto_com_o_nome_sugerido_e_corrigido() {

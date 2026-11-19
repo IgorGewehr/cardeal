@@ -81,6 +81,79 @@ impl Consulta for SaidasPorProdutoEOrigem {
     }
 }
 
+/// O que entrou no estoque de um produto por uma origem, e quanto se pagou.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EntradaDoProduto {
+    /// O produto.
+    pub produto: Id,
+    /// O módulo que originou a entrada (`compras`: nota de compra; `os`: peça que chegou na OS;
+    /// `estoque`: entrada manual; `vendas`/`pdv`: devolução de venda).
+    pub origem_modulo: String,
+    /// A quantidade que entrou.
+    pub quantidade: Quantidade,
+    /// Σ(quantidade × custo unitário da entrada).
+    pub valor: Dinheiro,
+}
+
+/// As entradas (movimentos `Entrada`; transferência entre locais/filiais não conta) do período,
+/// somadas por produto e origem — "o que comprei" de cada produto, para o relatório de compras
+/// pela estrutura mercadológica. O dia vai da meia-noite do primeiro à meia-noite seguinte ao
+/// último, no fuso da empresa.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EntradasPorProdutoEOrigem {
+    /// O período (datas, inclusive).
+    pub periodo: Periodo,
+    /// Só uma origem (`"compras"`…); `None` = todas.
+    pub origem: Option<String>,
+}
+
+impl Consulta for EntradasPorProdutoEOrigem {
+    type Saida = Vec<EntradaDoProduto>;
+    const PERMISSAO: &'static str = "estoque.abc.ver";
+
+    #[cfg(feature = "sqlite")]
+    fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        use cardeal_kernel::{Hora, Instante};
+
+        use crate::repositorio::{blob, id_de, persist};
+
+        let inicio = |d| Instante::de_data_hora(d, Hora::MEIA_NOITE, ctx.fuso).em_micros();
+        let de = inicio(self.periodo.de);
+        let ate = inicio(self.periodo.ate.mais_dias(1));
+        let mut stmt = conexao
+            .prepare(
+                "SELECT m.produto, m.origem_modulo, SUM(m.quantidade),
+                        SUM(m.quantidade * COALESCE(m.custo_unitario, 0))
+                 FROM estoque_movimento m
+                 WHERE m.empresa = ?1 AND m.tipo = 'Entrada'
+                   AND m.criado_em >= ?2 AND m.criado_em < ?3
+                   AND (?4 IS NULL OR m.origem_modulo = ?4)
+                 GROUP BY m.produto, m.origem_modulo
+                 ORDER BY m.produto, m.origem_modulo",
+            )
+            .map_err(persist)?;
+        let linhas = stmt
+            .query_map(
+                rusqlite::params![blob(ctx.empresa), de, ate, self.origem],
+                |r| {
+                    // Σ(qtd × custo) vem em 1e-10 de real; o centavo é 1e-2.
+                    let bruto: i64 = r.get(3)?;
+                    let centavos = (i128::from(bruto) + 50_000_000).div_euclid(100_000_000);
+                    Ok(EntradaDoProduto {
+                        produto: id_de(r.get::<_, Vec<u8>>(0)?),
+                        origem_modulo: r.get(1)?,
+                        quantidade: Quantidade::interna(r.get::<_, i64>(2)?),
+                        valor: Dinheiro::centavos(i64::try_from(centavos).unwrap_or(0)),
+                    })
+                },
+            )
+            .map_err(persist)?;
+        linhas
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(persist)
+    }
+}
+
 /// Os percentuais que incidem hoje sobre a venda da empresa (operação, imposto, comissão,
 /// taxas) e a margem líquida mínima — a régua da margem líquida **estimada** da rentabilidade.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]

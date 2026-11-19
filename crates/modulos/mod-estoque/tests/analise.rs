@@ -10,8 +10,9 @@ use cardeal_storage::{Armazenamento, ConfigArmazenamento, ContextoEscrita, ErroA
 use mod_estoque::analise::{ClasseAbc, ItemDeAnalise};
 use mod_estoque::{
     AnaliseDeEstoque, CriarGrupoProduto, CriarLocal, CriarProduto, CriarUnidade, EncargosAtuais,
-    GrupoProdutoCriado, LocalCriado, ModuloEstoque, ProdutoCriado, RegistrarEntrada,
-    RegistrarSaida, SaidaDoProduto, SaidasPorProdutoEOrigem, TipoLocal, UnidadeCriada, MANIFESTO,
+    EntradaDoProduto, EntradasPorProdutoEOrigem, GrupoProdutoCriado, LocalCriado, ModuloEstoque,
+    ProdutoCriado, RegistrarEntrada, RegistrarSaida, SaidaDoProduto, SaidasPorProdutoEOrigem,
+    TipoLocal, UnidadeCriada, MANIFESTO,
 };
 use tempfile::TempDir;
 
@@ -315,4 +316,111 @@ fn saidas_por_produto_e_origem_somam_o_custo_e_usam_o_medio_quando_falta() {
     )
     .unwrap();
     assert!(e.total() >= e.imposto);
+}
+
+#[test]
+fn entradas_por_produto_somam_o_valor_pago_e_separam_a_origem() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloEstoque]).unwrap();
+    let s = sessao(
+        empresa,
+        &[
+            "estoque.produto.criar",
+            "estoque.produto.ver",
+            "estoque.local.criar",
+            "estoque.movimento.entrada",
+            "estoque.movimento.saida",
+            "estoque.abc.ver",
+        ],
+    );
+    let amb = ambiente(empresa);
+    let cmd = |nome: &str, c: Vec<u8>| {
+        d.executar_comando(nome, &c, &s, &amb, arm.escritor())
+            .unwrap()
+    };
+    let g: GrupoProdutoCriado = postcard::from_bytes(&cmd(
+        "estoque.criar_grupo_produto.v1",
+        carga(&CriarGrupoProduto {
+            codigo: "G".into(),
+            nome: "G".into(),
+            pai: None,
+        }),
+    ))
+    .unwrap();
+    let u: UnidadeCriada = postcard::from_bytes(&cmd(
+        "estoque.criar_unidade.v1",
+        carga(&CriarUnidade {
+            sigla: "UN".into(),
+            nome: "Un".into(),
+            fracionavel: false,
+        }),
+    ))
+    .unwrap();
+    let l: LocalCriado = postcard::from_bytes(&cmd(
+        "estoque.criar_local.v1",
+        carga(&CriarLocal {
+            nome: "Dep".into(),
+            tipo: TipoLocal::Deposito,
+        }),
+    ))
+    .unwrap();
+    let p: ProdutoCriado = postcard::from_bytes(&cmd(
+        "estoque.criar_produto.v1",
+        carga(&CriarProduto {
+            grupo_produto: g.grupo_produto,
+            nome: "Cabo".into(),
+            ncm: "22021000".into(),
+            unidade_padrao: u.unidade,
+            codigo_barras: None,
+            detalhes_tecnicos: None,
+        }),
+    ))
+    .unwrap();
+    for (qtd, reais) in [(10, 4), (5, 6)] {
+        cmd(
+            "estoque.registrar_entrada.v1",
+            carga(&RegistrarEntrada {
+                produto: p.produto,
+                local: l.local,
+                quantidade: Quantidade::unidades(qtd),
+                custo_unitario: Preco::reais(reais),
+            }),
+        );
+    }
+    cmd(
+        "estoque.registrar_saida.v1",
+        carga(&RegistrarSaida {
+            produto: p.produto,
+            local: l.local,
+            quantidade: Quantidade::unidades(3),
+        }),
+    );
+    let entradas = |origem: Option<&str>| -> Vec<EntradaDoProduto> {
+        let hoje = Data::hoje(Fuso::BRASILIA);
+        postcard::from_bytes(
+            &d.executar_consulta(
+                "estoque.entradas_por_produto_e_origem.v1",
+                &carga(&EntradasPorProdutoEOrigem {
+                    periodo: Periodo::novo(hoje.mais_dias(-1), hoje.mais_dias(1)),
+                    origem: origem.map(str::to_owned),
+                }),
+                &s,
+                &amb,
+                arm.leitor(),
+            )
+            .unwrap(),
+        )
+        .unwrap()
+    };
+    let r = entradas(None);
+    assert_eq!(r.len(), 1, "a saída não conta");
+    assert_eq!(r[0].produto, p.produto);
+    assert_eq!(r[0].origem_modulo, "estoque");
+    assert_eq!(r[0].quantidade, Quantidade::unidades(15));
+    assert_eq!(r[0].valor, Dinheiro::reais(70));
+    assert!(
+        entradas(Some("compras")).is_empty(),
+        "só as da origem pedida"
+    );
+    assert_eq!(entradas(Some("estoque")).len(), 1);
 }

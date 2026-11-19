@@ -3,8 +3,10 @@
 //! Os módulos expõem consultas públicas; quem orquestra (a tela, hoje) junta as respostas e
 //! chama as funções daqui. Este crate nunca lê tabela nenhuma.
 
+pub mod estrutura;
 pub mod rentabilidade;
 
+pub use estrutura::{NoSomado, RecorteEstrutura, SomaPorEstrutura};
 pub use rentabilidade::{
     calcular, CustoDoProduto, EncargosDaVenda, NoDaEstrutura, NoDeRentabilidade,
     ProdutoDaEstrutura, ProdutoRentavel, ReceitaDoProduto, Rentabilidade, Totais,

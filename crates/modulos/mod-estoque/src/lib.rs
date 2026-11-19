@@ -180,7 +180,10 @@ pub use consultas_preco::{
     EncargosDaEmpresa, OrigemComissao, OrigemMargem, ParametrosDePreco, PrecoSugeridoDoProduto,
     PrecosSugeridosDoGrupo, SugestaoDePreco,
 };
-pub use consultas_rentabilidade::{EncargosAtuais, SaidaDoProduto, SaidasPorProdutoEOrigem};
+pub use consultas_rentabilidade::{
+    EncargosAtuais, EntradaDoProduto, EntradasPorProdutoEOrigem, SaidaDoProduto,
+    SaidasPorProdutoEOrigem,
+};
 pub use consultas_transferencia::{
     ItemTransferido, ResumoTransferencia, SaldoNoLocal, SaldosDoProdutoPorLocal, Transferencias,
 };

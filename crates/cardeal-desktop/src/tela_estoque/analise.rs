@@ -21,12 +21,23 @@ enum Recorte {
     Ruptura,
 }
 
+/// Como a aba mostra: a lista da curva ou a soma pela estrutura mercadológica.
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+enum Visao {
+    #[default]
+    Lista,
+    PorEstrutura,
+}
+
 /// O estado da aba.
 #[derive(Default)]
 pub(super) struct EstadoAnalise {
     dias: u32,
     pub(super) itens: Vec<ItemDeAnalise>,
     recorte: Recorte,
+    /// O filtro pela estrutura mercadológica (vale para os indicadores e a lista).
+    pub(super) estrutura: crate::recorte_estrutura::EstadoRecorte,
+    visao: Visao,
 }
 
 impl EstadoAnalise {
@@ -41,11 +52,20 @@ impl EstadoAnalise {
         ) {
             self.itens = i;
         }
+        self.estrutura.carregar(motor, sessao);
+    }
+
+    /// Os itens dentro do filtro da estrutura.
+    pub(super) fn na_estrutura(&self) -> Vec<&ItemDeAnalise> {
+        self.itens
+            .iter()
+            .filter(|i| self.estrutura.contem(i.produto))
+            .collect()
     }
 
     fn filtrados(&self) -> Vec<&ItemDeAnalise> {
-        self.itens
-            .iter()
+        self.na_estrutura()
+            .into_iter()
             .filter(|i| match self.recorte {
                 Recorte::Todos => true,
                 Recorte::A => i.classe == ClasseAbc::A,
@@ -89,10 +109,15 @@ pub(super) fn aba(
             estado.analise.dias = d;
             estado.analise.carregar(motor, sessao);
         }
+        ui.add_space(Espaco::E16);
+        estado
+            .analise
+            .estrutura
+            .mostrar_filtro(ui, "Estrutura da análise");
     });
     ui.add_space(Espaco::E12);
 
-    let itens = &estado.analise.itens;
+    let itens = estado.analise.na_estrutura();
     let parado: Dinheiro = itens
         .iter()
         .filter(|i| i.classe == ClasseAbc::SemGiro)
@@ -117,6 +142,38 @@ pub(super) fn aba(
     ])
     .mostrar(ui);
     ui.add_space(Espaco::E12);
+
+    if estado.analise.estrutura.tem_arvore() {
+        if let Some(v) = Abas::nova(&[
+            (Visao::Lista, "Curva ABC"),
+            (Visao::PorEstrutura, "Por estrutura"),
+        ])
+        .selecionada(estado.analise.visao)
+        .id_salt("analise-visao")
+        .mostrar(ui)
+        {
+            estado.analise.visao = v;
+        }
+        ui.add_space(Espaco::E8);
+    }
+    if estado.analise.visao == Visao::PorEstrutura {
+        let valores: Vec<(Id, Dinheiro)> = estado
+            .analise
+            .itens
+            .iter()
+            .map(|i| (i.produto, i.valor_saidas))
+            .collect();
+        let soma = estado.analise.estrutura.recorte().somar(valores);
+        ui.add(Rotulo::apoio(
+            "Quanto saiu do estoque, ao custo, em cada nível da estrutura (o nó soma tudo abaixo \
+             dele). Clique num nó para filtrar a curva por ele. Vale a classificação de hoje.",
+        ));
+        ui.add_space(Espaco::E8);
+        if estado.analise.estrutura.mostrar_soma(ui, &soma) {
+            estado.analise.visao = Visao::Lista;
+        }
+        return;
+    }
 
     if let Some(r) = Abas::nova(&[
         (Recorte::Todos, "Todos"),
