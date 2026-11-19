@@ -360,6 +360,93 @@ fn aba_analise_lista_o_produto_parado_com_o_dinheiro_que_ele_prende() {
 }
 
 #[test]
+fn aba_analise_filtra_a_curva_pela_subarvore_da_estrutura() {
+    let t = motor_de_teste();
+    let coca = cenario_de_preco(&t); // grupo BEB
+    let beb = t
+        .motor
+        .consultar(
+            &t.sessao,
+            "estoque.arvore_grupos_produto.v1",
+            &mod_estoque::ArvoreGruposProduto,
+        )
+        .expect("árvore")
+        .into_iter()
+        .find(|n: &mod_estoque::NoArvoreGrupo| n.codigo == "BEB")
+        .expect("BEB")
+        .id;
+    let lim = grupo(&t.motor, &t.sessao, "LIM", None);
+    let un: UnidadeCriada = t
+        .motor
+        .executar(
+            &t.sessao,
+            "estoque.criar_unidade.v1",
+            &CriarUnidade {
+                sigla: "PC".into(),
+                nome: "Peça".into(),
+                fracionavel: false,
+            },
+        )
+        .expect("unidade");
+    let sabao: ProdutoCriado = t
+        .motor
+        .executar(
+            &t.sessao,
+            "estoque.criar_produto.v1",
+            &CriarProduto {
+                grupo_produto: lim,
+                nome: "Sabão".into(),
+                ncm: "34011190".into(),
+                unidade_padrao: un.unidade,
+                codigo_barras: None,
+                detalhes_tecnicos: None,
+            },
+        )
+        .expect("produto");
+    let local = t
+        .motor
+        .consultar(&t.sessao, "estoque.locais.v1", &Locais)
+        .expect("locais");
+    let _: EntradaRegistrada = t
+        .motor
+        .executar(
+            &t.sessao,
+            "estoque.registrar_entrada.v1",
+            &RegistrarEntrada {
+                produto: sabao.produto,
+                local: local[0].id,
+                quantidade: Quantidade::unidades(3),
+                custo_unitario: Preco::reais(4),
+            },
+        )
+        .expect("entrada");
+
+    let mut estado = EstadoTelaEstoque {
+        aba: AbaEstoque::Analise,
+        ..Default::default()
+    };
+    estado.analise.carregar(&t.motor, &t.sessao);
+    let produtos = |e: &EstadoTelaEstoque| -> Vec<Id> {
+        e.analise.na_estrutura().iter().map(|i| i.produto).collect()
+    };
+    assert!(estado.analise.estrutura.tem_arvore());
+    let todos = produtos(&estado);
+    assert!(todos.contains(&coca) && todos.contains(&sabao.produto));
+
+    estado.analise.estrutura.filtro = Some(beb);
+    assert_eq!(produtos(&estado), vec![coca], "Bebidas não traz o sabão");
+    estado.analise.estrutura.filtro = Some(lim);
+    assert_eq!(produtos(&estado), vec![sabao.produto]);
+
+    // Recarregar mantém o filtro; um grupo que sumiu volta para "Toda a estrutura".
+    estado.analise.carregar(&t.motor, &t.sessao);
+    assert_eq!(estado.analise.estrutura.filtro, Some(lim));
+    estado.analise.estrutura.filtro = Some(Id::novo());
+    estado.analise.carregar(&t.motor, &t.sessao);
+    assert_eq!(estado.analise.estrutura.filtro, None);
+}
+
+#[test]
 fn aba_precos_muda_o_custo_de_referencia_e_abre_o_historico_de_compras() {
     let t = motor_de_teste();
     let produto = cenario_de_preco(&t); // 10 un a R$ 50
