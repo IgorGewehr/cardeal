@@ -38,6 +38,10 @@ pub use definir_preco_da_peca::DefinirPrecoDaPeca;
 pub use desfaturar_ordem_servico::{DesfaturarOrdemServico, OrdemServicoDesfaturada};
 pub use editar_dados_da_ordem::EditarDadosDaOrdem;
 pub use encerrar_apontamento::EncerrarApontamento;
+#[cfg(feature = "sqlite")]
+pub use encomenda_de_peca::{
+    desfazer_encomendas_do_pedido_comum, encomendar_pelo_pedido_comum, peca_espera_o_pedido,
+};
 pub use encomenda_de_peca::{
     ChegadaRegistrada, EncomendarPeca, PagamentoDaPeca, RegistrarChegadaDaPeca,
 };

@@ -33,7 +33,11 @@ pub(super) fn secao_pecas(
     let a_comprar: Vec<&mod_os::ItemPeca> = detalhe
         .itens_peca
         .iter()
-        .filter(|i| !i.aplicada && i.encomenda.is_none() && falta_no_estoque(i, &estado.produtos))
+        .filter(|i| {
+            !i.aplicada
+                && i.encomenda.is_none()
+                && falta_no_estoque(i, &estado.produtos, detalhe.reservado_para(i.id))
+        })
         .collect();
     let mut pedido = None;
     let mut encomendar = false;
@@ -77,7 +81,6 @@ pub(super) fn secao_pecas(
             })
             .collect();
         estado.pedido_encomenda = Some(crate::tela_compras::PecasDaOs {
-            ordem: os.id,
             numero: os.numero,
             equipamento: equipamento_label(os).to_owned(),
             pecas,
@@ -190,6 +193,9 @@ fn detalhe_da_peca(item: &mod_os::ItemPeca) -> String {
         if !e.fornecedor.trim().is_empty() {
             enc.push_str(&format!(" de {}", e.fornecedor.trim()));
         }
+        if e.pedido.is_some() {
+            enc.push_str(" pelo pedido de compra (chega pela nota)");
+        }
         partes.push(enc);
         if let Some(c) = e.custo_previsto {
             partes.push(format!("custo combinado {}", c.formatar_com_simbolo()));
@@ -230,7 +236,8 @@ fn linhas_de_pecas(
                 "{} × {nome}",
                 item.quantidade.formatar(0)
             )));
-            ui.add(etiqueta_da_peca(item, &estado.produtos));
+            let reservado = detalhe.reservado_para(item.id);
+            ui.add(etiqueta_da_peca(item, &estado.produtos, reservado));
             if item.preco_unitario.e_zero() && !item.coberto_garantia {
                 ui.add(Etiqueta::atencao("sem preço"));
             }
@@ -252,12 +259,14 @@ fn linhas_de_pecas(
                 if !ativa {
                     return;
                 }
-                let falta = falta_no_estoque(item, &estado.produtos);
+                let falta = falta_no_estoque(item, &estado.produtos, reservado);
                 if em_execucao && !falta && ui.add(Botao::secundario("Aplicar").pequeno()).clicked()
                 {
                     pedido = Some(PedidoItem::Aplicar(item.id));
                 }
+                // A que vem pelo pedido chega pela nota dele (já guardada para a OS).
                 if item.encomenda.is_some()
+                    && !vem_pelo_pedido(item.encomenda.as_ref())
                     && ui.add(Botao::secundario("Chegou").pequeno()).clicked()
                 {
                     let form = FormChegada::novo(

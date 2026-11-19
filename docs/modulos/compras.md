@@ -553,3 +553,22 @@ CREATE TABLE compras_transferencia_item (
     valor INTEGER NOT NULL, PRIMARY KEY (transferencia, ordem)
 ) STRICT, WITHOUT ROWID;
 ```
+
+## 15. Peça de OS no pedido (2026-11-18)
+
+O item do pedido diz quais peças de OS ele atende (`ItemDoPedido::para_os`, tabela
+`compras_pedido_item_os`; a soma cabe na quantidade do item, o resto é do estoque).
+
+- **Salvar o pedido** marca cada peça como encomendada na OS, ligada ao pedido, na mesma transação
+  (`mod_os::encomendar_pelo_pedido_comum`); a peça que saiu do pedido editado volta a "a comprar".
+- **Confirmar a nota do pedido** reserva o recebido para as peças, na ordem, cada uma até a quantidade
+  dela (`mod_estoque::reservar_para_origem_comum`, origem `os_peca`). Idempotente: só reserva o que falta, e
+  só para a peça que ainda espera (não aplicada, OS não finalizada).
+- **Aplicar a peça na OS** libera a reserva e dá a saída no local dela. O "Chegou" da OS (que lança entrada e
+  conta a pagar) é recusado para a peça do pedido — a entrada e a conta são as da nota.
+- **Cancelar/encerrar o pedido** devolve a "a comprar" as peças que não chegaram.
+- **Estornar a nota** solta as reservas antes de tirar a mercadoria e, depois, reserva de novo o que as outras
+  notas do pedido trouxeram.
+
+`mod-compras` depende de `mod-os` para isso (o inverso fecharia ciclo: `mod-fiscal` já depende de `mod-os`).
+

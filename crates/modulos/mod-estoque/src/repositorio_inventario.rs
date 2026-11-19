@@ -254,7 +254,7 @@ pub fn foto_do_local(
 ) -> Resultado<Vec<(Id, Quantidade)>> {
     let mut stmt = conn
         .prepare(
-            "SELECT s.produto, s.quantidade_disponivel, p.grupo_produto
+            "SELECT s.produto, s.quantidade_disponivel + s.quantidade_reservada, p.grupo_produto
              FROM estoque_saldo_local s
              JOIN estoque_produto p ON p.id = s.produto
              WHERE s.local = ?1 AND s.variacao = X'' AND p.empresa = ?2 AND p.ativo = 1
@@ -279,13 +279,14 @@ pub fn foto_do_local(
         .collect())
 }
 
-/// O disponível de um produto no local agora (zero sem saldo registrado).
+/// O que o sistema diz que está no local agora — disponível **mais reservado** (a contagem
+/// física enxerga a peça guardada para uma OS); zero sem saldo registrado.
 ///
 /// # Errors
 /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
 pub fn disponivel(conn: &Connection, produto: Id, local: Id) -> Resultado<Quantidade> {
     conn.query_row(
-        "SELECT quantidade_disponivel FROM estoque_saldo_local
+        "SELECT quantidade_disponivel + quantidade_reservada FROM estoque_saldo_local
          WHERE produto = ?1 AND local = ?2 AND variacao = X''",
         params![blob(produto), blob(local)],
         |r| r.get::<_, i64>(0),

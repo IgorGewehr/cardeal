@@ -23,8 +23,8 @@ use mod_clientes::ItemPessoa;
 use mod_compras::pedido::ResumoPedido;
 use mod_compras::{
     ACaminho, AprovarPedidoCompra, CancelarPedidoCompra, EncerrarPedidoCompra, EstadoPedido,
-    ItemDoPedido, PedidoCompra, PedidoDeCompra, PedidosDeCompra, SalvarPedidoCompra,
-    UltimosPrecosPagos,
+    ItemDoPedido, PecaDaOsNoPedido, PedidoCompra, PedidoDeCompra, PedidosDeCompra,
+    SalvarPedidoCompra, UltimosPrecosPagos,
 };
 use mod_estoque::{ItemAbaixoDoPontoPedido, ItemProdutoComSaldo, ProdutosAbaixoDoPontoPedido};
 
@@ -40,6 +40,8 @@ struct LinhaPedido {
     preco: String,
     /// O produto para o qual o preço já foi sugerido (não sugere de novo por cima do digitado).
     sugerido_para: Option<Id>,
+    /// As peças de OS que a linha atende (a nota do pedido as guarda para as OS).
+    para_os: Vec<PecaDaOsNoPedido>,
 }
 
 #[derive(Default)]
@@ -81,6 +83,7 @@ impl FormPedido {
                     qtd: i.quantidade.formatar(0),
                     preco: i.preco_unitario.formatar(),
                     sugerido_para: Some(i.produto),
+                    para_os: i.para_os.clone(),
                 })
                 .collect(),
             da_os: None,
@@ -121,10 +124,19 @@ impl FormPedido {
                     .parse::<Preco>()
                     .map_err(|_| format!("Linha {}: o preço não é um valor.", n + 1))?,
             };
+            let das_os: Quantidade = l.para_os.iter().map(|o| o.quantidade).sum();
+            if quantidade < das_os {
+                return Err(format!(
+                    "Linha {}: as OS precisam de {} — não peça menos que isso.",
+                    n + 1,
+                    das_os.formatar(0)
+                ));
+            }
             itens.push(ItemDoPedido {
                 produto,
                 quantidade,
                 preco_unitario,
+                para_os: l.para_os.clone(),
             });
         }
         Ok(SalvarPedidoCompra {
@@ -469,6 +481,7 @@ fn linhas_do_radar(motor: &Motor, sessao: &Sessao) -> Result<Vec<LinhaPedido>, S
                 .map(|p| p.formatar())
                 .unwrap_or_default(),
             sugerido_para: Some(produto),
+            para_os: Vec::new(),
         })
         .collect())
 }
@@ -510,7 +523,7 @@ fn dialogo_form(
                             Rotulo::interface(format!(
                             "{} peça(s) da OS #{} — ao salvar, ficam encomendadas na OS. Preço \
                              em branco = a combinar.",
-                            v.itens.len(),
+                            v.pecas,
                             v.numero
                         ))
                             .quebravel(),
@@ -686,14 +699,15 @@ fn salvar(ctx: &egui::Context, motor: &Motor, sessao: &Sessao, estado: &mut Esta
     let vinculo = f.da_os.clone();
     match motor.executar(sessao, "compras.salvar_pedido.v1", &cmd) {
         Ok(s) => {
+            // O próprio pedido marcou as peças como encomendadas na OS (mesma transação).
             if let Some(v) = &vinculo {
-                let fornecedor = estado
-                    .fornecedores
-                    .iter()
-                    .find(|x| x.pessoa == cmd.fornecedor)
-                    .map(|x| x.nome.clone())
-                    .unwrap_or_default();
-                da_os::marcar_encomendadas(ctx, motor, sessao, v, &cmd, &fornecedor);
+                notificar(
+                    ctx,
+                    Notificacao::sucesso(format!(
+                        "{} peça(s) da OS #{} encomendadas por este pedido",
+                        v.pecas, v.numero
+                    )),
+                );
             }
             notificar(
                 ctx,

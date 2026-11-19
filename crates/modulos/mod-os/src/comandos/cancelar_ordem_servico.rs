@@ -68,7 +68,17 @@ impl Comando for CancelarOrdemServico {
         let mut pecas_estornadas = 0usize;
         let mut pecas_pendentes_de_estorno_manual = 0usize;
         for mut item in itens_peca {
-            if !item.aplicada || item.estornada {
+            if !item.aplicada {
+                // O que o estoque guardava para a peça volta a ser de todos.
+                mod_estoque::liberar_reservas_da_origem_comum(
+                    crate::consultas::ORIGEM_RESERVA_PECA,
+                    item.id,
+                    ctx,
+                    uow,
+                )?;
+                continue;
+            }
+            if item.estornada {
                 continue;
             }
             let Some(local) = item.local else {

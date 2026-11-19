@@ -133,6 +133,15 @@ ALTER TABLE os_item_peca ADD COLUMN encomenda_previsao INTEGER;
 ALTER TABLE os_item_peca ADD COLUMN encomendada_em INTEGER;
 ";
 
+// Migração v10 (2026-11-18): a encomenda feita por um pedido de compra guarda o pedido — a peça
+// chega pela nota dele, reservada para a OS, e o "Chegou" (que lançaria entrada e conta de novo)
+// não vale para ela.
+const SQL_ENCOMENDA_PELO_PEDIDO: &str = r"
+ALTER TABLE os_item_peca ADD COLUMN encomenda_pedido BLOB;
+CREATE INDEX os_item_peca_encomenda_pedido ON os_item_peca(encomenda_pedido)
+    WHERE encomenda_pedido IS NOT NULL;
+";
+
 // Migração v9 (2026-10-13): o custo-hora da equipe técnica (o técnico é o usuário; o técnico
 // vazio guarda o padrão da oficina) — o que faltava para a mão de obra entrar nas margens.
 const SQL_CUSTO_HORA: &str = r"
@@ -198,6 +207,12 @@ const MIGRACOES: &[Migracao] = &[
         versao: 9,
         nome: "os_custo_hora",
         sql: SQL_CUSTO_HORA,
+        tipo: TipoMigracao::Esquema,
+    },
+    Migracao {
+        versao: 10,
+        nome: "os_item_peca_encomenda_pedido",
+        sql: SQL_ENCOMENDA_PELO_PEDIDO,
         tipo: TipoMigracao::Esquema,
     },
 ];

@@ -409,6 +409,12 @@ const MIGRACOES: &[Migracao] = &[
         sql: SQL_SIMPLES_HISTORICO,
         tipo: TipoMigracao::Esquema,
     },
+    Migracao {
+        versao: 15,
+        nome: "estoque_reserva",
+        sql: SQL_RESERVA,
+        tipo: TipoMigracao::Esquema,
+    },
 ];
 
 /// v14: o que o Cardeal não sabe sozinho para o RBT12 do Simples — o mês de abertura da empresa
@@ -425,6 +431,22 @@ CREATE TABLE estoque_simples_receita_anterior (
     valor       INTEGER NOT NULL CHECK (valor >= 0),
     PRIMARY KEY (empresa, competencia)
 ) STRICT, WITHOUT ROWID;
+";
+
+/// v15: a reserva por origem (`reserva.rs`) — a peça que chegou pela nota do pedido para uma OS.
+/// O saldo já tinha `quantidade_reservada`; esta tabela diz de quem é cada reserva.
+const SQL_RESERVA: &str = "
+CREATE TABLE estoque_reserva (
+    empresa        BLOB    NOT NULL,
+    produto        BLOB    NOT NULL REFERENCES estoque_produto(id),
+    local          BLOB    NOT NULL REFERENCES estoque_local(id),
+    origem_modulo  TEXT    NOT NULL,
+    origem_id      BLOB    NOT NULL,
+    quantidade     INTEGER NOT NULL CHECK (quantidade > 0),
+    criada_em      INTEGER NOT NULL,
+    PRIMARY KEY (origem_modulo, origem_id, produto, local)
+) STRICT, WITHOUT ROWID;
+CREATE INDEX estoque_reserva_produto ON estoque_reserva(produto, local);
 ";
 
 /// O conjunto de migrações do módulo de estoque.

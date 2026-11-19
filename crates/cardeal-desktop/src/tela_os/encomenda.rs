@@ -41,10 +41,18 @@ pub(super) fn nome_do_produto(produtos: &[ItemProdutoComSaldo], produto: Id) -> 
         .map_or_else(|| "Peça".to_owned(), |p| p.nome.clone())
 }
 
-/// A etiqueta de situação de uma peça do orçamento.
-pub(super) fn etiqueta_da_peca(item: &ItemPeca, produtos: &[ItemProdutoComSaldo]) -> Etiqueta {
+/// A etiqueta de situação de uma peça do orçamento. `reservado` = o que chegou pela nota do
+/// pedido e o estoque guarda para ela.
+pub(super) fn etiqueta_da_peca(
+    item: &ItemPeca,
+    produtos: &[ItemProdutoComSaldo],
+    reservado: Quantidade,
+) -> Etiqueta {
     if item.aplicada {
         return Etiqueta::positiva("aplicada");
+    }
+    if reservado >= item.quantidade {
+        return Etiqueta::positiva("chegou · guardada para esta OS");
     }
     if let Some(e) = &item.encomenda {
         let quando = e
@@ -64,12 +72,23 @@ pub(super) fn etiqueta_da_peca(item: &ItemPeca, produtos: &[ItemProdutoComSaldo]
     }
 }
 
-/// Se a peça ainda não tem saldo suficiente (o "Encomendar" faz sentido).
-pub(super) fn falta_no_estoque(item: &ItemPeca, produtos: &[ItemProdutoComSaldo]) -> bool {
-    produtos
+/// Se a peça ainda não tem saldo suficiente (o "Encomendar" faz sentido). Conta o que o estoque
+/// já guarda para ela (`reservado`), que não aparece no disponível.
+pub(super) fn falta_no_estoque(
+    item: &ItemPeca,
+    produtos: &[ItemProdutoComSaldo],
+    reservado: Quantidade,
+) -> bool {
+    let disponivel = produtos
         .iter()
         .find(|p| p.produto == item.produto)
-        .is_none_or(|p| p.disponivel < item.quantidade)
+        .map_or(Quantidade::ZERO, |p| p.disponivel);
+    disponivel + reservado < item.quantidade
+}
+
+/// A peça vem por um pedido de compra: chega pela nota dele, não pelo "Chegou".
+pub(super) fn vem_pelo_pedido(e: Option<&Encomenda>) -> bool {
+    e.is_some_and(|e| e.pedido.is_some())
 }
 
 impl FormEncomenda {
@@ -434,13 +453,21 @@ pub(super) fn aba_compras(ui: &mut egui::Ui, estado: &mut EstadoTelaOs) {
                 ui.add(Rotulo::interface(p.quantidade_necessaria.to_string()));
             });
             row.col(|ui| match &p.encomenda {
+                _ if p.reservado >= p.quantidade_necessaria => {
+                    ui.add(Etiqueta::positiva("chegou · guardada para a OS"));
+                }
                 Some(e) => {
                     let quando = e
                         .previsao_chegada
                         .map(|d| format!(" · chega {}", d.formatar_curta()))
                         .unwrap_or_default();
+                    let pelo = if e.pedido.is_some() {
+                        " · no pedido"
+                    } else {
+                        ""
+                    };
                     ui.add(Etiqueta::nova(
-                        format!("{}{quando}", e.fornecedor),
+                        format!("{}{pelo}{quando}", e.fornecedor),
                         Tom::Info,
                     ));
                 }
@@ -452,6 +479,11 @@ pub(super) fn aba_compras(ui: &mut egui::Ui, estado: &mut EstadoTelaOs) {
                 }
             });
             row.col(|ui| {
+                // A que vem pelo pedido chega pela nota dele: aplica-se na OS.
+                if vem_pelo_pedido(p.encomenda.as_ref()) {
+                    ui.add(Rotulo::apoio("aplique na OS quando chegar"));
+                    return;
+                }
                 ui.horizontal(|ui| {
                     if ui.add(Botao::primario("Chegou").pequeno()).clicked() {
                         acao = Some((true, i));

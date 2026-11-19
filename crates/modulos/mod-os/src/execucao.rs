@@ -57,6 +57,10 @@ pub struct Encomenda {
     pub previsao_chegada: Option<cardeal_kernel::Data>,
     /// Quando foi pedida.
     pub encomendada_em: cardeal_kernel::Data,
+    /// O pedido de compra que a traz, quando foi encomendada por um (Compras › Pedidos). A peça
+    /// chega então pela nota do pedido — reservada para esta OS —, não pelo "Chegou".
+    #[serde(default)]
+    pub pedido: Option<Id>,
 }
 
 impl ItemPeca {

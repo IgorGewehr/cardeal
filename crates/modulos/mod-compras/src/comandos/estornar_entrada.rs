@@ -95,7 +95,10 @@ impl Comando for EstornarEntrada {
             }
         }
 
-        // 3. Estoque: a mercadoria sai ao custo da nota (recusa se já foi vendida/movida).
+        // 3. Estoque: a mercadoria sai ao custo da nota (recusa se já foi vendida/movida). O que
+        // estava guardado para as OS volta ao disponível antes (a peça já aplicada não volta: aí
+        // a mercadoria foi consumida e o estorno é recusado).
+        let local_das_reservas = crate::pedido::sqlite::soltar_reservas_da_nota(nota.id, ctx, uow)?;
         let saidas = mod_estoque::retirar_entradas_da_origem("compras", nota.id, ctx, uow)?;
 
         // 4. Financeiro: pagamento (se pedido), lançamento e título.
@@ -125,7 +128,7 @@ impl Comando for EstornarEntrada {
 
         // 5. Persistir; o que a nota deu ao pedido sai.
         RepositorioCompras::novo(uow).atualizar_nota(&nota)?;
-        crate::pedido::sqlite::desfazer_recebimento(nota.id, ctx, uow)?;
+        crate::pedido::sqlite::desfazer_recebimento(nota.id, local_das_reservas, ctx, uow)?;
 
         // 6. Publicar.
         let titulo = desfeito.map(|d| d.titulo);

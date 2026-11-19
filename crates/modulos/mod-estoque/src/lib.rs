@@ -106,6 +106,7 @@ pub(crate) mod repositorio_lote;
 pub(crate) mod repositorio_preco;
 #[cfg(feature = "sqlite")]
 pub(crate) mod repositorio_transferencia;
+pub mod reserva;
 mod saldo;
 pub mod simples;
 pub mod transferencia;
@@ -199,4 +200,9 @@ pub use produto::{
 pub use produto_para_nota::{produtos_para_nota, ProdutoParaNota};
 #[cfg(feature = "sqlite")]
 pub use repositorio::RepositorioEstoque;
+#[cfg(feature = "sqlite")]
+pub use reserva::{
+    liberar_reservas_da_origem_comum, reservar_para_origem_comum, reservas_das_origens,
+};
+pub use reserva::{DadosReserva, ReservaAtiva};
 pub use saldo::{custo_medio_movel, Movimento, SaidaAplicada, SaldoLocal, TipoMovimento};

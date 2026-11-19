@@ -303,7 +303,7 @@ impl<'a, 'b> RepositorioOs<'a, 'b> {
             .execute(
                 "UPDATE os_item_peca
                  SET encomenda_fornecedor = ?2, encomenda_custo = ?3, encomenda_previsao = ?4,
-                     encomendada_em = ?5
+                     encomendada_em = ?5, encomenda_pedido = ?6
                  WHERE id = ?1",
                 params![
                     blob(item.id),
@@ -312,6 +312,7 @@ impl<'a, 'b> RepositorioOs<'a, 'b> {
                         .map(Preco::unidades_internas),
                     e.and_then(|e| e.previsao_chegada).map(dias),
                     e.map(|e| dias(e.encomendada_em)),
+                    e.and_then(|e| e.pedido).map(blob),
                 ],
             )
             .map_err(persist)?;
@@ -327,7 +328,7 @@ impl<'a, 'b> RepositorioOs<'a, 'b> {
             .query_row(
                 "SELECT id, ordem_servico, produto, quantidade, preco_unitario, custo_unitario,
                         coberto_garantia, aplicada, local, lote, estornada, encomenda_fornecedor,
-                        encomenda_custo, encomenda_previsao, encomendada_em
+                        encomenda_custo, encomenda_previsao, encomendada_em, encomenda_pedido
                  FROM os_item_peca WHERE id = ?1",
                 [blob(id)],
                 item_peca_de_linha,
@@ -342,6 +343,28 @@ impl<'a, 'b> RepositorioOs<'a, 'b> {
     /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
     pub fn itens_peca_da_ordem(&self, ordem_servico: Id) -> Resultado<Vec<ItemPeca>> {
         crate::consultas::itens_peca_da_ordem(self.conn(), ordem_servico)
+    }
+
+    /// Os itens de peça encomendados pelo pedido de compra.
+    ///
+    /// # Errors
+    /// [`CodigoErro::FALHA_INTERNA`] em erro do SQLite.
+    pub fn itens_peca_do_pedido(&self, pedido: Id) -> Resultado<Vec<ItemPeca>> {
+        let mut st = self
+            .conn()
+            .prepare(
+                "SELECT id, ordem_servico, produto, quantidade, preco_unitario, custo_unitario,
+                        coberto_garantia, aplicada, local, lote, estornada, encomenda_fornecedor,
+                        encomenda_custo, encomenda_previsao, encomendada_em, encomenda_pedido
+                 FROM os_item_peca WHERE encomenda_pedido = ?1 ORDER BY rowid",
+            )
+            .map_err(persist)?;
+        let v = st
+            .query_map([blob(pedido)], item_peca_de_linha)
+            .map_err(persist)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(persist);
+        v
     }
 
     /// Remove um item de peça do orçamento — só chamado enquanto a OS ainda aceita ajuste
@@ -579,6 +602,7 @@ pub(crate) fn item_peca_de_linha(r: &rusqlite::Row<'_>) -> rusqlite::Result<Item
                     custo_previsto: r.get::<_, Option<i64>>(12)?.map(Preco::interna),
                     previsao_chegada: r.get::<_, Option<i64>>(13)?.map(data_de),
                     encomendada_em: data_de(em),
+                    pedido: r.get::<_, Option<Vec<u8>>>(15)?.map(id_de),
                 })
             })
             .transpose()?,

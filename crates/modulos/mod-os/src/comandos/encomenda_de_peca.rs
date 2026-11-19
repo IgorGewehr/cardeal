@@ -60,6 +60,7 @@ impl Comando for EncomendarPeca {
     #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         let (_, mut item) = carregar_item_pendente(uow, self.ordem_servico, self.item_peca)?;
+        exigir_sem_pedido(&item)?;
         let fornecedor = self.fornecedor.trim();
         if fornecedor.is_empty() {
             return Err(Erro::novo(
@@ -75,9 +76,97 @@ impl Comando for EncomendarPeca {
                 .encomenda
                 .as_ref()
                 .map_or_else(|| ctx.hoje(), |e| e.encomendada_em),
+            pedido: None,
         });
         RepositorioOs::novo(uow).gravar_encomenda(&item)
     }
+}
+
+/// A peça encomendada por um pedido de compra se acompanha pelo pedido: nem se edita à mão nem
+/// "chega" pela OS — a nota do pedido dá a entrada e a reserva.
+#[cfg(feature = "sqlite")]
+fn exigir_sem_pedido(item: &ItemPeca) -> Resultado<()> {
+    if item.encomenda.as_ref().is_some_and(|e| e.pedido.is_some()) {
+        return Err(Erro::novo(
+            CodigoErro::REGRA_VIOLADA,
+            "Esta peça vem pelo pedido de compra: a entrada é a da nota do pedido, que já a \
+             guarda para esta OS. Para mudar, edite o pedido em Compras › Pedidos.",
+        ));
+    }
+    Ok(())
+}
+
+/// A encomenda que um pedido de compra faz por uma peça de OS (`mod-compras`, ao salvar o pedido,
+/// na mesma transação): marca a peça como pedida a `fornecedor`, ligada ao `pedido`.
+///
+/// # Errors
+/// Item inexistente, já aplicado, ou de OS finalizada.
+#[cfg(feature = "sqlite")]
+pub fn encomendar_pelo_pedido_comum(
+    item_peca: Id,
+    pedido: Id,
+    fornecedor: &str,
+    custo_previsto: Option<Preco>,
+    previsao_chegada: Option<Data>,
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<()> {
+    let ordem = RepositorioOs::novo(uow)
+        .buscar_item_peca(item_peca)?
+        .ok_or_else(|| Erro::nao_encontrado("peça da OS"))?
+        .ordem_servico;
+    let (_, mut item) = carregar_item_pendente(uow, ordem, item_peca)?;
+    item.encomenda = Some(Encomenda {
+        fornecedor: fornecedor.to_owned(),
+        custo_previsto,
+        previsao_chegada,
+        encomendada_em: item
+            .encomenda
+            .as_ref()
+            .map_or_else(|| ctx.hoje(), |e| e.encomendada_em),
+        pedido: Some(pedido),
+    });
+    RepositorioOs::novo(uow).gravar_encomenda(&item)
+}
+
+/// A peça ainda espera o que o pedido traz? (existe, não foi aplicada e a OS não terminou) — a
+/// nota do pedido só reserva para quem ainda espera.
+///
+/// # Errors
+/// Erro do SQLite.
+#[cfg(feature = "sqlite")]
+pub fn peca_espera_o_pedido(item_peca: Id, uow: &mut UnidadeDeTrabalho) -> Resultado<bool> {
+    let Some(item) = RepositorioOs::novo(uow).buscar_item_peca(item_peca)? else {
+        return Ok(false);
+    };
+    if item.aplicada || item.estornada {
+        return Ok(false);
+    }
+    Ok(carregar_ordem(uow, item.ordem_servico)?
+        .exigir_nao_finalizada()
+        .is_ok())
+}
+
+/// O pedido de compra deixou de trazer estas peças (cancelado, ou a peça saiu do pedido
+/// editado): as ainda não aplicadas voltam a "a comprar". As de `manter` continuam.
+///
+/// # Errors
+/// Erro do SQLite.
+#[cfg(feature = "sqlite")]
+pub fn desfazer_encomendas_do_pedido_comum(
+    pedido: Id,
+    manter: &[Id],
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<()> {
+    let itens = RepositorioOs::novo(uow).itens_peca_do_pedido(pedido)?;
+    for mut item in itens {
+        if item.aplicada || manter.contains(&item.id) {
+            continue;
+        }
+        item.encomenda = None;
+        RepositorioOs::novo(uow).gravar_encomenda(&item)?;
+    }
+    Ok(())
 }
 
 /// Como a peça que chegou foi paga.
@@ -149,6 +238,7 @@ impl Comando for RegistrarChegadaDaPeca {
             ));
         }
         let (os, mut item) = carregar_item_pendente(uow, self.ordem_servico, self.item_peca)?;
+        exigir_sem_pedido(&item)?;
         let fornecedor = match self.fornecedor.trim() {
             "" => item
                 .encomenda
@@ -198,6 +288,7 @@ impl Comando for RegistrarChegadaDaPeca {
                 custo_previsto: Some(self.custo_unitario),
                 previsao_chegada: None,
                 encomendada_em: ctx.hoje(),
+                pedido: None,
             });
             RepositorioOs::novo(uow).gravar_encomenda(&item)?;
         }

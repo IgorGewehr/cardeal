@@ -343,6 +343,7 @@ pub(super) fn decidir(
             produto: item.produto,
             quantidade: item.quantidade,
             preco_unitario: preco,
+            para_os: Vec::new(),
         };
         match grupos.iter_mut().find(|(f, _)| *f == e.fornecedor) {
             Some((_, v)) => v.push(linha),

@@ -3080,6 +3080,7 @@ dependencies = [
  "mod-estoque",
  "mod-financeiro",
  "mod-fiscal",
+ "mod-os",
  "postcard",
  "proptest",
  "rusqlite",

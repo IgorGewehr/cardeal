@@ -10,8 +10,8 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use super::{
     conferir, distribuir_recebimento, numero_do_xped, ConferenciaDoPedido, EstadoPedido,
-    ItemParaConferir, ItemPedido, NotaDoPedido, PedidoCompra, PedidoSalvo, PedidosDeCompra,
-    PrecoPago, ResumoPedido, SalvarPedidoCompra,
+    ItemParaConferir, ItemPedido, NotaDoPedido, PecaDaOsNoPedido, PedidoCompra, PedidoSalvo,
+    PedidosDeCompra, PrecoPago, ResumoPedido, SalvarPedidoCompra,
 };
 use crate::erros::ErroCompras;
 use crate::nota::EstadoNotaEntrada;
@@ -109,12 +109,32 @@ fn itens(c: &Connection, pedido: Id) -> Resultado<Vec<ItemPedido>> {
                 quantidade: Quantidade::interna(r.get(4)?),
                 preco_unitario: Preco::interna(r.get(5)?),
                 recebida: Quantidade::interna(r.get(6)?),
+                para_os: Vec::new(),
             })
         })
         .map_err(falha)?
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(falha);
-    v
+    let mut v = v?;
+    let mut st = c
+        .prepare_cached(
+            "SELECT item_peca, quantidade FROM compras_pedido_item_os
+             WHERE item_pedido = ?1 ORDER BY ordem",
+        )
+        .map_err(falha)?;
+    for item in &mut v {
+        item.para_os = st
+            .query_map([b(item.id)], |r| {
+                Ok(PecaDaOsNoPedido {
+                    item_peca: id_de(&r.get::<_, Vec<u8>>(0)?),
+                    quantidade: Quantidade::interna(r.get(1)?),
+                })
+            })
+            .map_err(falha)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(falha)?;
+    }
+    Ok(v)
 }
 
 /// O cabeçalho do pedido, de volta à base.
@@ -156,12 +176,13 @@ fn validar(
 ) -> Resultado<(
     Vec<super::ItemDoPedido>,
     HashMap<Id, mod_estoque::ProdutoParaNota>,
+    String,
 )> {
     let itens: Vec<_> = cmd
         .itens
         .iter()
         .filter(|i| i.quantidade.e_positiva())
-        .copied()
+        .cloned()
         .collect();
     if itens.is_empty() {
         return Err(Erro::de_dominio(&ErroCompras::PedidoVazio));
@@ -195,8 +216,57 @@ fn validar(
                 p.nome.clone(),
             )));
         }
+        let para_os: Quantidade = i.para_os.iter().map(|o| o.quantidade).sum();
+        if i.para_os.iter().any(|o| !o.quantidade.e_positiva()) || para_os > i.quantidade {
+            return Err(Erro::novo(
+                CodigoErro::ENTRADA_INVALIDA,
+                format!(
+                    "{}: as peças das OS pedem {}, mais do que o item do pedido ({})",
+                    p.nome,
+                    para_os.formatar(0),
+                    i.quantidade.formatar(0)
+                ),
+            ));
+        }
     }
-    Ok((itens, produtos))
+    let mut vistas: Vec<Id> = Vec::new();
+    for o in itens.iter().flat_map(|i| &i.para_os) {
+        if vistas.contains(&o.item_peca) {
+            return Err(Erro::novo(
+                CodigoErro::ENTRADA_INVALIDA,
+                "A mesma peça de OS está em mais de um item do pedido",
+            ));
+        }
+        vistas.push(o.item_peca);
+    }
+    Ok((itens, produtos, fornecedor.nome))
+}
+
+/// As peças de OS do pedido existem, esperam peça e são do produto do item.
+fn conferir_pecas_das_os(
+    itens: &[super::ItemDoPedido],
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<()> {
+    for i in itens {
+        for o in &i.para_os {
+            let peca = mod_os::RepositorioOs::novo(uow)
+                .buscar_item_peca(o.item_peca)?
+                .ok_or_else(|| Erro::nao_encontrado("peça da OS"))?;
+            if peca.produto != i.produto {
+                return Err(Erro::novo(
+                    CodigoErro::ENTRADA_INVALIDA,
+                    "A peça da OS é de outro produto que o item do pedido",
+                ));
+            }
+            if !mod_os::peca_espera_o_pedido(o.item_peca, uow)? {
+                return Err(Erro::novo(
+                    CodigoErro::REGRA_VIOLADA,
+                    "A peça da OS já foi aplicada ou a OS terminou",
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn salvar(
@@ -204,20 +274,34 @@ pub(crate) fn salvar(
     ctx: &Ctx,
     uow: &mut UnidadeDeTrabalho,
 ) -> Resultado<PedidoSalvo> {
+    let (itens, produtos, fornecedor) = validar(cmd, ctx, uow.conexao())?;
+    conferir_pecas_das_os(&itens, uow)?;
     let c = uow.conexao();
-    let (itens, produtos) = validar(cmd, ctx, c)?;
+    let tinha_os = match cmd.pedido {
+        Some(id) => c
+            .query_row(
+                "SELECT EXISTS (SELECT 1 FROM compras_pedido_item_os o
+                                JOIN compras_pedido_item i ON i.id = o.item_pedido
+                                WHERE i.pedido = ?1)",
+                [b(id)],
+                |r| r.get::<_, bool>(0),
+            )
+            .map_err(falha)?,
+        None => false,
+    };
     let (id, numero) = match cmd.pedido {
         None => criar_cabecalho(cmd, ctx, c)?,
         Some(id) => editar_cabecalho(id, cmd, ctx, c)?,
     };
     for (ordem, i) in itens.iter().enumerate() {
         let p = &produtos[&i.produto];
+        let item_id = Id::novo();
         c.execute(
             "INSERT INTO compras_pedido_item
                (id, pedido, ordem, produto, descricao, unidade, quantidade, preco_unitario)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
-                b(Id::novo()),
+                b(item_id),
                 b(id),
                 i64::try_from(ordem).unwrap_or(0),
                 b(i.produto),
@@ -228,6 +312,39 @@ pub(crate) fn salvar(
             ],
         )
         .map_err(falha)?;
+        for (n, o) in i.para_os.iter().enumerate() {
+            c.execute(
+                "INSERT INTO compras_pedido_item_os (item_pedido, item_peca, ordem, quantidade)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    b(item_id),
+                    b(o.item_peca),
+                    i64::try_from(n).unwrap_or(0),
+                    o.quantidade.unidades_internas()
+                ],
+            )
+            .map_err(falha)?;
+        }
+    }
+    // As peças das OS ficam encomendadas por este pedido; as que saíram dele voltam a "a comprar".
+    let mut atendidas = Vec::new();
+    for i in &itens {
+        for o in &i.para_os {
+            let custo = (i.preco_unitario.unidades_internas() > 0).then_some(i.preco_unitario);
+            mod_os::encomendar_pelo_pedido_comum(
+                o.item_peca,
+                id,
+                &fornecedor,
+                custo,
+                cmd.previsao_entrega,
+                ctx,
+                uow,
+            )?;
+            atendidas.push(o.item_peca);
+        }
+    }
+    if tinha_os {
+        mod_os::desfazer_encomendas_do_pedido_comum(id, &atendidas, uow)?;
     }
     Ok(PedidoSalvo {
         pedido: id,
@@ -307,6 +424,12 @@ fn editar_cabecalho(
         ],
     )
     .map_err(falha)?;
+    c.execute(
+        "DELETE FROM compras_pedido_item_os
+         WHERE item_pedido IN (SELECT id FROM compras_pedido_item WHERE pedido = ?1)",
+        [b(id)],
+    )
+    .map_err(falha)?;
     c.execute("DELETE FROM compras_pedido_item WHERE pedido = ?1", [b(id)])
         .map_err(falha)?;
     Ok((id, atual.numero))
@@ -322,7 +445,102 @@ pub(crate) fn mudar(
     let c = uow.conexao();
     let mut p = carregar(c, ctx.empresa, pedido)?.ok_or_else(|| Erro::nao_encontrado("pedido"))?;
     f(&mut p).map_err(|e| Erro::de_dominio(&e))?;
-    gravar_estado(c, &p, ctx)
+    gravar_estado(c, &p, ctx)?;
+    let tem_os = p.itens.iter().any(|i| !i.para_os.is_empty());
+    if tem_os && matches!(p.estado, EstadoPedido::Cancelado | EstadoPedido::Encerrado) {
+        // O que o pedido não vai mais trazer volta a "a comprar" na OS; a peça que já chegou
+        // (reservada) continua ligada a ele.
+        let pecas: Vec<Id> = p
+            .itens
+            .iter()
+            .flat_map(|i| i.para_os.iter().map(|o| o.item_peca))
+            .collect();
+        let chegaram: Vec<Id> = mod_estoque::reservas_das_origens(
+            uow.conexao(),
+            ctx.empresa,
+            mod_os::ORIGEM_RESERVA_PECA,
+            &pecas,
+        )?
+        .into_iter()
+        .map(|r| r.origem_id)
+        .collect();
+        mod_os::desfazer_encomendas_do_pedido_comum(p.id, &chegaram, uow)?;
+    }
+    Ok(())
+}
+
+/// O que já chegou pelo pedido fica guardado para as peças das OS que ele atende: em cada item,
+/// o recebido vai às peças na ordem (cada uma até a quantidade dela) e o resto é do estoque. Só
+/// reserva o que falta (idempotente) e só para a peça que ainda espera; reserva no `local`.
+fn reservar_para_as_os(
+    pedido: Id,
+    local: Id,
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<()> {
+    let Some(p) = carregar(uow.conexao(), ctx.empresa, pedido)? else {
+        return Ok(());
+    };
+    for item in &p.itens {
+        let mut resta = item.recebida;
+        for o in &item.para_os {
+            let alvo = o.quantidade.min(resta);
+            resta = (resta - alvo).nao_negativa();
+            if !alvo.e_positiva() || !mod_os::peca_espera_o_pedido(o.item_peca, uow)? {
+                continue;
+            }
+            let ja: Quantidade = mod_estoque::reservas_das_origens(
+                uow.conexao(),
+                ctx.empresa,
+                mod_os::ORIGEM_RESERVA_PECA,
+                &[o.item_peca],
+            )?
+            .iter()
+            .map(|r| r.quantidade)
+            .sum();
+            if ja < alvo {
+                mod_estoque::reservar_para_origem_comum(
+                    mod_estoque::DadosReserva {
+                        produto: item.produto,
+                        local,
+                        quantidade: alvo - ja,
+                        origem_modulo: mod_os::ORIGEM_RESERVA_PECA,
+                        origem_id: o.item_peca,
+                    },
+                    ctx,
+                    uow,
+                )?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// No estorno da entrada, **antes** de tirar a mercadoria: as reservas das peças de OS do pedido
+/// da nota voltam ao disponível (senão a mercadoria parece já consumida). Devolve o local onde
+/// estavam, para [`desfazer_recebimento`] reservar de novo o que outras notas trouxeram.
+pub(crate) fn soltar_reservas_da_nota(
+    nota: Id,
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<Option<Id>> {
+    let Some((pedido, _)) = pedido_da_nota(uow.conexao(), nota)? else {
+        return Ok(None);
+    };
+    let Some(p) = carregar(uow.conexao(), ctx.empresa, pedido)? else {
+        return Ok(None);
+    };
+    let mut local = None;
+    for o in p.itens.iter().flat_map(|i| &i.para_os) {
+        let soltas = mod_estoque::liberar_reservas_da_origem_comum(
+            mod_os::ORIGEM_RESERVA_PECA,
+            o.item_peca,
+            ctx,
+            uow,
+        )?;
+        local = local.or_else(|| soltas.first().map(|r| r.local));
+    }
+    Ok(local)
 }
 
 /// O pedido e como a nota está ligada a ele.
@@ -516,7 +734,12 @@ pub(crate) fn diverge_do_pedido(c: &Connection, empresa: Id, nota: Id) -> Result
 }
 
 /// Na confirmação da entrada: o que a nota trouxe entra no pedido ligado.
-pub(crate) fn receber(nota: Id, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<()> {
+pub(crate) fn receber(
+    nota: Id,
+    local: Id,
+    ctx: &Ctx,
+    uow: &mut UnidadeDeTrabalho,
+) -> Resultado<()> {
     let c = uow.conexao();
     let Some((pedido, _)) = pedido_da_nota(c, nota)? else {
         return Ok(());
@@ -539,12 +762,16 @@ pub(crate) fn receber(nota: Id, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resul
     }
     p.itens = itens(c, pedido)?;
     p.atualizar_pelo_recebimento();
-    gravar_estado(c, &p, ctx)
+    gravar_estado(c, &p, ctx)?;
+    reservar_para_as_os(pedido, local, ctx, uow)
 }
 
-/// No estorno da entrada: o que a nota deu ao pedido sai.
+/// No estorno da entrada: o que a nota deu ao pedido sai; o que outras notas trouxeram volta a
+/// ficar reservado para as OS, no `local` onde as reservas estavam (ver
+/// [`soltar_reservas_da_nota`]).
 pub(crate) fn desfazer_recebimento(
     nota: Id,
+    local: Option<Id>,
     ctx: &Ctx,
     uow: &mut UnidadeDeTrabalho,
 ) -> Resultado<()> {
@@ -561,7 +788,11 @@ pub(crate) fn desfazer_recebimento(
         return Ok(());
     };
     p.atualizar_pelo_recebimento();
-    gravar_estado(c, &p, ctx)
+    gravar_estado(c, &p, ctx)?;
+    match local {
+        Some(local) => reservar_para_as_os(pedido, local, ctx, uow),
+        None => Ok(()),
+    }
 }
 
 pub(super) fn pedidos(

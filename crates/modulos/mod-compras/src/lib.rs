@@ -110,8 +110,9 @@ pub use nota::{
 };
 pub use pedido::{
     ACaminho, AprovarPedidoCompra, CancelarPedidoCompra, ConferenciaComPedido,
-    EncerrarPedidoCompra, EstadoPedido, ItemDoPedido, PedidoCompra, PedidoDeCompra, PedidoSalvo,
-    PedidosDeCompra, SalvarPedidoCompra, UltimosPrecosPagos, VincularNotaAoPedido,
+    EncerrarPedidoCompra, EstadoPedido, ItemDoPedido, PecaDaOsNoPedido, PedidoCompra,
+    PedidoDeCompra, PedidoSalvo, PedidosDeCompra, SalvarPedidoCompra, UltimosPrecosPagos,
+    VincularNotaAoPedido,
 };
 pub use preferencias::{PreferenciasCompras, RateioPor};
 #[cfg(feature = "sqlite")]

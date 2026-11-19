@@ -262,6 +262,7 @@ impl Base {
                         produto,
                         quantidade: Quantidade::unidades(q),
                         preco_unitario: Preco::centavos(centavos),
+                        para_os: Vec::new(),
                     })
                     .collect(),
             },
@@ -578,11 +579,13 @@ fn cancelar_o_pedido_solta_a_nota_que_nao_entrou() {
                     produto,
                     quantidade: Quantidade::unidades(1),
                     preco_unitario: Preco::centavos(400),
+                    para_os: Vec::new(),
                 },
                 ItemDoPedido {
                     produto,
                     quantidade: Quantidade::unidades(1),
                     preco_unitario: Preco::centavos(400),
+                    para_os: Vec::new(),
                 },
             ],
         },
@@ -602,6 +605,7 @@ fn cancelar_o_pedido_solta_a_nota_que_nao_entrou() {
                     produto,
                     quantidade: Quantidade::unidades(3),
                     preco_unitario: Preco::centavos(400),
+                    para_os: Vec::new(),
                 }],
             },
         )

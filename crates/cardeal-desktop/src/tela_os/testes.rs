@@ -619,7 +619,11 @@ fn peca_nova_pelo_orcamento_vai_para_a_lista_de_compras_e_chega_pela_tela() {
         .pecas_a_comprar
         .iter()
         .any(|p| p.item_peca == item.id));
-    assert!(falta_no_estoque(&item, &c.estado.produtos));
+    assert!(falta_no_estoque(
+        &item,
+        &c.estado.produtos,
+        Quantidade::ZERO
+    ));
 
     // Chegou, a prazo, pelo diálogo.
     let mut f = FormChegada::novo(c.os, item.id, None, "Conector".to_owned(), true);

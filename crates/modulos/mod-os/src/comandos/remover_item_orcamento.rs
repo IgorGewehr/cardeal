@@ -45,7 +45,7 @@ impl Comando for RemoverItemOrcamento {
     const RISCO: Risco = Risco::Baixo;
 
     #[cfg(feature = "sqlite")]
-    fn executar(self, _ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
+    fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
         // 1. Carregar.
         let mut os = carregar_ordem(uow, self.ordem_servico)?;
         let total_do_item = match self.tipo {
@@ -68,6 +68,14 @@ impl Comando for RemoverItemOrcamento {
             .map_err(|e| Erro::de_dominio(&e))?;
 
         // 4. Persistir.
+        if self.tipo == TipoItemOrcamento::Peca {
+            mod_estoque::liberar_reservas_da_origem_comum(
+                crate::consultas::ORIGEM_RESERVA_PECA,
+                self.item,
+                ctx,
+                uow,
+            )?;
+        }
         let mut repo = RepositorioOs::novo(uow);
         match self.tipo {
             TipoItemOrcamento::Peca => repo.remover_item_peca(self.item)?,

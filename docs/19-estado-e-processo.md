@@ -97,6 +97,17 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   caça-palavras — `SeletorOpcao` ganhou busca com foco ao abrir em listas longas e passou a desenhar o
   próprio botão e painel (o `ComboBox` do egui fecha em qualquer clique, inclusive na busca). A captura
   da demo aceita `CARDEAL_DEMO_GESTOS` (clique, texto, tecla) para fotografar menus abertos.
+  **Peça da OS comprada pelo pedido (2026-11-18):** a peça encomendada por Compras › Pedidos tinha o
+  "Chegou" da OS ativo depois que a nota do pedido entrava — que lançava **de novo** a entrada no estoque e
+  a conta a pagar. Agora o item do pedido guarda as peças de OS que atende (`PecaDaOsNoPedido`,
+  `compras_pedido_item_os`) e o salvar do pedido marca a encomenda na OS **na mesma transação**
+  (`Encomenda::pedido`); a nota confirmada **reserva** a peça para a OS (`mod_estoque::reserva`,
+  `estoque_reserva`, origem `os_peca`) — some do disponível, o PDV não a vende —; o "Aplicar" consome a
+  reserva no local onde está; o "Chegou" e o "Encomendar" manual são recusados para a peça do pedido;
+  cancelar/encerrar o pedido devolve a "a comprar" o que não chegou; estornar a nota solta a reserva antes
+  de tirar a mercadoria e reserva de novo o que outras notas trouxeram; cancelar a OS ou remover a peça
+  libera a reserva. O inventário conta o reservado como presente no local (foto = disponível + reservado).
+  Uma linha do pedido atende várias OS e o estoque ao mesmo tempo. Testes: `mod-compras/tests/encomenda_da_os.rs`.
   Onda 6 (Financeiro 2) começou: **conciliação com alerta de pendências e saldo banco × sistema**,
   **lançamento pré-preenchido pelo último da pessoa**, **DFC indireto**, **cheques**, **balancete/diário** e o
   **pacote do contador** (PDF + `.xlsx`) e a **régua de cobrança** (fila do dia com envio de um clique) feitos

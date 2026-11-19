@@ -151,6 +151,18 @@ pub(crate) fn consumir_e_aplicar(
     ctx: &Ctx,
     uow: &mut UnidadeDeTrabalho,
 ) -> Resultado<PecaFoiAplicada> {
+    // A peça que chegou pela nota do pedido está guardada para esta OS: a reserva volta ao
+    // disponível e a saída é dela, no local onde está (o lote escolhido manda no local).
+    let reservas = mod_estoque::liberar_reservas_da_origem_comum(
+        crate::consultas::ORIGEM_RESERVA_PECA,
+        item.id,
+        ctx,
+        uow,
+    )?;
+    let local = match (lote, reservas.first()) {
+        (None, Some(r)) => r.local,
+        _ => local,
+    };
     let dados_saida = DadosSaida {
         produto: item.produto,
         local,

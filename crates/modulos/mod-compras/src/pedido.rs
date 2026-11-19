@@ -129,6 +129,10 @@ pub struct ItemPedido {
     pub preco_unitario: Preco,
     /// Quanto já chegou (somado das notas confirmadas ligadas ao pedido).
     pub recebida: Quantidade,
+    /// As peças de OS que este item atende, na ordem em que recebem o que chega; o resto da
+    /// quantidade é para o estoque.
+    #[serde(default)]
+    pub para_os: Vec<PecaDaOsNoPedido>,
 }
 
 impl ItemPedido {
@@ -582,8 +586,17 @@ pub fn conferir<S: std::hash::BuildHasher>(
 
 // ── Comandos ─────────────────────────────────────────────────────────────
 
-/// Um item do pedido, como quem compra digita.
+/// Uma peça de OS que o item do pedido atende: a nota que trouxer o item a reserva para a OS.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PecaDaOsNoPedido {
+    /// O item de peça da OS.
+    pub item_peca: Id,
+    /// Quanto do item do pedido é dela.
+    pub quantidade: Quantidade,
+}
+
+/// Um item do pedido, como quem compra digita.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ItemDoPedido {
     /// O produto do estoque.
     pub produto: Id,
@@ -591,6 +604,9 @@ pub struct ItemDoPedido {
     pub quantidade: Quantidade,
     /// A que preço (por unidade).
     pub preco_unitario: Preco,
+    /// As peças de OS que o item atende (a soma cabe na quantidade; vazio = tudo para o estoque).
+    #[serde(default)]
+    pub para_os: Vec<PecaDaOsNoPedido>,
 }
 
 /// Cria (sem `pedido`) ou edita um pedido de compra. Editar o pedido já aprovado (sem nada
@@ -866,6 +882,7 @@ mod testes {
             quantidade: Quantidade::unidades(q),
             preco_unitario: Preco::centavos(preco),
             recebida: Quantidade::unidades(recebida),
+            para_os: Vec::new(),
         }
     }
 

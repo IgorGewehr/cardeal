@@ -27,8 +27,6 @@ pub struct PecaEmFalta {
 /// As peças em falta de uma OS.
 #[derive(Debug, Clone)]
 pub struct PecasDaOs {
-    /// A ordem de serviço.
-    pub ordem: Id,
     /// O número, para o texto.
     pub numero: u64,
     /// O aparelho, para o texto.
@@ -43,13 +41,13 @@ pub(super) struct EscolhaDaOs {
     pub(super) destino: Option<Option<Id>>,
 }
 
-/// O vínculo do formulário com a OS: ao salvar, estes itens ficam encomendados na OS.
+/// O formulário veio de uma OS (para o aviso depois de salvar; o vínculo de verdade são as
+/// [`PecaDaOsNoPedido`] de cada linha, gravadas com o pedido).
 #[derive(Debug, Clone)]
 pub(super) struct VinculoOs {
-    pub(super) ordem: Id,
     pub(super) numero: u64,
-    /// `(item de peça na OS, produto)`.
-    pub(super) itens: Vec<(Id, Id)>,
+    /// Quantas peças da OS foram para o pedido.
+    pub(super) pecas: usize,
 }
 
 /// O painel no topo da lista de pedidos.
@@ -164,18 +162,26 @@ fn montar_form(ctx: &egui::Context, motor: &Motor, sessao: &Sessao, estado: &mut
     };
     let marcadas: Vec<&PecaEmFalta> = escolha.pecas.pecas.iter().filter(|p| p.marcada).collect();
     for p in &marcadas {
+        let peca = PecaDaOsNoPedido {
+            item_peca: p.item_peca,
+            quantidade: p.quantidade,
+        };
         match form
             .linhas
             .iter_mut()
             .find(|l| l.produto == Some(p.produto))
         {
             Some(l) => {
+                if l.para_os.iter().any(|o| o.item_peca == p.item_peca) {
+                    continue; // já está neste pedido
+                }
                 let atual = l
                     .qtd
                     .trim()
                     .parse::<Quantidade>()
                     .unwrap_or(Quantidade::ZERO);
                 l.qtd = (atual + p.quantidade).formatar(0);
+                l.para_os.push(peca);
             }
             None => form.linhas.push(LinhaPedido {
                 produto: Some(p.produto),
@@ -188,57 +194,13 @@ fn montar_form(ctx: &egui::Context, motor: &Motor, sessao: &Sessao, estado: &mut
                 },
                 // Com o custo da OS, não sugere outro por cima; sem, sugere o último pago.
                 sugerido_para: (!p.custo.e_zero()).then_some(p.produto),
+                para_os: vec![peca],
             }),
         }
     }
     form.da_os = Some(VinculoOs {
-        ordem: escolha.pecas.ordem,
         numero: escolha.pecas.numero,
-        itens: marcadas.iter().map(|p| (p.item_peca, p.produto)).collect(),
+        pecas: marcadas.len(),
     });
     estado.dlg = Dlg::Form(Box::new(form));
-}
-
-/// Depois de salvar o pedido: marca as peças como encomendadas na OS.
-pub(super) fn marcar_encomendadas(
-    ctx: &egui::Context,
-    motor: &Motor,
-    sessao: &Sessao,
-    vinculo: &VinculoOs,
-    cmd: &SalvarPedidoCompra,
-    fornecedor: &str,
-) {
-    let mut ok = 0;
-    for (item, produto) in &vinculo.itens {
-        let custo = cmd
-            .itens
-            .iter()
-            .find(|i| i.produto == *produto)
-            .map(|i| i.preco_unitario)
-            .filter(|p| !p.e_zero());
-        let r = motor.executar(
-            sessao,
-            "os.encomendar_peca.v1",
-            &mod_os::EncomendarPeca {
-                ordem_servico: vinculo.ordem,
-                item_peca: *item,
-                fornecedor: fornecedor.to_owned(),
-                custo_previsto: custo,
-                previsao_chegada: cmd.previsao_entrega,
-            },
-        );
-        match r {
-            Ok(()) => ok += 1,
-            Err(e) => notificar(ctx, Notificacao::erro(e.mensagem)),
-        }
-    }
-    if ok > 0 {
-        notificar(
-            ctx,
-            Notificacao::sucesso(format!(
-                "{ok} peça(s) da OS #{} marcadas como encomendadas",
-                vinculo.numero
-            )),
-        );
-    }
 }

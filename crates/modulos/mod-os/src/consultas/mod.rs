@@ -62,7 +62,7 @@ pub fn itens_peca_da_ordem(conexao: &Connection, ordem_servico: Id) -> Resultado
         .prepare(
             "SELECT id, ordem_servico, produto, quantidade, preco_unitario, custo_unitario,
                     coberto_garantia, aplicada, local, lote, estornada, encomenda_fornecedor,
-                        encomenda_custo, encomenda_previsao, encomendada_em
+                        encomenda_custo, encomenda_previsao, encomendada_em, encomenda_pedido
              FROM os_item_peca WHERE ordem_servico = ?1 ORDER BY rowid",
         )
         .map_err(persist)?;
@@ -167,6 +167,22 @@ pub struct DetalheOrdem {
     pub itens_mao_de_obra: Vec<ItemMaoDeObra>,
     /// A linha do tempo: cada mudança de estado, mais antiga primeiro.
     pub historico: Vec<PassoDaOrdem>,
+    /// O que o estoque guarda para cada peça ainda não aplicada (chegou pela nota do pedido):
+    /// `(item de peça, quantidade reservada)`.
+    #[serde(default)]
+    pub reservas: Vec<(Id, Quantidade)>,
+}
+
+impl DetalheOrdem {
+    /// Quanto o estoque guarda para o item de peça (zero = nada reservado).
+    #[must_use]
+    pub fn reservado_para(&self, item_peca: Id) -> Quantidade {
+        self.reservas
+            .iter()
+            .filter(|(i, _)| *i == item_peca)
+            .map(|(_, q)| *q)
+            .sum()
+    }
 }
 
 /// Um passo da linha do tempo de uma OS.
@@ -503,7 +519,7 @@ impl Consulta for BuscarDetalheOrdem {
     const PERMISSAO: &'static str = "os.ordem.ver";
 
     #[cfg(feature = "sqlite")]
-    fn executar(self, _ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+    fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
         let Some(ordem) = buscar_ordem(conexao, self.ordem_servico)? else {
             return Ok(None);
         };
@@ -511,14 +527,35 @@ impl Consulta for BuscarDetalheOrdem {
         let itens_peca = itens_peca_da_ordem(conexao, self.ordem_servico)?;
         let itens_mao_de_obra = itens_mao_de_obra_da_ordem(conexao, self.ordem_servico)?;
         let historico = historico_da_ordem(conexao, self.ordem_servico)?;
+        let reservas = reservas_das_pecas(conexao, ctx.empresa, &itens_peca)?;
         Ok(Some(DetalheOrdem {
             ordem,
             laudo,
             itens_peca,
             itens_mao_de_obra,
             historico,
+            reservas,
         }))
     }
+}
+
+/// A origem das reservas de estoque de uma peça de OS (`mod_estoque::reserva`): o item de peça.
+pub const ORIGEM_RESERVA_PECA: &str = "os_peca";
+
+/// O que o estoque guarda para as peças: `(item de peça, quantidade)`.
+#[cfg(feature = "sqlite")]
+fn reservas_das_pecas(
+    conexao: &Connection,
+    empresa: Id,
+    itens: &[ItemPeca],
+) -> Resultado<Vec<(Id, Quantidade)>> {
+    let ids: Vec<Id> = itens.iter().map(|i| i.id).collect();
+    Ok(
+        mod_estoque::reservas_das_origens(conexao, empresa, ORIGEM_RESERVA_PECA, &ids)?
+            .into_iter()
+            .map(|r| (r.origem_id, r.quantidade))
+            .collect(),
+    )
 }
 
 /// As ordens paradas em `AguardandoAprovacao` — a fila de aprovação do cliente
@@ -777,6 +814,9 @@ pub struct ItemAguardandoEstoque {
     pub cliente: Id,
     /// A encomenda, se a peça já foi pedida ao fornecedor.
     pub encomenda: Option<crate::execucao::Encomenda>,
+    /// Quanto já chegou e está guardado para esta peça (pela nota do pedido).
+    #[serde(default)]
+    pub reservado: Quantidade,
 }
 
 /// Todas as peças orçadas (em ordens não finalizadas) ainda não aplicadas cujo saldo
@@ -793,10 +833,17 @@ pub fn pecas_aguardando_estoque(
 ) -> Resultado<Vec<ItemAguardandoEstoque>> {
     let mut pendentes = Vec::new();
     for os in ordens_nao_finalizadas(conexao, empresa)? {
-        for item in itens_peca_da_ordem(conexao, os.id)? {
+        let itens = itens_peca_da_ordem(conexao, os.id)?;
+        let reservas = reservas_das_pecas(conexao, empresa, &itens)?;
+        for item in itens {
             if item.aplicada || item.estornada {
                 continue;
             }
+            let reservado: Quantidade = reservas
+                .iter()
+                .filter(|(i, _)| *i == item.id)
+                .map(|(_, q)| *q)
+                .sum();
             let saldo_disponivel =
                 mod_estoque::saldo_disponivel_do_produto(conexao, empresa, item.produto)?;
             if saldo_disponivel < item.quantidade || item.encomenda.is_some() {
@@ -810,6 +857,7 @@ pub fn pecas_aguardando_estoque(
                     equipamento: os.equipamento.clone(),
                     cliente: os.cliente,
                     encomenda: item.encomenda,
+                    reservado,
                 });
             }
         }

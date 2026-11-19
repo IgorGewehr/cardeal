@@ -368,6 +368,12 @@ const MIGRACOES: &[Migracao] = &[
         sql: SQL_V13,
         tipo: TipoMigracao::Esquema,
     },
+    Migracao {
+        versao: 14,
+        nome: "compras_pedido_item_os",
+        sql: SQL_V14,
+        tipo: TipoMigracao::Esquema,
+    },
 ];
 
 /// v13: a transferência de mercadoria entre filiais do grupo (`transferencia.rs`). `empresa` é a
@@ -403,6 +409,19 @@ CREATE TABLE compras_transferencia_item (
     valor          INTEGER NOT NULL,
     PRIMARY KEY (transferencia, ordem)
 ) STRICT, WITHOUT ROWID;
+";
+
+/// v14: a peça de OS que o item do pedido atende (`PecaDaOsNoPedido`) — a nota que traz o item a
+/// reserva para a OS.
+const SQL_V14: &str = "
+CREATE TABLE compras_pedido_item_os (
+    item_pedido BLOB    NOT NULL REFERENCES compras_pedido_item(id),
+    item_peca   BLOB    NOT NULL,
+    ordem       INTEGER NOT NULL,
+    quantidade  INTEGER NOT NULL CHECK (quantidade > 0),
+    PRIMARY KEY (item_pedido, item_peca)
+) STRICT, WITHOUT ROWID;
+CREATE INDEX compras_pedido_item_os_peca ON compras_pedido_item_os(item_peca);
 ";
 
 /// O conjunto de migrações do módulo de compras.

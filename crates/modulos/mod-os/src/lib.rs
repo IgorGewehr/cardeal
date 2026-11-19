@@ -82,6 +82,10 @@ mod repositorio;
 
 pub use apontamento::ApontamentoDeTempo;
 pub use comandos::DefinirCustoHora;
+#[cfg(feature = "sqlite")]
+pub use comandos::{
+    desfazer_encomendas_do_pedido_comum, encomendar_pelo_pedido_comum, peca_espera_o_pedido,
+};
 pub use comandos::{
     AbrirOrdemComClienteNovo, AbrirOrdemServico, AjustarApontamento, AplicarPeca, AplicarPecas,
     ApontamentoIniciado, AprovarOrcamentoOs, CancelarOrdemServico, ConcluirExecucao,
@@ -95,6 +99,7 @@ pub use comandos::{
 pub use comandos::{ChegadaRegistrada, EncomendarPeca, PagamentoDaPeca, RegistrarChegadaDaPeca};
 pub use consultas::CustosHora;
 pub use consultas::OrdensDoCliente;
+pub use consultas::ORIGEM_RESERVA_PECA;
 pub use consultas::{
     ApontamentosDaOrdem, BuscarDetalheOrdem, BuscarOrdens, DetalheOrdem, FiltroEstadoOs,
     HistoricoDoEquipamento, ItemAguardandoEstoque, MargemDasOrdens, MargemDasOrdensNoPeriodo,
