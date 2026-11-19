@@ -115,6 +115,12 @@ dele). O centro é saber, a cada venda, quanto sobra depois de custo, operação
   (filtro + visão "Por estrutura" do que saiu), **Compras › Análise** (nova: quanto comprei por nível no
   período, das notas confirmadas — `estoque.entradas_por_produto_e_origem.v1`) e **OS › Peças a comprar**
   (filtro). Vale a classificação de hoje. Próximas telas a ligar: PDV (vendas do dia), comissões, DRE.
+  **Compras do dia a dia (2026-11-18):** o **radar de reposição** (`tela_compras/reposicao.rs`) soma o ponto
+  de pedido **e as peças de OS sem encomenda**, menos disponível e a caminho, e já liga as peças à linha do
+  pedido (a nota as guarda para cada OS); **"Para resolver hoje"** no topo de Notas/Pedidos (notas a
+  conferir, pedidos atrasados, rascunhos, peças de OS esperando — "Montar pedido" abre o pedido com o
+  radar); aba **Fornecedores** (comprado em 12 meses, última compra, pedidos em aberto/atrasados, a pagar) e
+  a **ficha** de cada um (pedidos, notas e o prazo real de entrega, do pedido até a primeira nota).
   Onda 6 (Financeiro 2) começou: **conciliação com alerta de pendências e saldo banco × sistema**,
   **lançamento pré-preenchido pelo último da pessoa**, **DFC indireto**, **cheques**, **balancete/diário** e o
   **pacote do contador** (PDF + `.xlsx`) e a **régua de cobrança** (fila do dia com envio de um clique) feitos

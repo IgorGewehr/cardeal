@@ -254,6 +254,34 @@ pub fn abrir_novo(estado: &mut EstadoPedidos) {
     estado.dlg = Dlg::Form(Box::new(FormPedido::novo()));
 }
 
+/// Um pedido novo já com o radar de reposição (o que está abaixo do ponto e as peças das OS).
+pub(super) fn abrir_reposicao(
+    ctx: &egui::Context,
+    motor: &Motor,
+    sessao: &Sessao,
+    estado: &mut EstadoPedidos,
+) {
+    let mut f = FormPedido::novo();
+    match linhas_do_radar(motor, sessao) {
+        Ok(v) if !v.is_empty() => f.linhas = v,
+        Ok(_) => notificar(ctx, Notificacao::info("Nada a repor agora.")),
+        Err(e) => notificar(ctx, Notificacao::erro(e)),
+    }
+    estado.dlg = Dlg::Form(Box::new(f));
+}
+
+/// (pedidos atrasados, rascunhos) da lista carregada.
+pub(super) fn resumo(estado: &EstadoPedidos, hoje: Data) -> (usize, usize) {
+    (
+        estado.lista.iter().filter(|p| p.atrasado(hoje)).count(),
+        estado
+            .lista
+            .iter()
+            .filter(|p| p.estado == EstadoPedido::Rascunho)
+            .count(),
+    )
+}
+
 /// Abre o pedido (vindo de outra aba, como a cotação decidida).
 pub fn abrir_pedido(estado: &mut EstadoPedidos, motor: &Motor, sessao: &Sessao, pedido: Id) {
     estado.abrir(motor, sessao, pedido);
@@ -443,8 +471,9 @@ fn ultimos_precos(motor: &Motor, sessao: &Sessao, produtos: Vec<Id>) -> HashMap<
         .collect()
 }
 
-/// As linhas que o radar de reposição sugere: o que está abaixo do ponto de pedido, menos o que
-/// já vem a caminho, com o último preço pago.
+/// As linhas que o radar de reposição sugere (`reposicao::sugerir`): o que está abaixo do ponto
+/// de pedido mais o que as OS esperam, menos o disponível e o que já vem a caminho, com o último
+/// preço pago — as peças das OS já ligadas à linha.
 fn linhas_do_radar(motor: &Motor, sessao: &Sessao) -> Result<Vec<LinhaPedido>, String> {
     let radar: Vec<ItemAbaixoDoPontoPedido> = motor
         .consultar(
@@ -458,30 +487,46 @@ fn linhas_do_radar(motor: &Motor, sessao: &Sessao) -> Result<Vec<LinhaPedido>, S
         .unwrap_or_default()
         .into_iter()
         .collect();
-    let faltam: Vec<(Id, Quantidade)> = radar
+    // Sem permissão de ver as OS, o radar fica só com o estoque.
+    let pecas: Vec<mod_os::ItemAguardandoEstoque> = motor
+        .consultar(
+            sessao,
+            "os.pecas_aguardando_estoque.v1",
+            &mod_os::PecasAguardandoEstoque,
+        )
+        .unwrap_or_default();
+    let abaixo: Vec<super::reposicao::AbaixoDoPonto> = radar
         .iter()
-        .filter_map(|r| {
-            let vem = a_caminho
-                .get(&r.produto)
-                .copied()
-                .unwrap_or(Quantidade::ZERO);
-            let falta = r.ponto_pedido - r.disponivel - vem;
-            falta.e_positiva().then_some((r.produto, falta))
+        .map(|r| super::reposicao::AbaixoDoPonto {
+            produto: r.produto,
+            ponto_pedido: r.ponto_pedido,
+            disponivel: r.disponivel,
         })
         .collect();
-    let precos = ultimos_precos(motor, sessao, faltam.iter().map(|(p, _)| *p).collect());
-    Ok(faltam
+    let esperando: Vec<super::reposicao::PecaEsperando> = pecas
+        .iter()
+        .filter(|p| p.encomenda.is_none())
+        .map(|p| super::reposicao::PecaEsperando {
+            item_peca: p.item_peca,
+            produto: p.produto,
+            falta: (p.quantidade_necessaria - p.reservado).nao_negativa(),
+            disponivel: p.saldo_disponivel,
+        })
+        .collect();
+    let sugestoes = super::reposicao::sugerir(&abaixo, &esperando, &a_caminho);
+    let precos = ultimos_precos(motor, sessao, sugestoes.iter().map(|s| s.produto).collect());
+    Ok(sugestoes
         .into_iter()
-        .map(|(produto, q)| LinhaPedido {
-            produto: Some(produto),
+        .map(|s| LinhaPedido {
+            produto: Some(s.produto),
             busca: String::new(),
-            qtd: q.formatar(0),
+            qtd: s.quantidade.formatar(0),
             preco: precos
-                .get(&produto)
+                .get(&s.produto)
                 .map(|p| p.formatar())
                 .unwrap_or_default(),
-            sugerido_para: Some(produto),
-            para_os: Vec::new(),
+            sugerido_para: Some(s.produto),
+            para_os: s.para_os,
         })
         .collect())
 }
@@ -575,7 +620,8 @@ fn dialogo_form(
                         Ok(v) if v.is_empty() => notificar(
                             ui.ctx(),
                             Notificacao::info(
-                                "Nada abaixo do ponto de pedido (descontado o que está a caminho).",
+                                "Nada abaixo do ponto de pedido nem peça de OS esperando (descontado o que está \
+                                 a caminho).",
                             ),
                         ),
                         Ok(v) => {
@@ -631,6 +677,8 @@ fn editor_linhas(
                         ));
                         if ui.add(Botao::fantasma("Trocar").pequeno()).clicked() {
                             l.produto = None;
+                            // As peças das OS são deste produto: não vão junto para outro.
+                            l.para_os.clear();
                         }
                     });
                 }
@@ -658,6 +706,14 @@ fn editor_linhas(
                 remover = Some(i);
             }
         });
+        if !l.para_os.is_empty() {
+            let das_os: Quantidade = l.para_os.iter().map(|o| o.quantidade).sum();
+            ui.add(Rotulo::apoio(format!(
+                "{} para {} OS — a nota deste pedido guarda para elas",
+                das_os.formatar(0),
+                l.para_os.len()
+            )));
+        }
         // O produto escolhido agora ganha o último preço pago (sem apagar o digitado).
         if let Some(p) = l.produto {
             if l.sugerido_para != Some(p) {

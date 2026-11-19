@@ -26,7 +26,7 @@
 use std::collections::HashMap;
 
 use cardeal_cliente::{Motor, Sessao};
-use cardeal_kernel::{Dinheiro, Fuso, Id};
+use cardeal_kernel::{Data, Dinheiro, Fuso, Id};
 use cardeal_modkit::Icone;
 use cardeal_ui::atoms::{Botao, Caixa, Divisor, Etiqueta, Rotulo, Tom, ValorDinheiro, ATALHO_NOVO};
 use cardeal_ui::molecules::{
@@ -56,10 +56,13 @@ mod conferencia_pedido;
 mod cotacoes;
 mod devolucao;
 mod estorno;
+mod fornecedores;
+mod hoje;
 mod parcelas;
 mod pedidos;
 pub use pedidos::{PecaEmFalta, PecasDaOs};
 mod rateio;
+mod reposicao;
 
 /// As abas da tela.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -70,6 +73,8 @@ enum AbaCompras {
     Cotacoes,
     /// Quanto se comprou, pela estrutura mercadológica.
     Analise,
+    /// De quem se compra: resumo e ficha de cada fornecedor.
+    Fornecedores,
 }
 
 /// O fuso das datas e horas da tela.
@@ -148,6 +153,9 @@ pub struct EstadoTelaCompras {
     pedidos: pedidos::EstadoPedidos,
     cotacoes: cotacoes::EstadoCotacoes,
     analise: analise::EstadoAnaliseCompras,
+    fornecedores_aba: fornecedores::EstadoFornecedores,
+    /// Peças de OS sem encomenda esperando compra (o painel "Para resolver hoje").
+    pecas_de_os_esperando: usize,
     /// O pedido de compra da nota aberta.
     conf_pedido: conferencia_pedido::EstadoConferenciaPedido,
     produtos: Vec<ItemProdutoComSaldo>,
@@ -231,8 +239,24 @@ impl EstadoTelaCompras {
             self.cotacoes
                 .carregar(motor, sessao, self.lista_fornecedores.clone());
         }
+        self.pecas_de_os_esperando = motor
+            .consultar(
+                sessao,
+                "os.pecas_aguardando_estoque.v1",
+                &mod_os::PecasAguardandoEstoque,
+            )
+            .map(|v: Vec<mod_os::ItemAguardandoEstoque>| {
+                v.iter()
+                    .filter(|p| p.encomenda.is_none() && p.reservado < p.quantidade_necessaria)
+                    .count()
+            })
+            .unwrap_or(0);
         if self.aba == AbaCompras::Analise {
             self.analise.carregar(motor, sessao);
+        }
+        if self.aba == AbaCompras::Fornecedores {
+            self.fornecedores_aba
+                .carregar(motor, sessao, &self.fornecedores, &self.notas);
         }
         if let Ok(p) = motor.consultar(sessao, "estoque.produtos_com_saldo.v1", &ProdutosComSaldo) {
             self.produtos = p;
@@ -372,7 +396,7 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
                 }
             }
             AbaCompras::Notas => cabecalho_notas(ui, motor, sessao, estado),
-            AbaCompras::Analise => {}
+            AbaCompras::Analise | AbaCompras::Fornecedores => {}
         },
         |ui, estado| {
             let mut abas = vec![(AbaCompras::Notas, "Notas de entrada")];
@@ -382,6 +406,7 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
             if sessao.concede("compras.cotacao.ver") {
                 abas.push((AbaCompras::Cotacoes, "Cotações"));
             }
+            abas.push((AbaCompras::Fornecedores, "Fornecedores"));
             if sessao.concede("estoque.abc.ver") {
                 abas.push((AbaCompras::Analise, "Análise"));
             }
@@ -396,11 +421,32 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
                 }
                 ui.add_space(Espaco::E16);
             }
+            if matches!(estado.aba, AbaCompras::Notas | AbaCompras::Pedidos) {
+                let pendencias = hoje::contar(estado, Data::hoje(FUSO));
+                match hoje::painel(ui, pendencias) {
+                    Some(hoje::IrPara::Notas) => estado.aba = AbaCompras::Notas,
+                    Some(hoje::IrPara::Pedidos) => estado.aba = AbaCompras::Pedidos,
+                    Some(hoje::IrPara::PedidoDeReposicao) => {
+                        estado.aba = AbaCompras::Pedidos;
+                        pedidos::abrir_reposicao(ui.ctx(), motor, sessao, &mut estado.pedidos);
+                    }
+                    None => {}
+                }
+            }
             match estado.aba {
                 AbaCompras::Pedidos => pedidos::corpo(ui, motor, sessao, &mut estado.pedidos),
                 AbaCompras::Cotacoes => cotacoes::corpo(ui, motor, sessao, &mut estado.cotacoes),
                 AbaCompras::Analise => {
                     analise::corpo(ui, motor, sessao, &estado.produtos, &mut estado.analise);
+                }
+                AbaCompras::Fornecedores => {
+                    fornecedores::corpo(
+                        ui,
+                        motor,
+                        sessao,
+                        &estado.notas,
+                        &mut estado.fornecedores_aba,
+                    );
                 }
                 AbaCompras::Notas => {
                     if let Some(erro) = &estado.erro {
@@ -437,7 +483,7 @@ pub fn mostrar(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut E
                 &mut estado.cotacoes,
             );
         }
-        AbaCompras::Analise => {}
+        AbaCompras::Analise | AbaCompras::Fornecedores => {}
         AbaCompras::Notas => match estado.dlg {
             Dlg::Fechado => {}
             Dlg::Ver => dialogo_ver(ui.ctx(), motor, sessao, estado),
@@ -1833,6 +1879,50 @@ mod testes {
         assert!(estado.analise.linhas().is_empty(), "fora do filtro");
         estado.analise.filtrar(Some(mercearia));
         assert_eq!(estado.analise.linhas().len(), 1, "a subárvore entra");
+    }
+
+    #[test]
+    fn fornecedores_resume_a_nota_importada_e_abre_a_ficha() {
+        let t = motor_de_teste();
+        let (m, s) = (&t.motor, &t.sessao);
+        let _: mod_compras::RelatorioImportacao = m
+            .executar(
+                s,
+                "compras.importar_nota_de_arquivo_xml.v1",
+                &ImportarNotaDeArquivoXml { xml: XML.into() },
+            )
+            .expect("importa");
+        let mut estado = EstadoTelaCompras {
+            aba: AbaCompras::Fornecedores,
+            ..EstadoTelaCompras::default()
+        };
+        estado.carregar(m, s);
+        let ctx = egui::Context::default();
+        cardeal_ui::tokens::instalar_fontes(&ctx);
+        cardeal_ui::tokens::instalar_estilo(&ctx, cardeal_ui::tokens::Tema::Claro);
+        for _ in 0..2 {
+            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    mostrar(ui, m, s, &mut estado);
+                });
+            });
+        }
+        let linhas = estado.fornecedores_aba.linhas();
+        assert_eq!(linhas.len(), 1, "o emitente da nota virou fornecedor");
+        assert!(linhas[0].ultima_compra.is_some());
+        assert_eq!(linhas[0].notas_12m, 0, "a nota ainda não foi confirmada");
+        estado.fornecedores_aba.abrir_para_teste(m, s, 0);
+        for _ in 0..2 {
+            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    mostrar(ui, m, s, &mut estado);
+                });
+            });
+        }
+        assert!(estado.fornecedores_aba.ficha_aberta());
+        // A nota a conferir aparece no "Para resolver hoje".
+        let p = hoje::contar(&estado, Data::hoje(FUSO));
+        assert_eq!(p.notas_a_conferir, 1);
     }
 
     #[test]
