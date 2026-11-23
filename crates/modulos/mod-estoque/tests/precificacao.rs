@@ -532,8 +532,9 @@ fn presumido_usa_os_campos_fiscais_herdados_do_grupo_e_o_produto_sobrescreve() {
     assert_eq!(s.imposto_origem, OrigemDaCarga::Regime);
     assert_eq!(s.sugerido.unwrap().preco, Dinheiro::centavos(11111));
 
-    // O grupo define ICMS 18% + PIS 0,65% + COFINS 3% = 21,65%: o produto herda.
-    // 25 + 20 + 21,65 = 66,65 → 50 / 0,3335 = 149,93.
+    // O grupo define ICMS 18% + PIS 0,65% + COFINS 3%: o produto herda. Pelo motor (Presumido):
+    // ICMS 18 + PIS 0,65 × 0,82 + COFINS 3 × 0,82 (sem o ICMS na base) + IRPJ 1,2 + CSLL 1,08
+    // = 23,273%. 25 + 20 + 23,273 = 68,273 → 50 / 0,31727 = 157,59.
     c.cmd(
         "estoque.definir_campos_fiscais_do_grupo.v1",
         &DefinirCamposFiscaisDoGrupo {
@@ -543,12 +544,12 @@ fn presumido_usa_os_campos_fiscais_herdados_do_grupo_e_o_produto_sobrescreve() {
     )
     .unwrap();
     let s = c.preco(p);
-    assert_eq!(s.imposto, Percentual::unidades(21_650_000));
+    assert_eq!(s.imposto, Percentual::unidades(23_273_000));
     assert_eq!(s.imposto_origem, OrigemDaCarga::PerfilFiscalDoProduto);
-    assert_eq!(s.sugerido.unwrap().preco, Dinheiro::centavos(14993));
+    assert_eq!(s.sugerido.unwrap().preco, Dinheiro::centavos(15759));
 
-    // O produto sobrescreve só o ICMS (12%); PIS/COFINS continuam do grupo: 15,65%.
-    // 25 + 20 + 15,65 = 60,65 → 50 / 0,3935 = 127,06.
+    // O produto sobrescreve só o ICMS (12%); PIS/COFINS continuam do grupo:
+    // 12 + 0,65 × 0,88 + 3 × 0,88 + 2,28 = 17,492%. 25 + 20 + 17,492 → 50 / 0,37508 = 133,30.
     c.cmd(
         "estoque.definir_campos_fiscais_do_produto.v1",
         &DefinirCamposFiscaisDoProduto {
@@ -558,8 +559,8 @@ fn presumido_usa_os_campos_fiscais_herdados_do_grupo_e_o_produto_sobrescreve() {
     )
     .unwrap();
     let s = c.preco(p);
-    assert_eq!(s.imposto, Percentual::unidades(15_650_000));
-    assert_eq!(s.sugerido.unwrap().preco, Dinheiro::centavos(12706));
+    assert_eq!(s.imposto, Percentual::unidades(17_492_000));
+    assert_eq!(s.sugerido.unwrap().preco, Dinheiro::centavos(13330));
 }
 
 #[test]
@@ -1084,4 +1085,131 @@ fn perfil_gravado_antes_do_fcp_continua_legivel() {
     assert_eq!(lido.cst_icms.as_deref(), Some("500"));
     assert_eq!(lido.aliquota_icms, Some(Percentual::pontos(17)));
     assert_eq!(lido.aliquota_fcp, None);
+}
+
+// ── preço pela carga real (motor cardeal-tributos) ─────────────────────────────────────────
+
+fn lucro_ok(s: &SugestaoDePreco, margem: i64) -> bool {
+    let r = s.resolvido.as_ref().expect("preço resolvido");
+    let alvo = r.preco.aplicar(
+        Percentual::pontos(margem),
+        cardeal_kernel::Arredondamento::MeioAcima,
+    );
+    (r.lucro.em_centavos() - alvo.em_centavos()).abs() <= 1
+}
+
+fn csosn(c: &str) -> CamposFiscais {
+    CamposFiscais {
+        cst_icms: Some(c.into()),
+        ..CamposFiscais::default()
+    }
+}
+
+#[test]
+fn criterio_1_simples_st_e_comum_mesmo_lucro() {
+    let c = Cenario::novo();
+    c.parametros_manuais(10);
+    let comum = c.grupo("COMUM", None);
+    let st = c.grupo("ST", None);
+    for g in [comum, st] {
+        c.margem_do_grupo(g, 15);
+    }
+    c.fiscal_do_grupo(comum, csosn("102"));
+    c.fiscal_do_grupo(st, csosn("500"));
+    let a = c.preco(c.produto_com_custo("Biscoito", comum, Preco::reais(15)));
+    let b = c.preco(c.produto_com_custo("Cerveja", st, Preco::reais(15)));
+    assert!(a.problema.is_none() && b.problema.is_none());
+    assert!(
+        a.sugerido.unwrap().preco > b.sugerido.unwrap().preco,
+        "quem paga mais imposto sai mais caro"
+    );
+    assert!(lucro_ok(&a, 15) && lucro_ok(&b, 15));
+    // O preço do markup e o resolvido são o mesmo número.
+    assert_eq!(
+        a.sugerido.unwrap().preco,
+        a.resolvido.as_ref().unwrap().preco
+    );
+}
+
+#[test]
+fn criterio_2_presumido_icms_17() {
+    let c = Cenario::novo();
+    c.regime_manual(10);
+    let g = c.grupo("ELE", None);
+    c.margem_do_grupo(g, 15);
+    c.fiscal_do_grupo(
+        g,
+        CamposFiscais {
+            aliquota_icms: Some(Percentual::pontos(17)),
+            ..csosn("00")
+        },
+    );
+    let s = c.preco(c.produto_com_custo("Cabo", g, Preco::reais(15)));
+    assert!(s.problema.is_none(), "{:?}", s.problema);
+    assert!(lucro_ok(&s, 15));
+    let rotulos: Vec<&str> = s
+        .resolvido
+        .as_ref()
+        .unwrap()
+        .parcelas
+        .iter()
+        .map(|p| p.rotulo.as_str())
+        .collect();
+    for imposto in ["ICMS", "PIS", "COFINS", "IRPJ", "CSLL"] {
+        assert!(rotulos.contains(&imposto), "{imposto} em {rotulos:?}");
+    }
+}
+
+#[test]
+fn regime_vem_do_cadastro_da_empresa() {
+    let c = Cenario::novo();
+    let empresa = c.empresa;
+    c.arm
+        .escritor()
+        .executar(
+            ContextoEscrita::novo(empresa, Id::novo(), Id::novo(), Id::novo()),
+            move |uow| {
+                uow.conexao()
+                    .execute(
+                        "UPDATE nucleo_empresa SET regime = 'LucroReal' WHERE id = ?1",
+                        [empresa.em_bytes().as_slice()],
+                    )
+                    .map(|_| ())
+                    .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+            },
+        )
+        .unwrap();
+    c.regime_manual(10);
+    let g = c.grupo("ELE", None);
+    c.margem_do_grupo(g, 15);
+    c.fiscal_do_grupo(
+        g,
+        CamposFiscais {
+            aliquota_icms: Some(Percentual::pontos(17)),
+            ..csosn("00")
+        },
+    );
+    let s = c.preco(c.produto_com_custo("Cabo", g, Preco::reais(15)));
+    // Lucro Real: o IR é sobre o lucro, e o que sobra depois dele é a margem pedida.
+    assert!(lucro_ok(&s, 15));
+    let ir = s
+        .resolvido
+        .as_ref()
+        .unwrap()
+        .parcelas
+        .iter()
+        .find(|p| p.rotulo == "IRPJ");
+    assert!(ir.unwrap().explicacao.contains("Lucro Real"));
+}
+
+#[test]
+fn simples_com_cst_do_normal_diz_o_que_corrigir() {
+    let c = Cenario::novo();
+    c.parametros_manuais(10);
+    let g = c.grupo("ELE", None);
+    c.margem_do_grupo(g, 15);
+    c.fiscal_do_grupo(g, csosn("00"));
+    let s = c.preco(c.produto_com_custo("Cabo", g, Preco::reais(15)));
+    assert!(s.sugerido.is_none());
+    assert!(s.problema.unwrap().contains("CSOSN"));
 }

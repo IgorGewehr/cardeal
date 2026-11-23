@@ -94,6 +94,9 @@ pub struct SugestaoDePreco {
     pub sugerido: Option<PrecoCalculado>,
     /// O preço de empate (sem margem).
     pub minimo: Option<PrecoCalculado>,
+    /// O preço resolvido pelo motor de carga (`cardeal-tributos`): para onde vai cada real,
+    /// imposto por imposto, com a frase de onde cada um veio.
+    pub resolvido: Option<cardeal_tributos::PrecoResolvido>,
     /// Por que não foi possível calcular, em português para o usuário.
     pub problema: Option<String>,
 }
@@ -287,6 +290,9 @@ struct BaseDePreco {
     arvore: crate::hierarquia::Arvore,
     rbt12: Dinheiro,
     opex_do_razao: Option<Percentual>,
+    /// O regime do cadastro da empresa (`LucroPresumido`, `LucroReal`...): no percentual
+    /// manual, decide se o motor calcula como Presumido ou Real.
+    regime_cadastral: String,
 }
 
 #[cfg(feature = "sqlite")]
@@ -315,7 +321,15 @@ impl BaseDePreco {
         // receita de antes do Cardeal e a anualização do primeiro ano (`simples.rs`).
         let rbt12 =
             crate::simples::sqlite::rbt12_da_empresa(conexao, ctx.empresa, hoje.competencia())?;
+        let regime_cadastral: String = conexao
+            .query_row(
+                "SELECT regime FROM nucleo_empresa WHERE id = ?1",
+                [crate::repositorio::blob(ctx.empresa)],
+                |r| r.get(0),
+            )
+            .unwrap_or_default();
         Ok(Self {
+            regime_cadastral,
             parametros,
             perfis,
             arvore,
@@ -398,6 +412,63 @@ impl BaseDePreco {
         crate::fiscal::perfil_do_produto(&l.fiscal, &cadeia)
     }
 
+    /// A carga do produto pelo motor (`cardeal-tributos`). MEI e Simples sempre pelo motor (o
+    /// perfil efetivo com as marcas antigas de ST/monofásico onde não há CST). No percentual
+    /// manual, o motor só entra quando o produto tem alíquota no perfil (o gatilho de sempre,
+    /// `OrigemDaCarga::PerfilFiscalDoProduto`), como Presumido ou Real conforme o cadastro;
+    /// sem ela, o percentual informado — o mesmo preço de antes.
+    fn carga_no_motor(
+        &self,
+        origem: OrigemDaCarga,
+        perfil: PerfilFiscal,
+        fiscal: &crate::fiscal::CamposFiscais,
+    ) -> Result<cardeal_tributos::Carga, String> {
+        use crate::precificacao::RegimeImposto;
+        use cardeal_tributos::{carga, Atividade, Regime};
+        let mut t = fiscal.perfil_tributario(None);
+        let regime = match self.parametros.regime {
+            RegimeImposto::Mei => Regime::Mei,
+            RegimeImposto::Simples(anexo) => {
+                if t.situacao_icms.is_none() && perfil.icms_st {
+                    t.situacao_icms = Some("500".into());
+                }
+                if t.cst_pis.is_none() && t.cst_cofins.is_none() && perfil.monofasico {
+                    t.cst_pis = Some("04".into());
+                    t.cst_cofins = Some("04".into());
+                }
+                Regime::Simples {
+                    anexo,
+                    rbt12: self.rbt12,
+                }
+            }
+            RegimeImposto::Manual(p) if origem == OrigemDaCarga::Regime => Regime::Manual(p),
+            RegimeImposto::Manual(_) => {
+                // Perfis antigos só com alíquotas, sem CST: tributado integralmente (00).
+                if t.situacao_icms.is_none() {
+                    t.situacao_icms = Some(
+                        if t.aliquota_icms.is_some() {
+                            "00"
+                        } else {
+                            "41"
+                        }
+                        .into(),
+                    );
+                }
+                if self.regime_cadastral == "LucroReal" {
+                    Regime::Real {
+                        pis_cofins_nao_cumulativo: true,
+                    }
+                } else {
+                    Regime::Presumido {
+                        atividade: Atividade::Comercio,
+                        receita_mensal: Dinheiro::centavos(self.rbt12.em_centavos() / 12),
+                    }
+                }
+            }
+        };
+        carga(&regime, &t)
+    }
+
     fn sugerir(&self, l: &LinhaProduto, custo_informado: Option<Dinheiro>) -> SugestaoDePreco {
         use crate::precificacao::{carga_do_produto, preco_minimo, preco_sugerido};
         use cardeal_kernel::{Arredondamento, Quantidade};
@@ -422,7 +493,10 @@ impl BaseDePreco {
         let fiscal = self.fiscal_efetivo(l);
         let perfil_fiscal = self.perfil_fiscal(l.grupo, &fiscal);
         let carga = carga_do_produto(self.parametros.regime, self.rbt12, perfil_fiscal, &fiscal);
-        let imposto = carga.percentual;
+        let motor = self.carga_no_motor(carga.origem, perfil_fiscal, &fiscal);
+        let imposto = motor
+            .as_ref()
+            .map_or(Percentual::ZERO, cardeal_tributos::Carga::por_dentro);
         let (opex, derivado) = match (
             self.parametros.custo_operacional_derivado,
             self.opex_do_razao,
@@ -449,7 +523,11 @@ impl BaseDePreco {
             componentes: None,
             sugerido: None,
             minimo: None,
+            resolvido: None,
             problema: None,
+        };
+        let Ok(motor) = motor.map_err(|e| s.problema = Some(e)) else {
+            return s;
         };
         let Some(custo) = custo else {
             s.problema = Some(
@@ -464,13 +542,22 @@ impl BaseDePreco {
             );
             return s;
         };
+        // O IR sobre o lucro (Lucro Real) pede uma margem maior antes dele: o markup divisor
+        // usa essa margem bruta, e o preço sai igual ao do motor.
+        let margem_bruta = antes_do_ir(margem, motor.sobre_o_lucro());
         let componentes = Componentes {
             custo_operacional: opex,
-            margem_liquida: margem,
+            margem_liquida: margem_bruta,
             imposto,
             comissao,
             taxa_pagamento: self.parametros.taxa_pagamento,
         };
+        let despesas = cardeal_tributos::Despesas {
+            operacional: opex,
+            comissao,
+            taxa_pagamento: self.parametros.taxa_pagamento,
+        };
+        s.resolvido = cardeal_tributos::resolver_preco(custo, &motor, &despesas, margem).ok();
         s.componentes = Some(componentes);
         match (
             preco_sugerido(custo, &componentes),
@@ -484,6 +571,17 @@ impl BaseDePreco {
         }
         s
     }
+}
+
+/// `margem ÷ (1 − ir)`: a margem antes do imposto sobre o lucro.
+fn antes_do_ir(margem: Percentual, ir: Percentual) -> Percentual {
+    if ir.e_zero() {
+        return margem;
+    }
+    let un = i128::from(margem.unidades_internas())
+        * i128::from(Percentual::CEM.unidades_internas())
+        / i128::from(ir.complemento().unidades_internas());
+    Percentual::unidades(i64::try_from(un).unwrap_or(i64::MAX))
 }
 
 /// Os percentuais que incidem sobre qualquer venda da empresa, no momento: o que o preço
