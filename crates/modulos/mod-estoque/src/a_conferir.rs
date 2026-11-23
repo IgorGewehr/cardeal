@@ -182,3 +182,68 @@ impl Consulta for ListarTributacaoAConferir {
         Ok(saida)
     }
 }
+
+/// Completa os campos fiscais **próprios** do produto com o que a nota de compra ensinou — só
+/// os vazios, nunca por cima do que o usuário definiu — e o CEST, se vazio; registra na lista
+/// para conferir, com o perfil de antes (para desfazer). `false` quando nada mudou.
+///
+/// # Errors
+/// Produto inexistente ou erro de persistência.
+#[cfg(feature = "sqlite")]
+#[allow(clippy::too_many_arguments)]
+pub fn aprender_tributacao_do_produto(
+    conexao: &Connection,
+    organizacao: Id,
+    produto: Id,
+    aprendido: &CamposFiscais,
+    cest: Option<&str>,
+    motivo: &str,
+    origem: &str,
+    agora: Instante,
+) -> Resultado<bool> {
+    use crate::repositorio::{blob, persist};
+    use rusqlite::OptionalExtension;
+    let Some((perfil, cest_atual)) = conexao
+        .query_row(
+            "SELECT perfil_fiscal, cest FROM estoque_produto WHERE id = ?1 AND empresa = ?2",
+            rusqlite::params![blob(produto), blob(organizacao)],
+            |r| {
+                Ok((
+                    CamposFiscais::de_blob(r.get::<_, Option<Vec<u8>>>(0)?.as_deref()),
+                    r.get::<_, Option<String>>(1)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(persist)?
+    else {
+        return Err(cardeal_kernel::Erro::nao_encontrado("produto"));
+    };
+    // Os campos aprendidos por baixo dos próprios: só preenche o que está vazio.
+    let novo = perfil.sobre(aprendido);
+    let cest_novo = cest
+        .filter(|_| cest_atual.as_deref().is_none_or(str::is_empty))
+        .map(str::to_owned);
+    if novo == perfil && cest_novo.is_none() {
+        return Ok(false);
+    }
+    conexao
+        .execute(
+            "UPDATE estoque_produto
+                SET perfil_fiscal = ?2, cest = COALESCE(?3, cest), versao = versao + 1
+              WHERE id = ?1",
+            rusqlite::params![blob(produto), novo.para_blob(), cest_novo],
+        )
+        .map_err(persist)?;
+    registrar_a_conferir(
+        conexao,
+        organizacao,
+        AlvoTributacao::Produto(produto),
+        motivo,
+        origem,
+        &perfil,
+        &novo,
+        agora,
+    )?;
+    Ok(true)
+}

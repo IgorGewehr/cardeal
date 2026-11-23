@@ -81,6 +81,18 @@ pub struct TributosDaCompra {
     pub aliquota_fcp_st: Option<Percentual>,
     /// O FCP do ST (`vFCPST`).
     pub valor_fcp_st: Dinheiro,
+    /// O crédito de ICMS que o fornecedor do Simples permite aproveitar (`vCredICMSSN`).
+    pub credito_sn: Dinheiro,
+    /// O CST do PIS (`det/imposto/PIS/*/CST`): 04 = monofásico.
+    pub cst_pis: Option<String>,
+    /// O PIS destacado (`vPIS`).
+    pub valor_pis: Dinheiro,
+    /// O CST da COFINS (`det/imposto/COFINS/*/CST`).
+    pub cst_cofins: Option<String>,
+    /// A COFINS destacada (`vCOFINS`).
+    pub valor_cofins: Dinheiro,
+    /// O CEST do item (`det/prod/CEST`): o produto sujeito a ST.
+    pub cest: Option<String>,
 }
 
 impl ItemNfe {
@@ -666,9 +678,52 @@ fn processar_texto(
             });
         }
         [.., "imposto", "ICMS", _, campo] => tributo_do_icms(item_atual, campo, texto)?,
+        [.., "imposto", grupo @ ("PIS" | "COFINS"), _, campo] => {
+            tributo_pis_cofins(item_atual, grupo, campo, texto)?;
+        }
+        [.., "prod", "CEST"] => {
+            let c = texto.trim().to_owned();
+            set_item(item_atual, |i| {
+                i.tributos.cest = (!c.is_empty()).then_some(c);
+            });
+        }
         [.., "imposto", "IPI", "IPITrib", "vIPI"] => {
             let v = dinheiro_de(texto, "vIPI")?;
             set_item(item_atual, |i| i.valor_ipi = v);
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// O CST e o valor do PIS e da COFINS do item (qualquer subgrupo: Aliq, NT, Outr...).
+fn tributo_pis_cofins(
+    item_atual: &mut Option<ItemParcial>,
+    grupo: &str,
+    campo: &str,
+    texto: &str,
+) -> Result<(), ErroFiscal> {
+    let pis = grupo == "PIS";
+    match campo {
+        "CST" => {
+            let c = Some(texto.trim().to_owned());
+            set_item(item_atual, |i| {
+                if pis {
+                    i.tributos.cst_pis = c;
+                } else {
+                    i.tributos.cst_cofins = c;
+                }
+            });
+        }
+        "vPIS" | "vCOFINS" => {
+            let v = dinheiro_de(texto, campo)?;
+            set_item(item_atual, |i| {
+                if pis {
+                    i.tributos.valor_pis = v;
+                } else {
+                    i.tributos.valor_cofins = v;
+                }
+            });
         }
         _ => {}
     }
@@ -726,6 +781,10 @@ fn tributo_do_icms(
             let v = dinheiro_de(texto, campo)?;
             set_item(item_atual, |i| i.tributos.base_fcp_st = v);
         }
+        "vCredICMSSN" => {
+            let v = dinheiro_de(texto, campo)?;
+            set_item(item_atual, |i| i.tributos.credito_sn = v);
+        }
         "pFCPST" => {
             let p = percentual()?;
             set_item(item_atual, |i| i.tributos.aliquota_fcp_st = Some(p));
@@ -744,6 +803,36 @@ fn set_item(item_atual: &mut Option<ItemParcial>, aplicar: impl FnOnce(&mut Item
 #[cfg(test)]
 mod testes {
     use super::*;
+
+    #[test]
+    fn le_pis_cofins_credito_do_simples_e_cest() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe"><NFe>
+<infNFe Id="NFe35240912345678000181550010000012341123456789" versao="4.00">
+  <ide><nNF>9</nNF><serie>1</serie><dhEmi>2024-09-12T10:00:00-03:00</dhEmi></ide>
+  <emit><CNPJ>11222333000181</CNPJ><xNome>Fornecedor</xNome></emit>
+  <det nItem="1">
+    <prod><cProd>A</cProd><xProd>SHAMPOO</xProd><NCM>33051000</NCM><CEST>2003700</CEST>
+      <qCom>1</qCom><vUnCom>10.00</vUnCom><vProd>10.00</vProd></prod>
+    <imposto>
+      <ICMS><ICMSSN101><orig>0</orig><CSOSN>101</CSOSN><pCredSN>1.25</pCredSN>
+        <vCredICMSSN>0.13</vCredICMSSN></ICMSSN101></ICMS>
+      <PIS><PISAliq><CST>01</CST><vBC>10.00</vBC><pPIS>1.65</pPIS><vPIS>0.17</vPIS></PISAliq></PIS>
+      <COFINS><COFINSNT><CST>04</CST></COFINSNT></COFINS>
+    </imposto>
+  </det>
+  <total><ICMSTot><vNF>10.00</vNF></ICMSTot></total>
+</infNFe></NFe></nfeProc>"#;
+        let n = interpretar(xml).unwrap();
+        let t = &n.itens[0].tributos;
+        assert_eq!(t.situacao.as_deref(), Some("101"));
+        assert_eq!(t.credito_sn, Dinheiro::centavos(13));
+        assert_eq!(t.cst_pis.as_deref(), Some("01"));
+        assert_eq!(t.valor_pis, Dinheiro::centavos(17));
+        assert_eq!(t.cst_cofins.as_deref(), Some("04"));
+        assert_eq!(t.valor_cofins, Dinheiro::ZERO);
+        assert_eq!(t.cest.as_deref(), Some("2003700"));
+    }
 
     #[test]
     fn st_fcp_ipi_e_desconto_do_item_e_o_st_retido_fica_de_fora() {

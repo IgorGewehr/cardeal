@@ -821,6 +821,8 @@ pub fn confirmar_entrada_com_parcelas(
     RepositorioCompras::novo(uow).atualizar_nota(&nota)?;
     gravar_data_de_entrada(nota.id, ctx.hoje(), uow)?;
     crate::pedido::sqlite::receber(nota.id, local, ctx, uow)?;
+    let rotulo = format!("{}/{}", nota.numero, nota.serie);
+    crate::aprender_tributacao::aprender_da_nota(uow.conexao(), ctx, nota.id, &rotulo)?;
 
     uow.publicar(NotaConfirmada {
         nota_entrada: nota.id,

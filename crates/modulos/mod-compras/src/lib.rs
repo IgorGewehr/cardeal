@@ -48,6 +48,8 @@
 #![allow(clippy::module_name_repetitions, clippy::must_use_candidate)]
 #![allow(clippy::result_large_err)]
 
+#[cfg(feature = "sqlite")]
+mod aprender_tributacao;
 mod casamento;
 mod comandos;
 mod consultas;

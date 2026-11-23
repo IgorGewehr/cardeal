@@ -3150,6 +3150,7 @@ dependencies = [
  "cardeal-modkit",
  "cardeal-storage",
  "cardeal-testkit",
+ "cardeal-tributos",
  "cardeal-ui",
  "egui",
  "mod-clientes",

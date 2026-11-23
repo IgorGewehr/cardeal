@@ -1118,3 +1118,170 @@ fn cfop_que_nao_e_venda_fica_a_conferir_com_aviso_mesmo_com_tudo_casado() {
         "só a venda gerou título"
     );
 }
+
+// ── a nota de compra ensina a tributação (spec do markup, §5.3) ─────────────────────────────
+
+/// Uma nota de um item no grupo de ICMS e PIS/COFINS escolhidos (o XML como a SEFAZ entrega).
+fn xml_tributado(chave: &str, icms: &str, pis_cst: &str, cest: Option<&str>) -> String {
+    let cest = cest
+        .map(|c| format!("<CEST>{c}</CEST>"))
+        .unwrap_or_default();
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe"><NFe>
+<infNFe Id="NFe{chave}" versao="4.00">
+  <ide><nNF>77</nNF><serie>1</serie><dhEmi>2026-11-01T09:00:00-03:00</dhEmi></ide>
+  <emit><CNPJ>{CNPJ_FORNECEDOR}</CNPJ><xNome>Distribuidora Alfa LTDA</xNome></emit>
+  <det nItem="1">
+    <prod><cProd>CERV-350</cProd><xProd>CERVEJA LATA 350ML</xProd><NCM>22030000</NCM>{cest}
+      <qCom>12.0000</qCom><vUnCom>5.000000</vUnCom><vProd>60.00</vProd></prod>
+    <imposto>
+      <ICMS>{icms}</ICMS>
+      <PIS><PISNT><CST>{pis_cst}</CST></PISNT></PIS>
+      <COFINS><COFINSNT><CST>{pis_cst}</CST></COFINSNT></COFINS>
+    </imposto>
+  </det>
+  <total><ICMSTot><vProd>60.00</vProd><vFrete>0.00</vFrete><vSeg>0.00</vSeg><vOutro>0.00</vOutro>
+    <vNF>60.00</vNF></ICMSTot></total>
+</infNFe></NFe></nfeProc>"#
+    )
+}
+
+fn importar_e_confirmar(arm: &Armazenamento, empresa: Id, produto: Id, local: Id, xml: String) {
+    let ctx_escrita = ContextoEscrita::novo(empresa, Id::novo(), Id::novo(), Id::novo());
+    arm.escritor()
+        .executar(ctx_escrita, move |uow| {
+            let nota_xml = cardeal_fiscal::interpretar(&xml)
+                .map_err(|e| cardeal_kernel::Erro::de_dominio(&e))
+                .map_err(cardeal_storage::ErroArmazenamento::Dominio)?;
+            let relatorio = importar_nota_da_sefaz(&nota_xml, &xml, &ctx(empresa), uow)
+                .map_err(cardeal_storage::ErroArmazenamento::Dominio)?;
+            let mut item = RepositorioCompras::novo(uow)
+                .itens_da_nota(relatorio.nota_entrada)
+                .map_err(cardeal_storage::ErroArmazenamento::Dominio)?[0]
+                .clone();
+            item.vincular(produto);
+            RepositorioCompras::novo(uow)
+                .atualizar_item(&item)
+                .map_err(cardeal_storage::ErroArmazenamento::Dominio)?;
+            confirmar_entrada_comum(
+                relatorio.nota_entrada,
+                local,
+                true,
+                false,
+                &ctx(empresa),
+                uow,
+            )
+            .map_err(cardeal_storage::ErroArmazenamento::Dominio)?;
+            Ok(())
+        })
+        .unwrap();
+}
+
+fn perfil_e_cest(
+    arm: &Armazenamento,
+    produto: Id,
+) -> (mod_estoque::fiscal::CamposFiscais, Option<String>) {
+    arm.leitor()
+        .consultar(move |c| {
+            c.query_row(
+                "SELECT perfil_fiscal, cest FROM estoque_produto WHERE id = ?1",
+                [produto.em_bytes().as_slice()],
+                |r| {
+                    Ok((
+                        mod_estoque::fiscal::CamposFiscais::de_blob(
+                            r.get::<_, Option<Vec<u8>>>(0)?.as_deref(),
+                        ),
+                        r.get::<_, Option<String>>(1)?,
+                    ))
+                },
+            )
+            .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+        })
+        .unwrap()
+}
+
+fn a_conferir(arm: &Armazenamento) -> Vec<(String, String)> {
+    arm.leitor()
+        .consultar(|c| {
+            let mut s = c
+                .prepare("SELECT motivo, origem FROM estoque_tributacao_a_conferir")
+                .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))?;
+            let v = s
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+                .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()));
+            v
+        })
+        .unwrap()
+}
+
+#[test]
+fn nota_com_csosn_500_ensina_st_e_monofasico_ao_produto_sem_perfil() {
+    let (_dir, arm, empresa) = base();
+    let produto = cadastrar_produto(&arm, empresa, "Cerveja Lata 350ml", "22030000");
+    let local = cadastrar_local(&arm, empresa);
+    let xml = xml_tributado(
+        &"9".repeat(44),
+        "<ICMSSN500><orig>0</orig><CSOSN>500</CSOSN></ICMSSN500>",
+        "04",
+        Some("0302100"),
+    );
+    importar_e_confirmar(&arm, empresa, produto, local, xml);
+    let (perfil, cest) = perfil_e_cest(&arm, produto);
+    // A empresa é do Simples: ST vira o CSOSN 500; PIS/COFINS monofásicos (CST 04).
+    assert_eq!(perfil.cst_icms.as_deref(), Some("500"));
+    assert_eq!(perfil.cst_pis.as_deref(), Some("04"));
+    assert_eq!(perfil.cst_cofins.as_deref(), Some("04"));
+    assert_eq!(perfil.origem, Some(0));
+    assert_eq!(cest.as_deref(), Some("0302100"));
+    let lista = a_conferir(&arm);
+    assert_eq!(lista.len(), 1);
+    assert!(
+        lista[0].1.contains("77"),
+        "origem com o número da nota: {}",
+        lista[0].1
+    );
+}
+
+#[test]
+fn produto_com_perfil_nunca_e_sobrescrito_e_a_contradicao_vira_aviso() {
+    let (_dir, arm, empresa) = base();
+    let produto = cadastrar_produto(&arm, empresa, "Cerveja Lata 350ml", "22030000");
+    let local = cadastrar_local(&arm, empresa);
+    let proprio = mod_estoque::fiscal::CamposFiscais {
+        cst_icms: Some("102".into()),
+        ..Default::default()
+    };
+    let blob = proprio.para_blob();
+    arm.escritor()
+        .executar(
+            ContextoEscrita::novo(empresa, Id::novo(), Id::novo(), Id::novo()),
+            move |uow| {
+                uow.conexao()
+                    .execute(
+                        "UPDATE estoque_produto SET perfil_fiscal = ?2 WHERE id = ?1",
+                        rusqlite::params![produto.em_bytes().as_slice(), blob],
+                    )
+                    .map(|_| ())
+                    .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+            },
+        )
+        .unwrap();
+    let xml = xml_tributado(
+        &"7".repeat(44),
+        "<ICMSSN500><orig>0</orig><CSOSN>500</CSOSN></ICMSSN500>",
+        "49",
+        None,
+    );
+    importar_e_confirmar(&arm, empresa, produto, local, xml);
+    assert_eq!(
+        perfil_e_cest(&arm, produto).0,
+        proprio,
+        "o perfil do usuário fica"
+    );
+    let lista = a_conferir(&arm);
+    assert_eq!(lista.len(), 1);
+    assert!(lista[0].0.contains("ST"), "{}", lista[0].0);
+}

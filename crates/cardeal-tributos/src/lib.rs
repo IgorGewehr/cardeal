@@ -13,6 +13,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs, clippy::pedantic)]
 
+pub mod ncm;
 pub mod preco;
 pub mod simples;
 

@@ -114,7 +114,7 @@ pub mod transferencia;
 pub mod tributacao_simples;
 
 #[cfg(feature = "sqlite")]
-pub use a_conferir::registrar_a_conferir;
+pub use a_conferir::{aprender_tributacao_do_produto, registrar_a_conferir};
 pub use a_conferir::{AlvoTributacao, ListarTributacaoAConferir, TributacaoAConferir};
 pub use aparelho_origem::AparelhoOrigem;
 #[cfg(feature = "sqlite")]
