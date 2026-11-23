@@ -19,6 +19,7 @@ pub mod simples;
 use cardeal_kernel::{Dinheiro, Percentual};
 use serde::{Deserialize, Serialize};
 
+pub use preco::{resolver_preco, Despesas, ParcelaDoPreco, PrecoResolvido};
 pub use simples::{aliquota_efetiva, faixa_do_simples, AnexoSimples, SUBLIMITE};
 
 /// A atividade da empresa no Lucro Presumido (decide a presunção do IRPJ e da CSLL).
