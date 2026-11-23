@@ -342,7 +342,9 @@ fn formulario_peca(
     let ok = estado.peca_produto.is_some() || !estado.peca_busca.trim().is_empty();
     let fora = ok && peca_fora_do_estoque(estado);
     let antes = estado.peca_produto;
+    let nova = estado.peca_produto.is_none() && !estado.peca_busca.trim().is_empty();
     let mut adicionar = false;
+    let (mut custo_mudou, mut preco_mudou) = (false, false);
     ui.columns(5, |c| {
         SeletorBusca::novo(
             "Nova peça",
@@ -354,15 +356,19 @@ fn formulario_peca(
         .mostrar(&mut c[0]);
         c[1].add(Campo::novo("Quantidade", &mut estado.peca_qtd).marcador("1"));
         if fora {
-            c[2].add(Campo::novo("Meu custo (un.)", &mut estado.peca_custo).marcador("opcional"));
+            custo_mudou = c[2]
+                .add(Campo::novo("Meu custo (un.)", &mut estado.peca_custo).marcador("opcional"))
+                .changed();
         }
-        c[3].add(
-            Campo::novo("Preço ao cliente (un.)", &mut estado.peca_preco).marcador(if fora {
-                "= custo"
-            } else {
-                "opcional"
-            }),
-        );
+        preco_mudou = c[3]
+            .add(
+                Campo::novo("Preço ao cliente (un.)", &mut estado.peca_preco).marcador(if fora {
+                    "= custo"
+                } else {
+                    "opcional"
+                }),
+            )
+            .changed();
         c[4].add_space(Espaco::E24);
         adicionar = c[4]
             .add(
@@ -372,17 +378,49 @@ fn formulario_peca(
             )
             .clicked();
     });
+    let mut grupo_mudou = false;
+    if nova {
+        let nos: Vec<NoArvore> = estado
+            .grupos
+            .iter()
+            .map(|g| NoArvore {
+                id: g.id,
+                nivel: g.nivel,
+                rotulo: g.nome.clone(),
+                apoio: None,
+                tem_filhos: false,
+            })
+            .collect();
+        let antes_grupo = estado.peca_grupo;
+        SeletorEmArvore::novo(
+            "Categoria da peça nova",
+            &mut estado.peca_grupo,
+            &nos,
+            &mut estado.peca_grupo_seletor,
+        )
+        .marcador("Peças")
+        .opcao_vazia("Peças")
+        .mostrar(ui);
+        grupo_mudou = estado.peca_grupo != antes_grupo;
+    }
+    if preco_mudou {
+        estado.peca_preco_manual = !estado.peca_preco.trim().is_empty();
+    }
+    if custo_mudou || grupo_mudou {
+        recalcular_preco_pelo_custo(motor, sessao, estado);
+    }
+    if !estado.peca_preco_dica.is_empty() {
+        ui.add(Rotulo::apoio(estado.peca_preco_dica.clone()).quebravel());
+    }
     if fora {
         ui.add(
             Rotulo::apoio(
-                "Fora do estoque: custo e preço são opcionais. Só um preenchido vale para os dois \
-                 (repasse a preço de custo — o lucro vem do serviço); nenhum, defina depois em \
-                 \"Valores\".",
+                "Fora do estoque: com o custo, o preço vem pelo markup da categoria. Só um \
+                 preenchido vale para os dois (repasse a preço de custo); nenhum, defina depois \
+                 em \"Valores\".",
             )
             .quebravel(),
         );
-    } else if !estado.peca_preco_dica.is_empty() {
-        ui.add(Rotulo::apoio(estado.peca_preco_dica.clone()).quebravel());
     }
     if let Some(produto) = estado.peca_produto.filter(|p| Some(*p) != antes) {
         sugerir_preco(motor, sessao, estado, produto);

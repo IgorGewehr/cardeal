@@ -19,6 +19,7 @@ struct Cenario {
     estado: EstadoTelaOs,
     os: Id,
     produto: Id,
+    grupo: Id,
 }
 
 fn cenario() -> Cenario {
@@ -128,6 +129,7 @@ fn cenario() -> Cenario {
         estado,
         os: aberta.ordem_servico,
         produto: produto.produto,
+        grupo: grupo.grupo_produto,
     }
 }
 
@@ -908,4 +910,142 @@ fn custo_e_preco_da_peca_sao_opcionais_e_um_vale_pelo_outro() {
     assert_eq!(valores_da_peca("", "150"), Some((p("150"), p("150"))));
     assert_eq!(valores_da_peca("100", "150"), Some((p("100"), p("150"))));
     assert_eq!(valores_da_peca("x", ""), None);
+}
+
+fn margem_de_15_em_pecas(c: &Cenario) {
+    c.motor
+        .executar(
+            &c.sessao,
+            "estoque.definir_margem_do_grupo.v1",
+            &mod_estoque::DefinirMargemDoGrupo {
+                grupo: c.grupo,
+                margem: Some(Percentual::pontos(15)),
+            },
+        )
+        .expect("margem");
+}
+
+fn markup_do_produto(c: &Cenario, custo: Option<Dinheiro>) -> Preco {
+    let s: mod_estoque::SugestaoDePreco = c
+        .motor
+        .consultar(
+            &c.sessao,
+            "estoque.preco_sugerido_do_produto.v1",
+            &mod_estoque::PrecoSugeridoDoProduto {
+                produto: c.produto,
+                custo,
+            },
+        )
+        .expect("sugestão");
+    Preco::centavos(s.sugerido.expect("preço").preco.em_centavos())
+}
+
+#[test]
+fn peca_do_estoque_sem_tabela_vem_com_o_preco_do_markup() {
+    let mut c = cenario();
+    margem_de_15_em_pecas(&c);
+    c.estado.limpar_campos();
+    sugerir_preco(&c.motor, &c.sessao, &mut c.estado, c.produto);
+    assert_eq!(c.estado.peca_preco, markup_do_produto(&c, None).formatar());
+    assert!(
+        c.estado
+            .peca_preco_dica
+            .starts_with("Sugerido pela categoria Peças"),
+        "{}",
+        c.estado.peca_preco_dica
+    );
+}
+
+#[test]
+fn peca_nova_digitada_calcula_o_preco_ao_digitar_o_custo() {
+    let mut c = cenario();
+    margem_de_15_em_pecas(&c);
+    c.estado.carregar(&c.motor, &c.sessao);
+    c.estado.abrir_detalhe(&c.motor, &c.sessao, c.os);
+    c.estado.peca_busca = "Tela A52".to_owned();
+    c.estado.peca_custo = "15,00".to_owned();
+    recalcular_preco_pelo_custo(&c.motor, &c.sessao, &mut c.estado);
+    let esperado: mod_estoque::SugestaoDePreco = c
+        .motor
+        .consultar(
+            &c.sessao,
+            "estoque.preco_sugerido_no_grupo.v1",
+            &mod_estoque::PrecoSugeridoNoGrupo {
+                grupo: c.grupo,
+                custo: Dinheiro::reais(15),
+            },
+        )
+        .expect("sugestão");
+    let preco = Preco::centavos(esperado.sugerido.expect("preço").preco.em_centavos());
+    assert_eq!(c.estado.peca_preco, preco.formatar());
+    assert!(preco > Preco::reais(15), "o markup soma ao custo");
+
+    adicionar_peca(&c.ctx, &c.motor, &c.sessao, &mut c.estado, c.os);
+    let d = c.estado.detalhe.clone().expect("detalhe");
+    let item = d.itens_peca.last().expect("peça").clone();
+    assert_eq!(item.preco_unitario, preco);
+    assert_eq!(item.custo_unitario, Preco::reais(15));
+}
+
+#[test]
+fn preco_digitado_pelo_usuario_nao_muda_com_o_custo() {
+    let mut c = cenario();
+    margem_de_15_em_pecas(&c);
+    c.estado.carregar(&c.motor, &c.sessao);
+    c.estado.peca_busca = "Tela A52".to_owned();
+    c.estado.peca_preco = "40,00".to_owned();
+    c.estado.peca_preco_manual = true;
+    c.estado.peca_custo = "15,00".to_owned();
+    recalcular_preco_pelo_custo(&c.motor, &c.sessao, &mut c.estado);
+    assert_eq!(c.estado.peca_preco, "40,00");
+}
+
+#[test]
+fn tabela_de_preco_vence_o_markup() {
+    let mut c = cenario();
+    margem_de_15_em_pecas(&c);
+    let tabela: mod_vendas::TabelaPrecoCriada = c
+        .motor
+        .executar(
+            &c.sessao,
+            "vendas.criar_tabela_preco.v1",
+            &mod_vendas::CriarTabelaPreco {
+                nome: "Balcão".into(),
+                tipo: mod_vendas::TipoTabela::Venda,
+                vigente_de: Data::hoje(Fuso::BRASILIA).mais_dias(-1),
+                vigente_ate: None,
+            },
+        )
+        .expect("tabela");
+    let _: mod_vendas::RegraPrecoCriada = c
+        .motor
+        .executar(
+            &c.sessao,
+            "vendas.criar_regra_preco.v1",
+            &mod_vendas::CriarRegraPreco {
+                tabela_preco: tabela.tabela_preco,
+                alvo_produto: Some(c.produto),
+                alvo_grupo: None,
+                quantidade_minima: None,
+                preco: Preco::reais(300),
+                periodo_de: None,
+                periodo_ate: None,
+            },
+        )
+        .expect("regra");
+    c.estado.limpar_campos();
+    sugerir_preco(&c.motor, &c.sessao, &mut c.estado, c.produto);
+    assert_eq!(c.estado.peca_preco, "300,00");
+    assert!(c.estado.peca_preco_dica.starts_with("Preço da tabela"));
+}
+
+#[test]
+fn escolher_sugestao_respeita_a_ordem() {
+    let t = Some((Preco::reais(3), "tabela".to_owned()));
+    let m = Some((Preco::reais(2), "markup".to_owned()));
+    let u = Some((Preco::reais(1), "último".to_owned()));
+    assert_eq!(escolher_sugestao(t.clone(), m.clone(), u.clone()), t);
+    assert_eq!(escolher_sugestao(None, m.clone(), u.clone()), m);
+    assert_eq!(escolher_sugestao(None, None, u.clone()), u);
+    assert_eq!(escolher_sugestao(None, None, None), None);
 }

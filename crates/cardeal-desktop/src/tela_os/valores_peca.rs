@@ -7,7 +7,11 @@ use super::*;
 /// O formulário.
 pub(super) struct FormValoresPeca {
     item: Id,
+    produto: Id,
     nome: String,
+    /// O preço já veio definido ou o usuário o digitou: mudar o custo não o recalcula.
+    preco_manual: bool,
+    dica: String,
     aplicada: bool,
     custo: String,
     preco: String,
@@ -24,7 +28,10 @@ impl FormValoresPeca {
         };
         Self {
             item: item.id,
+            produto: item.produto,
             nome,
+            preco_manual: !item.preco_unitario.e_zero(),
+            dica: String::new(),
             aplicada: item.aplicada,
             custo: texto(item.custo_unitario),
             preco: texto(item.preco_unitario),
@@ -59,14 +66,28 @@ pub(super) fn dialogo_valores_peca(
                 let Dlg::ValoresPeca(f) = &mut estado.dlg else {
                     return;
                 };
+                let (mut custo_mudou, mut preco_mudou) = (false, false);
                 ui.columns(2, |c| {
                     if f.aplicada {
                         Dado::novo("Meu custo", f.custo.clone()).mostrar(&mut c[0]);
                     } else {
-                        c[0].add(Campo::novo("Meu custo", &mut f.custo).marcador("opcional"));
+                        custo_mudou = c[0]
+                            .add(Campo::novo("Meu custo", &mut f.custo).marcador("opcional"))
+                            .changed();
                     }
-                    c[1].add(Campo::novo("Preço ao cliente", &mut f.preco).marcador("= custo"));
+                    preco_mudou = c[1]
+                        .add(Campo::novo("Preço ao cliente", &mut f.preco).marcador("= custo"))
+                        .changed();
                 });
+                if preco_mudou {
+                    f.preco_manual = !f.preco.trim().is_empty();
+                }
+                if custo_mudou {
+                    sugerir_pelo_custo(motor, sessao, f);
+                }
+                if !f.dica.is_empty() {
+                    ui.add(Rotulo::apoio(f.dica.clone()).quebravel());
+                }
             },
             |ui, _| {
                 salvar = ui.add(Botao::primario("Salvar")).clicked();
@@ -113,4 +134,40 @@ pub(super) fn dialogo_valores_peca(
         &cmd,
         "Valores da peça atualizados",
     );
+}
+
+/// O custo previsto mudou: o preço acompanha pelo markup do produto, a não ser que já tenha
+/// sido definido ou digitado.
+pub(super) fn sugerir_pelo_custo(motor: &Motor, sessao: &Sessao, f: &mut FormValoresPeca) {
+    if f.preco_manual {
+        return;
+    }
+    let Ok(custo) = f.custo.trim().parse::<Dinheiro>() else {
+        return;
+    };
+    if !custo.e_positivo() {
+        return;
+    }
+    let sugestao: Option<mod_estoque::SugestaoDePreco> = motor
+        .consultar(
+            sessao,
+            "estoque.preco_sugerido_do_produto.v1",
+            &mod_estoque::PrecoSugeridoDoProduto {
+                produto: f.produto,
+                custo: Some(custo),
+            },
+        )
+        .ok();
+    match sugestao.as_ref().and_then(dica_do_markup) {
+        Some((preco, dica)) => {
+            f.preco = preco.formatar();
+            f.dica = dica;
+        }
+        None => {
+            f.dica = sugestao
+                .and_then(|s| s.problema)
+                .map(|p| format!("Sem preço sugerido: {p}"))
+                .unwrap_or_default();
+        }
+    }
 }

@@ -38,8 +38,8 @@ use cardeal_ui::molecules::{
     OpcaoBusca, SecaoExpansivel, SeletorBusca, SeletorOpcao,
 };
 use cardeal_ui::organisms::{
-    notificar, ColunaGrade, ColunasDialogo, Dialogo, Direcao, FaixaKpi, Grade, LayoutTela,
-    Notificacao, Ordenacao, Painel,
+    notificar, ColunaGrade, ColunasDialogo, Dialogo, Direcao, EstadoSeletorArvore, FaixaKpi, Grade,
+    LayoutTela, NoArvore, Notificacao, Ordenacao, Painel, SeletorEmArvore,
 };
 use cardeal_ui::tokens::{Espaco, TemaUi};
 use confirmacoes::*;
@@ -245,6 +245,14 @@ pub struct EstadoTelaOs {
     peca_preco: String,
     /// O custo previsto da peça fora do estoque (opcional; ver `orcamento::valores_da_peca`).
     peca_custo: String,
+    /// A categoria da peça nova digitada (`None` = "Peças"): dela vêm a margem do preço
+    /// sugerido e onde a peça é cadastrada.
+    peca_grupo: Option<Id>,
+    peca_grupo_seletor: EstadoSeletorArvore,
+    /// O usuário digitou o preço: mudar o custo não o recalcula mais.
+    peca_preco_manual: bool,
+    /// A estrutura mercadológica (para a categoria da peça nova).
+    grupos: Vec<mod_estoque::NoArvoreGrupo>,
     /// O pedido de encomendar as peças em falta da OS em Compras › Pedidos (o `main` atende).
     pub pedido_encomenda: Option<crate::tela_compras::PecasDaOs>,
     aprovador: String,
@@ -321,6 +329,13 @@ impl EstadoTelaOs {
 
     /// Produtos com saldo — muda quando uma peça é aplicada ou volta ao estoque.
     fn carregar_produtos(&mut self, motor: &Motor, sessao: &Sessao) {
+        if let Ok(g) = motor.consultar(
+            sessao,
+            "estoque.arvore_grupos_produto.v1",
+            &mod_estoque::ArvoreGruposProduto,
+        ) {
+            self.grupos = g;
+        }
         if let Ok(p) = motor.consultar(sessao, "estoque.produtos_com_saldo.v1", &ProdutosComSaldo) {
             self.produtos = p;
         }
@@ -465,6 +480,8 @@ impl EstadoTelaOs {
         self.peca_preco.clear();
         self.peca_custo.clear();
         self.peca_preco_dica.clear();
+        self.peca_grupo = None;
+        self.peca_preco_manual = false;
         self.aprovador.clear();
     }
 }

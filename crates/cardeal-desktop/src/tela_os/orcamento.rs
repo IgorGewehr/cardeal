@@ -136,7 +136,7 @@ pub(super) fn adicionar_peca(
         }
         (None, nome) => ItemOrcamentoNovo::PecaNova {
             nome: nome.to_owned(),
-            grupo: None,
+            grupo: estado.peca_grupo,
             quantidade,
             preco_unitario,
         },
@@ -255,8 +255,9 @@ pub(super) fn aplicar_pecas(
 }
 
 /// Preenche quantidade 1 e o preço sugerido ao escolher a peça — antes o balcão digitava os
-/// dois toda vez. Ordem: a tabela de preço (se a empresa mantém uma), senão o último preço
-/// cobrado dessa peça numa OS, senão só mostra o custo como referência.
+/// dois toda vez. Ordem (`escolher_sugestao`): a tabela de preço (se a empresa mantém uma), o
+/// markup da categoria sobre o custo, o último preço cobrado dessa peça numa OS; sem nenhum,
+/// só mostra o custo como referência.
 pub(super) fn sugerir_preco(
     motor: &Motor,
     sessao: &Sessao,
@@ -266,11 +267,16 @@ pub(super) fn sugerir_preco(
     if estado.peca_qtd.trim().is_empty() {
         estado.peca_qtd = "1".to_owned();
     }
+    estado.peca_preco_manual = false;
     let custo = estado
         .produtos
         .iter()
         .find(|p| p.produto == produto)
         .map(|p| p.custo_medio);
+    let custo_txt = custo
+        .filter(|c| c.unidades_internas() > 0)
+        .map(|c| format!(" · custo {}", c.formatar_com_simbolo()))
+        .unwrap_or_default();
     let da_tabela = motor
         .consultar(
             sessao,
@@ -293,33 +299,137 @@ pub(super) fn sugerir_preco(
                 .ok()
                 .map(|p: mod_pdv::PrecoConsultado| (p.preco, tabela.nome))
         })
-        .filter(|(p, _)| p.unidades_internas() > 0);
-    let ultimo = || -> Option<Preco> {
-        motor
+        .filter(|(p, _)| p.unidades_internas() > 0)
+        .map(|(p, tabela)| (p, format!("Preço da tabela \"{tabela}\"{custo_txt}")));
+    let markup = motor
+        .consultar(
+            sessao,
+            "estoque.preco_sugerido_do_produto.v1",
+            &mod_estoque::PrecoSugeridoDoProduto {
+                produto,
+                custo: None,
+            },
+        )
+        .ok()
+        .and_then(|s: mod_estoque::SugestaoDePreco| dica_do_markup(&s));
+    let ultimo = motor
+        .consultar(
+            sessao,
+            "os.ultimo_preco_da_peca.v1",
+            &mod_os::UltimoPrecoDaPeca { produto },
+        )
+        .ok()
+        .flatten()
+        .map(|p: Preco| (p, format!("Último preço cobrado desta peça{custo_txt}")));
+    match escolher_sugestao(da_tabela, markup, ultimo) {
+        Some((preco, dica)) => {
+            estado.peca_preco = preco.formatar();
+            estado.peca_preco_dica = dica;
+        }
+        None => {
+            estado.peca_preco.clear();
+            estado.peca_preco_dica = if custo_txt.is_empty() {
+                "Sem preço anterior — informe o valor".to_owned()
+            } else {
+                format!("Sem preço anterior{custo_txt}")
+            };
+        }
+    }
+}
+
+/// A sugestão que vale: a tabela de preço (o preço que a empresa decidiu) vence o markup, e o
+/// markup (a margem da categoria sobre o custo) vence o último preço cobrado.
+pub(super) fn escolher_sugestao(
+    tabela: Option<(Preco, String)>,
+    markup: Option<(Preco, String)>,
+    ultimo: Option<(Preco, String)>,
+) -> Option<(Preco, String)> {
+    tabela.or(markup).or(ultimo)
+}
+
+/// O preço do markup e a frase que diz de onde ele veio; `None` sem preço possível (sem custo,
+/// sem margem, percentuais que não fecham).
+pub(super) fn dica_do_markup(s: &mod_estoque::SugestaoDePreco) -> Option<(Preco, String)> {
+    let p = s.sugerido.as_ref()?;
+    let origem = match &s.origem_margem {
+        mod_estoque::OrigemMargem::Grupo(nome) => format!("pela categoria {nome}"),
+        mod_estoque::OrigemMargem::Produto => "pela margem do produto".to_owned(),
+        mod_estoque::OrigemMargem::Padrao => "pela margem padrão da empresa".to_owned(),
+        mod_estoque::OrigemMargem::Nenhuma => return None,
+    };
+    let margem = s
+        .margem
+        .map(Percentual::formatar_com_simbolo)
+        .unwrap_or_default();
+    Some((
+        Preco::centavos(p.preco.em_centavos()),
+        format!(
+            "Sugerido {origem} · custo {} · lucro {margem}",
+            p.custo.formatar_com_simbolo()
+        ),
+    ))
+}
+
+/// A categoria da peça nova digitada: a escolhida ou, sem escolha, o grupo padrão "Peças"
+/// (o mesmo em que `estoque.criar_peca_rapida` a cadastra).
+pub(super) fn grupo_da_peca_nova(estado: &EstadoTelaOs) -> Option<Id> {
+    estado.peca_grupo.or_else(|| {
+        estado
+            .grupos
+            .iter()
+            .find(|g| g.codigo == "PECAS")
+            .map(|g| g.id)
+    })
+}
+
+/// O custo digitado mudou: o preço ao cliente acompanha pelo markup — a não ser que o usuário
+/// já tenha digitado o preço (aí o dele manda). Peça do catálogo usa a margem do produto e da
+/// categoria dele; peça nova, a da categoria escolhida.
+pub(super) fn recalcular_preco_pelo_custo(
+    motor: &Motor,
+    sessao: &Sessao,
+    estado: &mut EstadoTelaOs,
+) {
+    if estado.peca_preco_manual {
+        return;
+    }
+    let Ok(custo) = estado.peca_custo.trim().parse::<Dinheiro>() else {
+        return;
+    };
+    if !custo.e_positivo() {
+        return;
+    }
+    let sugestao: Option<mod_estoque::SugestaoDePreco> = match estado.peca_produto {
+        Some(produto) => motor
             .consultar(
                 sessao,
-                "os.ultimo_preco_da_peca.v1",
-                &mod_os::UltimoPrecoDaPeca { produto },
+                "estoque.preco_sugerido_do_produto.v1",
+                &mod_estoque::PrecoSugeridoDoProduto {
+                    produto,
+                    custo: Some(custo),
+                },
             )
-            .ok()
-            .flatten()
+            .ok(),
+        None => grupo_da_peca_nova(estado).and_then(|grupo| {
+            motor
+                .consultar(
+                    sessao,
+                    "estoque.preco_sugerido_no_grupo.v1",
+                    &mod_estoque::PrecoSugeridoNoGrupo { grupo, custo },
+                )
+                .ok()
+        }),
     };
-    let custo_txt = custo
-        .filter(|c| c.unidades_internas() > 0)
-        .map(|c| format!(" · custo {}", c.formatar_com_simbolo()))
-        .unwrap_or_default();
-    if let Some((preco, tabela)) = da_tabela {
-        estado.peca_preco = preco.formatar();
-        estado.peca_preco_dica = format!("Preço da tabela \"{tabela}\"{custo_txt}");
-    } else if let Some(preco) = ultimo() {
-        estado.peca_preco = preco.formatar();
-        estado.peca_preco_dica = format!("Último preço cobrado desta peça{custo_txt}");
-    } else {
-        estado.peca_preco.clear();
-        estado.peca_preco_dica = if custo_txt.is_empty() {
-            "Sem preço anterior — informe o valor".to_owned()
-        } else {
-            format!("Sem preço anterior{custo_txt}")
-        };
+    match sugestao.as_ref().and_then(dica_do_markup) {
+        Some((preco, dica)) => {
+            estado.peca_preco = preco.formatar();
+            estado.peca_preco_dica = dica;
+        }
+        None => {
+            estado.peca_preco_dica = sugestao
+                .and_then(|s| s.problema)
+                .map(|p| format!("Sem preço sugerido: {p}"))
+                .unwrap_or_default();
+        }
     }
 }
