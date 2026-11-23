@@ -111,6 +111,7 @@ pub mod reserva;
 mod saldo;
 pub mod simples;
 pub mod transferencia;
+pub mod tributacao_simples;
 
 #[cfg(feature = "sqlite")]
 pub use a_conferir::registrar_a_conferir;

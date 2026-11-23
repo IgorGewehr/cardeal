@@ -537,7 +537,7 @@ fn bloco_fiscal(
                  ou um subgrupo defina o seu. Campo em branco herda do grupo acima.",
             ));
             ui.add_space(Espaco::E8);
-            estado.est.fisc.mostrar(ui);
+            estado.est.fisc.mostrar_com_opcoes(ui, &estado.trib);
             ui.add_space(Espaco::E8);
             if ui
                 .add(Botao::secundario("Salvar perfil fiscal completo"))

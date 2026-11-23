@@ -107,6 +107,8 @@ pub struct EstadoTelaEstoque {
     val: validade::EstadoValidade,
     /// Perfil fiscal do produto aberto em "Editar": o que ele define e o vigente.
     fisc: fiscal::FormFiscal,
+    /// Regime e UF da empresa, para o seletor de tributação.
+    trib: fiscal::ContextoTributacao,
     fisc_efetivo: Vec<mod_estoque::fiscal::LinhaFiscal>,
     unidades: Vec<ItemUnidade>,
     locais: Vec<ItemLocal>,
@@ -167,6 +169,7 @@ impl EstadoTelaEstoque {
         if let Ok(g) = motor.consultar(sessao, "estoque.grupos_produto.v1", &GruposProduto) {
             self.grupos = g;
         }
+        self.trib = fiscal::ContextoTributacao::carregar(motor, sessao);
         // Sem o submódulo de lote a consulta é recusada: sem lote, sem alerta de validade.
         self.lotes_em_alerta = motor
             .consultar(
@@ -808,7 +811,7 @@ fn dialogo_editar(
                     ui.add_space(Espaco::E12);
                     ui.add(Rotulo::campo("Definir neste produto"));
                     ui.add_space(Espaco::E4);
-                    estado.fisc.mostrar(ui);
+                    estado.fisc.mostrar_com_opcoes(ui, &estado.trib);
                     ui.add_space(Espaco::E8);
                     if ui.add(Botao::secundario("Salvar perfil fiscal")).clicked() {
                         salvar_fiscal_do_produto(ui.ctx(), motor, sessao, estado, p.produto);

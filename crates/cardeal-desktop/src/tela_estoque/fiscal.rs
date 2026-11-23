@@ -5,6 +5,45 @@
 use super::*;
 use cardeal_kernel::Percentual;
 use mod_estoque::fiscal::{CamposFiscais, LinhaFiscal};
+use mod_estoque::tributacao_simples::{
+    aliquota_interna, campos_da_opcao, opcao_dos_campos, OpcaoTributacao,
+};
+
+/// O que o seletor "Como este produto é tributado" precisa saber da empresa.
+#[derive(Default, Clone)]
+pub(super) struct ContextoTributacao {
+    /// Simples ou MEI (CSOSN); senão regime normal (CST).
+    pub(super) simples: bool,
+    /// A UF da empresa (sugestão da alíquota interna de ICMS).
+    pub(super) uf: String,
+}
+
+impl ContextoTributacao {
+    pub(super) fn carregar(motor: &Motor, sessao: &Sessao) -> Self {
+        let simples = motor
+            .consultar(
+                sessao,
+                "estoque.parametros_de_preco.v1",
+                &mod_estoque::ParametrosDePreco,
+            )
+            .map(|p: mod_estoque::ParametrosPreco| {
+                !matches!(
+                    p.regime,
+                    mod_estoque::precificacao::RegimeImposto::Manual(_)
+                )
+            })
+            .unwrap_or(true);
+        let uf = motor
+            .consultar(
+                sessao,
+                "empresa.dados_fiscais.v1",
+                &mod_empresa::DadosFiscaisDaEmpresa,
+            )
+            .map(|d: mod_empresa::DadosFiscais| d.endereco.uf)
+            .unwrap_or_default();
+        Self { simples, uf }
+    }
+}
 
 /// Os campos como o usuário digita: texto.
 #[derive(Default, Clone)]
@@ -97,6 +136,65 @@ impl FormFiscal {
         };
         c.validar()?;
         Ok(c)
+    }
+
+    /// A opção que os campos digitados representam (`Avancado` se não casam com nenhuma).
+    pub(super) fn opcao(&self, simples: bool) -> OpcaoTributacao {
+        self.para()
+            .map_or(OpcaoTributacao::Avancado, |c| opcao_dos_campos(&c, simples))
+    }
+
+    /// Aplica uma opção pronta aos campos: CST/CSOSN do ICMS e do PIS/COFINS. No regime normal,
+    /// a alíquota de ICMS vazia recebe a sugestão da UF (o usuário confere antes de salvar);
+    /// os demais campos ficam como estão.
+    pub(super) fn aplicar(&mut self, opcao: OpcaoTributacao, ctx: &ContextoTributacao) {
+        if opcao == OpcaoTributacao::Avancado {
+            return;
+        }
+        let c = campos_da_opcao(opcao, ctx.simples, None);
+        let txt = |v: Option<String>| v.unwrap_or_default();
+        self.cst_icms = txt(c.cst_icms);
+        self.cst_pis = txt(c.cst_pis);
+        self.cst_cofins = txt(c.cst_cofins);
+        if opcao.pede_aliquota(ctx.simples) && self.aliquota_icms.trim().is_empty() {
+            self.aliquota_icms = pct(aliquota_interna(&ctx.uf));
+        }
+    }
+
+    /// O seletor em palavras do dono, com os campos completos recolhidos embaixo.
+    pub(super) fn mostrar_com_opcoes(&mut self, ui: &mut egui::Ui, ctx: &ContextoTributacao) {
+        let atual = self.opcao(ctx.simples);
+        let mut escolhida = Some(atual);
+        SeletorOpcao::novo("Como este produto é tributado", &mut escolhida)
+            .opcoes(OpcaoTributacao::TODAS.map(|o| (o, o.rotulo())))
+            .mostrar(ui);
+        if let Some(o) = escolhida.filter(|o| *o != atual) {
+            self.aplicar(o, ctx);
+        }
+        let opcao = self.opcao(ctx.simples);
+        if opcao.pede_aliquota(ctx.simples) {
+            ui.add_space(Espaco::E4);
+            ui.add(
+                Rotulo::apoio(format!(
+                    "Alíquota de ICMS: {}% — a interna de {} é a sugestão; produtos como cesta \
+                     básica e bebidas têm alíquota própria. Confira antes de salvar.",
+                    if self.aliquota_icms.trim().is_empty() {
+                        "não informada"
+                    } else {
+                        self.aliquota_icms.trim()
+                    },
+                    if ctx.uf.is_empty() {
+                        "sua UF"
+                    } else {
+                        ctx.uf.as_str()
+                    }
+                ))
+                .quebravel(),
+            );
+            ui.add(Campo::novo("Alíquota de ICMS (%)", &mut self.aliquota_icms).marcador("18"));
+        }
+        ui.add_space(Espaco::E8);
+        SecaoExpansivel::nova("Campos fiscais completos").mostrar(ui, |ui| self.mostrar(ui));
     }
 
     /// Desenha os campos em três colunas.

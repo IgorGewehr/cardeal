@@ -1595,3 +1595,48 @@ fn entre_filiais_a_aba_aparece_com_o_grupo_envia_e_a_filial_ve_a_caminho() {
         .map(|x| x.disponivel);
     assert_eq!(saldo, Some(Quantidade::unidades(10)));
 }
+
+#[test]
+fn seletor_de_tributacao_preenche_os_campos_do_regime() {
+    use super::fiscal::{ContextoTributacao, FormFiscal};
+    use mod_estoque::tributacao_simples::OpcaoTributacao as O;
+    let normal = ContextoTributacao {
+        simples: false,
+        uf: "SC".into(),
+    };
+    let mut f = FormFiscal::default();
+    assert_eq!(f.opcao(false), O::Avancado, "vazio = herda");
+    f.aplicar(O::RevendaComum, &normal);
+    assert_eq!(f.cst_icms, "00");
+    assert_eq!(f.cst_pis, "01");
+    assert_eq!(
+        f.aliquota_icms, "17,00",
+        "sugestão da UF, visível para conferir"
+    );
+    assert_eq!(f.opcao(false), O::RevendaComum);
+    // Trocar para ST não apaga a alíquota que o usuário viu/confirmou.
+    f.aliquota_icms = "12,00".into();
+    f.aplicar(O::RevendaComSt, &normal);
+    assert_eq!(
+        (f.cst_icms.as_str(), f.aliquota_icms.as_str()),
+        ("60", "12,00")
+    );
+    assert!(f.para().is_ok());
+
+    let simples = ContextoTributacao {
+        simples: true,
+        uf: "SC".into(),
+    };
+    let mut f = FormFiscal::default();
+    f.aplicar(O::Monofasico, &simples);
+    assert_eq!(
+        (
+            f.cst_icms.as_str(),
+            f.cst_pis.as_str(),
+            f.cst_cofins.as_str()
+        ),
+        ("102", "04", "04")
+    );
+    assert!(f.aliquota_icms.is_empty(), "o Simples não pede alíquota");
+    assert_eq!(f.opcao(true), O::Monofasico);
+}
