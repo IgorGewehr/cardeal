@@ -123,6 +123,41 @@ impl Consulta for PrecoSugeridoDoProduto {
     }
 }
 
+/// O preço sugerido para uma mercadoria que ainda não está no cadastro: só a categoria (de
+/// onde vêm margem, comissão e perfil fiscal) e o custo. É o caso da peça comprada sob
+/// demanda para uma OS. A sugestão volta com `produto` = [`Id::NULO`] e `nome` vazio.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct PrecoSugeridoNoGrupo {
+    /// A categoria (qualquer nível da estrutura mercadológica).
+    pub grupo: Id,
+    /// O custo por unidade.
+    pub custo: Dinheiro,
+}
+
+impl Consulta for PrecoSugeridoNoGrupo {
+    type Saida = SugestaoDePreco;
+    const PERMISSAO: &'static str = "estoque.produto.ver";
+
+    #[cfg(feature = "sqlite")]
+    fn executar(self, ctx: &Ctx, conexao: &Connection) -> Resultado<Self::Saida> {
+        let base = BaseDePreco::carregar(conexao, ctx)?;
+        if base.perfil(self.grupo).is_none() {
+            return Err(Erro::nao_encontrado("grupo"));
+        }
+        let linha = LinhaProduto {
+            id: Id::NULO,
+            nome: String::new(),
+            grupo: self.grupo,
+            margem: None,
+            comissao: None,
+            custo: Preco::ZERO,
+            ultima_compra: None,
+            fiscal: crate::fiscal::CamposFiscais::default(),
+        };
+        Ok(base.sugerir(&linha, Some(self.custo)))
+    }
+}
+
 /// O preço sugerido de todos os produtos ativos de um grupo e de seus descendentes —
 /// a base da revisão de preços em lote.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]

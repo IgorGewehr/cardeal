@@ -15,8 +15,8 @@ use mod_estoque::{
     DefinirCamposFiscaisDoGrupo, DefinirCamposFiscaisDoProduto, DefinirMargemDoGrupo,
     DefinirMargemDoProduto, DefinirParametrosPreco, DefinirPerfilFiscalDoGrupo, GrupoProdutoCriado,
     HistoricoDeCompras, LocalCriado, ModuloEstoque, OrigemMargem, ParametrosDePreco,
-    ParametrosPreco, PrecoSugeridoDoProduto, PrecosSugeridosDoGrupo, ProdutoCriado,
-    RegistrarEntrada, SugestaoDePreco, TipoLocal, UnidadeCriada, MANIFESTO,
+    ParametrosPreco, PrecoSugeridoDoProduto, PrecoSugeridoNoGrupo, PrecosSugeridosDoGrupo,
+    ProdutoCriado, RegistrarEntrada, SugestaoDePreco, TipoLocal, UnidadeCriada, MANIFESTO,
 };
 use tempfile::TempDir;
 
@@ -945,4 +945,48 @@ fn o_resumo_do_simples_e_o_preco_usam_o_mesmo_rbt12_da_lei() {
     let sugestao = c.preco(p);
     assert_eq!(sugestao.rbt12, r.mes.rbt12);
     assert_eq!(Some(sugestao.imposto), r.mes.aliquota);
+}
+
+#[test]
+fn preco_no_grupo_usa_a_margem_e_a_comissao_herdadas() {
+    // A peça comprada sob demanda ainda não existe no cadastro: só a categoria e o custo.
+    let c = Cenario::novo();
+    c.regime_manual(8);
+    let pecas = c.grupo("PECAS", None);
+    let celular = c.grupo("CEL", Some(pecas));
+    c.margem_do_grupo(pecas, 15);
+    // Um produto do mesmo grupo, com o mesmo custo, é a referência: o preço tem de bater.
+    let p = c.produto_com_custo("Tela A52", celular, Preco::reais(15));
+
+    let s: SugestaoDePreco = c.consulta(
+        "estoque.preco_sugerido_no_grupo.v1",
+        &PrecoSugeridoNoGrupo {
+            grupo: celular,
+            custo: Dinheiro::reais(15),
+        },
+    );
+    assert!(s.produto.e_nulo(), "não há produto");
+    assert_eq!(s.grupo, celular);
+    assert_eq!(s.origem_margem, OrigemMargem::Grupo("PECAS".into()));
+    // opex 25 + margem 15 + imposto 8 = 48 → 15 / 0,52 = 28,85
+    assert_eq!(s.sugerido.unwrap().preco, Dinheiro::centavos(2885));
+    assert_eq!(
+        s.sugerido.unwrap().preco,
+        c.preco(p).sugerido.unwrap().preco
+    );
+}
+
+#[test]
+fn preco_no_grupo_sem_margem_diz_o_que_falta() {
+    let c = Cenario::novo();
+    let g = c.grupo("PECAS", None);
+    let s: SugestaoDePreco = c.consulta(
+        "estoque.preco_sugerido_no_grupo.v1",
+        &PrecoSugeridoNoGrupo {
+            grupo: g,
+            custo: Dinheiro::reais(15),
+        },
+    );
+    assert!(s.sugerido.is_none());
+    assert!(s.problema.unwrap().contains("margem"));
 }

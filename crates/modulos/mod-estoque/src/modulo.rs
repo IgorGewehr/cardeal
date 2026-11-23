@@ -28,7 +28,9 @@ use crate::consultas_analise::AnaliseDeEstoque;
 use crate::consultas_lote::{
     HistoricoDeAlteracoesEmLote, PerfilFiscalDoProduto, PreviaDaAlteracaoEmLote, ProdutosParaLote,
 };
-use crate::consultas_preco::{ParametrosDePreco, PrecoSugeridoDoProduto, PrecosSugeridosDoGrupo};
+use crate::consultas_preco::{
+    ParametrosDePreco, PrecoSugeridoDoProduto, PrecoSugeridoNoGrupo, PrecosSugeridosDoGrupo,
+};
 use crate::manifesto::MANIFESTO;
 use crate::migracoes;
 
@@ -116,6 +118,7 @@ impl Modulo for ModuloEstoque {
                 "estoque.definir_historico_do_simples.v1",
             )
             .consulta::<PrecoSugeridoDoProduto>("estoque.preco_sugerido_do_produto.v1")
+            .consulta::<PrecoSugeridoNoGrupo>("estoque.preco_sugerido_no_grupo.v1")
             .consulta::<PrecosSugeridosDoGrupo>("estoque.precos_sugeridos_do_grupo.v1")
             .consulta::<PerfilFiscalDoProduto>("estoque.perfil_fiscal_do_produto.v1")
             .consulta::<crate::consultas_compras::HistoricoDeCompras>(

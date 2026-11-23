@@ -178,7 +178,7 @@ pub use consultas_lote::{
 pub use consultas_preco::{encargos_da_empresa, parametros_da_empresa, sugerir_precos};
 pub use consultas_preco::{
     EncargosDaEmpresa, OrigemComissao, OrigemMargem, ParametrosDePreco, PrecoSugeridoDoProduto,
-    PrecosSugeridosDoGrupo, SugestaoDePreco,
+    PrecoSugeridoNoGrupo, PrecosSugeridosDoGrupo, SugestaoDePreco,
 };
 pub use consultas_rentabilidade::{
     EncargosAtuais, EntradaDoProduto, EntradasPorProdutoEOrigem, SaidaDoProduto,
