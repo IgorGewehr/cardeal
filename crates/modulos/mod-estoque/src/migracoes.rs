@@ -415,6 +415,12 @@ const MIGRACOES: &[Migracao] = &[
         sql: SQL_RESERVA,
         tipo: TipoMigracao::Esquema,
     },
+    Migracao {
+        versao: 16,
+        nome: "estoque_tributacao_a_conferir",
+        sql: SQL_TRIBUTACAO_A_CONFERIR,
+        tipo: TipoMigracao::Esquema,
+    },
 ];
 
 /// v14: o que o Cardeal não sabe sozinho para o RBT12 do Simples — o mês de abertura da empresa
@@ -447,6 +453,25 @@ CREATE TABLE estoque_reserva (
     PRIMARY KEY (origem_modulo, origem_id, produto, local)
 ) STRICT, WITHOUT ROWID;
 CREATE INDEX estoque_reserva_produto ON estoque_reserva(produto, local);
+";
+
+/// v16: "Tributação a conferir" (`a_conferir.rs`) — o perfil aprendido de uma nota de compra,
+/// com o de antes para desfazer. `empresa` é a organização (dona do catálogo).
+const SQL_TRIBUTACAO_A_CONFERIR: &str = "
+CREATE TABLE estoque_tributacao_a_conferir (
+    id           BLOB    PRIMARY KEY,
+    empresa      BLOB    NOT NULL,
+    produto      BLOB    REFERENCES estoque_produto(id),
+    grupo        BLOB    REFERENCES estoque_grupo_produto(id),
+    motivo       TEXT    NOT NULL,
+    origem       TEXT    NOT NULL,
+    antes        BLOB,
+    depois       BLOB,
+    criado_em    INTEGER NOT NULL,
+    resolvido_em INTEGER,
+    CHECK ((produto IS NULL) <> (grupo IS NULL))
+) STRICT, WITHOUT ROWID;
+CREATE INDEX estoque_tributacao_a_conferir_aberta ON estoque_tributacao_a_conferir(empresa, resolvido_em);
 ";
 
 /// O conjunto de migrações do módulo de estoque.

@@ -23,6 +23,8 @@ pub(super) struct FormFiscal {
     pub(super) aliquota_cofins: String,
     pub(super) cest: String,
     pub(super) beneficio: String,
+    pub(super) aliquota_fcp: String,
+    pub(super) aliquota_ipi: String,
 }
 
 fn pct(p: Option<Percentual>) -> String {
@@ -61,6 +63,8 @@ impl FormFiscal {
             aliquota_cofins: pct(c.aliquota_cofins),
             cest: c.cest.clone().unwrap_or_default(),
             beneficio: c.beneficio_fiscal.clone().unwrap_or_default(),
+            aliquota_fcp: pct(c.aliquota_fcp),
+            aliquota_ipi: pct(c.aliquota_ipi),
         }
     }
 
@@ -88,6 +92,8 @@ impl FormFiscal {
             aliquota_cofins: le_pct("Alíquota de COFINS", &self.aliquota_cofins)?,
             cest: texto(&self.cest),
             beneficio_fiscal: texto(&self.beneficio),
+            aliquota_fcp: le_pct("FCP", &self.aliquota_fcp)?,
+            aliquota_ipi: le_pct("IPI na venda", &self.aliquota_ipi)?,
         };
         c.validar()?;
         Ok(c)
@@ -109,10 +115,12 @@ impl FormFiscal {
             c[2].add(Campo::novo("CFOP de entrada", &mut self.cfop_entrada).marcador("1102"));
         });
         ui.add_space(Espaco::E8);
-        ui.columns(3, |c| {
+        ui.columns(5, |c| {
             c[0].add(Campo::novo("Alíquota de ICMS (%)", &mut self.aliquota_icms).marcador("18"));
-            c[1].add(Campo::novo("Redução de base (%)", &mut self.reducao_base));
-            c[2].add(Campo::novo("MVA da ST (%)", &mut self.mva_st));
+            c[1].add(Campo::novo("FCP (%)", &mut self.aliquota_fcp));
+            c[2].add(Campo::novo("Redução de base (%)", &mut self.reducao_base));
+            c[3].add(Campo::novo("MVA da ST (%)", &mut self.mva_st));
+            c[4].add(Campo::novo("IPI na venda (%)", &mut self.aliquota_ipi));
         });
         ui.add_space(Espaco::E8);
         ui.columns(4, |c| {

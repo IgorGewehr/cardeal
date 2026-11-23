@@ -58,6 +58,7 @@
 #![allow(clippy::module_name_repetitions, clippy::must_use_candidate)]
 #![allow(clippy::result_large_err)]
 
+pub mod a_conferir;
 pub mod alteracao_em_lote;
 pub mod analise;
 mod aparelho_origem;
@@ -111,6 +112,9 @@ mod saldo;
 pub mod simples;
 pub mod transferencia;
 
+#[cfg(feature = "sqlite")]
+pub use a_conferir::registrar_a_conferir;
+pub use a_conferir::{AlvoTributacao, ListarTributacaoAConferir, TributacaoAConferir};
 pub use aparelho_origem::AparelhoOrigem;
 #[cfg(feature = "sqlite")]
 pub use comandos::criar_produto_de_compra_comum;

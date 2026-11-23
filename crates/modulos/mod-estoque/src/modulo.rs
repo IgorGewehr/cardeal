@@ -119,6 +119,9 @@ impl Modulo for ModuloEstoque {
             )
             .consulta::<PrecoSugeridoDoProduto>("estoque.preco_sugerido_do_produto.v1")
             .consulta::<PrecoSugeridoNoGrupo>("estoque.preco_sugerido_no_grupo.v1")
+            .consulta::<crate::a_conferir::ListarTributacaoAConferir>(
+                "estoque.tributacao_a_conferir.v1",
+            )
             .consulta::<PrecosSugeridosDoGrupo>("estoque.precos_sugeridos_do_grupo.v1")
             .consulta::<PerfilFiscalDoProduto>("estoque.perfil_fiscal_do_produto.v1")
             .consulta::<crate::consultas_compras::HistoricoDeCompras>(

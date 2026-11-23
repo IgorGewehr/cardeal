@@ -39,6 +39,68 @@ pub struct CamposFiscais {
     pub cest: Option<String>,
     /// Código do benefício fiscal.
     pub beneficio_fiscal: Option<String>,
+    /// Fundo de combate à pobreza (somado ao ICMS, mesma base).
+    pub aliquota_fcp: Option<Percentual>,
+    /// IPI na venda (indústria), cobrado por fora.
+    pub aliquota_ipi: Option<Percentual>,
+}
+
+/// O formato gravado na coluna `perfil_fiscal` antes do FCP e do IPI (até 23/11/2026). O
+/// postcard não tem campo opcional no fim: um blob antigo não decodifica no formato novo, então
+/// [`CamposFiscais::de_blob`] tenta este depois. Não mude a ordem nem os tipos.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct CamposFiscaisAte2026Nov {
+    /// Origem da mercadoria (tabela da NF-e, 0 a 8).
+    pub origem: Option<u8>,
+    /// CST do ICMS (2 dígitos) ou CSOSN do Simples (3 dígitos).
+    pub cst_icms: Option<String>,
+    /// CFOP de saída dentro da UF (4 dígitos, 5xxx).
+    pub cfop_saida_dentro_uf: Option<String>,
+    /// CFOP de saída para fora da UF (6xxx).
+    pub cfop_saida_fora_uf: Option<String>,
+    /// CFOP de entrada (1xxx, 2xxx ou 3xxx).
+    pub cfop_entrada: Option<String>,
+    /// Alíquota de ICMS.
+    pub aliquota_icms: Option<Percentual>,
+    /// Redução da base de cálculo do ICMS.
+    pub reducao_base: Option<Percentual>,
+    /// MVA da substituição tributária.
+    pub mva_st: Option<Percentual>,
+    /// CST do PIS (2 dígitos).
+    pub cst_pis: Option<String>,
+    /// CST da COFINS (2 dígitos).
+    pub cst_cofins: Option<String>,
+    /// Alíquota de PIS.
+    pub aliquota_pis: Option<Percentual>,
+    /// Alíquota de COFINS.
+    pub aliquota_cofins: Option<Percentual>,
+    /// CEST (7 dígitos), quando o NCM exige substituição tributária.
+    pub cest: Option<String>,
+    /// Código do benefício fiscal.
+    pub beneficio_fiscal: Option<String>,
+}
+
+impl From<CamposFiscaisAte2026Nov> for CamposFiscais {
+    fn from(a: CamposFiscaisAte2026Nov) -> Self {
+        Self {
+            origem: a.origem,
+            cst_icms: a.cst_icms,
+            cfop_saida_dentro_uf: a.cfop_saida_dentro_uf,
+            cfop_saida_fora_uf: a.cfop_saida_fora_uf,
+            cfop_entrada: a.cfop_entrada,
+            aliquota_icms: a.aliquota_icms,
+            reducao_base: a.reducao_base,
+            mva_st: a.mva_st,
+            cst_pis: a.cst_pis,
+            cst_cofins: a.cst_cofins,
+            aliquota_pis: a.aliquota_pis,
+            aliquota_cofins: a.aliquota_cofins,
+            cest: a.cest,
+            beneficio_fiscal: a.beneficio_fiscal,
+            aliquota_fcp: None,
+            aliquota_ipi: None,
+        }
+    }
 }
 
 fn so_digitos(t: &str, tamanhos: &[usize]) -> bool {
@@ -95,6 +157,8 @@ impl CamposFiscais {
         pct("MVA da ST", self.mva_st)?;
         pct("Alíquota de PIS", self.aliquota_pis)?;
         pct("Alíquota de COFINS", self.aliquota_cofins)?;
+        pct("FCP", self.aliquota_fcp)?;
+        pct("IPI na venda", self.aliquota_ipi)?;
         // CFOP começa pelo sentido da operação.
         for (nome, v, iniciais) in [
             ("CFOP de saída na UF", &self.cfop_saida_dentro_uf, "5"),
@@ -133,7 +197,9 @@ impl CamposFiscais {
             aliquota_pis,
             aliquota_cofins,
             cest,
-            beneficio_fiscal
+            beneficio_fiscal,
+            aliquota_fcp,
+            aliquota_ipi
         );
     }
 
@@ -147,7 +213,7 @@ impl CamposFiscais {
 
     /// Cada campo com o texto de exibição, na ordem da tela.
     #[must_use]
-    pub fn lista(&self) -> [(&'static str, Option<String>); 14] {
+    pub fn lista(&self) -> [(&'static str, Option<String>); 16] {
         let p = |v: Option<Percentual>| v.map(|p| format!("{}%", p.formatar(2)));
         [
             ("Origem da mercadoria", self.origem.map(|o| o.to_string())),
@@ -164,7 +230,27 @@ impl CamposFiscais {
             ("Alíquota de COFINS", p(self.aliquota_cofins)),
             ("CEST", self.cest.clone()),
             ("Benefício fiscal", self.beneficio_fiscal.clone()),
+            ("FCP", p(self.aliquota_fcp)),
+            ("IPI na venda", p(self.aliquota_ipi)),
         ]
+    }
+
+    /// O perfil que o motor de carga (`cardeal-tributos`) lê. `ncm` vem do produto.
+    #[must_use]
+    pub fn perfil_tributario(&self, ncm: Option<&str>) -> cardeal_tributos::PerfilTributario {
+        cardeal_tributos::PerfilTributario {
+            situacao_icms: self.cst_icms.clone(),
+            aliquota_icms: self.aliquota_icms,
+            reducao_base: self.reducao_base,
+            aliquota_fcp: self.aliquota_fcp,
+            mva_st: self.mva_st,
+            cst_pis: self.cst_pis.clone(),
+            cst_cofins: self.cst_cofins.clone(),
+            aliquota_pis: self.aliquota_pis,
+            aliquota_cofins: self.aliquota_cofins,
+            aliquota_ipi: self.aliquota_ipi,
+            ncm: ncm.filter(|n| !n.is_empty()).map(str::to_owned),
+        }
     }
 
     /// Serializa para a coluna `perfil_fiscal`; vazio vira `None` (coluna nula).
@@ -178,8 +264,14 @@ impl CamposFiscais {
     /// Lê da coluna; ausente ou ilegível vira vazio (herda tudo).
     #[must_use]
     pub fn de_blob(blob: Option<&[u8]>) -> Self {
-        blob.and_then(|b| postcard::from_bytes(b).ok())
-            .unwrap_or_default()
+        blob.and_then(|b| {
+            postcard::from_bytes::<Self>(b).ok().or_else(|| {
+                postcard::from_bytes::<CamposFiscaisAte2026Nov>(b)
+                    .ok()
+                    .map(Self::from)
+            })
+        })
+        .unwrap_or_default()
     }
 }
 

@@ -361,8 +361,10 @@ impl BaseDePreco {
         (self.parametros.comissao, OrigemComissao::Padrao)
     }
 
-    fn perfil_fiscal(&self, grupo: Id) -> PerfilFiscal {
-        let mut perfil = PerfilFiscal::default();
+    /// ST e monofásico do produto. O CST/CSOSN do perfil efetivo é a verdade (é o que a nota
+    /// emitida usa); as marcas antigas do grupo (`icms_st`/`monofasico`) só valem onde o perfil
+    /// não diz nada. As que discordam aparecem em "Tributação a conferir".
+    fn perfil_fiscal(&self, grupo: Id, fiscal: &crate::fiscal::CamposFiscais) -> PerfilFiscal {
         let (mut st, mut mono) = (None, None);
         for g in self.arvore.ancestrais(grupo) {
             if let Some(p) = self.perfil(g) {
@@ -370,9 +372,19 @@ impl BaseDePreco {
                 mono = mono.or(p.monofasico);
             }
         }
-        perfil.icms_st = st.unwrap_or(false);
-        perfil.monofasico = mono.unwrap_or(false);
-        perfil
+        let t = fiscal.perfil_tributario(None);
+        PerfilFiscal {
+            icms_st: if fiscal.cst_icms.is_some() {
+                cardeal_tributos::e_substituido(&t)
+            } else {
+                st.unwrap_or(false)
+            },
+            monofasico: if fiscal.cst_pis.is_some() || fiscal.cst_cofins.is_some() {
+                cardeal_tributos::e_monofasico(&t)
+            } else {
+                mono.unwrap_or(false)
+            },
+        }
     }
 
     /// Os campos fiscais do produto por cima dos de seus grupos, do mais próximo à raiz.
@@ -407,8 +419,8 @@ impl BaseDePreco {
         };
         let (margem, origem_margem) = self.margem(l.margem, l.grupo);
         let (comissao, origem_comissao) = self.comissao(l.comissao, l.grupo);
-        let perfil_fiscal = self.perfil_fiscal(l.grupo);
         let fiscal = self.fiscal_efetivo(l);
+        let perfil_fiscal = self.perfil_fiscal(l.grupo, &fiscal);
         let carga = carga_do_produto(self.parametros.regime, self.rbt12, perfil_fiscal, &fiscal);
         let imposto = carga.percentual;
         let (opex, derivado) = match (

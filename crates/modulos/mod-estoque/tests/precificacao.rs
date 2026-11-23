@@ -990,3 +990,98 @@ fn preco_no_grupo_sem_margem_diz_o_que_falta() {
     assert!(s.sugerido.is_none());
     assert!(s.problema.unwrap().contains("margem"));
 }
+
+impl Cenario {
+    fn fiscal_do_grupo(&self, grupo: Id, campos: CamposFiscais) {
+        self.cmd(
+            "estoque.definir_campos_fiscais_do_grupo.v1",
+            &DefinirCamposFiscaisDoGrupo { grupo, campos },
+        )
+        .unwrap();
+    }
+
+    fn marca_st(&self, grupo: Id, st: bool) {
+        self.cmd(
+            "estoque.definir_perfil_fiscal_do_grupo.v1",
+            &DefinirPerfilFiscalDoGrupo {
+                grupo,
+                icms_st: Some(st),
+                monofasico: None,
+            },
+        )
+        .unwrap();
+    }
+}
+
+#[test]
+fn marca_antiga_sem_cst_continua_valendo() {
+    let c = Cenario::novo();
+    let g = c.grupo("BEB", None);
+    let p = c.produto_com_custo("Cerveja", g, Preco::reais(5));
+    c.marca_st(g, true);
+    assert!(c.preco(p).perfil_fiscal.icms_st);
+}
+
+#[test]
+fn marca_e_cst_discordando_vale_o_cst_e_vai_para_conferir() {
+    let c = Cenario::novo();
+    let g = c.grupo("BEB", None);
+    let p = c.produto_com_custo("Cerveja", g, Preco::reais(5));
+    c.marca_st(g, true);
+    c.fiscal_do_grupo(
+        g,
+        CamposFiscais {
+            cst_icms: Some("102".into()),
+            ..CamposFiscais::default()
+        },
+    );
+    // A nota emitida usa o CSOSN 102 (sem ST): o preço também.
+    assert!(!c.preco(p).perfil_fiscal.icms_st);
+    let conflitos: Vec<mod_estoque::TributacaoAConferir> = c.consulta(
+        "estoque.tributacao_a_conferir.v1",
+        &mod_estoque::ListarTributacaoAConferir,
+    );
+    assert_eq!(conflitos.len(), 1);
+    assert!(
+        conflitos[0].motivo.contains("ST"),
+        "{}",
+        conflitos[0].motivo
+    );
+    // E o CST que diz ST liga a marca mesmo sem ela.
+    c.fiscal_do_grupo(
+        g,
+        CamposFiscais {
+            cst_icms: Some("500".into()),
+            ..CamposFiscais::default()
+        },
+    );
+    assert!(c.preco(p).perfil_fiscal.icms_st);
+}
+
+#[test]
+fn fcp_e_ipi_herdam_do_grupo() {
+    let grupo = CamposFiscais {
+        aliquota_fcp: Some(Percentual::pontos(2)),
+        aliquota_ipi: Some(Percentual::pontos(10)),
+        ..CamposFiscais::default()
+    };
+    let efetivo = mod_estoque::fiscal::perfil_do_produto(&CamposFiscais::default(), &[&grupo]);
+    assert_eq!(efetivo.aliquota_fcp, Some(Percentual::pontos(2)));
+    let t = efetivo.perfil_tributario(Some("33049990"));
+    assert_eq!(t.aliquota_ipi, Some(Percentual::pontos(10)));
+    assert_eq!(t.ncm.as_deref(), Some("33049990"));
+}
+
+#[test]
+fn perfil_gravado_antes_do_fcp_continua_legivel() {
+    let antigo = mod_estoque::fiscal::CamposFiscaisAte2026Nov {
+        cst_icms: Some("500".into()),
+        aliquota_icms: Some(Percentual::pontos(17)),
+        ..Default::default()
+    };
+    let blob = postcard::to_stdvec(&antigo).unwrap();
+    let lido = CamposFiscais::de_blob(Some(&blob));
+    assert_eq!(lido.cst_icms.as_deref(), Some("500"));
+    assert_eq!(lido.aliquota_icms, Some(Percentual::pontos(17)));
+    assert_eq!(lido.aliquota_fcp, None);
+}
