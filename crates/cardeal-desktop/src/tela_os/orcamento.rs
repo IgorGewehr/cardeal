@@ -136,6 +136,7 @@ pub(super) fn adicionar_peca(
         }
         (None, nome) => ItemOrcamentoNovo::PecaNova {
             nome: nome.to_owned(),
+            grupo: None,
             quantidade,
             preco_unitario,
         },

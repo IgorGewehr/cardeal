@@ -477,6 +477,7 @@ pub fn semear(motor: &Motor) -> Sessao {
                     ordem_servico: os,
                     item: ItemOrcamentoNovo::PecaNova {
                         nome: nome.to_owned(),
+                        grupo: None,
                         quantidade: Quantidade::unidades(1),
                         preco_unitario: Preco::reais(reais),
                     },

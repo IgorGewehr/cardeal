@@ -35,6 +35,10 @@ const UNIDADE_PADRAO: (&str, &str) = ("UN", "Unidade");
 pub struct CriarPecaRapida {
     /// O nome, como o balcão chama a peça.
     pub nome: String,
+    /// A categoria da estrutura mercadológica (de onde vêm a margem e a tributação);
+    /// `None` = o grupo padrão "Peças".
+    #[serde(default)]
+    pub grupo: Option<Id>,
 }
 
 /// O que o comando devolve.
@@ -53,7 +57,7 @@ impl Comando for CriarPecaRapida {
 
     #[cfg(feature = "sqlite")]
     fn executar(self, ctx: &Ctx, uow: &mut UnidadeDeTrabalho) -> Resultado<Self::Saida> {
-        criar_peca_rapida_comum(&self.nome, ctx, uow)
+        criar_peca_rapida_comum(&self.nome, self.grupo, ctx, uow)
     }
 }
 
@@ -61,10 +65,11 @@ impl Comando for CriarPecaRapida {
 /// (`os.montar_orcamento.v1` com peça nova). A permissão fica por conta de quem chama.
 ///
 /// # Errors
-/// Nome vazio, ou erro de persistência.
+/// Nome vazio, categoria inexistente ou de outra organização, ou erro de persistência.
 #[cfg(feature = "sqlite")]
 pub fn criar_peca_rapida_comum(
     nome: &str,
+    grupo: Option<Id>,
     ctx: &Ctx,
     uow: &mut UnidadeDeTrabalho,
 ) -> Resultado<PecaRapidaCriada> {
@@ -75,7 +80,10 @@ pub fn criar_peca_rapida_comum(
             nova: false,
         });
     }
-    let grupo = grupo_padrao(uow, ctx.organizacao)?;
+    let grupo = match grupo {
+        Some(g) => grupo_existente(uow, ctx.organizacao, g)?,
+        None => grupo_padrao(uow, ctx.organizacao)?,
+    };
     let unidade = unidade_padrao(uow, ctx.organizacao)?;
     let produto = Produto::novo(ctx.organizacao, grupo, nome, "", unidade)
         .map_err(|e| Erro::de_dominio(&e))?;
@@ -133,6 +141,20 @@ fn produto_ativo_com_nome(
         }
     }
     Ok(None)
+}
+
+#[cfg(feature = "sqlite")]
+fn grupo_existente(uow: &UnidadeDeTrabalho, organizacao: Id, grupo: Id) -> Resultado<Id> {
+    uow.conexao()
+        .query_row(
+            "SELECT id FROM estoque_grupo_produto WHERE id = ?1 AND empresa = ?2",
+            params![blob(grupo), blob(organizacao)],
+            |r| r.get::<_, Vec<u8>>(0),
+        )
+        .optional()
+        .map_err(persist)?
+        .map(id_de)
+        .ok_or_else(|| Erro::nao_encontrado("grupo"))
 }
 
 #[cfg(feature = "sqlite")]

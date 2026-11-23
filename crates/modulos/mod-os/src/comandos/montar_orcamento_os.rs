@@ -54,6 +54,9 @@ pub enum ItemOrcamentoNovo {
     PecaNova {
         /// O nome da peça, como o balcão chama.
         nome: String,
+        /// A categoria onde a peça é cadastrada; `None` = "Peças".
+        #[serde(default)]
+        grupo: Option<Id>,
         /// A quantidade orçada.
         quantidade: Quantidade,
         /// O preço cobrado do cliente por unidade.
@@ -100,6 +103,7 @@ impl Comando for MontarOrcamentoOs {
             } => orcar_peca(os.id, produto, quantidade, preco_unitario, uow)?,
             ItemOrcamentoNovo::PecaNova {
                 nome,
+                grupo,
                 quantidade,
                 preco_unitario,
             } => {
@@ -111,7 +115,7 @@ impl Comando for MontarOrcamentoOs {
                         "sem permissão para cadastrar peça nova",
                     ));
                 }
-                let produto = mod_estoque::criar_peca_rapida_comum(&nome, ctx, uow)?.produto;
+                let produto = mod_estoque::criar_peca_rapida_comum(&nome, grupo, ctx, uow)?.produto;
                 orcar_peca(os.id, produto, quantidade, preco_unitario, uow)?
             }
             ItemOrcamentoNovo::MaoDeObra {

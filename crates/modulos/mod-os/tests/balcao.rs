@@ -688,6 +688,7 @@ fn peca_sob_encomenda_do_orcamento_ate_a_chegada() {
                 ordem_servico: os,
                 item: ItemOrcamentoNovo::PecaNova {
                     nome: "Tela Samsung A52 original".to_owned(),
+                    grupo: None,
                     quantidade: Quantidade::unidades(1),
                     preco_unitario: Preco::reais(320),
                 },
@@ -1159,6 +1160,7 @@ fn peca_sem_preco_recebe_custo_e_preco_depois_e_a_margem_acompanha() {
                 ordem_servico: os,
                 item: ItemOrcamentoNovo::PecaNova {
                     nome: "Bateria Acer AC14B8K".into(),
+                    grupo: None,
                     quantidade: Quantidade::unidades(1),
                     preco_unitario: Preco::ZERO,
                 },

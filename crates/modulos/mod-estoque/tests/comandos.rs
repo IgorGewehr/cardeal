@@ -4,7 +4,7 @@
 #![allow(clippy::result_large_err)] // `ErroArmazenamento` carrega detalhes de propósito
 
 use cardeal_auth::{AutorizacoesEfetivas, EmissaoSessao, Escopo, Papel as PapelAuth, Sessao};
-use cardeal_kernel::{CodigoErro, Data, Dinheiro, Id, Instante, Preco, Quantidade};
+use cardeal_kernel::{CodigoErro, Data, Dinheiro, Erro, Id, Instante, Preco, Quantidade};
 use cardeal_ledger::semear_plano_padrao;
 use cardeal_modkit::{Ambiente, Despachante, Modulo, PedidoAtivacao, RegistroModulos};
 use cardeal_storage::{Armazenamento, ConfigArmazenamento, ContextoEscrita, ErroArmazenamento};
@@ -1021,6 +1021,7 @@ fn peca_rapida_nasce_so_com_nome_nao_duplica_e_ganha_ncm_da_nota() {
                 "estoque.criar_peca_rapida.v1",
                 &carga(&mod_estoque::CriarPecaRapida {
                     nome: nome.to_owned(),
+                    grupo: None,
                 }),
                 &s,
                 &ambiente(empresa),
@@ -1207,4 +1208,80 @@ fn listagem_paginada_de_produtos_busca_por_nome_e_codigo() {
     let bipe = listar(Some("7891234567895"), PedidoPagina::primeira(10));
     assert_eq!(bipe.itens.len(), 1);
     assert_eq!(bipe.itens[0].nome, "Bateria 07");
+}
+
+fn grupo_do_produto(arm: &Armazenamento, produto: Id) -> Id {
+    let b: Vec<u8> = arm
+        .leitor()
+        .consultar(move |c| {
+            c.query_row(
+                "SELECT grupo_produto FROM estoque_produto WHERE id = ?1",
+                [produto.em_bytes().as_slice()],
+                |r| r.get(0),
+            )
+            .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+        })
+        .unwrap();
+    Id::de_bytes(b.try_into().unwrap())
+}
+
+fn criar_peca(
+    d: &Despachante,
+    arm: &Armazenamento,
+    empresa: Id,
+    nome: &str,
+    grupo: Option<Id>,
+) -> Result<mod_estoque::PecaRapidaCriada, Erro> {
+    let s = sessao(empresa, &["estoque.produto.criar", "estoque.produto.ver"]);
+    d.executar_comando(
+        "estoque.criar_peca_rapida.v1",
+        &carga(&mod_estoque::CriarPecaRapida {
+            nome: nome.to_owned(),
+            grupo,
+        }),
+        &s,
+        &ambiente(empresa),
+        arm.escritor(),
+    )
+    .map(|b| postcard::from_bytes(&b).unwrap())
+}
+
+#[test]
+fn peca_rapida_entra_na_categoria_informada() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloEstoque]).unwrap();
+    let s = sessao(empresa, &["estoque.produto.criar", "estoque.produto.ver"]);
+    let g: GrupoProdutoCriado = postcard::from_bytes(
+        &d.executar_comando(
+            "estoque.criar_grupo_produto.v1",
+            &carga(&CriarGrupoProduto {
+                codigo: "CEL".into(),
+                nome: "Peças de celular".into(),
+                pai: None,
+            }),
+            &s,
+            &ambiente(empresa),
+            arm.escritor(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let p = criar_peca(&d, &arm, empresa, "Tela A52", Some(g.grupo_produto)).unwrap();
+    assert!(p.nova);
+    assert_eq!(grupo_do_produto(&arm, p.produto), g.grupo_produto);
+    // Categoria que não existe é recusada, não cai no padrão em silêncio.
+    let e = criar_peca(&d, &arm, empresa, "Bateria", Some(Id::novo())).unwrap_err();
+    assert_eq!(e.codigo, CodigoErro::NAO_ENCONTRADO);
+}
+
+#[test]
+fn peca_rapida_sem_categoria_continua_em_pecas() {
+    let (_dir, arm, empresa) = base();
+    let d = Despachante::construir(&[&ModuloEstoque]).unwrap();
+    let p = criar_peca(&d, &arm, empresa, "Tela A52", None).unwrap();
+    let pecas = criar_peca(&d, &arm, empresa, "Bateria", None).unwrap();
+    assert_eq!(
+        grupo_do_produto(&arm, p.produto),
+        grupo_do_produto(&arm, pecas.produto)
+    );
 }
