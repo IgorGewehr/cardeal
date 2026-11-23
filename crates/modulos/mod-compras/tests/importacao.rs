@@ -1147,7 +1147,13 @@ fn xml_tributado(chave: &str, icms: &str, pis_cst: &str, cest: Option<&str>) -> 
     )
 }
 
-fn importar_e_confirmar(arm: &Armazenamento, empresa: Id, produto: Id, local: Id, xml: String) {
+fn importar_e_confirmar(
+    arm: &Armazenamento,
+    empresa: Id,
+    produto: Id,
+    local: Id,
+    xml: String,
+) -> Id {
     let ctx_escrita = ContextoEscrita::novo(empresa, Id::novo(), Id::novo(), Id::novo());
     arm.escritor()
         .executar(ctx_escrita, move |uow| {
@@ -1173,9 +1179,10 @@ fn importar_e_confirmar(arm: &Armazenamento, empresa: Id, produto: Id, local: Id
                 uow,
             )
             .map_err(cardeal_storage::ErroArmazenamento::Dominio)?;
-            Ok(())
+            Ok(relatorio.nota_entrada)
         })
-        .unwrap();
+        .unwrap()
+        .valor
 }
 
 fn perfil_e_cest(
@@ -1284,4 +1291,145 @@ fn produto_com_perfil_nunca_e_sobrescrito_e_a_contradicao_vira_aviso() {
     let lista = a_conferir(&arm);
     assert_eq!(lista.len(), 1);
     assert!(lista[0].0.contains("ST"), "{}", lista[0].0);
+}
+
+// ── crédito de ICMS/PIS/COFINS na entrada do regime normal ──────────────────────────────────
+
+fn sql(arm: &Armazenamento, empresa: Id, comando: &'static str, p: Vec<Vec<u8>>) {
+    arm.escritor()
+        .executar(
+            ContextoEscrita::novo(empresa, Id::novo(), Id::novo(), Id::novo()),
+            move |uow| {
+                uow.conexao()
+                    .execute(comando, rusqlite::params_from_iter(p.iter()))
+                    .map(|_| ())
+                    .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+            },
+        )
+        .unwrap();
+}
+
+fn regime(arm: &Armazenamento, empresa: Id, regime: &'static str) {
+    let comando: &'static str = match regime {
+        "LucroReal" => "UPDATE nucleo_empresa SET regime = 'LucroReal' WHERE id = ?1",
+        _ => "UPDATE nucleo_empresa SET regime = 'LucroPresumido' WHERE id = ?1",
+    };
+    sql(arm, empresa, comando, vec![empresa.em_bytes().to_vec()]);
+}
+
+fn perfil_de_saida(arm: &Armazenamento, empresa: Id, produto: Id, cst: &str) {
+    let blob = mod_estoque::fiscal::CamposFiscais {
+        cst_icms: Some(cst.into()),
+        aliquota_icms: Some(cardeal_kernel::Percentual::pontos(17)),
+        ..Default::default()
+    }
+    .para_blob()
+    .unwrap();
+    sql(
+        arm,
+        empresa,
+        "UPDATE estoque_produto SET perfil_fiscal = ?2 WHERE id = ?1",
+        vec![produto.em_bytes().to_vec(), blob],
+    );
+}
+
+fn custo_medio(arm: &Armazenamento, produto: Id) -> i64 {
+    arm.leitor()
+        .consultar(move |c| {
+            c.query_row(
+                "SELECT custo_medio FROM estoque_saldo_local WHERE produto = ?1",
+                [produto.em_bytes().as_slice()],
+                |r| r.get(0),
+            )
+            .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+        })
+        .unwrap()
+}
+
+fn saldo_impostos_a_recuperar(arm: &Armazenamento, empresa: Id) -> i64 {
+    arm.leitor()
+        .consultar(move |c| {
+            c.query_row(
+                "SELECT COALESCE(SUM(p.valor), 0) FROM razao_partida p
+                 JOIN razao_conta k ON k.id = p.conta
+                 WHERE k.empresa = ?1 AND k.papel_padrao = 'ImpostosARecuperar'",
+                [empresa.em_bytes().as_slice()],
+                |r| r.get(0),
+            )
+            .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+        })
+        .unwrap()
+}
+
+const ICMS00: &str = "<ICMS00><orig>0</orig><CST>00</CST><vBC>60.00</vBC><pICMS>17.00</pICMS><vICMS>10.20</vICMS></ICMS00>";
+
+#[test]
+fn regime_normal_entra_sem_o_icms_e_lanca_a_recuperar() {
+    let (_dir, arm, empresa) = base();
+    regime(&arm, empresa, "LucroPresumido");
+    let produto = cadastrar_produto(&arm, empresa, "Cabo USB", "85444200");
+    perfil_de_saida(&arm, empresa, produto, "00");
+    let local = cadastrar_local(&arm, empresa);
+    let xml = xml_tributado(&"5".repeat(44), ICMS00, "01", None);
+    let nota = importar_e_confirmar(&arm, empresa, produto, local, xml);
+    // (60,00 − 10,20) / 12 = 4,15.
+    assert_eq!(custo_medio(&arm, produto), 4_150_000);
+    assert_eq!(saldo_impostos_a_recuperar(&arm, empresa).abs(), 1_020);
+
+    // O estorno da entrada desfaz o crédito.
+    let ctx_escrita = ContextoEscrita::novo(empresa, Id::novo(), Id::novo(), Id::novo());
+    arm.escritor()
+        .executar(ctx_escrita, move |uow| {
+            use cardeal_modkit::Comando;
+            mod_compras::EstornarEntrada {
+                nota_entrada: nota,
+                motivo: "vinculei o produto errado".into(),
+                estornar_pagamento: false,
+            }
+            .executar(&ctx(empresa), uow)
+            .map_err(cardeal_storage::ErroArmazenamento::Dominio)
+        })
+        .unwrap();
+    assert_eq!(saldo_impostos_a_recuperar(&arm, empresa), 0);
+}
+
+#[test]
+fn real_credita_tambem_pis_cofins() {
+    let (_dir, arm, empresa) = base();
+    regime(&arm, empresa, "LucroReal");
+    let produto = cadastrar_produto(&arm, empresa, "Cabo USB", "85444200");
+    perfil_de_saida(&arm, empresa, produto, "00");
+    let local = cadastrar_local(&arm, empresa);
+    let xml = xml_tributado(&"4".repeat(44), ICMS00, "01", None);
+    importar_e_confirmar(&arm, empresa, produto, local, xml);
+    // 10,20 + 0,99 + 4,56 = 15,75 → (60 − 15,75) / 12 = 3,6875.
+    assert_eq!(custo_medio(&arm, produto), 3_687_500);
+}
+
+#[test]
+fn simples_e_revenda_com_st_nao_creditam() {
+    let (_dir, arm, empresa) = base();
+    let produto = cadastrar_produto(&arm, empresa, "Cabo USB", "85444200");
+    let local = cadastrar_local(&arm, empresa);
+    let xml = xml_tributado(&"3".repeat(44), ICMS00, "01", None);
+    importar_e_confirmar(&arm, empresa, produto, local, xml);
+    assert_eq!(
+        custo_medio(&arm, produto),
+        5_000_000,
+        "Simples: o custo é a nota"
+    );
+
+    let (_dir2, arm2, empresa2) = base();
+    regime(&arm2, empresa2, "LucroPresumido");
+    let produto2 = cadastrar_produto(&arm2, empresa2, "Cerveja", "22030000");
+    perfil_de_saida(&arm2, empresa2, produto2, "60");
+    let local2 = cadastrar_local(&arm2, empresa2);
+    let xml = xml_tributado(&"2".repeat(44), ICMS00, "01", None);
+    importar_e_confirmar(&arm2, empresa2, produto2, local2, xml);
+    assert_eq!(
+        custo_medio(&arm2, produto2),
+        5_000_000,
+        "revenda com ST não credita"
+    );
+    assert_eq!(saldo_impostos_a_recuperar(&arm2, empresa2), 0);
 }

@@ -234,6 +234,13 @@ impl ItemNotaEntrada {
         preco_por_unidade(self.custo_total(), self.quantidade)
     }
 
+    /// O custo unitário sem o crédito de impostos que a empresa recupera (regime normal):
+    /// o que entra no estoque quando há crédito.
+    #[must_use]
+    pub fn custo_unitario_sem(&self, credito: Dinheiro) -> Preco {
+        preco_por_unidade(self.custo_total() - credito, self.quantidade)
+    }
+
     /// Vincula (ou revincula) o item a um produto do estoque, marcando `Casado`.
     pub fn vincular(&mut self, produto: Id) {
         self.produto_casado = Some(produto);

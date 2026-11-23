@@ -54,6 +54,8 @@ mod casamento;
 mod comandos;
 mod consultas;
 pub mod cotacao;
+#[cfg(feature = "sqlite")]
+mod credito;
 pub mod devolucao;
 mod dfe;
 mod erros;

@@ -742,6 +742,8 @@ pub fn confirmar_entrada_com_parcelas(
     }
 
     nota.confirmar().map_err(|e| Erro::de_dominio(&e))?;
+    // Regime normal: o ICMS/PIS/COFINS recuperável sai do custo (e vai a "a recuperar").
+    let creditos = crate::credito::creditos_da_nota(uow.conexao(), ctx, nota_id, &itens)?;
 
     for item in &itens {
         let produto = item
@@ -752,7 +754,10 @@ pub fn confirmar_entrada_com_parcelas(
                 produto,
                 local,
                 quantidade: item.quantidade,
-                custo_unitario: item.custo_final_unitario(),
+                custo_unitario: creditos.get(&item.id).map_or_else(
+                    || item.custo_final_unitario(),
+                    |c| item.custo_unitario_sem(*c),
+                ),
                 origem_modulo: "compras",
                 origem_id: Some(nota.id),
             },
@@ -821,8 +826,9 @@ pub fn confirmar_entrada_com_parcelas(
     RepositorioCompras::novo(uow).atualizar_nota(&nota)?;
     gravar_data_de_entrada(nota.id, ctx.hoje(), uow)?;
     crate::pedido::sqlite::receber(nota.id, local, ctx, uow)?;
-    let rotulo = format!("{}/{}", nota.numero, nota.serie);
-    crate::aprender_tributacao::aprender_da_nota(uow.conexao(), ctx, nota.id, &rotulo)?;
+    // Só com título: é ele que debita o estoque pelo valor cheio da nota.
+    crate::credito::lancar_credito(&creditos, gerar_titulo, &nota, ctx, uow)?;
+    crate::aprender_tributacao::aprender_da_nota(uow.conexao(), ctx, &nota)?;
 
     uow.publicar(NotaConfirmada {
         nota_entrada: nota.id,

@@ -117,6 +117,7 @@ impl Comando for EstornarEntrada {
             ctx,
             uow,
         )?;
+        crate::credito::estornar_credito(nota.id, &historico, ctx, uow)?;
         uow.conexao()
             .execute(
                 "UPDATE compras_item_nota_entrada

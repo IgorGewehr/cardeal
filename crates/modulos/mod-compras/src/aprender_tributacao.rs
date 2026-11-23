@@ -17,7 +17,13 @@ const COM_ST: &[&str] = &["10", "30", "60", "70", "201", "202", "203", "500"];
 ///
 /// # Errors
 /// Erro de persistência.
-pub(crate) fn aprender_da_nota(c: &Connection, ctx: &Ctx, nota: Id, rotulo: &str) -> Resultado<()> {
+pub(crate) fn aprender_da_nota(
+    c: &Connection,
+    ctx: &Ctx,
+    entrada: &crate::nota::NotaEntrada,
+) -> Resultado<()> {
+    let nota = entrada.id;
+    let rotulo = format!("{}/{}", entrada.numero, entrada.serie);
     let itens = crate::repositorio::itens_da_nota_por_conexao(c, nota)?;
     let produtos: Vec<Id> = itens.iter().filter_map(|i| i.produto_casado).collect();
     if produtos.is_empty() {
