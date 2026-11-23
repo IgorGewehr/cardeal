@@ -390,8 +390,8 @@ pub(crate) mod sqlite {
     use crate::documento::{
         decidir, decidir_busca, decidir_evento, em_contingencia, esperar,
         justificativa_da_contingencia, nao_reemitir, pede_contingencia, pede_substituicao,
-        pedido_da_substituida, Busca, Desfecho, DocumentoResumo, EstadoDocumento, Mudanca,
-        PedidoDocumento, JUSTIFICATIVA_DA_SUBSTITUICAO,
+        pede_svc, pedido_da_substituida, svc_nao_atende, Busca, Desfecho, DocumentoResumo,
+        EstadoDocumento, Mudanca, PedidoDocumento, JUSTIFICATIVA_DA_SUBSTITUICAO,
     };
     use crate::montagem::{marcar_homologacao, montar_nfce, DadosDaVenda, ItemDaVenda};
     use crate::sql_documento as sqld;
@@ -1463,13 +1463,70 @@ pub(crate) mod sqlite {
         desfecho: Desfecho,
         fuso: cardeal_kernel::Fuso,
     ) -> Mudanca {
-        // A contingência off-line é da NFC-e (a da NF-e é outra, a SVC).
+        // A contingência off-line é da NFC-e; a da NF-e é a SVC.
+        let codigo = doc.codigo.as_deref();
         if doc.modelo == ModeloFiscal::Nfce
-            && pede_contingencia(doc.estado, doc.tentativas, doc.codigo.as_deref(), &desfecho)
+            && pede_contingencia(doc.estado, doc.tentativas, codigo, &desfecho)
         {
             contingencia(x, doc, desfecho, fuso)
+        } else if doc.modelo == ModeloFiscal::Nfe
+            && pede_svc(doc.estado, doc.tentativas, codigo, &desfecho)
+        {
+            svc(x, doc, desfecho, fuso)
         } else {
             decidir(doc.estado, doc.tentativas, desfecho)
+        }
+    }
+
+    /// A NF-e pendente que a autorizadora da UF fora não recebeu vai à SVC, se a SEFAZ a
+    /// ativou. SVC inativa (ou que recusa por não atender), a nota espera — com o motivo.
+    fn svc(
+        x: &Contexto<'_>,
+        doc: &sqld::NaFila,
+        desfecho: Desfecho,
+        fuso: cardeal_kernel::Fuso,
+    ) -> Mudanca {
+        let esperar = |desfecho: Desfecho, porque: &str| {
+            let mut m = decidir(doc.estado, doc.tentativas, desfecho);
+            m.motivo = Some(format!("{} — {porque}", m.motivo.unwrap_or_default()));
+            m
+        };
+        let (Desfecho::Resposta(r), Some(blob), Some(uf)) = (&desfecho, &doc.nota, x.uf) else {
+            return decidir(doc.estado, doc.tentativas, desfecho);
+        };
+        let Ok(nota) = postcard::from_bytes::<cardeal_fiscal::Nfe>(blob) else {
+            return decidir(doc.estado, doc.tentativas, desfecho);
+        };
+        match x.porta.status_da_svc(uf) {
+            Ok(s) if s.em_operacao => {
+                let entrada = EntradaEmContingencia {
+                    inicio: Instante::agora(),
+                    justificativa: justificativa_da_contingencia(r),
+                    fuso,
+                    responsavel_tecnico: None,
+                };
+                match self::desfecho(x.porta.emitir_nfe_em_svc(&nota, &entrada)) {
+                    Desfecho::Resposta(r2) if svc_nao_atende(&r2) => esperar(
+                        desfecho,
+                        &format!("a SVC não atendeu ({} {})", r2.codigo, r2.motivo),
+                    ),
+                    na_svc => {
+                        let mut m = decidir(doc.estado, doc.tentativas, na_svc);
+                        if m.estado == EstadoDocumento::Autorizada {
+                            m.motivo = Some(format!(
+                                "Autorizada em contingência SVC (a SEFAZ da UF estava fora) — {}",
+                                m.motivo.unwrap_or_default()
+                            ));
+                        }
+                        m
+                    }
+                }
+            }
+            Ok(s) => esperar(
+                desfecho,
+                &format!("a SVC não está ativa ({} {})", s.codigo, s.motivo),
+            ),
+            Err(e) => esperar(desfecho, &format!("sem a SVC: {}", e.mensagem)),
         }
     }
 

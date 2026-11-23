@@ -41,6 +41,10 @@ Cardeal emite (Simples e regime normal sem ST).
 6. **Responsável técnico** (`infRespTec`, obrigatório): o da última nota autorizada da empresa (foi o
    `sefaz-api` que a montou), ou as variáveis `CARDEAL_RESP_TEC_CNPJ/CONTATO/EMAIL/FONE`.
 
+7. **A NF-e vai à SVC** com a mesma regra da tentativa anterior: a autorizadora da UF fora e a SVC ativa
+   (o status confere antes), a nota sai em SVC (`tpEmis` 6/7) pelo `sefaz-api`; a SVC inativa ou que recusa
+   por não atender (113/114) não vira rejeição — a nota espera.
+
 ## Consequências
 
 - O caixa sem internet emite: o DANFCE sai com "EMITIDA EM CONTINGÊNCIA", e a nota vai quando a rede voltar

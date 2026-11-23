@@ -74,6 +74,18 @@ impl PortaFiscal for PortaComNfseNacional {
         self.base()?.emitir_nfe(nota)
     }
 
+    fn status_da_svc(&self, uf: Uf) -> Resultado<StatusSefaz> {
+        self.base()?.status_da_svc(uf)
+    }
+
+    fn emitir_nfe_em_svc(
+        &self,
+        nota: &Nfe,
+        entrada: &EntradaEmContingencia,
+    ) -> Resultado<RetornoSefaz> {
+        self.base()?.emitir_nfe_em_svc(nota, entrada)
+    }
+
     fn emitir_nfce(&self, nota: &Nfce, csc: &Csc) -> Resultado<RetornoSefaz> {
         self.base()?.emitir_nfce(nota, csc)
     }

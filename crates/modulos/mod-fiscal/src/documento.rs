@@ -717,13 +717,40 @@ pub fn pede_contingencia(
     desfecho: &Desfecho,
 ) -> bool {
     estado == EstadoDocumento::Pendente
+        && nenhuma_ficou_sem_resposta(tentativas, codigo_anterior)
         && match desfecho {
             Desfecho::Resposta(r) => r.sefaz_fora(),
-            Desfecho::SemConexao(_) => {
-                tentativas == 0 || codigo_anterior.is_some_and(|c| !c.is_empty())
-            }
+            Desfecho::SemConexao(_) => true,
             Desfecho::Indisponivel(_) | Desfecho::Recusado(_) => false,
         }
+}
+
+/// Se a NF-e pendente vai à **SVC** (a contingência da NF-e): a autorizadora da UF está fora e
+/// a nota com certeza não chegou a ela — e nenhuma tentativa anterior ficou sem resposta (a
+/// mesma regra da contingência da NFC-e). A SVC precisa estar ativa (o status confere).
+#[must_use]
+pub fn pede_svc(
+    estado: EstadoDocumento,
+    tentativas: u32,
+    codigo_anterior: Option<&str>,
+    desfecho: &Desfecho,
+) -> bool {
+    estado == EstadoDocumento::Pendente
+        && nenhuma_ficou_sem_resposta(tentativas, codigo_anterior)
+        && matches!(desfecho, Desfecho::Resposta(r) if r.sefaz_fora())
+}
+
+/// A nota nunca foi tentada, ou toda tentativa anterior terminou com um código (resposta, ou
+/// [`CODIGO_SEM_CONEXAO`]): nenhuma conectou e ficou sem resposta.
+fn nenhuma_ficou_sem_resposta(tentativas: u32, codigo_anterior: Option<&str>) -> bool {
+    tentativas == 0 || codigo_anterior.is_some_and(|c| !c.is_empty())
+}
+
+/// A recusa da SVC que diz só que ela não atende agora (113 em desativação, 114 desabilitada):
+/// a nota não tem erro — espera a autorizadora da UF.
+#[must_use]
+pub fn svc_nao_atende(r: &cardeal_fiscal::RetornoSefaz) -> bool {
+    matches!(r.codigo.as_str(), "113" | "114")
 }
 
 /// A justificativa da entrada em contingência (`xJust`, de 15 a 256 caracteres): o que a
@@ -1330,6 +1357,14 @@ mod testes {
             "uma tentativa anterior conectou e ficou sem resposta: pode ter chegado"
         );
         assert!(!pede_contingencia(Incerta, 0, None, &sem));
+        // A regra da tentativa anterior vale também com a SEFAZ fora.
+        assert!(!pede_contingencia(Pendente, 2, None, &fora("ERR", true)));
+
+        // A NF-e: a SVC, com a mesma regra — e sem conexão não há SVC a alcançar.
+        assert!(pede_svc(Pendente, 0, None, &fora("108", false)));
+        assert!(!pede_svc(Pendente, 2, None, &fora("108", false)));
+        assert!(!pede_svc(Pendente, 0, None, &sem));
+        assert!(!pede_svc(Pendente, 0, None, &fora("ERR", false)));
         // A espera sem conexão grava o código que diz que o pedido não saiu.
         let m = decidir(Pendente, 0, sem);
         assert_eq!(m.estado, Pendente);

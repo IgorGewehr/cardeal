@@ -134,6 +134,33 @@ pub trait PortaFiscal: Send + Sync {
     /// Como [`Self::emitir_nfce`].
     fn emitir_nfe(&self, nota: &Nfe) -> Resultado<RetornoSefaz>;
 
+    /// O status da **SVC** (Sefaz Virtual de Contingência) da `uf` para a NF-e: em operação,
+    /// a SEFAZ da UF a ativou e a NF-e pode sair por ela ([`Self::emitir_nfe_em_svc`]).
+    ///
+    /// # Errors
+    /// Como [`Self::status_servico`]; [`crate::ErroFiscal::NaoSuportadoPeloProvedor`] sem SVC.
+    fn status_da_svc(&self, _uf: Uf) -> Resultado<StatusSefaz> {
+        Err(cardeal_kernel::Erro::de_dominio(
+            &crate::ErroFiscal::NaoSuportadoPeloProvedor("a contingência SVC".into()),
+        ))
+    }
+
+    /// Emite a NF-e em **contingência SVC** (`tpEmis` 6 ou 7, o da UF, com `dhCont`/`xJust`):
+    /// outra chave, que vai à SVC — para a autorizadora da UF fora e a SVC ativa. O retorno é
+    /// como o de [`Self::emitir_nfe`].
+    ///
+    /// # Errors
+    /// Como [`Self::emitir_nfe`]; [`crate::ErroFiscal::NaoSuportadoPeloProvedor`] sem SVC.
+    fn emitir_nfe_em_svc(
+        &self,
+        _nota: &Nfe,
+        _entrada: &EntradaEmContingencia,
+    ) -> Resultado<RetornoSefaz> {
+        Err(cardeal_kernel::Erro::de_dominio(
+            &crate::ErroFiscal::NaoSuportadoPeloProvedor("a contingência SVC".into()),
+        ))
+    }
+
     /// Emite uma NFC-e (síncrona na SEFAZ). Rejeição e denegação voltam em `Ok`, no
     /// [`RetornoSefaz`]; `Err` é não ter conseguido falar com a API.
     ///
@@ -377,5 +404,17 @@ impl<T: PortaFiscal + ?Sized> PortaFiscal for std::sync::Arc<T> {
         uf: Uf,
     ) -> Resultado<RetornoSefaz> {
         (**self).transmitir_nfce_em_contingencia(xml_assinado, uf)
+    }
+
+    fn status_da_svc(&self, uf: Uf) -> Resultado<StatusSefaz> {
+        (**self).status_da_svc(uf)
+    }
+
+    fn emitir_nfe_em_svc(
+        &self,
+        nota: &Nfe,
+        entrada: &EntradaEmContingencia,
+    ) -> Resultado<RetornoSefaz> {
+        (**self).emitir_nfe_em_svc(nota, entrada)
     }
 }

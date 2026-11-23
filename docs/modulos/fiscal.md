@@ -179,7 +179,12 @@ tributação da NFC-e e acrescenta:
   IPI").
 
 A série e o próximo número da NF-e (`ConfigurarNfe`/`ConfiguracaoDaNfe`) são separados dos da NFC-e. A
-contingência off-line e a substituição são só da NFC-e (a contingência da NF-e é outra, a SVC). Desktop: Vendas ›
+contingência off-line e a substituição são só da NFC-e. A contingência da NF-e é a **SVC** (2026-11-23):
+a NF-e pendente que a autorizadora da UF fora não recebeu (e que nenhuma tentativa anterior deixou sem
+resposta) confere o status da SVC (`PortaFiscal::status_da_svc`, o `/nfe/status` com `svc: true`); ativa, sai
+por ela (`emitir_nfe_em_svc`: `tpEmis` 6/7 na chave, `dhCont`/`xJust`), autorizada com a chave da SVC; inativa,
+ou recusando por não atender (113/114), a nota espera a UF — com o motivo. A consulta da nota de SVC tenta a
+SVC e depois a UF (no `sefaz-api`). Desktop: Vendas ›
 pedido faturado › **Emitir NF-e** (com a situação e o "Reenviar"); Configurações › Fiscal › NF-e de venda; as
 Notas fiscais mostram o modelo. Lição do gestao-raiz: lá a NF-e sai também de um formulário em que se digitam o
 destinatário e os itens; aqui só do pedido faturado — o cadastro é a fonte.

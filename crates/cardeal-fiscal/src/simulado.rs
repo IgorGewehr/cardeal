@@ -42,6 +42,10 @@ pub struct FiscalSimulado {
     /// Sem conexão com a API (o caixa sem internet): tudo volta "inalcançável" — menos a
     /// contingência, que a porta real monta e assina no próprio Cardeal.
     sem_conexao: std::sync::atomic::AtomicBool,
+    /// A SVC ativada pela SEFAZ da UF (a NF-e pode sair por ela).
+    svc_ativa: std::sync::atomic::AtomicBool,
+    /// Quantas NF-e saíram em SVC.
+    pub emissoes_em_svc: std::sync::atomic::AtomicUsize,
     /// Retornos programados para as próximas emissões (o primeiro sai primeiro).
     programados: Mutex<std::collections::VecDeque<RetornoSefaz>>,
     /// O que cada chave "emitida" retorna na consulta.
@@ -119,10 +123,36 @@ impl FiscalSimulado {
 
     /// A emissão simulada de uma NFC-e (`"65"`) ou NF-e (`"55"`).
     fn emitir_modelo(&self, nota: &Nfce, complemento: &Complemento) -> Resultado<RetornoSefaz> {
+        self.emitir_modelo_com(nota, complemento, 1)
+    }
+
+    /// A emissão com o `tpEmis` da chave: 1 (normal) responde a SEFAZ fora; 6/7 (SVC) só a SVC.
+    fn emitir_modelo_com(
+        &self,
+        nota: &Nfce,
+        complemento: &Complemento,
+        tipo_emissao: u8,
+    ) -> Resultado<RetornoSefaz> {
         let modelo = complemento.modelo;
         self.api_fora()?;
-        if let Some(r) = self.sem_sefaz() {
-            return Ok(r);
+        if tipo_emissao == 1 {
+            if let Some(r) = self.sem_sefaz() {
+                return Ok(r);
+            }
+        } else if !self.svc_ativa.load(std::sync::atomic::Ordering::SeqCst) {
+            return Ok(RetornoSefaz {
+                situacao: SituacaoRetorno::Rejeitado,
+                codigo: "114".into(),
+                motivo: "Rejeicao: SVC-AN desabilitada pela SEFAZ de Origem".into(),
+                chave: None,
+                protocolo: None,
+                recebido_em: None,
+                xml: None,
+                xml_assinado: None,
+                xml_cancelamento: None,
+                erros: Vec::new(),
+                nao_enviado: false,
+            });
         }
         self.emissoes
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -134,7 +164,7 @@ impl FiscalSimulado {
             modelo,
             nota.serie,
             nota.numero,
-            1,
+            tipo_emissao,
             u32::try_from(n).unwrap_or(0) + 10_000_000,
         );
         let chave = chave.como_str().to_string();
@@ -317,6 +347,12 @@ impl FiscalSimulado {
             .store(fora, std::sync::atomic::Ordering::SeqCst);
     }
 
+    /// Ativa (ou desativa) a SVC da UF — como a SEFAZ faz quando o autorizador dela cai.
+    pub fn simular_svc(&self, ativa: bool) {
+        self.svc_ativa
+            .store(ativa, std::sync::atomic::Ordering::SeqCst);
+    }
+
     /// Tira a conexão com a API fiscal simulada (ou devolve): os pedidos voltam
     /// [`ErroFiscal::ApiFiscalInalcancavel`]; a contingência continua sendo assinada (como a
     /// porta real faz, no próprio Cardeal).
@@ -469,6 +505,41 @@ impl PortaFiscal for FiscalSimulado {
             erros: Vec::new(),
             nao_enviado: false,
         })
+    }
+
+    fn status_da_svc(&self, _uf: Uf) -> Resultado<StatusSefaz> {
+        self.api_fora()?;
+        let ativa = self.svc_ativa.load(std::sync::atomic::Ordering::SeqCst);
+        Ok(StatusSefaz {
+            em_operacao: ativa,
+            codigo: if ativa { "107" } else { "113" }.into(),
+            motivo: if ativa {
+                "Servico SVC em Operacao"
+            } else {
+                "SVC em processo de desativacao"
+            }
+            .into(),
+        })
+    }
+
+    fn emitir_nfe_em_svc(
+        &self,
+        nota: &Nfe,
+        _entrada: &EntradaEmContingencia,
+    ) -> Resultado<RetornoSefaz> {
+        self.emissoes_em_svc
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let como_nfce = Nfce {
+            emitente: nota.emitente.clone(),
+            itens: nota.itens.clone(),
+            pagamentos: nota.pagamentos.clone(),
+            troco: cardeal_kernel::Dinheiro::ZERO,
+            consumidor: None,
+            serie: nota.serie,
+            numero: nota.numero,
+            informacoes: nota.informacoes.clone(),
+        };
+        self.emitir_modelo_com(&como_nfce, &Complemento::da_nfe(nota), 6)
     }
 
     fn emitir_nfe(&self, nota: &Nfe) -> Resultado<RetornoSefaz> {

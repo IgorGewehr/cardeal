@@ -1654,6 +1654,43 @@ fn o_pedido_faturado_vira_nfe_com_destinatario_e_duplicatas() {
         )
         .unwrap();
     assert_eq!(de_novo.estado, EstadoDocumento::Pendente);
+
+    // A autorizadora da UF fora: a NF-e espera enquanto a SEFAZ não ativa a SVC...
+    m.sim.simular_sefaz_fora(true);
+    let na_svc = emitir(pedido_faturado(true));
+    m.tentar_ja();
+    m.transmitir();
+    let d = m.documento(na_svc.id).resumo;
+    assert_eq!(d.estado, EstadoDocumento::Pendente);
+    assert!(
+        d.motivo
+            .as_deref()
+            .unwrap_or("")
+            .contains("a SVC não está ativa"),
+        "{:?}",
+        d.motivo
+    );
+    assert_eq!(
+        m.sim
+            .emissoes_em_svc
+            .load(std::sync::atomic::Ordering::SeqCst),
+        0
+    );
+    // ...e sai pela SVC quando ela é ativada: outra chave, com o tpEmis 6, o mesmo número.
+    m.sim.simular_svc(true);
+    m.tentar_ja();
+    m.transmitir();
+    let d = m.documento(na_svc.id).resumo;
+    assert_eq!(d.estado, EstadoDocumento::Autorizada, "{:?}", d.motivo);
+    assert_eq!(
+        &d.chave.as_deref().unwrap()[34..35],
+        "6",
+        "tpEmis 6 (SVC-AN)"
+    );
+    assert_eq!(d.numero, na_svc.numero);
+    assert!(d.motivo.unwrap().contains("contingência SVC"));
+    m.sim.simular_svc(false);
+    m.sim.simular_sefaz_fora(false);
 }
 
 #[test]

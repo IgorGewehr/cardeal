@@ -798,6 +798,40 @@ impl PortaFiscal for ApiFiscalHttp {
             .map_err(|e| Erro::de_dominio(&e))
     }
 
+    fn status_da_svc(&self, uf: Uf) -> Resultado<StatusSefaz> {
+        let mut corpo = self.corpo_base();
+        corpo.insert("ufEmitente".into(), Value::from(uf.sigla()));
+        corpo.insert("modelo".into(), Value::from("55"));
+        corpo.insert("svc".into(), Value::from(true));
+        let r: RespostaSefazApi = self
+            .postar("/nfe/status", &Value::Object(corpo))
+            .map_err(|e| Erro::de_dominio(&e))?;
+        Ok(StatusSefaz {
+            em_operacao: r.success && r.codigo_status == "107",
+            codigo: r.codigo_status,
+            motivo: r.motivo_status,
+        })
+    }
+
+    fn emitir_nfe_em_svc(
+        &self,
+        nota: &Nfe,
+        entrada: &EntradaEmContingencia,
+    ) -> Resultado<RetornoSefaz> {
+        let mut corpo = self.corpo_base();
+        corpo.extend(nfe_json(nota));
+        corpo.insert(
+            "contingencia".into(),
+            json!({
+                "dhCont": data_hora_sefaz(entrada.inicio, entrada.fuso),
+                "xJust": entrada.justificativa,
+            }),
+        );
+        self.postar("/nfe/emitir", &Value::Object(corpo))
+            .map(RespostaSefazApi::em_retorno)
+            .map_err(|e| Erro::de_dominio(&e))
+    }
+
     fn emitir_nfce(&self, nota: &Nfce, csc: &Csc) -> Resultado<RetornoSefaz> {
         let mut corpo = self.corpo_base();
         corpo.extend(nfce_json(nota, csc));
@@ -1413,6 +1447,50 @@ mod testes {
     }
 
     /// A NF-e de venda a prazo do teste.
+    #[test]
+    fn a_svc_manda_a_contingencia_no_emitir_e_o_svc_no_status() {
+        let (url, tarefa) = servidor(
+            200,
+            r#"{"success":true,"status":"autorizado","codigoStatus":"107","motivoStatus":"Servico em Operacao"}"#,
+        );
+        let s = cliente(&url).status_da_svc(Uf::Sc).unwrap();
+        assert!(s.em_operacao);
+        let recebido = tarefa.join().unwrap();
+        assert!(recebido.starts_with("POST /nfe/status "), "{recebido}");
+        let corpo: Value = serde_json::from_str(recebido.rsplit('\n').next().unwrap()).unwrap();
+        assert_eq!(
+            (corpo["svc"].clone(), corpo["modelo"].clone()),
+            (json!(true), json!("55"))
+        );
+
+        let (url, tarefa) = servidor(
+            200,
+            r#"{"success":true,"status":"autorizado","codigoStatus":"100","motivoStatus":"Autorizado o uso da NF-e","chaveAcesso":"42261111222333000181550020000000516100000017","protocolo":"342260000000001"}"#,
+        );
+        let entrada = EntradaEmContingencia {
+            inicio: cardeal_kernel::Instante::de_micros(1_793_030_400_000_000),
+            justificativa: "SEFAZ indisponível para autorização: Erro de conexão".into(),
+            fuso: cardeal_kernel::Fuso::BRASILIA,
+            responsavel_tecnico: None,
+        };
+        let r = cliente(&url)
+            .emitir_nfe_em_svc(&nfe_a_prazo(), &entrada)
+            .unwrap();
+        assert_eq!(r.situacao, SituacaoRetorno::Autorizado);
+        let recebido = tarefa.join().unwrap();
+        assert!(recebido.starts_with("POST /nfe/emitir "), "{recebido}");
+        let corpo: Value = serde_json::from_str(recebido.rsplit('\n').next().unwrap()).unwrap();
+        assert_eq!(corpo["contingencia"]["dhCont"], "2026-10-26T13:00:00-03:00");
+        assert_eq!(
+            corpo["contingencia"]["xJust"],
+            "SEFAZ indisponível para autorização: Erro de conexão"
+        );
+        assert!(
+            corpo["destinatario"].is_object(),
+            "o resto é a NF-e de sempre"
+        );
+    }
+
     fn nfe_a_prazo() -> Nfe {
         use crate::emissao::{Destinatario, DocumentoConsumidor, IndicadorIe, MeioPagamento};
         let base = crate::emissao::exemplo();
