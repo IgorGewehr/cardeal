@@ -249,6 +249,7 @@ Regras (spec §5.3): só produto **sem perfil efetivo** (nem próprio nem herdad
 **Files:**
 - Create: componente `DecomposicaoDePreco` em `crates/cardeal-ui` (+ `examples/galeria.rs`)
 - Modify: aba Preços do estoque e a dica da peça na OS (clique abre o painel)
+- Modify: item do pedido de venda e do orçamento (`tela_vendas`, `tela_orcamentos`) e produto sem preço no PDV (`tela_pdv/estado.rs`): mesma sugestão e dica da Task 3, pela `escolher_sugestao` movida para um módulo compartilhado do desktop; no PDV só sugere, respeitando "preço sugerido obrigatório"
 - Create: consulta `estoque.tributacao_a_conferir.v1` + comandos `estoque.resolver_tributacao_a_conferir.v1` (confirmar) e `estoque.desfazer_tributacao_a_conferir.v1`; tela em lista (padrão `FaixaKpi` → `BarraFiltros` → `Grade.com_acoes()`)
 - Test: mod-estoque e testes da tela
 
