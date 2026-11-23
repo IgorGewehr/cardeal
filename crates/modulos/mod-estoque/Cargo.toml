@@ -29,6 +29,7 @@ completo = ["saldo", "custo_medio", "lote", "validade", "inventario", "transfere
 
 [dependencies]
 cardeal-kernel.workspace  = true
+cardeal-tributos.workspace = true
 cardeal-ledger = { path = "../../cardeal-ledger", default-features = false }
 cardeal-storage = { workspace = true, optional = true }
 cardeal-modkit = { path = "../../cardeal-modkit", default-features = false }

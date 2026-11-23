@@ -1090,6 +1090,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "cardeal-tributos"
+version = "0.2.0"
+dependencies = [
+ "cardeal-kernel",
+ "serde",
+]
+
+[[package]]
 name = "cardeal-ui"
 version = "0.2.0"
 dependencies = [
@@ -3223,6 +3231,7 @@ dependencies = [
  "cardeal-ledger",
  "cardeal-modkit",
  "cardeal-storage",
+ "cardeal-tributos",
  "cardeal-ui",
  "egui",
  "postcard",
