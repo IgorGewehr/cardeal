@@ -155,15 +155,21 @@ impl ApiFiscalHttp {
             let cliente = reqwest::blocking::Client::builder()
                 .timeout(config.tempo_limite)
                 .build()
-                .map_err(|_| ErroFiscal::ServicoIndisponivel)?;
+                .map_err(|_| ErroFiscal::ApiFiscalInalcancavel)?;
             let resposta = cliente
                 .post(&url)
                 .bearer_auth(config.token.expor())
                 .json(corpo)
                 .send()
                 .map_err(|e| {
-                    tracing::warn!(erro = %e, "sefaz-api não respondeu");
-                    ErroFiscal::ServicoIndisponivel
+                    tracing::warn!(erro = %e, conectou = !e.is_connect(), "sefaz-api não respondeu");
+                    // Sem a conexão (DNS, recusa, TLS, tempo para conectar), o pedido não saiu;
+                    // depois de conectar (tempo de resposta, queda), pode ter saído.
+                    if e.is_connect() {
+                        ErroFiscal::ApiFiscalInalcancavel
+                    } else {
+                        ErroFiscal::ServicoIndisponivel
+                    }
                 })?;
             let status = resposta.status().as_u16();
             let texto = resposta
@@ -732,6 +738,8 @@ fn interpretar_resposta<T: DeserializeOwned>(status: u16, texto: &str) -> Result
                 Err(ErroFiscal::ApiFiscalRecusou(m))
             }
         }
+        // 530: o Cloudflare sem o túnel até o sefaz-api (erro 1033) — o pedido não chegou a ele.
+        530 => Err(ErroFiscal::ApiFiscalInalcancavel),
         429 | 500..=599 => Err(ErroFiscal::ServicoIndisponivel),
         _ => Err(ErroFiscal::ApiFiscalRecusou(mensagem())),
     }
@@ -1308,8 +1316,8 @@ mod testes {
     }
 
     #[test]
-    fn api_fora_do_ar_e_servico_indisponivel() {
-        // Uma porta que ninguém escuta.
+    fn sem_conexao_e_inalcancavel_e_sem_resposta_e_indisponivel() {
+        // Uma porta que ninguém escuta: a conexão não se completa — o pedido não saiu.
         let porta = TcpListener::bind("127.0.0.1:0")
             .unwrap()
             .local_addr()
@@ -1318,7 +1326,38 @@ mod testes {
         let erro = cliente(&format!("http://127.0.0.1:{porta}"))
             .status_servico(Uf::Sc, ModeloFiscal::Nfe)
             .unwrap_err();
+        assert_eq!(erro.codigo, cardeal_kernel::CodigoErro::FISCAL_INALCANCAVEL);
+
+        // Conecta e não responde: o pedido pode ter saído — indisponível, não inalcançável.
+        let ouvinte = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", ouvinte.local_addr().unwrap());
+        let _segura = std::thread::spawn(move || {
+            let conexao = ouvinte.accept();
+            std::thread::sleep(std::time::Duration::from_secs(3));
+            drop(conexao);
+        });
+        let mut config = ConfigApiFiscal::nova(format!("{url}/"), "chave-de-teste");
+        config.tempo_limite = std::time::Duration::from_millis(500);
+        let erro = ApiFiscalHttp::novo(
+            Arc::new(config),
+            CertificadoA1 {
+                pfx: Segredo::novo(b"PFX".to_vec()),
+                senha: Segredo::novo("s3nha".into()),
+            },
+            AmbienteFiscal::Homologacao,
+        )
+        .status_servico(Uf::Sc, ModeloFiscal::Nfe)
+        .unwrap_err();
         assert_eq!(erro.codigo, cardeal_kernel::CodigoErro::FISCAL_INDISPONIVEL);
+    }
+
+    #[test]
+    fn o_tunel_fora_e_inalcancavel() {
+        // 530 do Cloudflare (túnel desconectado, 1033): o pedido não chegou ao sefaz-api.
+        let r: Result<RespostaSefazApi, _> = interpretar_resposta(530, "error code: 1033");
+        assert_eq!(r.unwrap_err(), ErroFiscal::ApiFiscalInalcancavel);
+        let r: Result<RespostaSefazApi, _> = interpretar_resposta(502, "Bad gateway");
+        assert_eq!(r.unwrap_err(), ErroFiscal::ServicoIndisponivel);
     }
 
     fn csc() -> Csc {
@@ -1338,6 +1377,7 @@ mod testes {
             inicio: cardeal_kernel::Instante::de_micros(1_793_030_400_000_000),
             justificativa: "SEFAZ indisponível: sem conexão com o webservice".into(),
             fuso: cardeal_kernel::Fuso::BRASILIA,
+            responsavel_tecnico: None,
         };
         let nota = cliente(&url)
             .preparar_nfce_em_contingencia(&crate::emissao::exemplo(), &csc(), &entrada)

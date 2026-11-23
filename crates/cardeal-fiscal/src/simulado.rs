@@ -39,6 +39,9 @@ pub struct FiscalSimulado {
     /// Quantas vezes a distribuição foi consultada.
     pub consultas_dfe: std::sync::atomic::AtomicUsize,
     fora_do_ar: std::sync::atomic::AtomicBool,
+    /// Sem conexão com a API (o caixa sem internet): tudo volta "inalcançável" — menos a
+    /// contingência, que a porta real monta e assina no próprio Cardeal.
+    sem_conexao: std::sync::atomic::AtomicBool,
     /// Retornos programados para as próximas emissões (o primeiro sai primeiro).
     programados: Mutex<std::collections::VecDeque<RetornoSefaz>>,
     /// O que cada chave "emitida" retorna na consulta.
@@ -185,9 +188,7 @@ impl FiscalSimulado {
         justificativa: &str,
         substituta: Option<&ChaveAcesso>,
     ) -> Resultado<RetornoSefaz> {
-        if self.fora_do_ar.load(std::sync::atomic::Ordering::SeqCst) {
-            return Err(Erro::de_dominio(&ErroFiscal::ServicoIndisponivel));
-        }
+        self.api_fora()?;
         if let Some(r) = self.sem_sefaz() {
             return Ok(r);
         }
@@ -250,9 +251,7 @@ impl FiscalSimulado {
     }
 
     fn inutilizar_numeros(&self, p: &PedidoInutilizacao) -> Resultado<RetornoSefaz> {
-        if self.fora_do_ar.load(std::sync::atomic::Ordering::SeqCst) {
-            return Err(Erro::de_dominio(&ErroFiscal::ServicoIndisponivel));
-        }
+        self.api_fora()?;
         if let Some(r) = travar(&self.programados).pop_front() {
             return Ok(r);
         }
@@ -318,7 +317,18 @@ impl FiscalSimulado {
             .store(fora, std::sync::atomic::Ordering::SeqCst);
     }
 
+    /// Tira a conexão com a API fiscal simulada (ou devolve): os pedidos voltam
+    /// [`ErroFiscal::ApiFiscalInalcancavel`]; a contingência continua sendo assinada (como a
+    /// porta real faz, no próprio Cardeal).
+    pub fn simular_sem_conexao(&self, sem: bool) {
+        self.sem_conexao
+            .store(sem, std::sync::atomic::Ordering::SeqCst);
+    }
+
     fn api_fora(&self) -> Resultado<()> {
+        if self.sem_conexao.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(Erro::de_dominio(&ErroFiscal::ApiFiscalInalcancavel));
+        }
         if self.fora_do_ar.load(std::sync::atomic::Ordering::SeqCst) {
             return Err(Erro::de_dominio(&ErroFiscal::ServicoIndisponivel));
         }
@@ -347,9 +357,7 @@ impl FiscalSimulado {
 
 impl PortaFiscal for FiscalSimulado {
     fn distribuicao_dfe(&self, _cnpj: &Cnpj, _uf: Uf, desde: Nsu) -> Resultado<PaginaDfe> {
-        if self.fora_do_ar.load(std::sync::atomic::Ordering::SeqCst) {
-            return Err(Erro::de_dominio(&ErroFiscal::ServicoIndisponivel));
-        }
+        self.api_fora()?;
         self.consultas_dfe
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let d = travar(&self.dfe);
@@ -388,9 +396,7 @@ impl PortaFiscal for FiscalSimulado {
         _uf: Uf,
         chave: &ChaveAcesso,
     ) -> Resultado<PaginaDfe> {
-        if self.fora_do_ar.load(std::sync::atomic::Ordering::SeqCst) {
-            return Err(Erro::de_dominio(&ErroFiscal::ServicoIndisponivel));
-        }
+        self.api_fora()?;
         let d = travar(&self.dfe);
         let completa = d
             .ciencias
@@ -422,9 +428,7 @@ impl PortaFiscal for FiscalSimulado {
         tipo: Manifestacao,
         _justificativa: Option<&str>,
     ) -> Resultado<RetornoSefaz> {
-        if self.fora_do_ar.load(std::sync::atomic::Ordering::SeqCst) {
-            return Err(Erro::de_dominio(&ErroFiscal::ServicoIndisponivel));
-        }
+        self.api_fora()?;
         if let Some(r) = travar(&self.programados).pop_front() {
             return Ok(r);
         }
@@ -672,7 +676,10 @@ impl PortaFiscal for FiscalSimulado {
         _csc: &Csc,
         entrada: &EntradaEmContingencia,
     ) -> Resultado<NotaEmContingencia> {
-        self.api_fora()?;
+        // Sem conexão, a porta real monta e assina a contingência no próprio Cardeal.
+        if !self.sem_conexao.load(std::sync::atomic::Ordering::SeqCst) {
+            self.api_fora()?;
+        }
         let n = self
             .contingencias
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -749,9 +756,7 @@ impl PortaFiscal for FiscalSimulado {
     }
 
     fn status_servico(&self, uf: Uf, modelo: ModeloFiscal) -> Resultado<StatusSefaz> {
-        if self.fora_do_ar.load(std::sync::atomic::Ordering::SeqCst) {
-            return Err(Erro::de_dominio(&ErroFiscal::ServicoIndisponivel));
-        }
+        self.api_fora()?;
         Ok(StatusSefaz {
             em_operacao: true,
             codigo: "107".into(),

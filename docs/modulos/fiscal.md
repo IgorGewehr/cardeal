@@ -139,7 +139,8 @@ pura (`decidir`):
 | Duplicidade 539 (a chave da nota que existe vem no motivo) / 204 | `Incerta` — conferir essa chave |
 | Consulta: não consta (217) | `Pendente` — emitir de novo, já (a de contingência, chave com `tpEmis` 9, volta a `Contingencia`: o mesmo XML) |
 | Consulta: 101/151/155 | `Cancelada` — com o protocolo da autorização e o XML do cancelamento (o `sefaz-api` dizia "autorizado" para o 101 até bc58e77) |
-| API fora do ar (sem quem assine) | continua `Pendente`, espera 30 s → 1, 2, 4, 8 → 15 min |
+| Sem conexão com a API (o caixa sem internet: a conexão nem se completou) | NFC-e: `Contingencia`, assinada no Cardeal (ADR-0021) — se nenhuma tentativa anterior ficou sem resposta; senão espera como abaixo |
+| API conectou e não respondeu | continua `Pendente`, espera 30 s → 1, 2, 4, 8 → 15 min |
 | Recusa do provedor/instalação (CNPJ, credencial, cofre) | `Rejeitada` com a mensagem |
 | Erro do emissor repetido 6 vezes | `Rejeitada` — não gira na fila para sempre |
 
@@ -344,8 +345,14 @@ Decisões:
   novo pede o cancelamento por substituição da original (evento 110112) — ainda não feito.
 - **Automática**, sem chave na tela: a contingência é o que a lei prevê para a SEFAZ fora, e a alternativa
   era o consumidor sair sem cupom fiscal. O `xJust` é o que a SEFAZ (ou a falta dela) respondeu.
-- **Sem internet nenhuma, nada muda**: a nota espera na fila. Assinar no Cardeal (XMLDSig, o XML inteiro
-  em Rust) seria trazer o `sefaz-api` para dentro — não vale enquanto o caso real é a SEFAZ fora.
+- ~~Sem internet nenhuma, nada muda~~ — **mudou em 2026-11-23 (ADR-0021)**: a NFC-e em contingência é
+  montada e assinada **no próprio Cardeal** (`montar_nfce_em_contingencia`, o mesmo XML do `sefaz-api`,
+  conferido contra ele e contra o XSD 4.00), local primeiro, sempre. Sem conexão com a API
+  (`FISCAL_INALCANCAVEL`: a conexão nem se completou — o pedido com certeza não saiu), a pendente vai em
+  contingência se nunca foi tentada ou se as tentativas anteriores também não saíram (código `SEMREDE`); a
+  que um dia conectou e ficou sem resposta espera a rede. Numa rodada sem conexão, as outras NFC-e
+  pendentes vão em contingência na hora, sem voltar à rede. O responsável técnico (`infRespTec`) sai da
+  última nota autorizada, ou de `CARDEAL_RESP_TEC_*`.
 - O prazo de **24 horas** é o mais estrito entre as UFs (o manual fala em "até o primeiro dia útil").
 
 **Substituição da nota sem resposta** (NT 2018.004; migração v9; `sefaz-api` 43c98f0; 2026-10-27). A nota

@@ -126,7 +126,7 @@ pub enum DestinoDaCarta {
 pub fn decidir_carta(desfecho: Desfecho) -> DestinoDaCarta {
     use cardeal_fiscal::SituacaoRetorno;
     let r = match desfecho {
-        Desfecho::Indisponivel(m) => return DestinoDaCarta::Esperar(m),
+        Desfecho::Indisponivel(m) | Desfecho::SemConexao(m) => return DestinoDaCarta::Esperar(m),
         Desfecho::Recusado(m) => return DestinoDaCarta::Recusada(m),
         Desfecho::Resposta(r) => r,
     };

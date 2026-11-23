@@ -12,11 +12,11 @@
 //!   passou;
 //! - o certificado é conferido no padrão ICP-Brasil antes de abrir a conexão.
 
-mod assinatura;
+pub(crate) mod assinatura;
 mod cliente;
 mod dps;
 mod porta;
-mod xml;
+pub(crate) mod xml;
 
 pub use porta::PortaComNfseNacional;
 
@@ -199,6 +199,17 @@ impl NfseNacional {
             })
             .as_ref()
             .map_err(Erro::de_dominio)
+    }
+
+    /// A chave do A1 (aberta uma vez), para o que o Cardeal assina sozinho — a NFC-e em
+    /// contingência local.
+    pub(crate) fn chave_de_assinatura(&self) -> Resultado<&ChaveDeAssinatura> {
+        self.abrir().map(|(chave, _)| chave)
+    }
+
+    /// O ambiente desta porta.
+    pub(crate) const fn ambiente(&self) -> AmbienteFiscal {
+        self.ambiente
     }
 
     /// Emite a NFS-e.

@@ -105,6 +105,8 @@ impl CodigoErro {
     pub const FISCAL_INDISPONIVEL: Self = Self(6101);
     /// A SEFAZ rejeitou o documento.
     pub const FISCAL_REJEITADO: Self = Self(6102);
+    /// A API fiscal não foi alcançada (sem conexão com ela): o pedido **com certeza** não saiu.
+    pub const FISCAL_INALCANCAVEL: Self = Self(6103);
     /// O TEF recusou a transação.
     pub const TEF_RECUSADO: Self = Self(6203);
     /// Periférico não respondeu.

@@ -39,6 +39,7 @@ mod dfe;
 mod emissao;
 mod erros;
 mod escrituracao;
+mod nfce_offline;
 mod nfe;
 mod nfse;
 pub mod nfse_nacional;
@@ -65,6 +66,7 @@ pub use emissao::{
 pub use emissao::{Destinatario, DevolucaoDoItem, IndicadorIe, Nfe};
 pub use erros::ErroFiscal;
 pub use escrituracao::{ler_para_escriturar, DocumentoXml, ItemXml, ParticipanteXml, TotaisXml};
+pub use nfce_offline::{montar_nfce_em_contingencia, ResponsavelTecnico, VARS_RESPONSAVEL_TECNICO};
 pub use nfe::{cfop_de_venda, descrever_cfop, ClassificacaoEntrada, FinalidadeNfe};
 pub use nfe::{interpretar, Duplicata, ItemNfe, NotaFiscalXml, TributosDaCompra};
 pub use nfse::{

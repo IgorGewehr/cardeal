@@ -27,6 +27,11 @@ pub enum ErroFiscal {
     #[error("A API fiscal não respondeu — confira a internet e tente de novo em instantes")]
     ServicoIndisponivel,
 
+    /// Nem a conexão com a API fiscal se completou (sem internet, DNS, recusa, o túnel fora):
+    /// o pedido **com certeza** não saiu — a NFC-e pode ir em contingência com o mesmo número.
+    #[error("Sem conexão com a API fiscal — confira a internet")]
+    ApiFiscalInalcancavel,
+
     /// A API fiscal recusou a chave de acesso (`CARDEAL_FISCAL_TOKEN`).
     #[error("A chave de acesso da API fiscal foi recusada — fale com o suporte")]
     CredencialDaApiFiscal,
@@ -48,6 +53,7 @@ impl ErroDominio for ErroFiscal {
             | Self::CertificadoInvalido(_)
             | Self::SenhaDoCertificadoIncorreta => CodigoErro::ENTRADA_INVALIDA,
             Self::ServicoIndisponivel => CodigoErro::FISCAL_INDISPONIVEL,
+            Self::ApiFiscalInalcancavel => CodigoErro::FISCAL_INALCANCAVEL,
             Self::CredencialDaApiFiscal => CodigoErro::CREDENCIAL_INVALIDA,
             Self::ApiFiscalRecusou(_) | Self::NaoSuportadoPeloProvedor(_) => {
                 CodigoErro::REGRA_VIOLADA

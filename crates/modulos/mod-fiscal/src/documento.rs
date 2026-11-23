@@ -431,6 +431,10 @@ pub enum Desfecho {
     Resposta(RetornoSefaz),
     /// A API não respondeu: tentar de novo depois.
     Indisponivel(String),
+    /// Nem a conexão com a API se completou (o caixa sem internet): o pedido **com certeza** não
+    /// saiu. Para o resto da fila é o mesmo que [`Self::Indisponivel`]; a NFC-e pendente vai em
+    /// contingência, assinada no próprio Cardeal (ADR-0021).
+    SemConexao(String),
     /// A API (ou a instalação) recusou o pedido: precisa de correção.
     Recusado(String),
 }
@@ -513,6 +517,16 @@ pub fn decidir(estado: EstadoDocumento, tentativas: u32, desfecho: Desfecho) -> 
     let r = match desfecho {
         Desfecho::Indisponivel(m) => {
             return Mudanca {
+                motivo: Some(m),
+                espera_segundos: espera(tentativas),
+                ..base(estado)
+            }
+        }
+        // O código marca que o pedido não saiu: a próxima tentativa sem rede pode ir em
+        // contingência (`pede_contingencia`).
+        Desfecho::SemConexao(m) => {
+            return Mudanca {
+                codigo: Some(CODIGO_SEM_CONEXAO.into()),
                 motivo: Some(m),
                 espera_segundos: espera(tentativas),
                 ..base(estado)
@@ -683,14 +697,33 @@ pub fn decidir(estado: EstadoDocumento, tentativas: u32, desfecho: Desfecho) -> 
     }
 }
 
-/// Se a emissão de uma nota pendente pede a contingência: a SEFAZ está fora e a nota **com
-/// certeza** não chegou a ela (paralisada, ou o provedor diz que não enviou) — o número
-/// continua livre. A API respondeu, então pode assinar. A API fora do ar não: sem ela não há
-/// quem assine.
+/// O código gravado quando a tentativa morreu antes de conectar à API (o pedido não saiu).
+pub const CODIGO_SEM_CONEXAO: &str = "SEMREDE";
+
+/// Se a emissão de uma nota pendente pede a contingência: a nota **com certeza** não chegou à
+/// SEFAZ e o número continua livre —
+/// - a SEFAZ está fora (paralisada, ou o provedor diz que não enviou); ou
+/// - nem a conexão com a API se completou (o caixa sem internet) **e** nenhuma tentativa
+///   anterior ficou sem resposta: a que conectou e não respondeu (`codigo_anterior` vazio
+///   depois de tentar) pode ter levado a nota à SEFAZ, e outra com o mesmo número em
+///   contingência seria duplicidade. Essa espera a rede.
+///
+/// Quem assina é o próprio Cardeal (ADR-0021).
 #[must_use]
-pub fn pede_contingencia(estado: EstadoDocumento, desfecho: &Desfecho) -> bool {
+pub fn pede_contingencia(
+    estado: EstadoDocumento,
+    tentativas: u32,
+    codigo_anterior: Option<&str>,
+    desfecho: &Desfecho,
+) -> bool {
     estado == EstadoDocumento::Pendente
-        && matches!(desfecho, Desfecho::Resposta(r) if r.sefaz_fora())
+        && match desfecho {
+            Desfecho::Resposta(r) => r.sefaz_fora(),
+            Desfecho::SemConexao(_) => {
+                tentativas == 0 || codigo_anterior.is_some_and(|c| !c.is_empty())
+            }
+            Desfecho::Indisponivel(_) | Desfecho::Recusado(_) => false,
+        }
 }
 
 /// A justificativa da entrada em contingência (`xJust`, de 15 a 256 caracteres): o que a
@@ -853,7 +886,7 @@ pub fn decidir_evento(
         ),
     };
     let r = match desfecho {
-        Desfecho::Indisponivel(m) => {
+        Desfecho::Indisponivel(m) | Desfecho::SemConexao(m) => {
             return Mudanca {
                 motivo: Some(m),
                 espera_segundos: espera(tentativas),
@@ -960,7 +993,7 @@ pub enum Busca {
 #[must_use]
 pub fn decidir_busca(desfecho: Desfecho) -> Busca {
     let r = match desfecho {
-        Desfecho::Indisponivel(_) => {
+        Desfecho::Indisponivel(_) | Desfecho::SemConexao(_) => {
             return Busca::TentarDeNovo {
                 espera_segundos: ESPERA_DA_BUSCA_SEM_API,
                 gasta: false,
@@ -1268,16 +1301,39 @@ mod testes {
     #[test]
     fn so_a_nota_que_nao_chegou_a_sefaz_vai_em_contingencia() {
         use EstadoDocumento::{Incerta, Pendente};
-        assert!(pede_contingencia(Pendente, &fora("ERR", true)));
-        assert!(pede_contingencia(Pendente, &fora("108", false)));
+        assert!(pede_contingencia(Pendente, 0, None, &fora("ERR", true)));
+        assert!(pede_contingencia(Pendente, 0, None, &fora("108", false)));
         // Pode ter chegado (timeout depois do envio): consulta, não contingência.
-        assert!(!pede_contingencia(Pendente, &fora("ERR", false)));
-        // Sem a API não há quem assine; e a incerta, nunca.
+        assert!(!pede_contingencia(Pendente, 0, None, &fora("ERR", false)));
+        // A API que conectou e não respondeu: pode ter levado a nota — espera; e a incerta, nunca.
         assert!(!pede_contingencia(
             Pendente,
+            0,
+            None,
             &Desfecho::Indisponivel("x".into())
         ));
-        assert!(!pede_contingencia(Incerta, &fora("ERR", true)));
+        assert!(!pede_contingencia(Incerta, 0, None, &fora("ERR", true)));
+
+        // Sem conexão com a API (o caixa sem internet): o pedido não saiu — contingência local.
+        let sem = Desfecho::SemConexao("sem internet".into());
+        assert!(pede_contingencia(Pendente, 0, None, &sem));
+        assert!(
+            pede_contingencia(Pendente, 3, Some(CODIGO_SEM_CONEXAO), &sem),
+            "as tentativas anteriores também não saíram"
+        );
+        assert!(
+            pede_contingencia(Pendente, 1, Some("217"), &sem),
+            "a SEFAZ disse que não tem"
+        );
+        assert!(
+            !pede_contingencia(Pendente, 2, None, &sem),
+            "uma tentativa anterior conectou e ficou sem resposta: pode ter chegado"
+        );
+        assert!(!pede_contingencia(Incerta, 0, None, &sem));
+        // A espera sem conexão grava o código que diz que o pedido não saiu.
+        let m = decidir(Pendente, 0, sem);
+        assert_eq!(m.estado, Pendente);
+        assert_eq!(m.codigo.as_deref(), Some(CODIGO_SEM_CONEXAO));
         // A pendente que não foi em contingência (a assinatura falhou) espera, sem virar
         // rejeitada — e sem gastar as tentativas de erro.
         let m = decidir(Pendente, TENTATIVAS_COM_ERRO, fora("ERR", true));

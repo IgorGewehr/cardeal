@@ -938,7 +938,14 @@ pub(crate) mod sqlite {
                     adiar(x, &n.chave, motivo, true)?;
                     return Ok(Parar::Nao);
                 }
-                Err(e) if e.codigo == CodigoErro::FISCAL_INDISPONIVEL => return Ok(Parar::Sim),
+                Err(e)
+                    if matches!(
+                        e.codigo,
+                        CodigoErro::FISCAL_INDISPONIVEL | CodigoErro::FISCAL_INALCANCAVEL
+                    ) =>
+                {
+                    return Ok(Parar::Sim)
+                }
                 Err(e) => {
                     adiar(x, &n.chave, e.mensagem, true)?;
                     return Ok(Parar::Nao);
@@ -959,7 +966,14 @@ pub(crate) mod sqlite {
                 }
                 Ok(Parar::Nao)
             }
-            Err(e) if e.codigo == CodigoErro::FISCAL_INDISPONIVEL => Ok(Parar::Sim),
+            Err(e)
+                if matches!(
+                    e.codigo,
+                    CodigoErro::FISCAL_INDISPONIVEL | CodigoErro::FISCAL_INALCANCAVEL
+                ) =>
+            {
+                Ok(Parar::Sim)
+            }
             Err(e) => {
                 adiar(x, &n.chave, e.mensagem, false)?;
                 Ok(Parar::Nao)

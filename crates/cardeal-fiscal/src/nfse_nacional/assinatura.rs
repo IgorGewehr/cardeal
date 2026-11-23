@@ -38,6 +38,23 @@ pub(crate) fn assinar_enveloped(
     id: &str,
     chave: &ChaveDeAssinatura,
 ) -> Result<String, ErroFiscal> {
+    assinar_enveloped_com(raiz, ns, atributos_da_raiz, grupo, "", id, chave)
+}
+
+/// Como [`assinar_enveloped`], com `depois_do_grupo` entre o grupo assinado e a `Signature`
+/// — fora da assinatura (o `infNFeSupl` da NFC-e, com o QR Code).
+///
+/// # Errors
+/// [`ErroFiscal::CertificadoInvalido`] se a operação RSA falhar.
+pub(crate) fn assinar_enveloped_com(
+    raiz: &str,
+    ns: &str,
+    atributos_da_raiz: &[(&str, &str)],
+    grupo: &str,
+    depois_do_grupo: &str,
+    id: &str,
+    chave: &ChaveDeAssinatura,
+) -> Result<String, ErroFiscal> {
     let b64 = base64::engine::general_purpose::STANDARD;
     let canonico = com_namespace(grupo, ns);
     let resumo = b64.encode(Sha1::digest(canonico.as_bytes()));
@@ -65,7 +82,7 @@ pub(crate) fn assinar_enveloped(
         let _ = write!(abertura, " {k}=\"{v}\"");
     }
     Ok(format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>{abertura}>{grupo}\
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>{abertura}>{grupo}{depois_do_grupo}\
          <Signature xmlns=\"{NS_DSIG}\">{}<SignatureValue>{valor}</SignatureValue>\
          <KeyInfo><X509Data><X509Certificate>{certificado}</X509Certificate></X509Data></KeyInfo>\
          </Signature></{raiz}>",

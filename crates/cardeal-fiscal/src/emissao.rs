@@ -497,6 +497,9 @@ pub struct EntradaEmContingencia {
     pub justificativa: String,
     /// O fuso da empresa (o `dhCont` vai com o deslocamento).
     pub fuso: Fuso,
+    /// O responsável técnico (`infRespTec`) para a nota montada no próprio Cardeal — o da
+    /// última nota autorizada da empresa, ou o das variáveis. Sem ele, só o `sefaz-api` assina.
+    pub responsavel_tecnico: Option<crate::nfce_offline::ResponsavelTecnico>,
 }
 
 /// A NFC-e assinada em contingência: a chave (com `tpEmis = 9`) e o XML com o QR Code — o que

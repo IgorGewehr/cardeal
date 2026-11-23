@@ -1251,6 +1251,93 @@ fn sefaz_fora_a_nota_sai_em_contingencia_e_e_transmitida_quando_ela_volta() {
 }
 
 #[test]
+fn sem_internet_a_nfce_sai_em_contingencia_assinada_no_cardeal_e_vai_quando_a_rede_volta() {
+    let m = Mundo::novo();
+    let cen = m.cenario();
+    m.configurar(1);
+    m.sim.simular_sem_conexao(true);
+
+    // O caixa sem internet: nem a API é alcançada — o pedido com certeza não saiu, então as
+    // duas vendas saem em contingência numa rodada só, sem tentar a rede de novo.
+    let a = m.emitir(m.vender(&cen, cen.produto, 1, false));
+    let b = m.emitir(m.vender(&cen, cen.produto, 2, false));
+    let resumo = m.transmitir();
+    assert!(resumo.contains("2 em contingência"), "{resumo}");
+    for doc in [&a, &b] {
+        let d = m.documento(doc.id);
+        assert_eq!(d.resumo.estado, EstadoDocumento::Contingencia);
+        assert_eq!(&d.resumo.chave.as_deref().unwrap()[34..35], "9");
+        assert_eq!(d.resumo.numero, doc.numero, "o mesmo número");
+        let xml = d.xml_assinado.expect("a nota assinada, para o DANFCE");
+        assert!(
+            xml.contains("<xJust>SEFAZ indisponível para autorização: sem conexão com a internet"),
+            "{xml}"
+        );
+    }
+    assert_eq!(
+        m.sim
+            .contingencias
+            .load(std::sync::atomic::Ordering::SeqCst),
+        2
+    );
+
+    // Ainda sem rede, a transmissão espera, sem gastar nada.
+    m.tentar_ja();
+    m.transmitir();
+    assert_eq!(
+        m.documento(a.id).resumo.estado,
+        EstadoDocumento::Contingencia
+    );
+
+    // A rede volta: o mesmo XML vai e é autorizado.
+    m.sim.simular_sem_conexao(false);
+    m.tentar_ja();
+    assert!(m.transmitir().starts_with("2 autorizada"));
+    assert_eq!(m.documento(b.id).resumo.estado, EstadoDocumento::Autorizada);
+}
+
+#[test]
+fn a_nota_que_ficou_sem_resposta_nao_vai_em_contingencia_sem_internet() {
+    let m = Mundo::novo();
+    let cen = m.cenario();
+    m.configurar(1);
+
+    // A API conectou e não respondeu: a nota pode ter chegado à SEFAZ.
+    m.sim.simular_fora_do_ar(true);
+    let doc = m.emitir(m.vender(&cen, cen.produto, 1, false));
+    m.transmitir();
+    assert_eq!(m.documento(doc.id).resumo.estado, EstadoDocumento::Pendente);
+
+    // Depois, sem internet: outra nota com o mesmo número em contingência seria duplicidade —
+    // esta espera a rede. Uma venda nova, que nunca saiu, vai em contingência.
+    m.sim.simular_fora_do_ar(false);
+    m.sim.simular_sem_conexao(true);
+    let nova = m.emitir(m.vender(&cen, cen.produto, 2, false));
+    m.tentar_ja();
+    m.transmitir();
+    assert_eq!(m.documento(doc.id).resumo.estado, EstadoDocumento::Pendente);
+    assert_eq!(
+        m.documento(nova.id).resumo.estado,
+        EstadoDocumento::Contingencia
+    );
+    assert_eq!(
+        m.sim
+            .contingencias
+            .load(std::sync::atomic::Ordering::SeqCst),
+        1
+    );
+
+    // A rede volta: a que esperou é emitida normalmente.
+    m.sim.simular_sem_conexao(false);
+    m.tentar_ja();
+    m.transmitir();
+    assert_eq!(
+        m.documento(doc.id).resumo.estado,
+        EstadoDocumento::Autorizada
+    );
+}
+
+#[test]
 fn cada_caixa_numera_na_sua_serie() {
     use mod_fiscal::{DefinirSerieDoTerminal, SeriesDosTerminais};
     let m = Mundo::novo();

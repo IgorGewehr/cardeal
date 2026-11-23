@@ -3,7 +3,8 @@
 //! nacional) segue para a porta de base (o `sefaz-api`). Sem a chave do `sefaz-api`, a NFS-e
 //! nacional funciona mesmo assim — o resto responde o erro da base.
 
-use cardeal_kernel::{Cnpj, Erro, Resultado, Uf};
+use cardeal_kernel::{Cnpj, Erro, Instante, Resultado, Uf};
+use rand::Rng as _;
 
 use super::{emite_pela_sefin_nacional, NfseNacional};
 use crate::chave::ChaveAcesso;
@@ -11,6 +12,7 @@ use crate::dfe::{Manifestacao, PaginaDfe};
 use crate::emissao::{
     Csc, EntradaEmContingencia, Nfce, Nfe, NotaEmContingencia, PedidoInutilizacao, RetornoSefaz,
 };
+use crate::nfce_offline::montar_nfce_em_contingencia;
 use crate::porta::{ModeloFiscal, Nsu, PortaFiscal, StatusSefaz};
 use crate::{CancelamentoNfse, Emitente, Nfse, RetornoNfse};
 
@@ -155,14 +157,48 @@ impl PortaFiscal for PortaComNfseNacional {
             .cancelar_por_substituicao(chave, protocolo, justificativa, uf, substituta)
     }
 
+    /// A NFC-e em contingência é montada e assinada **aqui** (ADR-0021) — sem depender de rede:
+    /// é o caso do caixa sem internet. Só sem o responsável técnico, ou com o que a montagem
+    /// local não cobre, ela vai ao `sefaz-api` (o `/contingencia/prepare`, o mesmo XML).
     fn preparar_nfce_em_contingencia(
         &self,
         nota: &Nfce,
         csc: &Csc,
         entrada: &EntradaEmContingencia,
     ) -> Resultado<NotaEmContingencia> {
-        self.base()?
-            .preparar_nfce_em_contingencia(nota, csc, entrada)
+        let local = match &entrada.responsavel_tecnico {
+            Some(responsavel) => self.nacional.chave_de_assinatura().and_then(|chave| {
+                montar_nfce_em_contingencia(
+                    nota,
+                    entrada,
+                    self.nacional.ambiente(),
+                    responsavel,
+                    chave,
+                    Instante::agora(),
+                    rand::thread_rng().gen_range(10_000_000..100_000_000),
+                )
+                .map_err(|e| Erro::de_dominio(&e))
+            }),
+            None => Err(Erro::de_dominio(&crate::ErroFiscal::ApiFiscalRecusou(
+                "sem o responsável técnico (nenhuma nota autorizada ainda, nem CARDEAL_RESP_TEC_*)"
+                    .into(),
+            ))),
+        };
+        match local {
+            Ok(n) => Ok(n),
+            Err(motivo) => {
+                tracing::warn!(motivo = %motivo.mensagem, "contingência local não saiu; pedindo ao sefaz-api");
+                self.base()
+                    .map_err(|_| motivo.clone())?
+                    .preparar_nfce_em_contingencia(nota, csc, entrada)
+                    .map_err(|e| {
+                        Erro::novo(
+                            e.codigo,
+                            format!("{} (e a local: {})", e.mensagem, motivo.mensagem),
+                        )
+                    })
+            }
+        }
     }
 
     fn transmitir_nfce_em_contingencia(

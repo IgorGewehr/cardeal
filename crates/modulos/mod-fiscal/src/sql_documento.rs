@@ -468,6 +468,8 @@ pub(crate) struct NaFila {
     pub substitui: Option<Id>,
     /// A substituta desta.
     pub substituida_por: Option<Id>,
+    /// O código da última tentativa (`None` quando a API conectou e não respondeu).
+    pub codigo: Option<String>,
 }
 
 /// Os pendentes, os incertos, os pedidos e as buscas de XML cuja hora chegou, os mais antigos
@@ -482,7 +484,7 @@ pub(crate) fn fila(
         .prepare(
             "SELECT id, estado, tentativas, chave, nota, ambiente, pedido, justificativa, protocolo,
                     serie, numero, criado_em, anulada, xml_assinado, xml_a_buscar, origem_id,
-                    origem_modulo, total, substitui, substituida_por, modelo
+                    origem_modulo, total, substitui, substituida_por, modelo, codigo
              FROM fiscal_documento
              WHERE empresa = ?1
                AND (estado IN ('Pendente','Incerta','Contingencia') OR pedido IS NOT NULL
@@ -529,6 +531,7 @@ pub(crate) fn fila(
                     } else {
                         ModeloFiscal::Nfce
                     },
+                    codigo: r.get(21)?,
                 })
             },
         )
@@ -536,6 +539,20 @@ pub(crate) fn fila(
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(falha);
     linhas
+}
+
+/// O XML da última nota autorizada da empresa (de onde sai o responsável técnico da
+/// contingência local).
+pub(crate) fn ultimo_xml_autorizado(c: &Connection, empresa: Id) -> Resultado<Option<String>> {
+    c.query_row(
+        "SELECT xml FROM fiscal_documento
+         WHERE empresa = ?1 AND estado = 'Autorizada' AND xml IS NOT NULL
+         ORDER BY autorizado_em DESC LIMIT 1",
+        params![empresa.em_bytes().as_slice()],
+        |r| r.get(0),
+    )
+    .optional()
+    .map_err(falha)
 }
 
 /// Grava o resultado de uma tentativa — só se o documento ainda está no estado em que foi lido

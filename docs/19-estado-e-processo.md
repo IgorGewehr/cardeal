@@ -844,6 +844,19 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   `feriados`, `prorrogar`/`antecipar`/`dia_util`/`ultimo_dia_util`, `obrigacoes_do_mes` por regime,
   `ObrigacoesDoMes` com as do Cardeal); desktop: o cartão "Obrigações" na Visão geral
   (`tela_financeiro/obrigacoes.rs`).
+- **NFC-e em contingência assinada pelo Cardeal (2026-11-23, ADR-0021, fiscal.md §7):** `cardeal-fiscal`:
+  `nfce_offline.rs` (`montar_nfce_em_contingencia`: chave `tpEmis` 9, `infNFe` na ordem do XSD 4.00, QR v3
+  off-line assinado, `ResponsavelTecnico` da última autorizada ou de `CARDEAL_RESP_TEC_*`), o
+  `assinar_enveloped_com` (o `infNFeSupl` fora da assinatura), `ErroFiscal::ApiFiscalInalcancavel` /
+  `CodigoErro::FISCAL_INALCANCAVEL` (`reqwest` `is_connect`, 530 do Cloudflare), a `PortaComNfseNacional`
+  monta a contingência local primeiro; o `FiscalSimulado::simular_sem_conexao`; os XSD da NF-e em
+  `tests/dados/nfe_xsd`. `mod-fiscal`: `Desfecho::SemConexao`, `pede_contingencia` com a regra da tentativa
+  anterior (código `SEMREDE`), a rodada sem conexão não volta à rede, `ultimo_xml_autorizado`.
+  `sefaz-api` c1b8744/adcddc6 (no ar em c1b8744): NFref no fim do `<ide>`, PIS/COFINS Outr completos, SVC-AN no
+  `sefazvirtual`, a contingência SVC da NF-e (tpEmis 6/7). **Não repetir:** conferir a NFC-e local só pelo
+  XSD — o teste ignorado `exportar_para_conferir_com_o_sefaz_api` gera os pedidos para comparar com o montador
+  do `sefaz-api` (deu idêntico, menos o `verProc`); ir em contingência depois de uma tentativa que conectou
+  e não respondeu (duplicidade).
 - **NFS-e nacional emitida pelo Cardeal (2026-11-23, ADR-0020, fiscal.md §7):** `cardeal-fiscal`:
   `nfse_nacional/` (`xml.rs` escritor canônico e limpeza do texto para o XSD; `dps.rs` `montar_dps` nos
   leiautes 1.01 vigente e NT 009, `montar_cancelamento`, `id_dps`; `assinatura.rs` XMLDSig enveloped

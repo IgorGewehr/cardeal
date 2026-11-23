@@ -451,3 +451,54 @@ fn a_emissao_recua_um_minuto_sem_mudar_de_dia() {
     );
     assert_eq!(recuar_um_minuto(meia_noite), meia_noite);
 }
+
+#[test]
+fn a_porta_monta_a_nfce_em_contingencia_sem_o_sefaz_api() {
+    use crate::emissao::{exemplo, Csc, EntradaEmContingencia};
+    use crate::nfce_offline::ResponsavelTecnico;
+    use crate::porta::PortaFiscal;
+    use crate::sefaz_api::CertificadoA1;
+    use cardeal_storage::Segredo;
+
+    let pfx = std::fs::read(dados().join("aes256.pfx")).unwrap();
+    let certificado = CertificadoA1 {
+        pfx: Segredo::novo(pfx),
+        senha: Segredo::novo(SENHA.to_owned()),
+    };
+    // Sem sefaz-api nenhum (a base é o erro de "não configurado").
+    let porta = PortaComNfseNacional::nova(
+        Err(Erro::novo(
+            cardeal_kernel::CodigoErro::FISCAL_INDISPONIVEL,
+            "sem a API",
+        )),
+        NfseNacional::novo(certificado, AmbienteFiscal::Homologacao),
+    );
+    let csc = Csc {
+        id: "1".into(),
+        token: Segredo::novo("x".to_owned()),
+    };
+    let mut entrada = EntradaEmContingencia {
+        inicio: instante(),
+        justificativa: "SEFAZ indisponivel para autorizacao: sem conexao com a internet".into(),
+        fuso: Fuso::BRASILIA,
+        responsavel_tecnico: ResponsavelTecnico::novo(
+            "11222333000181",
+            "Fulano de Tal",
+            "suporte@exemplo.com.br",
+            "51999990000",
+        ),
+    };
+    let n = porta
+        .preparar_nfce_em_contingencia(&exemplo(), &csc, &entrada)
+        .unwrap();
+    assert_eq!(&n.chave[34..35], "9");
+    assert!(n.xml.contains("<tpEmis>9</tpEmis>") && n.xml.contains("<verProc>Cardeal "));
+    assert!(n.xml.contains("<infNFeSupl><qrCode>") && n.xml.contains("<SignatureValue>"));
+
+    // Sem o responsável técnico a montagem local não sai — e sem o sefaz-api, o motivo volta.
+    entrada.responsavel_tecnico = None;
+    let e = porta
+        .preparar_nfce_em_contingencia(&exemplo(), &csc, &entrada)
+        .unwrap_err();
+    assert!(e.mensagem.contains("responsável técnico"), "{}", e.mensagem);
+}

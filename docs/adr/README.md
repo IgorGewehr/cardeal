@@ -34,6 +34,7 @@ deliberadamente honestas — um ADR sem trade-off real não está fazendo seu tr
 | [0018](0018-formacao-de-preco-por-markup-divisor.md) | Formação de preço por markup divisor, com carga tributária e custo operacional lidos do sistema | Aceita | 2026-10-09 |
 | [0019](0019-sefaz-api-como-provedor-e-cofre-do-certificado.md) | O `sefaz-api` é o provedor fiscal; o certificado A1 mora cifrado no cofre da instalação | Aceita | 2026-10-14 |
 | [0020](0020-nfse-nacional-emitida-pelo-cardeal.md) | A NFS-e do padrão nacional é emitida pelo próprio Cardeal, direto na Sefin Nacional | Aceita | 2026-11-23 |
+| [0021](0021-nfce-em-contingencia-assinada-pelo-cardeal.md) | A NFC-e em contingência é montada e assinada pelo próprio Cardeal | Aceita | 2026-11-23 |
 
 ## Como usar
 

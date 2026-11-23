@@ -1015,6 +1015,12 @@ pub(crate) mod sqlite {
         let cnpj = t.ler(|c| {
             Ok(cardeal_kernel::Cnpj::novo(&mod_empresa::sql::dados(c, empresa)?.cnpj).ok())
         })?;
+        // O da última nota autorizada (o sefaz-api a montou), ou o das variáveis.
+        let responsavel = t
+            .ler(|c| sqld::ultimo_xml_autorizado(c, empresa))?
+            .as_deref()
+            .and_then(cardeal_fiscal::ResponsavelTecnico::do_xml)
+            .or_else(cardeal_fiscal::ResponsavelTecnico::do_ambiente);
         let mut rodada = Rodada::default();
         for doc in fila {
             let Some(porta) = portas.get(&doc.ambiente) else {
@@ -1025,6 +1031,7 @@ pub(crate) mod sqlite {
                 csc: csc.as_ref(),
                 uf,
                 cnpj,
+                responsavel: responsavel.as_ref(),
             };
             if processar(t, &ctx, doc, &mut rodada)? {
                 return Ok(resumo_da_rodada(&rodada));
@@ -1138,7 +1145,10 @@ pub(crate) mod sqlite {
             },
             _ => Desfecho::Recusado("a nota não tem chave, ou a empresa não tem a UF".into()),
         };
-        let parar = matches!(desfecho, Desfecho::Indisponivel(_));
+        let parar = matches!(
+            desfecho,
+            Desfecho::Indisponivel(_) | Desfecho::SemConexao(_)
+        );
         let destino = decidir_carta(desfecho);
         match destino {
             DestinoDaCarta::Registrada { .. } => rodada.cartas.0 += 1,
@@ -1171,6 +1181,9 @@ pub(crate) mod sqlite {
         cartas: (u32, u32),
         /// NFS-e autorizadas, recusadas e canceladas.
         nfse: (u32, u32, u32),
+        /// A conexão com a API não se completou nesta rodada (o motivo): o resto da fila não
+        /// tenta a rede de novo — a NFC-e pendente vai direto para a contingência local.
+        sem_conexao: Option<String>,
     }
 
     /// O que vale para a rodada inteira.
@@ -1179,6 +1192,8 @@ pub(crate) mod sqlite {
         csc: Option<&'a Csc>,
         uf: Option<Uf>,
         cnpj: Option<cardeal_kernel::Cnpj>,
+        /// O responsável técnico da contingência montada no próprio Cardeal.
+        responsavel: Option<&'a cardeal_fiscal::ResponsavelTecnico>,
     }
 
     /// Leva um documento à SEFAZ e grava o que veio. Devolve se a rodada para (a API não
@@ -1314,9 +1329,14 @@ pub(crate) mod sqlite {
         substituta: Option<&str>,
         rodada: &mut Rodada,
     ) -> (Mudanca, bool, bool) {
+        let sem_rede = rodada.sem_conexao.clone().map(Desfecho::SemConexao);
         if let Some(pedido) = doc.pedido {
-            let desfecho =
-                desfecho_do_pedido(x.porta, pedido, doc, x.uf, x.cnpj, t.ctx.fuso, substituta);
+            let desfecho = sem_rede.unwrap_or_else(|| {
+                desfecho_do_pedido(x.porta, pedido, doc, x.uf, x.cnpj, t.ctx.fuso, substituta)
+            });
+            if let Desfecho::SemConexao(m) = &desfecho {
+                rodada.sem_conexao = Some(m.clone());
+            }
             let parar = matches!(desfecho, Desfecho::Indisponivel(_));
             (
                 mudanca_do_pedido(pedido, doc, desfecho, &mut rodada.eventos),
@@ -1327,10 +1347,17 @@ pub(crate) mod sqlite {
             // A substituta sai sempre em contingência: a SEFAZ exige `tpEmis` 9 no 110112.
             (contingencia_da_substituta(x, doc, t.ctx.fuso), false, true)
         } else {
-            let desfecho = desfecho_da_emissao(x.porta, doc, x.csc, x.uf);
+            // Sem conexão já nesta rodada, nada vai à rede: o pedido com certeza não sai.
+            let desfecho =
+                sem_rede.unwrap_or_else(|| desfecho_da_emissao(x.porta, doc, x.csc, x.uf));
+            if let Desfecho::SemConexao(m) = &desfecho {
+                rodada.sem_conexao = Some(m.clone());
+            }
+            // Sem conexão a rodada segue (sem rede): as outras NFC-e pendentes vão em
+            // contingência já, e o resto espera.
             let parar = matches!(desfecho, Desfecho::Indisponivel(_));
             let api_respondeu = matches!(desfecho, Desfecho::Resposta(_));
-            let mut m = mudanca_da_emissao(x.porta, doc, x.csc, desfecho, t.ctx.fuso);
+            let mut m = mudanca_da_emissao(x, doc, desfecho, t.ctx.fuso);
             if doc.substituida_por.is_some() {
                 m = nao_reemitir(m);
             }
@@ -1407,7 +1434,7 @@ pub(crate) mod sqlite {
             // "Não chegou": sem a assinatura, a pendente espera em vez de virar rejeitada.
             nao_enviado: true,
         };
-        contingencia(x.porta, doc, x.csc, Desfecho::Resposta(r), fuso)
+        contingencia(x, doc, Desfecho::Resposta(r), fuso)
     }
 
     /// O que gravar depois de levar um pedido (cancelar, inutilizar) — e a conta da rodada:
@@ -1431,15 +1458,16 @@ pub(crate) mod sqlite {
     /// O que gravar depois de emitir, transmitir ou consultar: a decisão — ou, quando a SEFAZ
     /// está fora e a nota não chegou a ela, a contingência, já.
     fn mudanca_da_emissao(
-        porta: &dyn PortaFiscal,
+        x: &Contexto<'_>,
         doc: &sqld::NaFila,
-        csc: Option<&Csc>,
         desfecho: Desfecho,
         fuso: cardeal_kernel::Fuso,
     ) -> Mudanca {
         // A contingência off-line é da NFC-e (a da NF-e é outra, a SVC).
-        if doc.modelo == ModeloFiscal::Nfce && pede_contingencia(doc.estado, &desfecho) {
-            contingencia(porta, doc, csc, desfecho, fuso)
+        if doc.modelo == ModeloFiscal::Nfce
+            && pede_contingencia(doc.estado, doc.tentativas, doc.codigo.as_deref(), &desfecho)
+        {
+            contingencia(x, doc, desfecho, fuso)
         } else {
             decidir(doc.estado, doc.tentativas, desfecho)
         }
@@ -1448,19 +1476,27 @@ pub(crate) mod sqlite {
     /// Assina em contingência a nota pendente que a SEFAZ fora não recebeu. Se a assinatura
     /// falha, a nota espera como pendente — com o motivo dos dois.
     fn contingencia(
-        porta: &dyn PortaFiscal,
+        x: &Contexto<'_>,
         doc: &sqld::NaFila,
-        csc: Option<&Csc>,
         desfecho: Desfecho,
         fuso: cardeal_kernel::Fuso,
     ) -> Mudanca {
-        let assinada = match (&desfecho, &doc.nota, csc) {
-            (Desfecho::Resposta(r), Some(blob), Some(csc)) => {
+        // Sem conexão, o "retorno" é o da falta dela (não enviado, sem código da SEFAZ).
+        let sem_conexao = match &desfecho {
+            Desfecho::SemConexao(m) => Some(sem_conexao_como_retorno(m)),
+            _ => None,
+        };
+        let retorno = match (&desfecho, &sem_conexao) {
+            (Desfecho::Resposta(r), _) | (_, Some(r)) => Some(r),
+            _ => None,
+        };
+        let assinada = match (retorno, &doc.nota, x.csc) {
+            (Some(r), Some(blob), Some(csc)) => {
                 let inicio = Instante::agora();
                 postcard::from_bytes::<Nfce>(blob)
                     .map_err(|e| e.to_string())
                     .and_then(|nota| {
-                        porta
+                        x.porta
                             .preparar_nfce_em_contingencia(
                                 &nota,
                                 csc,
@@ -1468,6 +1504,7 @@ pub(crate) mod sqlite {
                                     inicio,
                                     justificativa: justificativa_da_contingencia(r),
                                     fuso,
+                                    responsavel_tecnico: x.responsavel.cloned(),
                                 },
                             )
                             .map_err(|e| e.mensagem)
@@ -1687,11 +1724,31 @@ pub(crate) mod sqlite {
         }
     }
 
+    /// A falta de conexão como o retorno que a contingência registra (o pedido não saiu).
+    fn sem_conexao_como_retorno(motivo: &str) -> cardeal_fiscal::RetornoSefaz {
+        cardeal_fiscal::RetornoSefaz {
+            situacao: cardeal_fiscal::SituacaoRetorno::Erro,
+            codigo: crate::documento::CODIGO_SEM_CONEXAO.into(),
+            motivo: format!("sem conexão com a internet ({motivo})"),
+            chave: None,
+            protocolo: None,
+            recebido_em: None,
+            xml: None,
+            xml_assinado: None,
+            xml_cancelamento: None,
+            erros: Vec::new(),
+            nao_enviado: true,
+        }
+    }
+
     fn desfecho(r: Resultado<cardeal_fiscal::RetornoSefaz>) -> Desfecho {
         match r {
             Ok(r) => Desfecho::Resposta(r),
             Err(e) if e.codigo == CodigoErro::FISCAL_INDISPONIVEL => {
                 Desfecho::Indisponivel(e.mensagem)
+            }
+            Err(e) if e.codigo == CodigoErro::FISCAL_INALCANCAVEL => {
+                Desfecho::SemConexao(e.mensagem)
             }
             Err(e) => Desfecho::Recusado(e.mensagem),
         }
