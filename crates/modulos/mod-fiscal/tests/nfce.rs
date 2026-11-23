@@ -2050,13 +2050,14 @@ fn a_os_faturada_vira_nfse_pela_fila_consulta_o_dps_e_cancela() {
         ),
         ("140101", "14.01")
     );
-    let rejeitada = emitir().unwrap();
-    assert_eq!(rejeitada.estado, EstadoNfse::Rejeitada);
-    assert!(rejeitada
-        .motivo
-        .as_deref()
-        .unwrap()
-        .contains("inscrição municipal"));
+    // No padrão nacional (Porto Alegre) a inscrição municipal não é exigida: já entra na fila.
+    let primeira = emitir().unwrap();
+    assert_eq!(
+        (primeira.estado, primeira.numero),
+        (EstadoNfse::Pendente, 10),
+        "{:?}",
+        primeira.motivo
+    );
     let _: DadosFiscais = m
         .executar(
             "empresa.definir_dados_fiscais.v1",
@@ -2079,8 +2080,8 @@ fn a_os_faturada_vira_nfse_pela_fila_consulta_o_dps_e_cancela() {
         )
         .unwrap();
 
-    // Emitir de novo remonta no mesmo número; a resposta se perde (o DPS chegou): a fila consulta
-    // pelo DPS e acha a NFS-e, sem emitir outra.
+    // Emitir de novo devolve a mesma (mesmo número); a resposta se perde (o DPS chegou): a fila
+    // consulta pelo DPS e acha a NFS-e, sem emitir outra.
     let pendente = emitir().unwrap();
     assert_eq!(
         (pendente.estado, pendente.numero),

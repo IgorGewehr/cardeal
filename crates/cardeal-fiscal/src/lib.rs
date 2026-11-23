@@ -41,13 +41,15 @@ mod erros;
 mod escrituracao;
 mod nfe;
 mod nfse;
+pub mod nfse_nacional;
 mod porta;
 mod sefaz_api;
 mod simulado;
 mod simulado_xml;
 
 pub use certificado::{
-    ler_certificado_a1, preparar_certificado_a1, CertificadoPreparado, InfoCertificado,
+    abrir_para_assinar, conferir_padrao_icp, ler_certificado_a1, preparar_certificado_a1,
+    AlgoritmoAssinatura, CertificadoPreparado, ChaveDeAssinatura, InfoCertificado,
 };
 pub use chave::ChaveAcesso;
 pub use dfe::{
@@ -66,7 +68,8 @@ pub use escrituracao::{ler_para_escriturar, DocumentoXml, ItemXml, ParticipanteX
 pub use nfe::{cfop_de_venda, descrever_cfop, ClassificacaoEntrada, FinalidadeNfe};
 pub use nfe::{interpretar, Duplicata, ItemNfe, NotaFiscalXml, TributosDaCompra};
 pub use nfse::{
-    CancelamentoNfse, MotivoCancelamentoNfse, Nfse, RetornoNfse, SituacaoNfse, TomadorNfse,
+    CancelamentoNfse, MotivoCancelamentoNfse, Nfse, OpcaoSimples, RetornoNfse, SituacaoNfse,
+    TomadorNfse,
 };
 pub use porta::{AmbienteFiscal, ModeloFiscal, Nsu, PortaFiscal, StatusSefaz};
 pub use sefaz_api::{ApiFiscalHttp, CertificadoA1, ConfigApiFiscal};

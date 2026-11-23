@@ -25,6 +25,13 @@ pub enum ErroModuloFiscal {
         em: String,
     },
 
+    /// O certificado não segue o padrão que a NFS-e/NF-e exigem (ICP-Brasil, uso da chave…).
+    #[error("Este certificado não serve para emitir nota: {problemas}")]
+    CertificadoForaDoPadrao {
+        /// O que está fora, numa frase.
+        problemas: String,
+    },
+
     /// Nenhum certificado instalado.
     #[error("Instale o certificado digital A1 da empresa antes")]
     SemCertificado,

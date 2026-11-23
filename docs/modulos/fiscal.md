@@ -276,6 +276,21 @@ gestao-raiz a NFS-e "não é suportada nesta versão". O `sefaz-api` lia a respo
 que não é o da API (saía sem número, sem XML e sem a chave, que o cancelamento exige) — corrigido em
 5726b25, que também faz a consulta pelo DPS buscar a nota pela chave. Não conferido contra o ADN de verdade.
 
+**NFS-e nacional direta (2026-11-23, ADR-0020):** nos municípios do padrão nacional a NFS-e não passa mais
+pelo `sefaz-api` — `cardeal_fiscal::nfse_nacional` monta a DPS 1.01 (leiaute vigente e o da NT 009), assina
+(XMLDSig, `rsa-sha1`, C14N) com o A1 do cofre e envia à Sefin Nacional (`POST /nfse`, `GET /dps/{id}`,
+`GET /nfse/{chave}`, `POST /nfse/{chave}/eventos`) por TLS mútuo nativo (a Sefin renegocia para pedir o
+certificado; o rustls não renegocia). A porta (`PortaComNfseNacional`, montada pelo `ProvedorFiscal`) manda
+São Paulo e os municípios no Betha para o `sefaz-api`. Mudanças de regra: no padrão nacional a inscrição
+municipal não é exigida (o CNPJ basta); o MEI vai como `opSimpNac=2` (pelo regime da empresa); o motivo
+"duplicidade"/"erro de processamento" do cancelamento vira "9 — outros" (o nacional só tem 1, 2 e 9). A
+recusa pelo esquema troca o leiaute e reenvia uma vez; toda recusa confere se a DPS já virou nota. A
+instalação do certificado confere o padrão ICP-Brasil (v3, não-AC, `keyUsage`, autenticação de cliente,
+e-CNPJ, chave que abre e é a do certificado). Testes: a DPS e o cancelamento contra os XSD oficiais
+(`crates/cardeal-fiscal/tests/dados/nfse_xsd`, `xmllint`), a assinatura pelo `xmlsec1`, e um teste `#[ignore]`
+que fala com a produção restrita (`cargo test -p cardeal-fiscal -- --ignored sefin_de_verdade`). Falta: a
+primeira nota de verdade (homologação com o A1 da empresa), o grupo IBS/CBS e o DANFSe local (NT 008).
+
 **Calendário de obrigações** (`mod_fiscal::calendario`, `fiscal.obrigacoes_do_mes.v1`, 2026-10-28): o que vence
 no mês, pelo regime da empresa (`nucleo_empresa.regime`). As datas são as da regra federal, com os dias úteis
 descontando os fins de semana e os feriados nacionais em que os bancos não abrem (com a Sexta-feira Santa e a
@@ -558,8 +573,9 @@ Cancelar e configurar continuam fora do papel.
 4. ~~Série por terminal~~ — feita em 2026-10-27 (§7, "Série por caixa").
 5. NF-e: ~~a de venda, o DANFE A4, a carta de correção, a devolução de compra e a NF-e de entrada da
    devolução de venda~~ (2026-10-27, §7). A devolução da venda do PDV (NFC-e) ainda não sai em NF-e.
-6. ~~NFS-e da OS~~ — feita em 2026-10-28 (§7; `sefaz-api` 5726b25). Falta conferir num município de
-   verdade (homologação do ADN, com a inscrição municipal e o código do serviço da empresa).
+6. ~~NFS-e da OS~~ — feita em 2026-10-28 (§7); **emitida pelo próprio Cardeal na Sefin Nacional desde
+   2026-11-23** (ADR-0020). Falta a primeira nota na produção restrita com o A1 da empresa, o grupo IBS/CBS
+   e o DANFSe local (NT 008).
 7. ~~SPED gerado no Cardeal~~ — a EFD ICMS/IPI feita em 2026-10-28 (§7); a EFD-Contribuições fica fora (acaba
    em 2027). Falta validar um arquivo no PVA de verdade (com o contador).
 10. ~~Calendário de obrigações~~ — feito em 2026-10-28 (§7).

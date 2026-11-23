@@ -63,6 +63,26 @@ impl Comando for InstalarCertificado {
         let cnpj = info
             .cnpj
             .ok_or_else(|| Erro::de_dominio(&ErroModuloFiscal::CertificadoSemCnpj))?;
+        // O que a Sefin confere na assinatura e na conexão — barrado aqui, não na primeira nota.
+        // A raiz fora da ICP-Brasil só aparece quando o arquivo traz a cadeia; é aviso (a
+        // homologação aceita certificados de teste), não impedimento.
+        let fora: Vec<String> =
+            cardeal_fiscal::conferir_padrao_icp(&self.arquivo, &self.senha, ctx.agora)
+                .map_err(|e| Erro::de_dominio(&e))?
+                .into_iter()
+                .filter(|p| !p.contains("não a ICP-Brasil") && !p.contains("vencido"))
+                .collect();
+        if !fora.is_empty() {
+            return Err(Erro::de_dominio(
+                &ErroModuloFiscal::CertificadoForaDoPadrao {
+                    problemas: fora.join("; "),
+                },
+            ));
+        }
+        // A chave privada tem de abrir e ser a do certificado (o arquivo sem a chave, ou com a
+        // chave de outro certificado, só falharia na hora de assinar).
+        cardeal_fiscal::abrir_para_assinar(&preparado.pfx, &self.senha)
+            .map_err(|e| Erro::de_dominio(&e))?;
         let da_empresa = Cnpj::novo(&mod_empresa::sql::dados(uow.conexao(), ctx.empresa)?.cnpj)?;
         if cnpj != da_empresa {
             return Err(Erro::de_dominio(&ErroModuloFiscal::CnpjDiferente {

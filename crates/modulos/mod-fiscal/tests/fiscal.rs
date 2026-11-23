@@ -324,6 +324,22 @@ fn cnpj_de_outra_empresa_e_recusado() {
 }
 
 #[test]
+fn certificado_fora_do_padrao_icp_nao_instala() {
+    // CNPJ certo no CN, mas sem não repúdio, sem autenticação de cliente e sem o e-CNPJ: a Sefin
+    // recusaria a assinatura e a conexão — barrado na instalação, com cada motivo.
+    let m = Mundo::novo();
+    let erro = m.instalar("fora_do_padrao.pfx", SENHA).unwrap_err();
+    assert_eq!(erro.codigo, CodigoErro::REGRA_VIOLADA);
+    for trecho in ["não repúdio", "autenticação de cliente", "e-CNPJ"] {
+        assert!(erro.mensagem.contains(trecho), "{}", erro.mensagem);
+    }
+    assert!(
+        m.instalar("aes256.pfx", SENHA).is_ok(),
+        "o do padrão instala"
+    );
+}
+
+#[test]
 fn recursos_ausentes_ou_de_outra_instalacao() {
     let mut m = Mundo::novo();
     let _: DadosFiscais = m

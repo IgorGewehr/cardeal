@@ -61,6 +61,85 @@ pub struct Nfse {
     pub competencia: Data,
     /// Informações complementares.
     pub informacoes: Option<String>,
+    /// A situação perante o Simples (`opSimpNac`). `None`: a do regime do prestador (Simples →
+    /// ME/EPP). O MEI precisa dizer — o padrão nacional confere com o cadastro do Simples.
+    pub opcao_simples: Option<OpcaoSimples>,
+}
+
+/// A situação do prestador perante o Simples Nacional (`opSimpNac` da DPS).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum OpcaoSimples {
+    /// 1 — não optante.
+    NaoOptante,
+    /// 2 — MEI.
+    Mei,
+    /// 3 — microempresa ou empresa de pequeno porte.
+    MeEpp,
+}
+
+impl OpcaoSimples {
+    /// O código do XML.
+    #[must_use]
+    pub const fn codigo(self) -> &'static str {
+        match self {
+            Self::NaoOptante => "1",
+            Self::Mei => "2",
+            Self::MeEpp => "3",
+        }
+    }
+}
+
+/// A NFS-e como era guardada na fila antes do `opcao_simples` (postcard não tem campo opcional
+/// no fim: uma nota pendente gravada pela versão anterior só lê neste formato).
+#[derive(Deserialize)]
+struct NfseV1 {
+    prestador: Emitente,
+    tomador: TomadorNfse,
+    codigo_tributacao_nacional: String,
+    item_lc116: String,
+    codigo_tributacao_municipal: Option<String>,
+    nbs: Option<String>,
+    discriminacao: String,
+    valor_servicos: Dinheiro,
+    desconto: Dinheiro,
+    aliquota: Percentual,
+    iss_retido: bool,
+    serie: u32,
+    numero: u64,
+    competencia: Data,
+    informacoes: Option<String>,
+}
+
+impl Nfse {
+    /// Lê a NFS-e guardada na fila (postcard) — no formato atual ou no anterior.
+    ///
+    /// # Errors
+    /// Os bytes não são uma NFS-e em nenhum dos dois formatos.
+    pub fn ler_guardada(bytes: &[u8]) -> Result<Self, postcard::Error> {
+        match postcard::from_bytes::<Self>(bytes) {
+            Ok(n) => Ok(n),
+            Err(e) => postcard::from_bytes::<NfseV1>(bytes)
+                .map_err(|_| e)
+                .map(|v| Self {
+                    prestador: v.prestador,
+                    tomador: v.tomador,
+                    codigo_tributacao_nacional: v.codigo_tributacao_nacional,
+                    item_lc116: v.item_lc116,
+                    codigo_tributacao_municipal: v.codigo_tributacao_municipal,
+                    nbs: v.nbs,
+                    discriminacao: v.discriminacao,
+                    valor_servicos: v.valor_servicos,
+                    desconto: v.desconto,
+                    aliquota: v.aliquota,
+                    iss_retido: v.iss_retido,
+                    serie: v.serie,
+                    numero: v.numero,
+                    competencia: v.competencia,
+                    informacoes: v.informacoes,
+                    opcao_simples: None,
+                }),
+        }
+    }
 }
 
 /// Em que deu o pedido.
@@ -372,6 +451,7 @@ pub(crate) mod testes {
             numero: 7,
             competencia: Data::de_ymd(2026, 10, 28).unwrap(),
             informacoes: None,
+            opcao_simples: None,
         }
     }
 

@@ -1090,21 +1090,19 @@ pub(crate) mod sqlite {
             (EstadoNfse::Incerta, Some(p)) => porta
                 .consultar_nfse_por_dps(p, n.serie, n.numero)
                 .map_err(|e| e.mensagem),
-            (EstadoNfse::Pendente, _) => match n
-                .nota
-                .as_deref()
-                .map(postcard::from_bytes::<cardeal_fiscal::Nfse>)
-            {
-                Some(Ok(nota)) => porta.emitir_nfse(&nota).map_err(|e| e.mensagem),
-                _ => Ok(cardeal_fiscal::RetornoNfse {
-                    situacao: cardeal_fiscal::SituacaoNfse::Rejeitada,
-                    numero: None,
-                    chave: None,
-                    codigo_verificacao: None,
-                    xml: None,
-                    mensagens: vec!["a NFS-e guardada está ilegível — emita de novo".into()],
-                }),
-            },
+            (EstadoNfse::Pendente, _) => {
+                match n.nota.as_deref().map(cardeal_fiscal::Nfse::ler_guardada) {
+                    Some(Ok(nota)) => porta.emitir_nfse(&nota).map_err(|e| e.mensagem),
+                    _ => Ok(cardeal_fiscal::RetornoNfse {
+                        situacao: cardeal_fiscal::SituacaoNfse::Rejeitada,
+                        numero: None,
+                        chave: None,
+                        codigo_verificacao: None,
+                        xml: None,
+                        mensagens: vec!["a NFS-e guardada está ilegível — emita de novo".into()],
+                    }),
+                }
+            }
             _ => Err("os dados fiscais da empresa estão incompletos".into()),
         };
         let parar = resposta.is_err();

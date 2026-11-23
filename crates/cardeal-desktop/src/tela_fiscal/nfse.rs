@@ -124,11 +124,14 @@ pub fn secao(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, f: &mut FormNfse
         ui.add(
             Rotulo::apoio(
                 "A NFS-e sai da OS faturada (Ordens de serviço › OS › Emitir NFS-e), com a mão de \
-                 obra — as peças são mercadoria e ficam de fora. Precisa da inscrição municipal \
-                 nos dados fiscais. O código de tributação nacional está no anexo do Padrão \
-                 Nacional (ex.: 14.01.01 para manutenção de máquinas e aparelhos). No Simples, o \
-                 percentual é o aproximado dos tributos do Simples (a alíquota efetiva do DAS); \
-                 no regime normal, a alíquota do ISS do município.",
+                 obra — as peças são mercadoria e ficam de fora. Nos municípios do padrão nacional \
+                 ela é emitida direto na Sefin Nacional, assinada com o certificado A1 da empresa \
+                 (basta o CNPJ; o MEI é reconhecido pelo regime da empresa). São Paulo e os \
+                 municípios no Betha pedem a inscrição municipal e seguem pela API fiscal. O código \
+                 de tributação nacional está no anexo do Padrão Nacional (ex.: 14.01.01 para \
+                 manutenção de máquinas e aparelhos). No Simples, o percentual é o aproximado dos \
+                 tributos do Simples (a alíquota efetiva do DAS); no regime normal, a alíquota do \
+                 ISS do município.",
             )
             .quebravel(),
         );
@@ -150,7 +153,7 @@ pub fn secao(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, f: &mut FormNfse
         ui.columns(2, |c| {
             c[0].add(
                 Campo::novo("Código municipal (se o município pede)", &mut f.municipal)
-                    .marcador("opcional"),
+                    .marcador("3 dígitos, opcional"),
             );
             c[1].add(
                 Campo::novo("NBS (opcional)", &mut f.nbs)

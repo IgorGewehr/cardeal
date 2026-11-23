@@ -4,6 +4,7 @@
 
 use std::sync::Arc;
 
+use cardeal_fiscal::nfse_nacional::{NfseNacional, PortaComNfseNacional};
 use cardeal_fiscal::{
     AmbienteFiscal, ApiFiscalHttp, CertificadoA1, ConfigApiFiscal, FiscalSimulado, PortaFiscal,
 };
@@ -19,6 +20,8 @@ type Fabrica =
 pub struct ProvedorFiscal {
     nome: String,
     fabrica: Box<Fabrica>,
+    /// A NFS-e do padrão nacional sai direto na Sefin Nacional (ADR-0020) — não no simulado.
+    nfse_nacional: bool,
 }
 
 impl std::fmt::Debug for ProvedorFiscal {
@@ -28,12 +31,13 @@ impl std::fmt::Debug for ProvedorFiscal {
 }
 
 impl ProvedorFiscal {
-    /// O `sefaz-api` de verdade.
+    /// O `sefaz-api` de verdade (com a NFS-e nacional direta na Sefin).
     #[must_use]
     pub fn sefaz_api(config: ConfigApiFiscal) -> Self {
         let config = Arc::new(config);
         Self {
-            nome: format!("sefaz-api ({})", config.url),
+            nfse_nacional: true,
+            nome: format!("sefaz-api ({}) + NFS-e nacional direta", config.url),
             fabrica: Box::new(move |certificado, ambiente| {
                 Ok(Box::new(ApiFiscalHttp::novo(
                     Arc::clone(&config),
@@ -48,17 +52,20 @@ impl ProvedorFiscal {
     #[must_use]
     pub fn simulado(porta: Arc<FiscalSimulado>) -> Self {
         Self {
+            nfse_nacional: false,
             nome: "simulado".into(),
             fabrica: Box::new(move |_, _| Ok(Box::new(Arc::clone(&porta)))),
         }
     }
 
     /// Sem chave da API: toda conversa com a SEFAZ responde
-    /// [`ErroModuloFiscal::ProvedorNaoConfigurado`].
+    /// [`ErroModuloFiscal::ProvedorNaoConfigurado`] — menos a NFS-e do padrão nacional, que o
+    /// Cardeal emite direto na Sefin com o certificado da empresa.
     #[must_use]
     pub fn nao_configurado() -> Self {
         Self {
-            nome: "não configurado".into(),
+            nfse_nacional: true,
+            nome: "sem sefaz-api (só NFS-e nacional direta)".into(),
             fabrica: Box::new(|_, _| {
                 Err(Erro::de_dominio(&ErroModuloFiscal::ProvedorNaoConfigurado))
             }),
@@ -87,7 +94,14 @@ impl ProvedorFiscal {
         certificado: CertificadoA1,
         ambiente: AmbienteFiscal,
     ) -> Resultado<Box<dyn PortaFiscal>> {
-        (self.fabrica)(certificado, ambiente)
+        if !self.nfse_nacional {
+            return (self.fabrica)(certificado, ambiente);
+        }
+        let base = (self.fabrica)(certificado.clone(), ambiente);
+        Ok(Box::new(PortaComNfseNacional::nova(
+            base,
+            NfseNacional::novo(certificado, ambiente),
+        )))
     }
 }
 

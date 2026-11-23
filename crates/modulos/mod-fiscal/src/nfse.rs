@@ -8,7 +8,7 @@
 //! diferentes dos da NF-e, e não cabe na série/chave de 44 dígitos de `fiscal_documento`.
 
 use cardeal_fiscal::{
-    Emitente, MotivoCancelamentoNfse, Nfse, RetornoNfse, SituacaoNfse, TomadorNfse,
+    Emitente, MotivoCancelamentoNfse, Nfse, OpcaoSimples, RetornoNfse, SituacaoNfse, TomadorNfse,
 };
 #[cfg(feature = "sqlite")]
 use cardeal_kernel::Resultado;
@@ -310,15 +310,21 @@ pub fn montar_nfse_da_os(
     tomador: TomadorNfse,
     os: &OsParaNota,
     cfg: &ConfiguracaoNfse,
-    serie: u32,
-    numero: u64,
+    (serie, numero): (u32, u64),
     competencia: Data,
+    opcao_simples: Option<OpcaoSimples>,
 ) -> Result<Nfse, Vec<String>> {
     let mut problemas = Vec::new();
-    if prestador
-        .inscricao_municipal
-        .as_deref()
-        .is_none_or(|im| im.trim().is_empty())
+    // No padrão nacional o prestador é identificado pelo CNPJ (o cadastro nacional); a
+    // inscrição municipal só é exigida pelos sistemas próprios dos municípios.
+    let nacional = cardeal_fiscal::nfse_nacional::emite_pela_sefin_nacional(
+        &prestador.endereco.codigo_municipio,
+    );
+    if !nacional
+        && prestador
+            .inscricao_municipal
+            .as_deref()
+            .is_none_or(|im| im.trim().is_empty())
     {
         problemas.push(
             "a empresa está sem inscrição municipal (Configurações › Fiscal) — a NFS-e precisa dela"
@@ -374,6 +380,7 @@ pub fn montar_nfse_da_os(
         numero,
         competencia,
         informacoes: None,
+        opcao_simples,
     })
 }
 
@@ -496,11 +503,12 @@ mod testes {
             tomador(),
             &os(),
             &cfg(),
-            900,
-            7,
+            (900, 7),
             Data::de_ymd(2026, 10, 28).unwrap(),
+            Some(OpcaoSimples::Mei),
         )
         .unwrap();
+        assert_eq!(n.opcao_simples, Some(OpcaoSimples::Mei));
         assert_eq!(n.valor_servicos, Dinheiro::reais(150));
         assert_eq!(n.codigo_tributacao_nacional, "140101");
         assert_eq!(n.item_lc116, "14.01");
@@ -515,19 +523,33 @@ mod testes {
     fn sem_inscricao_municipal_e_sem_servico_nao_sai() {
         let mut so_pecas = os();
         so_pecas.servicos.clear();
+        // São Paulo (sistema próprio) exige a inscrição municipal.
+        let mut paulistano = prestador(None);
+        paulistano.endereco.codigo_municipio = "3550308".into();
         let e = montar_nfse_da_os(
-            prestador(None),
+            paulistano,
             tomador(),
             &so_pecas,
             &cfg(),
-            900,
-            7,
+            (900, 7),
             Data::de_ymd(2026, 10, 28).unwrap(),
+            None,
         )
         .unwrap_err();
         assert_eq!(e.len(), 2);
         assert!(e[0].contains("inscrição municipal"));
         assert!(e[1].contains("sem serviço"));
+        // No padrão nacional (Caxias do Sul) o CNPJ basta.
+        let n = montar_nfse_da_os(
+            prestador(None),
+            tomador(),
+            &os(),
+            &cfg(),
+            (900, 7),
+            Data::de_ymd(2026, 10, 28).unwrap(),
+            None,
+        );
+        assert!(n.is_ok(), "{n:?}");
     }
 
     #[test]

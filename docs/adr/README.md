@@ -33,6 +33,7 @@ deliberadamente honestas — um ADR sem trade-off real não está fazendo seu tr
 | [0017](0017-organizacao-com-varios-cnpjs.md) | Organização com vários CNPJs numa base só | Aceita | 2026-10-02 |
 | [0018](0018-formacao-de-preco-por-markup-divisor.md) | Formação de preço por markup divisor, com carga tributária e custo operacional lidos do sistema | Aceita | 2026-10-09 |
 | [0019](0019-sefaz-api-como-provedor-e-cofre-do-certificado.md) | O `sefaz-api` é o provedor fiscal; o certificado A1 mora cifrado no cofre da instalação | Aceita | 2026-10-14 |
+| [0020](0020-nfse-nacional-emitida-pelo-cardeal.md) | A NFS-e do padrão nacional é emitida pelo próprio Cardeal, direto na Sefin Nacional | Aceita | 2026-11-23 |
 
 ## Como usar
 

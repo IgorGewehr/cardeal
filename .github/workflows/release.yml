@@ -22,7 +22,7 @@ jobs:
     container: fedora:latest
     steps:
       - name: Instala dependências de build (gcc, rpmbuild, git)
-        run: dnf install -y gcc rpm-build git
+        run: dnf install -y gcc rpm-build git openssl-devel pkgconf-pkg-config
 
       - uses: actions/checkout@v4
 

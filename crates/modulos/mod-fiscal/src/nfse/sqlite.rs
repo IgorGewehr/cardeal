@@ -282,8 +282,10 @@ pub(super) fn emitir_da_os(
         );
     }
     let tomador = tomador_da_os(c, cliente, &mut problemas)?;
+    let mei = mod_empresa::sql::dados(c, ctx.empresa)?.regime == "MEI";
+    let opcao = mei.then_some(cardeal_fiscal::OpcaoSimples::Mei);
     let nota = match crate::nfce::sqlite::emitente(c, ctx.empresa)? {
-        Ok(e) => montar_nfse_da_os(e, tomador, &os, &cfg, serie, numero, ctx.hoje()),
+        Ok(e) => montar_nfse_da_os(e, tomador, &os, &cfg, (serie, numero), ctx.hoje(), opcao),
         Err(p) => Err(p),
     };
     let nota = match nota {

@@ -18,7 +18,9 @@ pub(crate) fn invalido<T>(motivo: impl Into<String>) -> Res<T> {
 pub(crate) mod tag {
     pub const BOOLEANO: u8 = 0x01;
     pub const INTEIRO: u8 = 0x02;
+    pub const BITS: u8 = 0x03;
     pub const OCTETOS: u8 = 0x04;
+    pub const NULO: u8 = 0x05;
     pub const OID: u8 = 0x06;
     pub const UTF8: u8 = 0x0C;
     pub const IMPRIMIVEL: u8 = 0x13;

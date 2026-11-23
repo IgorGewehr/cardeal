@@ -15,7 +15,10 @@ cardeal-storage.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-reqwest = { workspace = true, features = ["blocking"] }
+# `native-tls` só para a Sefin Nacional: o IIS dela pede o certificado do cliente por
+# renegociação TLS 1.2, que o rustls não implementa (SChannel/OpenSSL implementam). O resto do
+# Cardeal segue no rustls.
+reqwest = { workspace = true, features = ["blocking", "native-tls"] }
 base64.workspace = true
 tokio.workspace = true
 tracing.workspace = true
@@ -26,10 +29,12 @@ des.workspace = true
 rc2.workspace = true
 hmac.workspace = true
 pbkdf2.workspace = true
-sha1.workspace = true
-sha2.workspace = true
+sha1 = { workspace = true, features = ["oid"] }
+sha2 = { workspace = true, features = ["oid"] }
 rand.workspace = true
 zeroize.workspace = true
+postcard.workspace = true
+rsa.workspace = true
+flate2.workspace = true
 
 [dev-dependencies]
-postcard.workspace = true

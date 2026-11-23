@@ -844,6 +844,17 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   `feriados`, `prorrogar`/`antecipar`/`dia_util`/`ultimo_dia_util`, `obrigacoes_do_mes` por regime,
   `ObrigacoesDoMes` com as do Cardeal); desktop: o cartão "Obrigações" na Visão geral
   (`tela_financeiro/obrigacoes.rs`).
+- **NFS-e nacional emitida pelo Cardeal (2026-11-23, ADR-0020, fiscal.md §7):** `cardeal-fiscal`:
+  `nfse_nacional/` (`xml.rs` escritor canônico e limpeza do texto para o XSD; `dps.rs` `montar_dps` nos
+  leiautes 1.01 vigente e NT 009, `montar_cancelamento`, `id_dps`; `assinatura.rs` XMLDSig enveloped
+  `rsa-sha1`; `cliente.rs` Sefin Nacional com TLS mútuo **nativo** — o IIS da Sefin renegocia para pedir o
+  certificado e o rustls não renegocia; `porta.rs` `PortaComNfseNacional`), `certificado.rs`
+  (`abrir_para_assinar`/`ChaveDeAssinatura`, `conferir_padrao_icp`), `Nfse.opcao_simples` (+ `OpcaoSimples`,
+  `Nfse::ler_guardada` lê o formato anterior da fila), os XSD oficiais em `tests/dados/nfse_xsd`;
+  `mod-fiscal`: o `ProvedorFiscal` monta a porta com a NFS-e nacional (menos no simulado), a instalação do
+  A1 confere o padrão ICP e a chave, o MEI pelo regime, a IM só fora do padrão nacional; Dockerfile com
+  `libssl` (distroless/base) e a CI com `libssl-dev`. **Não repetir:** rustls para a Sefin (cai no reset);
+  conferir a DPS só "de olho" — os testes validam nos XSD oficiais com `xmllint` e a assinatura com `xmlsec1`.
 - **NFS-e da OS (2026-10-28, fiscal.md §7):** `sefaz-api` 5726b25 (a emissão no ADN lê `chaveAcesso`/
   `nfseXmlGZipB64`; a consulta pelo DPS busca a nota pela chave); `cardeal-fiscal`: `nfse.rs` (`Nfse`,
   `TomadorNfse`, `RetornoNfse`, `CancelamentoNfse`), `PortaFiscal::emitir_nfse`/`consultar_nfse_por_dps`/

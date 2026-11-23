@@ -3,7 +3,7 @@
 #
 #   docker build -f packaging/servidor/Dockerfile -t cardeal-server .
 #
-# Imagem final: binário único + o app web pré-comprimido + glibc (distroless), sem shell,
+# Imagem final: binário único + o app web pré-comprimido + glibc e libssl (distroless/base), sem shell,
 # sem gerenciador de pacotes, rodando como usuário sem privilégio. TLS termina no Cloudflare
 # Tunnel, não aqui.
 
@@ -18,6 +18,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certifi
  && cargo binstall -y --locked "wasm-bindgen-cli@${versao}" wasm-opt
 
 FROM rust:1.98-slim-bookworm AS construcao
+# OpenSSL: a NFS-e nacional fala com a Sefin pelo TLS nativo (o IIS dela renegocia para pedir o
+# certificado do cliente, e o rustls não renegocia — ADR-0020).
+RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev \
+ && rm -rf /var/lib/apt/lists/*
 COPY --from=ferramentas /usr/local/cargo/bin/wasm-bindgen /usr/local/cargo/bin/wasm-opt /usr/local/cargo/bin/
 WORKDIR /src
 COPY . .
@@ -34,7 +38,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
  && cp -r dist/web /web \
  && mkdir /dados
 
-FROM gcr.io/distroless/cc-debian12:nonroot
+FROM gcr.io/distroless/base-debian12:nonroot
 COPY --from=construcao /cardeal-server /usr/local/bin/cardeal-server
 COPY --from=construcao /web /web
 # Volume novo herda o dono da pasta na imagem: o usuário sem privilégio (65532) consegue gravar.

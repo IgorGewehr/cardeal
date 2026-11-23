@@ -63,6 +63,12 @@ mod oid {
     pub const RESTRICOES_BASICAS: &str = "2.5.29.19";
     /// ICP-Brasil: o CNPJ da pessoa jurídica titular do e-CNPJ.
     pub const ICP_BRASIL_CNPJ: &str = "2.16.76.1.3.3";
+    /// ICP-Brasil: os dados (e o CPF) da pessoa física titular do e-CPF.
+    pub const ICP_BRASIL_CPF: &str = "2.16.76.1.3.1";
+    pub const USO_DA_CHAVE: &str = "2.5.29.15";
+    pub const USO_ESTENDIDO: &str = "2.5.29.37";
+    pub const AUTENTICACAO_CLIENTE: &str = "1.3.6.1.5.5.7.3.2";
+    pub const RSA: &str = "1.2.840.113549.1.1.1";
 }
 
 /// Teto de iterações das derivações de chave — um arquivo hostil não trava a máquina. Os
@@ -690,12 +696,26 @@ fn escolher_folha(conteudo: &Conteudo) -> Result<Vec<u8>, Falha> {
 struct X509 {
     info: InfoCertificado,
     ac: bool,
+    /// A versão do X.509 (3 = `v3`).
+    versao: u64,
+    /// `keyUsage` presente: (assinatura digital, não repúdio).
+    uso_da_chave: Option<(bool, bool)>,
+    /// `extendedKeyUsage` presente: inclui "autenticação de cliente" (o TLS da transmissão)?
+    autentica_cliente: Option<bool>,
+    /// Tem o `otherName` ICP-Brasil de CNPJ (`2.16.76.1.3.3`) ou de CPF (`2.16.76.1.3.1`).
+    documento_icp: bool,
+    /// O nome do emissor (DER) e o do titular — iguais num certificado de raiz.
+    emissor_der: Vec<u8>,
+    titular_der: Vec<u8>,
+    /// O `RSAPublicKey` (DER) do `subjectPublicKeyInfo`, para conferir que a chave é a dele.
+    chave_publica: Vec<u8>,
 }
 
 fn ler_x509(der: &[u8]) -> Res<InfoCertificado> {
     ler_x509_bruto(der).map(|x| x.info)
 }
 
+#[allow(clippy::too_many_lines)]
 fn ler_x509_bruto(der: &[u8]) -> Res<X509> {
     let cert = Tlv::unico(der)?
         .exigir(tag::SEQUENCIA, "Certificate")?
@@ -716,11 +736,27 @@ fn ler_x509_bruto(der: &[u8]) -> Res<X509> {
         |t| t.exigir(tag::INTEIRO, "série"),
     )?;
     let _assinatura = campos.next();
-    let (Some(emissor), Some(validade), Some(titular)) =
-        (campos.next(), campos.next(), campos.next())
+    let (Some(emissor), Some(validade), Some(titular), Some(spki)) =
+        (campos.next(), campos.next(), campos.next(), campos.next())
     else {
         return invalido("certificado incompleto");
     };
+    let versao = tbs
+        .filhos()?
+        .first()
+        .filter(|t| t.tag == tag::CONTEXTO_0)
+        .map(|v| Tlv::unico(v.valor).and_then(Tlv::inteiro))
+        .transpose()?
+        .map_or(1, |v| v + 1);
+    let chave_publica = spki
+        .filhos()?
+        .get(1)
+        .filter(|b| b.tag == tag::BITS)
+        .and_then(|b| b.valor.split_first().map(|(_, resto)| resto.to_vec()))
+        .unwrap_or_default();
+    let mut uso_da_chave = None;
+    let mut autentica_cliente = None;
+    let mut documento_icp = false;
     let [de, ate] = validade.filhos()?[..] else {
         return invalido("validade malformada");
     };
@@ -734,7 +770,22 @@ fn ler_x509_bruto(der: &[u8]) -> Res<X509> {
             };
             let valor = valor.octetos()?;
             match tipo.oid()?.as_str() {
-                oid::NOMES_ALTERNATIVOS => cnpj_extensao = cnpj_dos_nomes_alternativos(&valor)?,
+                oid::NOMES_ALTERNATIVOS => {
+                    cnpj_extensao = cnpj_dos_nomes_alternativos(&valor)?;
+                    documento_icp = tem_documento_icp(&valor)?;
+                }
+                oid::USO_DA_CHAVE => {
+                    let bits = Tlv::unico(&valor)?.exigir(tag::BITS, "keyUsage")?;
+                    let primeiro = bits.valor.get(1).copied().unwrap_or(0);
+                    uso_da_chave = Some((primeiro & 0x80 != 0, primeiro & 0x40 != 0));
+                }
+                oid::USO_ESTENDIDO => {
+                    let mut cliente = false;
+                    for uso in Tlv::unico(&valor)?.filhos()? {
+                        cliente |= uso.oid()? == oid::AUTENTICACAO_CLIENTE;
+                    }
+                    autentica_cliente = Some(cliente);
+                }
                 oid::RESTRICOES_BASICAS => {
                     ac = Tlv::unico(&valor)?.filhos()?.first().is_some_and(|b| {
                         b.tag == tag::BOOLEANO && b.valor.first().is_some_and(|&v| v != 0)
@@ -763,7 +814,32 @@ fn ler_x509_bruto(der: &[u8]) -> Res<X509> {
             valido_ate: instante(ate)?,
         },
         ac,
+        versao,
+        uso_da_chave,
+        autentica_cliente,
+        documento_icp,
+        emissor_der: emissor.bruto.to_vec(),
+        titular_der: titular.bruto.to_vec(),
+        chave_publica,
     })
+}
+
+/// O `subjectAltName` tem o `otherName` ICP-Brasil de CNPJ ou de CPF?
+fn tem_documento_icp(valor: &[u8]) -> Res<bool> {
+    for nome in Tlv::unico(valor)?.filhos()? {
+        if nome.tag != tag::CONTEXTO_0 {
+            continue;
+        }
+        if let Some(tipo) = nome.filhos()?.first() {
+            if matches!(
+                tipo.oid()?.as_str(),
+                oid::ICP_BRASIL_CNPJ | oid::ICP_BRASIL_CPF
+            ) {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
 }
 
 /// O `CN` de um `Name`.
@@ -844,6 +920,279 @@ fn instante(t: Tlv<'_>) -> Res<Instante> {
     let hora = Hora::de_hms(campo(4)?, campo(6)?, campo(8)?)
         .map_err(|_| FormatoInvalido("hora inválida".into()))?;
     Ok(Instante::de_data_hora(data, hora, Fuso::UTC))
+}
+
+// --------------------------------------------------------------------------------------------
+// A chave para assinar e para o TLS mútuo (NFS-e do padrão nacional, emitida pelo Cardeal)
+// --------------------------------------------------------------------------------------------
+
+/// O certificado A1 aberto para **assinar** (`XMLDSig` da DPS e dos eventos) e para o **TLS
+/// mútuo** com a Sefin Nacional. A chave privada só existe em memória, é zerada ao sair, e nunca
+/// é impressa (`Debug` mostra só o titular).
+pub struct ChaveDeAssinatura {
+    par: rsa::RsaPrivateKey,
+    /// A chave em PKCS#8 (sem atributos), para o TLS.
+    pkcs8: Zeroizing<Vec<u8>>,
+    /// O certificado do titular (DER).
+    pub certificado: Vec<u8>,
+    /// Os outros certificados do arquivo (as ACs), na ordem em que vieram.
+    pub cadeia: Vec<Vec<u8>>,
+    /// O que se leu do certificado do titular.
+    pub info: InfoCertificado,
+}
+
+impl std::fmt::Debug for ChaveDeAssinatura {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ChaveDeAssinatura")
+            .field("titular", &self.info.titular)
+            .field("cnpj", &self.info.cnpj)
+            .finish_non_exhaustive()
+    }
+}
+
+/// O resumo que a assinatura usa.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlgoritmoAssinatura {
+    /// `rsa-sha1` / `sha1` — o que o manual do Sistema Nacional NFS-e (e a NF-e) exige.
+    Sha1,
+    /// `rsa-sha256` / `sha256`.
+    Sha256,
+}
+
+impl ChaveDeAssinatura {
+    /// Assina `dados` com RSA PKCS#1 v1.5 no resumo pedido (com cegamento da operação privada).
+    ///
+    /// # Errors
+    /// [`ErroFiscal::CertificadoInvalido`] se a operação RSA falhar (não acontece com uma chave
+    /// que abriu e conferiu).
+    pub fn assinar(
+        &self,
+        algoritmo: AlgoritmoAssinatura,
+        dados: &[u8],
+    ) -> Result<Vec<u8>, ErroFiscal> {
+        use rsa::Pkcs1v15Sign;
+        let mut rng = rand::thread_rng();
+        let r = match algoritmo {
+            AlgoritmoAssinatura::Sha1 => {
+                self.par
+                    .sign_with_rng(&mut rng, Pkcs1v15Sign::new::<Sha1>(), &Sha1::digest(dados))
+            }
+            AlgoritmoAssinatura::Sha256 => self.par.sign_with_rng(
+                &mut rng,
+                Pkcs1v15Sign::new::<Sha256>(),
+                &Sha256::digest(dados),
+            ),
+        };
+        r.map_err(|e| ErroFiscal::CertificadoInvalido(format!("falha ao assinar ({e})")))
+    }
+
+    /// O certificado do titular e a cadeia, em PEM (o titular primeiro).
+    #[must_use]
+    pub fn pem_certificados(&self) -> String {
+        let mut pem = em_pem("CERTIFICATE", &self.certificado);
+        for ac in &self.cadeia {
+            pem.push_str(&em_pem("CERTIFICATE", ac));
+        }
+        pem
+    }
+
+    /// A chave privada em PKCS#8 PEM. Quem chama não guarda nem registra.
+    #[must_use]
+    pub fn pem_chave(&self) -> Zeroizing<String> {
+        Zeroizing::new(em_pem("PRIVATE KEY", &self.pkcs8))
+    }
+
+    /// A chave e os certificados num PEM só (o formato do rustls).
+    #[must_use]
+    pub fn pem_para_tls(&self) -> Zeroizing<String> {
+        let mut pem = self.pem_chave();
+        pem.push_str(&self.pem_certificados());
+        pem
+    }
+}
+
+fn em_pem(rotulo: &str, der: &[u8]) -> String {
+    use base64::Engine as _;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(der);
+    let mut s = format!("-----BEGIN {rotulo}-----\n");
+    for linha in b64.as_bytes().chunks(64) {
+        s.push_str(std::str::from_utf8(linha).unwrap_or_default());
+        s.push('\n');
+    }
+    let _ = writeln!(s, "-----END {rotulo}-----");
+    s
+}
+
+/// Abre o A1 para assinar: decifra a chave do titular, confere que ela é a do certificado e a
+/// prepara para o `ring` e para o TLS.
+///
+/// # Errors
+/// [`ErroFiscal::SenhaDoCertificadoIncorreta`]; [`ErroFiscal::CertificadoInvalido`] se não há
+/// chave, se ela não é RSA ou não corresponde ao certificado.
+pub fn abrir_para_assinar(pfx: &[u8], senha: &str) -> Result<ChaveDeAssinatura, ErroFiscal> {
+    let abrir_chave = || -> Result<ChaveDeAssinatura, Falha> {
+        let conteudo = abrir(pfx, senha)?;
+        let folha_der = escolher_folha(&conteudo)?;
+        let folha = ler_x509_bruto(&folha_der)?;
+        let id_da_folha = conteudo
+            .certificados
+            .iter()
+            .find(|c| c.der == folha_der)
+            .and_then(|c| c.id_local.clone());
+        let bolsa = conteudo
+            .chaves
+            .iter()
+            .find(|k| id_da_folha.is_some() && k.id_local == id_da_folha)
+            .or_else(|| (conteudo.chaves.len() == 1).then(|| &conteudo.chaves[0]))
+            .map_or_else(
+                || formato("o arquivo não traz a chave privada do certificado"),
+                Ok,
+            )?;
+        let pkcs8 = Zeroizing::new(chave_em_claro(&bolsa.bolsa, senha)?);
+        let pkcs1 = Zeroizing::new(rsa_do_pkcs8(&pkcs8)?);
+        let par = {
+            use rsa::pkcs1::{DecodeRsaPrivateKey, EncodeRsaPublicKey};
+            let par = rsa::RsaPrivateKey::from_pkcs1_der(&pkcs1).map_err(|e| {
+                Falha::Formato(FormatoInvalido(format!("a chave RSA não abriu ({e})")))
+            })?;
+            par.validate().map_err(|_| {
+                Falha::Formato(FormatoInvalido(
+                    "a chave RSA do arquivo é inconsistente".into(),
+                ))
+            })?;
+            let publica = par
+                .to_public_key()
+                .to_pkcs1_der()
+                .map_err(|_| Falha::Formato(FormatoInvalido("chave pública ilegível".into())))?;
+            if publica.as_bytes() != folha.chave_publica.as_slice() {
+                return formato("a chave privada do arquivo não é a do certificado");
+            }
+            par
+        };
+        // PKCS#8 limpo (sem atributos — o do Windows traz `keyUsage` e o TLS recusa).
+        let limpo = Zeroizing::new(sequencia(&[
+            &inteiro_der(0),
+            &sequencia(&[&oid_der(oid::RSA), &[tag::NULO, 0x00]]),
+            &octetos_der(&pkcs1),
+        ]));
+        let cadeia = conteudo
+            .certificados
+            .iter()
+            .filter(|c| c.der != folha_der)
+            .map(|c| c.der.clone())
+            .collect();
+        Ok(ChaveDeAssinatura {
+            par,
+            pkcs8: limpo,
+            certificado: folha_der,
+            cadeia,
+            info: folha.info,
+        })
+    };
+    abrir_chave().map_err(Falha::em_erro_fiscal)
+}
+
+/// A `PrivateKeyInfo` (PKCS#8) de uma `keyBag` ou de uma `pkcs8ShroudedKeyBag`.
+fn chave_em_claro(bolsa: &[u8], senha: &str) -> Result<Vec<u8>, Falha> {
+    let campos = Tlv::unico(bolsa)?.filhos()?;
+    let [tipo, valor, ..] = campos.as_slice() else {
+        return formato("SafeBag malformada");
+    };
+    if tipo.oid()? == oid::BOLSA_CHAVE {
+        return Ok(Tlv::unico(valor.valor)?.bruto.to_vec());
+    }
+    let info = Tlv::unico(valor.valor)?.filhos()?;
+    let [algoritmo, cifrado] = info[..] else {
+        return formato("EncryptedPrivateKeyInfo malformado");
+    };
+    decifrar(algoritmo, &cifrado.octetos()?, senha, &senha_bmp(senha))
+}
+
+/// O `RSAPrivateKey` (PKCS#1) de dentro de uma `PrivateKeyInfo`.
+fn rsa_do_pkcs8(pkcs8: &[u8]) -> Result<Vec<u8>, Falha> {
+    let campos = Tlv::unico(pkcs8)?
+        .exigir(tag::SEQUENCIA, "PrivateKeyInfo")?
+        .filhos()?;
+    let [_, algoritmo, chave, ..] = campos[..] else {
+        return formato("PrivateKeyInfo malformado");
+    };
+    let alg = algoritmo.filhos()?.first().map(|t| t.oid()).transpose()?;
+    if alg.as_deref() != Some(oid::RSA) {
+        return formato("o certificado não usa chave RSA (a NFS-e exige RSA)");
+    }
+    Ok(chave.octetos()?.into_owned())
+}
+
+/// O que, no certificado, faria a Sefin Nacional recusar a assinatura ou a conexão (regras do
+/// Anexo I e do manual: `X.509 v3`, não ser de AC, `keyUsage` com assinatura digital e não repúdio,
+/// "autenticação de cliente" quando há `extendedKeyUsage`, CNPJ ou CPF ICP-Brasil, validade e — quando o arquivo traz a raiz — raiz ICP-Brasil). Vazio = em
+/// ordem.
+///
+/// # Errors
+/// Os de [`ler_certificado_a1`].
+pub fn conferir_padrao_icp(
+    pfx: &[u8],
+    senha: &str,
+    agora: Instante,
+) -> Result<Vec<String>, ErroFiscal> {
+    let conferir = || -> Result<Vec<String>, Falha> {
+        let conteudo = abrir(pfx, senha)?;
+        let folha_der = escolher_folha(&conteudo)?;
+        let folha = ler_x509_bruto(&folha_der)?;
+        let mut problemas = Vec::new();
+        if folha.versao != 3 {
+            problemas.push(format!(
+                "o certificado é X.509 v{} (a NFS-e exige v3)",
+                folha.versao
+            ));
+        }
+        if folha.ac {
+            problemas.push(
+                "o arquivo traz um certificado de autoridade certificadora, não o da empresa"
+                    .into(),
+            );
+        }
+        match folha.uso_da_chave {
+            Some((true, true)) => {}
+            _ => problemas.push(
+                "o uso da chave não inclui assinatura digital e não repúdio (exigido pela NFS-e)"
+                    .into(),
+            ),
+        }
+        if folha.autentica_cliente == Some(false) {
+            problemas.push(
+                "o certificado não permite autenticação de cliente (a conexão com a Sefin exige)"
+                    .into(),
+            );
+        }
+        if !folha.documento_icp {
+            problemas.push(
+                "o certificado não tem o CNPJ/CPF no padrão ICP-Brasil (não é e-CNPJ nem e-CPF)"
+                    .into(),
+            );
+        }
+        if agora < folha.info.valido_de {
+            problemas.push("o certificado ainda não começou a valer".into());
+        }
+        if folha.info.vencido(agora) {
+            problemas.push("o certificado está vencido".into());
+        }
+        let raiz = conteudo
+            .certificados
+            .iter()
+            .filter_map(|c| ler_x509_bruto(&c.der).ok())
+            .find(|x| x.ac && x.emissor_der == x.titular_der);
+        if let Some(raiz) = raiz {
+            if !raiz.info.titular.to_uppercase().contains("ICP-BRASIL") {
+                problemas.push(format!(
+                    "a raiz do certificado é \"{}\", não a ICP-Brasil",
+                    raiz.info.titular
+                ));
+            }
+        }
+        Ok(problemas)
+    };
+    conferir().map_err(Falha::em_erro_fiscal)
 }
 
 #[cfg(test)]
@@ -996,5 +1345,95 @@ mod testes {
             hex
         });
         assert_eq!(hex, "8AAAE6297B6CB04642AB5B077851284EB7128F1A2A7FBCA3");
+    }
+
+    #[test]
+    fn a_chave_assina_e_a_assinatura_confere_com_o_certificado() {
+        for arquivo in ["aes256.pfx", "aes128.pfx", "3des.pfx", "legado.pfx"] {
+            let chave = abrir_para_assinar(&dado(arquivo), SENHA)
+                .unwrap_or_else(|e| panic!("{arquivo}: {e}"));
+            assert_eq!(chave.info.titular, "EMPRESA TESTE LTDA", "{arquivo}");
+            let x = ler_x509_bruto(&chave.certificado).unwrap();
+            let publica = {
+                use rsa::pkcs1::DecodeRsaPublicKey;
+                rsa::RsaPublicKey::from_pkcs1_der(&x.chave_publica).unwrap()
+            };
+            let a1 = chave
+                .assinar(AlgoritmoAssinatura::Sha1, b"<infDPS/>")
+                .unwrap();
+            publica
+                .verify(
+                    rsa::Pkcs1v15Sign::new::<Sha1>(),
+                    &Sha1::digest(b"<infDPS/>"),
+                    &a1,
+                )
+                .unwrap_or_else(|_| panic!("{arquivo}: a assinatura SHA-1 não confere"));
+            let a2 = chave
+                .assinar(AlgoritmoAssinatura::Sha256, b"<infDPS/>")
+                .unwrap();
+            publica
+                .verify(
+                    rsa::Pkcs1v15Sign::new::<Sha256>(),
+                    &Sha256::digest(b"<infDPS/>"),
+                    &a2,
+                )
+                .unwrap_or_else(|_| panic!("{arquivo}: a assinatura SHA-256 não confere"));
+            assert!(publica
+                .verify(
+                    rsa::Pkcs1v15Sign::new::<Sha1>(),
+                    &Sha1::digest(b"<outro/>"),
+                    &a1
+                )
+                .is_err());
+            let pem = chave.pem_para_tls();
+            assert!(pem.starts_with("-----BEGIN PRIVATE KEY-----\n"));
+            assert!(pem.contains("-----BEGIN CERTIFICATE-----"));
+            assert!(
+                !format!("{chave:?}").contains("PRIVATE"),
+                "Debug não mostra a chave"
+            );
+        }
+    }
+
+    #[test]
+    fn senha_errada_nao_abre_a_chave() {
+        assert!(matches!(
+            abrir_para_assinar(&dado("aes256.pfx"), "outra"),
+            Err(ErroFiscal::SenhaDoCertificadoIncorreta)
+        ));
+    }
+
+    #[test]
+    fn o_certificado_de_teste_segue_o_padrao_e_a_validade_conta() {
+        let pfx = dado("aes256.pfx");
+        let dentro = instante_utc(2026, 11, 23, 12);
+        // A AC de teste vem junto e é raiz: o aviso é o único problema (v3, não-AC, keyUsage e
+        // e-CNPJ estão em ordem).
+        let raiz = "a raiz do certificado é \"AC TESTE CARDEAL\", não a ICP-Brasil".to_string();
+        assert_eq!(
+            conferir_padrao_icp(&pfx, SENHA, dentro).unwrap(),
+            vec![raiz.clone()]
+        );
+        let depois = instante_utc(2036, 1, 1, 0);
+        let p = conferir_padrao_icp(&pfx, SENHA, depois).unwrap();
+        assert_eq!(p, vec!["o certificado está vencido".to_string(), raiz]);
+        let antes = instante_utc(2024, 1, 1, 0);
+        assert!(conferir_padrao_icp(&pfx, SENHA, antes).unwrap()[0].contains("começou"));
+    }
+
+    #[test]
+    fn o_certificado_fora_do_padrao_diz_cada_problema() {
+        let p = conferir_padrao_icp(
+            &dado("fora_do_padrao.pfx"),
+            SENHA,
+            instante_utc(2026, 11, 23, 12),
+        )
+        .unwrap();
+        let tem = |trecho: &str| p.iter().any(|m| m.contains(trecho));
+        assert!(tem("não repúdio"), "{p:?}");
+        assert!(tem("autenticação de cliente"), "{p:?}");
+        assert!(tem("ICP-Brasil (não é e-CNPJ"), "{p:?}");
+        assert!(tem("não a ICP-Brasil"), "{p:?}");
+        assert!(!tem("vencido") && !tem("v1"), "{p:?}");
     }
 }
