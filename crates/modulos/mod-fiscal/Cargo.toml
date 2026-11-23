@@ -45,6 +45,7 @@ thiserror.workspace = true
 zeroize.workspace   = true
 
 [dev-dependencies]
+cardeal-tributos.workspace = true
 cardeal-auth.workspace = true
 cardeal-ledger.workspace = true
 postcard.workspace     = true

@@ -126,6 +126,15 @@ pub fn tributar(
     perfil: &CamposFiscais,
     base: Dinheiro,
 ) -> Result<TributacaoDoItem, String> {
+    // O preço sugerido já conta o FCP (`cardeal-tributos`); a emissão ainda não o destaca.
+    // Sair sem ele seria uma nota errada — melhor parar e dizer.
+    if let Some(fcp) = perfil.aliquota_fcp.filter(|p| !p.e_zero()) {
+        return Err(format!(
+            "o perfil fiscal tem FCP de {}, que a emissão ainda não destaca — retire o FCP do \
+             perfil até a nota suportá-lo",
+            fcp.formatar_com_simbolo()
+        ));
+    }
     let (icms, icms_retido) = icms(crt, perfil, base)?;
 
     let contribuicao = |cst: &Option<String>, aliquota: Option<Percentual>, nome: &str| {
@@ -262,5 +271,84 @@ mod testes {
         assert!(tributar(Crt::RegimeNormal, &p, Dinheiro::reais(1))
             .unwrap_err()
             .contains("5xxx"));
+    }
+
+    /// O ICMS (+FCP) que a nota destaca a um preço P é o que o motor de carga previu para P
+    /// (`cardeal-tributos`), em todo perfil que a NFC-e emite — o preço sugerido e a nota usam
+    /// a mesma conta. (PIS/COFINS: a nota destaca sobre o valor do item, o motor calcula o
+    /// custo real sem o ICMS na base — a exclusão é da apuração; DAS e IR não vão na nota.)
+    #[test]
+    fn imposto_emitido_e_o_previsto_para_todo_perfil() {
+        use cardeal_tributos::{carga, Atividade, Imposto, Regime};
+        let simples = Regime::Simples {
+            anexo: cardeal_tributos::AnexoSimples::I,
+            rbt12: Dinheiro::reais(100_000),
+        };
+        let normal = Regime::Presumido {
+            atividade: Atividade::Comercio,
+            receita_mensal: Dinheiro::reais(50_000),
+        };
+        let mut casos = Vec::new();
+        for c in ["102", "103", "300", "400", "500"] {
+            casos.push((Crt::SimplesNacional, simples, c, None, None));
+        }
+        for (c, aliq, red) in [
+            ("00", Some(17), None),
+            ("00", Some(12), None),
+            ("20", Some(18), Some(50)),
+            ("40", None, None),
+            ("41", None, None),
+            ("60", None, None),
+        ] {
+            casos.push((Crt::RegimeNormal, normal, c, aliq, red));
+        }
+        let mut conferidos = 0;
+        for (crt, regime, cst, aliq, red) in casos {
+            for pis in ["01", "04", "49"] {
+                let p = CamposFiscais {
+                    cst_icms: Some(cst.into()),
+                    aliquota_icms: aliq.map(Percentual::pontos),
+                    reducao_base: red.map(Percentual::pontos),
+                    cst_pis: Some(pis.into()),
+                    cst_cofins: Some(pis.into()),
+                    aliquota_pis: Some(Percentual::milesimos(650)),
+                    aliquota_cofins: Some(Percentual::pontos(3)),
+                    ..CamposFiscais::default()
+                };
+                let previsto = carga(&regime, &p.perfil_tributario(None)).unwrap();
+                let coef = previsto
+                    .termos
+                    .iter()
+                    .filter(|t| matches!(t.imposto, Imposto::Icms | Imposto::Fcp))
+                    .fold(Percentual::ZERO, |a, t| a + t.coeficiente);
+                for preco in [
+                    Dinheiro::centavos(100),
+                    Dinheiro::reais(15),
+                    Dinheiro::centavos(99_999),
+                ] {
+                    let t = tributar(crt, &p, preco).unwrap();
+                    let emitido = t.impostos.icms.valor.unwrap_or(Dinheiro::ZERO);
+                    assert_eq!(
+                        emitido,
+                        valor_de(preco, coef),
+                        "{crt:?} CST {cst} PIS {pis} a {preco:?}"
+                    );
+                    conferidos += 1;
+                }
+            }
+        }
+        assert_eq!(conferidos, 11 * 3 * 3);
+    }
+
+    #[test]
+    fn fcp_no_perfil_e_recusado_ate_a_nfce_destacar() {
+        let p = CamposFiscais {
+            cst_icms: Some("00".into()),
+            aliquota_icms: Some(Percentual::pontos(18)),
+            aliquota_fcp: Some(Percentual::pontos(2)),
+            ..CamposFiscais::default()
+        };
+        let e = tributar(Crt::RegimeNormal, &p, Dinheiro::reais(10)).unwrap_err();
+        assert!(e.contains("FCP"), "{e}");
     }
 }

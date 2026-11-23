@@ -3276,6 +3276,7 @@ dependencies = [
  "cardeal-ledger",
  "cardeal-modkit",
  "cardeal-storage",
+ "cardeal-tributos",
  "mod-clientes",
  "mod-empresa",
  "mod-estoque",
