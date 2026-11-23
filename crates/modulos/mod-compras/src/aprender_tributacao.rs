@@ -89,8 +89,8 @@ pub(crate) fn aprender_da_nota(c: &Connection, ctx: &Ctx, nota: Id, rotulo: &str
                 ctx.agora,
             )?;
         } else if veio_st {
-            let perfil = efetivo.perfil_tributario(None);
-            if !cardeal_tributos::e_substituido(&perfil) && efetivo.cst_icms.is_some() {
+            let tributario = efetivo.perfil_tributario(None);
+            if !cardeal_tributos::e_substituido(&tributario) && efetivo.cst_icms.is_some() {
                 mod_estoque::registrar_a_conferir(
                     c,
                     ctx.organizacao,
