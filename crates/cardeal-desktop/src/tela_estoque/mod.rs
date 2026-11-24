@@ -6,6 +6,7 @@
 //! (produtos abaixo do ponto de pedido — `estoque.produtos_abaixo_do_ponto_pedido.v1`, já
 //! existia no backend mas não estava ligado a nenhuma tela).
 
+mod a_conferir;
 mod analise;
 mod dicionario;
 mod estrutura;
@@ -109,6 +110,8 @@ pub struct EstadoTelaEstoque {
     fisc: fiscal::FormFiscal,
     /// Regime e UF da empresa, para o seletor de tributação.
     trib: fiscal::ContextoTributacao,
+    /// "Tributação a conferir" (aba Preços).
+    a_conferir: Vec<mod_estoque::TributacaoAConferir>,
     fisc_efetivo: Vec<mod_estoque::fiscal::LinhaFiscal>,
     unidades: Vec<ItemUnidade>,
     locais: Vec<ItemLocal>,
@@ -170,6 +173,7 @@ impl EstadoTelaEstoque {
             self.grupos = g;
         }
         self.trib = fiscal::ContextoTributacao::carregar(motor, sessao);
+        self.a_conferir = a_conferir::carregar(motor, sessao);
         // Sem o submódulo de lote a consulta é recusada: sem lote, sem alerta de validade.
         self.lotes_em_alerta = motor
             .consultar(

@@ -954,6 +954,13 @@ fn peca_do_estoque_sem_tabela_vem_com_o_preco_do_markup() {
         "{}",
         c.estado.peca_preco_dica
     );
+    // A conta do preço vem junto, e fecha: custo + parcelas + lucro = preço.
+    let conta = c.estado.peca_conta.clone().expect("conta do preço");
+    let soma = conta
+        .parcelas
+        .iter()
+        .fold(conta.custo + conta.lucro, |a, p| a + p.valor);
+    assert_eq!(soma, conta.preco);
 }
 
 #[test]

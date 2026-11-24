@@ -247,3 +247,93 @@ pub fn aprender_tributacao_do_produto(
     )?;
     Ok(true)
 }
+
+/// Confirma um item da lista: o perfil fica como está e o item sai da lista.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct ConfirmarTributacaoAConferir {
+    /// O item.
+    pub id: Id,
+}
+
+/// Desfaz um item da lista: o perfil volta ao de antes e o item sai da lista.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct DesfazerTributacaoAConferir {
+    /// O item.
+    pub id: Id,
+}
+
+#[cfg(feature = "sqlite")]
+fn resolver(
+    ctx: &Ctx,
+    uow: &mut cardeal_storage::UnidadeDeTrabalho,
+    id: Id,
+    desfazer: bool,
+) -> Resultado<()> {
+    use crate::repositorio::{blob, id_de, persist};
+    use rusqlite::OptionalExtension;
+    let c = uow.conexao();
+    let linha = c
+        .query_row(
+            "SELECT produto, grupo, antes FROM estoque_tributacao_a_conferir
+              WHERE id = ?1 AND empresa = ?2 AND resolvido_em IS NULL",
+            rusqlite::params![blob(id), blob(ctx.organizacao)],
+            |r| {
+                Ok((
+                    r.get::<_, Option<Vec<u8>>>(0)?.map(id_de),
+                    r.get::<_, Option<Vec<u8>>>(1)?.map(id_de),
+                    r.get::<_, Option<Vec<u8>>>(2)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(persist)?;
+    let Some((produto, grupo, antes)) = linha else {
+        return Err(cardeal_kernel::Erro::nao_encontrado(
+            "item de tributação a conferir",
+        ));
+    };
+    if desfazer {
+        let antes = CamposFiscais::de_blob(antes.as_deref()).para_blob();
+        let (tabela_sql, alvo) = match (produto, grupo) {
+            (Some(p), _) => (
+                "UPDATE estoque_produto SET perfil_fiscal = ?2, versao = versao + 1 WHERE id = ?1",
+                p,
+            ),
+            (None, Some(g)) => (
+                "UPDATE estoque_grupo_produto SET perfil_fiscal = ?2, versao = versao + 1 WHERE id = ?1",
+                g,
+            ),
+            (None, None) => return Err(cardeal_kernel::Erro::nao_encontrado("produto")),
+        };
+        c.execute(tabela_sql, rusqlite::params![blob(alvo), antes])
+            .map_err(persist)?;
+    }
+    c.execute(
+        "UPDATE estoque_tributacao_a_conferir SET resolvido_em = ?2 WHERE id = ?1",
+        rusqlite::params![blob(id), ctx.agora.em_micros()],
+    )
+    .map_err(persist)?;
+    Ok(())
+}
+
+impl cardeal_modkit::Comando for ConfirmarTributacaoAConferir {
+    type Saida = ();
+    const PERMISSAO: &'static str = "estoque.tributario.editar";
+    const RISCO: cardeal_modkit::Risco = cardeal_modkit::Risco::Medio;
+
+    #[cfg(feature = "sqlite")]
+    fn executar(self, ctx: &Ctx, uow: &mut cardeal_storage::UnidadeDeTrabalho) -> Resultado<()> {
+        resolver(ctx, uow, self.id, false)
+    }
+}
+
+impl cardeal_modkit::Comando for DesfazerTributacaoAConferir {
+    type Saida = ();
+    const PERMISSAO: &'static str = "estoque.tributario.editar";
+    const RISCO: cardeal_modkit::Risco = cardeal_modkit::Risco::Alto;
+
+    #[cfg(feature = "sqlite")]
+    fn executar(self, ctx: &Ctx, uow: &mut cardeal_storage::UnidadeDeTrabalho) -> Resultado<()> {
+        resolver(ctx, uow, self.id, true)
+    }
+}

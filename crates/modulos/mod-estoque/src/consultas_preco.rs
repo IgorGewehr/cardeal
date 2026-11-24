@@ -574,6 +574,7 @@ impl BaseDePreco {
 }
 
 /// `margem ÷ (1 − ir)`: a margem antes do imposto sobre o lucro.
+#[cfg(feature = "sqlite")]
 fn antes_do_ir(margem: Percentual, ir: Percentual) -> Percentual {
     if ir.e_zero() {
         return margem;

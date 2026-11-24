@@ -251,6 +251,8 @@ pub struct EstadoTelaOs {
     peca_grupo_seletor: EstadoSeletorArvore,
     /// O usuário digitou o preço: mudar o custo não o recalcula mais.
     peca_preco_manual: bool,
+    /// A conta do preço sugerido pelo markup (para onde vai cada real).
+    peca_conta: Option<cardeal_tributos::PrecoResolvido>,
     /// A estrutura mercadológica (para a categoria da peça nova).
     grupos: Vec<mod_estoque::NoArvoreGrupo>,
     /// O pedido de encomendar as peças em falta da OS em Compras › Pedidos (o `main` atende).
@@ -482,6 +484,7 @@ impl EstadoTelaOs {
         self.peca_preco_dica.clear();
         self.peca_grupo = None;
         self.peca_preco_manual = false;
+        self.peca_conta = None;
         self.aprovador.clear();
     }
 }

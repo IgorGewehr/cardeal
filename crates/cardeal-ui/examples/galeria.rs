@@ -15,9 +15,9 @@ use cardeal_ui::molecules::{
     Severidade, SituacaoPasso,
 };
 use cardeal_ui::organisms::{
-    notificar, ArvoreHierarquia, ColunaGrade, ColunasDialogo, CondicaoPagamento, Dialogo, Gaveta,
-    Grade, Janela, Notificacao, Notificacoes, Ordenacao, Painel, PainelMargem, SeletorEmArvore,
-    SeletorPagamento,
+    notificar, ArvoreHierarquia, ColunaGrade, ColunasDialogo, CondicaoPagamento,
+    DecomposicaoDePreco, Dialogo, Gaveta, Grade, Janela, LinhaDecomposicao, Notificacao,
+    Notificacoes, Ordenacao, Painel, PainelMargem, SeletorEmArvore, SeletorPagamento,
 };
 use cardeal_ui::tokens::{instalar_estilo, instalar_fontes, Espaco, Rubro, Tema, TemaUi};
 use eframe::egui;
@@ -875,6 +875,30 @@ impl eframe::App for Galeria {
                     .mostrar(ui);
                     ui.add_space(Espaco::E8);
                 }
+
+                ui.add_space(Espaco::E24);
+                ui.add(Rotulo::titulo_secao(
+                    "DecomposicaoDePreco: para onde vai cada real (impostos com a frase)",
+                ));
+                let linhas = [
+                    LinhaDecomposicao {
+                        rotulo: "DAS".into(),
+                        valor: Dinheiro::centavos(98),
+                        explicacao: "DAS do Simples, Anexo I: alíquota efetiva 4,47%".into(),
+                    },
+                    LinhaDecomposicao {
+                        rotulo: "Operação".into(),
+                        valor: Dinheiro::centavos(220),
+                        explicacao: "10% de custo operacional sobre o faturamento".into(),
+                    },
+                ];
+                DecomposicaoDePreco::novo(
+                    Dinheiro::centavos(2_197),
+                    Dinheiro::reais(15),
+                    Dinheiro::centavos(379),
+                    &linhas,
+                )
+                .mostrar(ui);
 
                 ui.add_space(Espaco::E24);
                 ui.add(Rotulo::titulo_secao(

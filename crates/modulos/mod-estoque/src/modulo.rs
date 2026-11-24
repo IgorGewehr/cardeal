@@ -48,6 +48,12 @@ impl Modulo for ModuloEstoque {
 
     fn registrar(&self, registro: &mut Registro) -> Resultado<()> {
         registro
+            .comando::<crate::a_conferir::ConfirmarTributacaoAConferir>(
+                "estoque.confirmar_tributacao_a_conferir.v1",
+            )
+            .comando::<crate::a_conferir::DesfazerTributacaoAConferir>(
+                "estoque.desfazer_tributacao_a_conferir.v1",
+            )
             .comando::<CriarGrupoProduto>("estoque.criar_grupo_produto.v1")
             .comando::<RenomearGrupoProduto>("estoque.renomear_grupo_produto.v1")
             .comando::<crate::ImportarEstrutura>("estoque.importar_estrutura.v1")

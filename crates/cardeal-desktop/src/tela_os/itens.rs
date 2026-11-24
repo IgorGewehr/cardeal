@@ -412,6 +412,10 @@ fn formulario_peca(
     if !estado.peca_preco_dica.is_empty() {
         ui.add(Rotulo::apoio(estado.peca_preco_dica.clone()).quebravel());
     }
+    if let Some(conta) = &estado.peca_conta {
+        SecaoExpansivel::nova("Ver a conta do preço")
+            .mostrar(ui, |ui| crate::decomposicao::mostrar(ui, conta));
+    }
     if fora {
         ui.add(
             Rotulo::apoio(

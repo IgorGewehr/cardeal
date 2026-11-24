@@ -301,7 +301,7 @@ pub(super) fn sugerir_preco(
         })
         .filter(|(p, _)| p.unidades_internas() > 0)
         .map(|(p, tabela)| (p, format!("Preço da tabela \"{tabela}\"{custo_txt}")));
-    let markup = motor
+    let sugestao: Option<mod_estoque::SugestaoDePreco> = motor
         .consultar(
             sessao,
             "estoque.preco_sugerido_do_produto.v1",
@@ -310,8 +310,12 @@ pub(super) fn sugerir_preco(
                 custo: None,
             },
         )
-        .ok()
-        .and_then(|s: mod_estoque::SugestaoDePreco| dica_do_markup(&s));
+        .ok();
+    let markup = sugestao.as_ref().and_then(dica_do_markup);
+    let veio_do_markup = da_tabela.is_none() && markup.is_some();
+    estado.peca_conta = sugestao
+        .and_then(|s| s.resolvido)
+        .filter(|_| veio_do_markup);
     let ultimo = motor
         .consultar(
             sessao,
@@ -424,8 +428,10 @@ pub(super) fn recalcular_preco_pelo_custo(
         Some((preco, dica)) => {
             estado.peca_preco = preco.formatar();
             estado.peca_preco_dica = dica;
+            estado.peca_conta = sugestao.and_then(|s| s.resolvido);
         }
         None => {
+            estado.peca_conta = None;
             estado.peca_preco_dica = sugestao
                 .and_then(|s| s.problema)
                 .map(|p| format!("Sem preço sugerido: {p}"))

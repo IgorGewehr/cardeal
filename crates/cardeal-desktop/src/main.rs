@@ -19,6 +19,7 @@ mod compras_fundo;
 mod comprovante;
 mod danfce;
 mod danfe;
+mod decomposicao;
 #[cfg(feature = "demo")]
 mod demo_app;
 mod fiscal_fundo;

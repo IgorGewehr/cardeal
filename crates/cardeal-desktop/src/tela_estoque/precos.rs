@@ -53,6 +53,8 @@ pub(super) struct EstadoPrecos {
     pub(super) def: super::precos_defasados::EstadoDefasados,
     /// Histórico de compras do produto aberto no diálogo (nome e dados).
     pub(super) historico: Option<(String, mod_estoque::historico_compras::ResumoDeCompras)>,
+    /// A conta do preço sugerido do produto clicado (para onde vai cada real).
+    pub(super) conta: Option<cardeal_tributos::PrecoResolvido>,
 }
 
 const ANEXOS: [AnexoSimples; 5] = [
@@ -184,6 +186,8 @@ pub(super) fn aba(
 ) {
     resumo(ui, &estado.prc);
     ui.add_space(Espaco::E16);
+    super::a_conferir::secao(ui, motor, sessao, estado);
+    ui.add_space(Espaco::E8);
     SecaoExpansivel::nova("Parâmetros de preço da empresa").mostrar(ui, |ui| {
         parametros(ui, motor, sessao, estado);
     });
@@ -438,10 +442,11 @@ fn tabela(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estado
         });
     });
     ui.add(Rotulo::apoio(
-        "Clique num produto para ver o histórico das últimas compras.",
+        "Clique num produto para ver para onde vai cada real do preço e o histórico de compras.",
     ));
     if let Some(i) = resposta.linha_clicada {
         let (produto, nome) = (linhas[i].produto, linhas[i].nome.clone());
+        estado.prc.conta = linhas[i].resolvido.clone();
         if abrir_historico(motor, sessao, &mut estado.prc, produto, nome) {
             estado.dlg = Dlg::HistoricoCompras;
         }

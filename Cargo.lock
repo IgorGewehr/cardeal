@@ -846,6 +846,7 @@ dependencies = [
  "cardeal-modkit",
  "cardeal-pdf",
  "cardeal-planilha",
+ "cardeal-tributos",
  "cardeal-ui",
  "eframe",
  "egui",

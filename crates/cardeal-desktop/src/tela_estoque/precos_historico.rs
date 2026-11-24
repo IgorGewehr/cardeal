@@ -45,6 +45,10 @@ pub(super) fn dialogo(ctx: &egui::Context, estado: &mut EstadoTelaEstoque) {
         ctx,
         estado,
         |ui, estado| {
+            if let Some(r) = &estado.prc.conta {
+                crate::decomposicao::mostrar(ui, r);
+                ui.add_space(Espaco::E12);
+            }
             let Some((_, h)) = &estado.prc.historico else {
                 return;
             };

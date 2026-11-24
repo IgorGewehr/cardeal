@@ -1213,3 +1213,88 @@ fn simples_com_cst_do_normal_diz_o_que_corrigir() {
     assert!(s.sugerido.is_none());
     assert!(s.problema.unwrap().contains("CSOSN"));
 }
+
+// ── tributação a conferir: confirmar e desfazer ─────────────────────────────────────────────
+
+fn perfil_proprio(c: &Cenario, produto: Id) -> CamposFiscais {
+    let b: Option<Vec<u8>> = c
+        .arm
+        .leitor()
+        .consultar(move |k| {
+            k.query_row(
+                "SELECT perfil_fiscal FROM estoque_produto WHERE id = ?1",
+                [produto.em_bytes().as_slice()],
+                |r| r.get(0),
+            )
+            .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+        })
+        .unwrap();
+    CamposFiscais::de_blob(b.as_deref())
+}
+
+fn aprender_st(c: &Cenario, produto: Id) {
+    let org = c.empresa;
+    c.arm
+        .escritor()
+        .executar(
+            ContextoEscrita::novo(org, Id::novo(), Id::novo(), Id::novo()),
+            move |uow| {
+                mod_estoque::aprender_tributacao_do_produto(
+                    uow.conexao(),
+                    org,
+                    produto,
+                    &CamposFiscais {
+                        cst_icms: Some("500".into()),
+                        ..CamposFiscais::default()
+                    },
+                    None,
+                    "aprendido da nota de compra: ST",
+                    "nota 1/1",
+                    Instante::agora(),
+                )
+                .map(|_| ())
+                .map_err(ErroArmazenamento::Dominio)
+            },
+        )
+        .unwrap();
+}
+
+fn lista(c: &Cenario) -> Vec<mod_estoque::TributacaoAConferir> {
+    c.consulta(
+        "estoque.tributacao_a_conferir.v1",
+        &mod_estoque::ListarTributacaoAConferir,
+    )
+}
+
+#[test]
+fn desfazer_volta_o_perfil_de_antes() {
+    let c = Cenario::novo();
+    let g = c.grupo("BEB", None);
+    let p = c.produto_com_custo("Cerveja", g, Preco::reais(5));
+    aprender_st(&c, p);
+    assert_eq!(perfil_proprio(&c, p).cst_icms.as_deref(), Some("500"));
+    let item = lista(&c)[0].id.expect("registro");
+    c.cmd(
+        "estoque.desfazer_tributacao_a_conferir.v1",
+        &mod_estoque::DesfazerTributacaoAConferir { id: item },
+    )
+    .unwrap();
+    assert_eq!(perfil_proprio(&c, p), CamposFiscais::default());
+    assert!(lista(&c).is_empty());
+}
+
+#[test]
+fn confirmar_tira_da_lista_e_mantem_o_perfil() {
+    let c = Cenario::novo();
+    let g = c.grupo("BEB", None);
+    let p = c.produto_com_custo("Cerveja", g, Preco::reais(5));
+    aprender_st(&c, p);
+    let item = lista(&c)[0].id.expect("registro");
+    c.cmd(
+        "estoque.confirmar_tributacao_a_conferir.v1",
+        &mod_estoque::ConfirmarTributacaoAConferir { id: item },
+    )
+    .unwrap();
+    assert!(lista(&c).is_empty());
+    assert_eq!(perfil_proprio(&c, p).cst_icms.as_deref(), Some("500"));
+}
