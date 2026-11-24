@@ -14,6 +14,7 @@
 #![warn(missing_docs, clippy::pedantic)]
 
 pub mod credito;
+pub mod destino;
 pub mod ncm;
 pub mod preco;
 pub mod simples;
@@ -124,6 +125,8 @@ pub enum Imposto {
     Ipi,
     /// ICMS-ST cobrado pelo substituto.
     IcmsSt,
+    /// Diferencial de alíquota ao consumidor de outro estado.
+    Difal,
     /// CBS (reforma).
     Cbs,
     /// IBS (reforma).
@@ -148,6 +151,7 @@ impl Imposto {
             Self::Csll => "CSLL",
             Self::Ipi => "IPI",
             Self::IcmsSt => "ICMS-ST",
+            Self::Difal => "DIFAL",
             Self::Cbs => "CBS",
             Self::Ibs => "IBS",
             Self::Seletivo => "Imposto Seletivo",
