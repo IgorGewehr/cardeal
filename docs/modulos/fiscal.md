@@ -597,3 +597,9 @@ Cancelar e configurar continuam fora do papel.
 9. ~~O `sefaz-api` devolver o XML do evento e a nota assinada da emissão incerta~~ — feito em
    2026-10-26 (sefaz-api bc58e77; aqui, a busca do que falta). Para valer em produção, o `sefaz-api`
    publicado precisa ser atualizado (o servidor dele não é desta máquina).
+
+## 12. A nota e o preço usam a mesma conta (2026-11-24, ADR-0022)
+
+`tributacao::tributar` não foi refeita: o teste `imposto_emitido_e_o_previsto_para_todo_perfil`
+amarra o ICMS destacado ao previsto pelo `cardeal-tributos` (99 casos). O FCP já entra no preço,
+mas a NFC-e ainda não o destaca: perfil com FCP é recusado na emissão até o destaque existir.

@@ -35,6 +35,7 @@ deliberadamente honestas — um ADR sem trade-off real não está fazendo seu tr
 | [0019](0019-sefaz-api-como-provedor-e-cofre-do-certificado.md) | O `sefaz-api` é o provedor fiscal; o certificado A1 mora cifrado no cofre da instalação | Aceita | 2026-10-14 |
 | [0020](0020-nfse-nacional-emitida-pelo-cardeal.md) | A NFS-e do padrão nacional é emitida pelo próprio Cardeal, direto na Sefin Nacional | Aceita | 2026-11-23 |
 | [0021](0021-nfce-em-contingencia-assinada-pelo-cardeal.md) | A NFC-e em contingência é montada e assinada pelo próprio Cardeal | Aceita | 2026-11-23 |
+| [0022](0022-markup-pela-carga-tributaria-real.md) | Markup pela carga tributária real de cada produto | Aceita | 2026-11-24 |
 
 ## Como usar
 

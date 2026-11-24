@@ -901,3 +901,20 @@ CREATE TABLE estoque_contagem_item (
     UNIQUE (inventario, produto, variacao, lote)
 ) STRICT;
 ```
+
+## 14. Preço pela carga tributária real (2026-11-24, ADR-0022)
+
+- O preço sugerido usa o motor `cardeal-tributos`: `SugestaoDePreco.resolvido` traz o preço, o
+  custo, cada imposto (com a frase de onde veio), operação, comissão, cartão, o lucro e o total de
+  imposto por unidade (coluna da aba Preços). Presumido/Real pelo regime do cadastro da empresa;
+  produto sem alíquota no perfil continua no percentual manual.
+- `estoque.preco_sugerido_no_grupo.v1`: o preço por categoria e custo, sem produto (a peça da OS).
+- O CST/CSOSN do perfil é a fonte de ST e monofásico; as marcas `icms_st`/`monofasico` do grupo
+  só valem sem CST, e as que discordam aparecem em "Tributação a conferir".
+- O perfil ganhou `aliquota_fcp` e `aliquota_ipi` (o blob antigo, `CamposFiscaisAte2026Nov`,
+  continua legível).
+- "Como este produto é tributado" (`tributacao_simples`): revenda comum, com ST, monofásico, os
+  dois, isento ou avançado; grava CSOSN no Simples e CST no normal; no normal sugere a alíquota
+  interna da UF (tabela de 2025, conferir) para o usuário confirmar.
+- "Tributação a conferir" (`a_conferir`, migração v16): o que a nota de compra ensinou, com
+  `estoque.confirmar_tributacao_a_conferir.v1` e `estoque.desfazer_tributacao_a_conferir.v1`.

@@ -429,3 +429,10 @@ obra ficou sem custo; no Financeiro, o diálogo de baixa da parcela da OS e o ca
 mostram a mão de obra. O lançamento contábil do faturamento **não muda**: a mão de obra própria já está na
 folha (despesa de pessoal); o custo-hora é **gerencial**, para a margem, e não vira CMV no razão.
 
+
+## 16. Preço da peça pelo markup da categoria (2026-11-24, ADR-0022)
+
+Ao escolher a peça: tabela de preço > markup da categoria sobre o custo > último preço cobrado.
+A peça nova digitada escolhe a categoria (padrão "Peças") e o preço acompanha o custo digitado
+até o usuário digitar o preço; o diálogo "Valores" faz o mesmo. "Ver a conta do preço" mostra
+para onde vai cada real.

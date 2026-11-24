@@ -844,6 +844,16 @@ WhatsApp, classificação de extrato, NCM por NLP), microsserviços/AWS/Postgres
   `feriados`, `prorrogar`/`antecipar`/`dia_util`/`ultimo_dia_util`, `obrigacoes_do_mes` por regime,
   `ObrigacoesDoMes` com as do Cardeal); desktop: o cartão "Obrigações" na Visão geral
   (`tela_financeiro/obrigacoes.rs`).
+- **Markup pela carga tributária real (2026-11-23/24, ADR-0022):** crate `cardeal-tributos`
+  (`carga`, `resolver_preco`, `credito_do_item`, `destino`, `reforma`, `ncm`); `mod-estoque`:
+  `SugestaoDePreco.resolvido`, `PrecoSugeridoNoGrupo`, `tributacao_simples` (o seletor), FCP/IPI no
+  perfil (blob antigo legível), `a_conferir` (migração v16, confirmar/desfazer); `mod-compras`:
+  `aprender_tributacao` e `credito` (estorno desfaz); `mod-fiscal`: amarração emissão × motor e
+  FCP recusado; `cardeal-ui`: `DecomposicaoDePreco`; desktop: a peça da OS com preço pelo markup
+  da categoria (tabela > markup > último), a categoria da peça nova, "Ver a conta do preço", a
+  coluna de imposto por unidade e "Tributação a conferir" na aba Preços. **Não feito:** markup no
+  pedido/orçamento/PDV, imposto realizado por produto, telas de destino e reforma, FCP na NFC-e,
+  Imposto Seletivo. **Não verificado** com o contador nem com nota real.
 - **NFC-e em contingência assinada pelo Cardeal (2026-11-23, ADR-0021, fiscal.md §7):** `cardeal-fiscal`:
   `nfce_offline.rs` (`montar_nfce_em_contingencia`: chave `tpEmis` 9, `infNFe` na ordem do XSD 4.00, QR v3
   off-line assinado, `ResponsavelTecnico` da última autorizada ou de `CARDEAL_RESP_TEC_*`), o

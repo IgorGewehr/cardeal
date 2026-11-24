@@ -572,3 +572,14 @@ O item do pedido diz quais peças de OS ele atende (`ItemDoPedido::para_os`, tab
 
 `mod-compras` depende de `mod-os` para isso (o inverso fecharia ciclo: `mod-fiscal` já depende de `mod-os`).
 
+
+## 16. A nota ensina a tributação e dá o crédito (2026-11-24, ADR-0022)
+
+- Na confirmação, o produto **sem perfil nenhum** aprende da nota: ST (CSOSN 500 / CST 60 / ST
+  cobrado) e monofásico (CST 04 ou NCM da lista de `cardeal_tributos::ncm`), mais origem e CEST;
+  vai para "Tributação a conferir" com o perfil de antes. Produto com perfil não muda — a nota que
+  o contradiz vira aviso. Lido do XML guardado (nota lançada à mão não ensina).
+- Regime normal: o ICMS destacado (ou `vCredICMSSN`) da mercadoria de saída tributada e o
+  PIS/COFINS no não cumulativo (menos monofásico) saem do custo; o Razão recebe
+  `D Impostos a recuperar / C Estoque` (origem `compras/credito`), e o estorno desfaz. Simples e
+  MEI não creditam.
