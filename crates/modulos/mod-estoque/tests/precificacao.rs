@@ -484,6 +484,25 @@ fn sem_parametros_gravados_vale_o_regime_cadastrado() {
 }
 
 impl Cenario {
+    fn regime_cadastral(&self, regime: &'static str) {
+        let empresa = self.empresa;
+        self.arm
+            .escritor()
+            .executar(
+                ContextoEscrita::novo(empresa, Id::novo(), Id::novo(), Id::novo()),
+                move |uow| {
+                    uow.conexao()
+                        .execute(
+                            "UPDATE nucleo_empresa SET regime = ?2 WHERE id = ?1",
+                            rusqlite::params![empresa.em_bytes().as_slice(), regime],
+                        )
+                        .map(|_| ())
+                        .map_err(|e| ErroArmazenamento::Sqlite(e.to_string()))
+                },
+            )
+            .unwrap();
+    }
+
     fn regime_manual(&self, imposto: i64) {
         let mut p = ParametrosPreco::padrao_para("LucroPresumido");
         p.regime = RegimeImposto::Manual(Percentual::pontos(imposto));
@@ -521,6 +540,7 @@ fn icms_pis_cofins(icms: Option<i64>, pis: Option<i64>, cofins: Option<i64>) -> 
 #[test]
 fn presumido_usa_os_campos_fiscais_herdados_do_grupo_e_o_produto_sobrescreve() {
     let c = Cenario::novo();
+    c.regime_cadastral("LucroPresumido");
     c.regime_manual(10);
     let g = c.grupo("ELE", None);
     c.margem_do_grupo(g, 20);
@@ -1134,6 +1154,7 @@ fn criterio_1_simples_st_e_comum_mesmo_lucro() {
 #[test]
 fn criterio_2_presumido_icms_17() {
     let c = Cenario::novo();
+    c.regime_cadastral("LucroPresumido");
     c.regime_manual(10);
     let g = c.grupo("ELE", None);
     c.margem_do_grupo(g, 15);
@@ -1297,4 +1318,23 @@ fn confirmar_tira_da_lista_e_mantem_o_perfil() {
     .unwrap();
     assert!(lista(&c).is_empty());
     assert_eq!(perfil_proprio(&c, p).cst_icms.as_deref(), Some("500"));
+}
+
+#[test]
+fn simples_com_percentual_manual_continua_no_manual() {
+    // O cadastro diz Simples (o que a nota usa): o percentual informado vale, nunca IRPJ/CSLL.
+    let c = Cenario::novo();
+    c.regime_manual(10);
+    let g = c.grupo("ELE", None);
+    c.margem_do_grupo(g, 15);
+    c.fiscal_do_grupo(
+        g,
+        CamposFiscais {
+            aliquota_icms: Some(Percentual::pontos(17)),
+            ..csosn("102")
+        },
+    );
+    let s = c.preco(c.produto_com_custo("Cabo", g, Preco::reais(15)));
+    assert!(s.problema.is_none(), "{:?}", s.problema);
+    assert_eq!(s.imposto, Percentual::pontos(10));
 }

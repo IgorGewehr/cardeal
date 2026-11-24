@@ -36,9 +36,9 @@ pub(crate) fn aprender_da_nota(
         return Ok(());
     };
     let perfis = mod_estoque::produtos_para_nota(c, ctx.organizacao, &produtos)?;
-    let simples = !matches!(
-        mod_estoque::parametros_da_empresa(c, ctx)?.regime,
-        mod_estoque::precificacao::RegimeImposto::Manual(_)
+    // CSOSN ou CST pelo regime do cadastro — o mesmo que a emissão usa.
+    let simples = mod_estoque::tributacao_simples::simples_pelo_cadastro(
+        &mod_estoque::tributacao_simples::regime_cadastral(c, ctx.empresa),
     );
     let origem = format!("nota {rotulo}");
     for (i, item) in itens.iter().enumerate() {
@@ -83,7 +83,13 @@ pub(crate) fn aprender_da_nota(
             if motivos.is_empty() {
                 continue;
             }
-            aprendido.origem = Some(t.origem);
+            // Importado pelo fornecedor (1) ou sem similar importado por ele (6): para nós é
+            // estrangeira comprada no mercado interno (2 e 7).
+            aprendido.origem = Some(match t.origem {
+                1 => 2,
+                6 => 7,
+                o => o,
+            });
             mod_estoque::aprender_tributacao_do_produto(
                 c,
                 ctx.organizacao,

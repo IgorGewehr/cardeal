@@ -1402,8 +1402,8 @@ fn real_credita_tambem_pis_cofins() {
     let local = cadastrar_local(&arm, empresa);
     let xml = xml_tributado(&"4".repeat(44), ICMS00, "01", None);
     importar_e_confirmar(&arm, empresa, produto, local, xml);
-    // 10,20 + 0,99 + 4,56 = 15,75 → (60 − 15,75) / 12 = 3,6875.
-    assert_eq!(custo_medio(&arm, produto), 3_687_500);
+    // 10,20 + 0,82 + 3,78 = 14,80 (PIS/COFINS sem o ICMS na base) → (60 − 14,80) / 12.
+    assert_eq!(custo_medio(&arm, produto), 3_766_667);
 }
 
 #[test]
@@ -1432,4 +1432,48 @@ fn simples_e_revenda_com_st_nao_creditam() {
         "revenda com ST não credita"
     );
     assert_eq!(saldo_impostos_a_recuperar(&arm2, empresa2), 0);
+}
+
+#[test]
+fn importado_do_fornecedor_vira_estrangeira_do_mercado_interno() {
+    let (_dir, arm, empresa) = base();
+    let produto = cadastrar_produto(&arm, empresa, "Cerveja Importada", "22030000");
+    let local = cadastrar_local(&arm, empresa);
+    let xml = xml_tributado(
+        &"6".repeat(44),
+        "<ICMSSN500><orig>1</orig><CSOSN>500</CSOSN></ICMSSN500>",
+        "04",
+        None,
+    );
+    importar_e_confirmar(&arm, empresa, produto, local, xml);
+    // O fornecedor importou (1); para nós é estrangeira comprada no mercado interno (2).
+    assert_eq!(perfil_e_cest(&arm, produto).0.origem, Some(2));
+}
+
+#[test]
+fn simples_com_preco_manual_aprende_csosn_pelo_cadastro() {
+    let (_dir, arm, empresa) = base();
+    sql(
+        &arm,
+        empresa,
+        "INSERT INTO estoque_parametros_preco (empresa, regime, anexo, imposto_manual,
+            custo_operacional, custo_operacional_derivado, comissao, taxa_pagamento,
+            margem_padrao, margem_minima, preco_obrigatorio, custo_referencia)
+         VALUES (?1, 'Manual', 'I', 0, 0, 1, 0, 0, NULL, 0, 0, 'CustoMedio')",
+        vec![empresa.em_bytes().to_vec()],
+    );
+    let produto = cadastrar_produto(&arm, empresa, "Cerveja", "22030000");
+    let local = cadastrar_local(&arm, empresa);
+    let xml = xml_tributado(
+        &"1".repeat(44),
+        "<ICMSSN500><orig>0</orig><CSOSN>500</CSOSN></ICMSSN500>",
+        "04",
+        None,
+    );
+    importar_e_confirmar(&arm, empresa, produto, local, xml);
+    // A empresa é do Simples no cadastro (o que a emissão usa): CSOSN, nunca CST.
+    assert_eq!(
+        perfil_e_cest(&arm, produto).0.cst_icms.as_deref(),
+        Some("500")
+    );
 }

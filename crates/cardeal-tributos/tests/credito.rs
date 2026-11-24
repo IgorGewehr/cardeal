@@ -50,10 +50,10 @@ fn real_nao_cumulativo_credita_pis_cofins_menos_monofasico() {
         pis_cofins_nao_cumulativo: true,
     };
     let c = credito_do_item(&real, &perfil("00", None), &compra());
-    // 60 × 1,65% = 0,99; 60 × 7,6% = 4,56.
+    // Sem o ICMS na base (Lei 14.592/2023): (60 − 10,20) × 1,65% = 0,82; × 7,6% = 3,78.
     assert_eq!(
         (c.pis, c.cofins),
-        (Dinheiro::centavos(99), Dinheiro::centavos(456))
+        (Dinheiro::centavos(82), Dinheiro::centavos(378))
     );
     let mono = credito_do_item(&real, &perfil("00", Some("04")), &compra());
     assert_eq!(mono.pis + mono.cofins, Dinheiro::ZERO);

@@ -14,20 +14,7 @@ use crate::nota::ItemNotaEntrada;
 
 /// O regime do motor, ou `None` quando a empresa não credita (MEI/Simples).
 fn regime_que_credita(c: &Connection, ctx: &Ctx) -> Resultado<Option<cardeal_tributos::Regime>> {
-    use mod_estoque::precificacao::RegimeImposto;
-    if !matches!(
-        mod_estoque::parametros_da_empresa(c, ctx)?.regime,
-        RegimeImposto::Manual(_)
-    ) {
-        return Ok(None);
-    }
-    let cadastral: String = c
-        .query_row(
-            "SELECT regime FROM nucleo_empresa WHERE id = ?1",
-            [ctx.empresa.em_bytes().as_slice()],
-            |r| r.get(0),
-        )
-        .unwrap_or_default();
+    let cadastral = mod_estoque::tributacao_simples::regime_cadastral(c, ctx.empresa);
     Ok(Some(match cadastral.as_str() {
         "LucroReal" => cardeal_tributos::Regime::Real {
             pis_cofins_nao_cumulativo: true,

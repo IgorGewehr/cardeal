@@ -20,17 +20,26 @@ pub(super) struct ContextoTributacao {
 
 impl ContextoTributacao {
     pub(super) fn carregar(motor: &Motor, sessao: &Sessao) -> Self {
+        // CSOSN ou CST pelo regime do cadastro (o que a emissão usa); sem acesso aos dados da
+        // empresa, pelo parâmetro de preço.
         let simples = motor
-            .consultar(
-                sessao,
-                "estoque.parametros_de_preco.v1",
-                &mod_estoque::ParametrosDePreco,
-            )
-            .map(|p: mod_estoque::ParametrosPreco| {
-                !matches!(
-                    p.regime,
-                    mod_estoque::precificacao::RegimeImposto::Manual(_)
-                )
+            .consultar(sessao, "empresa.dados.v1", &mod_empresa::DadosDaEmpresa)
+            .map(|d: mod_empresa::EmpresaResumo| {
+                mod_estoque::tributacao_simples::simples_pelo_cadastro(&d.regime)
+            })
+            .or_else(|_| {
+                motor
+                    .consultar(
+                        sessao,
+                        "estoque.parametros_de_preco.v1",
+                        &mod_estoque::ParametrosDePreco,
+                    )
+                    .map(|p: mod_estoque::ParametrosPreco| {
+                        !matches!(
+                            p.regime,
+                            mod_estoque::precificacao::RegimeImposto::Manual(_)
+                        )
+                    })
             })
             .unwrap_or(true);
         let uf = motor

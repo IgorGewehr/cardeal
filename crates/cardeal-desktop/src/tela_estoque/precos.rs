@@ -418,7 +418,10 @@ fn tabela(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estado
             ui.horizontal(|ui| {
                 ui.add(Rotulo::interface(format!("{}%", pct(s.imposto))));
                 if let Some(r) = &s.resolvido {
-                    ui.add(Rotulo::apoio(format!("= {}", r.imposto.formatar_com_simbolo())));
+                    ui.add(Rotulo::apoio(format!(
+                        "= {}",
+                        r.imposto.formatar_com_simbolo()
+                    )));
                 }
                 if s.imposto_origem == OrigemDaCarga::PerfilFiscalDoProduto {
                     ui.add(Etiqueta::info("do produto"));

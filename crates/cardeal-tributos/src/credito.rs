@@ -4,8 +4,8 @@
 //! - ICMS: o destacado na nota (ou o crédito que o fornecedor do Simples permite, `vCredICMSSN`),
 //!   só se a **saída** do produto é tributada (CST 00, 10, 20, 70). Revendido com ST ou isento,
 //!   o crédito não existe (ou teria de ser estornado).
-//! - PIS/COFINS: só no não cumulativo (Lucro Real), 1,65% + 7,6% sobre o valor do item, e nunca
-//!   no monofásico.
+//! - PIS/COFINS: só no não cumulativo (Lucro Real), 1,65% + 7,6% sobre o valor do item **sem o
+//!   ICMS destacado** (Lei 14.592/2023), e nunca no monofásico.
 
 use cardeal_kernel::{Arredondamento, Dinheiro, Percentual};
 use serde::{Deserialize, Serialize};
@@ -69,7 +69,9 @@ pub fn credito_do_item(
         Dinheiro::ZERO
     };
     let (pis, cofins) = if nao_cumulativo && !e_monofasico(saida) {
-        let parte = |p: Percentual| compra.valor.aplicar(p, Arredondamento::MeioAcima);
+        // A base é o valor do item sem o ICMS destacado (Lei 14.592/2023).
+        let base = compra.valor - compra.icms_destacado;
+        let parte = |p: Percentual| base.aplicar(p, Arredondamento::MeioAcima);
         (
             parte(Percentual::milesimos(1_650)),
             parte(Percentual::milesimos(7_600)),

@@ -139,3 +139,24 @@ pub fn aliquota_interna(uf: &str) -> Option<Percentual> {
     };
     Some(Percentual::milesimos(milesimos))
 }
+
+/// O regime do cadastro da empresa (`nucleo_empresa.regime`: `MEI`, `SimplesNacional`,
+/// `LucroPresumido`, `LucroReal`) é do Simples — o que a emissão usa para escolher CSOSN ou CST.
+/// Quem decide CSOSN × CST (o seletor, o que a nota de compra ensina) lê **daqui**, nunca do
+/// parâmetro de preço, que o usuário pode pôr em "manual".
+#[must_use]
+pub fn simples_pelo_cadastro(regime_cadastral: &str) -> bool {
+    !matches!(regime_cadastral, "LucroPresumido" | "LucroReal")
+}
+
+/// O regime do cadastro da empresa (vazio se não houver).
+#[cfg(feature = "sqlite")]
+#[must_use]
+pub fn regime_cadastral(c: &rusqlite::Connection, empresa: cardeal_kernel::Id) -> String {
+    c.query_row(
+        "SELECT regime FROM nucleo_empresa WHERE id = ?1",
+        [empresa.em_bytes().as_slice()],
+        |r| r.get(0),
+    )
+    .unwrap_or_default()
+}

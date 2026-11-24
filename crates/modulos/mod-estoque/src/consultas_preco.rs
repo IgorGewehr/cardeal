@@ -441,7 +441,12 @@ impl BaseDePreco {
                     rbt12: self.rbt12,
                 }
             }
-            RegimeImposto::Manual(p) if origem == OrigemDaCarga::Regime => Regime::Manual(p),
+            RegimeImposto::Manual(p)
+                if origem == OrigemDaCarga::Regime
+                    || crate::tributacao_simples::simples_pelo_cadastro(&self.regime_cadastral) =>
+            {
+                Regime::Manual(p)
+            }
             RegimeImposto::Manual(_) => {
                 // Perfis antigos só com alíquotas, sem CST: tributado integralmente (00).
                 if t.situacao_icms.is_none() {
