@@ -52,6 +52,8 @@ pub struct PrecoResolvido {
     pub por_fora: Vec<ParcelaDoPreco>,
     /// O lucro líquido.
     pub lucro: Dinheiro,
+    /// Quanto do preço é imposto (por dentro e sobre o lucro; o por fora não entra).
+    pub imposto: Dinheiro,
     /// O preço de empate (lucro zero).
     pub empate: Dinheiro,
 }
@@ -118,6 +120,7 @@ pub fn resolver_preco(
             explicacao: t.explicacao.clone(),
         })
         .collect();
+    let mut imposto = parcelas.iter().fold(Dinheiro::ZERO, |a, p| a + p.valor);
     for (rotulo, p, explicacao) in [
         (
             "Operação",
@@ -151,9 +154,11 @@ pub fn resolver_preco(
         } else {
             Dinheiro::ZERO
         };
+        let valor = base.aplicar(t.coeficiente, Arredondamento::MeioAcima);
+        imposto += valor;
         parcelas.push(ParcelaDoPreco {
             rotulo: t.imposto.nome().to_owned(),
-            valor: base.aplicar(t.coeficiente, Arredondamento::MeioAcima),
+            valor,
             explicacao: t.explicacao.clone(),
         });
     }
@@ -178,6 +183,7 @@ pub fn resolver_preco(
         parcelas,
         por_fora,
         lucro,
+        imposto,
         empate,
     })
 }

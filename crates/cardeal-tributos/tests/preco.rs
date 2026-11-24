@@ -156,3 +156,27 @@ fn ipi_soma_ao_cobrado_e_nao_ao_preco() {
     assert!(fecha(&x));
     assert_eq!(x.por_fora.len(), 1);
 }
+
+#[test]
+fn imposto_e_a_soma_das_parcelas_de_imposto() {
+    let p = PerfilTributario {
+        aliquota_icms: Some(pct(17)),
+        ..perfil("00")
+    };
+    let c = carga(
+        &Regime::Presumido {
+            atividade: Atividade::Comercio,
+            receita_mensal: Dinheiro::reais(50_000),
+        },
+        &p,
+    )
+    .unwrap();
+    let x = resolver_preco(Dinheiro::reais(15), &c, &despesas(10), pct(15)).unwrap();
+    let so_impostos = x
+        .parcelas
+        .iter()
+        .filter(|p| p.rotulo != "Operação")
+        .fold(Dinheiro::ZERO, |a, p| a + p.valor);
+    assert_eq!(x.imposto, so_impostos);
+    assert!(x.imposto.e_positivo());
+}

@@ -385,7 +385,7 @@ fn tabela(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estado
         ColunaGrade::nova("Produto").largura(240.0),
         ColunaGrade::nova("Custo").largura(100.0).numero(),
         ColunaGrade::nova("Margem").largura(150.0),
-        ColunaGrade::nova("Imposto").largura(150.0),
+        ColunaGrade::nova("Imposto por unidade").largura(190.0),
         ColunaGrade::nova("Comissão").largura(130.0),
         ColunaGrade::nova("Preço mínimo").largura(120.0).numero(),
         ColunaGrade::nova("Preço sugerido").largura(130.0).numero(),
@@ -417,6 +417,9 @@ fn tabela(ui: &mut egui::Ui, motor: &Motor, sessao: &Sessao, estado: &mut Estado
         row.col(|ui| {
             ui.horizontal(|ui| {
                 ui.add(Rotulo::interface(format!("{}%", pct(s.imposto))));
+                if let Some(r) = &s.resolvido {
+                    ui.add(Rotulo::apoio(format!("= {}", r.imposto.formatar_com_simbolo())));
+                }
                 if s.imposto_origem == OrigemDaCarga::PerfilFiscalDoProduto {
                     ui.add(Etiqueta::info("do produto"));
                 }
