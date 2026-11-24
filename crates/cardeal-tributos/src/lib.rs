@@ -17,6 +17,7 @@ pub mod credito;
 pub mod destino;
 pub mod ncm;
 pub mod preco;
+pub mod reforma;
 pub mod simples;
 
 use cardeal_kernel::{Dinheiro, Percentual};
